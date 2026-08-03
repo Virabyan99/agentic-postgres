@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/bootstrap-state.schema.json",
+  "title": "Agentic Postgres provider bootstrap state",
+  "description": "The record of which external provider resources this project owns. Root-owned, mode 0600, atomically replaced, one file per project under /etc/agentic-postgres/projects/{project_key}/. It records provider identifiers and file paths; it records no secret value and no client secret. Destruction and repair act on the IDs recorded here, never on a name lookup -- name equality is not ownership. See docs/decisions/0011-provider-bootstrap-state.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project_key",
+    "project_manifest_sha256",
+    "provider_inputs_sha256",
+    "provider",
+    "api_url",
+    "organization_slug",
+    "infisical_project_id",
+    "environment_slug",
+    "runtime_folder",
+    "runtime_identity_id",
+    "runtime_client_id",
+    "active_client_secret_id",
+    "credential_files",
+    "managed_resources",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "project_key": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,47}$" },
+    "project_manifest_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "The whole manifest, for evidence. Deliberately NOT the convergence key: a domain or application change would otherwise force provider churn for resources that did not change."
+    },
+    "provider_inputs_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "Computed only from provider-relevant non-secret inputs. This is the convergence key: a repeated --plan reports no changes when it matches."
+    },
+    "provider": { "type": "string", "enum": ["infisical"] },
+    "api_url": {
+      "type": "string",
+      "pattern": "^https://[a-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$"
+    },
+    "organization_slug": { "$ref": "#/$defs/providerSlug" },
+    "infisical_project_id": { "$ref": "#/$defs/providerId" },
+    "environment_slug": { "$ref": "#/$defs/providerSlug" },
+    "runtime_folder": { "type": "string", "pattern": "^/[a-z0-9][a-z0-9/_-]{0,62}$" },
+    "runtime_identity_id": { "$ref": "#/$defs/providerId" },
+    "runtime_client_id": {
+      "$ref": "#/$defs/providerId",
+      "description": "The Universal Auth client ID. Non-secret by design -- it is a username. The matching client secret is never in this file; it lives only in the root-owned 0400 file named by credential_files.client_secret_path."
+    },
+    "active_client_secret_id": {
+      "$ref": "#/$defs/providerId",
+      "description": "The provider's identifier FOR the secret, not the secret. Rotation revokes by this ID after a replacement has been written and validated, so a failed rotation can never leave the project with no working credential."
+    },
+    "credential_files": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["client_id_path", "client_secret_path"],
+      "description": "Paths, not contents. Both are under the per-project credential directory, so the path itself carries the project scope and a state file naming another project's directory is detectable. The `_path` suffix is load-bearing, not decoration: a key literally named `client_secret` is rejected by the inherited sensitive-key rule (ADR 0008), and correctly so -- the rule cannot tell that this one holds a filename. Naming the field for what it contains satisfies the rule without weakening it.",
+      "properties": {
+        "client_id_path": { "$ref": "#/$defs/credentialPath" },
+        "client_secret_path": { "$ref": "#/$defs/credentialPath" }
+      }
+    },
+    "managed_resources": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "project",
+          "environment",
+          "runtime_folder",
+          "runtime_identity",
+          "runtime_membership",
+          "runtime_client_secret",
+          "session2_sentinel"
+        ]
+      },
+      "description": "What this project created and is therefore allowed to destroy. An enum rather than free text: destruction reads this list, and a typo that silently widened it would be the worst possible bug in this file."
+    },
+    "created_at": { "$ref": "#/$defs/timestamp" },
+    "updated_at": { "$ref": "#/$defs/timestamp" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "providerId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._~-]{1,127}$",
+      "description": "A provider resource identifier. Mandatory before a resource is treated as managed: without an ID, destruction would have to fall back to a name lookup, and a name is not proof of ownership."
+    },
+    "providerSlug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,62}$" },
+    "credentialPath": {
+      "type": "string",
+      "pattern": "^/etc/agentic-postgres/credentials/[a-z0-9-]+/infisical-client-(id|secret)$"
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    }
+  }
+}

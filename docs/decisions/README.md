@@ -74,5 +74,6 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0008](0008-sensitive-key-policy.md) | Sensitive key detection by terminal token, never substring | 1 | Accepted |
 | [0009](0009-host-and-edge-plane.md) | Host configuration is separate, and one edge plane is shared | 2 | Accepted |
 | [0010](0010-secret-materialization.md) | Secrets are individual files in immutable generations | 2 | Accepted |
+| [0011](0011-provider-bootstrap-state.md) | Provider ownership is recorded by ID, and convergence is keyed narrowly | 2 | Accepted |
 | [0012](0012-output-document-kinds.md) | Two output document kinds under one versioned schema | 2 | Accepted |
 | [0015](0015-reserved-health-route.md) | The platform health route is reserved | 2 | Accepted |
