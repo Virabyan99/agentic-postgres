@@ -51,8 +51,8 @@ Usage: bin/compose.sh <generated-project-dir> [compose arguments...]
                            containing compose.env.
 
 Examples:
-  bin/compose.sh .generated/fixture-alpha-dev --profile contract config
-  bin/compose.sh .generated/fixture-alpha-dev ps --quiet
+  bin/compose.sh .generated/<project-key> --profile contract config
+  bin/compose.sh .generated/<project-key> ps --quiet
 
 Session 1 refuses up, run, start, create, restart, exec, attach, and cp.
 Environment variables are stripped to an explicit allowlist so that nothing

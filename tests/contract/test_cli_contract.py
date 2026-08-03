@@ -247,8 +247,27 @@ def test_commands_do_not_echo_a_planted_environment_variable() -> None:
 
 
 def test_no_command_documents_a_secret_argument() -> None:
-    """Runbook §2: never accept a secret value as a command-line argument."""
+    """Runbook §2: never accept a secret value as a command-line argument.
+
+    Matched as whole flags, not substrings. A substring check flags
+    ``--secrets-namespace``, which takes a namespace *reference* and is exactly
+    the safe-reference case runbook §3.6 warns against false-positiving on.
+    """
+    import re
+
+    forbidden = re.compile(r"--(password|secret|token|api-key|access-key|private-key)(?![a-z-])")
     for relative in SHELL_COMMANDS:
         help_text = run(str(REPO_ROOT / relative), "--help").stdout.lower()
-        for forbidden in ("--password", "--secret", "--token", "--api-key"):
-            assert forbidden not in help_text, f"{relative} documents {forbidden}"
+        match = forbidden.search(help_text)
+        assert match is None, f"{relative} documents a secret argument: {match.group(0)}"
+
+
+def test_the_secret_argument_scan_would_catch_a_real_one() -> None:
+    """Guard the guard, since the pattern above deliberately allows near-misses."""
+    import re
+
+    forbidden = re.compile(r"--(password|secret|token|api-key|access-key|private-key)(?![a-z-])")
+    assert forbidden.search("--password VALUE")
+    assert forbidden.search("--api-key VALUE")
+    assert not forbidden.search("--secrets-namespace REF")
+    assert not forbidden.search("--token-ttl-seconds 900")

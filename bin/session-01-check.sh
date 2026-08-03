@@ -108,12 +108,28 @@ python bin/render-config.py --bounds-doc --check
 # ---------------------------------------------------------------------------
 step "7. Compose validates and no project container is running"
 # ---------------------------------------------------------------------------
-bin/compose.sh .generated/fixture-alpha-dev  --profile contract config >/dev/null
-bin/compose.sh .generated/fixture-alpine-dev --profile contract config >/dev/null
+# Project keys are discovered from what step 3 actually rendered rather than
+# written here. Hard-coding them would put fixture identities into deployable
+# source, which §9 forbids and tests/contract/test_repository_contract.py
+# enforces -- and it would silently stop checking anything if a fixture were
+# renamed.
+rendered_count=0
+for project_dir in .generated/*/; do
+  [ -f "${project_dir}compose.env" ] || continue
+  bin/compose.sh "${project_dir%/}" --profile contract config >/dev/null
+  running="$(bin/compose.sh "${project_dir%/}" ps --quiet)"
+  if [ -n "${running}" ]; then
+    printf 'containers are running for %s:\n%s\n' "${project_dir}" "${running}" >&2
+    exit 1
+  fi
+  rendered_count=$((rendered_count + 1))
+done
 
-test -z "$(bin/compose.sh .generated/fixture-alpha-dev ps --quiet)"
-test -z "$(bin/compose.sh .generated/fixture-alpine-dev ps --quiet)"
-printf 'both models render; no container is running\n'
+if [ "${rendered_count}" -lt 2 ]; then
+  printf 'expected at least 2 rendered projects, found %d\n' "${rendered_count}" >&2
+  exit 1
+fi
+printf '%d models render; no container is running\n' "${rendered_count}"
 
 # ---------------------------------------------------------------------------
 step "8. Session evidence"
