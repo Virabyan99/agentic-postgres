@@ -59,8 +59,16 @@ entry when discovered later.
 
 ## Index
 
-| ADR | Title | Status |
-|---|---|---|
-| [0001](0001-product-shape.md) | Product shape is a one-project-per-deployment appliance | Accepted |
-| [0002](0002-configuration-authority.md) | Configuration authority and transactional rendering | Accepted |
-| [0003](0003-example-domain.md) | Frozen example domain | Accepted |
+Every file matching `NNNN-*.md` in this directory must appear below. An
+unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
+
+| ADR | Title | Session | Status |
+|---|---|---|---|
+| [0001](0001-product-shape.md) | Product shape is a one-project-per-deployment appliance | 1 | Accepted |
+| [0002](0002-configuration-authority.md) | Configuration authority and transactional rendering | 1 | Accepted |
+| [0003](0003-example-domain.md) | Frozen example domain | 1 | Accepted |
+| [0004](0004-version-lock-format.md) | Version lock format and offline verification | 1 | Accepted |
+| [0005](0005-route-reservation.md) | Reserved routes and segment-wise overlap | 1 | Accepted |
+| [0006](0006-capability-scopes.md) | Approved scope vocabulary lives in the capability schema | 1 | Accepted |
+| [0007](0007-bounds-authority.md) | The project schema is the sole authority for numeric bounds | 1 | Accepted |
+| [0008](0008-sensitive-key-policy.md) | Sensitive key detection by terminal token, never substring | 1 | Accepted |

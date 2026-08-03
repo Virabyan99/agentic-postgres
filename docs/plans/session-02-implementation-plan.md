@@ -45,6 +45,7 @@ Twelve were named in the brief. Fourteen more were found reading the working tre
 | **D24** | *(found)* Phase 18: operator guide "fewer than 15 operator steps"; §13's demonstration script has ~18 `sudo` lines. | — | Define the counting rule in the guide: a *step* is one operator decision, not one shell line; the two `deploy.sh` invocations are one step parametrized by project. State the count explicitly at the top of the guide. | An unstated counting rule makes the criterion unfalsifiable. | no |
 | **D25** | *(found)* Runbook assumes a checkout on the VPS but never says how it gets there; the remote is private. | — | See §2. Transport is a `git bundle` pushed from WSL; no GitHub credential ever exists on the VPS. | | no |
 | **D26** | *(found)* `docs/decisions/README.md` index. | Lists `0001`–`0003`; `0004` exists on disk and is unlisted. | Regenerate the index to cover `0001`–`0011`, and add a contract test asserting every `docs/decisions/NNNN-*.md` appears in the index. | Drift that is currently invisible. | no |
+| **D27** | *(found during Run 1)* — | `src/agentic_postgres/naming.py` cites "plan decision **W**" and `src/agentic_postgres/config.py` cites "plan decision **X**", but the Session 1 decision log stops at **V**. Two more dangling citations of D1's species. | Transcribe **W** (`COMPOSE_NAME_MAX = 63` as the single truncation boundary) and **X** (the pgBackRest stanza character set) into the Session 1 decision log under a "Decided during implementation" heading, dated and labelled as transcription. No code changes. | The citations already claim these live in the log. **X** is security-relevant — it is what stops a stanza name containing `/` from addressing another project's backup prefix — and it existed only as a regex and a one-line comment. | no |
 
 ---
 
@@ -375,9 +376,13 @@ The scanner reads the sentinel through a root-only helper into memory and compar
 
 ---
 
-## Open items requiring your decision before Run 1
+## Open items — closed 2026-08-04
 
-1. **Backfilling ADRs `0005`–`0008`** (D1) is strictly speaking Session 1 debt. I recommend doing it in Run 1 because the content already exists verbatim in the Session 1 decision log and the citations are currently dangling — but say the word if you would rather Session 2 leave Session 1's files alone and simply start at `0009`.
-2. **`ssh.allowed_source_cidrs`** (§3.2) — do you have a static source address, or do we go `0.0.0.0/0` + key-only with a recorded deviation?
+1. **Backfill ADRs `0005`–`0008`.** Approved. Done in Run 1 as commit 2, transcribed from the Session 1 decision log and labelled as transcription with the original decision date. D27 was found while doing it and given the same treatment.
+2. **`ssh.allowed_source_cidrs`.** No static source address is available. **Decision: `0.0.0.0/0` on the SSH port with key-only authentication**, recorded as a deviation in `host.example.yaml`, in `docs/host-baseline.md`, and in Session 2 evidence.
 
-Everything else I found is closed above with a named owner and, where the rule requires it, a named ADR. If implementation surfaces a new ambiguity it comes back here as a new `D` row and an ADR — it does not get resolved inline.
+   What this costs and what still holds: the SSH port stays exposed to the public Internet, so the controls that carry the boundary are `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin no`, `MaxAuthTries 3`, `LoginGraceTime 30`, and key-only public-key auth — all of which Phase 6 sets and the live-host suite asserts against `sshd -T` for the real operator/source tuple. The CIDR restriction was defence in depth, never the boundary. What is genuinely lost is rate-limit and log-noise reduction, and one layer against a stolen-key attacker who does not know the source address.
+
+   `host.schema.json` still **requires** `ssh.allowed_source_cidrs` to be non-empty, so `0.0.0.0/0` is an explicit written choice in the manifest rather than an omission, and `provision-host.sh --check` warns (does not fail) when a `/0` is present so the deviation is visible on every run. Tightening it later is a one-line manifest edit plus `--apply`; nothing else depends on the value.
+
+Everything else is closed above with a named owner and, where the rule requires it, a named ADR. If implementation surfaces a new ambiguity it comes back here as a new `D` row and an ADR — it does not get resolved inline.

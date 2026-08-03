@@ -188,6 +188,18 @@ Decision: **the runbook wins.** Its §2 audit correction 1 states the CLI was de
 
 **Not conflicts, recorded so they are not mistaken for drift later.** The runbook's `project.yaml` (§3.1) adds `schema_version`, `pooled_public_cidrs`, `storage.prefix`, and `backup.repository_prefix` over source specification §5.1; its repository tree (§6) is substantially larger than §5.3; and its `0600` requirement (§4.2) is unconditional where §5.2 makes it conditional on credential-bearing content. All three are deliberate strengthenings, named in the runbook's own §2 audit corrections 2, 5, and 12. The stricter form governs.
 
+### Decided during implementation
+
+Both rows below were settled while writing Session 1 and are cited by name in the source, but were never transcribed back into this table. They are recorded here on 2026-08-04, at the start of Session 2, with the content the code already implements. Nothing about the code changed; this closes two dangling citations.
+
+**W. Runbook §3.7 rule 4 requires every derived value to have a maximum, but Docker imposes no tight ceiling on a project, network, or volume name.** Decision: `COMPOSE_NAME_MAX = 63`, matching `POSTGRES_IDENTIFIER_MAX` and `R2_BUCKET_MAX`.
+*Rationale:* it makes every identity in the system truncate at one boundary rather than three, so the truncation contract can be stated and tested once. At the largest input the schema permits — a 31-character slug plus a 16-character environment — the longest Compose name is 61 bytes, so this ceiling never actually fires. It is a guard, not a constraint, and the comment in `naming.py` says so to stop a later reader from treating 63 as a Docker fact.
+*Source of truth:* `COMPOSE_NAME_MAX` in `src/agentic_postgres/naming.py`.
+
+**X. Runbook §3.4 bounds the pgBackRest stanza name but gives no character set, and pgBackRest's own documentation is permissive enough to allow a path separator.** Decision: `^[a-z0-9][a-z0-9_-]{0,62}$` — lowercase alphanumeric plus `-` and `_`, starting alphanumeric, at most 63 characters.
+*Rationale:* the stanza name is concatenated into `backup.repository_prefix` to address objects in the backup repository. Permitting whitespace or `/` would let a stanza escape its own prefix and address another project's backup path — a cross-project authority leak reachable from a non-secret manifest field. The 63-byte ceiling is decision **W**'s single boundary again.
+*Source of truth:* `_BACKUP_STANZA` in `src/agentic_postgres/config.py`; also expressed as the `backup.stanza` pattern in `schemas/project.schema.json` and `schemas/outputs.schema.json`.
+
 ---
 
 ## 3. Consistency strategy for the acceptance harness
