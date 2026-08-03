@@ -1,0 +1,17 @@
+# Human-edited dependency input (runbook §5.3).
+# Regenerate the hash-locked output with:  bin/lock-dev-deps.sh --update
+# Verify it is current with:               bin/lock-dev-deps.sh --check
+#
+# Note (plan §5, documented assumption): httpx and pydantic are required by
+# runbook §8.1's minimum list but are not imported anywhere in Session 1.
+# They are locked here for spec compliance; the cost is a wider hash-lock
+# surface than Session 1 alone needs.
+
+pytest
+pytest-timeout
+pytest-xdist
+PyYAML
+jsonschema
+pydantic
+httpx
+ruff

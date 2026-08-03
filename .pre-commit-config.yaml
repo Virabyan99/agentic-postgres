@@ -1,0 +1,54 @@
+# Pre-commit exists here for one structural reason (implementation plan §3):
+# bin/session-01-check.sh requires a clean tracked tree BEFORE it runs, and it
+# only ever verifies generated documentation with --check. A generator that
+# self-healed during the gate would dirty the tree it just demanded be clean.
+# So drift is corrected at commit time and the gate only ever confirms.
+#
+# Install once:  python -m pre_commit install
+# (pre-commit is not in requirements-dev.txt; it is a developer convenience,
+#  not a contract dependency. CI enforces the same checks via the gate.)
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: python -m ruff check --fix
+        language: system
+        types: [python]
+
+      - id: ruff-format
+        name: ruff format
+        entry: python -m ruff format
+        language: system
+        types: [python]
+
+      - id: shellcheck
+        name: shellcheck
+        entry: shellcheck
+        language: system
+        files: '\.sh$'
+
+      # Regenerate every generated documentation block so the gate's --check
+      # modes can never be the first thing to notice drift.
+      # Enabled as each generator lands:
+      #   --bounds-doc  arrives in Run 2 (bin/render-config.py)
+      #   --write       arrives in Run 5 (bin/render-acceptance-matrix.py)
+      #
+      # - id: render-bounds-doc
+      #   name: regenerate numeric bounds documentation
+      #   entry: python bin/render-config.py --bounds-doc --write
+      #   language: system
+      #   pass_filenames: false
+      #   files: '^(schemas/project\.schema\.json|docs/product-contract\.md)$'
+      #
+      # - id: render-acceptance-matrix
+      #   name: regenerate acceptance matrix
+      #   entry: python bin/render-acceptance-matrix.py --write
+      #   language: system
+      #   pass_filenames: false
+      #   files: '^(tests/acceptance-registry\.yaml|docs/(acceptance-matrix|product-contract)\.md)$'
+
+  - repo: meta
+    hooks:
+      - id: check-useless-excludes

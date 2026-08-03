@@ -1,0 +1,46 @@
+[project]
+name = "agentic-postgres"
+description = "Agentic Postgres Primitive — deterministic repository contract."
+requires-python = "==3.12.*"
+dynamic = ["version"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Ruff is the only linter/formatter. The gate runs:
+#   python -m ruff check src bin tests
+#   python -m ruff format --check src bin tests
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "bin", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle
+  "F",    # pyflakes
+  "I",    # isort
+  "B",    # bugbear
+  "UP",   # pyupgrade
+  "S",    # bandit
+  "RUF",
+]
+ignore = [
+  "S101",  # assert is the whole point of the test suite
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Contract tests deliberately spawn nested pytest runs (see plan §3).
+"tests/**" = ["S603", "S607"]
+# bin/ entry points shell out to git, docker, and shellcheck by design.
+"bin/**" = ["S603", "S607"]
+
+[tool.ruff.format]
+line-ending = "lf"
