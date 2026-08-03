@@ -306,6 +306,46 @@ def test_product_contract_requirement_table_is_generated() -> None:
             assert entry["id"] in text, f"{entry['id']} is absent from the generated table"
 
 
+def test_every_adr_is_indexed() -> None:
+    """An unlisted ADR is one nobody reads, and 0004 went unlisted for a session.
+
+    Checked against the filesystem rather than against a hard-coded count, so
+    the next ADR is covered the moment it is written.
+    """
+    decisions = REPO_ROOT / "docs" / "decisions"
+    index = (decisions / "README.md").read_text(encoding="utf-8")
+    missing = [
+        path.name
+        for path in sorted(decisions.glob("[0-9][0-9][0-9][0-9]-*.md"))
+        if f"({path.name})" not in index
+    ]
+    assert not missing, f"ADRs absent from docs/decisions/README.md: {missing}"
+
+
+def test_no_source_file_cites_a_missing_adr() -> None:
+    """The reverse direction: a citation of an ADR that does not exist.
+
+    Session 1 shipped four such citations -- decisions B, C, E and F each named
+    an ADR file that was never written -- and nothing detected it for a session.
+    """
+    existing = {
+        path.name for path in (REPO_ROOT / "docs" / "decisions").glob("[0-9][0-9][0-9][0-9]-*.md")
+    }
+    cited: set[str] = set()
+    for root in ("src", "bin", "schemas", "tests"):
+        for path in (REPO_ROOT / root).rglob("*"):
+            if not path.is_file() or path.suffix not in {".py", ".sh", ".json", ".yaml"}:
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            cited.update(re.findall(r"\b(\d{4}-[a-z0-9-]+\.md)\b", text))
+
+    dangling = sorted(cited - existing)
+    assert not dangling, f"source cites ADRs that do not exist: {dangling}"
+
+
 def test_registry_file_is_the_only_place_ids_are_created() -> None:
     """Guard against a second catalog appearing somewhere else."""
     others = [

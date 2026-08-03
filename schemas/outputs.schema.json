@@ -2,77 +2,354 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/outputs.schema.json",
   "title": "Agentic Postgres generated outputs",
-  "description": "The automation contract. additionalProperties is false at every level so a new field cannot appear unreviewed, and there is deliberately no timestamp anywhere: identical inputs must render byte-identically.",
+  "description": "The automation contract, version 2. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. See docs/decisions/0012-output-document-kinds.md.",
   "type": "object",
-  "additionalProperties": false,
-  "required": [
-    "schema_version",
-    "inputs",
-    "project",
-    "compose",
-    "database",
-    "routes",
-    "jwt",
-    "secrets",
-    "storage",
-    "backup",
-    "capabilities",
-    "template_version"
+  "oneOf": [
+    { "$ref": "#/$defs/renderedDocument" },
+    { "$ref": "#/$defs/deployedDocument" }
   ],
-  "properties": {
-    "schema_version": { "type": "integer", "enum": [1] },
-    "inputs": {
+
+  "$defs": {
+    "renderedDocument": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "project_sha256",
-        "capabilities_sha256",
-        "versions_lock_sha256",
-        "source_specification_sha256"
+        "schema_version",
+        "document_kind",
+        "inputs",
+        "project",
+        "compose",
+        "database",
+        "routes",
+        "jwt",
+        "secrets",
+        "storage",
+        "backup",
+        "capabilities",
+        "template_version"
       ],
-      "description": "Every file that determines this render. The same block appears in each generated file, so an incomplete set is detectable.",
       "properties": {
-        "project_sha256": { "$ref": "#/$defs/sha256" },
-        "capabilities_sha256": { "$ref": "#/$defs/sha256" },
-        "versions_lock_sha256": { "$ref": "#/$defs/sha256" },
-        "source_specification_sha256": { "$ref": "#/$defs/sha256" }
-      }
-    },
-    "project": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["slug", "environment", "key", "domain", "generated_directory"],
-      "properties": {
-        "slug": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,30}$" },
-        "environment": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$" },
-        "key": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,47}$" },
-        "domain": { "type": "string", "format": "hostname" },
-        "generated_directory": { "type": "string", "pattern": "^\\.generated/[a-z0-9-]+$" }
-      }
-    },
-    "compose": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["project_name", "networks", "volumes"],
-      "properties": {
-        "project_name": { "$ref": "#/$defs/composeName" },
-        "networks": {
+        "schema_version": { "type": "integer", "enum": [2] },
+        "document_kind": { "const": "rendered" },
+        "inputs": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["edge", "internal"],
+          "required": [
+            "project_sha256",
+            "capabilities_sha256",
+            "secrets_contract_sha256",
+            "versions_lock_sha256",
+            "source_specification_sha256"
+          ],
+          "description": "Every file that determines this render. The same block appears in each generated file, so an incomplete set is detectable. secrets_contract_sha256 joined the set in Session 2 when secrets.required_names started reaching rendered output: a value derived from a file that is not digested here would make the render depend on an untracked input.",
           "properties": {
-            "edge": { "$ref": "#/$defs/composeName" },
-            "internal": { "$ref": "#/$defs/composeName" }
+            "project_sha256": { "$ref": "#/$defs/sha256" },
+            "capabilities_sha256": { "$ref": "#/$defs/sha256" },
+            "secrets_contract_sha256": { "$ref": "#/$defs/sha256" },
+            "versions_lock_sha256": { "$ref": "#/$defs/sha256" },
+            "source_specification_sha256": { "$ref": "#/$defs/sha256" }
           }
         },
-        "volumes": {
+        "project": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["postgres"],
-          "properties": { "postgres": { "$ref": "#/$defs/composeName" } }
-        }
+          "required": ["slug", "environment", "key", "domain", "generated_directory"],
+          "properties": {
+            "slug": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,30}$" },
+            "environment": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$" },
+            "key": { "$ref": "#/$defs/projectKey" },
+            "domain": { "type": "string", "format": "hostname" },
+            "generated_directory": {
+              "type": "string",
+              "pattern": "^\\.generated/[a-z0-9-]+$",
+              "description": "Repository-relative, and deliberately still so in v2. Host paths live on the deployed branch under `runtime`, with their own anchored absolute patterns; loosening this one to carry both meanings is how a path-traversal check dies."
+            }
+          }
+        },
+        "compose": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["project_name", "networks", "volumes"],
+          "properties": {
+            "project_name": { "$ref": "#/$defs/composeName" },
+            "networks": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["edge", "internal"],
+              "properties": {
+                "edge": { "$ref": "#/$defs/composeName" },
+                "internal": { "$ref": "#/$defs/composeName" }
+              }
+            },
+            "volumes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["postgres"],
+              "properties": { "postgres": { "$ref": "#/$defs/composeName" } }
+            }
+          }
+        },
+        "database": { "$ref": "#/$defs/database" },
+        "routes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["rest", "app", "mcp", "docs", "health"],
+          "properties": {
+            "rest": { "$ref": "#/$defs/httpsUrl" },
+            "app": { "$ref": "#/$defs/httpsUrl" },
+            "mcp": { "$ref": "#/$defs/httpsUrl" },
+            "docs": { "$ref": "#/$defs/httpsUrl" },
+            "health": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "url"],
+              "description": "An object rather than a bare URL so the rendered and deployed branches stay structurally parallel: the deployed document has to carry a readiness claim, and a claim needs somewhere to live.",
+              "properties": {
+                "status": { "const": "planned" },
+                "url": { "$ref": "#/$defs/httpsUrl" }
+              }
+            }
+          }
+        },
+        "jwt": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["issuer", "audience"],
+          "properties": {
+            "issuer": { "$ref": "#/$defs/httpsUrl" },
+            "audience": {
+              "type": "string",
+              "pattern": "^urn:agentic-postgres:[a-z0-9-]+:[a-z0-9-]+$"
+            }
+          }
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["namespace", "status", "required_names"],
+          "description": "Names only. No value, no reference to a materialized path, no generation identifier -- a rendered document describes a plan, and nothing has been materialized when it is written.",
+          "properties": {
+            "namespace": { "type": "string", "pattern": "^agentic-postgres/[a-z0-9-]+$" },
+            "status": { "const": "planned" },
+            "required_names": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,47}$" }
+            }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "bucket", "prefix"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "bucket": {
+              "type": ["string", "null"],
+              "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+            },
+            "prefix": { "type": ["string", "null"], "pattern": "^[^/].*/$" }
+          }
+        },
+        "backup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "stanza", "repository_prefix"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "stanza": { "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$" },
+            "repository_prefix": { "type": ["string", "null"], "pattern": "^[^/].*/$" }
+          }
+        },
+        "capabilities": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled"],
+          "properties": {
+            "enabled": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,47}$" }
+            }
+          }
+        },
+        "template_version": { "type": "string", "minLength": 1, "maxLength": 64 }
       }
     },
+
+    "deployedDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "document_kind",
+        "source_commit",
+        "project",
+        "host",
+        "edge",
+        "routes",
+        "tls",
+        "bootstrap",
+        "secrets",
+        "runtime",
+        "database",
+        "template_version",
+        "observed_at"
+      ],
+      "description": "Root-owned, mode 0600, written under /var/lib/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
+      "properties": {
+        "schema_version": { "type": "integer", "enum": [2] },
+        "document_kind": { "const": "deployed" },
+        "source_commit": { "$ref": "#/$defs/commit" },
+        "project": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug", "environment", "key", "domain"],
+          "properties": {
+            "slug": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,30}$" },
+            "environment": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$" },
+            "key": { "$ref": "#/$defs/projectKey" },
+            "domain": { "type": "string", "format": "hostname" }
+          }
+        },
+        "host": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "os_release", "public_ipv4", "public_ipv6"],
+          "properties": {
+            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$" },
+            "os_release": { "type": "string", "enum": ["26.04", "24.04"] },
+            "public_ipv4": { "type": ["string", "null"], "format": "ipv4" },
+            "public_ipv6": { "type": ["string", "null"], "format": "ipv6" }
+          }
+        },
+        "edge": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stack_name",
+            "control_network",
+            "egress_network",
+            "project_network_attached"
+          ],
+          "properties": {
+            "stack_name": { "$ref": "#/$defs/composeName" },
+            "control_network": { "$ref": "#/$defs/composeName" },
+            "egress_network": { "$ref": "#/$defs/composeName" },
+            "project_network_attached": { "type": "boolean" }
+          }
+        },
+        "routes": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["health"],
+          "properties": {
+            "health": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["status", "url"],
+              "properties": {
+                "status": { "type": "string", "enum": ["ready", "unavailable"] },
+                "url": { "$ref": "#/$defs/httpsUrl" }
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "acme_environment",
+            "resolver",
+            "certificate_sha256",
+            "not_before",
+            "not_after"
+          ],
+          "properties": {
+            "status": { "type": "string", "enum": ["issued", "unavailable"] },
+            "acme_environment": { "type": "string", "enum": ["staging", "production"] },
+            "resolver": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,30}$" },
+            "certificate_sha256": {
+              "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+              "description": "A fingerprint of a public certificate. Public material, so recording it leaks nothing; it is what lets the external suite prove it reached the same certificate the host issued."
+            },
+            "not_before": { "$ref": "#/$defs/nullableTimestamp" },
+            "not_after": { "$ref": "#/$defs/nullableTimestamp" }
+          }
+        },
+        "bootstrap": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "state_path",
+            "infisical_project_id",
+            "runtime_identity_id"
+          ],
+          "properties": {
+            "status": { "type": "string", "enum": ["complete", "unavailable"] },
+            "state_path": {
+              "type": "string",
+              "pattern": "^/etc/agentic-postgres/projects/[a-z0-9-]+/bootstrap-state\\.json$"
+            },
+            "infisical_project_id": { "$ref": "#/$defs/providerId" },
+            "runtime_identity_id": { "$ref": "#/$defs/providerId" }
+          }
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "generation_id",
+            "generation_manifest",
+            "required_names",
+            "fresh",
+            "materialized_at"
+          ],
+          "properties": {
+            "status": { "type": "string", "enum": ["ready", "unavailable"] },
+            "generation_id": { "$ref": "#/$defs/generationId" },
+            "generation_manifest": {
+              "type": "string",
+              "pattern": "^/var/lib/agentic-postgres/secrets/[a-z0-9-]+/generations/[a-z0-9-]+/manifest\\.json$"
+            },
+            "required_names": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,47}$" }
+            },
+            "fresh": {
+              "type": "boolean",
+              "description": "False records a bounded last-known-good start. Recorded rather than hidden: a host that has been running on a stale generation is a fact an operator needs."
+            },
+            "materialized_at": { "$ref": "#/$defs/nullableTimestamp" }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["release_path", "state_directory", "compose_model_sha256"],
+          "description": "Absolute host paths, anchored. This is where Session 2's filesystem layout is represented, so project.generated_directory never has to stop being repository-relative.",
+          "properties": {
+            "release_path": {
+              "type": "string",
+              "pattern": "^/opt/agentic-postgres/releases/[0-9a-f]{40}$"
+            },
+            "state_directory": {
+              "type": "string",
+              "pattern": "^/var/lib/agentic-postgres/projects/[a-z0-9-]+$"
+            },
+            "compose_model_sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "database": { "$ref": "#/$defs/database" },
+        "template_version": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "observed_at": { "$ref": "#/$defs/timestamp" }
+      }
+    },
+
     "database": {
       "type": "object",
       "additionalProperties": false,
@@ -117,77 +394,27 @@
         "direct": { "$ref": "#/$defs/endpoint" }
       }
     },
-    "routes": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["rest", "app", "mcp", "docs"],
-      "properties": {
-        "rest": { "$ref": "#/$defs/httpsUrl" },
-        "app": { "$ref": "#/$defs/httpsUrl" },
-        "mcp": { "$ref": "#/$defs/httpsUrl" },
-        "docs": { "$ref": "#/$defs/httpsUrl" }
-      }
-    },
-    "jwt": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["issuer", "audience"],
-      "properties": {
-        "issuer": { "$ref": "#/$defs/httpsUrl" },
-        "audience": { "type": "string", "pattern": "^urn:agentic-postgres:[a-z0-9-]+:[a-z0-9-]+$" }
-      }
-    },
-    "secrets": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["namespace"],
-      "description": "A namespace reference only. No secret value ever appears here.",
-      "properties": {
-        "namespace": { "type": "string", "pattern": "^agentic-postgres/[a-z0-9-]+$" }
-      }
-    },
-    "storage": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["enabled", "bucket", "prefix"],
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "bucket": {
-          "type": ["string", "null"],
-          "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
-        },
-        "prefix": { "type": ["string", "null"], "pattern": "^[^/].*/$" }
-      }
-    },
-    "backup": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["enabled", "stanza", "repository_prefix"],
-      "properties": {
-        "enabled": { "type": "boolean" },
-        "stanza": { "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$" },
-        "repository_prefix": { "type": ["string", "null"], "pattern": "^[^/].*/$" }
-      }
-    },
-    "capabilities": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["enabled"],
-      "properties": {
-        "enabled": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,47}$" }
-        }
-      }
-    },
-    "template_version": { "type": "string", "minLength": 1, "maxLength": 64 }
-  },
-  "$defs": {
+
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
       "description": "Lowercase hexadecimal. Documentation placeholders are not accepted."
+    },
+    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "projectKey": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,47}$" },
+    "generationId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "providerId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._~-]{1,127}$",
+      "description": "A provider resource identifier or a non-secret client ID. Client secrets are excluded from this document entirely, not merely pattern-constrained."
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "RFC 3339 UTC. Present only on the deployed branch: the rendered branch is byte-identical across renders and a timestamp would destroy that (plan decision U, extended by ADR 0012)."
+    },
+    "nullableTimestamp": {
+      "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
     },
     "postgresIdentifier": {
       "type": "string",
@@ -207,8 +434,15 @@
     "endpoint": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "available_from_session", "host", "port", "url", "password_secret_ref"],
-      "description": "Session 1 knows no tunnel host, bound port, or credential, so every field is null with an explicit unavailable status. Angle-bracket placeholders that resemble connection strings are not permitted.",
+      "required": [
+        "status",
+        "available_from_session",
+        "host",
+        "port",
+        "url",
+        "password_secret_ref"
+      ],
+      "description": "Session 2 still knows no tunnel host, bound port, or credential, so every field is null with an explicit unavailable status on both document kinds. Angle-bracket placeholders that resemble connection strings are not permitted.",
       "properties": {
         "status": { "type": "string", "enum": ["unavailable", "available"] },
         "available_from_session": { "type": "integer", "minimum": 1, "maximum": 12 },

@@ -52,7 +52,14 @@ SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
 #: Root is deliberately absent. Under the segment-prefix relation every path
 #: is below `/`, so including it would reject all input; `/` is rejected by an
 #: explicit equality check in ``_validate_base_path`` instead.
+#:
+#: `/__apg` was added in Session 2 (ADR 0015). It is the prefix of the platform
+#: health route ``naming.HEALTH_ROUTE_PATH``, which the shared edge plane is
+#: verified through, and the `public_base_path` pattern permits it — so
+#: reserving it is the only thing stopping a project manifest from shadowing
+#: the route the Session 2 gate depends on.
 RESERVED_BASE_PATHS: tuple[str, ...] = (
+    "/__apg",
     "/docs",
     "/health",
     "/healthz",

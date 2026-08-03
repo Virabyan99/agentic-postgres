@@ -28,7 +28,18 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import REPO_ROOT, config, naming, template_version
+from agentic_postgres import REPO_ROOT, config, naming, secrets_contract, template_version
+
+#: The session whose planned surface a render describes. Rendering is a
+#: planning operation, so this bounds which declared secrets appear in
+#: ``secrets.required_names`` — not which are materialized, which is a
+#: deployment concern and lives in the ``deployed`` document.
+RENDER_SESSION = 2
+
+#: The declared grant surface. A repository-level file, like ``versions.env``:
+#: it is not per-project, and it is digested into ``inputs`` so the render
+#: cannot depend on it invisibly.
+SECRET_CONTRACT_PATH = REPO_ROOT / "secrets.required.yaml"
 
 #: Owner-only. Runbook §4.2 and §9 check 5 make this a tested contract, not a
 #: nicety: rendered output names every role and authority in the project.
@@ -68,12 +79,19 @@ def sha256_file(path: Path) -> str:
 def input_digests(project_path: Path, capabilities_path: Path) -> dict[str, str]:
     """Digest every input that determines the render.
 
-    All four are recorded in each generated file so that an incomplete set is
+    All five are recorded in each generated file so that an incomplete set is
     detectable (runbook §4.1).
+
+    ``secrets_contract_sha256`` joined the set in Session 2, when
+    ``secrets.required_names`` started reaching rendered output. The rule is
+    that this block names *every* file the render depends on: a value derived
+    from an undigested file would make two renders differ with no visible
+    reason, which is the precise failure the digest block exists to expose.
     """
     return {
         "project_sha256": sha256_file(project_path),
         "capabilities_sha256": sha256_file(capabilities_path),
+        "secrets_contract_sha256": sha256_file(SECRET_CONTRACT_PATH),
         "versions_lock_sha256": sha256_file(REPO_ROOT / "versions.env"),
         "source_specification_sha256": sha256_file(REPO_ROOT / "docs" / "source-specification.md"),
     }
@@ -110,8 +128,16 @@ def build_outputs(
         "password_secret_ref": None,
     }
 
+    required_secret_names = sorted(
+        secret["name"]
+        for secret in secrets_contract.active_secrets(
+            secrets_contract.load_secret_contract(SECRET_CONTRACT_PATH), RENDER_SESSION
+        )
+    )
+
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
             "slug": identity.slug,
@@ -139,9 +165,21 @@ def build_outputs(
             "app": identity.route_app,
             "mcp": identity.route_mcp,
             "docs": identity.route_docs,
+            # `planned`, unconditionally. A rendered document describes what a
+            # deployment would create; nothing has been observed when it is
+            # written, and a readiness claim in a planning document is a lie
+            # that automation would believe.
+            "health": {"status": "planned", "url": identity.route_health},
         },
         "jwt": {"issuer": identity.jwt_issuer, "audience": identity.jwt_audience},
-        "secrets": {"namespace": identity.secrets_namespace},
+        "secrets": {
+            "namespace": identity.secrets_namespace,
+            "status": "planned",
+            # Names only. No generation ID, no path, no value: none of those
+            # exist until materialization, and inventing them here is exactly
+            # the placeholder-shaped output §4.5 forbids.
+            "required_names": required_secret_names,
+        },
         "storage": {
             "enabled": storage_enabled,
             "bucket": identity.storage_bucket,
@@ -201,6 +239,8 @@ def build_summary(outputs: dict[str, Any]) -> bytes:
         f"  app          {outputs['routes']['app']}",
         f"  mcp          {outputs['routes']['mcp']}",
         f"  docs         {outputs['routes']['docs']}",
+        f"  health       {outputs['routes']['health']['url']} "
+        f"({outputs['routes']['health']['status']})",
         "",
         "Authority",
         f"  jwt issuer   {outputs['jwt']['issuer']}",
@@ -218,6 +258,8 @@ def build_summary(outputs: dict[str, Any]) -> bytes:
         f"Backup         {'enabled' if outputs['backup']['enabled'] else 'disabled'}"
         + (f"  stanza={outputs['backup']['stanza']}" if outputs["backup"]["enabled"] else ""),
         f"Capabilities   {len(outputs['capabilities']['enabled'])} enabled",
+        f"Secrets        {len(outputs['secrets']['required_names'])} declared, "
+        f"{outputs['secrets']['status']}",
         "",
         "No service was started. Session 1 renders configuration only.",
     ]

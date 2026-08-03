@@ -1,0 +1,83 @@
+# Example host manifest.
+#
+# Copy to host.yaml and edit. host.yaml is deliberately NOT tracked -- it names
+# a real machine and a real operator -- so .gitignore lists it explicitly.
+# Only this redacted example is committed.
+#
+# This file contains no secret value and must never contain one. The Infisical
+# block below carries coordinates, not credentials: the control-plane
+# credential is a root-owned file passed to bootstrap by path, and the
+# per-project runtime credential is written by bootstrap under
+# /etc/agentic-postgres/credentials/{project_key}/.
+#
+# Every address here is from a documentation-only reserved range (RFC 5737
+# TEST-NET-2 and TEST-NET-3). Real deployment configuration uses the actual
+# host address; provision-host.sh --check proves the configured address is
+# genuinely assigned to the host before any mutation.
+
+schema_version: 1
+
+host:
+  id: apg-vps-01
+  # May narrow the implementation's fixed allowlist; may never extend it.
+  # 26.04 is canonical. 24.04 is the documented fallback for providers that do
+  # not yet offer the canonical image, and its use is recorded in evidence.
+  supported_os_releases:
+    - "26.04"
+    - "24.04"
+  # 'auto' resolves the interface carrying the default route. provision-host.sh
+  # refuses ambiguity rather than guessing; name the interface when it does.
+  public_interface: auto
+  address_mode: direct
+  expected_public_ipv4: 203.0.113.10
+  # Set this only when IPv6 ingress actually works. A published AAAA record
+  # with broken IPv6 routing fails ACME HTTP-01 in a way that looks like a
+  # certificate problem and is not one.
+  expected_public_ipv6: null
+
+ssh:
+  port: 22
+  operator_user: deployer
+  # Defence in depth, not the boundary. The boundary is key-only
+  # authentication with PermitRootLogin no, which Phase 6 sets and the
+  # live-host suite asserts against `sshd -T` for the real operator tuple.
+  #
+  # ACCEPTED DEVIATION: an operator with no static source address may write
+  # 0.0.0.0/0 here. The field stays required and non-empty so that choice is
+  # explicit in the manifest rather than an omission, and
+  # provision-host.sh reports it as a deviation on every run. See
+  # docs/host-baseline.md and docs/plans/session-02-implementation-plan.md
+  # section "Open items".
+  #
+  # Note that a single host is /32, not /24. A host-bits-set CIDR is rejected:
+  # 198.51.100.24/24 means 256 addresses, and it is almost always a typo.
+  allowed_source_cidrs:
+    - 198.51.100.24/32
+  # Session 4 tunnels the direct database endpoint over SSH local forwarding.
+  allow_local_forwarding: true
+
+edge:
+  acme_email: platform@example.com
+  # Const in the schema, not an enum. Production is never selected from source.
+  # It is reached only through:
+  #   sudo bin/edge.sh --host host.yaml promote-acme --to production --confirm apg-vps-01
+  # which writes root-owned edge state. This is what stops an editing mistake
+  # from spending a Let's Encrypt production rate limit.
+  initial_acme_environment: staging
+  acme_resolver_name: letsencrypt
+  http_entrypoint: web
+  https_entrypoint: websecure
+  # Host-scoped and shared by every project. Must differ from each other, and
+  # must never collide with a project edge or internal network name.
+  control_network: apg-edge-control
+  egress_network: apg-edge-egress
+  access_logs: true
+
+infisical:
+  api_url: https://app.infisical.com
+  organization_slug: example-team
+  environment_slug: dev
+  # The literal folder may be identical in both projects. Isolation comes from
+  # the full (project_id, environment_slug, runtime_folder) tuple, not from
+  # requiring different folder strings.
+  runtime_folder: /runtime

@@ -46,6 +46,15 @@ COMPOSE_NAME_MAX = 63
 #: Number of hexadecimal characters retained from the fingerprint (rule 7).
 FINGERPRINT_LENGTH = 10
 
+#: The platform health route, identical for every project. Session 2's edge
+#: probe answers here, and the Session 2 gate proves HTTPS through it.
+#:
+#: The prefix is `/__apg` rather than `/health` on purpose: `/health` is a path
+#: an application may reasonably want for itself, and this one cannot be given
+#: up. `config.RESERVED_BASE_PATHS` reserves `/__apg` so a project manifest
+#: cannot claim it and shadow the route the edge plane is verified through.
+HEALTH_ROUTE_PATH = "/__apg/healthz"
+
 # --------------------------------------------------------------------------
 # Output validators (runbook §3.7 rule 4: context-specific validator + maximum)
 # --------------------------------------------------------------------------
@@ -228,6 +237,12 @@ class ProjectIdentity:
     route_app: str = ""
     route_mcp: str = ""
     route_docs: str = ""
+    #: Session 2's public health probe. Under the platform-reserved `/__apg`
+    #: prefix rather than `/health`, because `/health` is a path an application
+    #: may legitimately want and this one is not negotiable: it is the route the
+    #: edge plane proves itself with. `/__apg` is reserved in
+    #: ``config.RESERVED_BASE_PATHS`` so a manifest cannot claim it.
+    route_health: str = ""
 
     jwt_issuer: str = ""
     jwt_audience: str = ""
@@ -283,6 +298,7 @@ def derive(
         route_app=f"https://{domain}{api_base_path}/app",
         route_mcp=f"https://{domain}{mcp_base_path}",
         route_docs=f"https://{domain}/docs",
+        route_health=f"https://{domain}{HEALTH_ROUTE_PATH}",
         jwt_issuer=f"https://{domain}{api_base_path}/app/auth",
         jwt_audience=f"urn:agentic-postgres:{slug}:{environment}",
         secrets_namespace=f"agentic-postgres/{key}",

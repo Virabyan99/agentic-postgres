@@ -28,8 +28,10 @@ REQUIRED_PATHS = (
     "capabilities.example.yaml",
     "compose.yaml",
     "deploy.sh",
+    "host.example.yaml",
     "project.example.yaml",
     "project.second.example.yaml",
+    "secrets.required.yaml",
     "pyproject.toml",
     "pytest.ini",
     "requirements-dev.in",
@@ -55,14 +57,23 @@ REQUIRED_PATHS = (
     "docs/decisions/0001-product-shape.md",
     "docs/decisions/0002-configuration-authority.md",
     "docs/decisions/0003-example-domain.md",
+    "docs/decisions/0004-version-lock-format.md",
+    "docs/decisions/0005-route-reservation.md",
+    "docs/decisions/0006-capability-scopes.md",
+    "docs/decisions/0007-bounds-authority.md",
+    "docs/decisions/0008-sensitive-key-policy.md",
     "schemas/capabilities.schema.json",
+    "schemas/host.schema.json",
     "schemas/outputs.schema.json",
     "schemas/project.schema.json",
+    "schemas/secret-contract.schema.json",
     "src/agentic_postgres/__init__.py",
     "src/agentic_postgres/config.py",
     "src/agentic_postgres/evidence.py",
+    "src/agentic_postgres/host_config.py",
     "src/agentic_postgres/naming.py",
     "src/agentic_postgres/rendering.py",
+    "src/agentic_postgres/secrets_contract.py",
     "tests/acceptance-registry.yaml",
     "tests/conftest.py",
 )
@@ -132,6 +143,35 @@ def test_gitignore_covers_the_required_entries() -> None:
     text = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
     for entry in (".generated/*", "evidence/*", ".venv/", "__pycache__/", ".pytest_cache/"):
         assert entry in text, f".gitignore is missing {entry}"
+
+
+def test_gitignore_covers_session_two_operator_inputs() -> None:
+    """Session 2 §5.4: only redacted examples are committed.
+
+    These have to be *ignored* rather than merely uncommitted, because
+    bin/session-01-check.sh step 1 fails on any untracked file and that gate
+    also runs from the checkout on the deployment host, where these files
+    genuinely exist.
+    """
+    text = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
+    for entry in ("/host.yaml", "/capabilities.yaml", "/project.alpha.yaml", "/project.beta.yaml"):
+        assert entry in text, f".gitignore is missing {entry}"
+
+
+def test_committed_examples_are_not_swept_up_by_the_ignore_rules() -> None:
+    """Guard the guard: a `/project.*.yaml` glob would hide a real example.
+
+    `git check-ignore` is asked rather than the pattern being re-read, because
+    the question is what Git does, not what the file appears to say.
+    """
+    for relative in ("project.example.yaml", "project.second.example.yaml", "host.example.yaml"):
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", relative],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 1, f"{relative} is ignored but must be committed"
 
 
 def test_gitattributes_forces_lf() -> None:

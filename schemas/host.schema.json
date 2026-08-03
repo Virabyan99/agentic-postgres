@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/host.schema.json",
+  "title": "Agentic Postgres host manifest",
+  "description": "Non-secret configuration for one deployment host. Separate from project configuration on purpose: a host is shared by projects, and folding host facts into project.yaml would make a project manifest un-portable and would make the deterministic render depend on where it happened to run. additionalProperties is false at every level. This file never contains a credential; docs/decisions/0008-sensitive-key-policy.md is applied to it by the loader.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "host", "ssh", "edge", "infisical"],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "supported_os_releases",
+        "public_interface",
+        "address_mode",
+        "expected_public_ipv4",
+        "expected_public_ipv6"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$",
+          "description": "Stable host identifier. Also the confirmation token for edge.sh promote-acme, so it is deliberately short and typeable."
+        },
+        "supported_os_releases": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/osRelease" },
+          "description": "Releases this host is permitted to run. The enum is the implementation's fixed allowlist; a manifest may narrow it but can never widen it, which is what stops an unsupported release being enabled through configuration."
+        },
+        "public_interface": {
+          "type": "string",
+          "pattern": "^(auto|[A-Za-z][A-Za-z0-9_.-]{0,14})$",
+          "description": "'auto' resolves the interface carrying the default route. A literal name is accepted when resolution is ambiguous; the host script refuses ambiguity rather than guessing."
+        },
+        "address_mode": {
+          "type": "string",
+          "enum": ["direct", "nat"],
+          "description": "'direct' means the public address is assigned to this host. 'nat' means a provider forwards it, so local assignment is not expected and external reachability is proven instead."
+        },
+        "expected_public_ipv4": {
+          "type": ["string", "null"],
+          "format": "ipv4"
+        },
+        "expected_public_ipv6": {
+          "type": ["string", "null"],
+          "format": "ipv6",
+          "description": "Null unless IPv6 ingress genuinely works. A published AAAA record with broken IPv6 routing is worse than no AAAA record, so the semantic layer requires this to be set whenever a project domain has an AAAA record."
+        }
+      }
+    },
+
+    "ssh": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port", "operator_user", "allowed_source_cidrs", "allow_local_forwarding"],
+      "properties": {
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "not": { "enum": [80, 443] },
+          "description": "May not be 80 or 443: those belong to Traefik, and a collision would be discovered by losing either SSH or ingress."
+        },
+        "operator_user": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+          "description": "Must exist and hold at least one authorized key before hardening. Never root."
+        },
+        "allowed_source_cidrs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/cidr" },
+          "description": "Required and non-empty even when the value is 0.0.0.0/0. An operator with no static address must write that choice down rather than omit the field; provision-host.sh reports it as a deviation on every run."
+        },
+        "allow_local_forwarding": {
+          "type": "boolean",
+          "description": "Session 4 tunnels the direct database endpoint over SSH local forwarding. Setting this false forecloses that without an ADR."
+        }
+      }
+    },
+
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acme_email",
+        "initial_acme_environment",
+        "acme_resolver_name",
+        "http_entrypoint",
+        "https_entrypoint",
+        "control_network",
+        "egress_network",
+        "access_logs"
+      ],
+      "properties": {
+        "acme_email": {
+          "type": "string",
+          "format": "email",
+          "maxLength": 254,
+          "description": "Non-secret host configuration: the ACME account contact."
+        },
+        "initial_acme_environment": {
+          "type": "string",
+          "const": "staging",
+          "description": "Const, not an enum. Production is never selected from source; it is reached only through edge.sh promote-acme, which writes root-owned edge state. This is what prevents an editing mistake from spending a Let's Encrypt production rate limit."
+        },
+        "acme_resolver_name": { "$ref": "#/$defs/traefikName" },
+        "http_entrypoint": { "$ref": "#/$defs/traefikName" },
+        "https_entrypoint": { "$ref": "#/$defs/traefikName" },
+        "control_network": { "$ref": "#/$defs/dockerNetworkName" },
+        "egress_network": { "$ref": "#/$defs/dockerNetworkName" },
+        "access_logs": { "type": "boolean" }
+      }
+    },
+
+    "infisical": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["api_url", "organization_slug", "environment_slug", "runtime_folder"],
+      "description": "Provider coordinates only. No credential: the control-plane credential is a root-owned file named on the command line by path, and the per-project runtime credential is written by bootstrap under /etc/agentic-postgres/credentials/.",
+      "properties": {
+        "api_url": {
+          "type": "string",
+          "pattern": "^https://[a-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$",
+          "description": "HTTPS only, and no userinfo component, so a credential cannot be smuggled into the URL."
+        },
+        "organization_slug": { "$ref": "#/$defs/providerSlug" },
+        "environment_slug": { "$ref": "#/$defs/providerSlug" },
+        "runtime_folder": {
+          "type": "string",
+          "pattern": "^/[a-z0-9][a-z0-9/_-]{0,62}$",
+          "description": "The literal folder may be identical across projects. Isolation comes from the full (project_id, environment_slug, runtime_folder) tuple, not from distinct folder strings."
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "osRelease": {
+      "type": "string",
+      "enum": ["26.04", "24.04"],
+      "description": "The fixed supported-host allowlist. 26.04 is canonical; 24.04 is the documented fallback for providers that do not yet offer the canonical image, and its use is recorded in evidence."
+    },
+    "cidr": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F.:]+/[0-9]{1,3}$",
+      "maxLength": 49,
+      "description": "Shape only. The semantic layer parses it with Python's ipaddress module, which is the thing that actually decides validity."
+    },
+    "traefikName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,30}$"
+    },
+    "dockerNetworkName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]{1,62}$"
+    },
+    "providerSlug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+    }
+  }
+}

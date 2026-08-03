@@ -12,3 +12,18 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
+
+# Session 2 operator inputs. These name a real host, real DNS, and a real
+# provider organization, so only the redacted *.example.yaml forms are
+# committed (runbook Session 2 §5.4).
+#
+# They are ignored rather than merely untracked because bin/session-01-check.sh
+# step 1 fails on ANY untracked file, and these files live in the checkout on
+# the deployment host where that gate also runs.
+#
+# Listed individually rather than as /project.*.yaml on purpose: a glob would
+# silently hide a future project.third.example.yaml that ought to be committed.
+/host.yaml
+/capabilities.yaml
+/project.alpha.yaml
+/project.beta.yaml

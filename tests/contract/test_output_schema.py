@@ -175,11 +175,40 @@ def test_input_digests_are_real_and_correct(alpha: dict[str, Any]) -> None:
 
 
 def test_every_generated_file_records_the_same_inputs(rendered: dict[str, Path]) -> None:
-    """Runbook §4.1: an incomplete published set must be detectable."""
+    """Runbook §4.1: an incomplete published set must be detectable.
+
+    The set became five in Session 2 (ADR 0012) when ``secrets.required_names``
+    started reaching rendered output. The count is asserted against the named
+    set rather than a bare number, so adding a digest without deciding to is a
+    failure rather than an arithmetic update.
+    """
+    expected = {
+        "project_sha256",
+        "capabilities_sha256",
+        "secrets_contract_sha256",
+        "versions_lock_sha256",
+        "source_specification_sha256",
+    }
     for directory in rendered.values():
         document = json.loads((directory / "outputs.json").read_text(encoding="utf-8"))
-        assert len(document["inputs"]) == 4
+        assert set(document["inputs"]) == expected
         assert all(len(value) == 64 for value in document["inputs"].values())
+
+
+def test_every_render_input_is_digested(rendered: dict[str, Path]) -> None:
+    """Guard the guard: a digest block that omits a real input proves nothing.
+
+    ``secrets.required_names`` is derived from ``secrets.required.yaml``. If that
+    file were not in ``inputs``, two renders could legitimately differ with
+    nothing in the document explaining why -- which is the exact failure the
+    block exists to expose.
+    """
+    document = json.loads((rendered["project.example.yaml"] / "outputs.json").read_text("utf-8"))
+    assert (
+        document["inputs"]["secrets_contract_sha256"]
+        == sha256((REPO_ROOT / "secrets.required.yaml").read_bytes()).hexdigest()
+    )
+    assert document["secrets"]["required_names"] == ["session2_sentinel"]
 
 
 # ---------------------------------------------------------------------------
