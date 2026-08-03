@@ -170,6 +170,24 @@ Matching rule, applied to every mapping key at every depth, lowercased: reject i
 
 **T. `bin/compose.sh` env allowlist (§7.2's "preserving Docker client variables" is not enumerated).** Decision: implemented as `env -i` plus exactly `PATH`, `HOME`, `USER`, `DOCKER_HOST`, `DOCKER_CONTEXT`, `DOCKER_CONFIG`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY`. Everything else — including every `COMPOSE_*` variable — is dropped. A test asserts that setting `COMPOSE_PROJECT_NAME=hijacked` in the caller's environment does not change `docker compose config`'s rendered project name.
 
+### Conflicts between the source specification and the runbook
+
+Both entries below are genuine contradictions, found on reading
+`docs/source-specification.md` in full. Neither is a judgement call the
+implementation gets to make quietly.
+
+**U. Deployment timestamp in `outputs.json`.** Source specification §5.2 requires the rendered outputs to include "Deployment timestamp, template version, and locked component versions". Runbook §3.7 rule 11 requires the opposite: "Session 1 `outputs.json` contains no timestamp, so identical inputs and locks produce byte-identical output."
+
+Decision: **the runbook wins for Session 1.** `outputs.json` carries no timestamp of any kind. Byte-identical reproducibility is an actively tested Session 1 contract, and a timestamp destroys it for no Session 1 benefit — nothing consumes a render time when no deployment has occurred. The timestamp requirement is satisfied outside the determinism boundary instead: `evidence/session-01.json` carries `completed_at`, and `versions.env` carries `APG_LOCKED_AT`.
+
+If a later session genuinely needs a deployment timestamp in rendered output, it goes in a field the determinism test explicitly excludes, and it requires an ADR at that time. It does not get added to the deterministic body of `outputs.json`.
+
+**V. `deploy.sh` argument grammar.** Source specification §1.4 step 7 and §13.1 use a positional form, `./deploy.sh project.yaml`. Runbook §2 mandates `--project FILE --capabilities FILE --render-only`.
+
+Decision: **the runbook wins.** Its §2 audit correction 1 states the CLI was deliberately standardized, and the positional form cannot express the capability manifest or the mandatory render-only mode at all. Consequence to carry forward: the "fewer than 15 operator steps" happy path in source specification §1.4 must be transcribed into `docs/new-team-member.md` (Run 5) in the flag form, not copied verbatim. `tests/contract/test_cli_contract.py` asserts `deploy.sh` rejects a positional argument with exit `2` rather than silently treating it as a project path.
+
+**Not conflicts, recorded so they are not mistaken for drift later.** The runbook's `project.yaml` (§3.1) adds `schema_version`, `pooled_public_cidrs`, `storage.prefix`, and `backup.repository_prefix` over source specification §5.1; its repository tree (§6) is substantially larger than §5.3; and its `0600` requirement (§4.2) is unconditional where §5.2 makes it conditional on credential-bearing content. All three are deliberate strengthenings, named in the runbook's own §2 audit corrections 2, 5, and 12. The stricter form governs.
+
 ---
 
 ## 3. Consistency strategy for the acceptance harness
