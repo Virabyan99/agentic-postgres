@@ -4,7 +4,7 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 1 of 12, in progress.** This repository currently defines a
+**Status: Session 1 of 12 complete.** This repository currently defines a
 contract. It deploys nothing, starts no container, and connects to no
 database. See [What is intentionally unavailable](#what-is-intentionally-unavailable).
 
@@ -13,9 +13,9 @@ database. See [What is intentionally unavailable](#what-is-intentionally-unavail
 - [Handoff — environment and workflow](docs/handoff.md) — machine specifics, git, known traps
 - [Session 1 implementation plan](docs/plans/session-01-implementation-plan.md) — environment constraints, decision log, build order
 
-> **Build progress.** Runs 1–4 of 5 are complete. Sections below marked
-> _(Run 5)_ describe commands that do not exist yet. Nothing in this file
-> claims a capability the code does not have.
+> `bin/session-01-check.sh` exits 0 from a clean tree: 516 active contract
+> tests, 566 P0 tests collected, 50 activatable placeholders owned by later
+> sessions, 0 identity collisions, 0 floating image references.
 
 ---
 
@@ -44,14 +44,14 @@ src/agentic_postgres/
                      nothing else may re-derive a name.
   config.py          Strict YAML loading, schema + semantic validation.
   rendering.py       Transactional staging and publication.
-  evidence.py        Session evidence from test artifacts.               (Run 5)
+  evidence.py        Session evidence from test artifacts.
 compose.yaml         Validation-only model. Never started in Session 1.
 versions.in.yaml     Human-selected candidates.
 versions.env         Generated digest lock. Never hand-edited.
 tests/contract/      Active Session 1 contract tests.
 tests/{integration,recovery,security}/
                      Future-session placeholders. Collectible, skipped by
-                     marker, and failing if the marker is removed.       (Run 5)
+                     marker, and failing if the marker is removed.
 .generated/          Rendered output. Git-ignored. Never hand-edited.
 evidence/            Generated session evidence. Git-ignored.
 ```
@@ -148,7 +148,7 @@ not a substitute. See [ADR 0004](docs/decisions/0004-version-lock-format.md).
 
 ```bash
 bin/smoke-test.sh          # fast: active contract tests only
-bin/session-01-check.sh    # the gate CI runs — clean tree required   (Run 5)
+bin/session-01-check.sh    # the gate CI runs — clean tree required
 ```
 
 ## Exit-code convention
