@@ -1,0 +1,25 @@
+# Decision N — session-01-implementation-plan.md
+# The system-level Git config on the Windows host sets core.autocrlf=true.
+# Without this file, `bin/*.sh` are checked out with CRLF and every
+# `#!/usr/bin/env bash` shebang fails with "bad interpreter: ...^M".
+# It also makes the LF requirement of runbook §3.7 rule 10 enforceable
+# for anyone who clones this repository from Windows.
+
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.py   text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf
+*.ini  text eol=lf
+*.in   text eol=lf
+*.txt  text eol=lf
+
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+.editorconfig  text eol=lf
+.python-version text eol=lf
+VERSION        text eol=lf
+versions.env   text eol=lf

@@ -1,0 +1,14 @@
+# Runbook §6.1 — generated outputs and evidence must not appear as
+# untracked files after the gate (bin/session-01-check.sh step 1).
+
+.generated/*
+!.generated/.gitkeep
+
+evidence/*
+!evidence/.gitkeep
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
