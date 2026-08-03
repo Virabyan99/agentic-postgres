@@ -66,7 +66,13 @@ REQUIRED_PATHS = (
     "docs/decisions/0010-secret-materialization.md",
     "docs/decisions/0011-provider-bootstrap-state.md",
     "docs/decisions/0012-output-document-kinds.md",
+    "docs/decisions/0013-compose-wrapper-scopes.md",
     "docs/decisions/0015-reserved-health-route.md",
+    "infra/edge/compose.yaml",
+    "services/edge-probe/Dockerfile",
+    "services/edge-probe/probe.py",
+    "services/secret-check/Dockerfile",
+    "services/secret-check/check.py",
     "docs/plans/session-01-implementation-plan.md",
     "docs/plans/session-02-implementation-plan.md",
     "schemas/bootstrap-state.schema.json",
@@ -91,7 +97,7 @@ REQUIRED_PATHS = (
 
 #: Deployable source and templates. Example manifests, tests, documentation,
 #: the copied specification, and generated output are excluded by §9.
-SCAN_ROOTS = ("compose.yaml", "deploy.sh", "bin", "src", "services")
+SCAN_ROOTS = ("compose.yaml", "deploy.sh", "bin", "src", "services", "infra", "libexec", "systemd")
 
 #: The exact distinctive values, never the generic word "example".
 FIXTURE_MARKERS = (

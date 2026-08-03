@@ -307,9 +307,164 @@ def test_wrapper_never_shell_sources_an_env_file() -> None:
     "subcommand", ["up", "run", "start", "create", "restart", "exec", "attach", "cp"]
 )
 def test_container_starting_subcommands_are_refused(subcommand: str) -> None:
+    """Still exit 10 by default. Session 2 added a way through, not a hole.
+
+    All eight parameters are unchanged from Session 1. What changed is the
+    message: refusal is now conditional on ``--runtime`` rather than on the
+    session, so asserting the old "Session 1 starts nothing" text would be
+    asserting a sentence rather than a behaviour (ADR 0013).
+    """
     result = compose(ALPHA, subcommand)
     assert result.returncode == 10, f"{subcommand} returned {result.returncode}"
-    assert "Session 1 starts nothing" in result.stderr
+    assert "requires --runtime with root" in result.stderr
+
+
+@pytest.mark.parametrize("subcommand", ["up", "restart", "exec"])
+def test_runtime_mode_requires_root(subcommand: str) -> None:
+    """Docker access is root-equivalent, so --runtime is not a flag you just add.
+
+    The privilege check runs before the allowlist check deliberately: what an
+    unprivileged caller may do is the same question regardless of which
+    subcommand they asked for.
+    """
+    result = compose(ALPHA, "--runtime", subcommand)
+    assert result.returncode == 3, f"{subcommand} returned {result.returncode}"
+    assert "requires root" in result.stderr
+
+
+def test_the_runtime_allowlist_excludes_container_entry_verbs() -> None:
+    """`exec`, `attach`, `run` and `cp` reach inside a running container.
+
+    Nothing in Session 2's documented path needs them, so --runtime does not
+    grant them even to root. Asserted against the script's allowlist because
+    proving it at runtime would need a root test process.
+    """
+    text = COMPOSE_SH.read_text(encoding="utf-8")
+    allowed = re.search(r'RUNTIME_ALLOWED="([^"]*)"', text)
+    assert allowed is not None
+    permitted = set(allowed.group(1).split())
+    assert permitted == {"up", "down", "restart", "build", "ps", "config", "logs"}
+    assert not permitted & {"exec", "attach", "run", "cp", "start", "create"}
+
+
+def test_the_forbidden_list_is_unchanged_from_session_one() -> None:
+    """The default refusal is the inherited contract; only the escape is new."""
+    text = COMPOSE_SH.read_text(encoding="utf-8")
+    forbidden = re.search(r'FORBIDDEN="([^"]*)"', text)
+    assert forbidden is not None
+    assert forbidden.group(1).split() == [
+        "up",
+        "run",
+        "start",
+        "create",
+        "restart",
+        "exec",
+        "attach",
+        "cp",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# The shared edge plane
+# ---------------------------------------------------------------------------
+
+
+def edge(*args: str, env: dict[str, str] | None = None):
+    return subprocess.run(
+        [str(COMPOSE_SH), "--edge", "--host", str(REPO_ROOT / "host.example.yaml"), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, **(env or {})},
+    )
+
+
+def test_edge_model_renders_from_the_host_manifest() -> None:
+    """`--edge config` must work offline: CI has no root-owned edge state."""
+    result = edge("config")
+    assert result.returncode == 0, result.stderr
+    document = yaml.safe_load(result.stdout)
+    assert document["name"] == "apg-edge"
+    assert set(document["services"]) == {"traefik", "docker-socket-proxy"}
+
+
+def test_edge_scope_requires_a_host_manifest() -> None:
+    result = subprocess.run(
+        [str(COMPOSE_SH), "--edge", "config"], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 2
+    assert "--host" in result.stderr
+
+
+def test_edge_mode_refuses_volume_removal() -> None:
+    """A deleted production ACME file turns a failed renewal into a rate limit.
+
+    The state is a bind mount, so `down -v` cannot actually reach it. Refusing
+    the flag removes the question rather than relying on that remaining true.
+    """
+    for flag in ("-v", "--volumes"):
+        result = edge("down", flag)
+        assert result.returncode == 2, flag
+        assert "ACME state" in result.stderr
+
+
+def test_inherited_edge_stack_name_cannot_override() -> None:
+    result = edge("config", env={"EDGE_STACK_NAME": "hijacked"})
+    assert result.returncode == 0, result.stderr
+    assert "hijacked" not in result.stdout
+
+
+def test_only_traefik_publishes_host_ports() -> None:
+    """Runbook §9 and SEC-NET-001, asserted against the resolved edge model."""
+    document = yaml.safe_load(edge("config").stdout)
+    assert "ports" not in document["services"]["docker-socket-proxy"]
+    published = {p["published"] for p in document["services"]["traefik"]["ports"]}
+    assert published == {"80", "443"}
+
+
+def test_traefik_has_no_direct_docker_socket_mount() -> None:
+    """DEP-EDGE-003. The whole reason the socket proxy exists."""
+    document = yaml.safe_load(edge("config").stdout)
+    for mount in document["services"]["traefik"].get("volumes", []):
+        assert "docker.sock" not in mount["source"], "Traefik mounts the Docker socket directly"
+
+
+def test_the_socket_proxy_denies_every_unneeded_api_section() -> None:
+    """`POST: 0` is the important one: it is what keeps read access read-only."""
+    document = yaml.safe_load(edge("config").stdout)
+    environment = document["services"]["docker-socket-proxy"]["environment"]
+
+    assert {k for k, v in environment.items() if v == "1"} == {
+        "CONTAINERS",
+        "EVENTS",
+        "NETWORKS",
+        "PING",
+        "VERSION",
+    }
+    for denied in ("POST", "EXEC", "BUILD", "IMAGES", "VOLUMES", "SECRETS", "SWARM", "INFO"):
+        assert environment[denied] == "0", f"{denied} is not explicitly disabled"
+
+
+def test_the_socket_proxy_is_not_privileged_and_is_unpublished() -> None:
+    document = yaml.safe_load(edge("config").stdout)
+    proxy = document["services"]["docker-socket-proxy"]
+    assert proxy.get("privileged") is not True
+    assert "ports" not in proxy
+    assert proxy["cap_drop"] == ["ALL"]
+    assert proxy["read_only"] is True
+    assert proxy["networks"] == {"control": None}
+
+
+def test_the_control_network_is_internal() -> None:
+    """The proxy is unreachable from any project network because of this."""
+    document = yaml.safe_load(edge("config").stdout)
+    assert document["networks"]["control"]["internal"] is True
+
+
+def test_the_edge_declares_no_named_volume() -> None:
+    """ACME state is a bind mount so `docker volume prune` cannot reach it."""
+    document = yaml.safe_load(edge("config").stdout)
+    assert "volumes" not in document or not document["volumes"]
 
 
 @pytest.mark.parametrize("project_dir", [ALPHA, ALPINE], ids=lambda p: p.name)

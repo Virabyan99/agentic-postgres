@@ -76,4 +76,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0010](0010-secret-materialization.md) | Secrets are individual files in immutable generations | 2 | Accepted |
 | [0011](0011-provider-bootstrap-state.md) | Provider ownership is recorded by ID, and convergence is keyed narrowly | 2 | Accepted |
 | [0012](0012-output-document-kinds.md) | Two output document kinds under one versioned schema | 2 | Accepted |
+| [0013](0013-compose-wrapper-scopes.md) | Compose wrapper scopes, the runtime gate, and three env files | 2 | Accepted |
 | [0015](0015-reserved-health-route.md) | The platform health route is reserved | 2 | Accepted |

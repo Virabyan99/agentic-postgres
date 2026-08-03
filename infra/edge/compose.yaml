@@ -1,0 +1,132 @@
+# Host-scoped shared edge plane (runbook Phase 10, ADR 0009).
+#
+# One per host, independent of every project Compose stack. It owns ingress and
+# nothing else -- no project state, no project authorization, no project secret
+# -- which is what makes sharing it acceptable.
+#
+# Only this stack publishes host ports. Every project service is reached through
+# it, over a project edge network Traefik is attached to explicitly.
+#
+# Invoke only through `bin/compose.sh --edge --host host.yaml`. Calling
+# `docker compose` directly lets inherited environment variables win over
+# --env-file, which is the exact override this repository exists to prevent.
+
+name: ${EDGE_STACK_NAME:?required}
+
+services:
+  # Traefik never mounts the Docker socket. It reads the Docker provider
+  # through this proxy, which permits exactly the read-only API sections the
+  # locked Traefik version needs and explicitly denies every other known
+  # section plus POST.
+  #
+  # This narrows Traefik's Docker API authority. It is NOT an absolute host
+  # boundary: the proxy process itself has the socket mounted, so compromising
+  # the proxy is equivalent to compromising the host. The threat model states
+  # that residual risk rather than implying otherwise.
+  docker-socket-proxy:
+    image: ${DOCKER_SOCKET_PROXY_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    restart: unless-stopped
+    read_only: true
+    tmpfs: [/run, /tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      # Permitted: the four sections the Docker provider actually uses, plus
+      # PING for the health check. Every addition needs an ADR and a matching
+      # negative-write regression test.
+      CONTAINERS: "1"
+      EVENTS: "1"
+      NETWORKS: "1"
+      PING: "1"
+      VERSION: "1"
+      # Denied. POST first, because it is the one that turns read access into
+      # write access regardless of which sections are enabled.
+      POST: "0"
+      AUTH: "0"
+      BUILD: "0"
+      COMMIT: "0"
+      CONFIGS: "0"
+      DISTRIBUTION: "0"
+      EXEC: "0"
+      GRPC: "0"
+      IMAGES: "0"
+      # INFO stays off until an executable compatibility test proves the locked
+      # Traefik requires it. It leaks the host's full container and plugin
+      # inventory, so "probably harmless" is not a good enough reason.
+      INFO: "0"
+      NODES: "0"
+      PLUGINS: "0"
+      SECRETS: "0"
+      SERVICES: "0"
+      SESSION: "0"
+      SWARM: "0"
+      SYSTEM: "0"
+      TASKS: "0"
+      VOLUMES: "0"
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true
+    # Control network only, and that network is `internal: true`. The proxy is
+    # unreachable from any project network and has no route off the host.
+    networks: [control]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2375/_ping | grep -qx OK"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+  traefik:
+    image: ${TRAEFIK_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    restart: unless-stopped
+    depends_on:
+      docker-socket-proxy:
+        condition: service_healthy
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # The only published ports on the host. Container ports are unprivileged so
+    # no capability is needed to bind them; the host side is the privileged
+    # half and Docker handles it.
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - type: bind
+        source: ${EDGE_STATE_DIR:?required}/traefik.yaml
+        target: /etc/traefik/traefik.yaml
+        read_only: true
+      - type: bind
+        source: ${EDGE_STATE_DIR:?required}/dynamic
+        target: /etc/traefik/dynamic
+        read_only: true
+      # The one writable mount, and the one that must survive everything.
+      # Deleting this directory is what turns a failed renewal into an
+      # exhausted Let's Encrypt rate limit, so bin/compose.sh refuses -v in
+      # edge mode and no routine rollback removes it.
+      - type: bind
+        source: ${EDGE_STATE_DIR:?required}/acme
+        target: /var/lib/traefik/acme
+    networks: [control, egress]
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+networks:
+  # internal: true -- no route off the host. This is what keeps the socket
+  # proxy unreachable from anything but Traefik.
+  control:
+    name: ${CONTROL_NETWORK_NAME:?required}
+    internal: true
+  egress:
+    name: ${EGRESS_NETWORK_NAME:?required}
+
+# No top-level volumes. ACME state is a bind mount to a root-owned host
+# directory, not a named volume, precisely so that `docker volume prune` and a
+# stray `down -v` cannot reach it.

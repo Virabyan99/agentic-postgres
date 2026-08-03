@@ -92,6 +92,48 @@ def unrestricted_ssh_sources(document: dict[str, Any]) -> list[str]:
     return [c for c in document["ssh"]["allowed_source_cidrs"] if c in _DEFAULT_ROUTES]
 
 
+#: Where the edge plane's rendered configuration and ACME state live. Root-owned
+#: and outside the repository: `traefik.yaml` names the ACME environment, and
+#: that selection must not be editable by anyone who can write to a checkout.
+EDGE_STATE_DIR = "/var/lib/agentic-postgres/edge"
+
+#: The Compose project name of the shared edge stack. Fixed rather than derived:
+#: there is exactly one per host, and a derived name would imply otherwise.
+EDGE_STACK_NAME = "apg-edge"
+
+#: The exact key set of the edge `compose.env`. Disjoint from `versions.env` and
+#: from every project `compose.env`, so no --env-file ordering can let one
+#: silently override another.
+EDGE_COMPOSE_ENV_KEYS: tuple[str, ...] = (
+    "EDGE_STACK_NAME",
+    "CONTROL_NETWORK_NAME",
+    "EGRESS_NETWORK_NAME",
+    "EDGE_STATE_DIR",
+)
+
+
+def edge_compose_env(document: dict[str, Any]) -> bytes:
+    """Render the edge stack's `compose.env` from a validated host manifest.
+
+    Derived rather than stored so that `--edge config` works offline and in CI,
+    where the root-owned `/var/lib/agentic-postgres/edge/compose.env` does not
+    exist. `bin/edge.sh` writes the same content to that path for the systemd
+    unit, which cannot read a manifest from an operator's checkout.
+    """
+    values = {
+        "EDGE_STACK_NAME": EDGE_STACK_NAME,
+        "CONTROL_NETWORK_NAME": document["edge"]["control_network"],
+        "EGRESS_NETWORK_NAME": document["edge"]["egress_network"],
+        "EDGE_STATE_DIR": EDGE_STATE_DIR,
+    }
+    lines = [
+        "# Generated from host.yaml. Do not edit; do not shell-source.",
+        "# Consumed only by bin/compose.sh --edge via --env-file.",
+        *(f"{key}={values[key]}" for key in EDGE_COMPOSE_ENV_KEYS),
+    ]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
 def _validate_semantics(document: dict[str, Any]) -> None:
     host = document["host"]
     ssh = document["ssh"]
@@ -203,7 +245,11 @@ def _validate_networks(edge: dict[str, Any]) -> None:
 
 __all__ = [
     "CANONICAL_OS_RELEASE",
+    "EDGE_COMPOSE_ENV_KEYS",
+    "EDGE_STACK_NAME",
+    "EDGE_STATE_DIR",
     "SUPPORTED_OS_RELEASES",
+    "edge_compose_env",
     "load_host_manifest",
     "unrestricted_ssh_sources",
 ]

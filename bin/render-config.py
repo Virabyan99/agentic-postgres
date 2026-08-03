@@ -28,7 +28,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import config, rendering  # noqa: E402
+from agentic_postgres import config, host_config, rendering  # noqa: E402
 
 BEGIN = "<!-- BEGIN GENERATED: bounds -->"
 END = "<!-- END GENERATED: bounds -->"
@@ -138,6 +138,25 @@ def render(project: Path, capabilities: Path) -> int:
     return 0
 
 
+def edge_env(host: Path) -> int:
+    """Write the shared edge stack's env file to stdout.
+
+    Derived from ``host.yaml`` on demand rather than read from
+    ``/var/lib/agentic-postgres/edge/compose.env``, so that ``--edge config``
+    works offline and in CI where nothing root-owned exists. ``bin/edge.sh``
+    writes identical content to that root-owned path for the systemd unit,
+    which cannot read a manifest out of an operator's checkout.
+    """
+    try:
+        document = host_config.load_host_manifest(host)
+    except config.ManifestError as exc:
+        print(f"render-config: {host}: {exc}", file=sys.stderr)
+        return 2
+
+    sys.stdout.buffer.write(host_config.edge_compose_env(document))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="bin/render-config.py",
@@ -145,6 +164,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--project", type=Path, help="Path to a project manifest.")
     parser.add_argument("--capabilities", type=Path, help="Path to a capability manifest.")
+    parser.add_argument("--host", type=Path, help="Path to a host manifest.")
+    parser.add_argument(
+        "--edge-env",
+        action="store_true",
+        help="With --host: write the shared edge stack's compose.env to stdout.",
+    )
     parser.add_argument(
         "--validate-only",
         action="store_true",
@@ -166,6 +191,11 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+
+    if args.edge_env:
+        if not args.host:
+            parser.error("--edge-env requires --host")
+        return edge_env(args.host)
 
     if args.bounds_doc:
         if args.write == args.check:
