@@ -199,20 +199,49 @@ def build_outputs(
     }
 
 
-def build_compose_env(identity: naming.ProjectIdentity) -> bytes:
-    """Exactly the four variables of plan decision M, and nothing else.
+#: The exact key set of a generated ``compose.env`` (plan decision M, extended
+#: by ADR 0013). Every entry is derived from the project manifest alone.
+#:
+#: The boundary this set encodes: a value that comes from ``host.yaml`` may not
+#: be here. ``host.yaml`` is not one of the digested render inputs, so a
+#: host-derived value in a rendered file would make the render depend on which
+#: machine produced it and break the determinism contract. Those values live in
+#: the root-owned ``/var/lib/agentic-postgres/projects/{key}/compose.env``,
+#: passed as a third ``--env-file`` in ``--runtime`` mode only.
+COMPOSE_ENV_KEYS: tuple[str, ...] = (
+    "COMPOSE_PROJECT_NAME",
+    "EDGE_NETWORK_NAME",
+    "INTERNAL_NETWORK_NAME",
+    "POSTGRES_VOLUME_NAME",
+    "PROJECT_KEY",
+    "PROJECT_ENVIRONMENT",
+    "PROJECT_DOMAIN",
+    "HEALTH_ROUTER_NAME",
+)
 
-    Anything from ``versions.env`` belongs to ``versions.env``: the two files
-    must define disjoint namespaces so ``bin/compose.sh`` can prove neither
-    silently overrides the other.
+
+def build_compose_env(identity: naming.ProjectIdentity) -> bytes:
+    """Exactly :data:`COMPOSE_ENV_KEYS`, in that order, and nothing else.
+
+    Anything from ``versions.env`` belongs to ``versions.env``, and anything
+    from ``host.yaml`` belongs to the root-owned runtime env file: all three
+    must define disjoint namespaces so ``bin/compose.sh`` can prove none of
+    them silently overrides another regardless of ``--env-file`` ordering.
     """
+    values = {
+        "COMPOSE_PROJECT_NAME": identity.compose_project_name,
+        "EDGE_NETWORK_NAME": identity.edge_network,
+        "INTERNAL_NETWORK_NAME": identity.internal_network,
+        "POSTGRES_VOLUME_NAME": identity.postgres_volume,
+        "PROJECT_KEY": identity.key,
+        "PROJECT_ENVIRONMENT": identity.environment,
+        "PROJECT_DOMAIN": identity.domain,
+        "HEALTH_ROUTER_NAME": identity.health_router,
+    }
     lines = [
         "# Generated. Do not edit; do not shell-source.",
         "# Consumed only by bin/compose.sh via --env-file.",
-        f"COMPOSE_PROJECT_NAME={identity.compose_project_name}",
-        f"EDGE_NETWORK_NAME={identity.edge_network}",
-        f"INTERNAL_NETWORK_NAME={identity.internal_network}",
-        f"POSTGRES_VOLUME_NAME={identity.postgres_volume}",
+        *(f"{key}={values[key]}" for key in COMPOSE_ENV_KEYS),
     ]
     return ("\n".join(lines) + "\n").encode("utf-8")
 

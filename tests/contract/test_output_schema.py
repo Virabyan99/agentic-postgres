@@ -288,12 +288,43 @@ def test_compose_env_defines_exactly_the_expected_keys(rendered: dict[str, Path]
     keys = {
         line.split("=", 1)[0] for line in text.splitlines() if line and not line.startswith("#")
     }
-    assert keys == {
-        "COMPOSE_PROJECT_NAME",
-        "EDGE_NETWORK_NAME",
-        "INTERNAL_NETWORK_NAME",
-        "POSTGRES_VOLUME_NAME",
+    assert keys == set(rendering.COMPOSE_ENV_KEYS)
+
+
+def test_compose_env_carries_no_host_derived_value(rendered: dict[str, Path]) -> None:
+    """The boundary ADR 0013 draws, asserted rather than described.
+
+    Every key here comes from the project manifest. A value from `host.yaml` --
+    the ACME resolver name, the middleware chain -- would make this rendered
+    file depend on which machine produced it, and `host.yaml` is not one of the
+    five digested inputs. Those values live in the root-owned runtime env file
+    instead, passed as a third `--env-file` in `--runtime` mode only.
+    """
+    host_derived = {
+        "ACME_RESOLVER_NAME",
+        "BASELINE_MIDDLEWARE_CHAIN",
+        "ACME_EMAIL",
+        "CONTROL_NETWORK_NAME",
+        "EGRESS_NETWORK_NAME",
+        "HTTP_ENTRYPOINT",
+        "HTTPS_ENTRYPOINT",
     }
+    text = (rendered["project.example.yaml"] / "compose.env").read_text(encoding="utf-8")
+    keys = {
+        line.split("=", 1)[0] for line in text.splitlines() if line and not line.startswith("#")
+    }
+    assert not keys & host_derived, (
+        f"host-derived keys reached a rendered file: {keys & host_derived}"
+    )
+
+
+def test_compose_env_key_order_is_stable(rendered: dict[str, Path]) -> None:
+    """Determinism covers ordering, not just membership."""
+    text = (rendered["project.example.yaml"] / "compose.env").read_text(encoding="utf-8")
+    keys = [
+        line.split("=", 1)[0] for line in text.splitlines() if line and not line.startswith("#")
+    ]
+    assert keys == list(rendering.COMPOSE_ENV_KEYS)
 
 
 def test_compose_env_is_disjoint_from_the_version_lock(rendered: dict[str, Path]) -> None:

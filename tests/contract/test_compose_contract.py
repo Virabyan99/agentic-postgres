@@ -87,13 +87,104 @@ def test_model_does_not_use_container_name() -> None:
 
 
 def test_model_references_only_locked_image_variables() -> None:
-    """No image may bypass the lock by naming a repository inline."""
+    """No image may bypass the lock by naming a repository inline.
+
+    Session 2 added services that *build* rather than pull. A `FROM` line in a
+    Dockerfile is a second, unlocked version declaration that
+    `bin/lock-versions.sh` cannot see, so a built service must take its base
+    image from the lock through a build argument instead — and this asserts one
+    of the two forms is present, never neither.
+    """
     document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
     for name, service in document["services"].items():
-        image = service["image"]
-        assert image.startswith("${") and image.endswith(":?required}"), (
-            f"service {name} does not take its image from a locked variable: {image}"
+        if "image" in service:
+            image = service["image"]
+            assert image.startswith("${") and image.endswith(":?required}"), (
+                f"service {name} does not take its image from a locked variable: {image}"
+            )
+            continue
+
+        base = service["build"]["args"]["BASE_IMAGE"]
+        assert base.startswith("${") and base.endswith(":?required}"), (
+            f"service {name} builds from an unlocked base image: {base}"
         )
+
+
+def test_no_dockerfile_names_its_own_base_image() -> None:
+    """The other half of the same rule, checked where it could be broken.
+
+    A `FROM python:3.12-slim` would build successfully, pass every Compose
+    assertion, and quietly reintroduce a floating tag into a public-facing
+    image.
+    """
+    for dockerfile in sorted((REPO_ROOT / "services").rglob("Dockerfile")):
+        froms = [
+            line.strip()
+            for line in dockerfile.read_text(encoding="utf-8").splitlines()
+            if line.strip().upper().startswith("FROM ")
+        ]
+        assert froms, f"{dockerfile} has no FROM line"
+        for line in froms:
+            assert line == "FROM ${BASE_IMAGE}", (
+                f"{dockerfile.relative_to(REPO_ROOT)} names its own base image: {line}"
+            )
+
+
+def test_no_project_service_publishes_a_host_port() -> None:
+    """Only Traefik publishes a host port (runbook §9, SEC-NET-001).
+
+    Asserted against the model source as well as the resolved model, because a
+    `ports` entry added here would be reviewed once and then enforced only by a
+    live test that needs a host.
+    """
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    for name, service in document["services"].items():
+        assert "ports" not in service, f"service {name} publishes a host port"
+
+
+def test_built_services_run_as_a_fixed_non_root_user() -> None:
+    """A root container makes `cap_drop: ALL` and `no-new-privileges` cosmetic."""
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    for name, service in document["services"].items():
+        if "build" not in service:
+            continue
+        assert service["user"] == "65532:65532", f"service {name} does not run as nonroot"
+        assert service["read_only"] is True, f"service {name} has a writable root filesystem"
+        assert service["cap_drop"] == ["ALL"], f"service {name} retains capabilities"
+        assert "no-new-privileges:true" in service["security_opt"], name
+
+
+def test_the_edge_probe_is_inert_without_the_runtime_override() -> None:
+    """`traefik.enable` is absent from the committed model, deliberately.
+
+    The router labels are rendered into the root-owned runtime override, so this
+    file on its own cannot expose anything. Exposure is an act of deployment
+    rather than a property of a file in the repository (ADR 0013).
+    """
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    labels = document["services"]["edge-probe"]["labels"]
+    assert "traefik.enable" not in labels
+    assert labels["apg.traefik.scope"] == "managed"
+    assert not any(key.startswith("traefik.http.") for key in labels)
+
+
+def test_the_unlabeled_probe_carries_no_discovery_label() -> None:
+    """The control for DEP-EDGE-002 only controls if it is genuinely unlabeled."""
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    service = document["services"]["unlabeled-probe"]
+    assert "labels" not in service, "the unlabeled probe has labels; it proves nothing"
+
+
+def test_the_secret_check_service_declares_no_secret_source() -> None:
+    """The generation path does not exist until materialization runs.
+
+    A `file:` source in the committed model would either be a guess or a stable
+    path -- and a stable path is exactly the shared, mutable location that
+    immutable generations exist to avoid (ADR 0010).
+    """
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    assert "secrets" not in document, "the committed model declares a secret source"
+    assert "secrets" not in document["services"]["secret-check"]
 
 
 def test_probe_is_profile_gated() -> None:

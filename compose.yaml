@@ -45,6 +45,86 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
 
+  # Session 2's public HTTPS target. Deliberately trivial: it exists so that
+  # "Traefik routes this project, with a trusted certificate, and returns this
+  # project's identity" is a measurable claim before any application service.
+  #
+  # It carries the identity labels and the network hint, but NOT
+  # `traefik.enable`, and NOT the router or service labels. Two reasons:
+  #
+  #   1. The router labels' *keys* contain the router name
+  #      (traefik.http.routers.<name>.rule). Interpolation inside a label key is
+  #      not portable to the Compose version floor, so the renderer emits fully
+  #      formed keys into the root-owned runtime override instead (ADR 0013).
+  #   2. Without `traefik.enable`, this model on its own is inert to Traefik.
+  #      Exposure becomes a deliberate act of deployment rather than a property
+  #      of a file in the repository.
+  edge-probe:
+    build:
+      context: ./services/edge-probe
+      args:
+        BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+    profiles: [session2]
+    restart: "on-failure:5"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    environment:
+      PROJECT_KEY: ${PROJECT_KEY:?required}
+    # No `ports`. Only Traefik publishes a host port, and the acceptance suite
+    # asserts that against the resolved model, not against this comment.
+    networks:
+      - edge
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+
+  # The control for DEP-EDGE-002. Same network, same project, no labels at all.
+  # If the public route can reach this, discovery is not actually constrained
+  # and `exposedByDefault=false` is not doing what it claims.
+  unlabeled-probe:
+    build:
+      context: ./services/edge-probe
+      args:
+        BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+    profiles: [isolation-test]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    environment:
+      PROJECT_KEY: ${PROJECT_KEY:?required}
+    networks:
+      - edge
+
+  # One-shot proof that secret materialization reached this container, and only
+  # this container. The `secrets:` grant and the top-level secrets block are NOT
+  # here: the source path is an immutable generation directory whose identifier
+  # does not exist until materialization runs, so the runtime override supplies
+  # them. What lives here is the `user:` the secret files must be owned by, so
+  # that secrets.required.yaml and the service contract can be cross-checked
+  # from source (tests/contract/test_secret_contract.py).
+  secret-check:
+    build:
+      context: ./services/secret-check
+      args:
+        BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+    profiles: [session2-verify]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    networks:
+      - internal
+
 networks:
   edge:
     name: ${EDGE_NETWORK_NAME:?required}

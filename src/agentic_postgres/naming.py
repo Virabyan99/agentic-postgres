@@ -63,6 +63,14 @@ _POSTGRES_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 _R2_BUCKET = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
 _COMPOSE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
+#: Traefik router and service names. Hyphens only, no underscores and no dots.
+#:
+#: A dot is the reason this pattern is tighter than ``_COMPOSE_NAME``: the name
+#: is embedded in a *label key* (``traefik.http.routers.<name>.rule``), which
+#: Traefik parses by splitting on dots. A name containing one would silently
+#: produce a router nobody asked for, under a name nobody chose.
+_TRAEFIK_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
 #: Every project-scoped PostgreSQL role. Order is stable because it reaches
 #: rendered output; ``object_owner`` is the non-login owner of runbook §3.8.
 ROLE_SUFFIXES: tuple[str, ...] = (
@@ -167,6 +175,32 @@ def compose_name(value: str, *, context: str) -> str:
     )
 
 
+def traefik_name(value: str, *, context: str) -> str:
+    """Truncate and validate ``value`` as a Traefik router or service name.
+
+    Truncated at the same 63 boundary as every other identity (decision W), so
+    a long project key produces a distinguishable router name rather than a
+    Compose validation failure at deploy time.
+    """
+    result = truncate(value, limit=COMPOSE_NAME_MAX, context=context, separator="-")
+    return _validated(
+        result,
+        pattern=_TRAEFIK_NAME,
+        limit=COMPOSE_NAME_MAX,
+        what=f"Traefik name ({context})",
+    )
+
+
+def health_router_name(key: str) -> str:
+    """The router and service name for one project's health route.
+
+    Router and service share the name deliberately: Traefik keys them in
+    separate namespaces, and one name per route is one fewer thing that can be
+    mismatched between the ``routers.<n>.service`` and ``services.<n>`` labels.
+    """
+    return traefik_name(f"apg-{key}-health", context="traefik_router_health")
+
+
 def r2_bucket(value: str, *, context: str = "r2_bucket") -> str:
     """Truncate and validate ``value`` as an R2/S3 bucket name."""
     result = truncate(value, limit=R2_BUCKET_MAX, context=context, separator="-")
@@ -243,6 +277,11 @@ class ProjectIdentity:
     #: edge plane proves itself with. `/__apg` is reserved in
     #: ``config.RESERVED_BASE_PATHS`` so a manifest cannot claim it.
     route_health: str = ""
+    #: Traefik router and service name for the health route. Project-derived,
+    #: so it reaches `compose.env`; the host-derived label values (resolver,
+    #: middleware chain) do not, because `host.yaml` is not a digested render
+    #: input (ADR 0009).
+    health_router: str = ""
 
     jwt_issuer: str = ""
     jwt_audience: str = ""
@@ -299,6 +338,7 @@ def derive(
         route_mcp=f"https://{domain}{mcp_base_path}",
         route_docs=f"https://{domain}/docs",
         route_health=f"https://{domain}{HEALTH_ROUTE_PATH}",
+        health_router=health_router_name(key),
         jwt_issuer=f"https://{domain}{api_base_path}/app/auth",
         jwt_audience=f"urn:agentic-postgres:{slug}:{environment}",
         secrets_namespace=f"agentic-postgres/{key}",
