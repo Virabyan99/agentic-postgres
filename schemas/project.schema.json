@@ -1,0 +1,212 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/project.schema.json",
+  "title": "Agentic Postgres project manifest",
+  "description": "Non-secret deployment configuration. This file is the sole authority for the numeric bounds below; documentation is generated from it and validation code reads it rather than restating any value.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project", "database", "api", "mcp"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1],
+      "description": "Manifest format version."
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "environment", "domain"],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{2,30}$",
+          "description": "Project identifier; 3-31 lowercase characters."
+        },
+        "environment": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,15}$",
+          "description": "Deployment environment; 2-16 lowercase characters."
+        },
+        "domain": {
+          "type": "string",
+          "format": "hostname",
+          "minLength": 4,
+          "maxLength": 253,
+          "description": "Public DNS name. No scheme, port, path, or wildcard."
+        }
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_client_connections", "pool_size"],
+      "properties": {
+        "name": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "maxLength": 63,
+          "description": "Database name. Defaults to the SQL-safe project key."
+        },
+        "pooled_public": {
+          "type": "boolean",
+          "default": false,
+          "description": "Expose PgBouncer publicly. Requires an explicit CIDR allowlist."
+        },
+        "pooled_public_cidrs": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": { "type": "string" },
+          "description": "Source networks permitted to reach the pooler."
+        },
+        "max_client_connections": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "PgBouncer client connection ceiling."
+        },
+        "pool_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Server-side pool size. Must not exceed max_client_connections."
+        }
+      },
+      "if": {
+        "properties": { "pooled_public": { "const": true } },
+        "required": ["pooled_public"]
+      },
+      "then": {
+        "required": ["pooled_public_cidrs"],
+        "properties": {
+          "pooled_public_cidrs": { "minItems": 1 }
+        }
+      }
+    },
+    "api": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["public_base_path", "max_rows"],
+      "properties": {
+        "public_base_path": {
+          "type": "string",
+          "pattern": "^/[^/].*[^/]$|^/[^/]$",
+          "maxLength": 128,
+          "description": "Route prefix for the REST and application surfaces."
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Global PostgREST row-return ceiling."
+        }
+      }
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["public_base_path", "max_result_rows", "max_response_bytes"],
+      "properties": {
+        "public_base_path": {
+          "type": "string",
+          "pattern": "^/[^/].*[^/]$|^/[^/]$",
+          "maxLength": 128,
+          "description": "Route prefix for the MCP transport."
+        },
+        "max_result_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Agent read row ceiling. Must not exceed api.max_rows."
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 10485760,
+          "description": "Agent response size ceiling."
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "bucket": {
+          "type": ["string", "null"],
+          "minLength": 3,
+          "maxLength": 63,
+          "description": "R2 bucket. Defaults to the project key."
+        },
+        "prefix": {
+          "type": ["string", "null"],
+          "maxLength": 256,
+          "description": "Relative object prefix ending in '/'. Defaults to objects/{project_key}/."
+        },
+        "upload_url_ttl_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600,
+          "description": "Presigned upload URL lifetime."
+        },
+        "download_url_ttl_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600,
+          "description": "Presigned download URL lifetime."
+        },
+        "max_upload_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5368709120,
+          "description": "Largest accepted upload. P0 default is 25 MiB."
+        }
+      },
+      "if": {
+        "properties": { "enabled": { "const": false } },
+        "required": ["enabled"]
+      },
+      "then": {
+        "properties": {
+          "bucket": { "type": "null" },
+          "prefix": { "type": "null" }
+        }
+      }
+    },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "stanza": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+          "description": "pgBackRest stanza. Defaults to the project key."
+        },
+        "repository_prefix": {
+          "type": ["string", "null"],
+          "maxLength": 256,
+          "description": "Relative repository prefix ending in '/'."
+        },
+        "retain_full": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12,
+          "description": "Full backup chains retained."
+        }
+      },
+      "if": {
+        "properties": { "enabled": { "const": false } },
+        "required": ["enabled"]
+      },
+      "then": {
+        "properties": {
+          "stanza": { "type": "null" },
+          "repository_prefix": { "type": "null" }
+        }
+      }
+    }
+  }
+}

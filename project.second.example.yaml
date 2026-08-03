@@ -1,0 +1,47 @@
+# Second example project manifest.
+#
+# Exists to prove isolation, not to demonstrate a different feature set. The
+# slug is deliberately similar to project.example.yaml's -- "fixture-alpha"
+# and "fixture-alpine" share the first 12 characters -- so that a naive
+# prefix-based derivation would collide here and a correct one will not.
+#
+# Every project-scoped identity rendered from this file must differ from the
+# one rendered from project.example.yaml. See runbook §8 and
+# tests/contract/test_render_isolation.py.
+
+schema_version: 1
+
+project:
+  slug: fixture-alpine
+  environment: dev
+  domain: fixture-alpine-dev.test
+
+database:
+  name: fixture_alpine_dev
+  pooled_public: false
+  pooled_public_cidrs: []
+  max_client_connections: 100
+  pool_size: 20
+
+api:
+  public_base_path: /api
+  max_rows: 500
+
+mcp:
+  public_base_path: /mcp
+  max_result_rows: 100
+  max_response_bytes: 262144
+
+storage:
+  enabled: true
+  bucket: fixture-alpine-dev
+  prefix: objects/fixture-alpine-dev/
+  upload_url_ttl_seconds: 600
+  download_url_ttl_seconds: 300
+  max_upload_bytes: 26214400
+
+backup:
+  enabled: true
+  stanza: fixture-alpine-dev
+  repository_prefix: pgbackrest/fixture-alpine-dev/
+  retain_full: 2

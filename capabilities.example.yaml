@@ -1,0 +1,21 @@
+# Agent-visible capability surface.
+#
+# Empty is the correct Session 1 state, and it is not a placeholder. No
+# capability may be enabled because no live backing API contract exists yet to
+# validate one against -- an entry with `enabled: true` fails rendering with
+# exit 5 rather than being accepted on trust.
+#
+# This file is separate from project.yaml on purpose: growing the API must not
+# automatically grow what an agent can reach. Adding a REST endpoint or an RPC
+# changes nothing here until someone edits this file.
+#
+# It may never contain SQL, SQL fragments, raw PostgREST query strings,
+# arbitrary paths, runtime-selected operation names, or ad-hoc columns. The
+# schema enforces that structurally; see schemas/capabilities.schema.json,
+# which is also the sole authority for the approved scope vocabulary.
+#
+# Planned tools and their owning sessions are recorded in
+# docs/capability-plan.md, not here.
+
+schema_version: 1
+capabilities: []

@@ -1,0 +1,48 @@
+# Example project manifest.
+#
+# Copy to project.yaml and edit. This file contains no secret value and must
+# never contain one: it is committed, and every derived identity in
+# outputs.json comes from it.
+#
+# The fixture values are deliberately distinctive so that a scan of deployable
+# source can prove no project identity was hard-coded. Together with
+# project.second.example.yaml they also exercise the collision contract --
+# "fixture-alpha" and "fixture-alpine" share a 12-character prefix.
+
+schema_version: 1
+
+project:
+  slug: fixture-alpha
+  environment: dev
+  domain: fixture-alpha-dev.test
+
+database:
+  # Defaults to the SQL-safe project key when omitted.
+  name: fixture_alpha_dev
+  pooled_public: false
+  pooled_public_cidrs: []
+  max_client_connections: 100
+  pool_size: 20
+
+api:
+  public_base_path: /api
+  max_rows: 500
+
+mcp:
+  public_base_path: /mcp
+  max_result_rows: 100
+  max_response_bytes: 262144
+
+storage:
+  enabled: true
+  bucket: fixture-alpha-dev
+  prefix: objects/fixture-alpha-dev/
+  upload_url_ttl_seconds: 600
+  download_url_ttl_seconds: 300
+  max_upload_bytes: 26214400
+
+backup:
+  enabled: true
+  stanza: fixture-alpha-dev
+  repository_prefix: pgbackrest/fixture-alpha-dev/
+  retain_full: 2

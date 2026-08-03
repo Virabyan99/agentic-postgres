@@ -98,9 +98,30 @@ generated from it. Cross-field *relations* cannot be expressed in JSON Schema
 and live in `src/agentic_postgres/config.py`; they are listed separately.
 
 <!-- BEGIN GENERATED: bounds -->
-<!-- Populated in Run 2 from schemas/project.schema.json by
-     bin/render-config.py --bounds-doc --write.
-     Do not hand-edit. -->
+<!-- Generated from schemas/project.schema.json by
+     bin/render-config.py --bounds-doc --write. Do not hand-edit. -->
+
+| Field | Minimum | Maximum | Meaning |
+|---|---:|---:|---|
+| `api.max_rows` | 1 | 10,000 | Global PostgREST row-return ceiling. |
+| `backup.retain_full` | 1 | 12 | Full backup chains retained. |
+| `database.max_client_connections` | 1 | 10,000 | PgBouncer client connection ceiling. |
+| `database.pool_size` | 1 | 1,000 | Server-side pool size. Must not exceed max_client_connections. |
+| `mcp.max_response_bytes` | 1,024 | 10,485,760 | Agent response size ceiling. |
+| `mcp.max_result_rows` | 1 | 1,000 | Agent read row ceiling. Must not exceed api.max_rows. |
+| `storage.download_url_ttl_seconds` | 60 | 3,600 | Presigned download URL lifetime. |
+| `storage.max_upload_bytes` | 1 | 5,368,709,120 | Largest accepted upload. P0 default is 25 MiB. |
+| `storage.upload_url_ttl_seconds` | 60 | 3,600 | Presigned upload URL lifetime. |
+
+Relations between these fields cannot be expressed in JSON Schema and are
+enforced in `src/agentic_postgres/config.py`:
+
+- `database.pool_size` must not exceed `database.max_client_connections`
+- `mcp.max_result_rows` must not exceed `api.max_rows`
+- `api.public_base_path` and `mcp.public_base_path` must not overlap segment-wise
+- Neither base path may overlap a reserved route
+- `database.pooled_public_cidrs` must be non-empty when `database.pooled_public` is true, and may not contain a default route
+
 <!-- END GENERATED: bounds -->
 
 ## 5. Non-goals

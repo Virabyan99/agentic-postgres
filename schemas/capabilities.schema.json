@@ -1,0 +1,180 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/capabilities.schema.json",
+  "title": "Agentic Postgres capability manifest",
+  "description": "The only agent-visible capability surface. Empty by default. This file is also the sole authority for the approved scope vocabulary (implementation plan decision C); the code carries no second copy.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "capabilities"],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "capabilities": {
+      "type": "array",
+      "default": [],
+      "items": { "$ref": "#/$defs/capability" },
+      "description": "Enabled agent tools. An entry may exist while disabled; enabling one requires a live backing API contract."
+    }
+  },
+  "$defs": {
+    "scope": {
+      "type": "string",
+      "enum": [
+        "notes:read",
+        "notes:write",
+        "tasks:read",
+        "tasks:write",
+        "meta:read"
+      ],
+      "description": "Approved scope vocabulary: one scope per (frozen-domain resource, verb), plus meta:read for schema introspection. Grows only when docs/decisions/0003-example-domain.md is superseded."
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "enabled", "required_scopes", "operation"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,47}$",
+          "description": "Stable MCP tool name."
+        },
+        "description": { "type": "string", "maxLength": 500 },
+        "kind": {
+          "type": "string",
+          "enum": ["read", "write"]
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Enabling requires the referenced live OpenAPI operation to exist with a matching approved shape."
+        },
+        "required_scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/scope" }
+        },
+        "operation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source", "operation_id"],
+          "description": "Reference to one pre-existing operation. Never SQL, never a raw query string, never a runtime-selected name.",
+          "properties": {
+            "source": {
+              "type": "string",
+              "enum": ["postgrest", "fastapi"]
+            },
+            "operation_id": {
+              "type": "string",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+            }
+          }
+        },
+        "resource": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,62}$",
+          "description": "Approved API resource, for read capabilities."
+        },
+        "columns": {
+          "type": "array",
+          "uniqueItems": true,
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{0,62}$"
+          },
+          "description": "Frozen column allowlist. Never derived at request time."
+        },
+        "filters": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["column", "operators"],
+            "properties": {
+              "column": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,62}$"
+              },
+              "operators": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "enum": ["eq", "neq", "lt", "lte", "gt", "gte", "in", "is_null"],
+                  "description": "Structured operators only. No expressions."
+                }
+              }
+            }
+          }
+        },
+        "order_by": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["column", "direction"],
+            "properties": {
+              "column": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,62}$"
+              },
+              "direction": { "type": "string", "enum": ["asc", "desc"] }
+            }
+          }
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "Hard global ceiling a project manifest cannot exceed."
+        },
+        "max_affected_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Write side-effect bound."
+        },
+        "idempotent": { "type": "boolean" },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 30000
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["redact"],
+          "properties": {
+            "redact": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{0,62}$"
+              },
+              "description": "Parameters replaced before the audit record is written."
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "read" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["resource", "columns", "max_rows"] }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "write" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["max_affected_rows", "idempotent"] }
+        }
+      ]
+    }
+  }
+}
