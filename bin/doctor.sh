@@ -124,6 +124,19 @@ main() {
   check_path "migrations/.gitkeep"
   check_path "requirements-dev.in"
   check_path "pytest.ini"
+  check_path "compose.yaml"
+  check_path "versions.in.yaml"
+  check_path "versions.env"
+  check_path "schemas/project.schema.json"
+  check_path "schemas/outputs.schema.json"
+
+  printf '\nLocks\n'
+  if [ -x "${ROOT_DIR}/bin/lock-versions.sh" ] \
+    && "${ROOT_DIR}/bin/lock-versions.sh" --check >/dev/null 2>&1; then
+    ok "version lock is current"
+  else
+    bad "version lock is stale or invalid — run bin/lock-versions.sh --check"
+  fi
 
   printf '\n'
   if [ "${FAILURES}" -ne 0 ]; then

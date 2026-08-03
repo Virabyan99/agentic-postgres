@@ -407,15 +407,19 @@ def _reread(path: Path) -> dict[str, Any]:
 
 
 def _validate_staged_compose(staging: Path) -> None:
-    """Runbook §4.1 step 6. Wired in Run 4 with bin/compose.sh."""
+    """Runbook §4.1 step 6: the staged model must render before it is published.
+
+    Validating the *staged* directory rather than the published one is the
+    whole point: a model that fails to interpolate must never reach
+    ``.generated/{project_key}``.
+    """
     wrapper = REPO_ROOT / "bin" / "compose.sh"
     model = REPO_ROOT / "compose.yaml"
-    if not wrapper.exists() or not model.exists():
-        print(
-            "deploy: SKIPPED staged Compose validation - no Compose model exists yet "
-            "(arrives in Run 4). The render is otherwise complete."
+    if not wrapper.is_file() or not model.is_file():
+        raise RenderError(
+            f"the Compose model is missing ({wrapper.name}, {model.name}); "
+            "cannot validate the staged render"
         )
-        return
 
     import subprocess
 

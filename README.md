@@ -12,8 +12,8 @@ database. See [What is intentionally unavailable](#what-is-intentionally-unavail
 - [Architecture decisions](docs/decisions/README.md)
 - [Session 1 implementation plan](docs/plans/session-01-implementation-plan.md) — environment constraints, decision log, build order
 
-> **Build progress.** Run 1 of 5 is complete. Sections below marked
-> _(Run N)_ describe commands that do not exist yet. Nothing in this file
+> **Build progress.** Runs 1–4 of 5 are complete. Sections below marked
+> _(Run 5)_ describe commands that do not exist yet. Nothing in this file
 > claims a capability the code does not have.
 
 ---
@@ -37,13 +37,16 @@ bin/                 Operator commands. Every one resolves the repo root from
 docs/decisions/      ADRs. Required for anything frozen in the runbook §4.
 docs/plans/          Implementation plans, including the decision log.
 schemas/             JSON Schema (Draft 2020-12). Sole authority for numeric
-                     bounds and the capability scope vocabulary.        (Run 2)
+                     bounds and the capability scope vocabulary.
 src/agentic_postgres/
   naming.py          Deterministic identity derivation. Load-bearing:
-                     nothing else may re-derive a name.                 (Run 2)
-  config.py          Strict YAML loading, schema + semantic validation.  (Run 2)
-  rendering.py       Transactional staging and publication.              (Run 3)
+                     nothing else may re-derive a name.
+  config.py          Strict YAML loading, schema + semantic validation.
+  rendering.py       Transactional staging and publication.
   evidence.py        Session evidence from test artifacts.               (Run 5)
+compose.yaml         Validation-only model. Never started in Session 1.
+versions.in.yaml     Human-selected candidates.
+versions.env         Generated digest lock. Never hand-edited.
 tests/contract/      Active Session 1 contract tests.
 tests/{integration,recovery,security}/
                      Future-session placeholders. Collectible, skipped by
@@ -89,7 +92,7 @@ bin/lock-dev-deps.sh --update    # resolves and rewrites requirements-dev.txt
 bin/lock-dev-deps.sh --check     # verifies the lock is current; modifies nothing
 ```
 
-## Rendering a project _(Run 3)_
+## Rendering a project
 
 ```bash
 cp project.example.yaml project.yaml
@@ -114,6 +117,31 @@ cat  .generated/<project-key>/rendered-summary.txt
 
 Output is byte-identical across renders with identical inputs. All three
 generated files are mode `0600`.
+
+## Compose
+
+Always through the wrapper. Calling `docker compose` directly lets inherited
+shell variables win over `--env-file`, which would silently point a command at
+the wrong project or bypass a locked digest.
+
+```bash
+bin/compose.sh .generated/<project-key> --profile contract config
+bin/compose.sh .generated/<project-key> ps --quiet
+```
+
+Session 1 refuses `up`, `run`, `start`, `create`, `restart`, `exec`, `attach`,
+and `cp` with exit `10`.
+
+## Version locks
+
+```bash
+bin/lock-versions.sh --update   # resolves digests; needs network + Buildx
+bin/lock-versions.sh --check    # offline; no registry, no credentials
+```
+
+Every image is pinned to an immutable digest for one declared platform. If a
+digest cannot be resolved for it, that blocks the session — a floating tag is
+not a substitute. See [ADR 0004](docs/decisions/0004-version-lock-format.md).
 
 ## Running the checks
 

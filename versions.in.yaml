@@ -5,10 +5,10 @@
 # immutable digest for the declared target platform. Never edit versions.env
 # by hand.
 #
-# INCOMPLETE AS OF RUN 3. The `images` section below is declared but not yet
-# resolved to digests -- that is Run 4's work, together with
-# bin/lock-versions.sh itself. Until then versions.env carries only the
-# entries that require no registry access.
+# Repositories are fully qualified (docker.io/...) on purpose. An unqualified
+# name resolves through the client's configured registry list, which is not a
+# property of this repository, so the same lock file could mean different
+# images on different machines.
 
 lock_format: 1
 
@@ -17,8 +17,8 @@ lock_format: 1
 target_platform: linux/amd64
 
 python:
-  # Must match .python-version. bin/lock-versions.sh --update copies this
-  # through verbatim; it involves no registry call.
+  # Must match .python-version. `--update` copies this through verbatim; it
+  # involves no registry call.
   version: "3.12.13"
 
 compose:
@@ -26,10 +26,24 @@ compose:
   # development machine runs v5.1.3, and a literal v2 check would reject it.
   minimum_version: "2.24.0"
 
-images: {}
-# Populated in Run 4:
-#   postgres, traefik, pgbouncer, postgrest, pgbackrest,
-#   python_runtime, node_runtime, infisical, dbmate
+# First-party application images do not exist yet. Session 1 locks the base
+# images and package inputs they will be built from. Their own digests become
+# mandatory when those images are built, before release.
+images:
+  POSTGRES_IMAGE: docker.io/pgvector/pgvector:pg18
+  TRAEFIK_IMAGE: docker.io/library/traefik:v3.5
+  PGBOUNCER_IMAGE: docker.io/edoburu/pgbouncer:v1.24.1-p1
+  POSTGREST_IMAGE: docker.io/postgrest/postgrest:v13.0.4
+  PGBACKREST_IMAGE: docker.io/woblerr/pgbackrest:2.55.1
+  PYTHON_RUNTIME_IMAGE: docker.io/library/python:3.12-slim
+  NODE_RUNTIME_IMAGE: docker.io/library/node:22-alpine
+  INFISICAL_IMAGE: docker.io/infisical/cli:0.41.89
+  DBMATE_IMAGE: docker.io/amacneil/dbmate:2.34.1
 
-packages: {}
-# Populated in Run 4: fastapi, fastmcp, prisma, scalar, dbmate
+# Package versions, locked as version strings rather than digests because no
+# first-party image exists to digest yet.
+packages:
+  FASTAPI_VERSION: "0.121.2"
+  FASTMCP_VERSION: "2.14.1"
+  PRISMA_VERSION: "6.19.1"
+  SCALAR_VERSION: "1.36.4"

@@ -1,0 +1,59 @@
+# Validation-only Compose model (runbook §7).
+#
+# Session 1 starts nothing. This file exists so that the resource names in
+# outputs.json can be proven to match what Docker would actually create, and so
+# that later sessions extend a model that already interpolates from the lock
+# rather than from whatever happens to be in the operator's environment.
+#
+# Every value is `${VAR:?required}`. That is deliberate: an unset variable
+# fails `docker compose config` loudly instead of silently rendering an empty
+# name, which would collapse two projects onto one resource.
+#
+# Resource names are set explicitly rather than left to Compose's
+# `{project}_{name}` convention, so the names here are byte-identical to the
+# ones in outputs.json.
+#
+# Do not use `container_name`: it is not project-scoped and would collide
+# across two deployments on the same host.
+#
+# Invoke only through bin/compose.sh. Calling `docker compose` directly lets
+# inherited environment variables win over --env-file, which is the exact
+# override this repository is built to prevent.
+
+name: ${COMPOSE_PROJECT_NAME:?required}
+
+services:
+  # Profile-gated so it is never part of the default set. It exists to give the
+  # model a service to validate; the Session 1 gate renders the model and never
+  # starts this container.
+  contract-probe:
+    image: ${PYTHON_RUNTIME_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [contract]
+    command: ["python", "--version"]
+    restart: "no"
+    # The probe attaches to both networks and mounts the volume purely so that
+    # all four resource names appear in `docker compose config` output.
+    # Compose prunes top-level networks and volumes that no service
+    # references, so a probe attached only to `internal` would leave the edge
+    # network and the volume unrenderable -- and runbook §12's "Compose has
+    # explicit actual resource names matching outputs" would be unverifiable.
+    # This container is never started; see bin/compose.sh.
+    networks:
+      - edge
+      - internal
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+networks:
+  edge:
+    name: ${EDGE_NETWORK_NAME:?required}
+  internal:
+    name: ${INTERNAL_NETWORK_NAME:?required}
+    # No route off the host. Product services attach here; only Traefik will
+    # ever straddle both networks.
+    internal: true
+
+volumes:
+  postgres-data:
+    name: ${POSTGRES_VOLUME_NAME:?required}
