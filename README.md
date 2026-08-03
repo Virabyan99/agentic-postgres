@@ -10,6 +10,7 @@ database. See [What is intentionally unavailable](#what-is-intentionally-unavail
 
 - [Product contract](docs/product-contract.md) — scope, requirement IDs, non-goals, change control
 - [Architecture decisions](docs/decisions/README.md)
+- [Handoff — environment and workflow](docs/handoff.md) — machine specifics, git, known traps
 - [Session 1 implementation plan](docs/plans/session-01-implementation-plan.md) — environment constraints, decision log, build order
 
 > **Build progress.** Runs 1–4 of 5 are complete. Sections below marked
