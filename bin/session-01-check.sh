@@ -80,7 +80,11 @@ step "3. Render both fixtures"
   --capabilities capabilities.example.yaml \
   --render-only >/dev/null
 
-printf 'rendered fixture-alpha-dev and fixture-alpine-dev\n'
+# The message names what was rendered rather than restating fixture identities,
+# for the same reason step 7 discovers them: identities belong in manifests.
+printf 'rendered:%s\n' "$(for d in .generated/*/; do
+  [ -f "${d}compose.env" ] && printf ' %s' "$(basename "${d}")"
+done)"
 
 # ---------------------------------------------------------------------------
 step "4. Active contract tests, with machine-readable output"
