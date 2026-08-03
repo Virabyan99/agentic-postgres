@@ -32,6 +32,14 @@ compose:
 images:
   POSTGRES_IMAGE: docker.io/pgvector/pgvector:pg18
   TRAEFIK_IMAGE: docker.io/library/traefik:v3.5
+  # Session 2. Traefik never mounts the Docker socket; it reads the Docker
+  # provider through this proxy over the host-scoped control network, with every
+  # write-capable API section explicitly disabled (ADR 0009).
+  #
+  # This narrows Traefik's Docker API authority. It is not an absolute host
+  # boundary -- the proxy process itself still has the socket mounted -- and the
+  # threat model says so rather than implying otherwise.
+  DOCKER_SOCKET_PROXY_IMAGE: docker.io/tecnativa/docker-socket-proxy:0.3.0
   PGBOUNCER_IMAGE: docker.io/edoburu/pgbouncer:v1.24.1-p1
   POSTGREST_IMAGE: docker.io/postgrest/postgrest:v13.0.4
   PGBACKREST_IMAGE: docker.io/woblerr/pgbackrest:2.55.1
