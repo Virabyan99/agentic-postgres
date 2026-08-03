@@ -85,9 +85,88 @@ Priorities:
 - **P2** — optional capability.
 
 <!-- BEGIN GENERATED: requirements -->
-<!-- Populated in Run 5 from tests/acceptance-registry.yaml by
-     bin/render-acceptance-matrix.py --requirements --write.
-     Do not hand-edit. -->
+<!-- Generated from tests/acceptance-registry.yaml by
+     bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
+
+**P0 — 63 requirements**
+
+| ID | Session | Guarantee |
+|---|---:|---|
+| `CFG-001` | 1 | A project manifest validates against schema and semantics, and contains no secret material. |
+| `CFG-002` | 1 | Ambiguous YAML is rejected outright rather than resolved silently. Default PyYAML keeps the last value for a duplicate key. |
+| `CFG-003` | 1 | Every identity is derived deterministically and per-context, and no PostgreSQL role can exceed 63 bytes regardless of input length. |
+| `CFG-004` | 1 | Identical inputs render byte-identical output, in the same process and across processes, with no timestamp anywhere in the document. |
+| `CFG-005` | 1 | Generated output conforms to its schema, records real input digests, and represents nonexistent endpoints as unavailable rather than as placeholders. |
+| `CFG-006` | 1 | Every generated file is mode 0600, independent of the process umask. |
+| `CFG-007` | 1 | A render that fails validation or publication leaves the previous valid render byte-identical and removes its staging directory. |
+| `CFG-008` | 1 | The renderer refuses symlinked inputs and output targets. |
+| `CFG-009` | 1 | Secret-bearing keys are rejected in manifests and in output, without false positives for safe reference names such as password_secret_ref. |
+| `CFG-010` | 1 | Public pooler exposure requires a specific CIDR allowlist; a default route is not an allowlist. |
+| `CFG-011` | 1 | Route trees may not collide with a reserved route or with each other, and overlap is decided segment-wise rather than by string prefix. |
+| `CFG-012` | 1 | Two similar projects render fully disjoint identities, compared over parsed semantic fields rather than by duplicate-string search. |
+| `CFG-013` | 1 | The capability surface is empty by default, cannot be enabled without a live backing contract, and cannot express SQL or a raw query. |
+| `CFG-014` | 1 | Container images are pinned to immutable digests for one declared platform, Python dependencies are hash-locked, and drift is detected offline. |
+| `CFG-015` | 1 | The Compose model renders the exact resource names published in outputs.json, cannot be overridden by inherited environment variables, and refuses to start a container in Session 1. |
+| `DX-002` | 1 | Operator commands document themselves, obey the exit-code convention, work from any directory, and never print the environment. |
+| `DX-003` | 1 | The repository has its required shape, generated output stays out of Git, and no deployable source file hard-codes a fixture identity. |
+| `SEC-NET-001` | 2 | No public route reaches the direct PostgreSQL endpoint. |
+| `SEC-SECRET-001` | 2 | Secret values appear in no image, repository file, Compose output, or log. |
+| `SEC-DEFAULT-001` | 3 | Default EXECUTE on newly created functions is revoked from PUBLIC. |
+| `SEC-FUNC-001` | 3 | An API role cannot execute a function it was not explicitly granted. |
+| `SEC-OWNER-001` | 3 | Objects are owned by a non-login role that no service connects as. |
+| `SEC-RLS-001` | 3 | A user can neither read nor mutate another user's rows. |
+| `SEC-VIEW-001` | 3 | A security-invoker view preserves the underlying row policy. |
+| `DBX-001` | 4 | Prisma Migrate runs through the direct endpoint. |
+| `DBX-002` | 4 | Prisma Client operates through the pooled endpoint. |
+| `DBX-003` | 4 | psql connects through both the direct and pooled endpoints. |
+| `DBX-005` | 4 | The direct endpoint is not publicly reachable. |
+| `API-CACHE-001` | 5 | An API migration reloads the schema cache and updates OpenAPI. |
+| `API-LIMIT-001` | 5 | Row limits and timeouts are enforced by the server, not the client. |
+| `API-SCHEMA-001` | 5 | Only the api schema is exposed, matching a committed allowlist. |
+| `SEC-ANON-001` | 5 | The anonymous role cannot reach protected resources. |
+| `SEC-PRIV-001` | 5 | No API role can address the app or app_private schemas. |
+| `API-ADMIN-001` | 6 | Admin endpoints require an explicit admin scope, not a role name. |
+| `API-AUTH-001` | 6 | Login issues a short-lived token and the identity endpoint reflects it. |
+| `SEC-CRED-001` | 6 | Raw user and agent credentials are never stored or logged. |
+| `SEC-JWT-001` | 6 | Wrong issuer, audience, algorithm, token type, or expiry is rejected. |
+| `SEC-KEY-001` | 6 | Verifying services hold public material only. |
+| `STO-KEY-001` | 7 | Object keys are generated server-side; client keys are rejected. |
+| `STO-OWN-001` | 7 | A user cannot obtain a download URL for another user's object. |
+| `STO-URL-001` | 7 | A presigned URL never reaches a log or the audit table. |
+| `AGT-BUDGET-001` | 8 | Row and response-size budgets are enforced server-side. |
+| `AGT-DRIFT-001` | 8 | Adding an API operation does not expose an agent capability without an explicit capabilities.yaml change. |
+| `AGT-READ-001` | 8 | An agent read through MCP equals the equivalent PostgREST result. |
+| `AGT-SCOPE-001` | 8 | Tool discovery is filtered by the caller's scopes. |
+| `AGT-SQL-001` | 8 | No agent input accepts SQL, a SQL fragment, or a raw query string. |
+| `SEC-INJ-001` | 8 | An injection payload stays data and does not alter query structure. |
+| `AGT-AUDIT-001` | 9 | Read, write, denied, and failed attempts are audited with redaction. |
+| `AGT-AUDITFAIL-001` | 9 | A write fails closed when its audit record cannot be created. |
+| `AGT-WRITE-001` | 9 | A read-only agent can neither discover nor invoke a write. |
+| `SEC-PARAM-001` | 9 | Tool parameters cannot override agent identity, role, or scope. |
+| `SEC-REV-001` | 9 | A token issued before revocation is denied on its next read and write through both MCP and PostgREST. |
+| `REC-EVID-001` | 10 | Restore evidence records backup set, requested and achieved recovery point, RTO, schema version, and test outcomes. |
+| `REC-PITR-001` | 10 | A timestamp-targeted restore into a disposable volume succeeds. |
+| `REC-SAFE-001` | 10 | The restore path never mounts, overwrites, or mutates the active volume. |
+| `REC-SMOKE-001` | 10 | The restored instance passes schema, RLS read, and write-RPC checks. |
+| `DEP-001` | 11 | A fresh project deploys on an empty host from documentation alone. |
+| `DEP-002` | 11 | Re-running deployment converges without destroying data. |
+| `DEP-PRE-001` | 11 | A missing prerequisite stops deployment before it changes anything, and lists every absent item. |
+| `OPS-001` | 11 | The diagnostic command reports every required check without secrets. |
+| `DEP-ISO-001` | 12 | Two projects on one host share no state or authority; shared provider accounts are permitted, shared project scope is not. |
+| `DEP-REMOVE-001` | 12 | Removing one project does not affect another. |
+| `DX-001` | 12 | A developer who did not build the primitive completes the documented path without source edits or undocumented commands. |
+
+**P1 — 4 requirements**
+
+| ID | Session | Guarantee |
+|---|---:|---|
+| `DBX-004` | 4 | Node and Python drivers round-trip a query through the pooler. |
+| `STO-COMPLETE-001` | 7 | Only objects verified against storage become downloadable. |
+| `REC-WAL-001` | 10 | A WAL archiving failure produces a visible non-zero signal. |
+| `OPS-LOG-001` | 11 | One request ID propagates across ingress, API, agent, and audit records. |
+
+Full node IDs are in [the acceptance matrix](acceptance-matrix.md).
+
 <!-- END GENERATED: requirements -->
 
 ## 4. Numeric bounds
