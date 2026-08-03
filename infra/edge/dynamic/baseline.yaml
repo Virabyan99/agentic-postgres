@@ -1,0 +1,55 @@
+# Baseline dynamic policy (runbook Phase 10).
+#
+# Rendered by bin/edge.sh into /var/lib/agentic-postgres/edge/dynamic/, which
+# Traefik watches. Every Session 2 project router attaches the middleware chain
+# named here; the chain name reaches a project's labels through the root-owned
+# runtime env file, because it is host-derived and may not enter a rendered,
+# digested project file (ADR 0009).
+#
+# One placeholder is substituted by edge.sh:
+#   __HSTS_BLOCK__   empty on staging; the HSTS header set after promotion.
+#
+# HSTS is deliberately absent until production. Sending it while a staging
+# certificate is in use teaches every browser that visited to refuse the site
+# for max-age seconds, and there is no way to un-teach them.
+
+tls:
+  options:
+    default:
+      # 1.2 rather than 1.3-only: 1.3 is preferable but excluding 1.2 buys
+      # little against a probe endpoint and breaks older clients that the
+      # external suite may legitimately run from.
+      minVersion: VersionTLS12
+      sniStrict: true
+
+http:
+  middlewares:
+    # Conservative, and deliberately not comprehensive. These are hygiene
+    # headers for a JSON health endpoint, not an application security policy --
+    # a CSP belongs with the application that has content to constrain.
+    apg-security-headers:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        browserXssFilter: false
+        referrerPolicy: "no-referrer"
+        __HSTS_BLOCK__
+
+    # An operational control, never an authorization claim. It bounds how fast
+    # one source can hit the edge; it decides nothing about who may do what.
+    # Session 2 has no authenticated surface, so treating this as a security
+    # boundary would be a category error worth naming rather than assuming.
+    apg-rate-limit:
+      rateLimit:
+        average: 20
+        burst: 40
+        period: 1s
+
+    # The chain project routers attach. Named once here so a project label
+    # references one name rather than enumerating middlewares -- which means
+    # adding a baseline middleware later does not require touching any project.
+    apg-baseline:
+      chain:
+        middlewares:
+          - apg-security-headers
+          - apg-rate-limit

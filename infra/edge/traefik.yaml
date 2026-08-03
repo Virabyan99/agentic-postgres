@@ -1,0 +1,97 @@
+# Traefik static configuration template (runbook Phase 10).
+#
+# This is the STAGING form, and staging is not a default anyone can drift away
+# from: `host.schema.json` pins `edge.initial_acme_environment` to the constant
+# "staging". `bin/edge.sh` renders this template into the root-owned
+# /var/lib/agentic-postgres/edge/traefik.yaml, substituting the ACME email and
+# resolver name from host.yaml. Promotion to production rewrites `caServer` and
+# `storage` from root-owned edge state -- it is never reached by editing source.
+#
+# Two placeholders are substituted by edge.sh and by nothing else:
+#   __ACME_EMAIL__          from host.yaml edge.acme_email
+#   __ACME_RESOLVER_NAME__  from host.yaml edge.acme_resolver_name
+#
+# Entry point ports are the container-side ones. Traefik runs unprivileged with
+# every capability dropped, so it binds 8080/8443 and Docker maps 80/443.
+
+api:
+  # No dashboard and no insecure API in Session 2. There is no dashboard router
+  # either, so there is nothing to reach even from inside the edge network.
+  dashboard: false
+  insecure: false
+
+ping:
+  # A dedicated entry point, not published to the host. `traefik healthcheck`
+  # talks to it from inside the container, which is why the health check works
+  # with a read-only root filesystem and no shell utilities.
+  entryPoint: ping
+
+entryPoints:
+  ping:
+    address: ":8082"
+  web:
+    address: ":8080"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+          permanent: true
+  websecure:
+    address: ":8443"
+    transport:
+      respondingTimeouts:
+        readTimeout: 30s
+        writeTimeout: 30s
+        idleTimeout: 60s
+
+providers:
+  docker:
+    # The socket proxy, over the internal control network. Never a socket mount.
+    endpoint: tcp://docker-socket-proxy:2375
+    # Nothing is routed unless it asks to be...
+    exposedByDefault: false
+    watch: true
+    # ...and asking is not enough: the container must also carry the project
+    # management label. Two independent conditions, so a stray `traefik.enable`
+    # on some unrelated container on this host still routes nothing.
+    constraints: "Label(`apg.traefik.scope`,`managed`)"
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+certificatesResolvers:
+  __ACME_RESOLVER_NAME__:
+    acme:
+      email: __ACME_EMAIL__
+      # Staging state, kept in a separate file from production. Separate files
+      # are what make promotion reversible and what stop an iteration loop from
+      # touching production issuance at all.
+      storage: /var/lib/traefik/acme/staging.json
+      caServer: https://acme-staging-v02.api.letsencrypt.org/directory
+      httpChallenge:
+        entryPoint: web
+
+log:
+  level: INFO
+  format: json
+
+accessLog:
+  format: json
+  fields:
+    defaultMode: keep
+    headers:
+      # Drop by default, keep two by name. Authorization, Cookie and every
+      # other credential-bearing header are dropped because they are not named
+      # here, rather than because they appear on a denylist someone has to
+      # keep complete.
+      defaultMode: drop
+      names:
+        X-Request-ID: keep
+        User-Agent: keep
+    queryParameters:
+      # A query string is the easiest place for a token to end up in a log.
+      # The live suite proves this works by issuing a request carrying a random
+      # sentinel and asserting the sentinel is absent from the access log --
+      # the setting alone is a claim, the sentinel is the measurement.
+      defaultMode: drop

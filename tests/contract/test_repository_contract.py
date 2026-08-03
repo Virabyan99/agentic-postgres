@@ -69,6 +69,8 @@ REQUIRED_PATHS = (
     "docs/decisions/0013-compose-wrapper-scopes.md",
     "docs/decisions/0015-reserved-health-route.md",
     "infra/edge/compose.yaml",
+    "infra/edge/traefik.yaml",
+    "infra/edge/dynamic/baseline.yaml",
     "services/edge-probe/Dockerfile",
     "services/edge-probe/probe.py",
     "services/secret-check/Dockerfile",
