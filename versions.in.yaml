@@ -1,0 +1,35 @@
+# Human-selected version candidates.
+#
+# This file is edited by people. `versions.env` is generated from it by
+# `bin/lock-versions.sh --update`, which resolves each image reference to an
+# immutable digest for the declared target platform. Never edit versions.env
+# by hand.
+#
+# INCOMPLETE AS OF RUN 3. The `images` section below is declared but not yet
+# resolved to digests -- that is Run 4's work, together with
+# bin/lock-versions.sh itself. Until then versions.env carries only the
+# entries that require no registry access.
+
+lock_format: 1
+
+# Every image is resolved for exactly this platform. If a digest cannot be
+# resolved for it, the session is blocked; a floating tag is not a substitute.
+target_platform: linux/amd64
+
+python:
+  # Must match .python-version. bin/lock-versions.sh --update copies this
+  # through verbatim; it involves no registry call.
+  version: "3.12.13"
+
+compose:
+  # Expressed as a floor, not an equality. The runbook says "Compose v2"; the
+  # development machine runs v5.1.3, and a literal v2 check would reject it.
+  minimum_version: "2.24.0"
+
+images: {}
+# Populated in Run 4:
+#   postgres, traefik, pgbouncer, postgrest, pgbackrest,
+#   python_runtime, node_runtime, infisical, dbmate
+
+packages: {}
+# Populated in Run 4: fastapi, fastmcp, prisma, scalar, dbmate

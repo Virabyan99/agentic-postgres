@@ -102,10 +102,20 @@ main() {
     die 10 "deployment is not available in Session 1; --render-only is mandatory. Deployment begins in Session 2."
   fi
 
-  # Run 1 scope: argument grammar and the exit-10 boundary only. The render
-  # pipeline lands in Run 3 and replaces this branch. Per runbook §3.2 a stub
-  # must not report success for a capability that does not exist.
-  die 10 "the render pipeline is not implemented yet (arrives with Run 3 of the Session 1 plan). No output was written."
+  # Step 4 of the runbook §11 order: verify local prerequisites before doing
+  # anything that could touch generated state.
+  command -v python >/dev/null 2>&1 \
+    || die 3 "python is not on PATH. Activate the repository virtual environment."
+
+  [ -f "${project}" ] || die 2 "project manifest not found: ${project}"
+  [ -f "${capabilities}" ] || die 2 "capability manifest not found: ${capabilities}"
+
+  # Steps 5-15 are one transaction and belong in one process. Splitting them
+  # across shell and Python would put the rollback boundary in the wrong place.
+  exec python "${ROOT_DIR}/bin/render-config.py" \
+    --project "${project}" \
+    --capabilities "${capabilities}" \
+    --render
 }
 
 main "$@"

@@ -28,7 +28,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import config  # noqa: E402
+from agentic_postgres import config, rendering  # noqa: E402
 
 BEGIN = "<!-- BEGIN GENERATED: bounds -->"
 END = "<!-- END GENERATED: bounds -->"
@@ -116,6 +116,28 @@ def validate_only(project: Path, capabilities: Path) -> int:
     return 0
 
 
+def render(project: Path, capabilities: Path) -> int:
+    """Runbook §11 steps 5-15. Publishes atomically or changes nothing."""
+    try:
+        directory = rendering.render_project(project, capabilities)
+    except config.CapabilityContractError as exc:
+        print(f"deploy: {capabilities}: {exc}", file=sys.stderr)
+        return 5
+    except config.ManifestError as exc:
+        print(f"deploy: {exc}", file=sys.stderr)
+        return 2
+    except rendering.RenderError as exc:
+        print(f"deploy: {exc}", file=sys.stderr)
+        print("deploy: the previous valid render, if any, is unchanged.", file=sys.stderr)
+        return 5
+
+    summary = (directory / "rendered-summary.txt").read_text(encoding="utf-8")
+    print(summary, end="")
+    print(f"\nWrote {directory}/{{outputs.json,compose.env,rendered-summary.txt}} (mode 0600)")
+    print("No service was started, and no provider was contacted.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="bin/render-config.py",
@@ -127,6 +149,11 @@ def main(argv: list[str] | None = None) -> int:
         "--validate-only",
         action="store_true",
         help="Validate the manifests and write nothing.",
+    )
+    parser.add_argument(
+        "--render",
+        action="store_true",
+        help="Validate, stage, verify, and publish the generated project directory.",
     )
     parser.add_argument(
         "--bounds-doc",
@@ -145,12 +172,17 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--bounds-doc requires exactly one of --write or --check")
         return bounds_doc("write" if args.write else "check")
 
-    if args.validate_only:
+    if args.validate_only and args.render:
+        parser.error("--validate-only and --render are mutually exclusive")
+
+    if args.validate_only or args.render:
         if not args.project or not args.capabilities:
-            parser.error("--validate-only requires --project and --capabilities")
+            parser.error("--validate-only and --render require --project and --capabilities")
+        if args.render:
+            return render(args.project, args.capabilities)
         return validate_only(args.project, args.capabilities)
 
-    parser.error("one of --validate-only or --bounds-doc is required")
+    parser.error("one of --validate-only, --render, or --bounds-doc is required")
     return 2  # unreachable; argparse exits
 
 
