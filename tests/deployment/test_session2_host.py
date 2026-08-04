@@ -31,6 +31,11 @@ pytestmark = [
     pytest.mark.requires_environment("APG_LIVE_HOST"),
 ]
 
+# The ownership comment bin/docker-firewall.sh stamps on every rule it manages.
+# Its default --tag; whether `iptables -S` renders it quoted varies, so both
+# spellings are accepted where it is matched.
+TAG = "agentic-postgres"
+
 SSH_DIRECTIVES = [
     ("permitrootlogin", "no"),
     ("passwordauthentication", "no"),
@@ -209,16 +214,49 @@ def test_the_live_policy_is_the_installed_policy(as_root, sh, command: str, inst
     plan raised to the runbook's deploying gate, and it applies here too.
     """
     del as_root
-    expected = {
+    expected = [
         line.strip()
         for line in Path(f"/etc/agentic-postgres/{installed}")
         .read_text(encoding="utf-8")
         .split("\n")
         if line.strip() and not line.strip().startswith("#")
-    }
-    live = {line.strip() for line in sh(command, "-S", "DOCKER-USER").splitlines()}
-    missing = sorted(rule for rule in expected if rule not in live)
+    ]
+    live = [line.strip() for line in sh(command, "-S", "DOCKER-USER").splitlines()]
+
+    # Not set equality. `-S` prefixes every rule with `-A DOCKER-USER` and the
+    # reconciler inserts an ownership comment ahead of the rendered
+    # specification, so a rendered line is never equal to a live one — it is the
+    # tail of one. Comparing for equality here would fail against a perfectly
+    # correct chain, which is a test that can only ever be deleted.
+    ours = [rule for rule in live if f'--comment "{TAG}"' in rule or f"--comment {TAG}" in rule]
+    missing = [spec for spec in expected if not any(rule.endswith(spec) for rule in live)]
     assert not missing, f"installed rules absent from the running {command} chain: {missing}"
+
+    assert len(ours) == len(expected), (
+        f"{command} DOCKER-USER carries {len(ours)} tagged rules for {len(expected)} rendered "
+        f"ones; reconciliation is accumulating or dropping rules:\n" + "\n".join(ours)
+    )
+
+    # Order decides the policy. The established-traffic RETURN has to precede
+    # the port RETURNs, and every one of them has to precede the DROP.
+    positions = [next(i for i, rule in enumerate(live) if rule.endswith(spec)) for spec in expected]
+    assert positions == sorted(positions), (
+        f"{command} DOCKER-USER applies the rendered rules out of order:\n" + "\n".join(live)
+    )
+
+
+@pytest.mark.parametrize("command", ["iptables", "ip6tables"])
+def test_the_docker_user_chain_is_reachable_from_forward(as_root, sh, command: str) -> None:
+    """A chain nothing jumps to is a policy that is not enforcing.
+
+    `iptables -S DOCKER-USER` looks identical whether or not FORWARD references
+    the chain, so this is invisible in every other check here.
+    """
+    del as_root
+    forward = sh(command, "-S", "FORWARD")
+    assert "-j DOCKER-USER" in forward, (
+        f"{command} FORWARD does not jump to DOCKER-USER; the policy is inert:\n{forward}"
+    )
 
 
 def test_ufw_denies_incoming_by_default(as_root, sh) -> None:

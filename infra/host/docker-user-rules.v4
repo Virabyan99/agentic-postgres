@@ -13,10 +13,17 @@
 # conntrack original destination port is the port the client actually asked
 # for, which is what the policy is about.
 #
-# Each non-comment line is an iptables rule specification, appended to
-# DOCKER-USER in this order. The launcher flushes only the rules it manages and
-# re-adds them, so reconciliation is idempotent and does not disturb rules
-# Docker or another operator put there.
+# Each non-comment line is an iptables rule specification, inserted at the head
+# of DOCKER-USER in this order -- not appended. Docker creates the chain holding
+# a single `-j RETURN`, so an appended rule sits after it and is never
+# evaluated: the policy would be installed, visible in `iptables -S`, and dead.
+#
+# Every rule is inserted carrying a comment naming the tool that owns it, and
+# reconciliation removes exactly those before re-adding the current file. That
+# is what makes it idempotent, and what keeps it from deleting rules Docker or
+# another operator put there. Precedence is a different question from ownership:
+# these rules go first, so a rule someone else added for the public interface is
+# shadowed by the DROP at the bottom of this file.
 #
 # Substituted by provision-host.sh:
 #   __PUBLIC_INTERFACE__   resolved from host.yaml, or from the default route
