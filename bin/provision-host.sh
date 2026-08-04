@@ -305,14 +305,27 @@ check_baseline() {
   # bind address is the whole answer. Reading the port and discarding the
   # address reports systemd-resolved's 127.0.0.53 stub as an exposure, which is
   # how a check earns the right to be ignored.
-  local unexpected
-  unexpected="$(ss -H -lnt 2>/dev/null | PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - \
-    "${ssh_port}" 80 443 <<'PYTHON'
+  #
+  # The socket list travels in the environment, not through a pipe. `python -`
+  # reads its program from stdin, so piping `ss` into a heredoc invocation gives
+  # stdin two claimants: the heredoc wins, Python never reads the pipe, `ss`
+  # writes to a pipe with no reader and takes SIGPIPE, and under `pipefail` that
+  # ends the script -- with no error, in the middle of a check, before the
+  # deviation summary is printed. It did exactly that on the deployment host for
+  # three runs before anyone noticed the summary line was missing.
+  local unexpected listening
+  listening="$(ss -H -lnt 2>/dev/null || true)"
+  unexpected="$(
+    APG_LISTENING_SOCKETS="${listening}" PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - \
+      "${ssh_port}" 80 443 <<'PYTHON'
+import os
 import sys
 
 from agentic_postgres.listeners import unexpected_public_ports
 
-ports = unexpected_public_ports(sys.stdin.read(), (int(a) for a in sys.argv[1:]))
+ports = unexpected_public_ports(
+    os.environ["APG_LISTENING_SOCKETS"], (int(argument) for argument in sys.argv[1:])
+)
 print(" ".join(str(port) for port in ports))
 PYTHON
   )"
