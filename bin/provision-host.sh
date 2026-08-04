@@ -272,16 +272,26 @@ check_baseline() {
   fi
 
   printf '\n== listeners ==\n'
+  # Classification lives in agentic_postgres.listeners, not in awk, because the
+  # thing being decided is "can a packet from off this host reach it" and the
+  # bind address is the whole answer. Reading the port and discarding the
+  # address reports systemd-resolved's 127.0.0.53 stub as an exposure, which is
+  # how a check earns the right to be ignored.
   local unexpected
-  unexpected="$(ss -H -lnt 2>/dev/null \
-    | awk '{print $4}' \
-    | sed 's/.*://' \
-    | sort -u \
-    | grep -vE "^(${ssh_port}|80|443)$" || true)"
+  unexpected="$(ss -H -lnt 2>/dev/null | PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - \
+    "${ssh_port}" 80 443 <<'PYTHON'
+import sys
+
+from agentic_postgres.listeners import unexpected_public_ports
+
+ports = unexpected_public_ports(sys.stdin.read(), (int(a) for a in sys.argv[1:]))
+print(" ".join(str(port) for port in ports))
+PYTHON
+  )"
   if [ -z "${unexpected}" ]; then
-    ok "only ${ssh_port}, 80 and 443 are listening"
+    ok "only ${ssh_port}, 80 and 443 listen on a public address"
   else
-    bad "unexpected listening ports: $(printf '%s' "${unexpected}" | tr '\n' ' ')"
+    bad "unexpected public listening ports: ${unexpected}"
     violations=$((violations + 1))
   fi
 
