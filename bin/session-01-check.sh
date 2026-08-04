@@ -14,7 +14,17 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 cd "$ROOT_DIR"
 
-export APG_ACCEPTANCE_SESSION=1
+# Derived from the package, never written here as a literal (ADR 0014). A
+# hard-coded value made the registry policy and the tree's own CURRENT_SESSION
+# disagree the moment Session 2 activated its requirements, and no ordering of
+# two commits kept both green. tests/contract/test_gate_contract.py asserts that
+# no session number is written into this file.
+APG_ACCEPTANCE_SESSION="$(
+  PYTHONPATH="${ROOT_DIR}/src" python -c \
+    'from agentic_postgres import CURRENT_SESSION; print(CURRENT_SESSION)'
+)"
+export APG_ACCEPTANCE_SESSION
+readonly APG_ACCEPTANCE_SESSION
 
 ALLOW_DIRTY=0
 
@@ -72,21 +82,61 @@ bin/lock-versions.sh --check
 # ---------------------------------------------------------------------------
 step "3. Render both fixtures"
 # ---------------------------------------------------------------------------
-./deploy.sh \
-  --project project.example.yaml \
-  --capabilities capabilities.example.yaml \
-  --render-only >/dev/null
+# The directories published here are recorded, and step 7 checks exactly these
+# (ADR 0014). Rediscovering them by globbing .generated/ would sweep in any
+# Session 2 project deployed on this machine, whose containers are running by
+# design -- so the Session 1 gate would fail on a Session 2 success.
+#
+# The list is data this run produced, never a literal: hard-coding a fixture
+# name would put a fixture identity into deployable source, which §9 forbids and
+# tests/contract/test_repository_contract.py enforces, and it would silently
+# stop checking anything if a fixture were renamed.
+FIXTURES=(project.example.yaml project.second.example.yaml)
 
-./deploy.sh \
-  --project project.second.example.yaml \
-  --capabilities capabilities.example.yaml \
-  --render-only >/dev/null
+for fixture in "${FIXTURES[@]}"; do
+  ./deploy.sh \
+    --project "${fixture}" \
+    --capabilities capabilities.example.yaml \
+    --render-only >/dev/null
+done
 
-# The message names what was rendered rather than restating fixture identities,
-# for the same reason step 7 discovers them: identities belong in manifests.
-printf 'rendered:%s\n' "$(for d in .generated/*/; do
-  [ -f "${d}compose.env" ] && printf ' %s' "$(basename "${d}")"
-done)"
+# Each directory is identified by the manifest digest its own outputs.json
+# records, not by re-deriving a name here. outputs.inputs.project_sha256 is
+# already contract (CFG-005), so this asks "which directory did this manifest
+# produce" using the answer the renderer itself published.
+mapfile -t RENDERED_DIRS < <(
+  PYTHONPATH="${ROOT_DIR}/src" python - "${FIXTURES[@]}" <<'PYTHON'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+manifests = sys.argv[1:]
+by_digest = {hashlib.sha256(Path(m).read_bytes()).hexdigest(): m for m in manifests}
+
+found: dict[str, str] = {}
+for outputs in sorted(Path(".generated").glob("*/outputs.json")):
+    document = json.loads(outputs.read_text(encoding="utf-8"))
+    manifest = by_digest.get(document["inputs"]["project_sha256"])
+    if manifest is not None and (outputs.parent / "compose.env").is_file():
+        found[manifest] = str(outputs.parent)
+
+missing = [m for m in manifests if m not in found]
+if missing:
+    sys.exit(f"no rendered directory records the digest of: {missing}")
+
+for manifest in manifests:
+    print(found[manifest])
+PYTHON
+)
+
+[ "${#RENDERED_DIRS[@]}" -eq "${#FIXTURES[@]}" ] || {
+  printf 'expected %d rendered directories, resolved %d\n' \
+    "${#FIXTURES[@]}" "${#RENDERED_DIRS[@]}" >&2
+  exit 1
+}
+
+printf 'rendered:%s\n' "$(printf ' %s' "${RENDERED_DIRS[@]##*/}")"
 
 # ---------------------------------------------------------------------------
 step "4. Active contract tests, with machine-readable output"
@@ -114,28 +164,29 @@ python bin/render-config.py --bounds-doc --check
 # ---------------------------------------------------------------------------
 step "7. Compose validates and no project container is running"
 # ---------------------------------------------------------------------------
-# Project keys are discovered from what step 3 actually rendered rather than
-# written here. Hard-coding them would put fixture identities into deployable
-# source, which §9 forbids and tests/contract/test_repository_contract.py
-# enforces -- and it would silently stop checking anything if a fixture were
-# renamed.
-rendered_count=0
-for project_dir in .generated/*/; do
-  [ -f "${project_dir}compose.env" ] || continue
-  bin/compose.sh "${project_dir%/}" --profile contract config >/dev/null
-  running="$(bin/compose.sh "${project_dir%/}" ps --quiet)"
+# Exactly the directories step 3 published, never a glob over .generated/
+# (ADR 0014). A glob would sweep in any Session 2 project deployed on this
+# machine, whose containers run by design, and the Session 1 gate would fail on
+# a Session 2 success. The claim this step makes is precise: the fixtures this
+# gate rendered have no container running. Any broader claim about the host
+# belongs to bin/session-02-check.sh, which enumerates the deployment.
+#
+# The identities still come from what step 3 produced rather than from a literal
+# here, so no fixture name enters deployable source (§9).
+for project_dir in "${RENDERED_DIRS[@]}"; do
+  bin/compose.sh "${project_dir}" --profile contract config >/dev/null
+  running="$(bin/compose.sh "${project_dir}" ps --quiet)"
   if [ -n "${running}" ]; then
     printf 'containers are running for %s:\n%s\n' "${project_dir}" "${running}" >&2
     exit 1
   fi
-  rendered_count=$((rendered_count + 1))
 done
 
-if [ "${rendered_count}" -lt 2 ]; then
-  printf 'expected at least 2 rendered projects, found %d\n' "${rendered_count}" >&2
+if [ "${#RENDERED_DIRS[@]}" -lt 2 ]; then
+  printf 'expected at least 2 rendered projects, found %d\n' "${#RENDERED_DIRS[@]}" >&2
   exit 1
 fi
-printf '%d models render; no container is running\n' "${rendered_count}"
+printf '%d models render; no container is running\n' "${#RENDERED_DIRS[@]}"
 
 # ---------------------------------------------------------------------------
 step "8. Session evidence"

@@ -107,15 +107,16 @@ def test_injection_strings_remain_data() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session 2 — network boundary
+# Session 2 — activated
+#
+# SEC-NET-001 and SEC-SECRET-001 lived here as placeholders through Session 1.
+# Session 2 replaced them with real proofs, so the placeholders are gone rather
+# than retained alongside: a placeholder kept next to its implementation would
+# be a second, weaker claim about the same requirement, and
+# test_no_requirement_is_claimed_by_two_placeholders exists to prevent exactly
+# that ambiguity.
+#
+#   SEC-NET-001     -> tests/external/test_session2_public_edge.py
+#   SEC-SECRET-001  -> tests/security/test_session2_secret_model.py
+#                      tests/security/test_session2_secrets.py
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.future(session=2, requirement="SEC-NET-001")
-def test_public_routes_cannot_reach_direct_postgresql() -> None:
-    unimplemented(2, "only Traefik is public, and it does not route to 5432")
-
-
-@pytest.mark.future(session=2, requirement="SEC-SECRET-001")
-def test_secret_values_do_not_appear_in_images_logs_or_compose_output() -> None:
-    unimplemented(2, "repository, image, Compose, and log scans find no secret value")

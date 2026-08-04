@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 63 requirements**
+**P0 — 74 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -109,8 +109,19 @@ Priorities:
 | `CFG-015` | 1 | The Compose model renders the exact resource names published in outputs.json, cannot be overridden by inherited environment variables, and refuses to start a container in Session 1. |
 | `DX-002` | 1 | Operator commands document themselves, obey the exit-code convention, work from any directory, and never print the environment. |
 | `DX-003` | 1 | The repository has its required shape, generated output stays out of Git, and no deployable source file hard-codes a fixture identity. |
-| `SEC-NET-001` | 2 | No public route reaches the direct PostgreSQL endpoint. |
-| `SEC-SECRET-001` | 2 | Secret values appear in no image, repository file, Compose output, or log. |
+| `CFG-016` | 2 | The deployed document is a distinct owner-only document kind that records observed host state, cannot be produced by migrating a rendered one, and is never accepted where a rendered document is required. |
+| `DEP-ISO-002` | 2 | Two projects sharing one host and one edge share no route, network, or ingress attachment, and stopping one leaves the other served. |
+| `DEP-PROV-001` | 2 | Provider ownership is recorded by identifier rather than by name, and re-applying the bootstrap converges without creating a second identity. |
+| `DEP-REL-001` | 2 | What systemd runs is an immutable root-owned release identified by commit, never a checkout, so switching a branch cannot change what starts next boot. |
+| `OPS-HEALTH-001` | 2 | Every deployed project answers the reserved health route with its own project key, through the edge only, and no unrouted path is served. |
+| `SEC-DOCKER-001` | 2 | The publicly reachable proxy reads the Docker API through an allowlisting socket proxy that refuses every write, and the daemon itself is reachable over no network socket. |
+| `SEC-HOST-001` | 2 | The host admits key-based SSH only, refuses root and password logins as OpenSSH actually resolves them, patches itself without rebooting itself, and exposes no public listener beyond SSH and the edge. |
+| `SEC-LOG-001` | 2 | No request query-string value and no request header value reaches the edge access log, proved by sending a value nothing else could produce and then looking for it in a log known to be recording the request. |
+| `SEC-NET-001` | 2 | No public route reaches the direct PostgreSQL endpoint: nothing listens on it, no forwarded path carries it, and a full-TCP connect scan from another network finds it closed while 443 is open. |
+| `SEC-NET-002` | 2 | Only the edge publishes a host port, and forwarded public traffic to anything else is dropped by a DOCKER-USER policy that matches the pre-DNAT destination port rather than the container's. |
+| `SEC-SECRET-001` | 2 | Secret values appear in no image, repository file, Compose output, log, or evidence file, proved by searching for a real value rather than by asserting that none was written. |
+| `SEC-SECRET-002` | 2 | A materialized secret is a mode 0400 file owned by its declared consumer, mounted into that service and no other, proved by the mount list rather than by comparing digests of what each service read. |
+| `SEC-TLS-001` | 2 | The public origin serves TLS 1.2 or better with a certificate a default trust store accepts, permanently redirects plaintext, and serves the exact certificate the deployed document records. |
 | `SEC-DEFAULT-001` | 3 | Default EXECUTE on newly created functions is revoked from PUBLIC. |
 | `SEC-FUNC-001` | 3 | An API role cannot execute a function it was not explicitly granted. |
 | `SEC-OWNER-001` | 3 | Objects are owned by a non-login role that no service connects as. |

@@ -89,6 +89,86 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
+  session-2-contract:
+    name: Session 2 offline contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # What this job can and cannot assert is worth stating plainly. It has
+    # Docker and no credentials, so it proves everything that is a property of
+    # the model: schemas, unit files, image builds, and the socket-proxy policy
+    # against the runner's own daemon. It cannot reach the VPS, obtain an ACME
+    # certificate, contact Infisical, or run ufw/iptables/sshd -T. Those are
+    # release evidence, produced by bin/session-02-check.sh, not pull-request CI.
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Read the pinned interpreter
+        id: python
+        run: echo "version=$(cat .python-version)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ steps.python.outputs.version }}
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.1"
+
+      - name: Install hash-locked dependencies
+        run: |
+          uv venv --seed --python "$(cat .python-version)" .venv
+          . .venv/bin/activate
+          python -m pip install --require-hashes -r requirements-dev.txt
+
+      # The session is derived, not passed: setting it here would let CI test a
+      # different policy than the gate does, which is the whole failure ADR 0014
+      # removed. This asserts the derived value is what the suite ran under.
+      - name: Confirm the acceptance session is derived from the package
+        run: |
+          . .venv/bin/activate
+          PYTHONPATH=src python -c \
+            'from agentic_postgres import CURRENT_SESSION; assert CURRENT_SESSION == 2, CURRENT_SESSION'
+
+      - name: Offline Session 2 contract suite
+        run: |
+          . .venv/bin/activate
+          python -m pytest -q -m "p0 and not future and not live_host and not external"
+
+      # live_host and external tests must be importable and collectible with no
+      # host and no network. A module that opened a socket at import time would
+      # break collection for the whole suite, and this is where that surfaces.
+      - name: Environment-gated tests collect and skip cleanly
+        run: |
+          . .venv/bin/activate
+          python -m pytest -q -m "live_host or external" | tee /tmp/gated.txt
+          grep -qE '[0-9]+ skipped' /tmp/gated.txt
+          ! grep -qE '[0-9]+ (failed|error)' /tmp/gated.txt
+
+      - name: Edge and project Compose models resolve
+        run: |
+          . .venv/bin/activate
+          ./deploy.sh --project project.example.yaml \
+            --capabilities capabilities.example.yaml --render-only >/dev/null
+          bin/compose.sh .generated/fixture-alpha-dev --profile contract config >/dev/null
+          bin/compose.sh --edge --host host.example.yaml config >/dev/null
+
+      # BASE_IMAGE is passed explicitly because neither Dockerfile declares a
+      # default: a FROM line naming a tag would be a second, unlocked version
+      # declaration that bin/lock-versions.sh could not see. A bare
+      # `docker build` here fails, and that is the intended behaviour.
+      - name: Probe images build from the locked base
+        run: |
+          set -a; . ./versions.env; set +a
+          docker build -q --build-arg "BASE_IMAGE=${PYTHON_RUNTIME_IMAGE}" services/edge-probe
+          docker build -q --build-arg "BASE_IMAGE=${PYTHON_RUNTIME_IMAGE}" services/secret-check
+
+      - name: Unit files are valid
+        run: systemd-analyze verify systemd/*.service
+
   future-inventory:
     name: P0 inventory
     runs-on: ubuntu-latest

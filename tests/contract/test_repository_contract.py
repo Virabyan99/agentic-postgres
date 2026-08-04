@@ -67,7 +67,9 @@ REQUIRED_PATHS = (
     "docs/decisions/0011-provider-bootstrap-state.md",
     "docs/decisions/0012-output-document-kinds.md",
     "docs/decisions/0013-compose-wrapper-scopes.md",
+    "docs/decisions/0014-gate-scope-and-session-derivation.md",
     "docs/decisions/0015-reserved-health-route.md",
+    "docs/decisions/0016-absence-is-not-a-collision.md",
     "infra/edge/compose.yaml",
     "infra/edge/traefik.yaml",
     "infra/edge/dynamic/baseline.yaml",
@@ -106,6 +108,18 @@ REQUIRED_PATHS = (
     "tests/fixtures/outputs-v1.json",
     "tests/acceptance-registry.yaml",
     "tests/conftest.py",
+    # The three Session 2 execution environments. Listed because the registry
+    # points requirement proofs at them: a directory that silently vanished
+    # would take its P0 evidence with it, and the collectibility check would
+    # then fail somewhere far from the cause.
+    "tests/deployment/conftest.py",
+    "tests/deployment/test_session2_host.py",
+    "tests/deployment/test_session2_edge.py",
+    "tests/deployment/test_session2_isolation.py",
+    "tests/external/test_session2_public_edge.py",
+    "tests/security/test_session2_secret_model.py",
+    "tests/security/test_session2_secrets.py",
+    "tests/security/test_session2_installed_release.py",
 )
 
 #: Deployable source and templates. Example manifests, tests, documentation,

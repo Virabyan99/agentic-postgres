@@ -191,13 +191,32 @@ def at(document: dict[str, Any], pointer: tuple[str, ...]) -> Any:
 
 
 def collision_count(rendered: dict[str, dict[str, Any]]) -> int:
-    """Compare parsed semantic fields, never duplicate strings (runbook §8)."""
+    """Compare parsed semantic fields, never duplicate strings (runbook §8).
+
+    A pair where *both* values are ``None`` is not counted (ADR 0016). Four of
+    the isolated fields — the storage and backup identifiers — are ``null``
+    whenever a project disables those facilities, which every Session 2 project
+    does, since object storage arrives in Session 7 and backups in Session 10.
+    Counting ``None == None`` would report four collisions for two projects that
+    share nothing at all.
+
+    ``null`` here means "this project has no bucket", and two projects that both
+    have no bucket are not sharing one. An identity collision is a claim about a
+    shared resource; absence is not a resource.
+
+    Roles are deliberately not given the same exemption: ``naming.derive``
+    produces all thirteen unconditionally, so a ``None`` there would be a bug
+    rather than a disabled facility.
+    """
     documents = list(rendered.values())
     collisions = 0
     for index, left in enumerate(documents):
         for right in documents[index + 1 :]:
             for pointer in ISOLATED_FIELDS:
-                if at(left, pointer) == at(right, pointer):
+                value = at(left, pointer)
+                if value is None and at(right, pointer) is None:
+                    continue
+                if value == at(right, pointer):
                     collisions += 1
             for role, name in left["database"]["roles"].items():
                 if right["database"]["roles"][role] == name:

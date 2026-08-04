@@ -77,4 +77,6 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0011](0011-provider-bootstrap-state.md) | Provider ownership is recorded by ID, and convergence is keyed narrowly | 2 | Accepted |
 | [0012](0012-output-document-kinds.md) | Two output document kinds under one versioned schema | 2 | Accepted |
 | [0013](0013-compose-wrapper-scopes.md) | Compose wrapper scopes, the runtime gate, and three env files | 2 | Accepted |
+| [0014](0014-gate-scope-and-session-derivation.md) | The Session 1 gate measures Session 1's claims, at the session the tree targets | 2 | Accepted |
 | [0015](0015-reserved-health-route.md) | The platform health route is reserved | 2 | Accepted |
+| [0016](0016-absence-is-not-a-collision.md) | Two projects that both lack a facility do not collide | 2 | Accepted |

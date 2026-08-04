@@ -13,7 +13,7 @@ from pathlib import Path
 #: ``APG_ACCEPTANCE_SESSION`` overrides it; see plan decision P. Keeping a
 #: default here means a bare ``pytest`` run enforces the same registry policy
 #: as ``bin/session-01-check.sh`` instead of silently skipping it.
-CURRENT_SESSION = 1
+CURRENT_SESSION = 2
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

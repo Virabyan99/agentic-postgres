@@ -216,23 +216,198 @@
     and no deployable source file hard-codes a fixture identity.
 
 # ---------------------------------------------------------------------------
-# Session 2 — host, ingress, secrets
+# Session 2 — host, ingress, secrets — active
+#
+# Each requirement below names both the structural proof, which runs in any
+# checkout, and the live proof, which runs only where the thing exists. Neither
+# is sufficient alone: structure without measurement misses the leak that went
+# around the structure, and measurement without structure passes on the day
+# nobody happened to exercise the path.
+#
+# The live proofs are skipped by an environment gate, never by a `future`
+# marker; tests/contract/test_environment_gates.py enforces that separation.
 # ---------------------------------------------------------------------------
 
 - id: SEC-NET-001
   priority: P0
   target_session: 2
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_public_routes_cannot_reach_direct_postgresql
-  description: No public route reaches the direct PostgreSQL endpoint.
+    - tests/external/test_session2_public_edge.py::test_no_service_port_is_publicly_reachable_over_ipv4
+    - tests/external/test_session2_public_edge.py::test_no_service_port_is_publicly_reachable_over_ipv6
+    - tests/external/test_session2_public_edge.py::test_the_scan_can_detect_an_open_port
+    - tests/external/test_session2_public_edge.py::test_the_deployed_document_still_reports_no_direct_endpoint
+    - tests/contract/test_compose_contract.py::test_no_project_service_publishes_a_host_port
+  description: >-
+    No public route reaches the direct PostgreSQL endpoint: nothing listens on
+    it, no forwarded path carries it, and a full-TCP connect scan from another
+    network finds it closed while 443 is open.
 
 - id: SEC-SECRET-001
   priority: P0
   target_session: 2
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_secret_values_do_not_appear_in_images_logs_or_compose_output
+    - tests/security/test_session2_secret_model.py::test_no_service_takes_a_secret_through_the_environment
+    - tests/security/test_session2_secrets.py::test_the_scan_would_find_a_planted_value_and_would_not_print_it
+    - tests/security/test_session2_secrets.py::test_the_sentinel_is_absent_from_every_git_visible_file
+    - tests/security/test_session2_secrets.py::test_the_sentinel_is_absent_from_container_inspection
+    - tests/security/test_session2_secrets.py::test_the_sentinel_is_absent_from_image_history
+    - tests/security/test_session2_secrets.py::test_the_sentinel_is_absent_from_container_logs
+    - tests/security/test_session2_secrets.py::test_the_sentinel_is_absent_from_resolved_compose_output
   description: >-
-    Secret values appear in no image, repository file, Compose output, or log.
+    Secret values appear in no image, repository file, Compose output, log, or
+    evidence file, proved by searching for a real value rather than by asserting
+    that none was written.
+
+- id: SEC-HOST-001
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_host.py::test_sshd_resolved_the_expected_policy
+    - tests/deployment/test_session2_host.py::test_password_authentication_is_refused_in_practice
+    - tests/deployment/test_session2_host.py::test_only_ssh_and_the_edge_listen_on_a_public_address
+    - tests/deployment/test_session2_host.py::test_unattended_upgrades_is_enabled_and_does_not_reboot
+    - tests/contract/test_host_infrastructure.py::test_ssh_snippet_sets_the_policy_that_carries_the_boundary
+  description: >-
+    The host admits key-based SSH only, refuses root and password logins as
+    OpenSSH actually resolves them, patches itself without rebooting itself, and
+    exposes no public listener beyond SSH and the edge.
+
+- id: SEC-NET-002
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_host.py::test_only_the_edge_publishes_container_ports
+    - tests/deployment/test_session2_host.py::test_the_docker_user_chain_ends_in_a_drop
+    - tests/deployment/test_session2_host.py::test_the_docker_user_chain_matches_the_original_destination_port
+    - tests/deployment/test_session2_host.py::test_the_live_policy_is_the_installed_policy
+    - tests/contract/test_host_infrastructure.py::test_policy_matches_the_original_destination_port
+    - tests/contract/test_compose_contract.py::test_only_traefik_publishes_host_ports
+  description: >-
+    Only the edge publishes a host port, and forwarded public traffic to
+    anything else is dropped by a DOCKER-USER policy that matches the pre-DNAT
+    destination port rather than the container's.
+
+- id: SEC-DOCKER-001
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_host.py::test_the_socket_proxy_refuses_a_write_call
+    - tests/deployment/test_session2_host.py::test_the_daemon_exposes_no_tcp_socket
+    - tests/deployment/test_session2_host.py::test_traefik_holds_no_docker_socket
+    - tests/contract/test_compose_contract.py::test_the_socket_proxy_denies_every_unneeded_api_section
+    - tests/contract/test_compose_contract.py::test_traefik_has_no_direct_docker_socket_mount
+  description: >-
+    The publicly reachable proxy reads the Docker API through an allowlisting
+    socket proxy that refuses every write, and the daemon itself is reachable
+    over no network socket.
+
+- id: SEC-TLS-001
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_edge.py::test_http_redirects_permanently_to_https
+    - tests/deployment/test_session2_edge.py::test_tls_one_dot_one_is_refused
+    - tests/deployment/test_session2_edge.py::test_the_recorded_certificate_is_the_one_being_served
+    - tests/external/test_session2_public_edge.py::test_the_certificate_is_trusted_by_a_default_trust_store
+    - tests/contract/test_edge_config.py::test_tls_minimum_version_is_at_least_1_2
+  description: >-
+    The public origin serves TLS 1.2 or better with a certificate a default
+    trust store accepts, permanently redirects plaintext, and serves the exact
+    certificate the deployed document records.
+
+- id: SEC-LOG-001
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_edge.py::test_no_query_string_reaches_the_access_log
+    - tests/deployment/test_session2_edge.py::test_no_request_header_value_reaches_the_access_log
+    - tests/deployment/test_session2_edge.py::test_the_log_sentinel_would_actually_be_visible
+    - tests/contract/test_edge_config.py::test_query_parameters_are_dropped
+    - tests/contract/test_edge_config.py::test_headers_are_dropped_by_default_and_kept_by_name
+  description: >-
+    No request query-string value and no request header value reaches the edge
+    access log, proved by sending a value nothing else could produce and then
+    looking for it in a log known to be recording the request.
+
+- id: SEC-SECRET-002
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/security/test_session2_secrets.py::test_materialized_files_are_read_only_and_owned_by_the_declared_consumer
+    - tests/security/test_session2_secrets.py::test_only_the_granted_service_mounts_a_secret
+    - tests/security/test_session2_secrets.py::test_no_container_mounts_another_projects_secret_directory
+    - tests/contract/test_secret_contract.py::test_consumer_ownership_matches_the_service_runtime_user
+    - tests/contract/test_secret_contract.py::test_no_service_receives_a_secret_it_was_not_granted
+  description: >-
+    A materialized secret is a mode 0400 file owned by its declared consumer,
+    mounted into that service and no other, proved by the mount list rather than
+    by comparing digests of what each service read.
+
+- id: DEP-ISO-002
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_isolation.py::test_each_hostname_reaches_its_own_project
+    - tests/deployment/test_session2_isolation.py::test_neither_hostname_serves_the_other_project
+    - tests/deployment/test_session2_isolation.py::test_traefik_joins_both_edge_networks_and_neither_internal_one
+    - tests/deployment/test_session2_isolation.py::test_removing_the_second_project_leaves_the_first_routed
+    - tests/contract/test_compose_contract.py::test_two_projects_render_disjoint_resource_names
+  description: >-
+    Two projects sharing one host and one edge share no route, network, or
+    ingress attachment, and stopping one leaves the other served.
+
+- id: DEP-REL-001
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/security/test_session2_installed_release.py::test_the_release_directory_is_named_for_a_full_commit
+    - tests/security/test_session2_installed_release.py::test_the_release_is_root_owned_and_not_group_writable
+    - tests/security/test_session2_installed_release.py::test_the_installed_unit_executes_only_a_libexec_launcher
+    - tests/security/test_session2_installed_release.py::test_the_running_containers_come_from_the_recorded_release
+    - tests/contract/test_host_infrastructure.py::test_units_execute_only_installed_release_launchers
+  description: >-
+    What systemd runs is an immutable root-owned release identified by commit,
+    never a checkout, so switching a branch cannot change what starts next boot.
+
+- id: DEP-PROV-001
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_host.py::test_bootstrap_state_is_root_only_and_records_provider_ids
+    - tests/deployment/test_session2_host.py::test_reapplying_the_bootstrap_reports_no_change
+    - tests/contract/test_bootstrap_state.py::test_every_provider_id_field_is_mandatory
+    - tests/contract/test_bootstrap_state.py::test_an_unrelated_manifest_change_does_not_force_provider_churn
+    - tests/contract/test_bootstrap_state.py::test_state_may_not_name_another_projects_credential_directory
+  description: >-
+    Provider ownership is recorded by identifier rather than by name, and
+    re-applying the bootstrap converges without creating a second identity.
+
+- id: CFG-016
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_host.py::test_the_deployed_document_is_owner_only
+    - tests/deployment/test_session2_host.py::test_the_deployed_document_names_the_release_that_is_running
+    - tests/deployment/test_session2_host.py::test_the_deployed_host_facts_are_real
+    - tests/contract/test_output_migrations.py::test_there_is_no_way_to_produce_a_deployed_document
+    - tests/contract/test_output_migrations.py::test_rendered_output_is_refused_where_deployed_state_is_required
+  description: >-
+    The deployed document is a distinct owner-only document kind that records
+    observed host state, cannot be produced by migrating a rendered one, and is
+    never accepted where a rendered document is required.
+
+- id: OPS-HEALTH-001
+  priority: P0
+  target_session: 2
+  test_nodeids:
+    - tests/deployment/test_session2_edge.py::test_the_health_route_answers_over_https
+    - tests/deployment/test_session2_edge.py::test_the_health_route_identifies_its_own_project
+    - tests/deployment/test_session2_edge.py::test_an_unrouted_path_is_not_served
+    - tests/external/test_session2_public_edge.py::test_the_public_health_route_answers
+    - tests/contract/test_output_migrations.py::test_health_route_constant_agrees_with_naming
+  description: >-
+    Every deployed project answers the reserved health route with its own
+    project key, through the edge only, and no unrouted path is served.
 
 # ---------------------------------------------------------------------------
 # Session 3 — database authorization

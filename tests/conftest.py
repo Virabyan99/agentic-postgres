@@ -76,6 +76,23 @@ def future_markers_in_source() -> dict[str, tuple[int, str]]:
     return found
 
 
+#: Environment variables that name the three execution environments of Session
+#: 2. A test gated on one of these is written and complete; it is the *host*
+#: that is absent. The tuple is closed so that a typo in a gate reads as an
+#: error rather than as a test that quietly never runs anywhere.
+ENVIRONMENT_VARIABLES = (
+    "APG_LIVE_HOST",
+    "APG_PROJECT_A_OUTPUTS",
+    "APG_PROJECT_B_OUTPUTS",
+    # No APG_PUBLIC_HOST_*: the hostname is read from the deployed document
+    # rather than supplied alongside it. Two sources for one fact is how a run
+    # ends up measuring one project's certificate against another's route.
+    "APG_PUBLIC_IPV4",
+    "APG_PUBLIC_IPV6",
+    "APG_SECRET_SENTINEL_FILE",
+)
+
+
 @pytest.fixture(scope="session")
 def future_markers() -> dict[str, tuple[int, str]]:
     """Every ``future`` marker in the suite, keyed by node ID."""
@@ -87,22 +104,66 @@ def gate_session() -> int:
     return acceptance_session()
 
 
+def apply_future_marker(item: pytest.Item) -> None:
+    marker = item.get_closest_marker("future")
+    if marker is None:
+        return
+
+    session = marker.kwargs.get("session")
+    requirement = marker.kwargs.get("requirement")
+    if not isinstance(session, int) or not isinstance(requirement, str):
+        raise pytest.UsageError(
+            f"Invalid future marker on {item.nodeid}: "
+            f"expected session=<int> and requirement=<str>, "
+            f"got session={session!r}, requirement={requirement!r}"
+        )
+
+    item.add_marker(pytest.mark.skip(reason=f"Future Session {session}: {requirement}"))
+
+
+def apply_environment_gate(item: pytest.Item) -> None:
+    """Skip because the environment is absent — never because a test is unwritten.
+
+    Session 2 introduces tests that cannot run in a checkout: they measure a
+    provisioned host or a public route. Those must not use ``future``.
+    ``future`` means *nobody has written this*, and its entire value is that
+    removing it activates a failing placeholder. Reused for "the host is not
+    here" it would be removed on the host, and would then have no way left to
+    say that work is unfinished.
+
+    The two are therefore kept apart by construction. Environment absence is
+    this marker, whose condition is a named variable and nothing else;
+    ``tests/contract/test_environment_gates.py`` asserts that every
+    ``live_host`` and ``external`` test carries one.
+    """
+    marker = item.get_closest_marker("requires_environment")
+    if marker is None:
+        return
+
+    names = marker.args
+    if not names or not all(isinstance(name, str) for name in names):
+        raise pytest.UsageError(
+            f"Invalid requires_environment marker on {item.nodeid}: "
+            f"expected one or more variable names, got {names!r}"
+        )
+
+    unknown = [name for name in names if name not in ENVIRONMENT_VARIABLES]
+    if unknown:
+        raise pytest.UsageError(
+            f"Invalid requires_environment marker on {item.nodeid}: "
+            f"{unknown} are not in tests/conftest.py ENVIRONMENT_VARIABLES. "
+            "A typo here would produce a test that silently never runs."
+        )
+
+    absent = [name for name in names if not os.environ.get(name)]
+    if absent:
+        item.add_marker(pytest.mark.skip(reason=f"environment absent: {', '.join(absent)}"))
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
     for item in items:
-        marker = item.get_closest_marker("future")
-        if marker is None:
-            continue
-
-        session = marker.kwargs.get("session")
-        requirement = marker.kwargs.get("requirement")
-        if not isinstance(session, int) or not isinstance(requirement, str):
-            raise pytest.UsageError(
-                f"Invalid future marker on {item.nodeid}: "
-                f"expected session=<int> and requirement=<str>, "
-                f"got session={session!r}, requirement={requirement!r}"
-            )
-
-        item.add_marker(pytest.mark.skip(reason=f"Future Session {session}: {requirement}"))
+        apply_future_marker(item)
+        apply_environment_gate(item)
 
 
 def pytest_report_header(config: pytest.Config) -> str:
