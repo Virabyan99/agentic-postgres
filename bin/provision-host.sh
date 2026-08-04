@@ -541,7 +541,14 @@ apply_baseline() {
   ufw allow 80/tcp >/dev/null
   ufw allow 443/tcp >/dev/null
 
-  ufw status | grep -q "${ssh_port}/tcp" \
+  # `ufw show added`, not `ufw status`. While ufw is inactive, `status` prints
+  # "Status: inactive" and lists nothing at all — so on the one host state where
+  # this guard matters, reading `status` proves the SSH rule is missing no
+  # matter how many times it was just added. `show added` reports the configured
+  # rules, which is what will be in force the moment `enable` runs.
+  #
+  # The port is anchored on both sides: an unanchored 22 also matches 122/tcp.
+  ufw show added 2>/dev/null | grep -qE "(^|[[:space:]])${ssh_port}/tcp([[:space:]]|\$)" \
     || die 6 "no rule covers the SSH port; refusing to enable the firewall."
 
   ufw default deny incoming >/dev/null

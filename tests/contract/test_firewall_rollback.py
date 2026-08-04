@@ -77,6 +77,36 @@ def test_it_refuses_to_enable_without_a_rule_covering_the_ssh_port(firewall_body
     assert guard < firewall_body.index("ufw --force enable")
 
 
+def test_the_ssh_rule_guard_reads_configured_rules_not_running_ones(firewall_body: str) -> None:
+    """`ufw status` lists nothing while ufw is inactive.
+
+    Which is the only state this guard runs in on a fresh host. Reading `status`
+    there concludes the SSH allow rule is absent immediately after adding it,
+    and --apply dies one line before the branch that would have explained why.
+    That is not hypothetical: it is what happened on the first real run.
+
+    `ufw show added` reports configured rules regardless of running state, which
+    is what `enable` will put in force.
+    """
+    guard_line = next(
+        line for line in firewall_body.splitlines() if "refusing to enable the firewall" in line
+    )
+    window = firewall_body[: firewall_body.index(guard_line)]
+    check = window[window.rindex("ufw ") :]
+    assert "ufw show added" in check, "the SSH-rule guard does not read `ufw show added`"
+    assert "ufw status" not in check, "the SSH-rule guard reads `ufw status`, which is empty"
+
+
+def test_the_port_is_anchored_so_22_does_not_match_122(firewall_body: str) -> None:
+    """A substring match would accept a rule for an unrelated port.
+
+    The ``\\$`` is the shell's, not a typo: the pattern is inside a double-quoted
+    string, so the dollar has to survive expansion to reach grep.
+    """
+    assert "grep -qE" in firewall_body, "the guard is a substring match, not an anchored one"
+    assert "(^|[[:space:]])${ssh_port}/tcp([[:space:]]|\\$)" in firewall_body
+
+
 def test_an_already_active_firewall_does_not_demand_a_new_timer(firewall_body: str) -> None:
     """Re-applying is not a new window.
 
