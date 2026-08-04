@@ -37,6 +37,13 @@ UNITS = (
     "agentic-postgres-edge.service",
     "agentic-postgres-project@.service",
 )
+#: Launchers that resolve an installed release and exec a script inside it.
+#:
+#: ``agentic-postgres-ssh-rollback`` is deliberately absent. It is a launcher by
+#: location only: it restores files and reloads sshd, and resolves no release,
+#: so the release-indirection assertions below do not apply to it. It has its
+#: own module, tests/contract/test_ssh_rollback.py, because what matters about
+#: it is different -- it runs unattended during a lockout.
 LAUNCHERS = (
     "agentic-postgres-edge",
     "agentic-postgres-project",

@@ -51,14 +51,18 @@ SECRET_ARGUMENT = re.compile(
 )
 
 #: Constructions that execute or expand file contents.
+#:
+#: Anchored at a command position rather than matched anywhere in the line. A
+#: bare ``source `` substring also matches a local variable named ``source``,
+#: which is a false positive that would train someone to add an exemption
+#: instead of looking.
 DANGEROUS_SHELL = (
-    ("eval ", "eval executes whatever it was handed"),
-    ('eval "$(', "command substitution into eval"),
-    ("source ", "sourcing a file executes it"),
-    (". /var/lib/agentic-postgres", "sourcing state executes it"),
-    ("set -x", "tracing prints every expanded argument"),
-    ("printenv", "dumps the environment"),
-    ("declare -p", "dumps variables"),
+    (r"(^|;|\||&&)\s*eval\b", "eval executes whatever it was handed"),
+    (r"(^|;|\||&&)\s*source\s", "sourcing a file executes it"),
+    (r"(^|;|\||&&)\s*\.\s+/(etc|var|run)/", "sourcing a system or state file executes it"),
+    (r"(^|;|\||&&)\s*set\s+-x\b", "tracing prints every expanded argument"),
+    (r"\bprintenv\b", "dumps the environment"),
+    (r"\bdeclare\s+-p\b", "dumps variables"),
 )
 
 
@@ -214,9 +218,42 @@ def test_the_secret_argument_scan_would_catch_a_real_one() -> None:
 def test_no_script_uses_a_construction_that_expands_file_contents(relative: str) -> None:
     code = code_of(relative)
     offenders = [
-        f"{construction!r} ({why})" for construction, why in DANGEROUS_SHELL if construction in code
+        f"{match.group(0).strip()!r} ({why})"
+        for pattern, why in DANGEROUS_SHELL
+        if (match := re.search(pattern, code, re.MULTILINE))
     ]
     assert not offenders, f"{relative} uses: {offenders}"
+
+
+def test_the_dangerous_shell_scan_catches_real_uses_and_not_variable_names() -> None:
+    """Guard the guard, in both directions.
+
+    The false positive is the one that matters: a variable named ``source`` is
+    not the ``source`` builtin, and a scan that cannot tell them apart teaches
+    people to add exemptions rather than to look.
+    """
+    caught = {
+        'eval "$(cmd)"': "eval",
+        "  source /etc/thing": "source",
+        ". /var/lib/agentic-postgres/state.env": "sourcing",
+        "set -x": "tracing",
+    }
+    for line, expectation in caught.items():
+        assert any(
+            re.search(pattern, line, re.MULTILINE)
+            for pattern, why in DANGEROUS_SHELL
+            if expectation in why or expectation in pattern
+        ), line
+
+    for allowed in (
+        "local origin name",
+        "  local source name",
+        'echo "resource"',
+        "set -euo pipefail",
+    ):
+        assert not any(
+            re.search(pattern, allowed, re.MULTILINE) for pattern, _ in DANGEROUS_SHELL
+        ), allowed
 
 
 def test_credential_handling_scripts_disable_tracing_explicitly() -> None:

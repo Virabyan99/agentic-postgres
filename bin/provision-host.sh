@@ -29,6 +29,8 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 
 readonly ETC="/etc/agentic-postgres"
+readonly LIBEXEC="/usr/local/libexec/agentic-postgres"
+readonly SYSTEMD_DIR="/etc/systemd/system"
 readonly BACKUP_ROOT="/var/backups/agentic-postgres"
 readonly SSH_SNIPPET="/etc/ssh/sshd_config.d/00-agentic-postgres-ssh.conf"
 readonly ROLLBACK_UNIT="apg-ssh-rollback"
@@ -124,11 +126,17 @@ check_baseline() {
     violations=$((violations + 1))
   fi
 
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  case "${VERSION_ID-}" in
-    24.04|26.04) ok "Ubuntu ${VERSION_ID}" ;;
-    *) bad "Ubuntu ${VERSION_ID-unknown} is not a supported release"; violations=$((violations + 1)) ;;
+  # Parsed, not sourced. /etc/os-release is a shell fragment by convention and
+  # sourcing it executes it; reading one field with grep does not, and the
+  # difference is that this script runs as root.
+  local release
+  release="$(grep -m1 '^VERSION_ID=' /etc/os-release 2>/dev/null | cut -d= -f2- | tr -d '"')"
+  case "${release}" in
+    24.04|26.04) ok "Ubuntu ${release}" ;;
+    *)
+      bad "Ubuntu ${release:-unknown} is not a supported release"
+      violations=$((violations + 1))
+      ;;
   esac
 
   if timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -q yes; then
@@ -163,6 +171,31 @@ check_baseline() {
       fi
     done
   fi
+
+  printf '\n== launchers and units ==\n'
+  # Checked because the units name these paths and nothing else. A unit whose
+  # Exec* target is absent fails at boot with a message about the unit rather
+  # than about the missing file.
+  local launcher
+  for launcher in edge project firewall ssh-rollback; do
+    if [ -x "${LIBEXEC}/${launcher}" ]; then
+      ok "launcher ${launcher}"
+    else
+      bad "launcher ${launcher} is not installed at ${LIBEXEC}/${launcher}"
+      violations=$((violations + 1))
+    fi
+  done
+
+  local unit
+  for unit in agentic-postgres-docker-firewall.service agentic-postgres-edge.service \
+              agentic-postgres-project@.service; do
+    if [ -f "${SYSTEMD_DIR}/${unit}" ]; then
+      ok "unit ${unit}"
+    else
+      bad "unit ${unit} is not installed"
+      violations=$((violations + 1))
+    fi
+  done
 
   printf '\n== docker ==\n'
   if [ -f /etc/docker/daemon.json ]; then
@@ -244,6 +277,49 @@ render_templates() {
   note "rendered templates into ${ETC}"
 }
 
+# The units name /usr/local/libexec/agentic-postgres/<name> and nothing else,
+# so the launchers have to be there before any unit is enabled. Installed from
+# the checkout deliberately: these are the *indirection*, not the code they
+# resolve to, and they change only when the repository changes.
+install_launchers() {
+  install -d -m 0755 -o root -g root "${LIBEXEC}"
+
+  # Named `origin` rather than `source`, which is a shell builtin and reads as
+  # one to both a human and a grep.
+  local origin name
+  for origin in "${ROOT_DIR}"/libexec/agentic-postgres-*; do
+    [ -f "${origin}" ] || continue
+    # agentic-postgres-edge -> edge. The units invoke the short name; the long
+    # name exists so the repository directory is self-describing.
+    name="$(basename "${origin}")"
+    name="${name#agentic-postgres-}"
+    install -m 0755 -o root -g root "${origin}" "${LIBEXEC}/${name}"
+  done
+
+  note "installed $(find "${LIBEXEC}" -maxdepth 1 -type f | wc -l) launcher(s) into ${LIBEXEC}"
+}
+
+install_units() {
+  local origin name
+  for origin in "${ROOT_DIR}"/systemd/*.service; do
+    [ -f "${origin}" ] || continue
+    name="$(basename "${origin}")"
+    install -m 0644 -o root -g root "${origin}" "${SYSTEMD_DIR}/${name}"
+  done
+
+  systemctl daemon-reload
+  note "installed units into ${SYSTEMD_DIR}"
+
+  # The firewall unit is enabled here because DOCKER-USER must be reconciled
+  # after every docker.service start, including the one this script just did.
+  # The edge and project units are NOT enabled: nothing is deployed yet, and a
+  # unit that fails on every boot until Run 6 trains an operator to ignore it.
+  systemctl enable agentic-postgres-docker-firewall.service >/dev/null 2>&1 \
+    || die 6 "could not enable the firewall reconciliation unit."
+  note "enabled agentic-postgres-docker-firewall.service"
+  note "edge and project units installed but not enabled; Run 6 starts them"
+}
+
 apply_baseline() {
   local ssh_port
   ssh_port="$(host_field ssh.port)"
@@ -265,6 +341,15 @@ apply_baseline() {
   # reads this copy, not whatever is in someone's checkout (plan divergence D22).
   install -m 0600 -o root -g root "${HOST_MANIFEST}" "${ETC}/host.yaml"
 
+  printf '\n== launchers and units ==\n'
+  # Before the SSH section, and this ordering is the point. The rollback timer
+  # the operator must arm fires ssh-rollback out of ${LIBEXEC}, so that file has
+  # to exist before there is anything to arm. On a fresh host the first --apply
+  # therefore installs everything, skips SSH, and prints an arm command that now
+  # names a file that is actually there; the second --apply does the hardening.
+  install_launchers
+  install_units
+
   printf '\n== ssh ==\n'
   if rollback_is_armed; then
     install -m 0644 -o root -g root "${ETC}/00-agentic-postgres-ssh.conf" "${SSH_SNIPPET}"
@@ -276,9 +361,13 @@ apply_baseline() {
     note "Then run: sudo bin/provision-host.sh --host ${HOST_MANIFEST} --confirm-ssh-ok"
   else
     printf '  SKIPPED SSH hardening: no rollback timer is armed.\n'
-    printf '  Arm one, then re-run --apply:\n'
+    printf '\n'
+    printf '  Everything else is now installed, including the rollback launcher.\n'
+    printf '  Arm the timer, confirm it shows a future trigger, then re-run --apply:\n\n'
     printf '    sudo systemd-run --on-active=10min --unit=%s \\\n' "${ROLLBACK_UNIT}"
-    printf '      /usr/local/libexec/agentic-postgres/ssh-rollback %s/ssh\n' "${backup}"
+    printf '      %s/ssh-rollback %s/ssh\n' "${LIBEXEC}" "${backup}"
+    printf '    systemctl list-timers %s%s\n\n' "${ROLLBACK_UNIT}" "'*'"
+    printf '  Keep your current session open. Do not close it until a NEW session works.\n'
   fi
 
   printf '\n== docker ==\n'

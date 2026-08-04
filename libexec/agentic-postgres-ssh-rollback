@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+#
+# Restore a backed-up /etc/ssh and reload sshd.
+# Installed at /usr/local/libexec/agentic-postgres/ssh-rollback.
+#
+# This is the thing a transient timer fires when SSH hardening goes wrong and
+# the operator can no longer log in to undo it. bin/provision-host.sh refuses to
+# harden SSH unless a timer pointing here is already armed.
+#
+# Everything about it is shaped by the fact that **nobody is watching when it
+# runs**. There is no operator to read a prompt, retry a command, or notice a
+# warning. So:
+#
+#   * It takes no decisions. The backup directory is an argument; it does not
+#     search for "the most recent" backup, because guessing wrong here is
+#     indistinguishable from doing nothing.
+#   * It validates the backup before touching the live configuration. Restoring
+#     a truncated backup would replace a broken sshd with a differently broken
+#     one, and the second failure is much harder to diagnose.
+#   * It reloads, never restarts. A restart drops every existing session,
+#     including the one an operator may be using to fix the problem by hand.
+#   * If the reload fails, it says so to the journal and leaves the restored
+#     files in place. A rollback that rolls itself back leaves nothing to read.
+#
+# Exit codes: 2 invalid input, 3 missing prerequisite, 6 the restore failed.
+
+set -euo pipefail
+
+readonly LIVE="/etc/ssh"
+
+log() {
+  # journalctl -u apg-ssh-rollback is the only place anyone will see this, and
+  # they will be reading it after a lockout, so it says what happened plainly.
+  printf 'agentic-postgres-ssh-rollback: %s\n' "$*"
+}
+
+die() {
+  local code="$1"
+  shift
+  printf 'agentic-postgres-ssh-rollback: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: /usr/local/libexec/agentic-postgres/ssh-rollback <backup-directory>
+
+Restores <backup-directory> over /etc/ssh and reloads sshd. Intended to be
+fired by a transient systemd timer armed BEFORE SSH is hardened:
+
+  sudo systemd-run --on-active=10min --unit=apg-ssh-rollback \
+    /usr/local/libexec/agentic-postgres/ssh-rollback /var/backups/agentic-postgres/<stamp>/ssh
+
+If a new SSH session works after hardening, disarm it:
+
+  sudo bin/provision-host.sh --host <host.yaml> --confirm-ssh-ok
+
+Nothing disarms this automatically. A script that cancelled its own rollback
+would cancel it in exactly the case where the script was wrong.
+USAGE
+}
+
+main() {
+  case "${1-}" in
+    --help|-h) usage; return 0 ;;
+    "") usage >&2; die 2 "a backup directory is required." ;;
+  esac
+
+  local backup="$1"
+
+  # Argument validation before the privilege check, matching every other command
+  # here: a directory that is not a backup is not a backup whoever ran this, and
+  # saying so is more useful than "must run as root" to someone testing the
+  # rollback path before they need it.
+  [ -d "${backup}" ] || die 2 "backup directory does not exist: ${backup}"
+  [ -L "${backup}" ] && die 2 "backup directory is a symlink, which is not accepted: ${backup}"
+
+  # Validate before touching anything live. A backup that is missing sshd_config
+  # is not a backup of /etc/ssh, and restoring it would leave a host with no
+  # server configuration at all -- strictly worse than the state that triggered
+  # this rollback.
+  [ -f "${backup}/sshd_config" ] \
+    || die 2 "${backup} has no sshd_config; this is not a backup of /etc/ssh."
+
+  local owner
+  owner="$(stat -c '%U' "${backup}")"
+  [ "${owner}" = "root" ] || die 2 "backup is owned by ${owner}, expected root."
+
+  [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+
+  log "restoring ${backup} over ${LIVE}"
+
+  # The current (broken) configuration is kept. Whatever went wrong is the thing
+  # someone will want to read afterwards, and this is the only moment it still
+  # exists.
+  local failed="${backup}.failed-config"
+  if [ ! -e "${failed}" ]; then
+    if cp -a "${LIVE}" "${failed}" 2>/dev/null; then
+      log "kept the failing configuration at ${failed}"
+    else
+      # Not fatal. Preserving the evidence is worth doing and not worth
+      # abandoning the restore over -- the restore is why this ran.
+      log "could not preserve the failing configuration; continuing with the restore"
+    fi
+  fi
+
+  # Copy contents rather than replacing the directory: /etc/ssh holds host keys
+  # that other things reference, and swapping the directory out from under a
+  # running sshd is a needless second variable.
+  cp -a "${backup}/." "${LIVE}/" || die 6 "could not copy the backup into ${LIVE}"
+
+  if ! sshd -t; then
+    # The restored configuration is itself invalid. Say so loudly and stop:
+    # reloading now would be reloading something already known to be broken.
+    die 6 "the RESTORED configuration fails sshd -t. Use the provider console."
+  fi
+
+  if systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null; then
+    log "restored and reloaded. A new SSH session should now work."
+    log "the configuration that failed is at ${failed}"
+    return 0
+  fi
+
+  # Deliberately not restarting as a fallback. If reload failed, restart is
+  # unlikely to succeed and certain to drop every existing session -- including
+  # the one someone may be using to fix this by hand right now.
+  die 6 "files were restored but sshd would not reload. Use the provider console."
+}
+
+main "$@"
