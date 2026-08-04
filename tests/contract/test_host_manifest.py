@@ -405,7 +405,11 @@ def test_every_field_path_a_shell_script_asks_for_resolves(example: dict[str, An
     for path in sorted((REPO_ROOT / "bin").glob("*.sh")):
         text = path.read_text(encoding="utf-8")
         paths.extend(
-            (path.name, dotted) for dotted in set(re.findall(r"host_field\s+([a-z_.]+)", text))
+            # Digits belong in the character class: without them
+            # `expected_public_ipv4` is extracted as `expected_public_ipv` and
+            # this test reports a failure against a field that is perfectly fine.
+            (path.name, dotted)
+            for dotted in set(re.findall(r"host_field\s+([a-z0-9_.]+)", text))
         )
 
     assert paths, "no host_field call was found; this test is measuring nothing"

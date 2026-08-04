@@ -96,6 +96,87 @@ def test_provision_host_installs_launchers_before_hardening_ssh() -> None:
 
 
 # ---------------------------------------------------------------------------
+# The reload is the point of no return
+# ---------------------------------------------------------------------------
+#
+# The timer is the last line of defence, not the first. Reloading a merged
+# configuration and finding out from a failed login that it was wrong is the
+# scenario the timer exists to survive — but it is one an operator should
+# almost never reach, because the merged policy can be read before it is
+# loaded and backed out for free.
+
+
+def provision_source() -> str:
+    return (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
+
+
+def ssh_apply_section() -> str:
+    body = provision_source().split("apply_baseline()", 1)[1]
+    return body.split("== ssh ==", 1)[1].split("== docker ==", 1)[0]
+
+
+def test_the_resolved_policy_is_verified_before_the_reload() -> None:
+    """`sshd -t` is syntax. It says nothing about who can still authenticate."""
+    section = ssh_apply_section()
+    assert "verify_resolved_sshd_policy" in section, "nothing checks the merged policy"
+    assert section.index("verify_resolved_sshd_policy") < section.index("systemctl reload"), (
+        "the configuration is reloaded before its resolved policy is checked"
+    )
+
+
+def test_a_wrong_policy_removes_the_snippet_instead_of_loading_it() -> None:
+    """On-disk state must not claim a hardening that was never loaded.
+
+    Leaving the file behind after refusing means the next reload — a package
+    upgrade, an unrelated `systemctl reload ssh` — applies the configuration
+    this run just decided was wrong, at a moment nobody is watching.
+    """
+    section = ssh_apply_section()
+    verify_index = section.index("verify_resolved_sshd_policy")
+    tail = section[verify_index:]
+    removal = tail.index('rm -f "${SSH_SNIPPET}"')
+    assert removal < tail.index("systemctl reload"), "a rejected snippet is left on disk"
+
+
+def test_a_syntax_failure_also_removes_the_snippet() -> None:
+    section = ssh_apply_section()
+    between = section[section.index("sshd -t") : section.index("verify_resolved_sshd_policy")]
+    assert 'rm -f "${SSH_SNIPPET}"' in between
+
+
+def test_the_probe_resolves_match_blocks() -> None:
+    """Without -C, a `Match User op` that disables pubkey auth is invisible.
+
+    Match applies wherever it appears, so being first in the include order is no
+    protection against it — which is exactly why the resolved value, not the
+    file's contents, is what gets checked.
+    """
+    body = provision_source().split("verify_resolved_sshd_policy()", 1)[1].split("\n}", 1)[0]
+    assert "sshd -T -C" in body
+    assert "user=${operator}" in body
+
+
+def test_check_and_apply_enforce_the_same_policy_list() -> None:
+    """Two lists under one name is two policies, and only one of them is tested."""
+    source = provision_source()
+    assert source.count("SSHD_REQUIRED_POLICY=(") == 1
+    assert source.count('"${SSHD_REQUIRED_POLICY[@]}"') == 2, (
+        "the baseline check and the safety gate do not both read the shared policy list"
+    )
+
+
+def test_the_policy_list_covers_the_directives_that_decide_access() -> None:
+    source = provision_source()
+    block = source.split("SSHD_REQUIRED_POLICY=(", 1)[1].split(")", 1)[0]
+    for directive in (
+        "pubkeyauthentication yes",
+        "passwordauthentication no",
+        "permitrootlogin no",
+    ):
+        assert directive in block, f"the shared policy list omits {directive!r}"
+
+
+# ---------------------------------------------------------------------------
 # It refuses rather than guesses
 # ---------------------------------------------------------------------------
 

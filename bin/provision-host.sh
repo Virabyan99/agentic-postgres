@@ -36,6 +36,22 @@ readonly SSH_SNIPPET="/etc/ssh/sshd_config.d/00-agentic-postgres-ssh.conf"
 readonly ROLLBACK_UNIT="apg-ssh-rollback"
 readonly UFW_ROLLBACK_UNIT="apg-ufw-rollback"
 
+# The directives whose *resolved* value decides whether an operator can still
+# get in, and whether the hardening did anything. One list, used both by --check
+# to report and by --apply to refuse: a baseline that reports on one set while
+# the safety gate enforces another is two policies wearing one name.
+#
+# Resolved, not configured. OpenSSH takes the first obtained value across a
+# lexicographic include order and Match blocks override regardless of order, so
+# what our file says and what sshd decided are different questions.
+readonly SSHD_REQUIRED_POLICY=(
+  "pubkeyauthentication yes"
+  "passwordauthentication no"
+  "permitrootlogin no"
+  "kbdinteractiveauthentication no"
+  "permitemptypasswords no"
+)
+
 MODE="check"
 HOST_MANIFEST=""
 CONFIRM_SSH_OK=0
@@ -200,7 +216,7 @@ check_baseline() {
   if command -v sshd >/dev/null 2>&1; then
     local resolved
     resolved="$(sshd -T 2>/dev/null || true)"
-    for pair in "permitrootlogin no" "passwordauthentication no" "pubkeyauthentication yes"; do
+    for pair in "${SSHD_REQUIRED_POLICY[@]}"; do
       if printf '%s\n' "${resolved}" | grep -qi "^${pair}$"; then
         ok "sshd resolved ${pair}"
       else
@@ -322,6 +338,53 @@ PYTHON
 
 timer_is_armed() {
   systemctl list-timers "$1*" --all 2>/dev/null | grep -q "$1"
+}
+
+# Advisory. Being first in the include order beats a plain directive in a later
+# file, but nothing beats a Match block, which applies wherever it appears. The
+# authoritative answer is what sshd actually resolves, checked below; this exists
+# so that when that check refuses, the operator can see what to go and look at.
+report_conflicting_snippets() {
+  local snippet found=0
+  for snippet in /etc/ssh/sshd_config.d/*.conf; do
+    [ -f "${snippet}" ] || continue
+    [ "${snippet}" = "${SSH_SNIPPET}" ] && continue
+    if grep -qiE '^[[:space:]]*Match[[:space:]]' "${snippet}"; then
+      note "NOTE ${snippet} contains a Match block; it applies regardless of include order."
+      found=1
+    fi
+  done
+  return "${found}"
+}
+
+# Verify the merged configuration before reloading it, and undo it if it is
+# wrong. `sshd -t` checks syntax; it has nothing to say about whether the policy
+# that came out of the merge still lets the operator authenticate. Reloading
+# first and discovering that from a failed login is what the rollback timer is
+# for, and the timer is the last line of defence, not the first.
+#
+# -C resolves Match blocks the way sshd will for this operator's real
+# connection. Without it a `Match User op` re-enabling password authentication,
+# or worse disabling pubkey, is invisible here and decisive in production.
+verify_resolved_sshd_policy() {
+  local operator="$1" probe_address="$2" resolved pair missing=0
+
+  if ! resolved="$(sshd -T -C "user=${operator},host=localhost,addr=${probe_address}" 2>/dev/null)"
+  then
+    # Older sshd, or criteria it will not accept. A plain -T still resolves the
+    # global block, which is better than resolving nothing.
+    note "NOTE sshd rejected the -C probe; falling back to the global resolution."
+    resolved="$(sshd -T 2>/dev/null || true)"
+  fi
+
+  for pair in "${SSHD_REQUIRED_POLICY[@]}"; do
+    printf '%s\n' "${resolved}" | grep -qi "^${pair}$" || {
+      printf '  RESOLVED POLICY WRONG: expected %q\n' "${pair}" >&2
+      missing=$((missing + 1))
+    }
+  done
+
+  [ "${missing}" -eq 0 ]
 }
 
 rollback_is_armed() {
@@ -500,8 +563,29 @@ apply_baseline() {
 
   printf '\n== ssh ==\n'
   if rollback_is_armed; then
+    local operator probe_address
+    operator="$(host_field ssh.operator_user)"
+    # The client address the probe pretends to come from. Any member of the
+    # allowed set will do; the host's own public address is a real routable one,
+    # which exercises an Address match the way a loopback address would not.
+    probe_address="$(host_field host.expected_public_ipv4)"
+
+    report_conflicting_snippets || true
+
     install -m 0644 -o root -g root "${ETC}/00-agentic-postgres-ssh.conf" "${SSH_SNIPPET}"
-    sshd -t || die 6 "sshd rejected the configuration; the snippet was written but not loaded."
+    sshd -t || {
+      rm -f "${SSH_SNIPPET}"
+      die 6 "sshd rejected the configuration; the snippet was removed and nothing was loaded."
+    }
+
+    # Written but not yet loaded. This is the last moment at which backing out
+    # costs nothing, so it is where the resolved policy gets checked.
+    verify_resolved_sshd_policy "${operator}" "${probe_address}" || {
+      rm -f "${SSH_SNIPPET}"
+      die 6 "the merged sshd policy is not what was asked for; snippet removed, nothing reloaded."
+    }
+    note "resolved sshd policy verified for ${operator}"
+
     # reload, never restart: restart drops every existing session, including the
     # one holding the door open.
     systemctl reload ssh || die 6 "sshd reload failed."
