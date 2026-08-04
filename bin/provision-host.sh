@@ -125,8 +125,15 @@ from pathlib import Path
 
 from agentic_postgres.host_config import load_host_manifest
 
-value = load_host_manifest(Path(sys.argv[1]))["host"]
+# Resolved from the whole document, not from the host block. `host`, `ssh`,
+# `edge` and `infisical` are siblings, so a path is written in full:
+# "ssh.port", "host.public_interface". Starting inside `host` made every
+# caller's path wrong and produced a bare KeyError with no field name in it.
+document = load_host_manifest(Path(sys.argv[1]))
+value = document
 for part in sys.argv[2].split("."):
+    if not isinstance(value, dict) or part not in value:
+        sys.exit(f"host manifest has no field {sys.argv[2]!r} (stopped at {part!r})")
     value = value[part]
 print(value)
 PYTHON
@@ -298,7 +305,17 @@ rollback_is_armed() {
 render_templates() {
   local ssh_port public_interface
   ssh_port="$(host_field ssh.port)"
-  public_interface="$(host_field network.public_interface)"
+  public_interface="$(host_field host.public_interface)"
+
+  # The schema permits 'auto'. Resolve it here rather than writing the literal
+  # string into a firewall rule, where it would match no interface and the
+  # policy would silently protect nothing.
+  if [ "${public_interface}" = "auto" ]; then
+    public_interface="$(ip -4 route show default | awk '{print $5}' | head -1)"
+    [ -n "${public_interface}" ] \
+      || die 3 "public_interface is 'auto' but no default route exists to resolve it from."
+    note "resolved public_interface 'auto' to ${public_interface}"
+  fi
 
   install -d -m 0755 -o root -g root "${ETC}"
 

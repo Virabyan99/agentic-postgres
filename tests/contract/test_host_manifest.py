@@ -386,6 +386,77 @@ def test_the_level_scan_would_catch_a_real_mismatch() -> None:
     assert not re.search(r"""\["host"\]\s*\[\s*["']infisical["']""", 'x = host["infisical"]')
 
 
+def test_every_field_path_a_shell_script_asks_for_resolves(example: dict[str, Any]) -> None:
+    """Resolve each ``host_field a.b`` against the real example manifest.
+
+    The third occurrence of the same family, and the first two tests could not
+    see it: the access lived inside a Python heredoc embedded in a shell script,
+    so a scan over ``bin/*.py`` never read it. ``host_field`` resolved from
+    inside the ``host`` block while every caller passed a top-level path, and
+    ``host_field network.public_interface`` named a block that does not exist.
+
+    Both produced a bare ``KeyError`` on a live host with no field name in it.
+    Resolving the paths against the committed example is what makes them
+    checkable offline at all.
+    """
+    import re
+
+    paths: list[tuple[str, str]] = []
+    for path in sorted((REPO_ROOT / "bin").glob("*.sh")):
+        text = path.read_text(encoding="utf-8")
+        paths.extend(
+            (path.name, dotted) for dotted in set(re.findall(r"host_field\s+([a-z_.]+)", text))
+        )
+
+    assert paths, "no host_field call was found; this test is measuring nothing"
+
+    unresolved: list[str] = []
+    for script, dotted in sorted(paths):
+        value: Any = example
+        for part in dotted.split("."):
+            if not isinstance(value, dict) or part not in value:
+                unresolved.append(f"{script}: host_field {dotted} (stopped at {part!r})")
+                break
+            value = value[part]
+
+    assert not unresolved, f"field paths that do not exist in host.example.yaml: {unresolved}"
+
+
+def test_the_path_walk_would_reject_a_bad_path(example: dict[str, Any]) -> None:
+    """Guard the guard. The first version of the walk above checked each level
+    without descending into it, so every two-part path failed at its second
+    component -- it rejected the correct paths and would have accepted nothing.
+    """
+
+    def resolves(dotted: str) -> bool:
+        value: Any = example
+        for part in dotted.split("."):
+            if not isinstance(value, dict) or part not in value:
+                return False
+            value = value[part]
+        return True
+
+    assert resolves("ssh.port")
+    assert resolves("host.public_interface")
+    assert resolves("edge.acme_email")
+    assert not resolves("network.public_interface")
+    assert not resolves("host.ssh.port")
+    assert not resolves("ssh.nonexistent")
+
+
+def test_the_field_path_resolver_starts_at_the_document_root() -> None:
+    """``ssh`` and ``edge`` are siblings of ``host``, so resolution starts above
+    all of them. Starting inside ``host`` makes every path silently wrong."""
+    text = (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
+    body = text.split("host_field()", 1)[1].split("PYTHON\n}", 1)[0]
+    assert 'load_host_manifest(Path(sys.argv[1]))["host"]' not in body, (
+        "host_field resolves from inside the host block; callers pass full paths"
+    )
+    assert "sys.exit(" in body, (
+        "host_field raises a bare KeyError instead of naming the missing field"
+    )
+
+
 def test_the_organization_id_is_a_uuid(example: dict[str, Any]) -> None:
     """The create calls take a UUID. A slug here fails at the provider, over the
     network, after a credential has already been sent."""
