@@ -95,6 +95,79 @@ def code_of(relative: str) -> str:
     return "\n".join(lines)
 
 
+def without_resolver(code: str) -> str:
+    """Drop the ``python_bin`` function body.
+
+    It is the one place that legitimately names ``python`` -- it is what does
+    the resolving, and its failure message lists the three candidates it tried.
+    Excluding the definition rather than loosening the pattern keeps the scan
+    strict everywhere else.
+    """
+    lines: list[str] = []
+    inside = False
+    for line in code.splitlines():
+        if line.startswith("python_bin() {"):
+            inside = True
+            continue
+        if inside:
+            if line == "}":
+                inside = False
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def test_the_resolver_stripper_removes_only_the_resolver() -> None:
+    """Guard the guard: over-stripping would hide real invocations."""
+    stripped = without_resolver(code_of("bin/provision-host.sh"))
+    assert "python_bin() {" not in stripped
+    assert "$(python_bin)" in stripped, "the stripper removed the call sites too"
+    assert "check_baseline" in stripped, "the stripper ate the rest of the script"
+
+
+@pytest.mark.parametrize("relative", ROOT_COMMANDS)
+def test_no_script_invokes_a_bare_python(relative: str) -> None:
+    """Ubuntu ships no ``python``, and ``sudo`` resets PATH.
+
+    A standing trap this repository documents, and five Session 2 scripts walked
+    into it: every one invoked a bare ``python``. It cannot fail locally, where
+    an activated venv provides the name, and it cannot fail without sudo, where
+    PATH survives. It fails on a host, as root, from inside a heredoc, reporting
+    ``python: command not found``.
+
+    The resolver prefers the repository's own venv precisely because
+    ``secure_path`` makes the operator's activated venv invisible.
+    """
+    offenders = [
+        line.strip()
+        for line in without_resolver(code_of(relative)).splitlines()
+        if re.search(r"(?<![\w/.\"$-])python(?![\w.\"-])", line)
+    ]
+    assert not offenders, f"{relative} invokes a bare python: {offenders}"
+
+
+@pytest.mark.parametrize("relative", ROOT_COMMANDS)
+def test_every_script_that_runs_python_resolves_the_interpreter(relative: str) -> None:
+    code = code_of(relative)
+    if "$(python_bin)" not in code:
+        pytest.skip(f"{relative} runs no Python")
+    assert "python_bin() {" in code, f"{relative} calls python_bin without defining it"
+    assert ".venv/bin/python" in code, (
+        f"{relative} does not prefer the repository venv, so sudo's secure_path wins"
+    )
+
+
+def test_the_bare_python_scan_would_catch_a_real_one() -> None:
+    """Guard the guard, against the exact lines that shipped and their fixes."""
+    caught = re.compile(r"(?<![\w/.\"$-])python(?![\w.\"-])")
+    assert caught.search('PYTHONPATH="${ROOT_DIR}/src" python - "${HOST}" <<PY')
+    assert caught.search("  python -m pytest -q")
+    # The fixed forms must not match.
+    assert not caught.search('PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "${HOST}"')
+    assert not caught.search('  "$(python_bin)" -m pytest -q')
+    assert not caught.search("  elif command -v python3 >/dev/null 2>&1; then")
+
+
 def test_the_usage_stripper_actually_strips() -> None:
     """Guard the guard: if this stopped working, several scans below would be
     reading documentation instead of code and would pass on anything."""

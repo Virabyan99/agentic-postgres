@@ -100,6 +100,28 @@ parse_arguments() {
   [ -f "${REQUIREMENTS}" ] || die 2 "secret contract not found: ${REQUIREMENTS}"
 }
 
+# Interpreter resolution, in this order and for these reasons:
+#
+#   1. the repository's own venv, because sudo resets PATH to secure_path and a
+#      venv the operator activated is therefore invisible to this script;
+#   2. python3, because Ubuntu ships no bare `python` and has not for years;
+#   3. python, for a machine where the venv is already on PATH.
+#
+# Assuming a bare `python` is a standing trap this repository documents, and
+# five Session 2 scripts walked into it. It fails only on a host, only under
+# sudo, and reports `python: command not found` from inside a heredoc.
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then
+    printf '%s' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    die 3 "no Python interpreter found (looked for .venv/bin/python, python3, python)."
+  fi
+}
+
 main() {
   parse_arguments "$@"
 
@@ -121,7 +143,7 @@ main() {
   )
   [ "${DRY_RUN}" -eq 1 ] && arguments+=(--plan)
 
-  PYTHONPATH="${ROOT_DIR}/src" exec python \
+  PYTHONPATH="${ROOT_DIR}/src" exec "$(python_bin)" \
     "${ROOT_DIR}/bin/materialize-secrets.py" "${arguments[@]}"
 }
 

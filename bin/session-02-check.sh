@@ -79,6 +79,28 @@ die() {
   exit "$code"
 }
 
+# Interpreter resolution, in this order and for these reasons:
+#
+#   1. the repository's own venv, because sudo resets PATH to secure_path and a
+#      venv the operator activated is therefore invisible to this script;
+#   2. python3, because Ubuntu ships no bare `python` and has not for years;
+#   3. python, for a machine where the venv is already on PATH.
+#
+# Assuming a bare `python` is a standing trap this repository documents, and
+# five Session 2 scripts walked into it. It fails only on a host, only under
+# sudo, and reports `python: command not found` from inside a heredoc.
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then
+    printf '%s' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    die 3 "no Python interpreter found (looked for .venv/bin/python, python3, python)."
+  fi
+}
+
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 
 parse_arguments() {
@@ -144,14 +166,14 @@ run_suite() {
   [ -n "${KEYWORD}" ] && arguments+=(-k "${KEYWORD}")
   [ -n "${junit}" ] && arguments+=(--junitxml="${junit}")
 
-  python -m pytest "${arguments[@]}"
+  "$(python_bin)" -m pytest "${arguments[@]}"
 }
 
 mode_offline() {
   step "1. Static quality"
   shellcheck deploy.sh bin/*.sh libexec/*
-  python -m ruff check src bin tests
-  python -m ruff format --check src bin tests
+  "$(python_bin)" -m ruff check src bin tests
+  "$(python_bin)" -m ruff format --check src bin tests
   bin/lock-versions.sh --check
 
   step "2. Offline Session 2 contract suite"
@@ -167,8 +189,8 @@ mode_offline() {
   printf 'edge model resolves\n'
 
   step "5. Registry and generated documentation"
-  python -m pytest -q tests/contract/test_acceptance_registry.py
-  python bin/render-acceptance-matrix.py --check
+  "$(python_bin)" -m pytest -q tests/contract/test_acceptance_registry.py
+  "$(python_bin)" bin/render-acceptance-matrix.py --check
 
   printf '\n\033[1msession-02-check: offline PASSED\033[0m\n'
 }
@@ -193,7 +215,7 @@ mode_host() {
   run_suite "live_host" "${EVIDENCE_DIR}/session-02-host-tests.xml"
 
   step "3. Host evidence"
-  python bin/write-session-evidence.py --session 2 --mode host \
+  "$(python_bin)" bin/write-session-evidence.py --session 2 --mode host \
     --project-a-outputs "${PROJECT_A_OUTPUTS}" \
     --output "${EVIDENCE_DIR}/session-02-host.json"
 
@@ -221,7 +243,7 @@ mode_external() {
   run_suite "external" "${EVIDENCE_DIR}/session-02-external-tests.xml"
 
   step "2. External evidence"
-  python bin/write-session-evidence.py --session 2 --mode external \
+  "$(python_bin)" bin/write-session-evidence.py --session 2 --mode external \
     --project-a-outputs "${PROJECT_A_OUTPUTS}" \
     --output "${EVIDENCE_DIR}/session-02-external.json"
 
