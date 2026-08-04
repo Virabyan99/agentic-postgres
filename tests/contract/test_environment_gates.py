@@ -160,6 +160,79 @@ def test_every_environment_dependent_test_names_its_variables() -> None:
     )
 
 
+#: Fixtures that read a deployment out of the environment, and the variable each
+#: one needs. Requesting the fixture without declaring the variable produces a
+#: collection-time KeyError instead of a skip.
+FIXTURE_REQUIREMENTS = {
+    "project_a": "APG_PROJECT_A_OUTPUTS",
+    "project_b": "APG_PROJECT_B_OUTPUTS",
+}
+
+
+def consumed_variables() -> list[tuple[str, set[str]]]:
+    """What each test actually needs, read from its parameters and its body."""
+    needs: list[tuple[str, set[str]]] = []
+
+    for path in all_test_modules():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            if not node.name.startswith("test_"):
+                continue
+
+            required = {
+                FIXTURE_REQUIREMENTS[argument.arg]
+                for argument in node.args.args
+                if argument.arg in FIXTURE_REQUIREMENTS
+            }
+            # os.environ["APG_..."] anywhere in the body counts too: reading it
+            # directly is the same dependency as taking the fixture.
+            for descendant in ast.walk(node):
+                if (
+                    isinstance(descendant, ast.Subscript)
+                    and isinstance(descendant.slice, ast.Constant)
+                    and isinstance(descendant.slice.value, str)
+                    and descendant.slice.value.startswith("APG_")
+                ):
+                    required.add(descendant.slice.value)
+
+            if required:
+                relative = path.relative_to(REPO_ROOT).as_posix()
+                needs.append((f"{relative}::{node.name}", required))
+
+    return needs
+
+
+def test_every_test_declares_the_environment_it_consumes() -> None:
+    """Carrying *a* gate is not the same as carrying the *right* gate.
+
+    ``test_every_environment_dependent_test_names_its_variables`` only checks
+    that a live_host test declares something. Five tests in
+    ``tests/deployment/test_session2_host.py`` declared ``APG_LIVE_HOST`` and
+    then took the ``project_a`` fixture, so on a host with no project deployed
+    they raised ``KeyError: 'APG_PROJECT_A_OUTPUTS'`` at fixture setup instead of
+    skipping. That is the failure this file exists to prevent, and it passed the
+    existing check comfortably.
+    """
+    declared = {node_id: variables for node_id, _, variables in gated_functions()}
+
+    offenders = [
+        (node_id, sorted(required - declared.get(node_id, set())))
+        for node_id, required in consumed_variables()
+        if required - declared.get(node_id, set())
+    ]
+    assert not offenders, (
+        "tests that consume an environment they do not declare: "
+        f"{offenders}. Without the declaration they error instead of skipping."
+    )
+
+
+def test_the_consumption_scan_finds_something() -> None:
+    """A scan over an empty set proves nothing and passes forever."""
+    assert consumed_variables(), "no test consumes a deployment fixture; the scan is stale"
+
+
 def test_every_gate_names_a_registered_variable() -> None:
     """A typo here produces a test that silently never runs anywhere."""
     offenders = [

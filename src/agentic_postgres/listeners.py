@@ -41,6 +41,10 @@ class Listener:
     address: str
     port: int
     is_loopback: bool
+    #: ``"tcp"``/``"udp"`` when ``ss`` printed a Netid column (``-lntu``), else
+    #: ``None``. ``ss -lnt`` omits it, and inventing a protocol for those rows
+    #: would let a UDP allowance silently cover a TCP listener.
+    protocol: str | None = None
 
 
 def _split_host_port(endpoint: str) -> tuple[str, int] | None:
@@ -97,13 +101,20 @@ def parse_listeners(ss_output: str) -> tuple[Listener, ...]:
     """
     listeners: list[Listener] = []
     for line in ss_output.splitlines():
-        for field in line.split():
+        fields = line.split()
+        protocol = fields[0].lower() if fields and fields[0].lower() in {"tcp", "udp"} else None
+        for field in fields:
             parsed = _split_host_port(field)
             if parsed is None:
                 continue
             address, port = parsed
             listeners.append(
-                Listener(address=address, port=port, is_loopback=_is_loopback(address))
+                Listener(
+                    address=address,
+                    port=port,
+                    is_loopback=_is_loopback(address),
+                    protocol=protocol,
+                )
             )
             break
     return tuple(listeners)

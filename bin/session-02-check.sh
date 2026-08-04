@@ -232,6 +232,11 @@ mode_host() {
   mkdir -p "${EVIDENCE_DIR}"
   export APG_LIVE_HOST=1
   if [ "${BASELINE_ONLY}" -eq 0 ]; then
+    # A project cannot be deployed without the edge, so project outputs imply a
+    # running edge. Declared separately anyway: a test that needs Traefik should
+    # say so rather than borrow a project's variable, and the two states are
+    # distinguishable on a host between `edge.sh up` and the first deploy.
+    export APG_EDGE_DEPLOYED=1
     export APG_PROJECT_A_OUTPUTS="${PROJECT_A_OUTPUTS}"
     [ -n "${PROJECT_B_OUTPUTS}" ] && export APG_PROJECT_B_OUTPUTS="${PROJECT_B_OUTPUTS}"
     [ -n "${SENTINEL_FILE}" ] && export APG_SECRET_SENTINEL_FILE="${SENTINEL_FILE}"

@@ -64,6 +64,20 @@ def test_the_baseline_reads_tcp_and_that_is_a_choice() -> None:
     assert unexpected_public_ports(HOST_SS_ALL, BASELINE_PORTS) == (68,)
 
 
+def test_protocol_is_captured_when_ss_reports_it() -> None:
+    """The live host check allows udp/68 by name, which needs the protocol.
+
+    A port-only allowance for 68 would also permit a TCP listener on 68, which
+    is not what the DHCP client does and not what was decided.
+    """
+    by_key = {
+        (listener.protocol, listener.port): listener for listener in parse_listeners(HOST_SS_ALL)
+    }
+    assert ("udp", 68) in by_key
+    assert ("tcp", 22) in by_key
+    assert ("tcp", 68) not in by_key
+
+
 def test_the_dns_stub_is_recognised_as_loopback_but_dhcp_is_not() -> None:
     """Both are 'not 22/80/443'. Only one of them is unreachable from outside."""
     by_port = {listener.port: listener for listener in parse_listeners(HOST_SS_ALL)}
@@ -124,8 +138,16 @@ def test_both_ss_column_layouts_parse_to_the_same_answer() -> None:
     """
     with_netid = "tcp   LISTEN 0      4096              0.0.0.0:5432        0.0.0.0:*"
     without_netid = "LISTEN 0      4096              0.0.0.0:5432        0.0.0.0:*"
-    assert parse_listeners(with_netid) == parse_listeners(without_netid)
+
+    (a,), (b,) = parse_listeners(with_netid), parse_listeners(without_netid)
+    assert (a.address, a.port, a.is_loopback) == (b.address, b.port, b.is_loopback)
     assert unexpected_public_ports(without_netid, BASELINE_PORTS) == (5432,)
+
+    # Protocol is the one field that legitimately differs, and it must be None
+    # rather than a guess: inventing "tcp" for a row that did not say so would
+    # let a UDP allowance quietly cover a TCP listener.
+    assert a.protocol == "tcp"
+    assert b.protocol is None
 
 
 def test_a_queue_depth_is_never_mistaken_for_an_address() -> None:

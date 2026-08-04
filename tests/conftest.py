@@ -81,6 +81,10 @@ def future_markers_in_source() -> dict[str, tuple[int, str]]:
 #: that is absent. The tuple is closed so that a typo in a gate reads as an
 #: error rather than as a test that quietly never runs anywhere.
 ENVIRONMENT_VARIABLES = (
+    # The edge plane comes up before any project is deployed, so "the edge is
+    # running" and "a project exists" are genuinely different states. A test
+    # that needs Traefik must not have to claim it needs a project's outputs.
+    "APG_EDGE_DEPLOYED",
     "APG_LIVE_HOST",
     "APG_PROJECT_A_OUTPUTS",
     "APG_PROJECT_B_OUTPUTS",

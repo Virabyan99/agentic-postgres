@@ -23,6 +23,7 @@ from typing import Any
 import pytest
 
 from agentic_postgres.host_config import EDGE_STACK_NAME
+from agentic_postgres.listeners import parse_listeners
 
 pytestmark = [
     pytest.mark.p0,
@@ -128,22 +129,30 @@ def test_unattended_upgrades_is_enabled_and_does_not_reboot(sh, sh_status) -> No
 
 
 def test_only_ssh_and_the_edge_listen_on_a_public_address(sshd_config: dict[str, str], sh) -> None:
-    """Anything else listening publicly is an ingress path nothing accounts for."""
-    allowed = {int(sshd_config["port"]), 80, 443}
+    """Anything else listening publicly is an ingress path nothing accounts for.
 
-    offenders: list[str] = []
-    for line in sh("ss", "-H", "-lntup").splitlines():
-        fields = line.split()
-        if len(fields) < 5:
-            continue
-        address, _, port = fields[4].rpartition(":")
-        address = address.strip("[]")
-        if not port.isdigit() or address in {"::1"} or address.startswith("127."):
-            continue
-        if int(port) not in allowed:
-            offenders.append(line.strip())
+    Parsed by ``agentic_postgres.listeners``, the same code
+    ``bin/provision-host.sh --check`` uses. This module had its own
+    implementation, which read a fixed column index and classified loopback by
+    string prefix; two parsers for one question is two chances to disagree about
+    what "public" means, and they did.
 
-    assert not offenders, "unexpected public listeners:\n" + "\n".join(offenders)
+    UDP/68 is permitted by name. The DHCP client genuinely binds the public
+    interface, and it is how this host holds its address — but allowing it is a
+    decision, not a rounding error, so it is written down rather than absorbed by
+    ignoring UDP altogether. Ignoring UDP wholesale would hide a real UDP
+    service the day one appears.
+    """
+    allowed = {("tcp", int(sshd_config["port"])), ("tcp", 80), ("tcp", 443), ("udp", 68)}
+
+    offenders = [
+        listener
+        for listener in parse_listeners(sh("ss", "-H", "-lntup"))
+        if not listener.is_loopback and (listener.protocol, listener.port) not in allowed
+    ]
+    assert not offenders, "unexpected public listeners:\n" + "\n".join(
+        f"  {item.protocol}/{item.port} on {item.address}" for item in offenders
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +170,7 @@ def test_only_the_edge_publishes_container_ports(running_containers: list[dict[s
     assert not offenders, f"non-edge containers publish host ports: {offenders}"
 
 
+@pytest.mark.requires_environment("APG_EDGE_DEPLOYED")
 def test_the_edge_publishes_exactly_eighty_and_four_four_three(
     running_containers: list[dict[str, Any]],
 ) -> None:
@@ -223,14 +233,28 @@ def test_the_live_policy_is_the_installed_policy(as_root, sh, command: str, inst
     ]
     live = [line.strip() for line in sh(command, "-S", "DOCKER-USER").splitlines()]
 
-    # Not set equality. `-S` prefixes every rule with `-A DOCKER-USER` and the
-    # reconciler inserts an ownership comment ahead of the rendered
-    # specification, so a rendered line is never equal to a live one — it is the
-    # tail of one. Comparing for equality here would fail against a perfectly
-    # correct chain, which is a test that can only ever be deleted.
-    ours = [rule for rule in live if f'--comment "{TAG}"' in rule or f"--comment {TAG}" in rule]
-    missing = [spec for spec in expected if not any(rule.endswith(spec) for rule in live)]
-    assert not missing, f"installed rules absent from the running {command} chain: {missing}"
+    # Neither equality nor a suffix match. `-S` prefixes every rule with
+    # `-A DOCKER-USER`, and iptables prints matches in its own canonical order
+    # rather than the order they were given — so the ownership comment, passed
+    # first on the command line, comes back sitting just before the `-j`. A
+    # rendered spec is therefore neither equal to a live rule nor the tail of
+    # one; it is what remains after the comment match is taken out.
+    #
+    # This is the second wrong comparison here. The first assumed set equality
+    # and could never have passed; the second assumed argument order survives
+    # iptables, and failed against a chain that was completely correct. Both
+    # would have been caught by looking at one line of real `-S` output.
+    def without_ownership(rule: str) -> str:
+        return re.sub(rf'\s-m comment --comment "?{re.escape(TAG)}"?', "", rule)
+
+    normalised = [without_ownership(rule) for rule in live]
+    ours = [rule for rule in live if without_ownership(rule) != rule]
+
+    missing = [spec for spec in expected if f"-A DOCKER-USER {spec}" not in normalised]
+    assert not missing, (
+        f"installed rules absent from the running {command} chain: {missing}\n"
+        f"live chain:\n" + "\n".join(live)
+    )
 
     assert len(ours) == len(expected), (
         f"{command} DOCKER-USER carries {len(ours)} tagged rules for {len(expected)} rendered "
@@ -239,7 +263,7 @@ def test_the_live_policy_is_the_installed_policy(as_root, sh, command: str, inst
 
     # Order decides the policy. The established-traffic RETURN has to precede
     # the port RETURNs, and every one of them has to precede the DROP.
-    positions = [next(i for i, rule in enumerate(live) if rule.endswith(spec)) for spec in expected]
+    positions = [normalised.index(f"-A DOCKER-USER {spec}") for spec in expected]
     assert positions == sorted(positions), (
         f"{command} DOCKER-USER applies the rendered rules out of order:\n" + "\n".join(live)
     )
@@ -289,6 +313,7 @@ def test_the_daemon_runs_the_configuration_we_installed(as_root, sh) -> None:
     assert info.get("Debug") is False
 
 
+@pytest.mark.requires_environment("APG_EDGE_DEPLOYED")
 def test_traefik_holds_no_docker_socket(
     as_root, sh, running_containers: list[dict[str, Any]]
 ) -> None:
@@ -303,6 +328,7 @@ def test_traefik_holds_no_docker_socket(
         assert not sockets, f"{container['Names']} mounts the Docker socket directly: {sockets}"
 
 
+@pytest.mark.requires_environment("APG_EDGE_DEPLOYED")
 def test_the_socket_proxy_refuses_a_write_call(as_root, sh_status, probe_image: str) -> None:
     """An allowlist is a claim until something is refused by it.
 
@@ -339,6 +365,7 @@ def test_the_socket_proxy_refuses_a_write_call(as_root, sh_status, probe_image: 
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.requires_environment("APG_PROJECT_A_OUTPUTS")
 def test_bootstrap_state_is_root_only_and_records_provider_ids(
     as_root, project_a: dict[str, Any]
 ) -> None:
@@ -354,6 +381,7 @@ def test_bootstrap_state_is_root_only_and_records_provider_ids(
         assert state.get(field), f"{field} is unrecorded; ownership would be adopted by name"
 
 
+@pytest.mark.requires_environment("APG_PROJECT_A_OUTPUTS")
 def test_reapplying_the_bootstrap_reports_no_change(
     as_root, sh_status, project_a: dict[str, Any]
 ) -> None:
@@ -377,12 +405,14 @@ def test_reapplying_the_bootstrap_reports_no_change(
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.requires_environment("APG_PROJECT_A_OUTPUTS")
 def test_the_deployed_document_is_owner_only() -> None:
     path = Path(os.environ["APG_PROJECT_A_OUTPUTS"])
     mode = oct(path.stat().st_mode & 0o777)
     assert mode == "0o600", mode
 
 
+@pytest.mark.requires_environment("APG_PROJECT_A_OUTPUTS")
 def test_the_deployed_document_names_the_release_that_is_running(
     project_a: dict[str, Any],
 ) -> None:
@@ -394,6 +424,7 @@ def test_the_deployed_document_names_the_release_that_is_running(
     )
 
 
+@pytest.mark.requires_environment("APG_PROJECT_A_OUTPUTS")
 def test_the_deployed_host_facts_are_real(project_a: dict[str, Any], sh) -> None:
     host = project_a["host"]
     ipaddress.ip_address(host["public_ipv4"])
