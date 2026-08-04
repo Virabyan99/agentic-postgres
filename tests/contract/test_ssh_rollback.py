@@ -80,11 +80,18 @@ def test_provision_host_names_the_path_this_installs_to() -> None:
 
 
 def test_provision_host_installs_launchers_before_hardening_ssh() -> None:
-    """Ordering: the timer cannot be armed before the file it fires exists."""
+    """Ordering: the timer cannot be armed before the file it fires exists.
+
+    Anchored on the write of the sshd snippet rather than on a mention of
+    ``rollback_is_armed``, because the function name also appears in an earlier
+    guard that has nothing to do with this ordering. A test that can be
+    satisfied by an unrelated occurrence of its own search string is measuring
+    the wrong thing.
+    """
     provision = (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
     body = provision.split("apply_baseline()", 1)[1]
-    assert body.index("install_launchers") < body.index("rollback_is_armed"), (
-        "SSH hardening is reached before the rollback launcher is installed"
+    assert body.index("install_launchers") < body.index("${SSH_SNIPPET}"), (
+        "the sshd snippet is written before the rollback launcher is installed"
     )
 
 

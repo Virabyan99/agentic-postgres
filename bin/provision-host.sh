@@ -34,15 +34,18 @@ readonly SYSTEMD_DIR="/etc/systemd/system"
 readonly BACKUP_ROOT="/var/backups/agentic-postgres"
 readonly SSH_SNIPPET="/etc/ssh/sshd_config.d/00-agentic-postgres-ssh.conf"
 readonly ROLLBACK_UNIT="apg-ssh-rollback"
+readonly UFW_ROLLBACK_UNIT="apg-ufw-rollback"
 
 MODE="check"
 HOST_MANIFEST=""
 CONFIRM_SSH_OK=0
+CONFIRM_FIREWALL_OK=0
 
 usage() {
   cat <<'USAGE'
 Usage: sudo bin/provision-host.sh --host FILE [--check | --apply]
        sudo bin/provision-host.sh --host FILE --confirm-ssh-ok
+       sudo bin/provision-host.sh --host FILE --confirm-firewall-ok
 
   --check   Report every deviation from the Session 2 baseline and change
             nothing. This is the default.
@@ -52,16 +55,24 @@ Usage: sudo bin/provision-host.sh --host FILE [--check | --apply]
             SSH session with a key and confirming it works. It is separate on
             purpose: a script that cancelled its own rollback would cancel it
             in exactly the case where the script was wrong.
+  --confirm-firewall-ok
+            Disarm the firewall rollback timer. Same rule: only after a NEW
+            session has connected through the enabled firewall.
 
   --host FILE  The host manifest.
 
-Before --apply hardens SSH it requires a rollback timer to already be armed:
+The two locking-out steps each refuse to run until their own rollback timer is
+armed, and only one may be armed at a time. A fresh host therefore takes three
+--apply passes, which is the cost of never having two unverified windows open
+at once:
 
-  sudo systemd-run --on-active=10min --unit=apg-ssh-rollback \
-    /usr/local/libexec/agentic-postgres/ssh-rollback <backup-dir>
+  1. --apply            installs launchers, units and Docker; skips both.
+  2. arm apg-ssh-rollback, --apply, verify a NEW session, --confirm-ssh-ok.
+  3. arm apg-ufw-rollback, --apply, verify a NEW session, --confirm-firewall-ok.
 
-If a new session fails after hardening, do nothing for ten minutes and let the
-timer restore the previous configuration.
+Each --apply prints the exact arm command for the step it skipped, including
+the backup directory it just created. If a new session fails after either step,
+do nothing for ten minutes and let the timer undo it.
 USAGE
 }
 
@@ -105,6 +116,7 @@ parse_arguments() {
       --check) MODE="check"; shift ;;
       --apply) MODE="apply"; shift ;;
       --confirm-ssh-ok) CONFIRM_SSH_OK=1; shift ;;
+      --confirm-firewall-ok) CONFIRM_FIREWALL_OK=1; shift ;;
       --host)
         [ "$#" -ge 2 ] || die 2 "--host requires a value."
         HOST_MANIFEST="$2"
@@ -308,8 +320,16 @@ PYTHON
 # Apply
 # ---------------------------------------------------------------------------
 
+timer_is_armed() {
+  systemctl list-timers "$1*" --all 2>/dev/null | grep -q "$1"
+}
+
 rollback_is_armed() {
-  systemctl list-timers "${ROLLBACK_UNIT}*" --all 2>/dev/null | grep -q "${ROLLBACK_UNIT}"
+  timer_is_armed "${ROLLBACK_UNIT}"
+}
+
+ufw_rollback_is_armed() {
+  timer_is_armed "${UFW_ROLLBACK_UNIT}"
 }
 
 render_templates() {
@@ -445,6 +465,13 @@ apply_baseline() {
   local ssh_port
   ssh_port="$(host_field ssh.port)"
 
+  # "Never two armed windows at once" (implementation plan §3). With both timers
+  # armed, a failure gives no way to tell which change caused it, and the two
+  # rollbacks can fire in either order.
+  if rollback_is_armed && ufw_rollback_is_armed; then
+    die 6 "both ${ROLLBACK_UNIT} and ${UFW_ROLLBACK_UNIT} are armed. Verify and disarm one first."
+  fi
+
   install -d -m 0700 -o root -g root "${BACKUP_ROOT}"
   local stamp backup
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -506,6 +533,10 @@ apply_baseline() {
   # Order is the control. The SSH allow rule goes in before default-deny, and
   # both before enable. A script that reaches `ufw enable` without an SSH rule
   # has locked the operator out, so it refuses to.
+  #
+  # Adding allow rules while ufw is inactive changes no packet's fate, so those
+  # are unconditional. `enable` is the step that can strand an operator, and it
+  # is gated on an armed rollback exactly as the SSH snippet is.
   ufw allow "${ssh_port}/tcp" >/dev/null
   ufw allow 80/tcp >/dev/null
   ufw allow 443/tcp >/dev/null
@@ -515,8 +546,26 @@ apply_baseline() {
 
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
-  ufw --force enable >/dev/null
-  note "ufw enabled with ${ssh_port}, 80 and 443 permitted"
+
+  if ufw status 2>/dev/null | grep -q 'Status: active'; then
+    # Already enforcing. Re-running is not a new window and must not demand a
+    # timer, or every idempotent re-apply becomes a two-step ceremony.
+    note "ufw is already active; rules reconciled"
+  elif ufw_rollback_is_armed; then
+    ufw --force enable >/dev/null
+    note "ufw enabled with ${ssh_port}, 80 and 443 permitted"
+    note "Open a NEW session NOW and confirm it works."
+    note "Then run: sudo bin/provision-host.sh --host ${HOST_MANIFEST} --confirm-firewall-ok"
+  else
+    printf '  SKIPPED enabling ufw: no firewall rollback timer is armed.\n'
+    printf '\n'
+    printf '  The allow rules for %s, 80 and 443 are in place but not enforcing.\n' "${ssh_port}"
+    printf '  Arm the timer, confirm it shows a future trigger, then re-run --apply:\n\n'
+    printf '    sudo systemd-run --on-active=10min --unit=%s \\\n' "${UFW_ROLLBACK_UNIT}"
+    printf '      /usr/sbin/ufw --force disable\n'
+    printf '    systemctl list-timers %s%s\n\n' "${UFW_ROLLBACK_UNIT}" "'*'"
+    printf '  Keep your current session open until a NEW one connects.\n'
+  fi
 
   "${ROOT_DIR}/bin/docker-firewall.sh" reconcile
   systemctl enable --now unattended-upgrades.service >/dev/null 2>&1 || true
@@ -528,11 +577,23 @@ apply_baseline() {
 main() {
   parse_arguments "$@"
 
+  if [ "${CONFIRM_SSH_OK}" -eq 1 ] && [ "${CONFIRM_FIREWALL_OK}" -eq 1 ]; then
+    die 2 "confirm one rollback at a time; they attest to two different things."
+  fi
+
   if [ "${CONFIRM_SSH_OK}" -eq 1 ]; then
     [ "$(id -u)" -eq 0 ] || die 3 "--confirm-ssh-ok requires root."
     systemctl stop "${ROLLBACK_UNIT}.timer" 2>/dev/null || true
     systemctl reset-failed "${ROLLBACK_UNIT}.service" 2>/dev/null || true
     printf 'provision-host: SSH rollback disarmed.\n'
+    return 0
+  fi
+
+  if [ "${CONFIRM_FIREWALL_OK}" -eq 1 ]; then
+    [ "$(id -u)" -eq 0 ] || die 3 "--confirm-firewall-ok requires root."
+    systemctl stop "${UFW_ROLLBACK_UNIT}.timer" 2>/dev/null || true
+    systemctl reset-failed "${UFW_ROLLBACK_UNIT}.service" 2>/dev/null || true
+    printf 'provision-host: firewall rollback disarmed.\n'
     return 0
   fi
 
