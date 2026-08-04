@@ -403,13 +403,20 @@ def test_every_field_path_a_shell_script_asks_for_resolves(example: dict[str, An
 
     paths: list[tuple[str, str]] = []
     for path in sorted((REPO_ROOT / "bin").glob("*.sh")):
-        text = path.read_text(encoding="utf-8")
+        # Code only. A comment that mentions "the first host_field call" is
+        # English, and scanning it extracts a field named `call`, failing the
+        # test on a sentence.
+        code = "\n".join(
+            line
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("#")
+        )
         paths.extend(
             # Digits belong in the character class: without them
             # `expected_public_ipv4` is extracted as `expected_public_ipv` and
             # this test reports a failure against a field that is perfectly fine.
             (path.name, dotted)
-            for dotted in set(re.findall(r"host_field\s+([a-z0-9_.]+)", text))
+            for dotted in set(re.findall(r"host_field\s+([a-z0-9_.]+)", code))
         )
 
     assert paths, "no host_field call was found; this test is measuring nothing"

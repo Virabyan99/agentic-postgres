@@ -144,6 +144,34 @@ parse_arguments() {
 
   [ -n "${HOST_MANIFEST}" ] || die 2 "--host is required."
   [ -f "${HOST_MANIFEST}" ] || die 2 "host manifest not found: ${HOST_MANIFEST}"
+
+  # Resolved here, while the caller's working directory is still the one they
+  # typed the path against. main() cd's to ${ROOT_DIR} before anything reads
+  # this file, so a relative --host would be re-resolved against the checkout:
+  # `--host host.yaml` from /tmp validates /tmp/host.yaml and then reads the
+  # checkout's. Being handed a manifest for a different host and provisioning
+  # from it is the quietest possible version of this going wrong.
+  HOST_MANIFEST="$(readlink -f -- "${HOST_MANIFEST}")" \
+    || die 2 "could not resolve an absolute path for the host manifest."
+  readonly HOST_MANIFEST
+
+  # Validated once, here, so an invalid manifest is one message and exit 2 --
+  # the documented code for invalid operator input. Without this the first
+  # host_field call raises a Python traceback out of a heredoc and the script
+  # exits 1, which reads like a bug in the tool rather than a bad input file.
+  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "${HOST_MANIFEST}" <<'PYTHON' \
+    || die 2 "the host manifest is not valid; nothing was read from it."
+import sys
+from pathlib import Path
+
+from agentic_postgres.config import ManifestError
+from agentic_postgres.host_config import load_host_manifest
+
+try:
+    load_host_manifest(Path(sys.argv[1]))
+except (ManifestError, OSError) as error:
+    sys.exit(f"provision-host: {error}")
+PYTHON
 }
 
 host_field() {
@@ -603,7 +631,7 @@ apply_baseline() {
     # one holding the door open.
     systemctl reload ssh || die 6 "sshd reload failed."
     note "SSH hardened. Open a NEW session with a key NOW and confirm it works."
-    note "Then run: sudo bin/provision-host.sh --host ${HOST_MANIFEST} --confirm-ssh-ok"
+    note "Then run: sudo ${ROOT_DIR}/bin/provision-host.sh --host ${HOST_MANIFEST} --confirm-ssh-ok"
   else
     printf '  SKIPPED SSH hardening: no rollback timer is armed.\n'
     printf '\n'
@@ -659,7 +687,7 @@ apply_baseline() {
     ufw --force enable >/dev/null
     note "ufw enabled with ${ssh_port}, 80 and 443 permitted"
     note "Open a NEW session NOW and confirm it works."
-    note "Then run: sudo bin/provision-host.sh --host ${HOST_MANIFEST} --confirm-firewall-ok"
+    note "Then run: sudo ${ROOT_DIR}/bin/provision-host.sh --host ${HOST_MANIFEST} --confirm-firewall-ok"
   else
     printf '  SKIPPED enabling ufw: no firewall rollback timer is armed.\n'
     printf '\n'
