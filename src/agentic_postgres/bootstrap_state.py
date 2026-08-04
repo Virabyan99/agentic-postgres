@@ -53,6 +53,7 @@ PROVIDER_RELEVANT_FIELDS: tuple[str, ...] = (
 #: because they come from `host.yaml`, not from the project manifest.
 PROVIDER_RELEVANT_HOST_FIELDS: tuple[str, ...] = (
     "infisical.api_url",
+    "infisical.organization_id",
     "infisical.organization_slug",
     "infisical.environment_slug",
     "infisical.runtime_folder",

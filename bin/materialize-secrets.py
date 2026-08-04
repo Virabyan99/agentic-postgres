@@ -27,6 +27,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from agentic_postgres.bootstrap_state import BootstrapStateError, load_state, state_path
 from agentic_postgres.config import load_project_manifest
 from agentic_postgres.host_config import load_host_manifest
 from agentic_postgres.infisical_client import Credential, InfisicalClient, InfisicalError
@@ -145,7 +146,7 @@ def plan(key: str, contract: dict[str, Any], session: int) -> int:
     return 0
 
 
-def materialize(key: str, contract: dict[str, Any], session: int, environment: str) -> int:
+def materialize(key: str, contract: dict[str, Any], session: int) -> int:
     project_root = Path(SECRET_ROOT) / key
     project_root.mkdir(parents=True, exist_ok=True)
     os.chmod(project_root, 0o700)
@@ -160,7 +161,23 @@ def materialize(key: str, contract: dict[str, Any], session: int, environment: s
     except (OSError, ValueError) as exc:
         fail(EXIT_PREREQUISITE, f"could not read {HOST_MANIFEST}: {exc}")
 
-    infisical = host["host"]["infisical"]
+    # `infisical` is a top-level sibling of `host`, not a child of it.
+    infisical = host["infisical"]
+
+    # The project id, environment and folder come from **bootstrap state**, not
+    # from host.yaml. host.yaml describes the host; the Infisical project is a
+    # thing bootstrap created for this one project and recorded the id of. That
+    # is also the only reading of them that stays correct with two projects on
+    # one host, which is the arrangement Session 2 exists to prove.
+    try:
+        state = load_state(state_path(key))
+    except BootstrapStateError as exc:
+        fail(
+            EXIT_PREREQUISITE,
+            f"{exc}. Run bin/bootstrap-providers.sh --apply for {key} first: "
+            "there is no recorded provider project to read secrets from.",
+        )
+
     client = InfisicalClient(infisical["api_url"])
 
     try:
@@ -181,8 +198,8 @@ def materialize(key: str, contract: dict[str, Any], session: int, environment: s
             try:
                 value = client.read_secret(
                     name=secret["provider_key"],
-                    project_id=infisical["project_id"],
-                    environment=environment,
+                    project_id=state["infisical_project_id"],
+                    environment=state["environment_slug"],
                     secret_path=secret["provider_path"],
                 )
             except InfisicalError as exc:
@@ -247,7 +264,10 @@ def main(argv: list[str] | None = None) -> int:
     if os.geteuid() != 0:
         fail(EXIT_PREREQUISITE, "must run as root")
 
-    return materialize(key, contract, arguments.session, project["environment"])
+    # The project manifest's environment is deliberately not passed through: the
+    # Infisical environment slug is a provider coordinate recorded by bootstrap,
+    # and the two are not required to be the same string.
+    return materialize(key, contract, arguments.session)
 
 
 if __name__ == "__main__":

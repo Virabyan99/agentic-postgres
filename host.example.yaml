@@ -75,6 +75,11 @@ edge:
 
 infisical:
   api_url: https://app.infisical.com
+  # The UUID is what every create call actually takes; the slug is what a human
+  # recognises in an error message. Both are carried rather than resolving one
+  # from the other, because a slug lookup is an API call that can fail, and a
+  # reused slug can silently resolve to a different organisation.
+  organization_id: 00000000-0000-4000-8000-000000000000
   organization_slug: example-team
   environment_slug: dev
   # The literal folder may be identical in both projects. Isolation comes from

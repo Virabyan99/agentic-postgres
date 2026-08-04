@@ -269,7 +269,9 @@ def apply(
     host: dict[str, Any],
     credential_file: Path,
 ) -> int:
-    infisical = host["host"]["infisical"]
+    # Top-level sibling of `host`, not a child of it. The schema has
+    # ["schema_version", "host", "ssh", "edge", "infisical"] at the root.
+    infisical = host["infisical"]
 
     if state is not None:
         missing = needs_credential_repair(state)
@@ -378,7 +380,7 @@ def destroy(
         fail(EXIT_INVALID, "--destroy requires --operator-credential-file")
 
     token = credential_file.read_text(encoding="utf-8").strip()
-    control = ControlPlane(host["host"]["infisical"]["api_url"], token)
+    control = ControlPlane(host["infisical"]["api_url"], token)
 
     identity_id = state["runtime_identity_id"]
     try:
@@ -422,7 +424,9 @@ def main(argv: list[str] | None = None) -> int:
     manifest_digest = sha256(arguments.project.read_bytes()).hexdigest()
 
     try:
-        digest = provider_inputs_digest(manifest, host["host"])
+        # The whole document: provider_inputs_digest reads "infisical.*", which
+        # lives at the root rather than inside the host block.
+        digest = provider_inputs_digest(manifest, host)
     except BootstrapStateError as exc:
         fail(EXIT_INVALID, str(exc))
 

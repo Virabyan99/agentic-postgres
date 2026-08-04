@@ -198,6 +198,23 @@ check_baseline() {
   done
 
   printf '\n== docker ==\n'
+  # Reported as its own deviation rather than left to surface as a failed
+  # `systemctl restart docker` later, which reads as a Docker problem rather
+  # than as Docker being absent.
+  if command -v docker >/dev/null 2>&1; then
+    ok "docker $(docker --version 2>/dev/null | awk '{print $3}' | tr -d ,)"
+  else
+    bad "docker is not installed; --apply installs it from the official repository"
+    violations=$((violations + 1))
+  fi
+
+  if docker compose version >/dev/null 2>&1; then
+    ok "compose plugin $(docker compose version --short 2>/dev/null)"
+  else
+    bad "the Compose v2 plugin is absent; every script here invokes 'docker compose'"
+    violations=$((violations + 1))
+  fi
+
   if [ -f /etc/docker/daemon.json ]; then
     ok "daemon.json installed"
   else
@@ -299,6 +316,61 @@ install_launchers() {
   note "installed $(find "${LIBEXEC}" -maxdepth 1 -type f | wc -l) launcher(s) into ${LIBEXEC}"
 }
 
+# Docker comes from Docker's own apt repository, not from Ubuntu's.
+#
+# Ubuntu's docker.io package lags, and more importantly it does not ship the
+# Compose v2 plugin, which every script here invokes as `docker compose`. The
+# floor in versions.env (COMPOSE_MINIMUM_VERSION) is checkable only against a
+# build that has it.
+#
+# The repository is added with a keyring file rather than apt-key, and the suite
+# is verified to exist before it is written into sources.list.d. A missing suite
+# otherwise turns into an `apt-get update` failure whose message is about a
+# signature, not about a release Docker has not published yet.
+install_docker() {
+  if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    note "docker and the compose plugin are already installed"
+    return 0
+  fi
+
+  local codename
+  codename="$(grep -m1 '^VERSION_CODENAME=' /etc/os-release | cut -d= -f2- | tr -d '"')"
+  [ -n "${codename}" ] || die 3 "could not read VERSION_CODENAME from /etc/os-release."
+
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq ca-certificates curl >/dev/null
+
+  # Confirm Docker actually publishes this release before trusting the repo.
+  if ! curl -fsSL -o /dev/null "https://download.docker.com/linux/ubuntu/dists/${codename}/Release"; then
+    die 3 "Docker publishes no apt suite for Ubuntu '${codename}' yet.
+     This is a stop condition rather than something to work around: falling back to
+     a different codename would install packages built for another release, and
+     falling back to Ubuntu's docker.io would omit the Compose v2 plugin every
+     script here depends on. Wait for the suite, or deploy on 24.04 (noble)."
+  fi
+
+  install -m 0755 -d /etc/apt/keyrings
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc \
+    || die 3 "could not fetch the Docker apt signing key."
+  chmod a+r /etc/apt/keyrings/docker.asc
+
+  printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' \
+    "$(dpkg --print-architecture)" "${codename}" > /etc/apt/sources.list.d/docker.list
+
+  apt-get update -qq
+  apt-get install -y -qq \
+    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null \
+    || die 3 "the Docker packages could not be installed."
+
+  # The operator is deliberately NOT added to the docker group. Membership is
+  # equivalent to root -- the socket will start any container with any mount --
+  # so it would quietly undo the privilege boundary every script here maintains
+  # by requiring explicit sudo.
+  note "installed docker from the official repository for ${codename}"
+  note "the operator is not in the docker group; that is deliberate and equals root"
+}
+
 install_units() {
   local origin name
   for origin in "${ROOT_DIR}"/systemd/*.service; do
@@ -371,6 +443,7 @@ apply_baseline() {
   fi
 
   printf '\n== docker ==\n'
+  install_docker
   install -d -m 0755 /etc/docker
   install -m 0644 -o root -g root "${ETC}/daemon.json" /etc/docker/daemon.json
   if command -v dockerd >/dev/null 2>&1; then

@@ -303,3 +303,104 @@ def test_a_secret_bearing_key_is_rejected(tmp_path: Path, example: dict[str, Any
     document["infisical"]["client_secret"] = "st.abc123"  # noqa: S105
     with pytest.raises(ManifestError, match="secret material"):
         host_config.load_host_manifest(write(tmp_path, document))
+
+
+# ---------------------------------------------------------------------------
+# Every field a script reads must be a field the schema defines
+# ---------------------------------------------------------------------------
+
+
+def test_no_script_reads_an_infisical_field_the_schema_does_not_define() -> None:
+    """The schema is ``additionalProperties: false``, so a field a script reads
+    but the schema omits can never be present in a valid manifest.
+
+    Not hypothetical. ``bin/bootstrap-providers.py`` read
+    ``infisical["organization_id"]`` for a full run before anyone noticed the
+    schema defined only ``organization_slug`` -- so ``--apply`` would have
+    raised ``KeyError`` on a perfectly valid host.yaml, and the surrounding
+    handler would have reported it as a provider failure. Nothing caught it
+    because no offline test reaches that line and there was no host to run it.
+    """
+    import re
+
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    defined = set(schema["properties"]["infisical"]["properties"])
+
+    pattern = re.compile(r"""infisical\[\s*["']([a-z_]+)["']\s*\]""")
+    offenders: list[str] = []
+    for relative in ("bin/bootstrap-providers.py", "bin/materialize-secrets.py"):
+        text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        offenders.extend(
+            f"{relative} reads infisical[{field!r}]"
+            for field in sorted(set(pattern.findall(text)))
+            if field not in defined
+        )
+
+    assert not offenders, (
+        f"scripts read Infisical fields the host schema does not define: {offenders}. "
+        f"Defined fields are {sorted(defined)}."
+    )
+
+
+def test_the_field_scan_would_catch_a_real_mismatch() -> None:
+    """Guard the guard: the pattern must match the access form actually used."""
+    import re
+
+    pattern = re.compile(r"""infisical\[\s*["']([a-z_]+)["']\s*\]""")
+    assert pattern.findall('organization = infisical["organization_id"]') == ["organization_id"]
+    assert pattern.findall("x = infisical['api_url']") == ["api_url"]
+
+
+def test_no_script_looks_for_a_top_level_block_inside_the_host_block() -> None:
+    """``infisical``, ``ssh`` and ``edge`` are siblings of ``host``, not children.
+
+    The second bug of the same family, and the one the field scan above could
+    not see: three scripts wrote ``host["host"]["infisical"]``, which raises
+    ``KeyError`` on every valid manifest. The field names were right; the level
+    was wrong, so a scan looking at names found nothing.
+    """
+    import re
+
+    schema = json.loads(SCHEMA.read_text(encoding="utf-8"))
+    top_level = set(schema["properties"]) - {"host"}
+    inside_host = set(schema["properties"]["host"]["properties"])
+
+    offenders: list[str] = []
+    for path in sorted((REPO_ROOT / "bin").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        for block in sorted(top_level):
+            if re.search(rf"""\["host"\]\s*\[\s*["']{block}["']""", text):
+                offenders.append(f"{path.name} reads host['host'][{block!r}]")
+
+    assert not offenders, (
+        f"{offenders}. These are top-level keys: {sorted(top_level)}. "
+        f"Only {sorted(inside_host)} live inside the host block."
+    )
+
+
+def test_the_level_scan_would_catch_a_real_mismatch() -> None:
+    """Guard the guard, on the exact string that shipped."""
+    import re
+
+    assert re.search(r"""\["host"\]\s*\[\s*["']infisical["']""", 'x = host["host"]["infisical"]')
+    assert not re.search(r"""\["host"\]\s*\[\s*["']infisical["']""", 'x = host["infisical"]')
+
+
+def test_the_organization_id_is_a_uuid(example: dict[str, Any]) -> None:
+    """The create calls take a UUID. A slug here fails at the provider, over the
+    network, after a credential has already been sent."""
+    import re
+
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        example["infisical"]["organization_id"],
+    )
+
+
+def test_a_slug_in_the_organization_id_field_is_rejected(
+    tmp_path: Path, example: dict[str, Any]
+) -> None:
+    document = copy.deepcopy(example)
+    document["infisical"]["organization_id"] = "my-team"
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, document))

@@ -123,13 +123,24 @@
     "infisical": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["api_url", "organization_slug", "environment_slug", "runtime_folder"],
+      "required": [
+        "api_url",
+        "organization_id",
+        "organization_slug",
+        "environment_slug",
+        "runtime_folder"
+      ],
       "description": "Provider coordinates only. No credential: the control-plane credential is a root-owned file named on the command line by path, and the per-project runtime credential is written by bootstrap under /etc/agentic-postgres/credentials/.",
       "properties": {
         "api_url": {
           "type": "string",
           "pattern": "^https://[a-z0-9.-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~/-]*)?$",
           "description": "HTTPS only, and no userinfo component, so a credential cannot be smuggled into the URL."
+        },
+        "organization_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "The organization UUID, which is what every create call actually takes. Carried alongside the slug rather than resolved from it: a slug lookup is one more API call that can fail, and it can silently resolve to a different organization if the slug is reused. The slug stays because it is what a human recognises in an error message."
         },
         "organization_slug": { "$ref": "#/$defs/providerSlug" },
         "environment_slug": { "$ref": "#/$defs/providerSlug" },
