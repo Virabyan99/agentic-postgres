@@ -158,6 +158,28 @@ def test_ipv6_policy_permits_icmpv6() -> None:
     assert "--limit" in lines, "unrestricted ICMPv6 is a flood amplifier"
 
 
+@pytest.mark.parametrize("name", ["docker-user-rules.v4", "docker-user-rules.v6"])
+def test_rate_units_are_written_the_way_iptables_echoes_them(name: str) -> None:
+    """A rendered rule has to survive a round trip through iptables as text.
+
+    ``--limit 10/second`` and ``--limit 10/sec`` mean the same thing going in,
+    and ``iptables -S`` returns the short form either way. Writing the long one
+    makes the installed file and the running chain differ as text while being
+    identical in effect, which fails the live comparison that proves the kernel
+    is running this exact policy.
+
+    Caught on a real host, where the v4 policy matched perfectly and v6 differed
+    by one word. The alternative was normalising spellings inside the live
+    comparison, and every entry in such a table is a difference that check has
+    agreed in advance not to notice.
+    """
+    text = "\n".join(rule_lines(name))
+    for long_form, short_form in (("/second", "/sec"), ("/minute", "/min")):
+        assert long_form not in text, (
+            f"{name} writes {long_form!r}; iptables reports it as {short_form!r}"
+        )
+
+
 def test_the_public_interface_is_a_substituted_placeholder() -> None:
     """A hard-coded eth0 is wrong on roughly half of all providers."""
     for name in ("docker-user-rules.v4", "docker-user-rules.v6"):

@@ -646,13 +646,27 @@ apply_baseline() {
   printf '\n== docker ==\n'
   install_docker
   install -d -m 0755 /etc/docker
+
+  # Restart only when there is a reason to. --apply is meant to be re-runnable,
+  # and from Run 6 onwards a restart takes the edge and every project down with
+  # it -- so an unconditional `systemctl restart docker` turns "verify the
+  # baseline is still met" into an outage. The daemon is restarted when its
+  # configuration actually changed, or when it is not running.
+  local daemon_changed=0
+  cmp -s "${ETC}/daemon.json" /etc/docker/daemon.json || daemon_changed=1
+
   install -m 0644 -o root -g root "${ETC}/daemon.json" /etc/docker/daemon.json
   if command -v dockerd >/dev/null 2>&1; then
     dockerd --validate --config-file=/etc/docker/daemon.json \
       || die 6 "dockerd rejected /etc/docker/daemon.json; the previous file is in ${backup}."
   fi
-  systemctl restart docker || die 6 "docker failed to restart; see journalctl -u docker -n 200."
-  note "docker restarted with the installed configuration"
+
+  if [ "${daemon_changed}" -eq 1 ] || ! systemctl is-active --quiet docker; then
+    systemctl restart docker || die 6 "docker failed to restart; see journalctl -u docker -n 200."
+    note "docker restarted with the installed configuration"
+  else
+    note "docker configuration unchanged; not restarting"
+  fi
 
   printf '\n== firewall ==\n'
   # Order is the control. The SSH allow rule goes in before default-deny, and

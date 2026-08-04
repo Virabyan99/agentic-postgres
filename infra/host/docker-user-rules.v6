@@ -24,6 +24,14 @@
 # complete and then hang on the first large response -- a failure that looks
 # like an application problem for a long time before anyone suspects the
 # firewall. Rate-limited rather than unrestricted.
--i __PUBLIC_INTERFACE__ -p ipv6-icmp -m limit --limit 10/second -j RETURN
+#
+# `10/sec`, not `10/second`. They mean the same thing to iptables, but iptables
+# echoes the short form back from `-S`, so writing the long one makes the
+# installed policy and the running policy differ as text while being identical
+# in effect. The comparison that proves the kernel is running this file is
+# exact, deliberately -- normalising spellings inside it would mean maintaining
+# a table of iptables' preferences, and every entry in such a table is a
+# difference the check has agreed in advance not to notice.
+-i __PUBLIC_INTERFACE__ -p ipv6-icmp -m limit --limit 10/sec -j RETURN
 
 -i __PUBLIC_INTERFACE__ -j DROP

@@ -143,6 +143,49 @@ def test_nothing_disarms_a_timer_as_a_side_effect_of_apply(apply_body: str) -> N
         assert f"systemctl stop {cancellation}" not in apply_body
 
 
+def code_only(text: str) -> str:
+    """Drop comment lines.
+
+    Ordering assertions that scan raw text match the prose explaining the
+    ordering, which sits above the code and therefore always comes first. That
+    has now caught me out three times in this repository.
+    """
+    return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+
+@pytest.fixture(scope="module")
+def docker_section(apply_body: str) -> str:
+    return code_only(apply_body.split("== docker ==", 1)[1].split("== firewall ==", 1)[0])
+
+
+def test_docker_restarts_only_when_something_changed(docker_section: str) -> None:
+    """--apply is re-runnable; from Run 6 onwards a restart is an outage.
+
+    An unconditional `systemctl restart docker` takes the edge and every project
+    down with it, so re-running the provisioner to confirm the baseline still
+    holds would break the thing it was confirming.
+    """
+    assert "systemctl restart docker" in docker_section
+    assert "daemon_changed" in docker_section, "docker is restarted unconditionally"
+    assert docker_section.index("daemon_changed=0") < docker_section.index(
+        "systemctl restart docker"
+    )
+    assert "systemctl is-active --quiet docker" in docker_section, (
+        "a stopped daemon would never be started, since its configuration did not change"
+    )
+
+
+def test_the_configuration_is_compared_before_it_is_overwritten(docker_section: str) -> None:
+    """Guard the guard: comparing after the copy always reports no change."""
+    assert docker_section.index("cmp -s") < docker_section.index("install -m 0644 -o root -g root")
+
+
+def test_the_comment_stripper_actually_strips() -> None:
+    """Two directions, since a stripper that returned "" would pass everything."""
+    assert code_only("  # note\ncode\n") == "code"
+    assert code_only("code # trailing") == "code # trailing"
+
+
 def test_help_documents_both_disarm_steps() -> None:
     result = subprocess.run(
         [str(SCRIPT), "--help"], capture_output=True, text=True, check=False, cwd=REPO_ROOT
