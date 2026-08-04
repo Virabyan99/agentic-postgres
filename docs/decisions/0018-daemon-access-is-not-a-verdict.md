@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-04
 - **Session:** 2
-- **Affects:** `tests/contract/test_compose_contract.py::test_no_container_is_running`, D13, ADR 0014
+- **Affects:** `tests/contract/test_compose_contract.py::test_no_container_is_running`, `bin/session-01-check.sh` step 7, D13, ADR 0014
 
 ## Context
 
@@ -73,6 +73,13 @@ Two constraints on the skip:
    failed and errors but not skipped, so a suite that silently stopped checking
    something would still read as a clean run. `evidence.parse_junit` already
    collects the count; the summary now prints it.
+
+The same rule applies to **step 7 of `bin/session-01-check.sh`**, which asks the
+same question in shell rather than in pytest and died on the same refusal. It
+now distinguishes the two outcomes in its printed result, and still validates
+every rendered model, since `config` needs no daemon. Fixing only the pytest
+test would have left the gate failing on the host for a reason this ADR had just
+finished explaining was not a failure.
 
 ## Consequences
 

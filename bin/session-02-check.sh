@@ -43,6 +43,7 @@ SENTINEL_FILE=""
 PUBLIC_IPV4=""
 PUBLIC_IPV6=""
 KEYWORD=""
+BASELINE_ONLY=0
 
 usage() {
   cat <<'USAGE'
@@ -50,6 +51,7 @@ Usage: bin/session-02-check.sh --mode offline
        sudo bin/session-02-check.sh --mode host --host FILE \
             --project-a-outputs FILE [--project-b-outputs FILE] \
             [--sentinel-file FILE]
+       sudo bin/session-02-check.sh --mode host --host FILE --baseline-only
        bin/session-02-check.sh --mode external --public-ipv4 ADDR \
             --project-a-outputs FILE [--public-ipv6 ADDR]
 
@@ -60,6 +62,10 @@ Usage: bin/session-02-check.sh --mode offline
                    its own routing table, not the boundary.
 
   -k EXPRESSION    Restrict to matching tests. For iterating on one failure.
+  --baseline-only  Host mode before anything is deployed: verify the host
+                   baseline and skip every test that needs a project. Writes no
+                   evidence, because a run where those tests never executed
+                   cannot support a verdict about a deployment.
 
 This command verifies and never deploys. Use ./deploy.sh --through-session 2
 to deploy, then run this to find out whether it worked.
@@ -122,6 +128,7 @@ parse_arguments() {
         PROJECT_A_OUTPUTS="$2"
         shift 2
         ;;
+      --baseline-only) BASELINE_ONLY=1; shift ;;
       --project-b-outputs)
         [ "$#" -ge 2 ] || die 2 "--project-b-outputs requires a value."
         PROJECT_B_OUTPUTS="$2"
@@ -196,11 +203,27 @@ mode_offline() {
 }
 
 mode_host() {
-  [ "$(id -u)" -eq 0 ] || die 3 "--mode host requires root: it reads root-only host state."
+  # Arguments before privilege, deliberately. An operator iterating on a command
+  # line should learn they mistyped a flag without first having to obtain root
+  # to be told.
   [ -n "${HOST_MANIFEST}" ] || die 2 "--mode host requires --host."
   [ -f "${HOST_MANIFEST}" ] || die 2 "host manifest not found: ${HOST_MANIFEST}"
-  [ -n "${PROJECT_A_OUTPUTS}" ] || die 2 "--mode host requires --project-a-outputs."
-  [ -f "${PROJECT_A_OUTPUTS}" ] || die 2 "not found: ${PROJECT_A_OUTPUTS}"
+
+  # --baseline-only exists because the host is provisioned one run before any
+  # project is deployed, and the baseline is worth verifying at that point. It
+  # is an explicit flag rather than an inference from a missing
+  # --project-a-outputs: an argument whose absence silently changes what a
+  # command means is one typo away from an evidence run that measured nothing.
+  if [ "${BASELINE_ONLY}" -eq 1 ]; then
+    [ -z "${PROJECT_A_OUTPUTS}" ] \
+      || die 2 "--baseline-only and --project-a-outputs contradict each other."
+  else
+    [ -n "${PROJECT_A_OUTPUTS}" ] \
+      || die 2 "--mode host requires --project-a-outputs, or --baseline-only before any deploy."
+    [ -f "${PROJECT_A_OUTPUTS}" ] || die 2 "not found: ${PROJECT_A_OUTPUTS}"
+  fi
+
+  [ "$(id -u)" -eq 0 ] || die 3 "--mode host requires root: it reads root-only host state."
 
   step "1. Host baseline, unchanged by this run"
   bin/provision-host.sh --host "${HOST_MANIFEST}" --check
@@ -208,11 +231,25 @@ mode_host() {
   step "2. Host-local acceptance suite"
   mkdir -p "${EVIDENCE_DIR}"
   export APG_LIVE_HOST=1
-  export APG_PROJECT_A_OUTPUTS="${PROJECT_A_OUTPUTS}"
-  [ -n "${PROJECT_B_OUTPUTS}" ] && export APG_PROJECT_B_OUTPUTS="${PROJECT_B_OUTPUTS}"
-  [ -n "${SENTINEL_FILE}" ] && export APG_SECRET_SENTINEL_FILE="${SENTINEL_FILE}"
+  if [ "${BASELINE_ONLY}" -eq 0 ]; then
+    export APG_PROJECT_A_OUTPUTS="${PROJECT_A_OUTPUTS}"
+    [ -n "${PROJECT_B_OUTPUTS}" ] && export APG_PROJECT_B_OUTPUTS="${PROJECT_B_OUTPUTS}"
+    [ -n "${SENTINEL_FILE}" ] && export APG_SECRET_SENTINEL_FILE="${SENTINEL_FILE}"
+  fi
 
   run_suite "live_host" "${EVIDENCE_DIR}/session-02-host-tests.xml"
+
+  # Every test that needs a deployed project is gated on APG_PROJECT_A_OUTPUTS
+  # by requires_environment, so under --baseline-only they skip rather than
+  # fail. That is also exactly why no evidence is written: a host evidence file
+  # produced from a run where the project tests never executed would assert a
+  # verdict nobody measured.
+  if [ "${BASELINE_ONLY}" -eq 1 ]; then
+    printf '\n\033[1msession-02-check: host baseline PASSED\033[0m\n'
+    printf 'No evidence written. Every project test was skipped for want of\n'
+    printf 'APG_PROJECT_A_OUTPUTS; this run makes no claim about a deployment.\n'
+    return 0
+  fi
 
   step "3. Host evidence"
   "$(python_bin)" bin/write-session-evidence.py --session 2 --mode host \

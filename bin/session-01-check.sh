@@ -173,12 +173,26 @@ step "7. Compose validates and no project container is running"
 #
 # The identities still come from what step 3 produced rather than from a literal
 # here, so no fixture name enters deployable source (§9).
+#
+# `ps` needs the Docker daemon; `config` does not. On the deployment host the
+# operator account cannot reach the daemon -- it is deliberately not in the
+# docker group, which is root-equivalent -- so `ps` there is a question this
+# account is not permitted to ask, and its refusal is not evidence that a
+# container is running. ADR 0018: say which of the two happened.
+#
+# The models are still validated either way, and the running-container claim is
+# proved on the host by bin/session-02-check.sh --mode host, as root.
+daemon_reachable=1
 for project_dir in "${RENDERED_DIRS[@]}"; do
   bin/compose.sh "${project_dir}" --profile contract config >/dev/null
-  running="$(bin/compose.sh "${project_dir}" ps --quiet)"
-  if [ -n "${running}" ]; then
-    printf 'containers are running for %s:\n%s\n' "${project_dir}" "${running}" >&2
-    exit 1
+
+  if running="$(bin/compose.sh "${project_dir}" ps --quiet 2>/dev/null)"; then
+    if [ -n "${running}" ]; then
+      printf 'containers are running for %s:\n%s\n' "${project_dir}" "${running}" >&2
+      exit 1
+    fi
+  else
+    daemon_reachable=0
   fi
 done
 
@@ -186,7 +200,15 @@ if [ "${#RENDERED_DIRS[@]}" -lt 2 ]; then
   printf 'expected at least 2 rendered projects, found %d\n' "${#RENDERED_DIRS[@]}" >&2
   exit 1
 fi
-printf '%d models render; no container is running\n' "${#RENDERED_DIRS[@]}"
+
+if [ "${daemon_reachable}" -eq 1 ]; then
+  printf '%d models render; no container is running\n' "${#RENDERED_DIRS[@]}"
+else
+  printf '%d models render; the Docker daemon is unreachable from this account, so\n' \
+    "${#RENDERED_DIRS[@]}"
+  printf 'whether a container is running was not determined here (ADR 0018).\n'
+  printf 'It is proved by: sudo bin/session-02-check.sh --mode host\n'
+fi
 
 # ---------------------------------------------------------------------------
 step "8. Session evidence"

@@ -264,7 +264,7 @@ sudo bin/provision-host.sh --host host.yaml --apply                   # 0
 sudo sshd -T -C user=<op>,host=localhost,addr=<cidr member> | grep …  # policy matches
 sudo ufw status verbose; sudo iptables -S DOCKER-USER                 # expected rules
 sudo ss -lntup                                                        # only ssh/80/443
-sudo bin/session-02-check.sh --host host.yaml --mode host --tests-only \
+sudo bin/session-02-check.sh --host host.yaml --mode host --baseline-only \
      -k "host or firewall or docker"                                  # 0
 bin/session-01-check.sh                                               # 0 (on the VPS checkout)
 ```
@@ -302,8 +302,8 @@ sudo bin/bootstrap-providers.sh … --project project.beta.yaml --apply …     
 sudo bin/materialize-secrets.sh --project project.beta.yaml …                        # 0
 sudo ./deploy.sh --host host.yaml --project project.beta.yaml … --through-session 2  # 0
 curl --fail https://beta-db.<domain>/__apg/healthz                                   # 200, beta key
-sudo bin/session-02-check.sh --host host.yaml --project-a … --project-b … \
-  --capabilities capabilities.yaml --mode host --tests-only                          # 0
+sudo bin/session-02-check.sh --host host.yaml --project-a-outputs … --project-b-outputs … \
+  --mode host                                                             # 0
 bin/session-01-check.sh                                                              # 0
 ```
 Also proved here: hostname A never returns B's body; Traefik attached to both edge networks and neither internal network; restarting/removing B leaves A's route up; the collision-refusal cases of §15 fail **before** mutation.
