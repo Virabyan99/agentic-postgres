@@ -467,11 +467,57 @@ def test_the_edge_declares_no_named_volume() -> None:
     assert "volumes" not in document or not document["volumes"]
 
 
+#: What ``bin/compose.sh`` prints when a daemon subcommand cannot reach Docker.
+#: Matched on the message rather than the exit code, because exit 3 covers
+#: several unrelated prerequisites and only this one is a question the calling
+#: account is not permitted to ask.
+DAEMON_UNREACHABLE = "the Docker daemon is unreachable"
+
+
 @pytest.mark.parametrize("project_dir", [ALPHA, ALPINE], ids=lambda p: p.name)
 def test_no_container_is_running(project_dir: Path) -> None:
+    """ADR 0018: failing to reach the daemon is not the same answer as "none".
+
+    The operator account on the deployment host is deliberately not in the
+    ``docker`` group — membership is root-equivalent — so on that host this
+    question cannot be asked at all. Reporting the refusal as a failure makes it
+    indistinguishable from a fixture container actually running.
+
+    The claim is not dropped there. ``bin/session-02-check.sh --mode host`` runs
+    as root and enumerates every running container directly.
+    """
     result = compose(project_dir, "ps", "--quiet")
+
+    if result.returncode != 0 and DAEMON_UNREACHABLE in result.stderr:
+        pytest.skip(
+            "the Docker daemon is unreachable from this account, so whether a fixture "
+            "container is running cannot be determined here; proved on the host by "
+            "session-02-check.sh --mode host, which runs as root (ADR 0018)"
+        )
+
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "", f"containers exist: {result.stdout}"
+
+
+def test_a_running_container_would_still_fail() -> None:
+    """Guard the guard: the skip must not grow into "skip if compose fails".
+
+    Asserted against the test's own source, because producing a genuinely
+    running container inside the contract suite is the one thing this suite
+    exists to forbid.
+    """
+    source = Path(__file__).read_text(encoding="utf-8")
+    body = source.split("def test_no_container_is_running", 1)[1].split("\ndef ", 1)[0]
+
+    assert "DAEMON_UNREACHABLE in result.stderr" in body, (
+        "the skip is not conditioned on the daemon being unreachable"
+    )
+    assert 'assert result.stdout.strip() == ""' in body, (
+        "the running-container assertion was removed rather than gated"
+    )
+    # Requiring a non-zero exit too: without it, a compose that succeeded and
+    # printed container ids while mentioning the daemon would be skipped.
+    assert "result.returncode != 0 and" in body
 
 
 def test_config_does_not_require_the_daemon() -> None:

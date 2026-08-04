@@ -183,9 +183,13 @@ def main(argv: list[str] | None = None) -> int:
     print(f"write-session-evidence: wrote {destination.relative_to(REPO_ROOT)}")
     print(f"  status                  {document['status']}")
     print(f"  source commit           {document['source_commit'][:12]}")
+    # Skipped is printed alongside the rest because a suite that quietly stopped
+    # checking something otherwise reads as a clean run (ADR 0018). The count was
+    # already being collected; it was simply never shown.
     print(
         f"  contract tests          {counts['passed']} passed, "
-        f"{counts['failed']} failed, {counts['errors']} errors"
+        f"{counts['failed']} failed, {counts['skipped']} skipped, "
+        f"{counts['errors']} errors"
     )
     print(f"  P0 collected            {document['p0_tests_collected']}")
     print(f"  P0 future placeholders  {document['p0_tests_future']}")

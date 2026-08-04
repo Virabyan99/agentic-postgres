@@ -136,8 +136,18 @@ read_var() {
   sed -n "s/^$2=//p" "$1" | head -n 1
 }
 
+# LC_ALL=C, and it is load-bearing. Under a UTF-8 locale `sort` collates with
+# rules that treat `_` as ignorable at the primary level; `comm` then decides the
+# input is not sorted, says so on stderr, and carries on -- producing an answer
+# that can omit real overlaps. A disjointness check that reports "no overlap"
+# because it gave up halfway is worse than no check, because the guarantee is
+# still being claimed. Byte order is identical everywhere and is what `comm`
+# expects.
+#
+# This surfaced only on the deployment host, which runs en_US.UTF-8 while the
+# development machine does not.
 env_keys() {
-  sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$1" | sort
+  sed -n 's/^\([A-Z][A-Z0-9_]*\)=.*/\1/p' "$1" | LC_ALL=C sort
 }
 
 # Every pair of env files must define disjoint variables, so no --env-file
@@ -145,7 +155,7 @@ env_keys() {
 # has three files, so this is three comparisons rather than one.
 assert_disjoint() {
   local overlap
-  overlap="$(comm -12 <(env_keys "$1") <(env_keys "$2") || true)"
+  overlap="$(LC_ALL=C comm -12 <(env_keys "$1") <(env_keys "$2") || true)"
   if [ -n "${overlap}" ]; then
     printf 'compose: these variables are defined in both %s and %s:\n%s\n' "$1" "$2" "${overlap}" >&2
     die 5 "env files must define disjoint variables."
