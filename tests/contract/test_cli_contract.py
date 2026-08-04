@@ -24,24 +24,38 @@ SHELL_COMMANDS = (
     "bin/bootstrap-providers.sh",
     "bin/compose.sh",
     "bin/connect.sh",
+    "bin/docker-firewall.sh",
     "bin/doctor.sh",
+    "bin/edge.sh",
+    "bin/edge-network.sh",
     "bin/lock-dev-deps.sh",
     "bin/lock-versions.sh",
+    "bin/materialize-secrets.sh",
     "bin/migrate.sh",
+    "bin/project-runtime.sh",
+    "bin/provision-host.sh",
     "bin/restore-test.sh",
     "bin/session-01-check.sh",
+    "bin/session-02-check.sh",
     "bin/smoke-test.sh",
 )
 
 PYTHON_COMMANDS = (
+    "bin/bootstrap-providers.py",
+    "bin/materialize-secrets.py",
     "bin/render-acceptance-matrix.py",
     "bin/render-config.py",
     "bin/write-session-evidence.py",
 )
 
 #: Commands that document a future capability and refuse to pretend otherwise.
+#:
+#: ``bin/bootstrap-providers.sh`` left this tuple in Session 2, when it was
+#: implemented. ADR 0017 records why that is legitimate and what replaced the
+#: assertion: it now carries real command-contract tests, which are stricter
+#: than the one it left. Emptying this tuple is not a way to make
+#: ``test_future_stub_exits_ten`` pass.
 FUTURE_STUBS = (
-    "bin/bootstrap-providers.sh",
     "bin/connect.sh",
     "bin/migrate.sh",
     "bin/restore-test.sh",
@@ -126,23 +140,34 @@ def test_no_file_uses_crlf(relative: str) -> None:
 
 @pytest.mark.parametrize(
     "relative",
-    [
-        "deploy.sh",
-        "bin/bootstrap-providers.sh",
-        "bin/compose.sh",
-        "bin/connect.sh",
-        "bin/doctor.sh",
-        "bin/lock-dev-deps.sh",
-        "bin/lock-versions.sh",
-        "bin/migrate.sh",
-        "bin/restore-test.sh",
-        "bin/smoke-test.sh",
-    ],
+    [command for command in SHELL_COMMANDS if command != "bin/session-01-check.sh"],
 )
 def test_help_exits_zero_and_says_something(relative: str) -> None:
+    """Every command documents itself, without root and without a host."""
     result = run(str(REPO_ROOT / relative), "--help")
     assert result.returncode == 0, result.stderr
     assert len(result.stdout.strip()) > 40, f"{relative} --help is not informative"
+
+
+def test_bootstrap_providers_is_no_longer_a_stub() -> None:
+    """ADR 0017: it was implemented, so a bare invocation is missing input, not
+    an unavailable capability.
+
+    Asserted directly rather than left implicit in ``FUTURE_STUBS``, so that
+    removing it from that tuple without implementing it fails here.
+    """
+    result = run(str(REPO_ROOT / "bin" / "bootstrap-providers.sh"))
+    assert result.returncode == 2, (
+        f"expected 2 (missing required input), got {result.returncode}. "
+        "A 10 here means the command went back to being a stub."
+    )
+    assert "required" in result.stderr.lower()
+
+
+def test_the_remaining_stubs_are_the_ones_later_sessions_own() -> None:
+    """Guard the guard: emptying FUTURE_STUBS must not make its tests vacuous."""
+    assert set(FUTURE_STUBS) == {"bin/connect.sh", "bin/migrate.sh", "bin/restore-test.sh"}
+    assert "bin/bootstrap-providers.sh" not in FUTURE_STUBS
 
 
 @pytest.mark.parametrize("relative", FUTURE_STUBS)
