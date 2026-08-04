@@ -248,3 +248,74 @@ def test_the_edge_probe_receives_no_secret(contract: dict[str, Any]) -> None:
 def test_container_path_is_the_compose_secrets_convention(contract: dict[str, Any]) -> None:
     consumer = contract["secrets"][0]["consumers"][0]
     assert secrets_contract.container_secret_path(consumer) == "/run/secrets/session2_sentinel"
+
+
+# ---------------------------------------------------------------------------
+# Cross-check against the Compose model (deferred from Run 1 with the service)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def compose_model() -> dict[str, Any]:
+    return yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+
+
+def test_every_consumer_names_a_real_compose_service(
+    contract: dict[str, Any], compose_model: dict[str, Any]
+) -> None:
+    """A grant to a service that does not exist is a grant nobody can audit."""
+    services = set(compose_model["services"])
+    for secret in contract["secrets"]:
+        for consumer in secret["consumers"]:
+            assert consumer["service"] in services, (
+                f"secret {secret['name']!r} is granted to {consumer['service']!r}, "
+                f"which is not a service in compose.yaml"
+            )
+
+
+def test_consumer_ownership_matches_the_service_runtime_user(
+    contract: dict[str, Any], compose_model: dict[str, Any]
+) -> None:
+    """The two numbers live in two files, which is how they come to disagree.
+
+    The host sets ownership on a secret file *before* Compose mounts it -- ADR
+    0010 deliberately does not rely on Compose's own uid/gid/mode fields. So if
+    the declared consumer UID and the service's `user:` diverge, the container
+    gets a file it cannot read, and the usual fix is to widen the mode from 0400.
+    """
+    for secret in contract["secrets"]:
+        for consumer in secret["consumers"]:
+            service = compose_model["services"][consumer["service"]]
+            expected = f"{consumer['uid']}:{consumer['gid']}"
+            assert service.get("user") == expected, (
+                f"{consumer['service']} runs as {service.get('user')!r} but secret "
+                f"{secret['name']!r} is materialized owned by {expected}"
+            )
+
+
+def test_no_service_receives_a_secret_it_was_not_granted(
+    contract: dict[str, Any], compose_model: dict[str, Any]
+) -> None:
+    """SEC-SECRET-002, checked from source.
+
+    The committed model declares no `secrets:` block at all -- the generation
+    path does not exist until materialization runs -- so the assertion is that
+    every service's grant list is empty here. The runtime override adds exactly
+    the declared grants, and the live suite asserts the mount list inside the
+    running container.
+    """
+    granted = secrets_contract.granted_services(contract, 2)
+    for name, service in compose_model["services"].items():
+        assert "secrets" not in service, (
+            f"service {name} declares a secret grant in the committed model; "
+            "grants belong in the root-owned runtime override"
+        )
+    assert granted == {"secret-check"}
+
+
+def test_the_publicly_routed_service_is_granted_nothing(
+    contract: dict[str, Any], compose_model: dict[str, Any]
+) -> None:
+    """The one container reachable from the Internet holds no secret material."""
+    assert "edge-probe" in compose_model["services"]
+    assert "edge-probe" not in secrets_contract.granted_services(contract, 2)

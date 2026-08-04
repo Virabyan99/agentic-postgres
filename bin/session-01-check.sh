@@ -61,7 +61,9 @@ fi
 # ---------------------------------------------------------------------------
 step "2. Static quality and lock checks"
 # ---------------------------------------------------------------------------
-shellcheck deploy.sh bin/*.sh
+# libexec/* is named explicitly: those launchers are extensionless, so the
+# bin/*.sh glob misses them, and they are the scripts systemd runs as root.
+shellcheck deploy.sh bin/*.sh libexec/*
 python -m ruff check src bin tests
 python -m ruff format --check src bin tests
 bin/lock-dev-deps.sh --check

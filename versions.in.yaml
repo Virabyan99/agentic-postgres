@@ -48,6 +48,23 @@ images:
   INFISICAL_IMAGE: docker.io/infisical/cli:0.41.89
   DBMATE_IMAGE: docker.io/amacneil/dbmate:2.34.1
 
+# Minimum versions required for a *feature*, not for an image.
+#
+# Each key `X_MINIMUM_VERSION` pairs with the image `X_IMAGE`: `--update`
+# records the resolved semantic version as `X_VERSION`, and the offline
+# `--check` asserts `X_VERSION >= X_MINIMUM_VERSION`.
+#
+# This is a floor, not a proof. A digest cannot tell you what a configuration
+# key does, so the real proof that query-parameter redaction works is the
+# live-host test that issues a request carrying a random sentinel and asserts
+# the sentinel is absent from the access log. The floor exists so that
+# *lowering* the Traefik version below the one that supports it fails offline,
+# in CI, instead of silently disabling redaction on a running host.
+feature_floors:
+  # accessLog.fields.queryParameters.defaultMode arrived in Traefik 3.
+  # A query string is the easiest place for a token to end up in a log.
+  TRAEFIK_MINIMUM_VERSION: "3.0"
+
 # Package versions, locked as version strings rather than digests because no
 # first-party image exists to digest yet.
 packages:

@@ -1,0 +1,13 @@
+// Managed by bin/provision-host.sh. Installed at
+// /etc/apt/apt.conf.d/20auto-upgrades.
+//
+// Automatic reboot is deliberately NOT enabled. An unattended reboot takes
+// every project on this host down at a time nobody chose, and Session 2 has no
+// health gate that would notice. /run/reboot-required is reported by the
+// diagnostics instead, so a pending kernel update is visible and the reboot is
+// an operator decision.
+
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::Download-Upgradeable-Packages "1";
+APT::Periodic::AutocleanInterval "7";

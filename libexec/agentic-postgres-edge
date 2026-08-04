@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# Stable root-owned launcher for the shared edge plane.
+# Installed at /usr/local/libexec/agentic-postgres/edge.
+#
+# Its whole job is indirection with a check. systemd unit files name a fixed
+# path; the code that path runs must be an immutable installed release, not
+# whatever is in an operator's working tree (runbook §4.2). This resolves the
+# release recorded in root-owned edge state, proves it looks like a release, and
+# execs the script inside it.
+#
+# The alternative -- pointing the unit at a checkout -- means `git checkout` on
+# a Friday afternoon silently changes what runs at the next boot.
+#
+# Exit codes: 2 invalid input, 3 missing prerequisite, 9 edge failure.
+
+set -euo pipefail
+
+readonly EDGE_STATE="/etc/agentic-postgres/edge-state.json"
+readonly HOST_MANIFEST="/etc/agentic-postgres/host.yaml"
+readonly RELEASE_ROOT="/opt/agentic-postgres/releases"
+
+die() {
+  local code="$1"
+  shift
+  printf 'agentic-postgres-edge: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: /usr/local/libexec/agentic-postgres/edge <up|down|reconcile|status|restart>
+
+Resolves the installed release recorded in /etc/agentic-postgres/edge-state.json
+and runs that release's bin/edge.sh. Not intended for direct operator use;
+systemd invokes it. Operators use bin/edge.sh from a checkout.
+USAGE
+}
+
+main() {
+  case "${1-}" in
+    --help|-h) usage; return 0 ;;
+    up|down|reconcile|status|restart) ;;
+    "") usage >&2; die 2 "a subcommand is required." ;;
+    *) usage >&2; die 2 "unknown subcommand: $1" ;;
+  esac
+
+  local action="$1"
+
+  [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+
+  [ -f "${EDGE_STATE}" ] || die 3 "missing ${EDGE_STATE}; run bin/provision-host.sh --apply first."
+  [ -L "${EDGE_STATE}" ] && die 2 "${EDGE_STATE} is a symlink, which is not accepted."
+  [ -f "${HOST_MANIFEST}" ] || die 3 "missing ${HOST_MANIFEST}."
+  [ -L "${HOST_MANIFEST}" ] && die 2 "${HOST_MANIFEST} is a symlink, which is not accepted."
+
+  command -v jq >/dev/null 2>&1 || die 3 "jq is not installed."
+
+  local commit release
+  commit="$(jq -r '.installed_release_commit // empty' "${EDGE_STATE}")"
+  [ -n "${commit}" ] || die 3 "${EDGE_STATE} records no installed release commit."
+
+  # A commit is 40 hex characters. Validated before it becomes a path component,
+  # because state is root-owned but a corrupted value should still not be able
+  # to point this at an arbitrary directory.
+  case "${commit}" in
+    *[!0-9a-f]* | "") die 2 "recorded release commit is not a hexadecimal commit: ${commit}" ;;
+  esac
+  [ "${#commit}" -eq 40 ] || die 2 "recorded release commit is not 40 characters: ${commit}"
+
+  release="${RELEASE_ROOT}/${commit}"
+  [ -d "${release}" ] || die 3 "installed release is missing: ${release}"
+  [ -L "${release}" ] && die 2 "installed release path is a symlink: ${release}"
+
+  local script="${release}/bin/edge.sh"
+  [ -x "${script}" ] || die 3 "installed release has no executable bin/edge.sh: ${script}"
+
+  # Ownership is checked rather than assumed. An installed release writable by
+  # anyone but root is a way to change what a root unit executes without
+  # touching the unit.
+  local owner
+  owner="$(stat -c '%U' "${release}")"
+  [ "${owner}" = "root" ] || die 2 "installed release is owned by ${owner}, expected root."
+
+  exec "${script}" --host "${HOST_MANIFEST}" "${action}"
+}
+
+main "$@"

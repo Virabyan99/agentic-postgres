@@ -1,0 +1,55 @@
+[Unit]
+Description=Agentic Postgres project %i
+Documentation=file:/opt/agentic-postgres/releases/current/docs/project-isolation.md
+
+After=network-online.target docker.service agentic-postgres-edge.service
+Wants=network-online.target
+Requires=docker.service agentic-postgres-edge.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# %i is the project key and NOTHING ELSE. The launcher validates it against the
+# project-key pattern before it is used, and resolves every path from it rather
+# than accepting a path. A template instance name is operator input that arrives
+# through a filename, so treating it as a free-form path would make
+# `systemctl start agentic-postgres-project@../../etc` a question worth asking.
+#
+# Order matters and is the whole contract:
+#
+#   materialize  Fresh secrets are attempted first. The bounded last-known-good
+#                fallback applies only to a temporary provider outage, and only
+#                when the existing generation is complete and its contract hash
+#                and provider identity still match deployment state. Invalid or
+#                revoked credentials fail closed -- an authorization failure is
+#                not an outage wearing a costume.
+#   up           Starts against the generation just selected, never a partial
+#                one: active-secret-generation.json is replaced atomically and
+#                only after the whole generation is durable.
+#   attach       Traefik joins this project's edge network...
+#   reconcile    ...and every other active project's, because recreating the
+#                edge container drops all of them.
+ExecStart=/usr/local/libexec/agentic-postgres/project %i materialize
+ExecStart=/usr/local/libexec/agentic-postgres/project %i up
+ExecStartPost=/usr/local/libexec/agentic-postgres/project %i attach
+ExecStartPost=/usr/local/libexec/agentic-postgres/edge reconcile
+
+# Detach before teardown. Stopping a project whose network Traefik still holds
+# leaves the edge container attached to a network that is about to be removed,
+# and Docker refuses the removal in a way that looks like a Compose bug.
+ExecStop=/usr/local/libexec/agentic-postgres/project %i detach
+ExecStopPost=/usr/local/libexec/agentic-postgres/project %i down
+
+TimeoutStartSec=600
+
+# systemd owns boot convergence, deliberate restarts, release changes and
+# generation rotation. Docker's own `restart: on-failure:5` on the project
+# services handles a process crash -- and handles it WITHOUT changing the
+# selected secret generation, which is why the two policies do not overlap.
+# Restart= here would re-run materialization on every crash and could rotate a
+# generation nobody asked to rotate.
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

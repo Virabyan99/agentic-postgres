@@ -1,0 +1,39 @@
+[Unit]
+Description=Agentic Postgres shared Traefik edge plane
+Documentation=file:/opt/agentic-postgres/releases/current/docs/host-baseline.md
+
+After=network-online.target docker.service agentic-postgres-docker-firewall.service
+Wants=network-online.target
+Requires=docker.service agentic-postgres-docker-firewall.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# The launcher, not a script in a checkout. It resolves the installed release
+# recorded in root-owned edge state and runs that release's edge.sh. An operator
+# editing their working tree therefore cannot change what this unit executes --
+# which is the entire reason immutable releases exist (runbook §4.2).
+ExecStart=/usr/local/libexec/agentic-postgres/edge up
+
+# Reconciliation is separate from `up` and runs unconditionally after it.
+# Traefik's attachment to each project edge network is added with `docker
+# network connect`, and that membership does NOT survive container recreation.
+# Without this, routes come back after a restart and then vanish the next time
+# the container is replaced -- an intermittent failure with a slow diagnosis.
+ExecStartPost=/usr/local/libexec/agentic-postgres/edge reconcile
+
+ExecReload=/usr/local/libexec/agentic-postgres/edge reconcile
+
+# `down`, never `down -v`. bin/compose.sh refuses --volumes in edge mode as
+# well, so this is the second of two independent guards on ACME state: a
+# deleted production.json turns a failed renewal into an exhausted Let's
+# Encrypt rate limit, and nothing about a routine stop should be able to cause
+# that.
+ExecStop=/usr/local/libexec/agentic-postgres/edge down
+
+TimeoutStartSec=300
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,29 @@
+# DOCKER-USER policy, IPv6. Managed by bin/provision-host.sh and reconciled by
+# agentic-postgres-docker-firewall.service after every docker.service start.
+#
+# Applied only when host.yaml configures an expected_public_ipv6. A half-applied
+# IPv6 policy is worse than none: it looks like coverage in a review and leaves
+# the actual path open, so provision-host.sh either applies this whole file or
+# records that IPv6 is not configured.
+#
+# Identical in shape to the v4 policy, and identical in the detail that matters:
+# --ctorigdstport rather than --dport, because DNAT has already rewritten the
+# destination by the time a packet reaches FORWARD.
+#
+# Substituted by provision-host.sh:
+#   __PUBLIC_INTERFACE__   resolved from host.yaml, or from the default route
+#                          when public_interface is `auto`.
+
+-i __PUBLIC_INTERFACE__ -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+
+-i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 80 -j RETURN
+-i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 443 -j RETURN
+
+# ICMPv6 is not optional the way ICMP is on v4. Path MTU discovery and neighbour
+# discovery both depend on it, and dropping it produces connections that
+# complete and then hang on the first large response -- a failure that looks
+# like an application problem for a long time before anyone suspects the
+# firewall. Rate-limited rather than unrestricted.
+-i __PUBLIC_INTERFACE__ -p ipv6-icmp -m limit --limit 10/second -j RETURN
+
+-i __PUBLIC_INTERFACE__ -j DROP

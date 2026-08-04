@@ -1,0 +1,43 @@
+# DOCKER-USER policy, IPv4. Managed by bin/provision-host.sh and reconciled by
+# agentic-postgres-docker-firewall.service after every docker.service start.
+#
+# Why this file exists at all: UFW filters the INPUT chain, and Docker-published
+# ports are DNAT'd and traverse FORWARD. A port published by a container is
+# therefore reachable from the Internet even when `ufw status` shows it denied.
+# DOCKER-USER is the one chain Docker guarantees it will not overwrite, and it
+# is consulted before Docker's own accept rules.
+#
+# --ctorigdstport, not --dport. This is the detail that makes or breaks the
+# policy: DNAT has already rewritten the destination by the time a packet
+# reaches FORWARD, so --dport 80 would match the *container's* port. The
+# conntrack original destination port is the port the client actually asked
+# for, which is what the policy is about.
+#
+# Each non-comment line is an iptables rule specification, appended to
+# DOCKER-USER in this order. The launcher flushes only the rules it manages and
+# re-adds them, so reconciliation is idempotent and does not disturb rules
+# Docker or another operator put there.
+#
+# Substituted by provision-host.sh:
+#   __PUBLIC_INTERFACE__   resolved from host.yaml, or from the default route
+#                          when public_interface is `auto`. Ambiguity is
+#                          refused rather than guessed.
+
+# Return traffic for connections this host or its containers established.
+# First, so the cost of the rest is only paid by new connections.
+-i __PUBLIC_INTERFACE__ -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+
+# The only two ports the public Internet may open a new connection to. Both
+# belong to Traefik; no project service publishes a host port.
+-i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 80 -j RETURN
+-i __PUBLIC_INTERFACE__ -p tcp -m conntrack --ctstate NEW --ctorigdstport 443 -j RETURN
+
+# Everything else forwarded from the public interface toward a Docker network
+# is dropped. This is what makes "no public route reaches the direct PostgreSQL
+# endpoint" (SEC-NET-001) true by construction rather than by there being no
+# PostgreSQL yet: when Session 4 adds one, publishing it by accident still
+# reaches nothing.
+#
+# DROP rather than REJECT: a reject response confirms the host is filtering and
+# tells a scanner the port exists but is blocked. Silence is a smaller answer.
+-i __PUBLIC_INTERFACE__ -j DROP

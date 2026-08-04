@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+#
+# Stable root-owned launcher for the DOCKER-USER ingress policy.
+# Installed at /usr/local/libexec/agentic-postgres/firewall.
+#
+# Separate from the edge launcher because this is a *host* concern, not an edge
+# one: it must run after docker.service and before the edge plane, and it stays
+# correct whether or not any project is deployed. The runbook's §7 layout names
+# only `edge` and `project`; this is a third launcher and is recorded as
+# divergence D29 in the Session 2 plan.
+#
+# Reconciliation is idempotent by construction: rules this file manages are
+# tagged with a comment, every tagged rule is removed, and the current policy is
+# re-added. Rules Docker or another operator placed in DOCKER-USER are left
+# alone, because flushing the whole chain would remove them too.
+#
+# Exit codes: 2 invalid input, 3 missing prerequisite, 6 firewall failure.
+
+set -euo pipefail
+
+readonly RELEASE_ROOT="/opt/agentic-postgres/releases"
+readonly EDGE_STATE="/etc/agentic-postgres/edge-state.json"
+readonly RULE_TAG="agentic-postgres"
+
+die() {
+  local code="$1"
+  shift
+  printf 'agentic-postgres-firewall: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: /usr/local/libexec/agentic-postgres/firewall <reconcile|clear|status>
+
+Applies the DOCKER-USER policy rendered by bin/provision-host.sh into
+/etc/agentic-postgres/. Not intended for direct operator use; invoked by
+agentic-postgres-docker-firewall.service after docker.service.
+USAGE
+}
+
+main() {
+  case "${1-}" in
+    --help|-h) usage; return 0 ;;
+    reconcile|clear|status) ;;
+    "") usage >&2; die 2 "a subcommand is required." ;;
+    *) usage >&2; die 2 "unknown subcommand: $1" ;;
+  esac
+
+  local action="$1"
+
+  [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+  command -v iptables >/dev/null 2>&1 || die 3 "iptables is not installed."
+  command -v jq >/dev/null 2>&1 || die 3 "jq is not installed."
+
+  [ -f "${EDGE_STATE}" ] || die 3 "missing ${EDGE_STATE}; run bin/provision-host.sh --apply first."
+  [ -L "${EDGE_STATE}" ] && die 2 "${EDGE_STATE} is a symlink, which is not accepted."
+
+  local commit release
+  commit="$(jq -r '.installed_release_commit // empty' "${EDGE_STATE}")"
+  [ -n "${commit}" ] || die 3 "${EDGE_STATE} records no installed release commit."
+  case "${commit}" in
+    *[!0-9a-f]* | "") die 2 "recorded release commit is not hexadecimal: ${commit}" ;;
+  esac
+  [ "${#commit}" -eq 40 ] || die 2 "recorded release commit is not 40 characters: ${commit}"
+
+  release="${RELEASE_ROOT}/${commit}"
+  [ -d "${release}" ] || die 3 "installed release is missing: ${release}"
+  [ -L "${release}" ] && die 2 "installed release path is a symlink: ${release}"
+
+  local owner
+  owner="$(stat -c '%U' "${release}")"
+  [ "${owner}" = "root" ] || die 2 "installed release is owned by ${owner}, expected root."
+
+  local script="${release}/bin/docker-firewall.sh"
+  [ -x "${script}" ] || die 3 "installed release has no executable bin/docker-firewall.sh"
+
+  exec "${script}" --tag "${RULE_TAG}" "${action}"
+}
+
+main "$@"

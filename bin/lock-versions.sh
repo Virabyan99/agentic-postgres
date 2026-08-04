@@ -118,6 +118,23 @@ for name, reference in sorted(spec["images"].items()):
 for name, version in sorted(spec["packages"].items()):
     lines.append(f"{name}={version}")
 
+# Feature floors, plus the resolved version each is compared against. The
+# resolved version comes from the *tag* rather than from a registry label,
+# because the tag is what versions.in.yaml selects and what a reviewer reads.
+# `v3.5` -> `3.5`.
+for floor_name, minimum in sorted(spec.get("feature_floors", {}).items()):
+    prefix = floor_name[: -len("_MINIMUM_VERSION")]
+    reference = spec["images"].get(f"{prefix}_IMAGE")
+    if reference is None:
+        blocked.append(f"{floor_name}: no matching {prefix}_IMAGE in versions.in.yaml")
+        continue
+    tag = reference.rsplit(":", 1)[-1].lstrip("vV")
+    if not tag or not tag[0].isdigit():
+        blocked.append(f"{floor_name}: {prefix}_IMAGE tag {tag!r} is not a version")
+        continue
+    lines.append(f"{floor_name}={minimum}")
+    lines.append(f"{prefix}_VERSION={tag}")
+
 if blocked:
     print("lock-versions: BLOCKED. Runbook §15: do not substitute a floating tag.",
           file=sys.stderr)
@@ -235,9 +252,53 @@ for name, version in sorted(spec["packages"].items()):
     if values.get(name) != str(version):
         problems.append(f"{name} does not match versions.in.yaml")
 
+
+def as_version(text):
+    """`3.5` -> (3, 5). Non-numeric components sort as 0 rather than raising."""
+    parts = []
+    for component in str(text).split("."):
+        digits = "".join(c for c in component if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    return tuple(parts)
+
+
+# 4b. Feature floors. Offline and comparative: it cannot prove the locked image
+#     supports a configuration key, but it does prove nobody lowered the version
+#     below the one that does. The live-host sentinel test is the actual proof.
+for floor_name, minimum in sorted(spec.get("feature_floors", {}).items()):
+    prefix = floor_name[: -len("_MINIMUM_VERSION")]
+    resolved_name = f"{prefix}_VERSION"
+
+    if values.get(floor_name) != str(minimum):
+        problems.append(f"{floor_name} does not match versions.in.yaml; run --update")
+        continue
+
+    resolved = values.get(resolved_name)
+    if resolved is None:
+        problems.append(f"{resolved_name} is absent from versions.env; run --update")
+        continue
+
+    locked_image = values.get(f"{prefix}_IMAGE", "")
+    tag = locked_image.rsplit("@", 1)[0].rsplit(":", 1)[-1].lstrip("vV")
+    if tag != resolved:
+        problems.append(
+            f"{resolved_name} is {resolved!r} but {prefix}_IMAGE is tagged {tag!r}; run --update"
+        )
+        continue
+
+    if as_version(resolved) < as_version(minimum):
+        problems.append(
+            f"{prefix} is locked at {resolved} but {floor_name} requires {minimum}: "
+            "the locked version does not support a feature this deployment depends on"
+        )
+
 # 5. No image variable may exist in the lock that the candidate file does not
 #    declare -- otherwise a stale entry survives a deliberate removal.
 declared = set(spec["images"]) | set(spec["packages"])
+declared |= set(spec.get("feature_floors", {}))
+declared |= {
+    f"{name[: -len('_MINIMUM_VERSION')]}_VERSION" for name in spec.get("feature_floors", {})
+}
 metadata = {"APG_LOCK_FORMAT", "APG_VERSIONS_IN_SHA256", "APG_LOCKED_AT",
             "TARGET_PLATFORM", "PYTHON_VERSION", "COMPOSE_MINIMUM_VERSION"}
 for name in sorted(set(values) - declared - metadata):

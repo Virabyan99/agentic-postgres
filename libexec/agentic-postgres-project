@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+#
+# Stable root-owned launcher for one project.
+# Installed at /usr/local/libexec/agentic-postgres/project.
+#
+# Invoked by agentic-postgres-project@.service, whose instance name (%i) is the
+# project key. That key arrives through a *filename*, so it is operator input
+# even though it looks like configuration: `systemctl start
+# agentic-postgres-project@../../etc` is a question this script has to have an
+# answer to. The answer is that %i is validated against the project-key pattern
+# before it is used, and every path is derived from it rather than accepted.
+#
+# Exit codes: 2 invalid input, 3 missing prerequisite, 4 missing runtime
+# prerequisite, 8 secret failure, 9 edge failure.
+
+set -euo pipefail
+
+readonly STATE_ROOT="/etc/agentic-postgres/projects"
+readonly RELEASE_ROOT="/opt/agentic-postgres/releases"
+readonly HOST_MANIFEST="/etc/agentic-postgres/host.yaml"
+
+# Same shape as schemas/outputs.schema.json's projectKey: a slug of at least 3
+# characters, a hyphen, and an environment of at least 2.
+readonly PROJECT_KEY_PATTERN='^[a-z][a-z0-9-]{4,47}$'
+
+die() {
+  local code="$1"
+  shift
+  printf 'agentic-postgres-project: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: /usr/local/libexec/agentic-postgres/project <project-key> <action>
+
+Actions: materialize | up | down | attach | detach | status
+
+Resolves the installed release recorded in that project's deployment state and
+runs that release's scripts. Not intended for direct operator use; systemd
+invokes it through agentic-postgres-project@<project-key>.service.
+USAGE
+}
+
+main() {
+  case "${1-}" in
+    --help|-h) usage; return 0 ;;
+    "") usage >&2; die 2 "a project key is required." ;;
+  esac
+
+  local project_key="$1"
+  local action="${2-}"
+
+  # Validated before it becomes a path component. This is the check that makes
+  # the systemd instance name safe.
+  if ! printf '%s' "${project_key}" | grep -Eq "${PROJECT_KEY_PATTERN}"; then
+    die 2 "not a valid project key: ${project_key}"
+  fi
+
+  case "${action}" in
+    materialize|up|down|attach|detach|status) ;;
+    "") usage >&2; die 2 "an action is required." ;;
+    *) usage >&2; die 2 "unknown action: ${action}" ;;
+  esac
+
+  [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+  command -v jq >/dev/null 2>&1 || die 3 "jq is not installed."
+
+  local deployment="${STATE_ROOT}/${project_key}/deployment.json"
+  [ -f "${deployment}" ] || die 4 "no deployment state for ${project_key}: ${deployment}"
+  [ -L "${deployment}" ] && die 2 "${deployment} is a symlink, which is not accepted."
+
+  local commit release
+  commit="$(jq -r '.installed_release_commit // empty' "${deployment}")"
+  [ -n "${commit}" ] || die 4 "${deployment} records no installed release commit."
+  case "${commit}" in
+    *[!0-9a-f]* | "") die 2 "recorded release commit is not hexadecimal: ${commit}" ;;
+  esac
+  [ "${#commit}" -eq 40 ] || die 2 "recorded release commit is not 40 characters: ${commit}"
+
+  release="${RELEASE_ROOT}/${commit}"
+  [ -d "${release}" ] || die 4 "installed release is missing: ${release}"
+  [ -L "${release}" ] && die 2 "installed release path is a symlink: ${release}"
+
+  local owner
+  owner="$(stat -c '%U' "${release}")"
+  [ "${owner}" = "root" ] || die 2 "installed release is owned by ${owner}, expected root."
+
+  # The state file names the copied manifests. They are copies under
+  # /etc/agentic-postgres/projects/, not paths into anyone's checkout, so a
+  # deployed project keeps working after the operator deletes their clone.
+  local manifest requirements
+  manifest="${STATE_ROOT}/${project_key}/manifest.yaml"
+  requirements="${STATE_ROOT}/${project_key}/secrets.required.yaml"
+  [ -f "${manifest}" ] || die 4 "no copied project manifest: ${manifest}"
+
+  case "${action}" in
+    materialize)
+      [ -f "${requirements}" ] || die 4 "no copied secret contract: ${requirements}"
+      exec "${release}/bin/materialize-secrets.sh" \
+        --project "${manifest}" --requirements "${requirements}" --session 2
+      ;;
+    attach|detach|status)
+      exec "${release}/bin/edge-network.sh" "${action}" --project-key "${project_key}"
+      ;;
+    up|down)
+      exec "${release}/bin/project-runtime.sh" \
+        --host "${HOST_MANIFEST}" --project-key "${project_key}" "${action}"
+      ;;
+  esac
+}
+
+main "$@"

@@ -1,0 +1,43 @@
+[Unit]
+Description=Agentic Postgres DOCKER-USER ingress policy
+Documentation=file:/opt/agentic-postgres/releases/current/docs/host-baseline.md
+
+# Docker creates the DOCKER-USER chain when it starts, and flushes its own
+# chains on restart. Anything that wrote the policy earlier in boot -- including
+# netfilter-persistent -- has written it into a chain that does not exist yet or
+# is about to be recreated. This unit exists because the only correct time to
+# reconcile is after docker.service.
+After=docker.service network-online.target
+Requires=docker.service
+PartOf=docker.service
+
+# Re-run whenever Docker restarts, not just at boot. A `systemctl restart
+# docker` at 3am otherwise silently drops the policy until the next reboot.
+ReloadPropagatedFrom=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+ExecStart=/usr/local/libexec/agentic-postgres/firewall reconcile
+ExecStop=/usr/local/libexec/agentic-postgres/firewall clear
+
+# The edge service requires this unit, so a failure here stops ingress rather
+# than leaving Traefik publishing ports behind no forwarding policy.
+# Deliberately no Restart=: a policy that cannot be applied is a condition an
+# operator must see, not one to retry around.
+TimeoutStartSec=60
+
+# The launcher needs raw netfilter access and nothing else.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_DAC_READ_SEARCH
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+
+[Install]
+WantedBy=multi-user.target

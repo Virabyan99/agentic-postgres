@@ -23,3 +23,13 @@
 .python-version text eol=lf
 VERSION        text eol=lf
 versions.env   text eol=lf
+
+# Session 2 adds file types with no extension, which is where `* text=auto`
+# is least reliable and where a CRLF is worst. A systemd unit with CRLF fails
+# to parse with a message about the line, not about the line ending; a
+# launcher with a CRLF shebang fails with "bad interpreter: ...^M".
+*.service      text eol=lf
+Dockerfile     text eol=lf
+libexec/*        text eol=lf
+infra/host/*     text eol=lf
+systemd/*        text eol=lf

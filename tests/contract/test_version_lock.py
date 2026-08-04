@@ -303,14 +303,90 @@ def test_check_reports_a_missing_lock_file(fake_repo: Path) -> None:
 
 
 def test_lock_variables_do_not_overlap_generated_ones(lock: dict[str, str]) -> None:
-    """Runbook §6.4: an overlap would make --env-file ordering load-bearing."""
-    generated = {
-        "COMPOSE_PROJECT_NAME",
-        "EDGE_NETWORK_NAME",
-        "INTERNAL_NETWORK_NAME",
-        "POSTGRES_VOLUME_NAME",
-    }
-    assert not generated & set(lock)
+    """Runbook §6.4: an overlap would make --env-file ordering load-bearing.
+
+    The generated set is read from the renderer rather than restated here, so a
+    key added to ``compose.env`` is covered the moment it is added.
+    """
+    from agentic_postgres import rendering
+
+    assert not set(rendering.COMPOSE_ENV_KEYS) & set(lock)
+
+
+def test_lock_variables_do_not_overlap_the_edge_env(lock: dict[str, str]) -> None:
+    """The third env file of ADR 0013 needs the same disjointness."""
+    from agentic_postgres import host_config
+
+    assert not set(host_config.EDGE_COMPOSE_ENV_KEYS) & set(lock)
+
+
+# ---------------------------------------------------------------------------
+# Feature floors (Session 2)
+# ---------------------------------------------------------------------------
+
+
+def test_the_traefik_floor_is_recorded(lock: dict[str, str], candidates: dict) -> None:
+    """A floor that is not in the lock cannot be checked offline."""
+    declared = candidates["feature_floors"]["TRAEFIK_MINIMUM_VERSION"]
+    assert lock["TRAEFIK_MINIMUM_VERSION"] == declared
+    tag = lock["TRAEFIK_IMAGE"].rsplit("@", 1)[0].rsplit(":", 1)[-1].lstrip("v")
+    assert lock["TRAEFIK_VERSION"] == tag
+
+
+def test_a_version_below_the_floor_is_detected(fake_repo: Path) -> None:
+    """The floor exists to stop a downgrade that silently disables redaction.
+
+    Traefik below 3 has no ``accessLog.fields.queryParameters.defaultMode``, so
+    the setting is accepted and ignored: query strings, and any token in one, go
+    into the access log with no error anywhere.
+    """
+    lock_path = fake_repo / "versions.env"
+    text = (
+        lock_path.read_text(encoding="utf-8")
+        .replace("traefik:v3.5@", "traefik:v2.9@")
+        .replace("TRAEFIK_VERSION=3.5", "TRAEFIK_VERSION=2.9")
+    )
+    lock_path.write_text(text, encoding="utf-8")
+
+    result = run_check(fake_repo)
+    assert result.returncode == 5
+    assert "does not support a feature" in result.stderr
+
+
+def test_a_resolved_version_that_disagrees_with_the_tag_is_detected(fake_repo: Path) -> None:
+    """Otherwise the floor is satisfied by editing one number.
+
+    ``TRAEFIK_VERSION`` is derived from the image tag by ``--update``. If
+    ``--check`` compared the floor against it without also comparing it against
+    the tag, raising the recorded version past the floor would be a one-line
+    edit that changes nothing about what runs.
+    """
+    lock_path = fake_repo / "versions.env"
+    lock_path.write_text(
+        lock_path.read_text(encoding="utf-8").replace("TRAEFIK_VERSION=3.5", "TRAEFIK_VERSION=9.9"),
+        encoding="utf-8",
+    )
+
+    result = run_check(fake_repo)
+    assert result.returncode == 5
+    assert "is tagged" in result.stderr
+
+
+def test_a_missing_floor_is_detected(fake_repo: Path) -> None:
+    lock_path = fake_repo / "versions.env"
+    lock_path.write_text(
+        "\n".join(
+            line
+            for line in lock_path.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("TRAEFIK_MINIMUM_VERSION=")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_check(fake_repo)
+    assert result.returncode == 5
+    assert "TRAEFIK_MINIMUM_VERSION" in result.stderr
 
 
 def test_cli_grammar() -> None:
