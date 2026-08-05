@@ -34,18 +34,23 @@ entryPoints:
     http:
       redirections:
         entryPoint:
-          to: websecure
-          scheme: https
-          # The port a client should come back on, which is not the port this
-          # entryPoint listens on. Traefik defaults to the target entryPoint's
-          # own address -- :8443 -- and the container ports are deliberately
-          # unprivileged so no capability is needed to bind them. Without this
-          # every visitor is redirected to https://host:8443/, which is not
-          # published and never answers.
+          # `:443`, not `websecure`. `to` takes an entry point name or a port,
+          # and naming the entry point makes Traefik redirect to that entry
+          # point's own address -- :8443. The container ports are unprivileged
+          # on purpose so no capability is needed to bind them, and Docker
+          # publishes them as 80 and 443; a visitor sent to :8443 reaches
+          # nothing.
           #
-          # Invisible from inside the host: websecure really is :8443 there.
-          # Found by following the redirect from another network.
-          port: "443"
+          # Naming the public port emits https://host/path with no port at all,
+          # since 443 is the scheme's default.
+          #
+          # There is no `port` field in a redirection. Adding one is rejected
+          # and Traefik refuses to start, which is how the first attempt at this
+          # fix took the edge plane down -- the mistake ADR 0019 records, made
+          # again while fixing something else. Verified against the image this
+          # time, by following the redirect it actually emits.
+          to: ":443"
+          scheme: https
           permanent: true
   websecure:
     address: ":8443"

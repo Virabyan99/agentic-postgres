@@ -156,8 +156,11 @@ def test_the_redirect_names_the_published_port_not_the_container_port(
     external suite exists.
     """
     redirection = static_config["entryPoints"]["web"]["http"]["redirections"]["entryPoint"]
-    assert redirection["port"] == "443", (
-        "the redirect sends clients to the container port, which is not published"
+    assert redirection["to"] == ":443", (
+        "the redirect names an entry point, so Traefik sends clients to its container port"
+    )
+    assert "port" not in redirection, (
+        "there is no `port` field in a Traefik redirection; it refuses to start with one"
     )
 
     published = {"80": "8080", "443": "8443"}
@@ -167,8 +170,13 @@ def test_the_redirect_names_the_published_port_not_the_container_port(
 
 
 def test_http_redirects_permanently_to_https(static_config: dict[str, Any]) -> None:
+    """Scheme and permanence only.
+
+    The target used to be asserted here as the entry point name `websecure`,
+    which is what sent visitors to the container port. The target is now the
+    subject of the test below, which carries the reasoning.
+    """
     redirection = static_config["entryPoints"]["web"]["http"]["redirections"]["entryPoint"]
-    assert redirection["to"] == "websecure"
     assert redirection["scheme"] == "https"
     assert redirection["permanent"] is True
 
