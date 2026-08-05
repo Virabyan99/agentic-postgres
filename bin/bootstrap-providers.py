@@ -149,9 +149,24 @@ class ControlPlane:
             ) as response:
                 payload = json.loads(response.read())
         except urllib.error.HTTPError as exc:
-            # Status only. A login body echoes the request on some deployments,
-            # and this message reaches a terminal.
-            raise BootstrapStateError(f"Universal Auth login failed with HTTP {exc.code}") from None
+            # Status only, never the body: a login body echoes the request on
+            # some deployments, and this message reaches a terminal.
+            hint = ""
+            if exc.code == 401:
+                # An identity has two UUIDs. Its own id appears in the page URL
+                # and is what an operator finds first -- it is visible before a
+                # client secret even exists. The Universal Auth client id lives
+                # inside the auth-method panel beside where the secret is
+                # created. They are indistinguishable by shape and only one of
+                # them logs in.
+                hint = (
+                    ". Line 1 must be the Universal Auth client id from the identity's "
+                    "auth-method panel, not the identity id from the page URL -- they are "
+                    "different UUIDs. A revoked or rotated client secret returns 401 too"
+                )
+            raise BootstrapStateError(
+                f"Universal Auth login failed with HTTP {exc.code}{hint}"
+            ) from None
         except urllib.error.URLError as exc:
             raise BootstrapStateError(f"could not reach the Infisical API: {exc.reason}") from None
 
