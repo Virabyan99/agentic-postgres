@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import ssl
 import sys
 import tempfile
@@ -70,6 +71,27 @@ def now() -> str:
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def read_operator_credential(path: Path) -> tuple[str, str]:
+    """Read a Universal Auth credential: client id on line 1, secret on line 2.
+
+        Validated for shape before either value is used, and every failure names the
+        file and the line count and nothing else. The previous version read the file
+        whole and used it as a bearer token, so a two-line file became the header
+        value `Bearer <id>
+    <secret>` -- which http.client rejects by raising a
+        ValueError containing the value.
+    """
+    lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    lines = [line for line in lines if line]
+
+    if len(lines) != 2:
+        raise BootstrapStateError(
+            f"{path} must hold a Universal Auth client id on line 1 and its client secret "
+            f"on line 2; found {len(lines)} non-empty line(s). No value is shown here."
+        )
+    return lines[0], lines[1]
+
+
 class ControlPlane:
     """The narrow set of Infisical control-plane calls this command makes.
 
@@ -77,12 +99,66 @@ class ControlPlane:
     create identities, and the runtime path must never be able to.
     """
 
+    #: What a bearer token may contain. Anything else -- a newline above all --
+    #: is refused before it reaches a header.
+    #:
+    #: http.client.putheader raises ValueError('Invalid header value %r' % value)
+    #: for a malformed header, and that %r is the credential. A two-line
+    #: credential file was therefore printed in full, client id and client
+    #: secret, to a terminal and into a transcript. The value must be checked
+    #: before the standard library ever sees it, and the check must not echo
+    #: what it rejected.
+    _TOKEN = re.compile(r"\A[A-Za-z0-9._~+/=-]+\Z")
+
     def __init__(self, api_url: str, token: str) -> None:
         if urllib.parse.urlparse(api_url).scheme != "https":
             raise BootstrapStateError("the Infisical API URL must be https")
+        if not self._TOKEN.match(token):
+            raise BootstrapStateError(
+                "the access token contains characters that cannot appear in an HTTP header "
+                f"(length {len(token)}); its value is deliberately not shown"
+            )
         self._base = api_url.rstrip("/")
         self._token = token
         self._context = ssl.create_default_context()
+
+    @classmethod
+    def login(cls, api_url: str, client_id: str, client_secret: str) -> ControlPlane:
+        """Exchange a Universal Auth credential for a short-lived access token.
+
+        The control plane used the credential file's contents directly as a
+        bearer token, which meant it never authenticated as the machine identity
+        the plan specifies -- and made the long-lived secret the thing sent on
+        every request. What travels now is an access token with a lifetime,
+        obtained the same way the runtime client obtains one.
+        """
+        if urllib.parse.urlparse(api_url).scheme != "https":
+            raise BootstrapStateError("the Infisical API URL must be https")
+
+        request = urllib.request.Request(  # noqa: S310 — scheme asserted above
+            f"{api_url.rstrip('/')}/api/v1/auth/universal-auth/login",
+            data=json.dumps({"clientId": client_id, "clientSecret": client_secret}).encode(),
+            method="POST",
+        )
+        request.add_header("Content-Type", "application/json")
+        request.add_header("Accept", "application/json")
+
+        try:
+            with urllib.request.urlopen(  # noqa: S310
+                request, timeout=TIMEOUT, context=ssl.create_default_context()
+            ) as response:
+                payload = json.loads(response.read())
+        except urllib.error.HTTPError as exc:
+            # Status only. A login body echoes the request on some deployments,
+            # and this message reaches a terminal.
+            raise BootstrapStateError(f"Universal Auth login failed with HTTP {exc.code}") from None
+        except urllib.error.URLError as exc:
+            raise BootstrapStateError(f"could not reach the Infisical API: {exc.reason}") from None
+
+        token = payload.get("accessToken")
+        if not token:
+            raise BootstrapStateError("Universal Auth login returned no access token")
+        return cls(api_url, token)
 
     def _call(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         request = urllib.request.Request(  # noqa: S310 — scheme asserted https above
@@ -296,12 +372,20 @@ def apply(
             "the old one deliberately rather than having this command guess.",
         )
 
-    token = credential_file.read_text(encoding="utf-8").strip()
-    if not token:
-        fail(EXIT_PREREQUISITE, f"the operator credential file is empty: {credential_file}")
+    # Distinct names from the runtime credential created below. Reusing
+    # client_id/client_secret for both meant the operator's long-lived control
+    # credential and the project's new runtime credential shared two variables
+    # in one function, which is one careless edit away from writing the wrong
+    # one to disk.
+    try:
+        operator_id, operator_secret = read_operator_credential(credential_file)
+    except BootstrapStateError as exc:
+        # Reported, never raised: an uncaught exception here prints a traceback,
+        # and a traceback through http.client is how this credential leaked.
+        fail(EXIT_PREREQUISITE, str(exc))
 
     try:
-        control = ControlPlane(infisical["api_url"], token)
+        control = ControlPlane.login(infisical["api_url"], operator_id, operator_secret)
         organization = infisical["organization_id"]
 
         project_id = control.create_project(key, key, organization)
