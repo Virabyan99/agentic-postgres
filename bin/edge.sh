@@ -175,6 +175,19 @@ do_up() {
   [ -e "${ACME_DIR}/staging.json" ] || : > "${ACME_DIR}/staging.json"
   chmod 0600 "${ACME_DIR}/staging.json"
 
+  # Before compose, because the model bind-mounts traefik.yaml and dynamic/ and
+  # Compose creates a missing bind source as a *directory*. That is how Traefik
+  # came to restart forever on "read /etc/traefik/traefik.yaml: is a directory":
+  # nothing had ever rendered the template, and the mount silently invented one
+  # in its place.
+  #
+  # Rendered against whatever ACME environment the store already reflects, so a
+  # restart after promote-acme does not quietly demote the edge to staging.
+  "$(python_bin)" "${ROOT_DIR}/bin/render-config.py" \
+    --host "${HOST_MANIFEST}" --edge-static "${EDGE_STATE_DIR}" \
+    --acme-environment "$(acme_environment)" \
+    || die 9 "could not render the edge configuration."
+
   compose --runtime up -d --wait || die 9 "the edge plane did not become healthy."
   "${ROOT_DIR}/bin/edge-network.sh" reconcile
   printf 'edge: up, ACME environment %s\n' "$(acme_environment)"
@@ -234,8 +247,12 @@ do_promote() {
   # Re-render the static configuration against the production directory, then
   # restart. The staging store is left in place: it costs nothing, and it is the
   # evidence that the configuration worked before production was ever asked.
-  APG_ACME_ENVIRONMENT=production "${ROOT_DIR}/bin/render-config.py" \
-    --host "${HOST_MANIFEST}" --edge-env >/dev/null \
+  # This said it re-rendered the static configuration and did not: --edge-env
+  # only writes compose.env, so promotion changed the ACME store on disk while
+  # leaving Traefik pointed at the staging directory.
+  "$(python_bin)" "${ROOT_DIR}/bin/render-config.py" \
+    --host "${HOST_MANIFEST}" --edge-static "${EDGE_STATE_DIR}" \
+    --acme-environment production \
     || die 9 "could not render the production edge configuration."
 
   compose --runtime restart || die 9 "the edge plane did not restart."

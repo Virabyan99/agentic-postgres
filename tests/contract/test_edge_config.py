@@ -301,3 +301,64 @@ def test_the_config_directory_is_not_masked() -> None:
     assert "haproxy.cfg.template" in "\n".join(proxy["command"]), (
         "the render no longer reads the image's own template"
     )
+
+
+# ---------------------------------------------------------------------------
+# Every bind source must be produced before Compose sees it
+# ---------------------------------------------------------------------------
+
+
+def test_edge_up_renders_the_static_configuration_before_compose(code_only) -> None:
+    """Compose creates a missing bind source as a directory.
+
+    `do_up` created the state directory and the ACME store and then started
+    Compose, having never rendered traefik.yaml. Compose invented a directory at
+    that path and Traefik restarted forever on "read /etc/traefik/traefik.yaml:
+    is a directory" -- a template with no renderer, which is the same shape as
+    the edge-state.json that had three readers and no writer.
+    """
+    body = code_only((REPO_ROOT / "bin" / "edge.sh").read_text(encoding="utf-8"))
+    up = body.split("do_up()", 1)[1].split("\n}", 1)[0]
+    assert "--edge-static" in up, "edge.sh up starts Compose without rendering the config"
+    assert up.index("--edge-static") < up.index("compose --runtime up")
+
+
+def test_promotion_re_renders_the_static_configuration(code_only) -> None:
+    """It claimed to and did not.
+
+    `--edge-env` writes compose.env only, so promotion moved the ACME store on
+    disk while leaving Traefik pointed at the staging directory -- production
+    certificates would never have been requested.
+    """
+    body = code_only((REPO_ROOT / "bin" / "edge.sh").read_text(encoding="utf-8"))
+    promote = body.split("do_promote()", 1)[1].split("\n}", 1)[0]
+    assert "--edge-static" in promote
+    assert "--acme-environment production" in promote
+
+
+def test_every_edge_bind_source_is_produced_by_the_up_path(code_only) -> None:
+    """The general rule, not just the file that broke.
+
+    Anything the Compose model bind-mounts out of EDGE_STATE_DIR has to be
+    created before `up` runs, or Compose fills the gap with a directory and the
+    failure lands inside a container.
+    """
+    model = yaml.safe_load((REPO_ROOT / "infra" / "edge" / "compose.yaml").read_text("utf-8"))
+    sources = {
+        volume["source"].replace("${EDGE_STATE_DIR:?required}/", "")
+        for service in model["services"].values()
+        for volume in service.get("volumes", [])
+        if "${EDGE_STATE_DIR" in volume.get("source", "")
+    }
+    assert sources, "no edge bind mounts found; this scan is measuring nothing"
+
+    up = code_only((REPO_ROOT / "bin" / "edge.sh").read_text(encoding="utf-8"))
+    up = up.split("do_up()", 1)[1].split("\n}", 1)[0]
+    renderer = (REPO_ROOT / "bin" / "render-config.py").read_text(encoding="utf-8")
+
+    for source in sorted(sources):
+        produced = source in up or source in renderer
+        assert produced, (
+            f"the edge model mounts {source} but nothing in do_up or render-config creates it; "
+            "Compose will create a directory there"
+        )

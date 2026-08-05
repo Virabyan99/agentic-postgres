@@ -22,7 +22,10 @@ Exit codes (runbook §2 convention):
 from __future__ import annotations
 
 import argparse
+import os
+import re
 import sys
+import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -157,6 +160,124 @@ def edge_env(host: Path) -> int:
     return 0
 
 
+def edge_static(host: Path, destination: Path, acme_environment: str) -> int:
+    """Render Traefik's static and dynamic configuration into a directory.
+
+    Nothing did this. ``infra/edge/traefik.yaml`` is a template with two
+    placeholders and it was never installed anywhere, so the Compose bind mount
+    pointed at a path that did not exist -- and Compose, whose
+    ``create_host_path`` defaults to true, created a *directory* there. Traefik
+    then restarted forever on "read /etc/traefik/traefik.yaml: is a directory".
+
+    The ACME environment is a parameter because promotion re-renders this file
+    against the production directory and storage. It is still not selectable
+    from a manifest: `host.schema.json` pins `initial_acme_environment` to the
+    const `staging`, and production is reached only through
+    `edge.sh promote-acme`.
+    """
+    try:
+        document = host_config.load_host_manifest(host)
+    except config.ManifestError as exc:
+        print(f"render-config: {host}: {exc}", file=sys.stderr)
+        return 2
+
+    if acme_environment not in {"staging", "production"}:
+        print(f"render-config: unknown ACME environment {acme_environment!r}", file=sys.stderr)
+        return 2
+
+    source = REPO_ROOT / "infra" / "edge"
+    text = (source / "traefik.yaml").read_text(encoding="utf-8")
+    text = text.replace("__ACME_RESOLVER_NAME__", document["edge"]["acme_resolver_name"])
+    text = text.replace("__ACME_EMAIL__", document["edge"]["acme_email"])
+
+    if acme_environment == "production":
+        # The staging store stays on disk. Rewriting the pointer rather than
+        # moving the state is what makes promotion reversible without deleting
+        # an ACME store -- deleting one is how a failed renewal becomes an
+        # exhausted weekly rate limit.
+        text = text.replace("acme/staging.json", "acme/production.json")
+        text = text.replace(
+            "https://acme-staging-v02.api.letsencrypt.org/directory",
+            "https://acme-v02.api.letsencrypt.org/directory",
+        )
+
+    remaining = sorted(set(re.findall(r"__[A-Z_]+__", text)))
+    if remaining:
+        print(f"render-config: unsubstituted placeholders: {remaining}", file=sys.stderr)
+        return 5
+
+    destination.mkdir(parents=True, exist_ok=True)
+    if (problem := _clear_invented_directory(destination / "traefik.yaml")) is not None:
+        print(f"render-config: {problem}", file=sys.stderr)
+        return 5
+    _write_config_file(destination / "traefik.yaml", text)
+
+    dynamic = destination / "dynamic"
+    dynamic.mkdir(parents=True, exist_ok=True)
+    for path in sorted((source / "dynamic").glob("*.yaml")):
+        body = path.read_text(encoding="utf-8").replace(
+            "__HSTS_BLOCK__", _hsts_block(acme_environment)
+        )
+        still_open = sorted(set(re.findall(r"__[A-Z_]+__", body)))
+        if still_open:
+            print(f"render-config: {path.name}: unsubstituted {still_open}", file=sys.stderr)
+            return 5
+        _write_config_file(dynamic / path.name, body)
+
+    print(f"render-config: wrote the {acme_environment} edge configuration to {destination}")
+    return 0
+
+
+def _hsts_block(acme_environment: str) -> str:
+    """Absent on staging, and that is the point.
+
+    A browser that pins HSTS against a staging certificate keeps refusing the
+    site long after the certificate is fixed, and the operator cannot clear it
+    for their visitors.
+    """
+    if acme_environment != "production":
+        return ""
+    return "stsSeconds: 31536000\n        stsIncludeSubdomains: true\n        stsPreload: false"
+
+
+def _clear_invented_directory(path: Path) -> str | None:
+    """Remove the empty directory Compose creates where a bind source is missing.
+
+    ``os.replace`` onto a directory fails, so a host that has already tried to
+    start the edge once cannot be repaired by rendering alone — and the operator
+    is left deleting a path under /var/lib by hand on the strength of an error
+    message.
+
+    ``rmdir``, never a recursive delete. It succeeds only on an empty directory,
+    which is exactly what Compose leaves and nothing else is. Anything with
+    contents is somebody's data and gets reported instead.
+    """
+    if not path.is_dir() or path.is_symlink():
+        return None
+    try:
+        path.rmdir()
+    except OSError:
+        return f"{path} is a non-empty directory where a file belongs; inspect it and remove it"
+    return None
+
+
+def _write_config_file(path: Path, text: str) -> None:
+    """Write 0644, replacing atomically.
+
+    0644 rather than 0600: Traefik reads these and the container's user is not
+    this file's decision. They carry no secret -- an ACME contact address and a
+    resolver name -- and what matters is that nothing but root can write them,
+    since writing them chooses the certificate authority.
+    """
+    handle, temporary = tempfile.mkstemp(dir=str(path.parent), prefix=f".{path.name}.")
+    with os.fdopen(handle, "w", encoding="utf-8") as stream:
+        stream.write(text)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.chmod(temporary, 0o644)
+    os.replace(temporary, path)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="bin/render-config.py",
@@ -169,6 +290,18 @@ def main(argv: list[str] | None = None) -> int:
         "--edge-env",
         action="store_true",
         help="With --host: write the shared edge stack's compose.env to stdout.",
+    )
+    parser.add_argument(
+        "--edge-static",
+        type=Path,
+        metavar="DIR",
+        help="With --host: render traefik.yaml and dynamic/ into DIR.",
+    )
+    parser.add_argument(
+        "--acme-environment",
+        choices=("staging", "production"),
+        default="staging",
+        help="With --edge-static: which ACME directory and store to point at.",
     )
     parser.add_argument(
         "--validate-only",
@@ -196,6 +329,11 @@ def main(argv: list[str] | None = None) -> int:
         if not args.host:
             parser.error("--edge-env requires --host")
         return edge_env(args.host)
+
+    if args.edge_static:
+        if not args.host:
+            parser.error("--edge-static requires --host")
+        return edge_static(args.host, args.edge_static, args.acme_environment)
 
     if args.bounds_doc:
         if args.write == args.check:
