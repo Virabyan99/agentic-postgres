@@ -122,6 +122,26 @@ die() {
   exit "$code"
 }
 
+# Interpreter resolution. Ubuntu ships no bare `python`, and sudo resets PATH to
+# secure_path, so an operator's activated venv is invisible to anything invoked
+# through it.
+#
+# This script is not itself a root command, which is exactly how it was missed:
+# bin/edge.sh resolves an interpreter correctly and then calls this, which did
+# not. The contract scan was scoped to what runs as root rather than to what
+# root reaches.
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then
+    printf '%s' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    die 3 "no Python interpreter found (looked for .venv/bin/python, python3, python)."
+  fi
+}
+
 cleanup() {
   if [ -n "${TEMP_ENV}" ]; then
     rm -f "${TEMP_ENV}"
@@ -251,7 +271,15 @@ configure_edge_scope() {
   # where the root-owned /var/lib/agentic-postgres/edge/compose.env does not
   # exist. umask keeps the temporary file owner-only.
   TEMP_ENV="$(umask 077 && mktemp)"
-  python "${ROOT_DIR}/bin/render-config.py" --host "${HOST_MANIFEST}" --edge-env > "${TEMP_ENV}" \
+
+  # Resolved first, so a missing interpreter is reported as a missing
+  # interpreter. Folding both failures into one message told an operator their
+  # host manifest was invalid when the real answer was that nothing could run
+  # the validator -- a diagnosis that sends the reader to the wrong file.
+  local interpreter
+  interpreter="$(python_bin)"
+  "${interpreter}" "${ROOT_DIR}/bin/render-config.py" \
+    --host "${HOST_MANIFEST}" --edge-env > "${TEMP_ENV}" \
     || die 2 "host manifest is not valid: ${HOST_MANIFEST}"
 
   assert_disjoint "${LOCK_ENV}" "${TEMP_ENV}"

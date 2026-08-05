@@ -50,9 +50,24 @@ die() {
   exit "$code"
 }
 
+# Reached from bin/session-02-check.sh, which runs as root in host mode, so the
+# same PATH problem applies here even though this is a developer tool most of
+# the time: sudo resets PATH to secure_path and Ubuntu ships no bare `python`.
+# Resolving is cheaper than reasoning about which callers are privileged today.
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then
+    printf '%s' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    die 3 "no Python interpreter found (looked for .venv/bin/python, python3, python)."
+  fi
+}
+
 require_python() {
-  command -v python >/dev/null 2>&1 \
-    || die 3 "python is not on PATH. Activate the repository virtual environment."
+  python_bin >/dev/null
 }
 
 update() {
@@ -60,7 +75,7 @@ update() {
   docker buildx version >/dev/null 2>&1 \
     || die 3 "docker buildx is unavailable; --update cannot resolve digests."
 
-  python - "$CANDIDATES" "$LOCK" <<'PY'
+  "$(python_bin)" - "$CANDIDATES" "$LOCK" <<'PY'
 import json
 import os
 import subprocess
@@ -153,7 +168,7 @@ PY
 }
 
 check() {
-  python - "$CANDIDATES" "$LOCK" <<'PY'
+  "$(python_bin)" - "$CANDIDATES" "$LOCK" <<'PY'
 import re
 import sys
 from hashlib import sha256

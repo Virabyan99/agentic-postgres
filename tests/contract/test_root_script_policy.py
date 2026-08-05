@@ -125,8 +125,51 @@ def test_the_resolver_stripper_removes_only_the_resolver() -> None:
     assert "check_baseline" in stripped, "the stripper ate the rest of the script"
 
 
-@pytest.mark.parametrize("relative", ROOT_COMMANDS)
-def test_no_script_invokes_a_bare_python(relative: str) -> None:
+def root_reachable_scripts() -> list[str]:
+    """Every script a root command can end up running, transitively.
+
+    The scan below was scoped to ROOT_COMMANDS — what runs as root — and the
+    hazard is what root *reaches*. `bin/edge.sh` resolves an interpreter
+    correctly and then calls `bin/compose.sh`, which did not, and the whole edge
+    plane failed on the host with `python: command not found` while the message
+    blamed the host manifest. Both scripts were individually defensible; the
+    boundary between them was where the trap sat.
+
+    Closure rather than a hand-maintained list, so the next script pulled into a
+    root path inherits the rule without anyone remembering to add it.
+    """
+    reachable = set(ROOT_COMMANDS) | {"deploy.sh"}
+    candidates = {
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in [*(REPO_ROOT / "bin").glob("*.sh"), REPO_ROOT / "deploy.sh"]
+    }
+
+    changed = True
+    while changed:
+        changed = False
+        for relative in sorted(reachable):
+            # code_of, so a script merely *named* in a usage heredoc — "run
+            # bin/edge.sh first" — is not mistaken for one that gets invoked.
+            body = code_of(relative)
+            for candidate in candidates - reachable:
+                if candidate in body:
+                    reachable.add(candidate)
+                    changed = True
+    return sorted(reachable)
+
+
+def test_the_reachability_closure_finds_the_indirect_case() -> None:
+    """Guard the guard: compose.sh is reached only through another script."""
+    reachable = root_reachable_scripts()
+    assert "bin/compose.sh" in reachable, "the closure no longer follows edge.sh into compose.sh"
+    assert "bin/edge.sh" in reachable
+    # doctor.sh is a developer command nothing privileged calls. If it ever
+    # appears here, something started invoking it from a root path.
+    assert "bin/doctor.sh" not in reachable
+
+
+@pytest.mark.parametrize("relative", root_reachable_scripts())
+def test_no_root_reachable_script_invokes_a_bare_python(relative: str) -> None:
     """Ubuntu ships no ``python``, and ``sudo`` resets PATH.
 
     A standing trap this repository documents, and five Session 2 scripts walked

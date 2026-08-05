@@ -56,6 +56,20 @@ die() {
   exit "$code"
 }
 
+# Ubuntu ships no bare `python`, and sudo resets PATH to secure_path, so an
+# operator's activated venv is invisible under --through-session.
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then
+    printf '%s' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    die 3 "no Python interpreter found (looked for .venv/bin/python, python3, python)."
+  fi
+}
+
 main() {
   local project="" capabilities="" host="" render_only=0 through_session=""
 
@@ -151,15 +165,16 @@ main() {
     [ -n "${host}" ] || die 2 "--through-session requires --host."
     [ -f "${host}" ] || die 2 "host manifest not found: ${host}"
 
-    command -v python3 >/dev/null 2>&1 || [ -x "${ROOT_DIR}/.venv/bin/python" ] \
-      || die 3 "no Python interpreter found."
-
     [ -f "${project}" ] || die 2 "project manifest not found: ${project}"
     [ -f "${capabilities}" ] || die 2 "capability manifest not found: ${capabilities}"
 
     [ "$(id -u)" -eq 0 ] || die 3 "--through-session requires root: it writes host state."
 
-    exec "${ROOT_DIR}/bin/deploy-session-2.py" \
+    # Run through the resolver rather than the shebang. `#!/usr/bin/env python3`
+    # would select the system interpreter, which has neither yaml nor
+    # jsonschema -- the failure would be a ModuleNotFoundError from inside a
+    # deployment, after the render had already run.
+    exec "$(python_bin)" "${ROOT_DIR}/bin/deploy-session-2.py" \
       --host "${host}" \
       --project "${project}" \
       --capabilities "${capabilities}"
@@ -167,15 +182,12 @@ main() {
 
   # Step 4 of the runbook §11 order: verify local prerequisites before doing
   # anything that could touch generated state.
-  command -v python >/dev/null 2>&1 \
-    || die 3 "python is not on PATH. Activate the repository virtual environment."
-
   [ -f "${project}" ] || die 2 "project manifest not found: ${project}"
   [ -f "${capabilities}" ] || die 2 "capability manifest not found: ${capabilities}"
 
   # Steps 5-15 are one transaction and belong in one process. Splitting them
   # across shell and Python would put the rollback boundary in the wrong place.
-  exec python "${ROOT_DIR}/bin/render-config.py" \
+  exec "$(python_bin)" "${ROOT_DIR}/bin/render-config.py" \
     --project "${project}" \
     --capabilities "${capabilities}" \
     --render
