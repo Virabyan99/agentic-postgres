@@ -32,6 +32,7 @@ from agentic_postgres.config import load_project_manifest
 from agentic_postgres.host_config import load_host_manifest
 from agentic_postgres.infisical_client import Credential, InfisicalClient, InfisicalError
 from agentic_postgres.naming import project_key as derive_project_key
+from agentic_postgres.secret_generation import build_manifest, write_manifest
 from agentic_postgres.secrets_contract import (
     SECRET_ROOT,
     active_secrets,
@@ -222,6 +223,19 @@ def materialize(key: str, contract: dict[str, Any], session: int) -> int:
             # Dropped as soon as it is written. Holding every value until the
             # end would keep them all resident for the whole run for no reason.
             del value
+
+        # Written into the staging directory, so the manifest is part of the
+        # generation rather than an annotation added to it afterwards. The
+        # deployed document points at this path; without it a deployment claims
+        # secrets are ready and names a file that does not exist.
+        write_manifest(
+            build_manifest(
+                project_key=key,
+                generation_id=generation,
+                secrets=list(active_secrets(contract, session=session)),
+            ),
+            staging / "manifest.json",
+        )
 
         fsync_directory(staging)
         staging.rename(target)
