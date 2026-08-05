@@ -134,6 +134,47 @@ def edge_compose_env(document: dict[str, Any]) -> bytes:
     return ("\n".join(lines) + "\n").encode("utf-8")
 
 
+#: The exact key set of a project's *runtime* `compose.env` -- the root-owned
+#: third `--env-file` that only `--runtime` mode passes.
+#:
+#: These are the host-derived values ADR 0013 keeps out of rendered output.
+#: `host.yaml` is not one of the digested inputs, so a rendered file carrying
+#: the ACME resolver name would depend on which machine produced it while
+#: claiming to be a pure function of the manifests. Disjoint from the project
+#: key set and from `versions.env`, so no `--env-file` ordering can shadow
+#: anything.
+RUNTIME_COMPOSE_ENV_KEYS: tuple[str, ...] = (
+    "ACME_RESOLVER_NAME",
+    "BASELINE_MIDDLEWARE_CHAIN",
+)
+
+#: The middleware every project route passes through, in order. Fixed here
+#: rather than per project: a project that could choose its own chain could
+#: choose to skip the security headers, and the chain is a platform guarantee
+#: rather than a project preference.
+BASELINE_MIDDLEWARE_CHAIN = "apg-security-headers@file,apg-rate-limit@file"
+
+
+def runtime_compose_env(document: dict[str, Any]) -> bytes:
+    """Render a project's root-owned runtime `compose.env` from the host manifest.
+
+    Root-owned, and outside the project's generated directory on purpose. An
+    operator who can write a project's rendered output must not thereby be able
+    to change which ACME resolver issues its certificate, or drop the middleware
+    chain from its routes.
+    """
+    values = {
+        "ACME_RESOLVER_NAME": document["edge"]["acme_resolver_name"],
+        "BASELINE_MIDDLEWARE_CHAIN": BASELINE_MIDDLEWARE_CHAIN,
+    }
+    lines = [
+        "# Generated from host.yaml by ./deploy.sh. Do not edit; do not shell-source.",
+        "# Passed as a third --env-file by bin/compose.sh --runtime only.",
+        *(f"{key}={values[key]}" for key in RUNTIME_COMPOSE_ENV_KEYS),
+    ]
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
 def _validate_semantics(document: dict[str, Any]) -> None:
     host = document["host"]
     ssh = document["ssh"]
