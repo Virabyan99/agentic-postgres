@@ -188,7 +188,23 @@ do_up() {
     --acme-environment "$(acme_environment)" \
     || die 9 "could not render the edge configuration."
 
-  compose --runtime up -d --wait || die 9 "the edge plane did not become healthy."
+  if ! compose --runtime up -d --wait; then
+    # Print why before dying. "did not become healthy" names the symptom and
+    # nothing else, and every failure of this command so far has been diagnosed
+    # by an operator running `docker logs` by hand and pasting the result
+    # somewhere. The reason is already on the host; there is no case where
+    # withholding it helps.
+    printf '\n--- why: last lines from each edge container ---\n' >&2
+    compose --runtime ps --all --format '{{.Name}} {{.State}}' >&2 2>/dev/null || true
+    local container
+    for container in $(compose --runtime ps --all --quiet 2>/dev/null); do
+      printf '\n== %s ==\n' \
+        "$(docker inspect "${container}" --format '{{.Name}} {{.State.Status}}' 2>/dev/null)" >&2
+      docker logs --tail 15 "${container}" 2>&1 | tail -15 >&2 || true
+    done
+    printf '\n' >&2
+    die 9 "the edge plane did not become healthy."
+  fi
   "${ROOT_DIR}/bin/edge-network.sh" reconcile
   printf 'edge: up, ACME environment %s\n' "$(acme_environment)"
 }

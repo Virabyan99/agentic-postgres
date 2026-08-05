@@ -406,3 +406,17 @@ def test_every_edge_bind_source_is_produced_by_the_up_path(code_only) -> None:
             f"the edge model mounts {source} but nothing in do_up or render-config creates it; "
             "Compose will create a directory there"
         )
+
+
+def test_edge_up_reports_why_it_failed(code_only) -> None:
+    """A failure that only names the symptom sends an operator to docker logs.
+
+    Every failure of `edge.sh up` in this session was diagnosed by hand: the
+    reason was on the host the whole time and the command chose not to say it.
+    """
+    body = code_only((REPO_ROOT / "bin" / "edge.sh").read_text(encoding="utf-8"))
+    up = body.split("do_up()", 1)[1].split("\n}", 1)[0]
+    assert "docker logs" in up, "up dies without printing why"
+    assert up.index("docker logs") < up.index("did not become healthy"), (
+        "the diagnosis is printed after the script has already exited"
+    )
