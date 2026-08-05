@@ -32,6 +32,7 @@ import argparse
 import json
 import os
 import re
+import secrets
 import ssl
 import sys
 import tempfile
@@ -74,12 +75,11 @@ def now() -> str:
 def read_operator_credential(path: Path) -> tuple[str, str]:
     """Read a Universal Auth credential: client id on line 1, secret on line 2.
 
-        Validated for shape before either value is used, and every failure names the
-        file and the line count and nothing else. The previous version read the file
-        whole and used it as a bearer token, so a two-line file became the header
-        value `Bearer <id>
-    <secret>` -- which http.client rejects by raising a
-        ValueError containing the value.
+    Validated for shape before either value is used, and every failure names the
+    file and the line count and nothing else. The previous version read the file
+    whole and used it as a bearer token, so a two-line file became a header value
+    containing a newline -- which http.client rejects by raising a ValueError
+    that includes the value it rejected.
     """
     lines = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
     lines = [line for line in lines if line]
@@ -239,6 +239,27 @@ class ControlPlane:
             raise BootstrapStateError("universal auth attachment returned no client id")
         return str(client_id)
 
+    def create_secret(
+        self, project_id: str, environment: str, secret_path: str, name: str, value: str
+    ) -> None:
+        """Write one secret value into the project.
+
+        The value is passed and never returned, never printed, and never held
+        beyond this call. Nothing in this file logs a request body, and this is
+        the only method that is ever handed one that matters.
+        """
+        self._call(
+            "POST",
+            f"/api/v3/secrets/raw/{urllib.parse.quote(name)}",
+            {
+                "workspaceId": project_id,
+                "environment": environment,
+                "secretPath": secret_path,
+                "secretValue": value,
+                "type": "shared",
+            },
+        )
+
     def create_client_secret(self, identity_id: str, description: str) -> tuple[str, str]:
         """Return ``(client_secret_id, client_secret)``.
 
@@ -325,14 +346,17 @@ def describe_plan(key: str, state: dict[str, Any] | None, digest: str) -> int:
             "create  Infisical project",
             "create  runtime machine identity",
             "create  Universal Auth client secret",
+            "create  session2 sentinel secret value",
             "grant   identity access to the project, read-only",
         ):
             print(f"  {change}")
         print()
-        print("4 change(s) proposed.")
+        print("5 change(s) proposed.")
         return 0
 
     changes: list[str] = []
+    if "session2_sentinel" not in state.get("managed_resources", []):
+        changes.append("create  session2 sentinel secret value")
     if not is_converged(state, digest):
         recorded = state.get("provider_inputs_sha256", "none")
         changes.append(f"update  provider inputs changed ({recorded[:12]} -> {digest[:12]})")
@@ -352,6 +376,47 @@ def describe_plan(key: str, state: dict[str, Any] | None, digest: str) -> int:
     return 0
 
 
+def add_sentinel(
+    key: str, state: dict[str, Any], host: dict[str, Any], credential_file: Path
+) -> int:
+    """Create the sentinel for a project that predates it, and record it.
+
+    Separate from the fresh-bootstrap path because it must not touch anything
+    else. The identity, its client secret and the project all exist and are
+    working; the only thing being added is the one secret value, and the only
+    thing being changed in state is the list of what this project owns.
+    """
+    infisical = host["infisical"]
+    try:
+        operator_id, operator_secret = read_operator_credential(credential_file)
+    except BootstrapStateError as exc:
+        fail(EXIT_PREREQUISITE, str(exc))
+
+    try:
+        control = ControlPlane.login(infisical["api_url"], operator_id, operator_secret)
+        control.create_secret(
+            state["infisical_project_id"],
+            state["environment_slug"],
+            state["runtime_folder"],
+            "APG_SESSION2_SENTINEL",
+            secrets.token_hex(32),
+        )
+    except (BootstrapStateError, KeyError) as exc:
+        fail(EXIT_PROVIDER, str(exc))
+
+    document = dict(state)
+    document["managed_resources"] = sorted({*state["managed_resources"], "session2_sentinel"})
+    document["updated_at"] = now()
+    validate_state(document)
+    write_private(
+        state_path(key), json.dumps(document, indent=2, sort_keys=True) + "\n", mode=0o600
+    )
+
+    print(f"bootstrap-providers: created the session2 sentinel for {key}")
+    print(f"bootstrap-providers: recorded it in {state_path(key)}")
+    return 0
+
+
 def apply(
     key: str,
     state: dict[str, Any] | None,
@@ -367,6 +432,17 @@ def apply(
     if state is not None:
         missing = needs_credential_repair(state)
         if is_converged(state, digest) and not missing:
+            # Converged on inputs is not the same as complete. A project
+            # bootstrapped before the sentinel was implemented has every
+            # provider resource it needs except the one secret the whole session
+            # exists to trace, and the digest cannot see the difference --
+            # nothing about the manifest changed.
+            #
+            # Adding the missing resource is what converge means. The
+            # alternative is --destroy and start again, which throws away a
+            # working identity and its credential to add one secret.
+            if "session2_sentinel" not in state.get("managed_resources", []):
+                return add_sentinel(key, state, host, credential_file)
             print("bootstrap-providers: no changes.")
             return 0
         if missing:
@@ -407,6 +483,22 @@ def apply(
         identity_id = control.create_identity(f"{key}-runtime", organization)
         client_id = control.attach_universal_auth(identity_id)
         secret_id, client_secret = control.create_client_secret(identity_id, f"{key} runtime")
+
+        # The sentinel. secrets.required.yaml describes it as "a random 32+ byte
+        # value created by bootstrap", and nothing created it -- materialize
+        # would have asked the provider for a secret that was never written.
+        #
+        # 32 bytes from secrets.token_hex, generated here and handed straight to
+        # the provider. It is never written to this host, never printed, and not
+        # kept after the call: the only copy is the provider's, and
+        # materialize-secrets fetching it is the thing being proved.
+        control.create_secret(
+            project_id,
+            infisical["environment_slug"],
+            infisical["runtime_folder"],
+            "APG_SESSION2_SENTINEL",
+            secrets.token_hex(32),
+        )
     except (BootstrapStateError, KeyError) as exc:
         fail(EXIT_PROVIDER, str(exc))
 
@@ -455,7 +547,12 @@ def apply(
         "runtime_client_id": client_id,
         "active_client_secret_id": secret_id,
         "credential_files": paths,
-        "managed_resources": ["project", "runtime_identity", "runtime_client_secret"],
+        "managed_resources": [
+            "project",
+            "runtime_identity",
+            "runtime_client_secret",
+            "session2_sentinel",
+        ],
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -464,7 +561,7 @@ def apply(
         state_path(key), json.dumps(document, indent=2, sort_keys=True) + "\n", mode=0o600
     )
 
-    print(f"bootstrap-providers: created 3 resource(s) for {key}")
+    print(f"bootstrap-providers: created 4 resource(s) for {key}")
     print(f"bootstrap-providers: recorded them in {state_path(key)}")
     return 0
 
