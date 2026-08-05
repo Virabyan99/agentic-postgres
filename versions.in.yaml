@@ -31,7 +31,7 @@ compose:
 # mandatory when those images are built, before release.
 images:
   POSTGRES_IMAGE: docker.io/pgvector/pgvector:pg18
-  TRAEFIK_IMAGE: docker.io/library/traefik:v3.5
+  TRAEFIK_IMAGE: docker.io/library/traefik:v3.7
   # Session 2. Traefik never mounts the Docker socket; it reads the Docker
   # provider through this proxy over the host-scoped control network, with every
   # write-capable API section explicitly disabled (ADR 0009).
@@ -55,15 +55,22 @@ images:
 # `--check` asserts `X_VERSION >= X_MINIMUM_VERSION`.
 #
 # This is a floor, not a proof. A digest cannot tell you what a configuration
-# key does, so the real proof that query-parameter redaction works is the
-# live-host test that issues a request carrying a random sentinel and asserts
-# the sentinel is absent from the access log. The floor exists so that
-# *lowering* the Traefik version below the one that supports it fails offline,
-# in CI, instead of silently disabling redaction on a running host.
+# key does -- and the previous floor here is what that costs when it goes
+# unchecked: it claimed to guarantee `accessLog.fields.queryParameters`, a key
+# that does not exist in any Traefik version (ADR 0019). The floor was real, the
+# feature was not, and nothing offline could tell the difference.
+#
+# A floor is therefore only written here for behaviour that has been observed
+# against the image, never for behaviour read from documentation.
 feature_floors:
-  # accessLog.fields.queryParameters.defaultMode arrived in Traefik 3.
-  # A query string is the easiest place for a token to end up in a log.
-  TRAEFIK_MINIMUM_VERSION: "3.0"
+  # Traefik 3.5 and earlier ask the Docker daemon for API v1.24. Docker 29
+  # reports minAPI 1.40 and answers 400 to anything older, so the Docker
+  # provider never loads and no project route is ever discovered -- the edge
+  # comes up healthy and routes nothing.
+  #
+  # Measured, not read: v3.5 fails and v3.6 works against a Docker 29 daemon,
+  # over the socket proxy and over the raw socket alike.
+  TRAEFIK_MINIMUM_VERSION: "3.6"
 
 # Package versions, locked as version strings rather than digests because no
 # first-party image exists to digest yet.

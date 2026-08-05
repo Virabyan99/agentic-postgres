@@ -235,7 +235,7 @@ def test_check_detects_a_missing_digest(fake_repo: Path) -> None:
     lock_path = fake_repo / "versions.env"
     text = re.sub(
         r"^TRAEFIK_IMAGE=.*$",
-        "TRAEFIK_IMAGE=docker.io/library/traefik:v3.5",
+        "TRAEFIK_IMAGE=docker.io/library/traefik:v3.7",
         lock_path.read_text(encoding="utf-8"),
         flags=re.MULTILINE,
     )
@@ -334,17 +334,23 @@ def test_the_traefik_floor_is_recorded(lock: dict[str, str], candidates: dict) -
 
 
 def test_a_version_below_the_floor_is_detected(fake_repo: Path) -> None:
-    """The floor exists to stop a downgrade that silently disables redaction.
+    """The floor exists to stop a downgrade that silently breaks discovery.
 
-    Traefik below 3 has no ``accessLog.fields.queryParameters.defaultMode``, so
-    the setting is accepted and ignored: query strings, and any token in one, go
-    into the access log with no error anywhere.
+    This docstring used to say the floor guarded
+    ``accessLog.fields.queryParameters.defaultMode``, a key that exists in no
+    Traefik version (ADR 0019). The floor was real and its justification was
+    invented, which is the failure mode a floor is least able to notice about
+    itself.
+
+    What it guards now was measured: Traefik 3.5 and below ask the Docker daemon
+    for API v1.24, Docker 29 answers 400 to anything below 1.40, and the Docker
+    provider never loads -- the edge comes up healthy and routes nothing.
     """
     lock_path = fake_repo / "versions.env"
     text = (
         lock_path.read_text(encoding="utf-8")
-        .replace("traefik:v3.5@", "traefik:v2.9@")
-        .replace("TRAEFIK_VERSION=3.5", "TRAEFIK_VERSION=2.9")
+        .replace("traefik:v3.7@", "traefik:v2.9@")
+        .replace("TRAEFIK_VERSION=3.7", "TRAEFIK_VERSION=2.9")
     )
     lock_path.write_text(text, encoding="utf-8")
 
@@ -363,7 +369,7 @@ def test_a_resolved_version_that_disagrees_with_the_tag_is_detected(fake_repo: P
     """
     lock_path = fake_repo / "versions.env"
     lock_path.write_text(
-        lock_path.read_text(encoding="utf-8").replace("TRAEFIK_VERSION=3.5", "TRAEFIK_VERSION=9.9"),
+        lock_path.read_text(encoding="utf-8").replace("TRAEFIK_VERSION=3.7", "TRAEFIK_VERSION=9.9"),
         encoding="utf-8",
     )
 
