@@ -89,9 +89,20 @@ accessLog:
       names:
         X-Request-ID: keep
         User-Agent: keep
-    queryParameters:
-      # A query string is the easiest place for a token to end up in a log.
-      # The live suite proves this works by issuing a request carrying a random
-      # sentinel and asserting the sentinel is absent from the access log --
-      # the setting alone is a claim, the sentinel is the measurement.
-      defaultMode: drop
+    names:
+      # A query string is the easiest place for a token to end up in a log, and
+      # Traefik cannot drop one. `accessLog.fields.queryParameters` was
+      # specified here and does not exist: the locked v3.5 rejects it with
+      # "field not found, node: queryParameters" and refuses to start. Only
+      # defaultMode, headers and names are real (ADR 0019).
+      #
+      # RequestPath carries the query string, so dropping that field is the only
+      # way to keep query strings out of the log. It costs the path, which is a
+      # genuine loss -- but RouterName and ServiceName remain, so which route
+      # matched is still answerable, and "no secret reaches a log" is the
+      # stronger of the two claims.
+      #
+      # Verified rather than assumed: a request carrying a random sentinel in
+      # its query string produces a log line with no RequestPath and no sentinel
+      # anywhere in it.
+      RequestPath: drop

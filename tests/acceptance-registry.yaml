@@ -322,7 +322,7 @@
     - tests/deployment/test_session2_edge.py::test_no_query_string_reaches_the_access_log
     - tests/deployment/test_session2_edge.py::test_no_request_header_value_reaches_the_access_log
     - tests/deployment/test_session2_edge.py::test_the_log_sentinel_would_actually_be_visible
-    - tests/contract/test_edge_config.py::test_query_parameters_are_dropped
+    - tests/contract/test_edge_config.py::test_the_request_path_is_dropped_so_query_strings_cannot_be_logged
     - tests/contract/test_edge_config.py::test_headers_are_dropped_by_default_and_kept_by_name
   description: >-
     No request query-string value and no request header value reaches the edge

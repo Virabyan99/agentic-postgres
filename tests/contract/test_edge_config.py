@@ -153,14 +153,25 @@ def test_http_redirects_permanently_to_https(static_config: dict[str, Any]) -> N
 # ---------------------------------------------------------------------------
 
 
-def test_query_parameters_are_dropped(static_config: dict[str, Any]) -> None:
-    """The easiest place for a token to end up in a log.
+def test_the_request_path_is_dropped_so_query_strings_cannot_be_logged(
+    static_config: dict[str, Any],
+) -> None:
+    """ADR 0019. This asserted a key that does not exist.
 
-    The setting is a claim; the live suite's random query-string sentinel is
-    the measurement.
+    `accessLog.fields.queryParameters` was invented in a threat-model table and
+    read as a control that was in place. Traefik v3.5 rejects it outright --
+    "field not found, node: queryParameters" -- and refuses to start, which is
+    how the edge plane failed on a real host. The test passed throughout,
+    because it read the template rather than the binary.
+
+    RequestPath carries the query string, so dropping it is the only way to keep
+    query strings out of the log.
     """
     fields = static_config["accessLog"]["fields"]
-    assert fields["queryParameters"]["defaultMode"] == "drop"
+    assert fields["names"]["RequestPath"] == "drop"
+    assert "queryParameters" not in fields, (
+        "queryParameters is not a Traefik field; the locked image refuses to start with it"
+    )
 
 
 def test_headers_are_dropped_by_default_and_kept_by_name(

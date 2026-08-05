@@ -82,3 +82,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0016](0016-absence-is-not-a-collision.md) | Two projects that both lack a facility do not collide | 2 | Accepted |
 | [0017](0017-stub-lifecycle.md) | A stub that becomes real stops returning 10 | 2 | Accepted |
 | [0018](0018-daemon-access-is-not-a-verdict.md) | A check that cannot reach the daemon reports that, not a verdict | 2 | Accepted |
+| [0019](0019-query-strings-cannot-be-dropped.md) | Traefik cannot drop query strings, so the path goes instead | 2 | Accepted |
