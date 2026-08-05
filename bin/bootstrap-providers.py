@@ -239,6 +239,37 @@ class ControlPlane:
             raise BootstrapStateError("universal auth attachment returned no client id")
         return str(client_id)
 
+    def ensure_folder(self, project_id: str, environment: str, folder: str) -> None:
+        """Create the folder a secret will be written into, if it is absent.
+
+        Infisical resolves ``secretPath`` before it writes, and answers 404 when
+        the path does not exist -- which reads exactly like a wrong endpoint and
+        is not. ``/runtime`` was never created by anything, so the first attempt
+        to write the sentinel failed on a path rather than on a route.
+
+        Tolerates an existing folder. Creating one that is already there is the
+        normal case on every apply after the first, and the provider reports it
+        as a conflict rather than a success.
+        """
+        parent, _, name = folder.rstrip("/").rpartition("/")
+        try:
+            self._call(
+                "POST",
+                "/api/v1/folders",
+                {
+                    "workspaceId": project_id,
+                    "environment": environment,
+                    "name": name,
+                    "path": parent or "/",
+                },
+            )
+        except BootstrapStateError as exc:
+            # 400 and 409 both mean "already there" depending on version. A 404
+            # here would mean the project or environment is wrong, which is not
+            # something to swallow.
+            if "HTTP 400" not in str(exc) and "HTTP 409" not in str(exc):
+                raise
+
     def create_secret(
         self, project_id: str, environment: str, secret_path: str, name: str, value: str
     ) -> None:
@@ -394,6 +425,11 @@ def add_sentinel(
 
     try:
         control = ControlPlane.login(infisical["api_url"], operator_id, operator_secret)
+        # The folder first: Infisical resolves secretPath before writing and
+        # answers 404 when it does not exist.
+        control.ensure_folder(
+            state["infisical_project_id"], state["environment_slug"], state["runtime_folder"]
+        )
         control.create_secret(
             state["infisical_project_id"],
             state["environment_slug"],
@@ -492,6 +528,9 @@ def apply(
         # the provider. It is never written to this host, never printed, and not
         # kept after the call: the only copy is the provider's, and
         # materialize-secrets fetching it is the thing being proved.
+        control.ensure_folder(
+            project_id, infisical["environment_slug"], infisical["runtime_folder"]
+        )
         control.create_secret(
             project_id,
             infisical["environment_slug"],
@@ -551,6 +590,7 @@ def apply(
             "project",
             "runtime_identity",
             "runtime_client_secret",
+            "runtime_folder",
             "session2_sentinel",
         ],
         "created_at": timestamp,
