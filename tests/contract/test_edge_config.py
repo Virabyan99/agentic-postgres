@@ -141,6 +141,31 @@ def test_staging_and_production_use_separate_state_files() -> None:
     assert "production.json" not in text, "the staging template names production state"
 
 
+def test_the_redirect_names_the_published_port_not_the_container_port(
+    static_config: dict[str, Any],
+) -> None:
+    """Traefik redirects to the target entryPoint's own address by default.
+
+    The container ports are unprivileged on purpose -- 8080 and 8443, so no
+    capability is needed to bind them -- and Docker publishes them as 80 and
+    443. Left to default, every HTTP visitor is sent to https://host:8443/,
+    which is not published and never answers.
+
+    Invisible from the host, where websecure really is :8443. It was found by
+    following the redirect from another network, and it is the reason the
+    external suite exists.
+    """
+    redirection = static_config["entryPoints"]["web"]["http"]["redirections"]["entryPoint"]
+    assert redirection["port"] == "443", (
+        "the redirect sends clients to the container port, which is not published"
+    )
+
+    published = {"80": "8080", "443": "8443"}
+    model = yaml.safe_load((REPO_ROOT / "infra" / "edge" / "compose.yaml").read_text("utf-8"))
+    ports = dict(entry.split(":") for entry in model["services"]["traefik"]["ports"])
+    assert ports == published, f"the published ports moved; the redirect port must follow: {ports}"
+
+
 def test_http_redirects_permanently_to_https(static_config: dict[str, Any]) -> None:
     redirection = static_config["entryPoints"]["web"]["http"]["redirections"]["entryPoint"]
     assert redirection["to"] == "websecure"

@@ -36,6 +36,16 @@ entryPoints:
         entryPoint:
           to: websecure
           scheme: https
+          # The port a client should come back on, which is not the port this
+          # entryPoint listens on. Traefik defaults to the target entryPoint's
+          # own address -- :8443 -- and the container ports are deliberately
+          # unprivileged so no capability is needed to bind them. Without this
+          # every visitor is redirected to https://host:8443/, which is not
+          # published and never answers.
+          #
+          # Invisible from inside the host: websecure really is :8443 there.
+          # Found by following the redirect from another network.
+          port: "443"
           permanent: true
   websecure:
     address: ":8443"
