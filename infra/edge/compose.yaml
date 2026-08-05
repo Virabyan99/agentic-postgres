@@ -31,6 +31,38 @@ services:
     tmpfs: [/run, /tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
+    # The image's entrypoint renders its HAProxy config from a template at
+    # startup and writes it back into /usr/local/etc/haproxy, which read_only
+    # forbids -- the container exited 1 with "can't create
+    # /usr/local/etc/haproxy/haproxy.cfg: Read-only file system" and Traefik,
+    # which depends on it being healthy, never started.
+    #
+    # A tmpfs over that directory would mask the template and the errors/ pages
+    # the config references. So the rendering is reproduced here, byte for byte
+    # from the image's own entrypoint, writing into the tmpfs that already
+    # exists. The image still owns the policy: the template is upstream's, and
+    # this only changes where the rendered copy lands.
+    #
+    # Dropping read_only was the alternative and is the wrong trade. It is the
+    # control that keeps a compromised proxy from rewriting its own allowlist,
+    # and the allowlist is the only thing standing between a read-only Docker
+    # API and a writable one.
+    # The bind is written out rather than derived from DISABLE_IPV6 as upstream
+    # does. Reproducing that branch meant a shell variable inside a sed pattern
+    # inside a Compose escape, and the first attempt silently substituted
+    # nothing -- haproxy started, read a literal ${BIND_CONFIG}, and died on
+    # "resolves to an empty address". One less layer of expansion is worth more
+    # here than a toggle nothing sets: this file is the only caller, and an
+    # IPv6 decision belongs in host.yaml if it ever needs to vary.
+    #
+    # Single quotes so the shell passes the pattern to sed untouched; $$ is the
+    # Compose escape for a literal $.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        sed 's|$${BIND_CONFIG}|[::]:2375 v4v6|g' \
+          /usr/local/etc/haproxy/haproxy.cfg.template > /tmp/haproxy.cfg
+        exec haproxy -W -db -f /tmp/haproxy.cfg
     environment:
       # Permitted: the four sections the Docker provider actually uses, plus
       # PING for the health check. Every addition needs an ADR and a matching

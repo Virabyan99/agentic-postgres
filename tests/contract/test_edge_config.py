@@ -237,3 +237,67 @@ def test_edge_state_paths_agree_with_the_host_module() -> None:
     assert "${EDGE_STATE_DIR:?required}/traefik.yaml" in model
     assert "${EDGE_STATE_DIR:?required}/dynamic" in model
     assert "${EDGE_STATE_DIR:?required}/acme" in model
+
+
+# ---------------------------------------------------------------------------
+# The socket proxy runs read-only, and had to be made able to
+# ---------------------------------------------------------------------------
+
+
+def edge_model_text() -> str:
+    return (REPO_ROOT / "infra" / "edge" / "compose.yaml").read_text(encoding="utf-8")
+
+
+def test_the_socket_proxy_stays_read_only() -> None:
+    """The control that keeps a compromised proxy from rewriting its allowlist.
+
+    The image's entrypoint renders its HAProxy config back into
+    /usr/local/etc/haproxy, which read_only forbids: the container exited 1 and
+    Traefik, which depends on it being healthy, never started. Dropping
+    read_only was the obvious fix and the wrong one -- the allowlist is the only
+    thing between a read-only Docker API and a writable one, and it lives in
+    that config file.
+    """
+    model = yaml.safe_load(edge_model_text())
+    proxy = model["services"]["docker-socket-proxy"]
+    assert proxy["read_only"] is True
+    assert "ALL" in proxy["cap_drop"]
+    assert "no-new-privileges:true" in proxy["security_opt"]
+
+
+def test_the_rendered_config_is_written_to_a_tmpfs() -> None:
+    """A read-only container needs somewhere writable, and only somewhere.
+
+    /tmp is already declared as tmpfs, so the rendered config lands nowhere that
+    survives a restart and nowhere the image ships anything else.
+    """
+    model = yaml.safe_load(edge_model_text())
+    proxy = model["services"]["docker-socket-proxy"]
+    command = "\n".join(proxy["command"])
+
+    # S108 flags these literals as insecure temp paths. They are neither: this
+    # is a path *inside a read-only container*, on a tmpfs the same file
+    # declares, asserted rather than created.
+    rendered = "/tmp/haproxy.cfg"  # noqa: S108
+    assert rendered in command
+    assert f"-f {rendered}" in command, "haproxy is not pointed at the rendered copy"
+
+    writable = {mount.split(":")[0] for mount in proxy["tmpfs"]}
+    assert "/tmp" in writable  # noqa: S108
+
+
+def test_the_config_directory_is_not_masked() -> None:
+    """A tmpfs over /usr/local/etc/haproxy was the other tempting fix.
+
+    It would hide the template the render reads and the errors/ pages the
+    config references, so the container would start and then serve nothing.
+    """
+    model = yaml.safe_load(edge_model_text())
+    proxy = model["services"]["docker-socket-proxy"]
+    for mount in proxy["tmpfs"]:
+        assert not mount.startswith("/usr/local/etc/haproxy"), (
+            "a tmpfs here masks haproxy.cfg.template and errors/"
+        )
+    assert "haproxy.cfg.template" in "\n".join(proxy["command"]), (
+        "the render no longer reads the image's own template"
+    )
