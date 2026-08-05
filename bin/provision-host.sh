@@ -257,6 +257,25 @@ check_baseline() {
     done
   fi
 
+  printf '\n== installed release ==\n'
+  # Checked because both launchers refuse without it, and a unit that cannot
+  # start is invisible until the reboot that needed it.
+  if [ -f "${ETC}/edge-state.json" ]; then
+    local recorded release_dir
+    recorded="$(sed -n 's/.*"installed_release_commit": "\([0-9a-f]\{40\}\)".*/\1/p' \
+      "${ETC}/edge-state.json")"
+    release_dir="/opt/agentic-postgres/releases/${recorded}"
+    if [ -n "${recorded}" ] && [ -d "${release_dir}" ]; then
+      ok "release ${recorded:0:12} installed and recorded"
+    else
+      bad "edge-state.json names no installed release the launchers can resolve"
+      violations=$((violations + 1))
+    fi
+  else
+    bad "${ETC}/edge-state.json is absent; the launchers cannot resolve a release"
+    violations=$((violations + 1))
+  fi
+
   printf '\n== launchers and units ==\n'
   # Checked because the units name these paths and nothing else. A unit whose
   # Exec* target is absent fails at boot with a message about the unit rather
@@ -544,6 +563,54 @@ install_docker() {
   note "the operator is not in the docker group; that is deliberate and equals root"
 }
 
+# Install an immutable release from the operator checkout and record it.
+#
+# This is what makes the enabled units able to run at all. Both launchers
+# resolve /etc/agentic-postgres/edge-state.json, refuse to continue without it,
+# and execute out of /opt/agentic-postgres/releases/<commit> so systemd never
+# runs a live checkout. Nothing wrote that file, so the firewall unit was
+# enabled on a provisioned host and had never once executed: the DOCKER-USER
+# policy existed only because --apply had run the reconciler from the checkout
+# by hand, and a reboot would have left the chain empty.
+#
+# It belongs here rather than in deploy.sh because the firewall is a host
+# concern that has to hold whether or not any project is deployed. Waiting for
+# the first deployment to install a release means the host spends a whole run
+# with an enabled unit that cannot start.
+install_release() {
+  local commit digest
+
+  commit="$(
+    PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "${ROOT_DIR}" "${HOST_MANIFEST}" <<'PYTHON'
+import hashlib
+import sys
+from pathlib import Path
+
+from agentic_postgres import edge_state, installed_release
+
+checkout, manifest = Path(sys.argv[1]), Path(sys.argv[2])
+
+# Archived from the commit, not copied from the tree: untracked files, editor
+# state and a dirty index cannot reach a directory that runs as root.
+commit = installed_release.resolve_commit(checkout)
+installed_release.assert_clean(checkout)
+installed_release.install(checkout, commit=commit)
+
+edge_state.write_state(
+    edge_state.build_state(
+        installed_release_commit=commit,
+        host_manifest_sha256=hashlib.sha256(manifest.read_bytes()).hexdigest(),
+    )
+)
+print(commit)
+PYTHON
+  )" || die 6 "could not install a release from the checkout; see the error above."
+
+  digest="${commit:0:12}"
+  note "installed release ${digest} at /opt/agentic-postgres/releases/${commit}"
+  note "recorded it in ${ETC}/edge-state.json, which the launchers resolve"
+}
+
 install_units() {
   local origin name
   for origin in "${ROOT_DIR}"/systemd/*.service; do
@@ -600,6 +667,10 @@ apply_baseline() {
   # therefore installs everything, skips SSH, and prints an arm command that now
   # names a file that is actually there; the second --apply does the hardening.
   install_launchers
+  # Before install_units, which enables the firewall unit. Enabling a unit whose
+  # launcher cannot resolve a release is how an operator learns to ignore a
+  # failing service.
+  install_release
   install_units
 
   printf '\n== ssh ==\n'

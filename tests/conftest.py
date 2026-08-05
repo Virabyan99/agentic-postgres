@@ -173,3 +173,24 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 def pytest_report_header(config: pytest.Config) -> str:
     del config
     return f"acceptance gate session: {acceptance_session()}"
+
+
+@pytest.fixture(scope="session")
+def code_only():
+    """Strip whole-line comments from a shell or Python source string.
+
+    Ordering assertions over source text keep matching the prose that explains
+    the ordering, which by construction sits above the code and therefore always
+    comes first. That has produced a false failure four separate times in this
+    repository: a comment reading "before install_units" made
+    ``body.index("install_units")`` point at the explanation rather than the
+    call.
+
+    A fixture rather than a copied two-line helper, so the next test that scans
+    source text inherits the fix instead of rediscovering the bug.
+    """
+
+    def strip(text: str) -> str:
+        return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+
+    return strip

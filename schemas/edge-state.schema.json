@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agenticpostgres.local/schemas/edge-state.schema.json",
+  "title": "Edge and host runtime state",
+  "description": "What the root-owned launchers under /usr/local/libexec/agentic-postgres resolve before they execute anything. Written by bin/provision-host.sh --apply and updated by ./deploy.sh; read by the firewall and edge launchers, which run from systemd after every docker.service start.\n\nThis file is the reason systemd never executes a checkout. It names the installed release the units must run from, so a working tree that is mid-edit, dirty, or checked out to a different commit cannot become what runs as root on a reboot.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "installed_release_commit",
+    "host_manifest_sha256",
+    "updated_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "installed_release_commit": {
+      "description": "The 40-character commit whose archive lives at /opt/agentic-postgres/releases/<commit>. Validated as a path component before use: a crafted value here would otherwise choose what a root unit executes.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "host_manifest_sha256": {
+      "description": "sha256 of the host manifest this host was provisioned from (plan divergence D22). Later root operations compare the operator's copy against this and refuse to proceed silently when they differ.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "updated_at": {
+      "description": "When this record was last written. Not a decision input; present so an operator reading the file can tell whether it predates the release directory it names.",
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
