@@ -33,8 +33,10 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +72,85 @@ def step(text: str) -> None:
 
 def run(*command: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, capture_output=True, text=True, check=False)
+
+
+def _establish_directory(path: Path) -> Path:
+    """Create a root-only directory, refusing a symlink at the destination."""
+    if path.is_symlink():
+        fail(EXIT_VALIDATION, f"{path} is a symlink, which is not accepted.")
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+    os.chown(path, 0, 0)
+    return path
+
+
+def _write_root_only(path: Path, payload: bytes) -> None:
+    """Write `0600 root:root`, atomically.
+
+    A reader that opens this file while it is half-written gets a truncated
+    document rather than the previous one, and every reader here treats a
+    truncated document as a hard failure.
+    """
+    if path.is_symlink():
+        fail(EXIT_VALIDATION, f"{path} is a symlink, which is not accepted.")
+    handle = tempfile.NamedTemporaryFile(dir=path.parent, delete=False)
+    try:
+        with handle:
+            handle.write(payload)
+        os.chmod(handle.name, 0o600)
+        os.chown(handle.name, 0, 0)
+        os.replace(handle.name, path)
+    except BaseException:
+        Path(handle.name).unlink(missing_ok=True)
+        raise
+
+
+def _install_file(source: Path, destination: Path) -> None:
+    """Copy an operator input into the configuration root.
+
+    A copy, not a reference. A deployed project keeps working after the operator
+    deletes their clone, which is the whole reason the launcher reads from /etc.
+    """
+    _write_root_only(destination, source.read_bytes())
+
+
+def _env_value(path: Path, key: str) -> str:
+    """Read one KEY=VALUE without shell-sourcing the file."""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        name, separator, value = line.partition("=")
+        if separator and name == key:
+            return value
+    fail(EXIT_VALIDATION, f"{key} is absent from {path}")
+    raise AssertionError("unreachable")
+
+
+def install_rendered(source: Path, destination: Path) -> Path:
+    """Install the rendered directory out of the checkout, atomically.
+
+    The runtime's Compose project directory may not be a working tree: a
+    `git checkout` on a Friday afternoon would otherwise change what the next
+    `systemctl restart` runs.
+    """
+    if not (source / "compose.env").is_file():
+        fail(EXIT_VALIDATION, f"nothing rendered at {source}; the render step did not run")
+
+    _establish_directory(destination.parent)
+
+    staging = destination.parent / f".{destination.name}.incoming"
+    previous = destination.parent / f".{destination.name}.previous"
+    for path in (staging, previous):
+        shutil.rmtree(path, ignore_errors=True)
+
+    shutil.copytree(source, staging)
+    for path in (staging, *staging.rglob("*")):
+        os.chmod(path, 0o700 if path.is_dir() else 0o600)
+        os.chown(path, 0, 0)
+
+    if destination.exists():
+        os.replace(destination, previous)
+    os.replace(staging, destination)
+    shutil.rmtree(previous, ignore_errors=True)
+    return destination
 
 
 # ---------------------------------------------------------------------------
@@ -284,17 +365,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"  release {commit[:12]} at {release}")
 
-    step("4. Root-owned runtime state")
-    state_directory = deployed_output.PROJECT_STATE_ROOT / key
-    state_directory.mkdir(parents=True, exist_ok=True)
-    os.chmod(state_directory, 0o700)
-    os.chown(state_directory, 0, 0)
+    step("4. Root-owned configuration and generated output")
+    state_directory = _establish_directory(deployed_output.PROJECT_STATE_ROOT / key)
 
-    runtime_env = state_directory / "compose.env"
-    runtime_env.write_bytes(runtime_compose_env(host))
-    os.chmod(runtime_env, 0o600)
-    os.chown(runtime_env, 0, 0)
-    print(f"  {runtime_env}")
+    _install_file(arguments.project, state_directory / "manifest.yaml")
+    _install_file(REPO_ROOT / "secrets.required.yaml", state_directory / "secrets.required.yaml")
+    _write_root_only(state_directory / "compose.env", runtime_compose_env(host))
+    print(f"  {state_directory}")
+
+    rendered_directory = install_rendered(rendered_dir, deployed_output.rendered_path(key))
+    print(f"  {rendered_directory}")
 
     step("5. Start the project")
     started = run(
@@ -327,7 +407,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime={
             "release_path": str(release),
             "state_directory": str(state_directory),
-            "compose_model_sha256": _model_digest(rendered_dir),
+            "compose_model_sha256": _model_digest(rendered_directory),
         },
         health_status=observe_health(rendered["routes"]["health"]["url"]),
     )
