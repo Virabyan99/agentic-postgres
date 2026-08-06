@@ -577,7 +577,9 @@ Expected: exit 0, as a non-root user, with no `host.yaml` anywhere.
 wsl -d Ubuntu bash -lc 'cd ~/projects/agentic-postgres && git add -A && git commit -q -m wip && source .venv/bin/activate && bin/session-01-check.sh 2>&1 | tail -20'
 ```
 
-Expected: `PASSED`, **1197 passed, 4 skipped**.
+Expected: `PASSED`, **1196 passed, 4 skipped**. (Revised during execution: the
+test asserting on `HEALTH_ROUTER_NAME` moved to Task 3, where the call site
+actually is.)
 
 ```bash
 wsl -d Ubuntu bash -lc "cd ~/projects/agentic-postgres && git commit -q --amend -F - <<'MSG'
@@ -923,8 +925,12 @@ def _launcher_state_files(text: str) -> set[str]:
     roots = dict(re.findall(r'^readonly (\w+)="([^"$]+)"', text, re.M))
 
     resolved: set[str] = set()
-    for raw in re.findall(r'^\s*(?:readonly|local) \w+="([^"]+)"', text, re.M):
-        path = re.sub(r"\$\{(\w+)\}", lambda m: roots.get(m.group(1), "_"), raw)
+    for raw in re.findall(r'^\s*(?:readonly |local )?\w+="([^"]+)"', text, re.M):
+        path = re.sub(
+            r"\$\{(\w+)\}",
+            lambda m: roots.get(m.group(1), f"_{m.group(1)}_"),
+            raw,
+        )
         if "$" in path or not path.startswith(("/etc/", "/var/")):
             continue
         if path.rsplit("/", 1)[-1].rsplit(".", 1)[-1] in {"json", "yaml", "env"}:
@@ -971,14 +977,15 @@ print(*sorted(found), sep=chr(10))
 "'
 ```
 
-Expected, five paths — `edge-state.json`, `host.yaml`, and the three under `projects/_/`:
+Expected, five paths — `edge-state.json`, `host.yaml`, and the three under
+`projects/_project_key_/` (the placeholder is derived from the variable name):
 
 ```
 /etc/agentic-postgres/edge-state.json
 /etc/agentic-postgres/host.yaml
-/etc/agentic-postgres/projects/_/manifest.yaml
-/etc/agentic-postgres/projects/_/outputs.json
-/etc/agentic-postgres/projects/_/secrets.required.yaml
+/etc/agentic-postgres/projects/_project_key_/manifest.yaml
+/etc/agentic-postgres/projects/_project_key_/outputs.json
+/etc/agentic-postgres/projects/_project_key_/secrets.required.yaml
 ```
 
 - [ ] **Step 6: Run the full gate and commit**
@@ -1107,7 +1114,9 @@ Expected: `PASSED`. Then record the run in the session evidence and stop — pro
 
 **Type consistency.** `rendered_path` returns a directory in Task 1 and is consumed as a directory in Task 2 step 4. `_write_root_only(path, payload)` takes `bytes` in Task 2 and is fed `render_override(...) -> bytes` in Task 3 step 5. `_env_value(path, key) -> str` feeds `build_override(router_name=...)`, which takes `str`. `ROUTED_SERVICE` is used as the service key in both the module and its test.
 
-**Test counts.** 1183 baseline, +8 (Task 1), +6 (Task 2), +9 (Task 3), +1 (Task 4) = 1207. If a task's count differs from the plan, stop and find out why before continuing; a silently absorbed count is how a weakened test hides.
+**Test counts.** 1183 baseline, +8 (Task 1), +5 (Task 2), +10 (Task 3), +1 (Task 4) = 1207.
+Task 2 and Task 3 differ from the original draft because one test moved between them
+during execution; the total is unchanged. If a task's count differs from the plan, stop and find out why before continuing; a silently absorbed count is how a weakened test hides.
 
 ## Divergences
 
