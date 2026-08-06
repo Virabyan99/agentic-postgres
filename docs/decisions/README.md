@@ -84,3 +84,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0018](0018-daemon-access-is-not-a-verdict.md) | A check that cannot reach the daemon reports that, not a verdict | 2 | Accepted |
 | [0019](0019-query-strings-cannot-be-dropped.md) | Traefik cannot drop query strings, so the path goes instead | 2 | Accepted |
 | [0020](0020-project-state-roots.md) | Configuration in /etc, generated output in /var/lib | 2 | Accepted |
+| [0021](0021-flag-values-mistaken-for-subcommands.md) | A Compose flag's value can be mistaken for the subcommand | 2 | Accepted |

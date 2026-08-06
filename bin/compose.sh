@@ -58,6 +58,15 @@ readonly RUNTIME_ALLOWED="up down restart build ps config logs"
 # the client, so it deliberately is not in this list.
 readonly NEEDS_DAEMON="ps top logs events port images kill down stop rm wait up restart build"
 
+# Compose global flags that consume the following token as their value, so
+# that token must never be mistaken for the subcommand. A flag written
+# --flag=value needs no entry: the value is inside the same token and is
+# already matched by first_subcommand's `-*` case below. Missing an entry
+# here is not cosmetic -- for a value-taking flag ahead of a
+# container-starting subcommand it can defeat FORBIDDEN and RUNTIME_ALLOWED
+# entirely, which is how `--profile session2 up` bypassed both (ADR 0021).
+readonly SUBCOMMAND_VALUE_FLAGS="--profile --file -f --env-file --project-name -p --project-directory --parallel --progress --ansi"
+
 # Everything the Docker client legitimately needs, and nothing else. Each entry
 # earns its place: HOME locates ~/.docker/config.json and therefore the active
 # context; without it `docker compose` cannot find the daemon at all.
@@ -332,11 +341,23 @@ configure_project_scope() {
   fi
 }
 
+# Finds the Compose subcommand in COMPOSE_ARGS. Skips flags, and skips the
+# separate value of any flag listed in SUBCOMMAND_VALUE_FLAGS, so that value
+# is never returned in place of the subcommand that follows it (ADR 0021).
 first_subcommand() {
-  local argument
+  local argument skip_value=0
   for argument in "${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"}"; do
+    if [ "${skip_value}" -eq 1 ]; then
+      skip_value=0
+      continue
+    fi
     case "${argument}" in
-      -*) ;;
+      --*=*) ;;
+      -*)
+        if in_list "${argument}" "${SUBCOMMAND_VALUE_FLAGS}"; then
+          skip_value=1
+        fi
+        ;;
       *) printf '%s' "${argument}"; return 0 ;;
     esac
   done

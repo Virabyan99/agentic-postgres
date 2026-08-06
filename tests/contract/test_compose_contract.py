@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -330,6 +331,80 @@ def test_runtime_mode_requires_root(subcommand: str) -> None:
     result = compose(ALPHA, "--runtime", subcommand)
     assert result.returncode == 3, f"{subcommand} returned {result.returncode}"
     assert "requires root" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# ADR 0021 -- a flag's value must not be mistaken for the subcommand
+# ---------------------------------------------------------------------------
+
+
+def _first_subcommand(*args: str, tmp_path: Path) -> str:
+    """Call the real ``first_subcommand`` out of bin/compose.sh.
+
+    Sources every definition in the script except its trailing `main "$@"`
+    call, so this exercises the actual parser rather than a description of
+    it. ``COMPOSE_ARGS`` is set to ``args`` before calling the function.
+    """
+    text = COMPOSE_SH.read_text(encoding="utf-8")
+    body = text[: text.rindex('main "$@"')]
+    quoted = " ".join(shlex.quote(a) for a in args)
+    harness = tmp_path / "first_subcommand.sh"
+    harness.write_text(body + f"\nCOMPOSE_ARGS=({quoted})\nfirst_subcommand\n", encoding="utf-8")
+    result = subprocess.run(["bash", str(harness)], capture_output=True, text=True, check=True)
+    return result.stdout
+
+
+def test_a_flag_with_a_value_cannot_smuggle_a_container_start() -> None:
+    """A value-taking flag ahead of the subcommand must not defeat FORBIDDEN.
+
+    Before ADR 0021, ``first_subcommand`` returned the flag's value
+    (``session2``) instead of ``up``. ``session2`` is not in FORBIDDEN, so the
+    refusal that is supposed to fire for every container-starting subcommand,
+    unconditionally, by default, silently did not -- and the real
+    ``docker compose ... up`` that followed still received the unexamined
+    ``up`` in COMPOSE_ARGS.
+    """
+    result = compose(ALPHA, "--profile", "session2", "up")
+    assert result.returncode == 10, result.stderr
+    assert "requires --runtime with root" in result.stderr
+
+
+@pytest.mark.parametrize("subcommand", ["up", "restart"])
+def test_runtime_call_with_a_flag_value_still_reaches_the_privilege_gate(
+    subcommand: str,
+) -> None:
+    """The exact shape ``bin/project-runtime.sh`` uses
+    (``--runtime --profile session2 <subcommand>``), run unprivileged.
+
+    This alone does not distinguish a correct resolution from the ADR 0021
+    bug: the privilege check in ``main()`` runs before the allowlist check
+    regardless of which subcommand was resolved, by design
+    (``test_runtime_mode_requires_root``). What it proves is that the parser
+    change does not disturb that ordering, or raise before reaching it.
+    ``test_first_subcommand_skips_a_flags_value``, below, is the test that
+    actually pins the resolution.
+    """
+    result = compose(ALPHA, "--runtime", "--profile", "session2", subcommand)
+    assert result.returncode == 3, f"{subcommand} returned {result.returncode}: {result.stderr}"
+    assert "requires root" in result.stderr
+
+
+def test_first_subcommand_skips_a_flags_value(tmp_path: Path) -> None:
+    """The direct regression test for ADR 0021.
+
+    Calls the real ``first_subcommand``, not a reimplementation of it, and
+    proves it returns the subcommand rather than the value of a flag written
+    ahead of it -- for both call shapes this repository actually uses
+    (``--profile session2 up``/``down`` in bin/project-runtime.sh, and
+    ``--profile contract config`` in bin/deploy-session-2.py's
+    ``_model_digest``) and for the ``--flag=value`` form, which needs no
+    entry in ``SUBCOMMAND_VALUE_FLAGS`` because it consumes nothing further.
+    """
+    up_args = ("--profile", "session2", "up", "-d", "--wait")
+    assert _first_subcommand(*up_args, tmp_path=tmp_path) == "up"
+    assert _first_subcommand("--profile", "session2", "down", tmp_path=tmp_path) == "down"
+    assert _first_subcommand("--profile", "contract", "config", tmp_path=tmp_path) == "config"
+    assert _first_subcommand("--profile=contract", "config", tmp_path=tmp_path) == "config"
 
 
 def test_the_runtime_allowlist_excludes_container_entry_verbs() -> None:
