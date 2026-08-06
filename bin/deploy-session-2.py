@@ -42,7 +42,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import deployed_output, edge_state, installed_release
+from agentic_postgres import deployed_output, edge_state, installed_release, runtime_override
 from agentic_postgres.bootstrap_state import load_state, state_path
 from agentic_postgres.config import ManifestError, load_project_manifest
 from agentic_postgres.host_config import (
@@ -375,6 +375,14 @@ def main(argv: list[str] | None = None) -> int:
 
     rendered_directory = install_rendered(rendered_dir, deployed_output.rendered_path(key))
     print(f"  {rendered_directory}")
+
+    _write_root_only(
+        rendered_directory / "runtime-compose.override.yaml",
+        runtime_override.render_override(
+            router_name=_env_value(rendered_directory / "compose.env", "HEALTH_ROUTER_NAME"),
+            https_entrypoint=host["edge"]["https_entrypoint"],
+        ),
+    )
 
     step("5. Start the project")
     started = run(

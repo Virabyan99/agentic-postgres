@@ -38,3 +38,12 @@ def test_the_install_is_atomic(source: str) -> None:
     """A half-written rendered directory is one the next boot treats as
     complete."""
     assert "os.replace" in source
+
+
+def test_the_router_name_is_read_back_not_re_derived(source: str, code_only) -> None:
+    """Deriving the router name a second time creates a second path to the same
+    answer; the deployed document would describe a project the render never
+    produced."""
+    body = code_only(source)
+    assert "HEALTH_ROUTER_NAME" in body
+    assert "health_router_name" not in body
