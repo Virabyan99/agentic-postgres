@@ -124,12 +124,21 @@ def _env_value(path: Path, key: str) -> str:
     raise AssertionError("unreachable")
 
 
-def install_rendered(source: Path, destination: Path) -> Path:
+def install_rendered(source: Path, destination: Path, override_payload: bytes) -> Path:
     """Install the rendered directory out of the checkout, atomically.
 
     The runtime's Compose project directory may not be a working tree: a
     `git checkout` on a Friday afternoon would otherwise change what the next
     `systemctl restart` runs.
+
+    `override_payload` -- the runtime override -- is written into the staging
+    copy before it is moved into place, not into the destination afterwards.
+    A crash between those two steps would otherwise leave a rendered directory
+    the next boot treats as complete but which produces no route: the same
+    silent-unroutable failure `bin/compose.sh`'s override check exists to
+    catch, reintroduced at the one moment that check cannot see it. Writing
+    the override into staging first means the directory becomes visible at
+    `destination` only once it already contains it.
     """
     if not (source / "compose.env").is_file():
         fail(EXIT_VALIDATION, f"nothing rendered at {source}; the render step did not run")
@@ -145,6 +154,8 @@ def install_rendered(source: Path, destination: Path) -> Path:
     for path in (staging, *staging.rglob("*")):
         os.chmod(path, 0o700 if path.is_dir() else 0o600)
         os.chown(path, 0, 0)
+
+    _write_root_only(staging / "runtime-compose.override.yaml", override_payload)
 
     if destination.exists():
         os.replace(destination, previous)
@@ -373,16 +384,14 @@ def main(argv: list[str] | None = None) -> int:
     _write_root_only(state_directory / "compose.env", runtime_compose_env(host))
     print(f"  {state_directory}")
 
-    rendered_directory = install_rendered(rendered_dir, deployed_output.rendered_path(key))
-    print(f"  {rendered_directory}")
-
-    _write_root_only(
-        rendered_directory / "runtime-compose.override.yaml",
-        runtime_override.render_override(
-            router_name=_env_value(rendered_directory / "compose.env", "HEALTH_ROUTER_NAME"),
-            https_entrypoint=host["edge"]["https_entrypoint"],
-        ),
+    override_payload = runtime_override.render_override(
+        router_name=_env_value(rendered_dir / "compose.env", "HEALTH_ROUTER_NAME"),
+        https_entrypoint=host["edge"]["https_entrypoint"],
     )
+    rendered_directory = install_rendered(
+        rendered_dir, deployed_output.rendered_path(key), override_payload
+    )
+    print(f"  {rendered_directory}")
 
     step("5. Start the project")
     started = run(
@@ -444,7 +453,12 @@ def _model_digest(rendered_dir: Path) -> str:
     agreement with a file, while the model is what Compose acted on.
     """
     result = run(
-        str(REPO_ROOT / "bin" / "compose.sh"), str(rendered_dir), "--profile", "contract", "config"
+        str(REPO_ROOT / "bin" / "compose.sh"),
+        str(rendered_dir),
+        "--runtime",
+        "--profile",
+        "contract",
+        "config",
     )
     if result.returncode != 0:
         fail(EXIT_VALIDATION, f"could not resolve the Compose model:\n{result.stderr}")

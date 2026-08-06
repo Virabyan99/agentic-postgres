@@ -86,6 +86,13 @@ readonly PROJECT_STATE_ROOT="/etc/agentic-postgres/projects"
 # worth paying for before they run.
 readonly VALIDATES_SECRETS="up restart"
 
+# Subcommands that start containers and therefore need the runtime override
+# to already exist. down, ps, logs, config and build must stay usable without
+# it -- a project whose override is missing (a partially installed rendered
+# directory, or one deployed by an older release) must still be inspectable
+# and tearable-down, which is exactly when an operator needs them.
+readonly OVERRIDE_REQUIRED="up restart"
+
 RUNTIME=0
 EDGE=0
 HOST_MANIFEST=""
@@ -399,7 +406,7 @@ main() {
     # router labels. Missing it here must fail loudly rather than start a
     # container that --wait reports healthy and the edge 404s on. Checked only
     # in project scope -- --edge has no override.
-    if [ "${EDGE}" -eq 0 ]; then
+    if [ "${EDGE}" -eq 0 ] && in_list "${subcommand}" "${OVERRIDE_REQUIRED}"; then
       [ -f "${OVERRIDE_PATH}" ] \
         || die 3 "no runtime override for ${PROJECT_KEY} at ${OVERRIDE_PATH}; the project is unroutable without it."
     fi
