@@ -305,15 +305,19 @@ def test_wrapper_never_shell_sources_an_env_file() -> None:
 
 
 @pytest.mark.parametrize(
-    "subcommand", ["up", "run", "start", "create", "restart", "exec", "attach", "cp"]
+    "subcommand",
+    ["up", "run", "start", "create", "restart", "exec", "attach", "cp", "watch", "scale"],
 )
 def test_container_starting_subcommands_are_refused(subcommand: str) -> None:
     """Still exit 10 by default. Session 2 added a way through, not a hole.
 
-    All eight parameters are unchanged from Session 1. What changed is the
-    message: refusal is now conditional on ``--runtime`` rather than on the
-    session, so asserting the old "Session 1 starts nothing" text would be
-    asserting a sentence rather than a behaviour (ADR 0013).
+    The first eight parameters are unchanged from Session 1; what changed
+    there is the message: refusal is now conditional on ``--runtime`` rather
+    than on the session, so asserting the old "Session 1 starts nothing" text
+    would be asserting a sentence rather than a behaviour (ADR 0013).
+    ``watch`` and ``scale`` were added after an audit against the currently
+    installed Compose found both start containers from a subcommand that was
+    not refused (ADR 0022).
     """
     result = compose(ALPHA, subcommand)
     assert result.returncode == 10, f"{subcommand} returned {result.returncode}"
@@ -408,22 +412,37 @@ def test_first_subcommand_skips_a_flags_value(tmp_path: Path) -> None:
 
 
 def test_the_runtime_allowlist_excludes_container_entry_verbs() -> None:
-    """`exec`, `attach`, `run` and `cp` reach inside a running container.
+    """`exec`, `attach`, `run`, `cp`, `watch` and `scale` all reach inside or
+    otherwise start a container.
 
     Nothing in Session 2's documented path needs them, so --runtime does not
-    grant them even to root. Asserted against the script's allowlist because
-    proving it at runtime would need a root test process.
+    grant them even to root. `watch` and `scale` are excluded for the same
+    reason `exec`/`attach`/`run`/`cp` are (ADR 0022 added them to FORBIDDEN
+    without adding them here). Asserted against the script's allowlist
+    because proving it at runtime would need a root test process.
     """
     text = COMPOSE_SH.read_text(encoding="utf-8")
     allowed = re.search(r'RUNTIME_ALLOWED="([^"]*)"', text)
     assert allowed is not None
     permitted = set(allowed.group(1).split())
     assert permitted == {"up", "down", "restart", "build", "ps", "config", "logs"}
-    assert not permitted & {"exec", "attach", "run", "cp", "start", "create"}
+    assert not permitted & {"exec", "attach", "run", "cp", "start", "create", "watch", "scale"}
 
 
-def test_the_forbidden_list_is_unchanged_from_session_one() -> None:
-    """The default refusal is the inherited contract; only the escape is new."""
+def test_the_forbidden_list_is_pinned_to_the_audited_compose_surface() -> None:
+    """The default refusal covers every container-starting Compose subcommand
+    an audit has actually checked for -- not just Session 1's original eight.
+
+    Formerly ``test_the_forbidden_list_is_unchanged_from_session_one``: that
+    name and its "only the escape is new" docstring stopped being true once
+    ``watch`` and ``scale`` were added. Both create or start containers and
+    were reachable with no ``--runtime`` and no root before this (ADR 0022) --
+    the list had drifted behind the Compose surface it was meant to cover,
+    which is a way this test's old formulation (diffing the file against its
+    own past self) could never have caught. This asserts the audited list is
+    what ships; it does not claim the audit is complete against any future
+    Compose release.
+    """
     text = COMPOSE_SH.read_text(encoding="utf-8")
     forbidden = re.search(r'FORBIDDEN="([^"]*)"', text)
     assert forbidden is not None
@@ -436,7 +455,95 @@ def test_the_forbidden_list_is_unchanged_from_session_one() -> None:
         "exec",
         "attach",
         "cp",
+        "watch",
+        "scale",
     ]
+
+
+def _compose_definitions_at_real_root() -> str:
+    """`bin/compose.sh`'s real definitions, minus the trailing `main "$@"`
+    call, with ROOT_DIR pointed at the real repository.
+
+    Same shape as the helper of the same name in
+    ``tests/contract/test_project_state_roots.py``, used there for the same
+    reason: the harness runs from a tmp_path, so ROOT_DIR must not resolve
+    against that instead.
+    """
+    text = COMPOSE_SH.read_text(encoding="utf-8")
+    body = text[: text.rindex('main "$@"')]
+    patched = body.replace(
+        'ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"',
+        f"ROOT_DIR={shlex.quote(str(REPO_ROOT))}",
+    )
+    assert patched != body, "could not redirect ROOT_DIR for the test"
+    return patched
+
+
+def _extract_runtime_allowed_check(compose_source: str) -> str:
+    """The literal RUNTIME_ALLOWED conditional out of `main()`, unmodified.
+
+    Run directly instead of through `main()`, for the same reason
+    ``tests/contract/test_project_state_roots.py`` runs OVERRIDE_REQUIRED's
+    conditional directly rather than calling `main()`: the privilege check
+    (``--runtime requires root``, exit 3) runs first, unconditionally, before
+    RUNTIME_ALLOWED is ever consulted. As a non-root test process, a real
+    ``bin/compose.sh --runtime watch`` or ``--runtime scale`` call can only
+    ever exit 3 with "requires root" -- never exit 10 with the allowlist
+    message -- regardless of whether RUNTIME_ALLOWED excludes them. A test
+    against the real subprocess could not even be made to pass while
+    asserting the allowlist's own exit code, let alone distinguish a correct
+    exclusion from a regression.
+
+    Slicing the real conditional out of the current file -- not retyping its
+    condition or its die() message -- keeps this tied to the actual code: if
+    the condition or the message changes, the slice changes with it; if the
+    anchor below stops matching, ``.index`` raises instead of silently
+    testing stale text.
+    """
+    start_marker = 'if ! in_list "${subcommand}" "${RUNTIME_ALLOWED}"; then'
+    start = compose_source.index(start_marker)
+    end_marker = "\n    fi\n"
+    end = compose_source.index(end_marker, start) + len(end_marker)
+    return compose_source[start:end]
+
+
+def _runtime_allowed_result(tmp_path: Path, subcommand: str) -> subprocess.CompletedProcess[str]:
+    """Resolve `subcommand` for a project-scope `--runtime <subcommand>` call
+    exactly as `main()` would -- via the real `parse_arguments` and
+    `configure_project_scope` -- then run the real RUNTIME_ALLOWED
+    conditional against what it resolved to.
+    """
+    runtime_check = _extract_runtime_allowed_check(COMPOSE_SH.read_text(encoding="utf-8"))
+    harness = _compose_definitions_at_real_root() + (
+        f"\nparse_arguments {shlex.quote(str(ALPHA))} --runtime {shlex.quote(subcommand)}"
+        '\nENV_FILE_ARGS=(--env-file "${LOCK_ENV}")'
+        '\nPROJECT_KEY=""'
+        "\nconfigure_project_scope"
+        '\nsubcommand="$(first_subcommand)"'
+        f"\n{runtime_check}\n"
+    )
+    harness_path = tmp_path / "harness.sh"
+    harness_path.write_text(harness, encoding="utf-8")
+    return subprocess.run(["bash", str(harness_path)], capture_output=True, text=True, check=False)
+
+
+@pytest.mark.parametrize("subcommand", ["watch", "scale"])
+def test_watch_and_scale_are_refused_with_runtime_even_as_root(
+    subcommand: str, tmp_path: Path
+) -> None:
+    """`--runtime` does not grant `watch` or `scale` even to root -- neither
+    is in RUNTIME_ALLOWED (ADR 0022), so both hit the same allowlist refusal
+    `exec`, `attach`, `run` and `cp` already get.
+
+    Asserted on the message rather than the exit code alone: exit 10 here is
+    the allowlist's own die(), distinct from the privilege gate's exit 3 --
+    but see `_extract_runtime_allowed_check` for why this cannot be proven
+    by calling `bin/compose.sh` itself as a non-root test process.
+    """
+    result = _runtime_allowed_result(tmp_path, subcommand)
+    assert result.returncode == 10, result.stderr
+    assert "not permitted in --runtime mode" in result.stderr
+    assert f"'{subcommand}'" in result.stderr
 
 
 # ---------------------------------------------------------------------------

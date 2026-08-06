@@ -44,9 +44,11 @@ readonly PROJECT_MODEL="${ROOT_DIR}/compose.yaml"
 readonly EDGE_MODEL="${ROOT_DIR}/infra/edge/compose.yaml"
 
 # Subcommands that create or start a container. Refused unless --runtime is
-# given AND the caller is root. The list is unchanged from Session 1; what
-# changed is that there is now a documented way through it.
-readonly FORBIDDEN="up run start create restart exec attach cp"
+# given AND the caller is root. The first eight are unchanged from Session 1;
+# what changed there is that there is now a documented way through it. `watch`
+# and `scale` were added after an audit against the currently installed
+# Compose found both start containers and neither was refused (ADR 0022).
+readonly FORBIDDEN="up run start create restart exec attach cp watch scale"
 
 # What --runtime actually permits. Deliberately smaller than FORBIDDEN's
 # complement: exec, attach, run and cp reach inside a running container and
