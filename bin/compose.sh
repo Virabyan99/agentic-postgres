@@ -71,7 +71,7 @@ readonly KEEP_VARS="PATH HOME USER DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCK
 # Where a project's secret generations may live. A `file:` secret source
 # anywhere else is refused before anything starts.
 readonly SECRET_ROOT="/var/lib/agentic-postgres/secrets"
-readonly PROJECT_STATE_ROOT="/var/lib/agentic-postgres/projects"
+readonly PROJECT_STATE_ROOT="/etc/agentic-postgres/projects"
 
 # Subcommands whose effect on a running container makes a secret-source check
 # worth paying for before they run.

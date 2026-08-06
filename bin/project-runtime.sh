@@ -19,7 +19,9 @@
 #   0  success
 #   2  invalid operator input
 #   3  missing prerequisite
-#   4  missing runtime state (the project was never deployed here)
+#   4  missing runtime state or rendered output (the project was never deployed
+#      here). Configuration lives under /etc/agentic-postgres/projects/<key>/;
+#      generated output under /var/lib/agentic-postgres/rendered/<key>/ (ADR 0020).
 #   8  secrets could not be materialized
 #   9  the edge attachment failed
 
@@ -28,7 +30,8 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 
-readonly PROJECT_STATE_ROOT="/var/lib/agentic-postgres/projects"
+readonly PROJECT_STATE_ROOT="/etc/agentic-postgres/projects"
+readonly PROJECT_RENDERED_ROOT="/var/lib/agentic-postgres/rendered"
 readonly PROJECT_KEY_PATTERN='^[a-z][a-z0-9-]{4,47}$'
 
 ACTION=""
@@ -93,9 +96,12 @@ parse_arguments() {
   fi
 }
 
-state_directory() {
-  local directory="${PROJECT_STATE_ROOT}/${PROJECT_KEY}"
-  [ -d "${directory}" ] || die 4 "no runtime state for ${PROJECT_KEY}: ${directory}"
+# `printf` stays last on purpose. Under `set -e` a bare `[ -L x ] && die` as the
+# final command of a function returns 1 when the path is not a symlink, and the
+# function would fail exactly when the check passes.
+resolved_directory() {
+  local directory="$1" label="$2"
+  [ -d "${directory}" ] || die 4 "no ${label} for ${PROJECT_KEY}: ${directory}"
   [ -L "${directory}" ] && die 2 "${directory} is a symlink, which is not accepted."
   printf '%s' "${directory}"
 }
@@ -112,15 +118,18 @@ main() {
     up|down) [ "$(id -u)" -eq 0 ] || die 3 "${ACTION} requires root." ;;
   esac
 
-  local state
-  state="$(state_directory)"
+  local state rendered
 
   case "${ACTION}" in
     status)
-      "${ROOT_DIR}/bin/compose.sh" "${state}" ps
+      rendered="$(resolved_directory "${PROJECT_RENDERED_ROOT}/${PROJECT_KEY}" "rendered output")"
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" ps
       ;;
 
     up)
+      state="$(resolved_directory "${PROJECT_STATE_ROOT}/${PROJECT_KEY}" "runtime state")"
+      rendered="$(resolved_directory "${PROJECT_RENDERED_ROOT}/${PROJECT_KEY}" "rendered output")"
+
       # Before the containers, not after. A container that starts and then finds
       # its secret missing fails in its own way, at its own time, and reports it
       # as an application error.
@@ -130,7 +139,7 @@ main() {
         --session 2 \
         || die 8 "secrets could not be materialized for ${PROJECT_KEY}."
 
-      "${ROOT_DIR}/bin/compose.sh" "${state}" --runtime --profile session2 up -d --wait \
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime --profile session2 up -d --wait \
         || die 9 "the project did not become healthy."
 
       # Last, and only now that --wait has returned.
@@ -141,6 +150,8 @@ main() {
       ;;
 
     down)
+      rendered="$(resolved_directory "${PROJECT_RENDERED_ROOT}/${PROJECT_KEY}" "rendered output")"
+
       # First. Compose cannot remove a network that still has an endpoint on it,
       # and the failure is reported as a network error rather than as the
       # missing detach it actually is.
@@ -149,7 +160,7 @@ main() {
 
       # No -v. The Postgres volume outlives the project by design; removing it
       # here would make `systemctl restart` a data-loss command.
-      "${ROOT_DIR}/bin/compose.sh" "${state}" --runtime --profile session2 down \
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime --profile session2 down \
         || die 9 "the project did not stop cleanly."
 
       printf 'project-runtime: %s is down. Volumes are preserved.\n' "${PROJECT_KEY}"

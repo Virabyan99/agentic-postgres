@@ -38,13 +38,16 @@ from agentic_postgres import config
 from agentic_postgres.config import ManifestError
 
 SCHEMA_VERSION = 2
-PROJECT_STATE_ROOT = Path("/var/lib/agentic-postgres/projects")
+PROJECT_STATE_ROOT = Path("/etc/agentic-postgres/projects")
+RENDERED_ROOT = Path("/var/lib/agentic-postgres/rendered")
 
 __all__ = [
     "PROJECT_STATE_ROOT",
+    "RENDERED_ROOT",
     "SCHEMA_VERSION",
     "build_deployed_document",
     "deployed_path",
+    "rendered_path",
     "validate_deployed_document",
     "write_deployed_document",
 ]
@@ -52,6 +55,16 @@ __all__ = [
 
 def deployed_path(project_key: str, *, root: Path = PROJECT_STATE_ROOT) -> Path:
     return root / project_key / "outputs.json"
+
+
+def rendered_path(project_key: str, *, root: Path = RENDERED_ROOT) -> Path:
+    """The installed rendered directory, not a file inside it.
+
+    Callers need the directory: it is what `bin/compose.sh` is given as the
+    Compose project directory. Returning `outputs.json` here would make the one
+    caller that wants the directory derive it back out with `.parent`.
+    """
+    return root / project_key
 
 
 def build_deployed_document(

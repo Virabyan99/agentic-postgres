@@ -198,5 +198,5 @@ def test_the_recorded_paths_match_the_schema_patterns(rendered: dict) -> None:
     assert document["runtime"]["release_path"].endswith(COMMIT)
     assert document["runtime"]["state_directory"].endswith(KEY)
     assert str(deployed_output.deployed_path(KEY)) == (
-        f"/var/lib/agentic-postgres/projects/{KEY}/outputs.json"
+        f"/etc/agentic-postgres/projects/{KEY}/outputs.json"
     )

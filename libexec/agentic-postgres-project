@@ -36,9 +36,9 @@ Usage: /usr/local/libexec/agentic-postgres/project <project-key> <action>
 
 Actions: materialize | up | down | attach | detach | status
 
-Resolves the installed release recorded in that project's deployment state and
-runs that release's scripts. Not intended for direct operator use; systemd
-invokes it through agentic-postgres-project@<project-key>.service.
+Resolves the installed release recorded in that project's deployed outputs
+document and runs that release's scripts. Not intended for direct operator use;
+systemd invokes it through agentic-postgres-project@<project-key>.service.
 USAGE
 }
 
@@ -66,13 +66,13 @@ main() {
   [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
   command -v jq >/dev/null 2>&1 || die 3 "jq is not installed."
 
-  local deployment="${STATE_ROOT}/${project_key}/deployment.json"
+  local deployment="${STATE_ROOT}/${project_key}/outputs.json"
   [ -f "${deployment}" ] || die 4 "no deployment state for ${project_key}: ${deployment}"
   [ -L "${deployment}" ] && die 2 "${deployment} is a symlink, which is not accepted."
 
   local commit release
-  commit="$(jq -r '.installed_release_commit // empty' "${deployment}")"
-  [ -n "${commit}" ] || die 4 "${deployment} records no installed release commit."
+  commit="$(jq -r '.source_commit // empty' "${deployment}")"
+  [ -n "${commit}" ] || die 4 "${deployment} records no source commit."
   case "${commit}" in
     *[!0-9a-f]* | "") die 2 "recorded release commit is not hexadecimal: ${commit}" ;;
   esac

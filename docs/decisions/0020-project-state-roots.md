@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-06
 - **Session:** 2
-- **Affects:** `libexec/agentic-postgres-project`, `bin/project-runtime.sh`, `bin/compose.sh`, `bin/deploy-session-2.py`, `src/agentic_postgres/deployed_output.py`, `test_every_state_file_a_launcher_requires_has_a_writer`
+- **Affects:** `libexec/agentic-postgres-project`, `bin/project-runtime.sh`, `bin/compose.sh`, `bin/deploy-session-2.py`, `src/agentic_postgres/deployed_output.py`, `test_every_state_file_a_launcher_requires_has_a_writer`, `test_the_recorded_paths_match_the_schema_patterns`
 
 ## Context
 
@@ -87,6 +87,13 @@ resolves `${VAR}` against `readonly` assignments in the same launcher, matches
 `PROJECT_STATE_ROOT` moves in three modules that currently agree with each
 other. They agree on a value the launcher never used, so the agreement was
 between consumers, not with the system.
+
+`test_the_recorded_paths_match_the_schema_patterns` pins `deployed_path` to a
+path literal, so relocating the root breaks it mechanically. The literal is
+updated to `/etc/agentic-postgres/projects/<key>/outputs.json` and the
+assertion keeps its meaning: it still pins the built path against the schema
+pattern. That is a consequence of the decision above rather than a separate
+one, which is why it is recorded here instead of in its own ADR.
 
 The systemd project path has never run. Correcting the launcher is necessary but
 proves nothing on its own: `systemctl start agentic-postgres-project@<key>` is
