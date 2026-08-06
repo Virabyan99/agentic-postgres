@@ -115,6 +115,63 @@ def test_provision_host_installs_a_release_before_enabling_the_units(code_only) 
     assert body.index("install_release") < body.index("install_units")
 
 
+def test_the_scan_resolves_a_composed_path() -> None:
+    """The scan must see a path built from a root, not only a whole literal.
+
+    The original scan matched `readonly NAME="/etc/....json"` and nothing else.
+    Three of the four files a launcher requires are declared with `local` and
+    built by interpolating a `readonly` root; two of them end in `.yaml`. A
+    fourth is a bare `NAME="value"` assignment following a keyword-less
+    `local NAME1 NAME2` declaration, exactly as the project launcher writes
+    `manifest` and `requirements` -- the specific shape that made the
+    keyword-required pattern miss two of the five real files.
+    """
+    planted = "\n".join(
+        [
+            'readonly STATE_ROOT="/etc/agentic-postgres/projects"',
+            '  local deployment="${STATE_ROOT}/${project_key}/planted.json"',
+            '  local contract="${STATE_ROOT}/${project_key}/planted.yaml"',
+            "  local manifest requirements",
+            '  manifest="${STATE_ROOT}/${project_key}/bare.yaml"',
+            '  local ignored="${STATE_ROOT}/${project_key}"',
+        ]
+    )
+    found = {path.rsplit("/", 1)[-1] for path in _launcher_state_files(planted)}
+    assert found == {"planted.json", "planted.yaml", "bare.yaml"}
+
+
+def _launcher_state_files(text: str) -> set[str]:
+    """Every /etc or /var file one launcher opens, including composed paths.
+
+    An unknown variable resolves to a placeholder derived from its own name
+    (rather than disqualifying the path, and rather than a single shared
+    placeholder that would collapse two distinct unknown variables into one
+    path): `${project_key}` is a systemd instance name, so the *file* is what
+    this scan is after and the directory it sits in varies by project.
+
+    A derived placeholder can still produce a path that exists nowhere on
+    disk if a variable is never actually a real directory component. That is
+    an accepted, deliberate limitation: it fails loudly, because a bogus path
+    with no writer trips the orphan assertion below, whereas silently
+    dropping the path would hide a real orphan. Do not "fix" this by
+    disqualifying unresolved variables instead.
+    """
+    roots = dict(re.findall(r'^\s*readonly (\w+)="([^"$]+)"', text, re.M))
+
+    resolved: set[str] = set()
+    for raw in re.findall(r'^\s*(?:readonly |local )?\w+="([^"]+)"', text, re.M):
+        path = re.sub(
+            r"\$\{(\w+)\}",
+            lambda m: roots.get(m.group(1), f"_{m.group(1)}_"),
+            raw,
+        )
+        if "$" in path or not path.startswith(("/etc/", "/var/")):
+            continue
+        if path.rsplit("/", 1)[-1].rsplit(".", 1)[-1] in {"json", "yaml", "env"}:
+            resolved.add(path)
+    return resolved
+
+
 def test_every_state_file_a_launcher_requires_has_a_writer() -> None:
     """The general form of the defect.
 
@@ -144,13 +201,13 @@ def test_every_state_file_a_launcher_requires_has_a_writer() -> None:
 
     required: set[str] = set()
     for launcher in sorted((REPO_ROOT / "libexec").iterdir()):
-        if not launcher.is_file():
-            continue
-        text = launcher.read_text(encoding="utf-8")
-        for match in re.finditer(r'^readonly \w+="(/(?:etc|var)/[^"]+\.json)"', text, re.M):
-            required.add(match.group(1))
+        if launcher.is_file():
+            required |= _launcher_state_files(launcher.read_text(encoding="utf-8"))
 
-    assert required, "no launcher declares a state file; this scan is measuring nothing"
+    assert len(required) >= 4, (
+        f"the scan found only {sorted(required)}; it is measuring almost nothing. "
+        "Four launchers open state files under /etc."
+    )
 
     orphans = []
     for path in sorted(required):
