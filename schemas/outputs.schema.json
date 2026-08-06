@@ -196,7 +196,7 @@
         "template_version",
         "observed_at"
       ],
-      "description": "Root-owned, mode 0600, written under /var/lib/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
+      "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
         "schema_version": { "type": "integer", "enum": [2] },
         "document_kind": { "const": "deployed" },
@@ -339,7 +339,7 @@
             },
             "state_directory": {
               "type": "string",
-              "pattern": "^/var/lib/agentic-postgres/projects/[a-z0-9-]+$"
+              "pattern": "^/etc/agentic-postgres/projects/[a-z0-9-]+$"
             },
             "compose_model_sha256": { "$ref": "#/$defs/sha256" }
           }

@@ -27,7 +27,7 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 
-readonly PROJECT_STATE_ROOT="/var/lib/agentic-postgres/projects"
+readonly PROJECT_RENDERED_ROOT="/var/lib/agentic-postgres/rendered"
 
 # Same shape as schemas/outputs.schema.json's projectKey. Validated before it is
 # used as a path component or a Docker object name.
@@ -70,7 +70,7 @@ edge_container() {
 }
 
 project_edge_network() {
-  local key="$1" state="${PROJECT_STATE_ROOT}/$1/compose.env"
+  local key="$1" state="${PROJECT_RENDERED_ROOT}/$1/compose.env"
   [ -f "${state}" ] || die 3 "no runtime state for ${key}: ${state}"
 
   # Read as a key/value file, never sourced. Sourcing an env file executes it,
@@ -173,7 +173,7 @@ main() {
       # projects', so without this every project loses ingress on an edge
       # restart and nothing reports it.
       local attached=0 skipped=0 directory key network
-      for directory in "${PROJECT_STATE_ROOT}"/*/; do
+      for directory in "${PROJECT_RENDERED_ROOT}"/*/; do
         [ -d "${directory}" ] || continue
         key="$(basename "${directory}")"
         printf '%s' "${key}" | grep -Eq "${PROJECT_KEY_PATTERN}" || continue

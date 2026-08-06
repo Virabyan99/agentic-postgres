@@ -84,6 +84,7 @@ PROJECT_DIR=""
 TEMP_ENV=""
 MODEL=""
 PROJECT_NAME=""
+OVERRIDE_PATH=""
 declare -a COMPOSE_ARGS=()
 declare -a ENV_FILE_ARGS=()
 declare -a MODEL_FILE_ARGS=()
@@ -308,21 +309,26 @@ configure_project_scope() {
 
   PROJECT_KEY="$(read_var "${project_env}" PROJECT_KEY)"
 
-  # The host-derived half of a project's environment, plus the override that
-  # carries the fully rendered router label keys. Both are written by deploy.sh
-  # and exist only after a Session 2 deployment, which is why this is
-  # conditional rather than required: ordinary validation must work without a
-  # host.
+  # The host-derived half of a project's environment. Written by deploy.sh and
+  # exists only after a Session 2 deployment, which is why this is conditional
+  # rather than required: ordinary validation must work without a host.
   local runtime_env="${PROJECT_STATE_ROOT}/${PROJECT_KEY}/compose.env"
-  local override="${PROJECT_STATE_ROOT}/${PROJECT_KEY}/runtime-compose.override.yaml"
+
+  # The override carrying the fully rendered router label keys. deploy.sh
+  # writes it into the rendered directory alongside the rendered compose.env --
+  # the same directory PROJECT_DIR already names -- not under PROJECT_STATE_ROOT.
+  # Required under --runtime, but that is enforced in main(), after the
+  # privilege check: an unprivileged caller must be refused for lacking root
+  # before anything else is said about the project.
+  OVERRIDE_PATH="${PROJECT_DIR}/runtime-compose.override.yaml"
 
   if [ "${RUNTIME}" -eq 1 ] && [ -f "${runtime_env}" ]; then
     assert_disjoint "${LOCK_ENV}" "${runtime_env}"
     assert_disjoint "${project_env}" "${runtime_env}"
     ENV_FILE_ARGS+=(--env-file "${runtime_env}")
   fi
-  if [ "${RUNTIME}" -eq 1 ] && [ -f "${override}" ]; then
-    MODEL_FILE_ARGS+=(--file "${override}")
+  if [ "${RUNTIME}" -eq 1 ] && [ -f "${OVERRIDE_PATH}" ]; then
+    MODEL_FILE_ARGS+=(--file "${OVERRIDE_PATH}")
   fi
 }
 
@@ -367,6 +373,14 @@ main() {
     [ "$(id -u)" -eq 0 ] || die 3 "--runtime requires root; Docker access is root-equivalent."
     if ! in_list "${subcommand}" "${RUNTIME_ALLOWED}"; then
       die 10 "'${subcommand}' is not permitted in --runtime mode; allowed: ${RUNTIME_ALLOWED}"
+    fi
+    # A project cannot be routed without its override: no traefik.enable, no
+    # router labels. Missing it here must fail loudly rather than start a
+    # container that --wait reports healthy and the edge 404s on. Checked only
+    # in project scope -- --edge has no override.
+    if [ "${EDGE}" -eq 0 ]; then
+      [ -f "${OVERRIDE_PATH}" ] \
+        || die 3 "no runtime override for ${PROJECT_KEY} at ${OVERRIDE_PATH}; the project is unroutable without it."
     fi
   elif in_list "${subcommand}" "${FORBIDDEN}"; then
     die 10 "'${subcommand}' would start or create a container; this requires --runtime with root."

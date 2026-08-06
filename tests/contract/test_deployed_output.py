@@ -76,7 +76,7 @@ OBSERVED = {
     },
     "runtime": {
         "release_path": f"/opt/agentic-postgres/releases/{COMMIT}",
-        "state_directory": f"/var/lib/agentic-postgres/projects/{KEY}",
+        "state_directory": f"/etc/agentic-postgres/projects/{KEY}",
         "compose_model_sha256": "d" * 64,
     },
 }

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-08-06
 - **Session:** 2
-- **Affects:** `libexec/agentic-postgres-project`, `bin/project-runtime.sh`, `bin/compose.sh`, `bin/deploy-session-2.py`, `src/agentic_postgres/deployed_output.py`, `test_every_state_file_a_launcher_requires_has_a_writer`, `test_the_recorded_paths_match_the_schema_patterns`
+- **Affects:** `libexec/agentic-postgres-project`, `bin/project-runtime.sh`, `bin/compose.sh`, `bin/deploy-session-2.py`, `src/agentic_postgres/deployed_output.py`, `test_every_state_file_a_launcher_requires_has_a_writer`, `test_the_recorded_paths_match_the_schema_patterns`, `bin/edge-network.sh`, `schemas/outputs.schema.json`, `tests/contract/test_deployed_output.py` (the `OBSERVED` fixture)
 
 ## Context
 
@@ -98,6 +98,24 @@ one, which is why it is recorded here instead of in its own ADR.
 The systemd project path has never run. Correcting the launcher is necessary but
 proves nothing on its own: `systemctl start agentic-postgres-project@<key>` is
 part of the acceptance for this change, on the host, and not a deferred item.
+
+The original plan under-scoped the move. Three more consumers read the
+relocated path and were not examined when this ADR was first written:
+`bin/edge-network.sh`, `schemas/outputs.schema.json`'s `runtime.state_directory`
+pattern, and the override lookup in `bin/compose.sh`. Two of the three failed
+silently or late rather than at the point of the mistake. The schema pattern
+failed late: `build_deployed_document` raised only at deploy step 6, after the
+containers were already up, so the deploy died having already changed host
+state and without writing the document the launcher reads. `bin/compose.sh`'s
+override lookup failed silently: its guard is a plain `[ -f ]`, so a project
+started, `--wait` reported healthy, and the health route 404'd with nothing in
+the log naming a missing file. `bin/edge-network.sh` was the one exception --
+it read a directory nothing writes any more and surfaced that as an explicit
+`die 3`, propagated by `bin/project-runtime.sh` into `die 9 "the project is
+running but has no ingress"` at deploy step 5, which is late but not silent.
+All three are fixed here, and their fixture and schema counterparts moved with
+them, under this same ADR rather than three new ones, per the operator's
+ruling that a contract test changes only with an ADR.
 
 ## Alternatives considered
 
