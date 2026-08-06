@@ -813,7 +813,7 @@ def render_override(*, router_name: str, https_entrypoint: str) -> bytes:
 wsl -d Ubuntu bash -lc 'cd ~/projects/agentic-postgres && source .venv/bin/activate && python -m pytest -q tests/contract/test_runtime_override.py'
 ```
 
-Expected: PASS, 10 passed.
+Expected: PASS, 9 passed.
 
 - [ ] **Step 5: Wire it into the deploy**
 
@@ -843,7 +843,7 @@ The router name is read back out of the installed `compose.env` rather than re-d
 wsl -d Ubuntu bash -lc 'cd ~/projects/agentic-postgres && git add -A && git commit -q -m wip && source .venv/bin/activate && bin/session-01-check.sh 2>&1 | tail -20'
 ```
 
-Expected: `PASSED`, **1207 passed, 4 skipped**.
+Expected: `PASSED`, **1206 passed, 4 skipped**.
 
 ```bash
 wsl -d Ubuntu bash -lc "cd ~/projects/agentic-postgres && git commit -q --amend -F - <<'MSG'
@@ -987,7 +987,7 @@ Expected, five paths — `edge-state.json`, `host.yaml`, and the three under `pr
 wsl -d Ubuntu bash -lc 'cd ~/projects/agentic-postgres && git add -A && git commit -q -m wip && source .venv/bin/activate && bin/session-01-check.sh 2>&1 | tail -20'
 ```
 
-Expected: `PASSED`, **1208 passed, 4 skipped**.
+Expected: `PASSED`, **1207 passed, 4 skipped**.
 
 ```bash
 wsl -d Ubuntu bash -lc "cd ~/projects/agentic-postgres && git commit -q --amend -F - <<'MSG'
@@ -1107,7 +1107,7 @@ Expected: `PASSED`. Then record the run in the session evidence and stop — pro
 
 **Type consistency.** `rendered_path` returns a directory in Task 1 and is consumed as a directory in Task 2 step 4. `_write_root_only(path, payload)` takes `bytes` in Task 2 and is fed `render_override(...) -> bytes` in Task 3 step 5. `_env_value(path, key) -> str` feeds `build_override(router_name=...)`, which takes `str`. `ROUTED_SERVICE` is used as the service key in both the module and its test.
 
-**Test counts.** 1183 baseline, +8 (Task 1), +6 (Task 2), +10 (Task 3), +1 (Task 4) = 1208. If a task's count differs from the plan, stop and find out why before continuing; a silently absorbed count is how a weakened test hides.
+**Test counts.** 1183 baseline, +8 (Task 1), +6 (Task 2), +9 (Task 3), +1 (Task 4) = 1207. If a task's count differs from the plan, stop and find out why before continuing; a silently absorbed count is how a weakened test hides.
 
 ## Divergences
 
