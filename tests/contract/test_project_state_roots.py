@@ -220,3 +220,129 @@ def test_state_directory_pattern_accepts_the_path_the_deploy_passes() -> None:
 
     path = f"{deployed_output.PROJECT_STATE_ROOT}/alpha-dev"
     assert re.fullmatch(pattern, path), f"{path!r} does not match {pattern!r}"
+
+
+# ---------------------------------------------------------------------------
+# OVERRIDE_REQUIRED: a project-scope --runtime up/restart with no
+# runtime-compose.override.yaml is refused, and down/ps/logs and --edge are
+# not caught by the same check.
+# ---------------------------------------------------------------------------
+
+COMPOSE_SH = REPO_ROOT / "bin" / "compose.sh"
+ALPHA = FIXTURE_COMPOSE_ENV.parent
+HOST_MANIFEST = REPO_ROOT / "host.example.yaml"
+
+#: Substring unique to OVERRIDE_REQUIRED's own die() message. `main()`'s
+#: privilege check ("--runtime requires root") also exits 3, so the two must
+#: be told apart by message, never by exit code alone (see
+#: `_override_check_result` below for why a real `main()` call cannot do
+#: this as a non-root test process).
+OVERRIDE_MESSAGE = "is unroutable without it"
+
+
+def _compose_definitions_at_real_root() -> str:
+    """`_sourced_definitions(COMPOSE_SH)` with ROOT_DIR pointed at the real
+    repository, exactly as
+    `test_compose_sh_looks_for_the_override_where_the_deploy_writes_it` does
+    it: the harness runs from a tmp_path, so ROOT_DIR must not resolve
+    against that instead.
+    """
+    body = _sourced_definitions(COMPOSE_SH)
+    patched = body.replace(
+        'ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"',
+        f"ROOT_DIR={shlex.quote(str(REPO_ROOT))}",
+    )
+    assert patched != body, "could not redirect ROOT_DIR for the test"
+    return patched
+
+
+def _extract_override_check(compose_source: str) -> str:
+    """The literal OVERRIDE_REQUIRED conditional out of `main()`, unmodified.
+
+    The tests below run this directly instead of calling `main()`: `main()`
+    checks "--runtime requires root" first, unconditionally, before it ever
+    looks at OVERRIDE_REQUIRED -- and these tests run as non-root, so a real
+    `main()` call would only ever observe "requires root", for every
+    subcommand and every scope, regardless of what OVERRIDE_REQUIRED
+    contains. A test that asserted exit 3 against that call would pass
+    whether or not the constant were correct, emptied, or inverted, which is
+    worse than no test.
+
+    Slicing the real conditional out of the current file -- not retyping its
+    condition or its die() message -- keeps this tied to the actual code: if
+    the guard, the constant, or the message changes, the slice changes with
+    it; if the anchor below stops matching at all, `.index` raises loudly
+    instead of silently testing stale text.
+    """
+    start_marker = 'if [ "${EDGE}" -eq 0 ] && in_list "${subcommand}" "${OVERRIDE_REQUIRED}"; then'
+    start = compose_source.index(start_marker)
+    end_marker = "\n    fi\n"
+    end = compose_source.index(end_marker, start) + len(end_marker)
+    return compose_source[start:end]
+
+
+def _override_check_result(tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """Resolve EDGE/subcommand/OVERRIDE_PATH/PROJECT_KEY for `args` exactly as
+    `main()` would -- via the real `parse_arguments` and the real scope
+    configurator -- then run the real OVERRIDE_REQUIRED conditional against
+    what they resolved to.
+    """
+    override_check = _extract_override_check(COMPOSE_SH.read_text(encoding="utf-8"))
+    quoted_args = " ".join(shlex.quote(a) for a in args)
+    harness = _compose_definitions_at_real_root() + (
+        f"\nparse_arguments {quoted_args}"
+        '\nPROJECT_KEY=""'
+        '\nENV_FILE_ARGS=(--env-file "${LOCK_ENV}")'
+        '\nif [ "${EDGE}" -eq 1 ]; then configure_edge_scope; else configure_project_scope; fi'
+        '\nsubcommand="$(first_subcommand)"'
+        f"\n{override_check}\n"
+    )
+    return _run_harness(harness, tmp_path)
+
+
+@requires_rendered_fixture
+def test_runtime_up_without_an_override_is_refused_by_the_override_check(
+    tmp_path: Path,
+) -> None:
+    """The regression this test exists for: OVERRIDE_REQUIRED could be
+    emptied, inverted, or have its die() deleted, and
+    `bin/session-01-check.sh` would stay green (a reviewer confirmed the
+    behaviour but no test pinned it).
+
+    ALPHA has no runtime-compose.override.yaml, which is the case under
+    test. Asserted on the message, not just the exit code -- exit 3 alone is
+    shared with `main()`'s privilege gate.
+    """
+    result = _override_check_result(tmp_path, str(ALPHA), "--runtime", "up")
+    assert result.returncode == 3, result.stderr
+    assert OVERRIDE_MESSAGE in result.stderr
+    assert str(ALPHA / "runtime-compose.override.yaml") in result.stderr
+
+
+@requires_rendered_fixture
+@pytest.mark.parametrize("subcommand", ["down", "ps", "logs"])
+def test_runtime_x_is_not_refused_for_a_missing_override(subcommand: str, tmp_path: Path) -> None:
+    """down/ps/logs must stay usable without an override -- a partially
+    installed or older-release project must still be inspectable and
+    tearable-down. If OVERRIDE_REQUIRED ever grew to include one of these,
+    this would start dying with the exact message the `up` test above
+    expects, at the same exit code (3) -- which is why both tests assert on
+    the message rather than the bare exit code.
+    """
+    result = _override_check_result(tmp_path, str(ALPHA), "--runtime", subcommand)
+    assert result.returncode == 0, result.stderr
+    assert OVERRIDE_MESSAGE not in result.stderr
+
+
+@requires_rendered_fixture
+def test_edge_scope_is_unaffected_by_the_override_check(tmp_path: Path) -> None:
+    """The edge plane has no override file at all; OVERRIDE_PATH is never set
+    for it. Uses `up`, which *is* in OVERRIDE_REQUIRED, so this exercises the
+    `EDGE -eq 0` guard itself rather than merely picking a subcommand the
+    check would ignore anyway.
+    """
+    result = _override_check_result(
+        tmp_path, "--edge", "--host", str(HOST_MANIFEST), "--runtime", "up"
+    )
+    assert result.returncode == 0, result.stderr
+    assert OVERRIDE_MESSAGE not in result.stderr
