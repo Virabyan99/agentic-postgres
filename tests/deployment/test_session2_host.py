@@ -385,15 +385,24 @@ def test_bootstrap_state_is_root_only_and_records_provider_ids(
 def test_reapplying_the_bootstrap_reports_no_change(
     as_root, sh_status, project_a: dict[str, Any]
 ) -> None:
-    """Convergence, proved by a second plan finding nothing to do."""
+    """Convergence, proved by a second plan finding nothing to do.
+
+    The manifest comes from the project's state directory, not from the release.
+    A release is a pristine copy of the repository and has never contained a
+    `project.yaml`; the operator's manifest is copied to
+    `<state>/manifest.yaml` by the deploy, which is the copy that outlives the
+    operator's checkout. This test named a path nothing creates, so it failed
+    with `project manifest not found` on a converged bootstrap.
+    """
     del as_root
     release = Path(project_a["runtime"]["release_path"])
+    state = Path(project_a["runtime"]["state_directory"])
     code, stdout, stderr = sh_status(
         str(release / "bin" / "bootstrap-providers.sh"),
         "--host",
         "/etc/agentic-postgres/host.yaml",
         "--project",
-        str(release / "project.yaml"),
+        str(state / "manifest.yaml"),
         "--plan",
     )
     assert code == 0, stdout + stderr

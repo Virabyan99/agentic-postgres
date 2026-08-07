@@ -170,8 +170,25 @@ def needs_credential_repair(document: dict[str, Any]) -> list[str]:
     provider still holds a credential; creating a second one without revoking
     the first leaks it, and revoking the first before the second is validated
     leaves the project with none.
+
+    "Cannot tell" is not "absent". Credential files live under a `0700 root`
+    directory, so `Path.is_file()` raises `PermissionError` rather than
+    returning `False` for any caller that is not root -- and an unprivileged
+    caller was getting a traceback instead of an answer. Reporting a repair on
+    an unreadable path would be worse: it would send an operator to re-issue a
+    credential that is present and healthy, which is precisely the leak this
+    function exists to prevent. Unreadable is therefore treated as intact, and
+    only root can meaningfully call this.
     """
-    return [name for name, raw in document["credential_files"].items() if not Path(raw).is_file()]
+    repairs = []
+    for name, raw in document["credential_files"].items():
+        try:
+            present = Path(raw).is_file()
+        except OSError:
+            continue
+        if not present:
+            repairs.append(name)
+    return repairs
 
 
 def _at(document: dict[str, Any], dotted: str, what: str) -> Any:

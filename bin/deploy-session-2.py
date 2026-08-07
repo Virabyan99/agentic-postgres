@@ -111,6 +111,29 @@ def _write_root_only(path: Path, payload: bytes) -> None:
         raise
 
 
+def _restore_checkout_ownership(path: Path) -> None:
+    """Give the operator back the files this render wrote into their checkout.
+
+    The render runs under sudo, so everything it writes into `.generated/` is
+    owned by root. The operator's own `bin/session-01-check.sh` then cannot read
+    its own rendered output, and six contract tests fail with `PermissionError`
+    on a host where nothing is actually wrong.
+
+    The authoritative copy is the root-owned one installed under
+    `/var/lib/agentic-postgres/rendered/`; this tree is a by-product of running
+    the renderer here, so handing it back costs nothing. Best-effort on purpose:
+    a deploy must not fail because it could not tidy up a scratch directory.
+    """
+    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
+    if not (uid and gid):
+        return
+    try:
+        for target in (path, *path.rglob("*")):
+            os.chown(target, int(uid), int(gid))
+    except OSError:
+        pass
+
+
 def _install_file(source: Path, destination: Path) -> None:
     """Copy an operator input into the configuration root.
 
@@ -175,8 +198,20 @@ def install_rendered(source: Path, destination: Path, override_payload: bytes) -
 # ---------------------------------------------------------------------------
 
 
-def require_edge_is_up() -> dict[str, Any]:
-    """The edge must already be serving. Its networks are what a project joins."""
+def require_edge_is_up(host: dict[str, Any]) -> dict[str, Any]:
+    """The edge must already be serving. Its networks are what a project joins.
+
+    The network names are *read* from the host manifest, not rebuilt from the
+    stack name. `infra/edge/compose.yaml` sets each network's `name:` explicitly
+    from that manifest, so Compose's default `<project>_<network>` convention
+    does not apply: the real networks are `apg-edge-control` and
+    `apg-edge-egress`, while the convention produces `apg-edge_control`.
+
+    Every deployed document recorded the invented pair. Nothing consumed them
+    until a test tried to attach a container to one, and `docker run` answered
+    `network apg-edge_control not found`. Deriving a name a second time is the
+    failure `build_deployed_document` is written to avoid.
+    """
     result = run("docker", "ps", "--format", "{{.Names}}")
     if result.returncode != 0:
         fail(EXIT_PREREQUISITE, f"cannot reach the Docker daemon: {result.stderr.strip()}")
@@ -190,8 +225,8 @@ def require_edge_is_up() -> dict[str, Any]:
 
     return {
         "stack_name": EDGE_STACK_NAME,
-        "control_network": f"{EDGE_STACK_NAME}_control",
-        "egress_network": f"{EDGE_STACK_NAME}_egress",
+        "control_network": host["edge"]["control_network"],
+        "egress_network": host["edge"]["egress_network"],
         # Set truthfully after the runtime attaches it, not here.
         "project_network_attached": False,
     }
@@ -288,12 +323,17 @@ def observe_tls(host: dict[str, Any], domain: str) -> dict[str, Any]:
     if result.returncode != 0 or "Fingerprint" not in result.stdout:
         return unavailable
 
+    # Keys are lower-cased on the way in. OpenSSL 3 prints `sha256 Fingerprint=`,
+    # not `SHA256 Fingerprint=`, and looking up the capitalised form matched
+    # nothing: every deployment recorded `tls: unavailable` while serving a
+    # certificate. The guard above passed, because the *word* Fingerprint is
+    # there -- only the lookup was wrong, so nothing pointed at the mistake.
     fields: dict[str, str] = {}
     for line in result.stdout.splitlines():
         key, _, value = line.partition("=")
-        fields[key.strip()] = value.strip()
+        fields[key.strip().lower()] = value.strip()
 
-    fingerprint = fields.get("SHA256 Fingerprint", "").replace(":", "").lower()
+    fingerprint = fields.get("sha256 fingerprint", "").replace(":", "").lower()
     if len(fingerprint) != 64:
         return unavailable
 
@@ -301,8 +341,8 @@ def observe_tls(host: dict[str, Any], domain: str) -> dict[str, Any]:
         **unavailable,
         "status": "issued",
         "certificate_sha256": fingerprint,
-        "not_before": _openssl_time(fields.get("notBefore")),
-        "not_after": _openssl_time(fields.get("notAfter")),
+        "not_before": _openssl_time(fields.get("notbefore")),
+        "not_after": _openssl_time(fields.get("notafter")),
     }
 
 
@@ -362,10 +402,11 @@ def main(argv: list[str] | None = None) -> int:
         fail(EXIT_VALIDATION, f"render failed:\n{render.stdout}{render.stderr}")
     rendered_dir = REPO_ROOT / ".generated" / key
     rendered = json.loads((rendered_dir / "outputs.json").read_text(encoding="utf-8"))
+    _restore_checkout_ownership(rendered_dir)
     print(f"  rendered {key}")
 
     step("2. Preconditions this session does not create")
-    edge = require_edge_is_up()
+    edge = require_edge_is_up(host)
     bootstrap = require_bootstrap(key)
     secrets = require_secret_generation(key)
     print(f"  edge up, providers bootstrapped, generation {secrets['generation_id']}")
@@ -400,8 +441,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {rendered_directory}")
 
     step("5. Start the project")
+    # From the release, not the checkout. Compose records its project directory
+    # on every container it starts, and starting from `REPO_ROOT` stamped
+    # `/home/<operator>/agentic-postgres` onto them -- the working tree that a
+    # `git checkout` can change under a running deployment. That is the same
+    # rule the systemd launchers enforce, and the deploy was the one path
+    # ignoring it.
     started = run(
-        str(REPO_ROOT / "bin" / "project-runtime.sh"),
+        str(release / "bin" / "project-runtime.sh"),
         "--host",
         str(arguments.host),
         "--project-key",
@@ -445,7 +492,7 @@ def main(argv: list[str] | None = None) -> int:
         runtime={
             "release_path": str(release),
             "state_directory": str(state_directory),
-            "compose_model_sha256": _model_digest(rendered_directory),
+            "compose_model_sha256": _model_digest(release, rendered_directory),
         },
         health_status=health_status,
     )
@@ -467,14 +514,18 @@ def _os_release() -> str:
     return "26.04"
 
 
-def _model_digest(rendered_dir: Path) -> str:
+def _model_digest(release: Path, rendered_dir: Path) -> str:
     """Digest the resolved Compose model, not the template that produced it.
 
     What is running is what `config` resolved. Hashing compose.yaml would record
     agreement with a file, while the model is what Compose acted on.
+
+    Resolved through the release's wrapper, for the same reason the project is
+    started through it: the digest must describe the model the runtime uses, and
+    the checkout's `compose.yaml` is not guaranteed to be that model.
     """
     result = run(
-        str(REPO_ROOT / "bin" / "compose.sh"),
+        str(release / "bin" / "compose.sh"),
         str(rendered_dir),
         "--runtime",
         "--profile",

@@ -96,7 +96,12 @@ def test_the_deployed_document_agrees_with_the_live_route(
     project_a: dict[str, Any], hostname: str
 ) -> None:
     recorded = project_a["routes"]["health"]
-    assert recorded["status"] == "available", recorded
+    # `ready`, not `available`. The enum for this field in
+    # schemas/outputs.schema.json is ["ready", "unavailable"], and the deploy
+    # writes what the schema accepts. This asserted a word the document is not
+    # permitted to contain, so it could only ever fail -- and it first ran
+    # against a route that was answering 200 from two networks.
+    assert recorded["status"] == "ready", recorded
     assert recorded["url"] == f"https://{hostname}{HEALTH_ROUTE_PATH}", recorded
 
 
@@ -224,17 +229,32 @@ def test_no_request_header_value_reaches_the_access_log(hostname: str, as_root, 
     assert sentinel not in logs, "the access log retained a request header value"
 
 
-def test_the_log_sentinel_would_actually_be_visible(as_root, sh) -> None:
+def test_the_log_sentinel_would_actually_be_visible(as_root, sh, hostname: str) -> None:
     """Guard the guard: prove the log is being read at all.
 
     Without this, a typo in the container name would produce empty output and
     two green tests that measured nothing.
+
+    It cannot look for the health *path*: ADR 0019 drops `RequestPath` precisely
+    because that field carries the query string, and dropping it is the only way
+    Traefik can keep a token out of a log. This asserted the presence of the one
+    field the edge is configured to remove, so it failed against a correctly
+    configured edge -- the guard contradicted the decision it was guarding.
+
+    `RequestHost` and `RouterName` survive that drop, per the same decision, so
+    they are what proves an access-log line for the route under test was
+    recorded.
     """
     del as_root
     logs = sh("docker", "logs", "--since", "10m", f"{EDGE_STACK_NAME}-traefik-1")
     assert logs.strip(), "no Traefik log output was captured; the redaction tests proved nothing"
-    assert HEALTH_ROUTE_PATH in logs, (
-        "the access log records no health request, so it is not logging the requests under test"
+    assert '"RouterName"' in logs, (
+        "no access-log entry was captured, only startup output, so the redaction "
+        "tests proved nothing"
+    )
+    assert hostname in logs, (
+        f"the access log records no request for {hostname}, so it is not logging "
+        "the requests under test"
     )
 
 
