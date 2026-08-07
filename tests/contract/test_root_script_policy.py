@@ -26,11 +26,13 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 #: Commands that run as root, or that read a credential, or both.
 ROOT_COMMANDS = (
     "bin/bootstrap-providers.sh",
+    "bin/db.sh",
     "bin/docker-firewall.sh",
     "bin/edge.sh",
     "bin/edge-network.sh",
     "bin/materialize-secrets.sh",
     "bin/project-runtime.sh",
+    "bin/postgres-bootstrap.sh",
     "bin/provision-host.sh",
     "bin/session-02-check.sh",
 )

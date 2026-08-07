@@ -1,0 +1,310 @@
+"""Command contracts for the two Session 3 database commands.
+
+Offline. Neither command is exercised against a cluster here -- they refuse
+before reaching one, which is the half that can be proved in a checkout and the
+half an operator meets first.
+
+The ordering assertion is the one worth stating plainly: **an argument error
+must exit 2 before the privilege check exits 3.** An operator who mistyped a
+flag should learn that without first being told to obtain root and try again,
+and the natural way to write these scripts -- gate on root, then parse -- gets
+it backwards.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from agentic_postgres import REPO_ROOT
+
+pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
+BOOTSTRAP = REPO_ROOT / "bin" / "postgres-bootstrap.sh"
+DB = REPO_ROOT / "bin" / "db.sh"
+COMMANDS = (BOOTSTRAP, DB)
+
+MANIFEST = ("--project", "project.example.yaml")
+
+
+def run(command: Path, *args: str, cwd: Path | None = None):
+    return subprocess.run(
+        [str(command), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=cwd or REPO_ROOT,
+        timeout=120,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _refuse_to_run_as_root() -> None:
+    """These assertions are about what happens *without* root.
+
+    Run as root they would exercise the opposite branch and pass for the wrong
+    reason, so the suite says it could not look rather than reporting a verdict
+    (ADR 0018).
+    """
+    if os.geteuid() == 0:
+        pytest.skip("this suite asserts the unprivileged refusals")
+
+
+# ---------------------------------------------------------------------------
+# Self-documentation and input validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+def test_help_exits_zero_and_describes_itself(command: Path) -> None:
+    result = run(command, "--help")
+    assert result.returncode == 0, result.stderr
+    assert "Usage:" in result.stdout
+    assert "--project" in result.stdout
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+def test_no_arguments_exits_two(command: Path) -> None:
+    """Not 10. Neither command is a stub, and `10` means "not this session"."""
+    assert run(command).returncode == 2
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(("--bogus",), id="unknown-flag"),
+        pytest.param(("--project",), id="flag-without-value"),
+        pytest.param(("--project", "does-not-exist.yaml"), id="missing-manifest"),
+    ],
+)
+def test_invalid_input_exits_two(command: Path, args: tuple[str, ...]) -> None:
+    assert run(command, *args).returncode == 2
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+def test_an_argument_error_is_reported_before_the_privilege_check(command: Path) -> None:
+    """The ordering this module exists for.
+
+    `--apply` and `sql` both need root. With a bad flag beside them the answer
+    must still be 2, not 3: the flag is wrong whether or not the operator is
+    root, and telling them to sudo first sends them to get privilege for a
+    command that was never going to run.
+    """
+    privileged = ("--apply",) if command is BOOTSTRAP else ("sql", "bootstrap.sql")
+    result = run(command, "--bogus", *privileged)
+    assert result.returncode == 2, f"got {result.returncode}: {result.stderr}"
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+def test_a_privileged_invocation_without_root_exits_three(command: Path) -> None:
+    privileged = ("--apply",) if command is BOOTSTRAP else ("status",)
+    result = run(command, *MANIFEST, *privileged)
+    assert result.returncode == 3, f"got {result.returncode}: {result.stderr}"
+    assert "root" in result.stderr
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+def test_it_works_from_any_directory(command: Path, tmp_path: Path) -> None:
+    """Runbook §8.5. Both resolve the repository from their own location."""
+    assert run(command, "--help", cwd=tmp_path).returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# bootstrap: --check is the default and changes nothing
+# ---------------------------------------------------------------------------
+
+
+def test_check_is_the_default_mode() -> None:
+    """Following bin/provision-host.sh. A default that changes things is one
+    an operator triggers while trying to find out what it would do."""
+    source = BOOTSTRAP.read_text(encoding="utf-8")
+    assert 'MODE="check"' in source
+    assert source.index('MODE="check"') < source.index("parse_args")
+
+
+def test_bootstrap_names_no_flag_that_adopts_a_volume() -> None:
+    """ADR 0030: a mismatch is refused, and there is no override.
+
+    Asserted on the operator surface rather than on the comparison logic,
+    because the way this rule dies is a flag added for one incident.
+    """
+    source = BOOTSTRAP.read_text(encoding="utf-8")
+    for forbidden in ("--force", "--adopt", "--take-ownership", "--ignore-identity"):
+        assert forbidden not in source, f"{forbidden} would let a volume be adopted"
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+def test_neither_command_can_remove_a_volume(command: Path) -> None:
+    """Volume removal exists in exactly one place, and it is not these."""
+    source = command.read_text(encoding="utf-8")
+    for forbidden in ("docker volume rm", "volume prune", "down -v", "--volumes"):
+        assert forbidden not in source, f"{command.name} contains {forbidden!r}"
+
+
+def test_the_exit_code_for_a_foreign_volume_is_eleven() -> None:
+    """ADR 0031. Documented on the command that raises it, and nowhere else
+    reused: `11` answers exactly one question."""
+    source = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "11" in source
+    helper = (REPO_ROOT / "bin" / "postgres-bootstrap.py").read_text(encoding="utf-8")
+    assert "EXIT_IDENTITY_MISMATCH = 11" in helper
+    assert helper.count("EXIT_IDENTITY_MISMATCH") >= 2
+
+
+def test_identity_comparison_uses_only_immutable_fields() -> None:
+    """ADR 0030: not the source commit, manifest checksum, or template version.
+
+    Those change on every legitimate redeploy, and a check that fires on a
+    valid volume is one operators learn to override.
+    """
+    helper = (REPO_ROOT / "bin" / "postgres-bootstrap.py").read_text(encoding="utf-8")
+    assert 'IDENTITY_FIELDS = ("project_key", "database_name", "compose_project_name",' in helper
+    for volatile in ("source_commit", "manifest_sha256", "template_version"):
+        assert f'"{volatile}"' not in helper.split("IDENTITY_FIELDS", 1)[1].split(")", 1)[0]
+
+
+# ---------------------------------------------------------------------------
+# db.sh: the narrow SQL door
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "anything.sql",
+        "../../../etc/passwd",
+        "/etc/passwd",
+        "bootstrap.sql.bak",
+        "",
+    ],
+)
+def test_sql_refuses_a_name_outside_the_allowlist(name: str) -> None:
+    """Checked as an exact name before anything touches the filesystem.
+
+    A traversal string is refused as "not allowlisted" rather than resolved
+    and then rejected, so there is no window in which it is a path.
+    """
+    result = run(DB, *MANIFEST, "sql", name)
+    assert result.returncode in (2, 5), f"got {result.returncode}: {result.stderr}"
+    assert "allowlist" in result.stderr.lower() or "requires" in result.stderr.lower()
+
+
+def test_sql_requires_a_name() -> None:
+    result = run(DB, *MANIFEST, "sql")
+    assert result.returncode == 2
+    assert "requires" in result.stderr
+
+
+def test_the_allowlist_is_a_fixed_set_not_a_glob() -> None:
+    """A directory glob executes whatever was dropped in the directory."""
+    source = DB.read_text(encoding="utf-8")
+    assert "readonly ALLOWED_SQL=" in source
+    for globbing in ("*.sql", "$(ls", "find "):
+        assert globbing not in source, f"db.sh resolves artifacts with {globbing!r}"
+
+
+def test_no_subcommand_takes_sql_from_an_argument_or_stdin() -> None:
+    """`sql NAME`, never `sql "SELECT ..."`. The door is a name, not a payload."""
+    source = DB.read_text(encoding="utf-8")
+    assert "--command" not in source
+    assert "read -r" not in source
+
+
+def test_two_subcommands_at_once_are_refused() -> None:
+    result = run(DB, *MANIFEST, "status", "identity")
+    assert result.returncode == 2
+    assert "one subcommand" in result.stderr
+
+
+def test_the_verifier_refuses_an_artifact_the_manifest_never_named(tmp_path: Path) -> None:
+    """Unnamed is not "unverified" -- it means the renderer did not produce it."""
+    import json
+
+    artifact = tmp_path / "bootstrap.sql"
+    artifact.write_text("SELECT 1;\n", encoding="utf-8")
+    (tmp_path / "rendered-manifest.json").write_text(
+        json.dumps({"artifacts": {}}), encoding="utf-8"
+    )
+    result = subprocess.run(
+        [str(REPO_ROOT / "bin" / "db-verify.py"), "--artifact", str(artifact)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "not named by the rendered manifest" in result.stderr
+
+
+def test_the_verifier_refuses_an_edited_artifact(tmp_path: Path) -> None:
+    import json
+    from hashlib import sha256
+
+    artifact = tmp_path / "bootstrap.sql"
+    artifact.write_text("SELECT 1;\n", encoding="utf-8")
+    recorded = sha256(artifact.read_bytes()).hexdigest()
+    (tmp_path / "rendered-manifest.json").write_text(
+        json.dumps({"artifacts": {"bootstrap.sql": recorded}}), encoding="utf-8"
+    )
+    artifact.write_text("DROP SCHEMA app CASCADE;\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [str(REPO_ROOT / "bin" / "db-verify.py"), "--artifact", str(artifact)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "does not match the manifest" in result.stderr
+
+
+def test_the_verifier_accepts_a_matching_artifact(tmp_path: Path) -> None:
+    """The positive case, so the refusals above are not passing vacuously."""
+    import json
+    from hashlib import sha256
+
+    artifact = tmp_path / "bootstrap.sql"
+    artifact.write_text("SELECT 1;\n", encoding="utf-8")
+    (tmp_path / "rendered-manifest.json").write_text(
+        json.dumps({"artifacts": {"bootstrap.sql": sha256(artifact.read_bytes()).hexdigest()}}),
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [str(REPO_ROOT / "bin" / "db-verify.py"), "--artifact", str(artifact)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Both handle credentials
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+def test_tracing_is_disabled_as_the_first_executable_line(command: Path) -> None:
+    """`set -x` would print every expanded argument, including a credential."""
+    lines = [
+        line.strip()
+        for line in command.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert lines[0] == "set +x", f"{command.name} starts with {lines[0]!r}"
+
+
+@pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
+def test_docker_exec_forwards_stdin(command: Path) -> None:
+    """`docker exec` without `-i` discards stdin and exits 0 having run nothing.
+
+    A silent success indistinguishable from a real one, which is exactly the
+    failure this project keeps producing. Every exec here passes `-i`.
+    """
+    source = command.read_text(encoding="utf-8")
+    for line in source.splitlines():
+        if "docker exec" in line and not line.strip().startswith("#"):
+            assert "docker exec -i" in line, f"{command.name}: {line.strip()}"

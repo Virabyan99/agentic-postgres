@@ -218,6 +218,13 @@ point a command at the wrong project or bypass a locked digest.
 | `8` | A secret could not be fetched or written |
 | `9` | The edge could not be brought to the requested state |
 | `10` | Capability intentionally unavailable in the current session |
+| `11` | Project-identity mismatch against an existing volume — the data is not yours |
+
+`11` was added in Session 3 and belongs to the same single convention this
+table describes, which is why it appears here rather than in a second table.
+It is raised only by the identity comparison in `bin/postgres-bootstrap.sh`, it
+is terminal, and no flag converts it into a success. See
+[ADR 0031](decisions/0031-exit-code-11-the-data-is-not-yours.md).
 
 ## See also
 
