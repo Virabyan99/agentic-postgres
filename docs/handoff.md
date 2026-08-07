@@ -87,22 +87,52 @@ For fast iteration: `bin/smoke-test.sh`, or
 `bin/session-01-check.sh --allow-dirty` (which deliberately writes no evidence,
 because evidence must describe a committed state).
 
-## Starting Session 2
+## The deployment host
+
+Session 2 added a second machine. It is not a development environment, and the
+repository on it is a checkout of an installed commit rather than a place to
+edit.
+
+- Transport is **`git bundle` + `scp`**. No GitHub credential exists on the VPS,
+  and none should be created there.
+- `host.yaml`, `capabilities.yaml`, `project.alpha.yaml` and `project.beta.yaml`
+  live only on the host and are gitignored individually. They name a real
+  machine, real DNS and a real provider organisation. **Never commit them.**
+- `sudo` there needs a TTY, so anything privileged is run by a human at a
+  terminal rather than piped over `ssh`.
+- `bin/session-01-check.sh` also runs there and needs **both** `~/.local/bin`
+  (uv, shellcheck, jq — reached by `bash -l` sourcing `.profile`) and
+  `.venv/bin` (python, ruff, pytest — reached only by activating). Either alone
+  fails. `bin/lock-dev-deps.sh --check` runs `uv pip compile`, so the gate needs
+  PyPI egress from wherever it runs.
+
+Everything else about operating it is in the
+[Session 2 operator guide](session-02-operator-guide.md).
+
+## Starting Session 3
 
 Read, in this order:
 
-1. [The implementation plan's decision log](plans/session-01-implementation-plan.md)
+1. [The Session 2 divergence table and decision log](plans/session-02-implementation-plan.md)
    — every ambiguity that was closed, and why. **New ambiguities go there or
    into an ADR; they do not get resolved inline.**
 2. [The product contract](product-contract.md) and the
    [ADRs](decisions/README.md).
-3. [The acceptance matrix](acceptance-matrix.md) — 67 requirements, 50 of them
-   still placeholders.
+3. [The acceptance matrix](acceptance-matrix.md).
 
-Session 2 owns `SEC-NET-001` and `SEC-SECRET-001`. Activating a requirement
-means **removing its `future` marker and implementing the body** — the
-placeholder already fails when executed, which is what makes it activatable.
-The gate then enforces that nothing owned by session ≤ N is still a placeholder
-via `APG_ACCEPTANCE_SESSION`.
+Activating a requirement means **removing its `future` marker and implementing
+the body** — the placeholder already fails when executed, which is what makes it
+activatable. The gate then enforces that nothing owned by session ≤ N is still a
+placeholder via `APG_ACCEPTANCE_SESSION`.
 
 Preserve `--render-only`. Do not weaken an active test to make a new one pass.
+A contract test changes only with an ADR.
+
+**The defect pattern to look for.** Session 2's recurring failure — five times
+in Run 7 alone — was *a value that looked measured and was not*: a hard-coded
+`"staging"` where an environment should have been read, a network name copied
+from the wrong scope, a placeholder substituted somewhere nobody looked, a
+filesystem fact standing in for a logic test, and an evidence key naming the
+suite that ran rather than the thing it proved. Each passed for exactly as long
+as its wrong answer happened to coincide with the right one. When a test is
+green, ask what would have to break for it to go red.

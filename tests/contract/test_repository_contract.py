@@ -71,6 +71,15 @@ REQUIRED_PATHS = (
     "docs/decisions/0015-reserved-health-route.md",
     "docs/decisions/0016-absence-is-not-a-collision.md",
     "docs/decisions/0017-stub-lifecycle.md",
+    # The Session 2 operator documentation. Two of these are cited by
+    # `Documentation=` in installed systemd units, so `systemctl status` sends
+    # an operator to a path that must exist inside the release directory; the
+    # other three are what those two link to.
+    "docs/host-baseline.md",
+    "docs/project-isolation.md",
+    "docs/provider-bootstrap.md",
+    "docs/secret-handling.md",
+    "docs/session-02-operator-guide.md",
     "bin/bootstrap-providers.py",
     "bin/docker-firewall.sh",
     "bin/edge.sh",

@@ -4,18 +4,42 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 1 of 12 complete.** This repository currently defines a
-contract. It deploys nothing, starts no container, and connects to no
-database. See [What is intentionally unavailable](#what-is-intentionally-unavailable).
+**Status: Session 2 of 12 complete.** The repository defines a contract *and*
+deploys. Two isolated projects run on one hardened host behind one shared
+Traefik edge on Let's Encrypt production certificates. It still starts no
+PostgreSQL and opens no database connection — that is Session 4. See
+[What is intentionally unavailable](#what-is-intentionally-unavailable).
 
+- [Session 2 operator guide](docs/session-02-operator-guide.md) — **start here to deploy**
+- [Host baseline](docs/host-baseline.md) · [Provider bootstrap](docs/provider-bootstrap.md) · [Project isolation](docs/project-isolation.md) · [Secret handling](docs/secret-handling.md)
 - [Product contract](docs/product-contract.md) — scope, requirement IDs, non-goals, change control
 - [Architecture decisions](docs/decisions/README.md)
 - [Handoff — environment and workflow](docs/handoff.md) — machine specifics, git, known traps
-- [Session 1 implementation plan](docs/plans/session-01-implementation-plan.md) — environment constraints, decision log, build order
+- [Session 2 implementation plan](docs/plans/session-02-implementation-plan.md) — divergence table, decision log, build order
 
-> `bin/session-01-check.sh` exits 0 from a clean tree: 516 active contract
-> tests, 566 P0 tests collected, 50 activatable placeholders owned by later
-> sessions, 0 identity collisions, 0 floating image references.
+> `bin/session-01-check.sh` exits 0 from a clean tree, **including on the
+> deployment host with both projects running**. `bin/session-02-check.sh` runs
+> in three environments — `offline`, `host`, `external` — because a port scan
+> run on the host traverses its own routing table and can report "closed" for a
+> port the world can reach.
+
+---
+
+## Deploying
+
+`--render-only` needs no host and no root, and it remains the whole of what runs
+in a checkout:
+
+```bash
+./deploy.sh --project project.yaml --capabilities capabilities.yaml --render-only
+```
+
+Deploying is an ordered sequence, and no step makes its own preconditions:
+host baseline → edge plane → provider bootstrap → materialize secrets → deploy
+→ verify → promote ACME. The
+[operator guide](docs/session-02-operator-guide.md) carries the commands, the
+two rollback timers that stop host hardening from locking you out, and the
+Let's Encrypt rate limits that cost a week if you retry in a loop.
 
 ---
 
@@ -45,7 +69,12 @@ src/agentic_postgres/
   config.py          Strict YAML loading, schema + semantic validation.
   rendering.py       Transactional staging and publication.
   evidence.py        Session evidence from test artifacts.
-compose.yaml         Validation-only model. Never started in Session 1.
+  evidence_claims.py Claims resolved from the acceptance registry and JUnit.
+infra/host/          Templates provision-host.sh renders into /etc.
+infra/edge/          The shared Traefik + socket-proxy stack.
+libexec/             Launchers systemd runs. Never a working tree.
+systemd/             Installed units, including agentic-postgres-project@.
+compose.yaml         Validation-only model. Never started.
 versions.in.yaml     Human-selected candidates.
 versions.env         Generated digest lock. Never hand-edited.
 tests/contract/      Active Session 1 contract tests.
@@ -106,8 +135,11 @@ cp capabilities.example.yaml capabilities.yaml
   --render-only
 ```
 
-`--render-only` is mandatory in Session 1. Without it, `deploy.sh` exits `10`
-and says deployment begins in a later session. It does not partially deploy.
+`--render-only` needs no host and no root and starts nothing. To deploy, pass
+`--host` and `--through-session 2` instead — and read the
+[operator guide](docs/session-02-operator-guide.md) first, because that form
+expects the host, the edge, providers and secrets to be ready already. It does
+not partially deploy.
 
 Inspect the result:
 
@@ -130,8 +162,10 @@ bin/compose.sh .generated/<project-key> --profile contract config
 bin/compose.sh .generated/<project-key> ps --quiet
 ```
 
-Session 1 refuses `up`, `run`, `start`, `create`, `restart`, `exec`, `attach`,
-and `cp` with exit `10`.
+The wrapper's scopes decide which subcommands are permitted; the Session 1
+fixture scope still refuses `up`, `run`, `start`, `create`, `restart`, `exec`,
+`attach` and `cp` with exit `10`. See
+[ADR 0013](docs/decisions/0013-compose-wrapper-scopes.md).
 
 ## Version locks
 
@@ -147,9 +181,13 @@ not a substitute. See [ADR 0004](docs/decisions/0004-version-lock-format.md).
 ## Running the checks
 
 ```bash
-bin/smoke-test.sh          # fast: active contract tests only
-bin/session-01-check.sh    # the gate CI runs — clean tree required
+bin/smoke-test.sh                       # fast: active contract tests only
+bin/session-01-check.sh                 # the Session 1 gate — clean tree required
+bin/session-02-check.sh --mode offline  # Session 2's checkout-runnable half
 ```
+
+The other two Session 2 modes need a deployment. See the
+[operator guide](docs/session-02-operator-guide.md) §7.
 
 ## Exit-code convention
 
@@ -159,29 +197,36 @@ bin/session-01-check.sh    # the gate CI runs — clean tree required
 | `2` | Invalid operator input or manifest |
 | `3` | Missing local prerequisite |
 | `4` | Missing bootstrap/runtime prerequisite |
+| `4` | Missing runtime state — the project was never deployed here |
 | `5` | Contract, lock, collision, or generated-output validation failure |
+| `6` | A host or gate check failed |
+| `7` | The provider rejected an operation, or state disagrees with it |
+| `8` | A secret could not be fetched or written |
+| `9` | The edge could not be brought to the requested state |
 | `10` | Capability intentionally unavailable in the current session |
 
 ## What is intentionally unavailable
 
-Session 1 renders configuration. It does not deploy. Specifically, none of the
-following exists yet, and every command that would use them exits `10` rather
-than reporting success:
+Session 2 deploys an edge, a health route and a secret-materialization proof.
+It does not run a database. Every command that would use the following exits
+`10` rather than reporting success:
 
-- PostgreSQL, PgBouncer, PostgREST, FastAPI, FastMCP, Traefik — no service starts
+- PostgreSQL, PgBouncer, PostgREST, FastAPI, FastMCP — no service starts.
+  Traefik and the Docker socket proxy **do** run; they are the edge plane.
 - Database endpoints — rendered as `status: "unavailable"` with `host`, `port`,
   `url`, and `password_secret_ref` all `null`. Not placeholders. Session 4.
 - Migrations (`bin/migrate.sh`) — Session 3
-- Provider bootstrap (`bin/bootstrap-providers.sh`) — Session 2
 - Connections (`bin/connect.sh`) — Session 4
 - Restore rehearsal (`bin/restore-test.sh`) — Session 10
+- Object storage — Session 7. Backups — Session 10. Both are `null` in every
+  Session 2 project, and two projects that both lack one are not colliding
+  ([ADR 0016](docs/decisions/0016-absence-is-not-a-collision.md)).
 - Agent capabilities — `capabilities.yaml` is empty by default, and an entry
   marked `enabled: true` fails with exit `5` because no live backing contract
   exists to validate it against
 
-## Session 2 preview
+## Session 3 preview
 
-Session 2 adds provider bootstrap and validation, host hardening, Traefik as a
-real edge service, and secret materialization through Docker secrets or
-restricted runtime files. It preserves `--render-only`, and activates its own
-tests by removing their `future` markers and implementing the bodies.
+Session 3 adds migrations. `--render-only` is preserved, and Session 3 activates
+its own requirements by removing their `future` markers and implementing the
+bodies — never by weakening an active test.

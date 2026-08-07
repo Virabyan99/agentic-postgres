@@ -272,6 +272,31 @@ def test_units_reference_no_repository_path(name: str) -> None:
         assert forbidden not in text, f"{name} references a working tree: {forbidden}"
 
 
+#: `Documentation=file:/opt/agentic-postgres/releases/<commit>/<path>`. The
+#: release directory is a checkout of a commit, so the tail is a repository
+#: path and can be checked here.
+DOCUMENTATION_URL = re.compile(
+    r"^Documentation=file:/opt/agentic-postgres/releases/[^/]+/(?P<path>\S+)$", re.MULTILINE
+)
+
+
+@pytest.mark.parametrize("name", UNITS)
+def test_every_documentation_url_names_a_file_that_exists(name: str) -> None:
+    """A consumer with no producer, in the place an operator looks first.
+
+    `systemctl status` prints this line. All three units carried one for a
+    document that did not exist for six runs, so the one pointer a stuck
+    operator is handed at 3am led nowhere. The paths are also in
+    `test_repository_contract.REQUIRED_PATHS`, which stops the file being
+    deleted; this stops the *reference* drifting away from it.
+    """
+    text = unit_text(name)
+    matches = DOCUMENTATION_URL.findall(text)
+    assert matches, f"{name} carries no Documentation= line an operator could follow"
+    for relative in matches:
+        assert (REPO_ROOT / relative).is_file(), f"{name} documents a missing path: {relative}"
+
+
 def test_the_firewall_unit_runs_after_docker() -> None:
     """Docker creates DOCKER-USER when it starts and flushes its chains on restart.
 
