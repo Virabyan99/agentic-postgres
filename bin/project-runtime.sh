@@ -139,7 +139,13 @@ main() {
         --session 2 \
         || die 8 "secrets could not be materialized for ${PROJECT_KEY}."
 
-      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime --profile session2 up -d --wait \
+      # --build, because Compose only builds an image that is missing. Without
+      # it a project started once kept its first image for good: a new immutable
+      # release could change a service's source and the running container would
+      # never see it, while the deploy reported success. Layer caching makes
+      # this near-free when nothing changed, and a release is meant to be what
+      # is actually running.
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime --profile session2 up -d --build --wait \
         || die 9 "the project did not become healthy."
 
       # Last, and only now that --wait has returned.

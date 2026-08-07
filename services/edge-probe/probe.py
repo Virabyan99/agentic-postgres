@@ -29,6 +29,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import FrameType
+from urllib.parse import urlsplit
 
 HEALTH_PATH = "/__apg/healthz"
 SESSION = 2
@@ -56,10 +57,17 @@ class Handler(BaseHTTPRequestHandler):
         started = time.monotonic()
         request_id = self.headers.get("X-Request-ID") or str(uuid.uuid4())
 
-        # Compared against the exact path. Traefik routes on Path(`/__apg/healthz`)
-        # and an origin that also answered /__apg/healthz?x=1 or /__apg/healthz/
-        # would make the route assertion weaker than it reads.
-        if self.path == HEALTH_PATH:
+        # The path component, with any query string removed. `self.path` carries
+        # the query, so comparing it whole made `/__apg/healthz?x=1` a 404 --
+        # Traefik matched `Path(/__apg/healthz)` and routed the request, and the
+        # origin then disagreed with its own router. It also blocked the only
+        # proof that a query string never reaches the access log (ADR 0019),
+        # which has to send one to a route that answers.
+        #
+        # The exactness this replaced is not lost: `/__apg/healthz/` and every
+        # other path still miss, and the log below still records only the fixed
+        # constant, so no caller-supplied text can reach it.
+        if urlsplit(self.path).path == HEALTH_PATH:
             status, payload = 200, {
                 "status": "ok",
                 "project_key": PROJECT_KEY,
