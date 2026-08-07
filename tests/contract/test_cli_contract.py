@@ -54,14 +54,14 @@ PYTHON_COMMANDS = (
 
 #: Commands that document a future capability and refuse to pretend otherwise.
 #:
-#: ``bin/bootstrap-providers.sh`` left this tuple in Session 2, when it was
-#: implemented. ADR 0017 records why that is legitimate and what replaced the
-#: assertion: it now carries real command-contract tests, which are stricter
-#: than the one it left. Emptying this tuple is not a way to make
-#: ``test_future_stub_exits_ten`` pass.
+#: ``bin/bootstrap-providers.sh`` left this tuple in Session 2 and
+#: ``bin/migrate.sh`` in Session 3, each in the run that implemented it. ADR
+#: 0017 records why that is legitimate and what replaced the assertion: both
+#: now carry real command-contract tests, which are stricter than the one they
+#: left. Emptying this tuple is not a way to make ``test_future_stub_exits_ten``
+#: pass, and the two commands still here are still stubs.
 FUTURE_STUBS = (
     "bin/connect.sh",
-    "bin/migrate.sh",
     "bin/restore-test.sh",
 )
 
@@ -170,7 +170,7 @@ def test_bootstrap_providers_is_no_longer_a_stub() -> None:
 
 def test_the_remaining_stubs_are_the_ones_later_sessions_own() -> None:
     """Guard the guard: emptying FUTURE_STUBS must not make its tests vacuous."""
-    assert set(FUTURE_STUBS) == {"bin/connect.sh", "bin/migrate.sh", "bin/restore-test.sh"}
+    assert set(FUTURE_STUBS) == {"bin/connect.sh", "bin/restore-test.sh"}
     assert "bin/bootstrap-providers.sh" not in FUTURE_STUBS
 
 

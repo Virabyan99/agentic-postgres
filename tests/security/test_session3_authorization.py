@@ -1,0 +1,441 @@
+"""The database authorization boundary, measured against a running cluster.
+
+These replace the seven Session 3 placeholders that lived in
+``test_future_security_boundaries.py``. They need a host, and they say so with
+``requires_environment`` rather than with ``future`` -- the distinction
+``test_environment_gates.py`` holds: ``future`` means nobody wrote this, and
+these are written.
+
+**What these prove and what they do not.** Session 3 does not authenticate.
+Request identity is a transaction-local claim the database trusts and cannot
+verify (ADR 0029), so `SEC-RLS-001` proves that *given a claim*, rows are
+isolated by owner. It does not prove the claim is authentic; anything holding a
+database credential can assert any value. Session 6 makes it authentic by
+changing who sets the GUC, and the policies do not move.
+
+Every assertion reads the catalog or measures a real query result. None reads
+the migration source: a test asserting that a migration *contains* `FORCE ROW
+LEVEL SECURITY` would pass against a cluster where the migration never ran, and
+`ALTER DEFAULT PRIVILEGES` in Run 4 is the standing reminder that a statement
+can be present, report success, and establish nothing.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+# ruff: noqa: S608
+#
+# Every statement below interpolates values that came from the rendered
+# outputs document -- role names and a database name derived by `naming` and
+# validated by the outputs schema -- plus two hard-coded uuid constants. None
+# of it is operator input, and parameter binding is unavailable where an
+# identifier or a role name goes, which is the same reason
+# `migrations.quote_identifier` exists. Suppressed per module rather than per
+# line because the rule fires on nearly every assertion here and a wall of
+# inline noqa comments is one nobody reads.
+
+pytestmark = [
+    pytest.mark.p0,
+    pytest.mark.security,
+    pytest.mark.database,
+    pytest.mark.live_host,
+    pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS"),
+]
+
+#: Two arbitrary owner identities. Constants rather than generated values so a
+#: failure names the same uuid every time and a stray row is attributable.
+OWNER_A = "11111111-1111-1111-1111-111111111111"
+OWNER_B = "22222222-2222-2222-2222-222222222222"
+
+
+@pytest.fixture(scope="module")
+def project_a() -> dict[str, Any]:
+    return json.loads(Path(os.environ["APG_PROJECT_A_OUTPUTS"]).read_text(encoding="utf-8"))
+
+
+@pytest.fixture(scope="module")
+def roles(project_a: dict[str, Any]) -> dict[str, str]:
+    return project_a["database"]["roles"]
+
+
+def sql(document: dict[str, Any], statement: str) -> str:
+    """Run one statement over the container socket and return its output.
+
+    `docker exec -i`, and the `-i` matters: without it stdin is not forwarded,
+    psql reads nothing, and the command exits 0 having executed nothing -- a
+    silent success indistinguishable from a real one.
+    """
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            document["database"]["container"],
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            document["database"]["name"],
+            "-X",
+            "-qtA",
+            "-c",
+            statement,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        return f"ERROR: {result.stderr.strip()}"
+    return result.stdout.strip()
+
+
+def as_role(document: dict[str, Any], role: str, statement: str, claim: str | None = None) -> str:
+    """Run a statement as a role, optionally under a request-identity claim."""
+    prelude = f'SET ROLE "{role}"; '
+    if claim is not None:
+        prelude += f"SET app.user_id = '{claim}'; "
+    return sql(document, prelude + statement)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _seed(project_a: dict[str, Any], roles: dict[str, str]) -> None:
+    """One note per owner, created through the RPC as the RPC's caller.
+
+    Seeded through `api.create_note` rather than by a direct INSERT so the
+    fixture exercises the same path the assertions describe. A fixture that
+    inserted as the owner would prove isolation over rows no caller could have
+    produced.
+    """
+    for owner in (OWNER_A, OWNER_B):
+        as_role(
+            project_a,
+            roles["authenticated"],
+            f"SELECT (api.create_note('seed-{owner[:8]}')).owner_id;",
+            claim=owner,
+        )
+
+
+# ---------------------------------------------------------------------------
+# SEC-RLS-001 — owner-scoped rows are isolated by owner under forced RLS
+# ---------------------------------------------------------------------------
+
+
+def test_user_a_cannot_read_user_b_rows(project_a: dict[str, Any], roles: dict[str, str]) -> None:
+    visible = as_role(
+        project_a, roles["authenticated"], "SELECT string_agg(title, ',') FROM api.notes;", OWNER_A
+    )
+    assert f"seed-{OWNER_A[:8]}" in visible
+    assert f"seed-{OWNER_B[:8]}" not in visible, "A can see B's rows"
+
+
+def test_user_b_cannot_read_user_a_rows(project_a: dict[str, Any], roles: dict[str, str]) -> None:
+    visible = as_role(
+        project_a, roles["authenticated"], "SELECT string_agg(title, ',') FROM api.notes;", OWNER_B
+    )
+    assert f"seed-{OWNER_B[:8]}" in visible
+    assert f"seed-{OWNER_A[:8]}" not in visible, "B can see A's rows"
+
+
+def test_a_missing_claim_sees_no_rows(project_a: dict[str, Any], roles: dict[str, str]) -> None:
+    """The policies deny by default rather than falling back to anything.
+
+    `current_setting(..., true)` is NULL when unset and `owner_id = NULL` is
+    never true, so an absent claim is not an anonymous read -- it is no read.
+    """
+    visible = as_role(project_a, roles["authenticated"], "SELECT count(*) FROM api.notes;")
+    assert visible == "0", f"a caller with no claim saw {visible} rows"
+
+
+def test_forced_rls_applies_to_the_object_owner(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """FORCE, not merely ENABLE. This is the assertion that distinguishes them.
+
+    With ENABLE alone every statement run by the table's owner -- which is what
+    a migration and any maintenance script runs as -- bypasses every policy
+    silently. "RLS is on" is true in both cases and means much less in one.
+    """
+    unclaimed = as_role(project_a, roles["object_owner"], "SELECT count(*) FROM app.notes;")
+    assert unclaimed == "0", f"the owner saw {unclaimed} rows with no claim; FORCE is not in effect"
+
+    claimed = as_role(
+        project_a, roles["object_owner"], "SELECT string_agg(title, ',') FROM app.notes;", OWNER_A
+    )
+    assert f"seed-{OWNER_A[:8]}" in claimed
+    assert f"seed-{OWNER_B[:8]}" not in claimed
+
+
+def test_the_catalog_records_forced_row_level_security(project_a: dict[str, Any]) -> None:
+    """Read from pg_class, not from the migration text."""
+    observed = sql(
+        project_a,
+        "SELECT string_agg(c.relname || '=' || c.relrowsecurity || '/' || "
+        "c.relforcerowsecurity, ' ' ORDER BY c.relname) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'app' AND c.relkind = 'r';",
+    )
+    assert observed == "notes=t/t tasks=t/t", observed
+
+
+def test_a_caller_cannot_update_a_row_into_another_owner(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """USING governs visibility, WITH CHECK governs writes. Both are needed.
+
+    With USING alone a caller could UPDATE a row it can see into one owned by
+    somebody else, and the row would vanish from its own view -- which reads as
+    a delete and is a write into another tenant.
+    """
+    result = as_role(
+        project_a,
+        roles["authenticated"],
+        f"UPDATE app.notes SET owner_id = '{OWNER_B}' WHERE owner_id = '{OWNER_A}';",
+        claim=OWNER_A,
+    )
+    assert "ERROR" in result, f"a caller reassigned ownership: {result}"
+
+
+# ---------------------------------------------------------------------------
+# SEC-VIEW-001 — security-invoker views expose only caller-visible rows
+# ---------------------------------------------------------------------------
+
+
+def test_the_api_views_are_security_invoker(project_a: dict[str, Any]) -> None:
+    observed = sql(
+        project_a,
+        "SELECT string_agg(c.relname || '=' || "
+        "(c.reloptions::text LIKE '%security_invoker=true%')::text, ' ' ORDER BY c.relname) "
+        "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = 'api' AND c.relkind = 'v';",
+    )
+    assert observed == "notes=true tasks=true", observed
+
+
+def test_the_view_returns_the_callers_rows_not_the_owners(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """The reloption is not the proof. A view can be correct in the catalog and
+    wrong in what it returns if the underlying table lost FORCE, so this
+    compares two callers' actual results."""
+    seen_by_a = as_role(
+        project_a, roles["authenticated"], "SELECT count(*) FROM api.notes;", OWNER_A
+    )
+    seen_by_b = as_role(
+        project_a, roles["authenticated"], "SELECT count(*) FROM api.notes;", OWNER_B
+    )
+    total = sql(project_a, "SELECT count(*) FROM app.notes;")
+    assert seen_by_a == "1", seen_by_a
+    assert seen_by_b == "1", seen_by_b
+    assert int(total) >= 2, "the seed did not produce rows for both owners"
+
+
+# ---------------------------------------------------------------------------
+# SEC-DB-002 — the schema boundaries
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("schema", ["app", "app_private"])
+def test_api_roles_cannot_address_the_private_schemas(
+    project_a: dict[str, Any], roles: dict[str, str], schema: str
+) -> None:
+    """Both halves are asserted separately (D58).
+
+    The API roles hold SELECT on the base tables -- a security_invoker view
+    needs it -- and deliberately no USAGE on the schema, so the view works and
+    direct access does not. Inferring either from the other is how one of them
+    silently stops being true.
+    """
+    for role in ("authenticated", "agent_reader", "anon"):
+        observed = sql(
+            project_a,
+            f"SELECT has_schema_privilege('{roles[role]}', '{schema}', 'USAGE');",
+        )
+        assert observed == "f", f"{role} holds USAGE on {schema}"
+
+
+def test_a_direct_read_of_the_private_table_is_denied(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    result = as_role(project_a, roles["authenticated"], "SELECT count(*) FROM app.notes;", OWNER_A)
+    assert "ERROR" in result and "permission denied" in result, result
+
+
+def test_the_four_schemas_exist(project_a: dict[str, Any]) -> None:
+    observed = sql(
+        project_a,
+        "SELECT string_agg(nspname, ',' ORDER BY nspname) FROM pg_namespace "
+        "WHERE nspname IN ('api', 'app', 'app_private', 'extensions');",
+    )
+    assert observed == "api,app,app_private,extensions", observed
+
+
+def test_pgvector_is_installed_outside_public(project_a: dict[str, Any]) -> None:
+    """DBX-PG-001's live half: installed, not merely available.
+
+    `pg_available_extensions` reports what the image ships;
+    `pg_extension` reports what this database actually has. The distinction is
+    the entire content of the requirement.
+    """
+    observed = sql(
+        project_a,
+        "SELECT n.nspname || ' ' || e.extversion FROM pg_extension e "
+        "JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'vector';",
+    )
+    assert observed.startswith("extensions "), observed
+
+
+# ---------------------------------------------------------------------------
+# SEC-FUNC-001 and SEC-DEFAULT-001 — execution is granted, never defaulted
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("role", ["anon", "agent_reader"])
+def test_an_api_role_cannot_execute_an_ungranted_function(
+    project_a: dict[str, Any], roles: dict[str, str], role: str
+) -> None:
+    observed = sql(
+        project_a,
+        f"SELECT has_function_privilege('{roles[role]}', 'api.create_note(text,text)', 'EXECUTE');",
+    )
+    assert observed == "f", f"{role} can execute a write RPC it was never granted"
+
+
+def test_the_granted_roles_can_execute(project_a: dict[str, Any], roles: dict[str, str]) -> None:
+    """The positive case, so the refusals above are not vacuous."""
+    for role in ("authenticated", "agent_writer"):
+        observed = sql(
+            project_a,
+            f"SELECT has_function_privilege('{roles[role]}', "
+            "'api.create_note(text,text)', 'EXECUTE');",
+        )
+        assert observed == "t", f"{role} cannot execute a function it was granted"
+
+
+def test_public_cannot_execute_the_write_rpcs(project_a: dict[str, Any]) -> None:
+    """SEC-DEFAULT-001, measured on the functions that exist.
+
+    PostgreSQL grants EXECUTE to PUBLIC on every new function. Run 4 measured
+    `ALTER DEFAULT PRIVILEGES` to report success and store nothing on this
+    image, so what carries this is the explicit REVOKE beside each CREATE
+    FUNCTION -- and this asserts the outcome rather than the statement.
+    """
+    for signature in ("api.create_note(text,text)", "api.create_task(text,uuid)"):
+        observed = sql(
+            project_a, f"SELECT has_function_privilege('public', '{signature}', 'EXECUTE');"
+        )
+        assert observed == "f", f"PUBLIC can execute {signature}"
+
+
+def test_the_write_rpc_derives_ownership_from_the_claim(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """There is no owner parameter, so the claim is the only lever."""
+    observed = as_role(
+        project_a,
+        roles["authenticated"],
+        "SELECT (api.create_note('derived')).owner_id;",
+        claim=OWNER_A,
+    )
+    assert observed == OWNER_A, observed
+
+
+def test_the_write_rpc_refuses_without_a_claim(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    observed = as_role(project_a, roles["authenticated"], "SELECT api.create_note('nobody');")
+    assert "AP401" in observed, observed
+
+
+def test_the_write_rpcs_pin_their_search_path(project_a: dict[str, Any]) -> None:
+    """On a SECURITY DEFINER function this is not hygiene, it is the boundary.
+
+    Without a pinned search_path a caller who can create a temporary object
+    shadows an unqualified name and has it executed as the owner.
+    """
+    observed = sql(
+        project_a,
+        "SELECT string_agg(p.proname || '=' || "
+        "coalesce(array_to_string(p.proconfig, ','), 'NONE'), ' ' ORDER BY p.proname) "
+        "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = 'api' AND p.prosecdef;",
+    )
+    assert (
+        "search_path=pg_catalog, pg_temp" in observed
+        or "search_path=pg_catalog,pg_temp" in observed
+    ), observed
+
+
+# ---------------------------------------------------------------------------
+# SEC-OWNER-001 and SEC-DB-001 — role attributes
+# ---------------------------------------------------------------------------
+
+
+def test_the_object_owner_is_a_non_login_role(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    observed = sql(
+        project_a, f"SELECT rolcanlogin FROM pg_roles WHERE rolname = '{roles['object_owner']}';"
+    )
+    assert observed == "f", "the object owner can log in"
+
+
+def test_no_runtime_role_holds_a_dangerous_attribute(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """Read from pg_roles, never inferred from how a role was created."""
+    names = "', '".join(sorted(roles.values()))
+    observed = sql(
+        project_a,
+        f"SELECT coalesce(string_agg(rolname, ','), '') FROM pg_roles WHERE rolname IN ('{names}') "
+        "AND (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls);",
+    )
+    assert observed == "", f"roles hold dangerous attributes: {observed}"
+
+
+def test_only_the_migration_user_may_log_in(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """Plan §6.3: every other service identity is a NOLOGIN stub until its
+    owning session activates it deliberately."""
+    names = "', '".join(sorted(roles.values()))
+    observed = sql(
+        project_a,
+        f"SELECT coalesce(string_agg(rolname, ',' ORDER BY rolname), '') FROM pg_roles "
+        f"WHERE rolname IN ('{names}') AND rolcanlogin;",
+    )
+    assert observed in ("", roles["migration_user"]), observed
+
+
+# ---------------------------------------------------------------------------
+# DBX-MIG-001 — the two planes are distinct
+# ---------------------------------------------------------------------------
+
+
+def test_the_migration_membership_options_are_read_from_the_catalog(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """ADR 0026: the membership option columns, not the role's own rolinherit.
+
+    They are different switches, and PostgreSQL 16 made the per-membership one
+    govern. A test reading `rolinherit` would stay green if the membership were
+    later granted with INHERIT TRUE, which is the regression it exists to catch.
+    """
+    observed = sql(
+        project_a,
+        "SELECT m.admin_option || ' ' || m.inherit_option || ' ' || m.set_option "
+        "FROM pg_auth_members m "
+        "JOIN pg_roles member ON member.oid = m.member "
+        "JOIN pg_roles grantor ON grantor.oid = m.roleid "
+        f"WHERE member.rolname = '{roles['migration_user']}' "
+        f"AND grantor.rolname = '{roles['object_owner']}';",
+    )
+    assert observed == "f f t", f"expected admin=f inherit=f set=t, got {observed!r}"

@@ -115,12 +115,13 @@ python_bin() {
 project_key() {
   "$(python_bin)" -c '
 import sys
+from pathlib import Path
 sys.path.insert(0, sys.argv[1] + "/src")
 from agentic_postgres import config, naming
-document = config.load_project_manifest(sys.argv[2])
+document = config.load_project_manifest(Path(sys.argv[2]))
 project = document["project"]
 print(naming.project_key(project["slug"], project["environment"]))
-' "${ROOT_DIR}" "${PROJECT_MANIFEST}" 2>/dev/null \
+' "${ROOT_DIR}" "${PROJECT_MANIFEST}" \
     || die 5 "the project manifest is not valid; no identity was derived from it."
 }
 

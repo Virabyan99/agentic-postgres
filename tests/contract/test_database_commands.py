@@ -25,7 +25,8 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 BOOTSTRAP = REPO_ROOT / "bin" / "postgres-bootstrap.sh"
 DB = REPO_ROOT / "bin" / "db.sh"
-COMMANDS = (BOOTSTRAP, DB)
+MIGRATE = REPO_ROOT / "bin" / "migrate.sh"
+COMMANDS = (BOOTSTRAP, DB, MIGRATE)
 
 MANIFEST = ("--project", "project.example.yaml")
 
@@ -94,17 +95,104 @@ def test_an_argument_error_is_reported_before_the_privilege_check(command: Path)
     root, and telling them to sudo first sends them to get privilege for a
     command that was never going to run.
     """
-    privileged = ("--apply",) if command is BOOTSTRAP else ("sql", "bootstrap.sql")
+    privileged = {
+        BOOTSTRAP: ("--apply",),
+        DB: ("sql", "bootstrap.sql"),
+        MIGRATE: ("up",),
+    }[command]
     result = run(command, "--bogus", *privileged)
     assert result.returncode == 2, f"got {result.returncode}: {result.stderr}"
 
 
 @pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)
 def test_a_privileged_invocation_without_root_exits_three(command: Path) -> None:
-    privileged = ("--apply",) if command is BOOTSTRAP else ("status",)
+    privileged = {BOOTSTRAP: ("--apply",), DB: ("status",), MIGRATE: ("up",)}[command]
     result = run(command, *MANIFEST, *privileged)
     assert result.returncode == 3, f"got {result.returncode}: {result.stderr}"
     assert "root" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# bin/migrate.sh left FUTURE_STUBS (D48, ADR 0017)
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_is_no_longer_a_stub() -> None:
+    """ADR 0017's rule, applied a second time.
+
+    A stub may leave ``FUTURE_STUBS`` only in the session that implements it,
+    only together with real command-contract tests, and only in a commit that
+    leaves every other stub's assertion untouched. The replacement assertions
+    must be *stricter* than the one removed -- ``test_future_stub_exits_ten``
+    asserted one exit code for a bare invocation; what replaces it is every
+    test in this module that parametrizes over MIGRATE, plus the subcommand
+    surface below.
+    """
+    from tests.contract.test_cli_contract import FUTURE_STUBS
+
+    assert "bin/migrate.sh" not in FUTURE_STUBS
+    assert "bin/connect.sh" in FUTURE_STUBS, "another stub's assertion was removed"
+    assert "bin/restore-test.sh" in FUTURE_STUBS, "another stub's assertion was removed"
+
+    result = run(MIGRATE)
+    assert result.returncode == 2, "a bare invocation is a missing subcommand, not 'unavailable'"
+
+
+def test_migrate_offers_no_down() -> None:
+    """Released platform migrations are fix-forward only (ADR 0028).
+
+    Refused by name rather than merely absent from the parser, so an operator
+    reaching for `down` is told why instead of being told the flag is unknown.
+    """
+    for word in ("down", "rollback"):
+        result = run(MIGRATE, *MANIFEST, word)
+        assert result.returncode == 2
+        assert "fix-forward" in result.stderr, result.stderr
+
+
+def test_migrate_lock_commands_take_no_project() -> None:
+    """The lock covers the committed set, not one project (ADR 0028).
+
+    Requiring `--project` here would invite an operator to believe the lock is
+    per project, which is precisely what it is not.
+    """
+    result = run(MIGRATE, "verify-lock")
+    assert result.returncode == 0, result.stderr
+
+
+def test_verify_lock_agrees_with_the_committed_tree() -> None:
+    result = run(MIGRATE, "verify-lock")
+    assert result.returncode == 0
+    assert "agrees" in result.stdout
+
+
+def test_freeze_lock_is_the_only_writer() -> None:
+    """The gate verifies the lock and never creates it."""
+    source = MIGRATE.read_text(encoding="utf-8")
+    assert "freeze-lock" in source
+    helper = (REPO_ROOT / "bin" / "migrate.py").read_text(encoding="utf-8")
+    writes = [line for line in helper.splitlines() if "LOCK_PATH.write_text" in line]
+    assert len(writes) == 1, f"the lock is written in {len(writes)} places"
+
+
+def test_status_and_render_need_no_root() -> None:
+    """A read that required privilege is one an operator runs as root by habit."""
+    for subcommand in ("render", "status"):
+        result = run(MIGRATE, *MANIFEST, subcommand)
+        assert result.returncode == 0, f"{subcommand}: {result.stderr}"
+
+
+def test_render_reports_a_digest_per_migration() -> None:
+    result = run(MIGRATE, *MANIFEST, "render")
+    assert result.returncode == 0, result.stderr
+    lines = [line for line in result.stdout.splitlines() if line.strip()]
+    assert len(lines) == 5, result.stdout
+
+
+def test_two_subcommands_at_once_are_refused_by_migrate() -> None:
+    result = run(MIGRATE, *MANIFEST, "status", "render")
+    assert result.returncode == 2
+    assert "one subcommand" in result.stderr
 
 
 @pytest.mark.parametrize("command", COMMANDS, ids=lambda p: p.name)

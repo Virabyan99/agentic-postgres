@@ -417,42 +417,53 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_user_a_cannot_access_user_b_rows
+    - tests/security/test_session3_authorization.py::test_user_a_cannot_read_user_b_rows
+    - tests/security/test_session3_authorization.py::test_user_b_cannot_read_user_a_rows
+    - tests/security/test_session3_authorization.py::test_a_missing_claim_sees_no_rows
+    - tests/security/test_session3_authorization.py::test_forced_rls_applies_to_the_object_owner
+    - tests/security/test_session3_authorization.py::test_the_catalog_records_forced_row_level_security
+    - tests/security/test_session3_authorization.py::test_a_caller_cannot_update_a_row_into_another_owner
   description: A user can neither read nor mutate another user's rows.
 
 - id: SEC-VIEW-001
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_security_invoker_view_preserves_rls
+    - tests/security/test_session3_authorization.py::test_the_api_views_are_security_invoker
+    - tests/security/test_session3_authorization.py::test_the_view_returns_the_callers_rows_not_the_owners
   description: A security-invoker view preserves the underlying row policy.
 
 - id: SEC-FUNC-001
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_api_role_cannot_execute_ungranted_functions
+    - tests/security/test_session3_authorization.py::test_an_api_role_cannot_execute_an_ungranted_function
+    - tests/security/test_session3_authorization.py::test_the_granted_roles_can_execute
+    - tests/security/test_session3_authorization.py::test_the_write_rpc_derives_ownership_from_the_claim
+    - tests/security/test_session3_authorization.py::test_the_write_rpc_refuses_without_a_claim
+    - tests/security/test_session3_authorization.py::test_the_write_rpcs_pin_their_search_path
   description: An API role cannot execute a function it was not explicitly granted.
 
 - id: SEC-DEFAULT-001
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_newly_created_function_is_not_executable_by_public
+    - tests/security/test_session3_authorization.py::test_public_cannot_execute_the_write_rpcs
   description: Default EXECUTE on newly created functions is revoked from PUBLIC.
 
 - id: SEC-OWNER-001
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_object_owner_is_a_non_login_role
+    - tests/security/test_session3_authorization.py::test_the_object_owner_is_a_non_login_role
+    - tests/security/test_session3_authorization.py::test_only_the_migration_user_may_log_in
   description: Objects are owned by a non-login role that no service connects as.
 
 - id: SEC-DB-001
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_no_runtime_role_holds_a_dangerous_attribute
+    - tests/security/test_session3_authorization.py::test_no_runtime_role_holds_a_dangerous_attribute
   description: >-
     No runtime role holds SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or
     BYPASSRLS. Read from the catalog, never inferred from how a role was
@@ -462,7 +473,9 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_schema_boundaries_match_the_contract
+    - tests/security/test_session3_authorization.py::test_api_roles_cannot_address_the_private_schemas
+    - tests/security/test_session3_authorization.py::test_a_direct_read_of_the_private_table_is_denied
+    - tests/security/test_session3_authorization.py::test_the_four_schemas_exist
   description: >-
     The public, app and app_private schema boundaries match the contract, and
     the API roles cannot address the private schemas at all.
@@ -471,7 +484,9 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/contract/test_future_database_platform.py::test_locked_postgres_image_provides_pgvector_at_the_locked_version
+    - tests/contract/test_image_contracts.py::test_pgvector_is_present_at_the_locked_version
+    - tests/contract/test_image_contracts.py::test_the_server_major_version_matches_the_lock
+    - tests/security/test_session3_authorization.py::test_pgvector_is_installed_outside_public
   description: >-
     The locked PostgreSQL 18 image runs with pgvector present at the locked
     version, in the extensions schema rather than in public.
@@ -480,7 +495,10 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/contract/test_future_database_platform.py::test_postgres_is_unreachable_from_outside_the_project_network
+    - tests/contract/test_compose_contract.py::test_postgres_joins_only_the_internal_network
+    - tests/contract/test_compose_contract.py::test_postgres_carries_no_traefik_label_of_any_kind
+    - tests/contract/test_compose_contract.py::test_the_migration_service_is_also_project_internal
+    - tests/contract/test_compose_contract.py::test_no_project_service_publishes_a_host_port
   description: >-
     PostgreSQL publishes no host port, joins no edge network, and carries no
     Traefik label. It is reachable only on its own project network.
@@ -489,7 +507,11 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/contract/test_future_database_platform.py::test_a_volume_belonging_to_another_project_is_refused
+    - tests/contract/test_database_commands.py::test_bootstrap_names_no_flag_that_adopts_a_volume
+    - tests/contract/test_database_commands.py::test_identity_comparison_uses_only_immutable_fields
+    - tests/contract/test_database_commands.py::test_the_exit_code_for_a_foreign_volume_is_eleven
+    - tests/deployment/test_session3_isolation.py::test_bootstrap_refuses_a_volume_belonging_to_another_project
+    - tests/deployment/test_session3_isolation.py::test_the_refusal_message_carries_no_secret
   description: >-
     An existing data volume is bound to one project identity, and a mismatch is
     refused with exit 11 rather than adopted. See ADR 0030.
@@ -498,7 +520,8 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/contract/test_future_database_platform.py::test_bootstrap_and_migration_authority_are_distinct
+    - tests/security/test_session3_authorization.py::test_the_migration_membership_options_are_read_from_the_catalog
+    - tests/security/test_session3_authorization.py::test_only_the_migration_user_may_log_in
   description: >-
     Bootstrap authority and migration authority are distinct and least
     privileged. Proved from the membership option columns, not from the role's
@@ -508,7 +531,10 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/contract/test_future_database_platform.py::test_rendered_migrations_are_deterministic_and_match_their_source
+    - tests/contract/test_migrations.py::test_rendering_is_deterministic
+    - tests/contract/test_migrations.py::test_rendering_carries_no_deployment_metadata
+    - tests/contract/test_migrations.py::test_two_projects_render_different_payloads
+    - tests/contract/test_migrations.py::test_the_committed_lock_verifies
   description: >-
     Rendering a migration twice from one input produces identical bytes, and
     those bytes agree with the committed released lock. See ADR 0028.
@@ -517,7 +543,12 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/contract/test_future_database_platform.py::test_an_applied_migration_cannot_be_edited_removed_or_reordered
+    - tests/contract/test_migrations.py::test_an_edited_applied_migration_is_detected
+    - tests/contract/test_migrations.py::test_a_removed_migration_is_detected
+    - tests/contract/test_migrations.py::test_an_unlocked_migration_is_detected
+    - tests/contract/test_migrations.py::test_a_duplicate_version_is_refused
+    - tests/contract/test_migrations.py::test_out_of_order_versions_are_refused
+    - tests/contract/test_migrations.py::test_every_down_block_refuses
   description: >-
     An applied migration cannot be silently edited, removed, or reordered; the
     preflight refuses on any disagreement between its five sources.
@@ -526,7 +557,12 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_two_projects_have_isolated_clusters_and_identities
+    - tests/deployment/test_session3_isolation.py::test_the_two_projects_run_separate_containers
+    - tests/deployment/test_session3_isolation.py::test_the_two_projects_use_separate_volumes
+    - tests/deployment/test_session3_isolation.py::test_neither_projects_roles_exist_in_the_other
+    - tests/deployment/test_session3_isolation.py::test_a_row_written_to_one_project_is_absent_from_the_other
+    - tests/deployment/test_session3_isolation.py::test_each_project_has_its_own_identity_sentinel
+    - tests/deployment/test_session3_isolation.py::test_the_databases_have_different_names
   description: >-
     Two deployed projects have isolated clusters, volumes, roles, credentials
     and identity sentinels, and neither project's credential authenticates

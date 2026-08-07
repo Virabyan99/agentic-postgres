@@ -22,45 +22,17 @@ def unimplemented(session: int, what: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session 3 — the database is the authorization source of truth
+# Session 3 — activated
+#
+# The seven Session 3 placeholders were replaced in Run 6 by real proofs in
+# tests/security/test_session3_authorization.py. They are gone rather than kept
+# beside their implementations: a placeholder next to a real test is a second,
+# weaker claim about the same requirement, which is what
+# test_no_requirement_is_claimed_by_two_placeholders exists to prevent.
+#
+#   SEC-RLS-001, SEC-VIEW-001, SEC-FUNC-001, SEC-DEFAULT-001, SEC-OWNER-001,
+#   SEC-DB-001, SEC-DB-002  -> tests/security/test_session3_authorization.py
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.future(session=3, requirement="SEC-RLS-001")
-def test_user_a_cannot_access_user_b_rows() -> None:
-    unimplemented(3, "User A reads and mutates only its own notes and tasks")
-
-
-@pytest.mark.future(session=3, requirement="SEC-VIEW-001")
-def test_security_invoker_view_preserves_rls() -> None:
-    unimplemented(3, "an api-schema view does not bypass the underlying row policy")
-
-
-@pytest.mark.future(session=3, requirement="SEC-FUNC-001")
-def test_api_role_cannot_execute_ungranted_functions() -> None:
-    unimplemented(3, "execution is denied for every function not explicitly granted")
-
-
-@pytest.mark.future(session=3, requirement="SEC-DEFAULT-001")
-def test_newly_created_function_is_not_executable_by_public() -> None:
-    unimplemented(3, "default EXECUTE on new functions is revoked from PUBLIC")
-
-
-@pytest.mark.future(session=3, requirement="SEC-OWNER-001")
-def test_object_owner_is_a_non_login_role() -> None:
-    unimplemented(3, "no service connects as the object owner")
-
-
-@pytest.mark.future(session=3, requirement="SEC-DB-001")
-def test_no_runtime_role_holds_a_dangerous_attribute() -> None:
-    unimplemented(
-        3, "no runtime role has SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS"
-    )
-
-
-@pytest.mark.future(session=3, requirement="SEC-DB-002")
-def test_schema_boundaries_match_the_contract() -> None:
-    unimplemented(3, "the public, app and app_private grants are exactly what the contract says")
 
 
 # ---------------------------------------------------------------------------
