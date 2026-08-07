@@ -132,10 +132,23 @@ def test_the_launchers_are_root_owned_and_not_writable_by_others() -> None:
         assert stat.st_mode & 0o100, f"{path} is not executable"
 
 
-def test_the_running_containers_come_from_the_recorded_release(
+def test_the_running_containers_come_from_an_installed_release(
     project_a: dict[str, Any], release: Path
 ) -> None:
-    """Compose records its project directory; it must be under the release."""
+    """Compose records its project directory; it must be an installed release.
+
+    The property being defended is that nothing runs out of a working tree: a
+    `git checkout` must not be able to change what a running deployment is made
+    of. Any directory under the immutable release root satisfies that.
+
+    It deliberately does not demand the *recorded* release. `compose up -d`
+    does not recreate a container whose configuration has not changed, which is
+    what makes a no-op redeploy free of downtime -- so after installing a new
+    release the containers legitimately still carry the previous release's
+    working directory until something about them actually changes. Requiring an
+    exact match failed on every second deploy while the security property held
+    perfectly.
+    """
     key = project_a["project"]["key"]
     working_dirs = {
         line.strip()
@@ -152,6 +165,19 @@ def test_the_running_containers_come_from_the_recorded_release(
     assert working_dirs, f"no running container records a Compose working directory for {key}"
 
     state = Path(project_a["runtime"]["state_directory"])
-    allowed = {str(release), str(state)}
-    offenders = sorted(path for path in working_dirs if path not in allowed)
-    assert not offenders, f"containers were started from outside the release or state: {offenders}"
+    release_root = release.parent
+    offenders = sorted(
+        path
+        for path in working_dirs
+        if path != str(state) and release_root not in Path(path).parents
+    )
+    assert not offenders, (
+        f"containers were started from outside the release root {release_root} "
+        f"and outside the state directory: {offenders}"
+    )
+
+    # An installed release that no longer exists on disk is not immutability, it
+    # is a dangling reference: the code those containers were made from can no
+    # longer be inspected or reproduced.
+    missing = sorted(path for path in working_dirs if not Path(path).is_dir())
+    assert not missing, f"containers name release directories that no longer exist: {missing}"

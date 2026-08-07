@@ -32,7 +32,11 @@ pytestmark = [
 
 
 def fetch(
-    url: str, *, host_header: str | None = None, verify: bool = True
+    url: str,
+    *,
+    host_header: str | None = None,
+    verify: bool = True,
+    ca_file: str | None = None,
 ) -> tuple[int, dict[str, str], bytes]:
     """Fetch a URL without following redirects, returning status, headers, body.
 
@@ -44,7 +48,7 @@ def fetch(
         def redirect_request(self, *args: Any, **kwargs: Any) -> None:
             return None
 
-    context = ssl.create_default_context()
+    context = ssl.create_default_context(cafile=ca_file)
     if not verify:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
@@ -65,6 +69,37 @@ def fetch(
         return exc.code, dict(exc.headers), exc.read()
 
 
+#: Let's Encrypt's staging root, vendored. A staging certificate chains to
+#: this and to nothing in any public trust store, which is the point of staging.
+STAGING_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "letsencrypt-stg-root-x1.pem"
+
+
+@pytest.fixture(scope="module")
+def trust_bundle(project_a: dict[str, Any]) -> str | None:
+    """The CA these assertions verify against, or None for the system store.
+
+    Every HTTPS assertion in this file failed with CERTIFICATE_VERIFY_FAILED
+    against an edge that was serving correctly, because a staging certificate is
+    deliberately untrusted. Skipping them under staging would mean the routing,
+    HSTS and log-redaction proofs only ever ran after the production promotion --
+    and an untested path is where this project keeps finding its defects.
+
+    The root is trusted *only* when the deployed document says the deployment is
+    on staging. A production deployment still has to chain to a real public
+    root, so a promotion that silently stayed on staging fails here rather than
+    passing quietly.
+    """
+    environment = project_a["tls"]["acme_environment"]
+    if environment != "staging":
+        return None
+    assert STAGING_ROOT.is_file(), (
+        f"the vendored staging root is missing: {STAGING_ROOT}. Without it a "
+        "staging deployment cannot be verified, and skipping instead would "
+        "retire six proofs."
+    )
+    return str(STAGING_ROOT)
+
+
 @pytest.fixture(scope="module")
 def hostname(project_a: dict[str, Any]) -> str:
     return project_a["project"]["domain"]
@@ -75,8 +110,8 @@ def hostname(project_a: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_the_health_route_answers_over_https(hostname: str) -> None:
-    status, _, body = fetch(f"https://{hostname}{HEALTH_ROUTE_PATH}")
+def test_the_health_route_answers_over_https(hostname: str, trust_bundle: str | None) -> None:
+    status, _, body = fetch(f"https://{hostname}{HEALTH_ROUTE_PATH}", ca_file=trust_bundle)
     assert status == 200, status
     payload = json.loads(body)
     assert payload["status"] == "ok"
@@ -84,11 +119,11 @@ def test_the_health_route_answers_over_https(hostname: str) -> None:
 
 
 def test_the_health_route_identifies_its_own_project(
-    hostname: str, project_a: dict[str, Any]
+    hostname: str, project_a: dict[str, Any], trust_bundle: str | None
 ) -> None:
     """A shared edge that answers with the wrong project key is a routing bug
     that a bare 200 cannot distinguish from success."""
-    _, _, body = fetch(f"https://{hostname}{HEALTH_ROUTE_PATH}")
+    _, _, body = fetch(f"https://{hostname}{HEALTH_ROUTE_PATH}", ca_file=trust_bundle)
     assert json.loads(body)["project_key"] == project_a["project"]["key"]
 
 
@@ -105,8 +140,8 @@ def test_the_deployed_document_agrees_with_the_live_route(
     assert recorded["url"] == f"https://{hostname}{HEALTH_ROUTE_PATH}", recorded
 
 
-def test_an_unrouted_path_is_not_served(hostname: str) -> None:
-    status, _, _ = fetch(f"https://{hostname}/{secrets.token_hex(8)}")
+def test_an_unrouted_path_is_not_served(hostname: str, trust_bundle: str | None) -> None:
+    status, _, _ = fetch(f"https://{hostname}/{secrets.token_hex(8)}", ca_file=trust_bundle)
     assert status == 404, f"an unrouted path returned {status}"
 
 
@@ -121,7 +156,9 @@ def test_http_redirects_permanently_to_https(hostname: str) -> None:
     assert headers["Location"].startswith(f"https://{hostname}"), headers.get("Location")
 
 
-def test_hsts_is_present_on_the_https_response(hostname: str, project_a: dict[str, Any]) -> None:
+def test_hsts_is_present_on_the_https_response(
+    hostname: str, project_a: dict[str, Any], trust_bundle: str | None
+) -> None:
     """HSTS is withheld until the certificate is trusted.
 
     Sending it while a staging certificate is in play would pin browsers to an
@@ -129,7 +166,7 @@ def test_hsts_is_present_on_the_https_response(hostname: str, project_a: dict[st
     a deploy. The assertion therefore follows the recorded ACME environment
     instead of demanding the header unconditionally.
     """
-    _, headers, _ = fetch(f"https://{hostname}{HEALTH_ROUTE_PATH}")
+    _, headers, _ = fetch(f"https://{hostname}{HEALTH_ROUTE_PATH}", ca_file=trust_bundle)
     header = headers.get("Strict-Transport-Security")
 
     if project_a["tls"]["acme_environment"] != "production":
@@ -207,22 +244,30 @@ def test_no_query_string_reaches_the_access_log(hostname: str, as_root, sh) -> N
     """
     del as_root
     sentinel = f"apgsentinel{secrets.token_hex(12)}"
-    status, _, _ = fetch(f"https://{hostname}{HEALTH_ROUTE_PATH}?apg_sentinel={sentinel}")
+    status, _, _ = fetch(
+        f"https://{hostname}{HEALTH_ROUTE_PATH}?apg_sentinel={sentinel}", ca_file=trust_bundle
+    )
     assert status == 200, status
 
     logs = sh("docker", "logs", "--since", "5m", f"{EDGE_STACK_NAME}-traefik-1")
     assert sentinel not in logs, "the access log retained a request query-string value"
 
 
-def test_no_request_header_value_reaches_the_access_log(hostname: str, as_root, sh) -> None:
+def test_no_request_header_value_reaches_the_access_log(
+    hostname: str, as_root, sh, trust_bundle: str | None
+) -> None:
     del as_root
     sentinel = f"apgsentinel{secrets.token_hex(12)}"
 
     request = urllib.request.Request(f"https://{hostname}{HEALTH_ROUTE_PATH}")
     request.add_header("X-Apg-Probe", sentinel)
     request.add_header("Authorization", f"Bearer {sentinel}")
-    # S310: literal https scheme, hostname from the deployed document.
-    with urllib.request.urlopen(request, timeout=20) as response:  # noqa: S310
+    # Built explicitly rather than via urlopen's default context, so a staging
+    # deployment is verified against the vendored staging root instead of
+    # failing to connect at all.
+    context = ssl.create_default_context(cafile=trust_bundle)
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context))
+    with opener.open(request, timeout=20) as response:
         assert response.status == 200
 
     logs = sh("docker", "logs", "--since", "5m", f"{EDGE_STACK_NAME}-traefik-1")

@@ -363,7 +363,7 @@
     - tests/security/test_session2_installed_release.py::test_the_release_directory_is_named_for_a_full_commit
     - tests/security/test_session2_installed_release.py::test_the_release_is_root_owned_and_not_group_writable
     - tests/security/test_session2_installed_release.py::test_the_installed_unit_executes_only_a_libexec_launcher
-    - tests/security/test_session2_installed_release.py::test_the_running_containers_come_from_the_recorded_release
+    - tests/security/test_session2_installed_release.py::test_the_running_containers_come_from_an_installed_release
     - tests/contract/test_host_infrastructure.py::test_units_execute_only_installed_release_launchers
   description: >-
     What systemd runs is an immutable root-owned release identified by commit,

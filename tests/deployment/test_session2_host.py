@@ -328,8 +328,10 @@ def test_traefik_holds_no_docker_socket(
         assert not sockets, f"{container['Names']} mounts the Docker socket directly: {sockets}"
 
 
-@pytest.mark.requires_environment("APG_EDGE_DEPLOYED")
-def test_the_socket_proxy_refuses_a_write_call(as_root, sh_status, probe_image: str) -> None:
+@pytest.mark.requires_environment("APG_EDGE_DEPLOYED", "APG_PROJECT_A_OUTPUTS")
+def test_the_socket_proxy_refuses_a_write_call(
+    as_root, sh_status, probe_image: str, project_a: dict[str, Any]
+) -> None:
     """An allowlist is a claim until something is refused by it.
 
     The permitted read and the refused write run from the same client on the
@@ -337,7 +339,12 @@ def test_the_socket_proxy_refuses_a_write_call(as_root, sh_status, probe_image: 
     a successful denial.
     """
     del as_root
-    network = f"{EDGE_STACK_NAME}_control"
+    # Read, not rebuilt. `infra/edge/compose.yaml` names each network explicitly
+    # from the host manifest, so Compose's default `<project>_<network>`
+    # convention does not apply: the real network is `apg-edge-control`, and
+    # `docker run` answered `network apg-edge_control not found`. The deployed
+    # document had the same invented name until it was corrected to read it.
+    network = project_a["edge"]["control_network"]
     script = (
         "import urllib.request,urllib.error,sys\n"
         "def code(url, method):\n"
