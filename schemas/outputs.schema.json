@@ -230,12 +230,16 @@
             "stack_name",
             "control_network",
             "egress_network",
+            "project_edge_network",
+            "project_internal_network",
             "project_network_attached"
           ],
           "properties": {
             "stack_name": { "$ref": "#/$defs/composeName" },
             "control_network": { "$ref": "#/$defs/composeName" },
             "egress_network": { "$ref": "#/$defs/composeName" },
+            "project_edge_network": { "$ref": "#/$defs/composeName" },
+            "project_internal_network": { "$ref": "#/$defs/composeName" },
             "project_network_attached": { "type": "boolean" }
           }
         },

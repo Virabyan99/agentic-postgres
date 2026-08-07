@@ -86,3 +86,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0020](0020-project-state-roots.md) | Configuration in /etc, generated output in /var/lib | 2 | Accepted |
 | [0021](0021-flag-values-mistaken-for-subcommands.md) | A Compose flag's value can be mistaken for the subcommand | 2 | Accepted |
 | [0022](0022-forbidden-list-drifted-behind-compose.md) | The forbidden list drifted behind the Compose surface it covers | 2 | Accepted |
+| [0023](0023-isolation-proofs-read-the-edges-network-not-the-projects.md) | The isolation proofs read the edge's network, not the project's | 2 | Accepted |

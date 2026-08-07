@@ -97,6 +97,27 @@ def test_an_unknown_hostname_is_not_served(project_a: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_the_recorded_networks_are_project_scoped(
+    project_a: dict[str, Any], project_b: dict[str, Any]
+) -> None:
+    """Guard the guard, for ADR 0023.
+
+    Every network assertion below names a network out of the deployed document.
+    If those fields ever went back to holding one host-wide value -- which is
+    what ``egress_network`` holds, and what they were read from before -- the
+    assertions would all keep passing while measuring nothing. This is the test
+    that notices.
+    """
+    for field in ("project_edge_network", "project_internal_network"):
+        assert project_a["edge"][field] != project_b["edge"][field], (
+            f"both projects record the same {field}; it is not project-scoped"
+        )
+        for project in (project_a, project_b):
+            assert project["edge"][field] != project["edge"]["egress_network"], (
+                f"{field} holds the shared edge plane's network, not the project's"
+            )
+
+
 def test_traefik_joins_both_edge_networks_and_neither_internal_one(
     as_root, sh, project_a: dict[str, Any], project_b: dict[str, Any]
 ) -> None:
@@ -109,14 +130,16 @@ def test_traefik_joins_both_edge_networks_and_neither_internal_one(
     )
 
     for project in (project_a, project_b):
-        edge = project["edge"]["egress_network"]
+        edge = project["edge"]["project_edge_network"]
         assert edge in networks, f"Traefik is not attached to {edge}; that project has no ingress"
 
+    # By name, not by prefix. The previous version matched networks against the
+    # project *key* (`alpha-dev`), while every network name begins `apg-`, so
+    # the comprehension was always empty and the assertion could not fail.
     internal = sorted(
-        name
-        for name in networks
-        if any(name.startswith(project["project"]["key"]) for project in (project_a, project_b))
-        and not name.endswith("-edge")
+        project["edge"]["project_internal_network"]
+        for project in (project_a, project_b)
+        if project["edge"]["project_internal_network"] in networks
     )
     assert not internal, f"Traefik is attached to project-internal networks: {internal}"
 
@@ -146,9 +169,16 @@ def test_neither_project_joins_the_others_network(
                     sh("docker", "inspect", "--format", "{{json .NetworkSettings.Networks}}", name)
                 )
             )
-            assert other["edge"]["egress_network"] not in networks, (
-                f"{name} is attached to {other['project']['key']}'s edge network"
+            # Both directions. Absent from the other project's networks is the
+            # claim; present on its own is what makes the absence mean
+            # something, rather than describing a container attached to nothing.
+            assert own["edge"]["project_edge_network"] in networks, (
+                f"{name} is not on its own edge network {own['edge']['project_edge_network']}"
             )
+            for field in ("project_edge_network", "project_internal_network"):
+                assert other["edge"][field] not in networks, (
+                    f"{name} is attached to {other['project']['key']}'s {field}"
+                )
 
 
 # ---------------------------------------------------------------------------

@@ -111,7 +111,25 @@ def build_deployed_document(
             "domain": rendered["project"]["domain"],
         },
         "host": dict(host),
-        "edge": dict(edge),
+        # `edge` as measured, plus the project's own two network names carried
+        # from the render (ADR 0023). The caller's block names the *shared* edge
+        # plane -- `apg-edge-control` and `apg-edge-egress` -- which is the same
+        # pair for every project on the host. Reading those as though they were
+        # project-scoped is what made three isolation assertions vacuous: with
+        # one project deployed there was nothing for a shared value to collide
+        # with, and with two the collision was one line of output.
+        #
+        # Carried, not re-derived. `apg-<key>-edge` is a convention this module
+        # could reproduce, and reproducing it is exactly how a document naming
+        # `apg-edge_control` -- a network that never existed -- got published.
+        # The rendered document decides what `compose.env` will say, and
+        # `compose.env` is what `bin/edge-network.sh` reads to decide what to
+        # attach.
+        "edge": {
+            **edge,
+            "project_edge_network": rendered["compose"]["networks"]["edge"],
+            "project_internal_network": rendered["compose"]["networks"]["internal"],
+        },
         "routes": {
             "health": {
                 "status": health_status,
