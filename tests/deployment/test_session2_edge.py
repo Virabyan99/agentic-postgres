@@ -48,6 +48,17 @@ def fetch(
         def redirect_request(self, *args: Any, **kwargs: Any) -> None:
             return None
 
+    # Naming a fixture without requesting it in the test signature binds the
+    # fixture *function*, not its value, and `ssl` then reports only
+    # "cafile should be a valid filesystem path" from three frames away. Say
+    # which argument is wrong and what it actually got.
+    if not (ca_file is None or isinstance(ca_file, str)):
+        raise TypeError(
+            f"ca_file must be a path or None, got {type(ca_file).__name__}: {ca_file!r}. "
+            "A test that passes ca_file=trust_bundle must also declare trust_bundle "
+            "in its signature."
+        )
+
     context = ssl.create_default_context(cafile=ca_file)
     if not verify:
         context.check_hostname = False
@@ -234,7 +245,9 @@ def test_the_acme_state_file_matches_the_recorded_environment(
 # ---------------------------------------------------------------------------
 
 
-def test_no_query_string_reaches_the_access_log(hostname: str, as_root, sh) -> None:
+def test_no_query_string_reaches_the_access_log(
+    hostname: str, as_root, sh, trust_bundle: str | None
+) -> None:
     """The real proof behind the offline Traefik version floor.
 
     ``bin/lock-versions.sh --check`` can only assert the locked Traefik is new
