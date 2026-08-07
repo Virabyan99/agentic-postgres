@@ -266,17 +266,66 @@ def test_missing_credential_files_are_reported_as_repair(tmp_path: Path) -> None
     The provider still holds a credential nobody can use. Creating another one
     silently leaks the first; revoking the first before validating a replacement
     leaves the project with none.
+
+    Both paths sit under ``tmp_path`` (ADR 0024). This used to assert the
+    absence of ``/etc/agentic-postgres/credentials/alpha-dev/...``:
+    ``make_state``'s default key is ``alpha-dev`` and its ``credential_files``
+    come from the real ``credential_paths()``. ``alpha-dev`` is a project
+    actually deployed to the Session 2 host, so the assertion was a claim about
+    the machine running the suite -- green wherever no such project had been
+    bootstrapped, red on the one host where the thing it describes is real.
     """
     document = make_state()
+    document["credential_files"] = {
+        "client_id_path": str(tmp_path / "infisical-client-id"),
+        "client_secret_path": str(tmp_path / "infisical-client-secret"),
+    }
+
     assert sorted(bootstrap_state.needs_credential_repair(document)) == [
         "client_id_path",
         "client_secret_path",
     ]
 
-    present = tmp_path / "infisical-client-id"
-    present.write_text("cli-0123456789\n", encoding="utf-8")
-    document["credential_files"]["client_id_path"] = str(present)
+    Path(document["credential_files"]["client_id_path"]).write_text(
+        "cli-0123456789\n", encoding="utf-8"
+    )
     assert bootstrap_state.needs_credential_repair(document) == ["client_secret_path"]
+
+    # The converged case, which the old test never reached. Its regression -- a
+    # repair reported for a project whose credentials are both present -- sends
+    # an operator to rotate a healthy client secret.
+    Path(document["credential_files"]["client_secret_path"]).write_text(
+        "not-a-real-secret\n", encoding="utf-8"
+    )
+    assert bootstrap_state.needs_credential_repair(document) == []
+
+
+def test_an_unreadable_credential_path_is_treated_as_intact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """ "Cannot tell" is not "absent", and this is the first test to say so.
+
+    Credential files live under a ``0700 root`` directory, so ``is_file()``
+    raises ``PermissionError`` for any caller that is not root. Reporting a
+    repair there would send an operator to re-issue a credential that is
+    present and healthy -- the exact leak this function exists to prevent.
+
+    Asserted by patching rather than by ``chmod``: a ``chmod 0000`` fixture
+    passes as the operator and fails as root, reintroducing the machine
+    dependence ADR 0024 removed.
+    """
+
+    def denied(self: Path) -> bool:
+        raise PermissionError(13, "Permission denied", str(self))
+
+    document = make_state()
+    document["credential_files"] = {
+        "client_id_path": str(tmp_path / "infisical-client-id"),
+        "client_secret_path": str(tmp_path / "infisical-client-secret"),
+    }
+    monkeypatch.setattr(Path, "is_file", denied)
+
+    assert bootstrap_state.needs_credential_repair(document) == []
 
 
 # ---------------------------------------------------------------------------
