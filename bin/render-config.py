@@ -203,16 +203,11 @@ def edge_static(host: Path, destination: Path, acme_environment: str) -> int:
             "https://acme-v02.api.letsencrypt.org/directory",
         )
 
-    remaining = sorted(set(re.findall(r"__[A-Z_]+__", text)))
-    if remaining:
-        print(f"render-config: unsubstituted placeholders: {remaining}", file=sys.stderr)
-        return 5
-
     destination.mkdir(parents=True, exist_ok=True)
     if (problem := _clear_invented_directory(destination / "traefik.yaml")) is not None:
         print(f"render-config: {problem}", file=sys.stderr)
         return 5
-    if (problem := _yaml_problem("traefik.yaml", text)) is not None:
+    if (problem := render_problem("traefik.yaml", text)) is not None:
         print(f"render-config: {problem}", file=sys.stderr)
         return 5
     _write_config_file(destination / "traefik.yaml", text)
@@ -221,11 +216,7 @@ def edge_static(host: Path, destination: Path, acme_environment: str) -> int:
     dynamic.mkdir(parents=True, exist_ok=True)
     for path in sorted((source / "dynamic").glob("*.yaml")):
         body = _substitute_hsts(path.read_text(encoding="utf-8"), acme_environment)
-        still_open = sorted(set(re.findall(r"__[A-Z_]+__", body)))
-        if still_open:
-            print(f"render-config: {path.name}: unsubstituted {still_open}", file=sys.stderr)
-            return 5
-        if (problem := _yaml_problem(path.name, body)) is not None:
+        if (problem := render_problem(path.name, body)) is not None:
             print(f"render-config: {problem}", file=sys.stderr)
             return 5
         _write_config_file(dynamic / path.name, body)
@@ -234,18 +225,27 @@ def edge_static(host: Path, destination: Path, acme_environment: str) -> int:
     return 0
 
 
-def _yaml_problem(name: str, text: str) -> str | None:
-    """Refuse to write a rendered file Traefik will silently discard.
+def render_problem(name: str, text: str) -> str | None:
+    """Refuse to write a rendered file Traefik would silently discard.
 
-    Nothing checked this, and "no unsubstituted placeholders" is a weaker claim
-    than it looks: a substitution can complete and still produce a document
-    that does not parse. Traefik's file provider does not fail loudly when one
-    does -- it drops the whole file, and the only symptom is that every
-    middleware defined in it stops existing. The routers referencing them are
-    rejected one by one with `middleware "..." does not exist`, and the
-    hostname answers 404 while holding a perfectly valid certificate.
+    Two checks, and the order matters because the first makes the second
+    possible.
 
-    Cheaper to refuse to write it.
+    **It parses.** Nothing checked this, and "no unsubstituted placeholders" is
+    a weaker claim than it looks: a substitution can complete and still produce
+    a document that does not parse. Traefik's file provider does not fail
+    loudly when one does -- it drops the whole file, and the only symptom is
+    that every middleware defined in it stops existing. The routers referencing
+    them are rejected one by one with `middleware "..." does not exist`, and
+    the hostname answers 404 while holding a perfectly valid certificate.
+
+    **No placeholder survived into the data.** This scans the parsed document
+    rather than the raw text, which is the difference between "a placeholder
+    reaches the host" and "a placeholder reaches Traefik". `baseline.yaml`
+    documents its own placeholder in a header comment, on purpose, and a
+    raw-text scan cannot tell that occurrence -- inert, deliberate -- from one
+    in a value, which is a real defect. Scanning the parse is how the
+    distinction gets made without writing a YAML comment stripper.
     """
     try:
         parsed = yaml.safe_load(text)
@@ -253,7 +253,28 @@ def _yaml_problem(name: str, text: str) -> str | None:
         return f"{name}: the rendered configuration is not valid YAML: {exc}"
     if not isinstance(parsed, dict):
         return f"{name}: the rendered configuration is not a mapping, got {type(parsed).__name__}"
+
+    unsubstituted = sorted(_placeholders_in(parsed))
+    if unsubstituted:
+        return f"{name}: unsubstituted {unsubstituted}"
     return None
+
+
+def _placeholders_in(node: object) -> set[str]:
+    """Every `__NAME__` token reachable in a parsed document's keys or values."""
+    if isinstance(node, str):
+        return set(re.findall(r"__[A-Z_]+__", node))
+    if isinstance(node, dict):
+        found: set[str] = set()
+        for key, value in node.items():
+            found |= _placeholders_in(key) | _placeholders_in(value)
+        return found
+    if isinstance(node, list):
+        found = set()
+        for value in node:
+            found |= _placeholders_in(value)
+        return found
+    return set()
 
 
 #: Only where the placeholder is the whole of a line, indentation aside.

@@ -13,6 +13,9 @@ directory, because a template that shipped production issuance would make
 
 from __future__ import annotations
 
+import functools
+import importlib.util
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -243,19 +246,73 @@ def _render_dynamic(acme_environment: str) -> str:
     baseline middleware with it, and both hostnames served 404 behind valid
     certificates.
     """
-    import importlib.util
+    return _render_config()._substitute_hsts(DYNAMIC.read_text(encoding="utf-8"), acme_environment)
 
+
+@functools.cache
+def _render_config() -> Any:
+    """``bin/render-config.py``, imported by path because it is not a module."""
     path = REPO_ROOT / "bin" / "render-config.py"
     spec = importlib.util.spec_from_file_location("render_config_under_test", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module._substitute_hsts(DYNAMIC.read_text(encoding="utf-8"), acme_environment)
+    return module
 
 
 @pytest.fixture(scope="module")
 def dynamic_config() -> dict[str, Any]:
     return yaml.safe_load(_render_dynamic("staging"))
+
+
+@pytest.mark.parametrize("acme_environment", ["staging", "production"])
+def test_the_whole_edge_render_produces_files_traefik_can_load(
+    tmp_path: Path, acme_environment: str
+) -> None:
+    """End to end, because this path had never been run offline at all.
+
+    ``render-config.py --edge-static`` is invoked only by ``bin/edge.sh``, on a
+    host, as root. Nothing in the gate reached it, so a defect in it could be
+    found only by promoting a real deployment -- which is how the production
+    substitution defect was found, and it cost a live outage to find it.
+    """
+    exit_code = _render_config().edge_static(
+        REPO_ROOT / "host.example.yaml", tmp_path, acme_environment
+    )
+    assert exit_code == 0, "the edge render refused its own templates"
+
+    static = yaml.safe_load((tmp_path / "traefik.yaml").read_text(encoding="utf-8"))
+    dynamic = yaml.safe_load((tmp_path / "dynamic" / "baseline.yaml").read_text(encoding="utf-8"))
+
+    assert set(dynamic["http"]["middlewares"]) == {
+        "apg-security-headers",
+        "apg-rate-limit",
+        "apg-baseline",
+    }
+
+    resolver = next(iter(static["certificatesResolvers"].values()))["acme"]
+    expected = "production.json" if acme_environment == "production" else "staging.json"
+    assert resolver["storage"].endswith(expected), resolver["storage"]
+    assert ("acme-staging-v02" in resolver["caServer"]) == (acme_environment == "staging"), (
+        resolver["caServer"]
+    )
+
+
+def test_a_placeholder_reaching_a_value_is_refused_and_one_in_a_comment_is_not() -> None:
+    """The distinction a raw-text scan cannot make.
+
+    Scanning rendered text for ``__NAME__`` treated ``baseline.yaml``'s own
+    documentation of its placeholder as an unsubstituted placeholder, and
+    refused to render at all. Scanning the parse tells an inert comment from a
+    live value without anyone writing a YAML comment stripper.
+    """
+    render_problem = _render_config().render_problem
+
+    assert render_problem("t.yaml", "http:\n  x: __ACME_EMAIL__\n") == (
+        "t.yaml: unsubstituted ['__ACME_EMAIL__']"
+    )
+    assert render_problem("t.yaml", "# documented: __ACME_EMAIL__\nhttp:\n  x: 1\n") is None
+    assert "not valid YAML" in (render_problem("t.yaml", "a:\n  b: 1\n c: 2\n") or "")
 
 
 @pytest.mark.parametrize("acme_environment", ["staging", "production"])
