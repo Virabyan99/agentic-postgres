@@ -223,16 +223,43 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "PROJECT_ENVIRONMENT",
     "PROJECT_DOMAIN",
     "HEALTH_ROUTER_NAME",
+    # Session 3. Every one is project-derived, so this is the right file for
+    # them: the image references they are used beside come from versions.env,
+    # and the three env files must stay disjoint (ADR 0013).
+    #
+    # Emitted with their units already attached -- `128MB`, `768m` -- rather
+    # than as bare integers. compose.yaml then interpolates a finished value
+    # instead of concatenating a suffix onto one, which it cannot do anyway,
+    # and the unit a number is in stops being something a reader has to infer
+    # from the variable's name.
+    "POSTGRES_DATABASE_NAME",
+    "POSTGRES_SHARED_BUFFERS",
+    "POSTGRES_MAX_CONNECTIONS",
+    "POSTGRES_WORK_MEM",
+    "POSTGRES_MAINTENANCE_WORK_MEM",
+    "POSTGRES_MEMORY_LIMIT",
+    "POSTGRES_SHM_SIZE",
+    "MIGRATIONS_TABLE",
 )
 
+#: Where dbmate records applied versions. A constant rather than a manifest
+#: field: the ledger's location is part of the migration contract, and a
+#: project that could choose it could point two projects at one table.
+MIGRATIONS_TABLE = "app_private.schema_migrations"
 
-def build_compose_env(identity: naming.ProjectIdentity) -> bytes:
+
+def build_compose_env(identity: naming.ProjectIdentity, budget: dict[str, int]) -> bytes:
     """Exactly :data:`COMPOSE_ENV_KEYS`, in that order, and nothing else.
 
     Anything from ``versions.env`` belongs to ``versions.env``, and anything
     from ``host.yaml`` belongs to the root-owned runtime env file: all three
     must define disjoint namespaces so ``bin/compose.sh`` can prove none of
     them silently overrides another regardless of ``--env-file`` ordering.
+
+    ``budget`` is passed in already resolved, from ``config.database_budget``.
+    Resolving it here would be a second place that decides what a manifest
+    without a `shared_buffers_mb` means, and the two would agree until one of
+    them was changed.
     """
     values = {
         "COMPOSE_PROJECT_NAME": identity.compose_project_name,
@@ -243,6 +270,18 @@ def build_compose_env(identity: naming.ProjectIdentity) -> bytes:
         "PROJECT_ENVIRONMENT": identity.environment,
         "PROJECT_DOMAIN": identity.domain,
         "HEALTH_ROUTER_NAME": identity.health_router,
+        "POSTGRES_DATABASE_NAME": identity.database_name,
+        "POSTGRES_SHARED_BUFFERS": f"{budget['shared_buffers_mb']}MB",
+        "POSTGRES_MAX_CONNECTIONS": str(budget["max_connections"]),
+        "POSTGRES_WORK_MEM": f"{budget['work_mem_mb']}MB",
+        "POSTGRES_MAINTENANCE_WORK_MEM": f"{budget['maintenance_work_mem_mb']}MB",
+        # Lowercase `m` is Docker's byte suffix; uppercase `MB` is
+        # PostgreSQL's. They are different spellings on purpose, because they
+        # are read by different parsers, and a value that satisfied both would
+        # be a coincidence rather than a fact.
+        "POSTGRES_MEMORY_LIMIT": f"{budget['memory_limit_mb']}m",
+        "POSTGRES_SHM_SIZE": f"{budget['shm_size_mb']}m",
+        "MIGRATIONS_TABLE": MIGRATIONS_TABLE,
     }
     lines = [
         "# Generated. Do not edit; do not shell-source.",
@@ -454,7 +493,10 @@ def render_project(
 
         try:
             write_private(staging / "outputs.json", naming.canonical_json(outputs))
-            write_private(staging / "compose.env", build_compose_env(identity))
+            write_private(
+                staging / "compose.env",
+                build_compose_env(identity, outputs["database"]["budget"]),
+            )
             write_private(staging / "rendered-summary.txt", build_summary(outputs))
 
             staged = staging / "outputs.json"

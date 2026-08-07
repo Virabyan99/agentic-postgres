@@ -416,17 +416,31 @@ main() {
     die 10 "'${subcommand}' would start or create a container; this requires --runtime with root."
   fi
 
-  # ACME state is a bind mount, so `down -v` cannot reach it -- but refusing the
-  # flag removes the question entirely, and a deleted production ACME file is
-  # how a failed renewal becomes an exhausted Let's Encrypt rate limit.
-  if [ "${EDGE}" -eq 1 ]; then
-    local argument
-    for argument in "${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"}"; do
-      case "${argument}" in
-        -v|--volumes) die 2 "--volumes is refused in edge mode; it endangers ACME state." ;;
-      esac
-    done
-  fi
+  # Refused in BOTH scopes, for two different reasons that arrive at the same
+  # rule (ADR 0030).
+  #
+  # In edge scope: ACME state is a bind mount, so `down -v` cannot reach it --
+  # but refusing the flag removes the question entirely, and a deleted
+  # production ACME file is how a failed renewal becomes an exhausted Let's
+  # Encrypt rate limit.
+  #
+  # In project scope, from Session 3: POSTGRES_VOLUME_NAME finally holds
+  # something. `down -v` is the one command that destroys a database while
+  # looking like a stop -- same word an operator types to free a port, same
+  # muscle memory, and no confirmation. Volume removal exists in exactly one
+  # place, and it is not this one: an explicit disposable-project command that
+  # refuses any key but the declared disposable one.
+  local argument
+  for argument in "${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"}"; do
+    case "${argument}" in
+      -v|--volumes)
+        if [ "${EDGE}" -eq 1 ]; then
+          die 2 "--volumes is refused in edge mode; it endangers ACME state."
+        fi
+        die 2 "--volumes is refused in project mode; it would destroy the database volume."
+        ;;
+    esac
+  done
 
   if in_list "${subcommand}" "${NEEDS_DAEMON}"; then
     docker info >/dev/null 2>&1 \

@@ -263,12 +263,21 @@ class ProjectIdentity:
     edge_network: str
     internal_network: str
     postgres_volume: str
-    #: The PostgreSQL container name, declared rather than predicted. It happens
-    #: to coincide with what Compose would generate from the project and service
-    #: names today, and that coincidence is not what makes it correct: Session 3
-    #: sets `container_name:` explicitly so the identity a test asserts is the
-    #: one the Compose model states, not one inferred from a naming algorithm
-    #: that belongs to another project and can change under us.
+    #: The name Compose gives the PostgreSQL container: `<project>-<service>-1`.
+    #:
+    #: This is a *prediction* of Compose's own naming, and it is deliberately
+    #: not enforced with `container_name:`. The model forbids that key
+    #: (`test_model_does_not_use_container_name`) because it is not
+    #: project-scoped, and Session 3 is not an ADR-backed reason to weaken a
+    #: passing contract test -- so the identity is recorded here and *checked
+    #: against reality* on the host instead. `DEP-ISO-003` compares this string
+    #: to the container actually running in Run 8; until then it is unverified,
+    #: and it is written down in one place so that the live test compares
+    #: against the rendered document rather than against a second f-string.
+    #:
+    #: It carries no isolation weight of its own: it is a function of
+    #: `compose_project_name`, which is already in MUST_DIFFER, so two projects
+    #: cannot collide here without colliding there first. See D55.
     postgres_container: str
 
     database_name: str

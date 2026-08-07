@@ -231,7 +231,20 @@ def test_a_later_session_secret_is_not_active_now(tmp_path: Path, raw: dict[str,
     assert [s["name"] for s in secrets_contract.active_secrets(document, 2)] == [
         "session2_sentinel"
     ]
-    assert len(secrets_contract.active_secrets(document, 3)) == 2
+    # Membership, not a count. The count was 2 while Session 3 declared no
+    # secrets of its own; now that it declares two, a length assertion has to be
+    # edited every time the contract grows -- and the property under test was
+    # never about how many there are. What matters is that the injected
+    # session-3 secret appears at 3, does not appear at 2, and that the
+    # session-2 set is exactly the secrets introduced by session 2 or earlier.
+    at_two = {s["name"] for s in secrets_contract.active_secrets(document, 2)}
+    at_three = {s["name"] for s in secrets_contract.active_secrets(document, 3)}
+    assert "db_password_ref" in at_three
+    assert "db_password_ref" not in at_two
+    assert at_two < at_three, "session 2's grants must be a strict subset of session 3's"
+    assert all(
+        s["introduced_in_session"] <= 2 for s in secrets_contract.active_secrets(document, 2)
+    )
     assert secrets_contract.granted_services(document, 2) == {"secret-check"}
 
 

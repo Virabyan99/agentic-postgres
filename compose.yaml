@@ -42,8 +42,12 @@ services:
     networks:
       - edge
       - internal
+    # Mounted where `postgres` mounts it, not at the pre-18 `/data` path. The
+    # probe never starts, so nothing here breaks either way -- but this is the
+    # only other mount target in the repository, and a wrong example is how the
+    # wrong path gets copied into the service that does start. See D53.
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql
 
   # Session 2's public HTTPS target. Deliberately trivial: it exists so that
   # "Traefik routes this project, with a trusted certificate, and returns this
@@ -122,6 +126,122 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     user: "65532:65532"
+    networks:
+      - internal
+
+  # Session 3's cluster. Everything here that looks like hardening is a
+  # requirement with a test behind it, not a precaution:
+  #
+  #   * `internal` only, no `ports`, no Traefik label of any kind -- DBX-PG-002.
+  #     The internal network is `internal: true`, so this has no route off the
+  #     host at all; SEC-NET-001's external scan of 5432 measures a firewall
+  #     from Session 3 on rather than measuring an absence.
+  #   * the volume mounts at `/var/lib/postgresql`, which is what the image
+  #     declares as its VOLUME -- NOT at PGDATA (`/var/lib/postgresql/18/docker`)
+  #     and not at the pre-18 `/var/lib/postgresql/data`. All three were
+  #     measured: the pre-18 path makes the image refuse to start, and mounting
+  #     at PGDATA works while silently leaving an anonymous volume on the
+  #     parent. Two of the three persist data, so "the row survived" is not the
+  #     property that distinguishes them. See D53.
+  #   * `user: "999:999"` is the image's own postgres uid/gid, measured rather
+  #     than assumed -- it is not the 65532 the Session 2 services use. Running
+  #     as that user directly rather than letting the entrypoint gosu down from
+  #     root also leaves PGDATA owned `999:999` instead of `999:0`.
+  #     secrets.required.yaml must name the same numbers, and
+  #     tests/contract/test_secret_contract.py cross-checks the two.
+  #   * `shm_size` exceeds `shared_buffers`. PostgreSQL's dynamic shared memory
+  #     for parallel query lands in /dev/shm, and Docker's default is 64 MiB.
+  #   * `mem_limit` is deliberately larger than the manifest's unreclaimable
+  #     budget. A container limit caps page cache too; set at the budget, the
+  #     cluster runs in permanent reclaim and never says why it is slow.
+  #
+  # No `container_name`. The model's standing rule holds and the name Compose
+  # derives is recorded in outputs.json instead; Run 8 compares that against the
+  # container actually running.
+  postgres:
+    image: ${POSTGRES_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [session3]
+    restart: "on-failure:5"
+    user: "999:999"
+    stop_grace_period: 1m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:?required}
+    shm_size: ${POSTGRES_SHM_SIZE:?required}
+    environment:
+      POSTGRES_DB: ${POSTGRES_DATABASE_NAME:?required}
+      POSTGRES_USER: postgres
+      # The value never appears here, in compose.env, or in any process
+      # argument. The entrypoint's own file_env reads the path.
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_init_superuser_password
+      # Locale and checksums are initdb-time and cannot be changed afterwards
+      # without a dump and reload, which is why they are pinned at the model
+      # rather than left to whatever the image defaults to this year.
+      POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8 --locale=C"
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:?required}
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:?required}
+      - -c
+      - work_mem=${POSTGRES_WORK_MEM:?required}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:?required}
+      # Listening on every interface inside a network with no route off the
+      # host. The boundary is the network and the absence of a published port,
+      # not a bind address -- binding to localhost would also make the cluster
+      # unreachable from its own project's services.
+      - -c
+      - listen_addresses=*
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DATABASE_NAME:?required} -q"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    networks:
+      - internal
+    volumes:
+      - postgres-data:/var/lib/postgresql
+
+  # The migration plane (ADR 0026). A separate service from `postgres` because
+  # it is a separate authority: dbmate connects as `migration_user`, which holds
+  # LOGIN and NOINHERIT and none of SUPERUSER, CREATEDB, CREATEROLE, REPLICATION
+  # or BYPASSRLS, and reaches owner authority only by an explicit membership it
+  # must SET into.
+  #
+  # The flag positions below are measured, not guessed. In dbmate 2.34.1
+  # `--migrations-dir`, `--migrations-table`, `--no-dump-schema` and `--env-file`
+  # are GLOBAL and must precede the subcommand, while `--strict` is
+  # subcommand-only and exists on `up` and `migrate` but not on `status`. A flag
+  # in the wrong position exits 2 with "flag provided but not defined"; a global
+  # flag silently omitted writes the ledger somewhere else entirely.
+  #
+  # No connection string here. `--env` names an environment variable that the
+  # runtime override supplies from a secret file, so the URL -- which carries a
+  # password -- never enters compose.env, the model, or a process argument.
+  dbmate:
+    image: ${DBMATE_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [migration]
+    restart: "no"
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    entrypoint: ["/usr/local/bin/dbmate"]
+    command:
+      - --env
+      - APG_MIGRATION_DATABASE_URL
+      - --migrations-dir
+      - /migrations
+      - --migrations-table
+      - ${MIGRATIONS_TABLE:?required}
+      - --no-dump-schema
+      - status
     networks:
       - internal
 

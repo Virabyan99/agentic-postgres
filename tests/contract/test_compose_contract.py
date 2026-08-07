@@ -155,6 +155,79 @@ def test_built_services_run_as_a_fixed_non_root_user() -> None:
         assert "no-new-privileges:true" in service["security_opt"], name
 
 
+# ---------------------------------------------------------------------------
+# The Session 3 cluster is project-internal (DBX-PG-002, offline half)
+# ---------------------------------------------------------------------------
+
+
+def test_postgres_joins_only_the_internal_network() -> None:
+    """The boundary is the network, not a bind address.
+
+    `internal: true` on that network means no route off the host at all. This
+    is the claim SEC-NET-001's external scan of 5432 measures from Session 3
+    on -- until now it found the port closed because nothing was listening,
+    which is a different fact wearing the same green tick.
+    """
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    assert document["services"]["postgres"]["networks"] == ["internal"]
+    assert document["networks"]["internal"]["internal"] is True
+
+
+def test_postgres_carries_no_traefik_label_of_any_kind() -> None:
+    """Not `traefik.enable`, not a router, not even the network hint.
+
+    Checked over every key rather than against a list of known-dangerous ones:
+    the edge-probe carries `traefik.docker.network` legitimately, so a test
+    that only looked for `traefik.enable` would let a router label through.
+    """
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    labels = document["services"]["postgres"].get("labels", {}) or {}
+    offenders = [key for key in labels if "traefik" in str(key).lower()]
+    assert not offenders, f"postgres carries Traefik labels: {offenders}"
+
+
+def test_the_migration_service_is_also_project_internal() -> None:
+    """dbmate reaches the cluster over the project network and nothing else."""
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    dbmate = document["services"]["dbmate"]
+    assert dbmate["networks"] == ["internal"]
+    assert "ports" not in dbmate
+    labels = dbmate.get("labels", {}) or {}
+    assert not [key for key in labels if "traefik" in str(key).lower()]
+
+
+def test_no_database_credential_appears_in_the_model_or_the_env() -> None:
+    """The credential reaches dbmate by env-var name, never by value.
+
+    `--env APG_MIGRATION_DATABASE_URL` names a variable the runtime override
+    fills from a secret file. A connection string here -- or in compose.env,
+    which is world-readable within its 0600 directory and is interpolated into
+    process arguments -- would put a password where `docker inspect` shows it.
+    """
+    text = MODEL.read_text(encoding="utf-8")
+    for marker in ("postgresql://", "postgres://", "PGPASSWORD"):
+        assert marker not in text, f"compose.yaml contains {marker}"
+
+    for directory in (ALPHA, ALPINE):
+        env = (directory / "compose.env").read_text(encoding="utf-8")
+        for marker in ("postgresql://", "postgres://", "PASSWORD", "PGPASSWORD"):
+            assert marker not in env, f"{directory.name}/compose.env contains {marker}"
+
+
+def test_the_postgres_memory_limit_exceeds_the_declared_budget() -> None:
+    """The measured failure, asserted on the rendered pair rather than the rule.
+
+    `config` refuses a manifest whose limit is at the budget. This checks the
+    other end -- that what actually reaches Compose still satisfies it, so a
+    future renderer that emitted the budget into POSTGRES_MEMORY_LIMIT would
+    fail here rather than on a host, where it looks like a slow cluster.
+    """
+    for directory in (ALPHA, ALPINE):
+        budget = outputs(directory)["database"]["budget"]
+        assert budget["memory_limit_mb"] > budget["unreclaimable_mb"], directory.name
+        assert budget["shm_size_mb"] >= budget["shared_buffers_mb"], directory.name
+
+
 def test_the_edge_probe_is_inert_without_the_runtime_override() -> None:
     """`traefik.enable` is absent from the committed model, deliberately.
 
