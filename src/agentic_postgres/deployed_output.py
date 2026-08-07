@@ -37,11 +37,28 @@ from typing import Any
 from agentic_postgres import config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 PROJECT_STATE_ROOT = Path("/etc/agentic-postgres/projects")
 RENDERED_ROOT = Path("/var/lib/agentic-postgres/rendered")
 
+#: The database facts of a deployment nobody has read yet.
+#:
+#: Session 3 introduces `database.observed`, and the deploy path publishes a
+#: document before anything has interrogated the cluster. This is the honest
+#: value for that moment, and it is a named constant rather than a literal at
+#: the call site so that "we did not look" cannot be spelled two ways. Reading
+#: the cluster is `bin/session-03-check.sh --mode host`, which replaces this
+#: wholesale; there is deliberately no path that fills in one member and leaves
+#: the status saying nothing was observed.
+NOT_OBSERVED: dict[str, Any] = {
+    "status": "not_observed",
+    "server_version": None,
+    "extensions": None,
+    "memory": None,
+}
+
 __all__ = [
+    "NOT_OBSERVED",
     "PROJECT_STATE_ROOT",
     "RENDERED_ROOT",
     "SCHEMA_VERSION",
@@ -78,6 +95,7 @@ def build_deployed_document(
     secrets: dict[str, Any],
     runtime: dict[str, Any],
     health_status: str,
+    database_observed: dict[str, Any],
 ) -> dict[str, Any]:
     """Assemble a deployed document from a rendered one plus observed facts.
 
@@ -140,7 +158,13 @@ def build_deployed_document(
         "bootstrap": dict(bootstrap),
         "secrets": dict(secrets),
         "runtime": dict(runtime),
-        "database": rendered["database"],
+        # Derived members carried from the render, plus the one measured member.
+        # `database_observed` is a required argument with no default for the
+        # same reason every other observation here is: a default would let a
+        # caller that measured nothing produce a document indistinguishable
+        # from one that did, and `NOT_OBSERVED` exists so that saying so is
+        # one import rather than four literals.
+        "database": {**rendered["database"], "observed": dict(database_observed)},
         "template_version": rendered["template_version"],
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }

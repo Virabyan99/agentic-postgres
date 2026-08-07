@@ -242,6 +242,103 @@ def test_mcp_rows_may_not_exceed_api_rows(tmp_path: Path, base: dict[str, Any]) 
 
 
 # ---------------------------------------------------------------------------
+# The Session 3 memory budget (D52, ADR 0007 for the bounds)
+# ---------------------------------------------------------------------------
+
+
+def test_budget_defaults_match_the_schema() -> None:
+    """`default` in JSON Schema annotates; it does not populate.
+
+    A validator accepts a manifest without these keys and hands it back
+    unchanged, so `config.DATABASE_BUDGET_DEFAULTS` is what actually decides
+    the value. This is the test that stops the two from drifting -- a schema
+    default nothing reads is documentation that lies.
+    """
+    import json
+
+    schema = json.loads((REPO_ROOT / "schemas" / "project.schema.json").read_text(encoding="utf-8"))
+    properties = schema["properties"]["database"]["properties"]
+    for key, value in config.DATABASE_BUDGET_DEFAULTS.items():
+        assert properties[key]["default"] == value, key
+
+
+def test_a_manifest_that_declares_no_budget_gets_the_defaults(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    document = check(tmp_path, base)
+    budget = config.database_budget(document["database"])
+    for key, value in config.DATABASE_BUDGET_DEFAULTS.items():
+        assert budget[key] == value, key
+
+
+def test_the_derived_total_excludes_work_mem(tmp_path: Path, base: dict[str, Any]) -> None:
+    """Measured, not reasoned: `work_mem` is a per-sort ceiling, not a reservation.
+
+    Charging `max_connections x work_mem` would add 200 MiB per cluster at the
+    defaults, for memory two measured clusters never allocated. A guardrail that
+    refuses configurations which fit is one that gets raised.
+    """
+    budget = config.database_budget(base["database"])
+    assert budget["unreclaimable_mb"] == (
+        budget["shared_buffers_mb"]
+        + budget["maintenance_work_mem_mb"]
+        + budget["max_connections"] * config.PER_BACKEND_ANON_MB
+    )
+    base["database"]["work_mem_mb"] = 64
+    raised = config.database_budget(base["database"])
+    assert raised["unreclaimable_mb"] == budget["unreclaimable_mb"]
+
+
+def test_shm_size_below_shared_buffers_is_refused(tmp_path: Path, base: dict[str, Any]) -> None:
+    """Docker's 64 MiB default /dev/shm is below the default shared_buffers."""
+    base["database"]["shared_buffers_mb"] = 256
+    base["database"]["shm_size_mb"] = 64
+    with pytest.raises(config.ManifestError, match="shm_size_mb"):
+        check(tmp_path, base)
+
+
+def test_a_memory_limit_at_the_budget_is_refused(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The measured failure: a limit equal to the budget caps page cache too.
+
+    Two clusters at 512 MiB pegged their limit with several hundred reclaim
+    events and no OOM kill -- functional, permanently thrashing, and invisible
+    to anything that only asks whether the container is running.
+    """
+    budget = config.database_budget(base["database"])
+    base["database"]["memory_limit_mb"] = budget["unreclaimable_mb"]
+    with pytest.raises(config.ManifestError, match="does not exceed the unreclaimable budget"):
+        check(tmp_path, base)
+
+
+def test_a_budget_over_the_host_guardrail_is_refused(tmp_path: Path, base: dict[str, Any]) -> None:
+    base["database"]["shared_buffers_mb"] = 1024
+    base["database"]["maintenance_work_mem_mb"] = 512
+    base["database"]["max_connections"] = 200
+    base["database"]["memory_limit_mb"] = 4096
+    base["database"]["shm_size_mb"] = 1024
+    with pytest.raises(config.ManifestError, match="exceeds the per-host"):
+        check(tmp_path, base)
+
+
+def test_two_projects_at_the_defaults_fit_the_host(tmp_path: Path) -> None:
+    """The claim D52 actually makes, checked rather than asserted in prose.
+
+    Both shipped manifests, summed, against the declared guardrail. Measured
+    consumption was lower still (~218 MiB per cluster against 292 charged), and
+    the guardrail is conservative in the direction that costs a redeploy rather
+    than an OOM kill on a host with no swap.
+    """
+    total = 0
+    for path in FIXTURES:
+        document = config.load_project_manifest(path)
+        total += config.database_budget(document["database"])["unreclaimable_mb"]
+    assert total <= config.HOST_MEMORY_GUARDRAIL_MB, (
+        f"two projects at their declared budgets need {total} MiB, "
+        f"over the {config.HOST_MEMORY_GUARDRAIL_MB} MiB guardrail"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Conditional rules
 # ---------------------------------------------------------------------------
 

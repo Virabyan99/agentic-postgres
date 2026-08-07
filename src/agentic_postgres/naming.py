@@ -263,6 +263,13 @@ class ProjectIdentity:
     edge_network: str
     internal_network: str
     postgres_volume: str
+    #: The PostgreSQL container name, declared rather than predicted. It happens
+    #: to coincide with what Compose would generate from the project and service
+    #: names today, and that coincidence is not what makes it correct: Session 3
+    #: sets `container_name:` explicitly so the identity a test asserts is the
+    #: one the Compose model states, not one inferred from a naming algorithm
+    #: that belongs to another project and can change under us.
+    postgres_container: str
 
     database_name: str
     roles: dict[str, str] = field(default_factory=dict)
@@ -329,6 +336,9 @@ def derive(
         edge_network=compose_name(f"apg-{key}-edge", context="compose_network_edge"),
         internal_network=compose_name(f"apg-{key}-internal", context="compose_network_internal"),
         postgres_volume=compose_name(f"apg-{key}-postgres", context="compose_volume_postgres"),
+        postgres_container=compose_name(
+            f"apg-{key}-postgres-1", context="compose_container_postgres"
+        ),
         database_name=postgres_identifier(
             database_name if database_name else key_sql, context="postgres_database"
         ),

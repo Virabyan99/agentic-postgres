@@ -42,6 +42,10 @@ ISOLATED_FIELDS = (
     ("compose", "networks", "internal"),
     ("compose", "volumes", "postgres"),
     ("database", "name"),
+    # Session 3. The volume name above and the container name here are the two
+    # identities deciding whether two projects can share a cluster's storage or
+    # its process, which is exactly what DEP-ISO-003 denies.
+    ("database", "container"),
     ("jwt", "issuer"),
     ("jwt", "audience"),
     ("secrets", "namespace"),

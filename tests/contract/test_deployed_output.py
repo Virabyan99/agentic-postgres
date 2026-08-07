@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, deployed_output
+from agentic_postgres import REPO_ROOT, config, deployed_output
 from agentic_postgres.config import ManifestError
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
@@ -79,6 +79,15 @@ OBSERVED = {
         "state_directory": f"/etc/agentic-postgres/projects/{KEY}",
         "compose_model_sha256": "d" * 64,
     },
+    # A real Session 3 reading of a cluster. The default here is a measurement
+    # rather than `NOT_OBSERVED`, so that the tests below exercise the branch a
+    # deployed host is actually in; the not-observed case gets its own test.
+    "database_observed": {
+        "status": "observed",
+        "server_version": "18.4",
+        "extensions": {"vector": "0.8.6", "plpgsql": "1.0"},
+        "memory": {"anon_mb": 62, "shmem_mb": 140, "file_mb": 410},
+    },
 }
 
 
@@ -96,7 +105,7 @@ def build(rendered: dict, **overrides):
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 2
+    assert document["schema_version"] == 3
     assert document["project"]["key"] == KEY
 
 
@@ -132,6 +141,87 @@ def test_the_direct_database_endpoint_stays_unavailable(rendered: dict) -> None:
     assert document["database"]["direct"]["status"] == "unavailable"
     assert document["database"]["direct"]["url"] is None
     assert document["database"]["pooled"]["url"] is None
+
+
+# ---------------------------------------------------------------------------
+# Version 3: the observed block (ADR 0027)
+# ---------------------------------------------------------------------------
+
+
+def test_the_observed_block_is_the_callers_measurement(rendered: dict) -> None:
+    """This module observes nothing; it records what it was handed."""
+    document = build(rendered)
+    assert document["database"]["observed"] == OBSERVED["database_observed"]
+
+
+def test_the_derived_database_members_are_carried_not_rebuilt(rendered: dict) -> None:
+    """Everything except `observed` comes from the render, unchanged.
+
+    Re-deriving them here would be a second path to the same names, and the
+    failure that produces is a deployed document describing a project the
+    render never made -- ADR 0023's defect arriving from inside the tool.
+    """
+    document = build(rendered)
+    for key in ("name", "container", "roles", "budget", "pooled", "direct"):
+        assert document["database"][key] == rendered["database"][key], key
+
+
+def test_a_deployment_that_measured_nothing_says_so(rendered: dict) -> None:
+    """`NOT_OBSERVED` is a valid document, and it is distinguishable.
+
+    Session 2's deploy path publishes this. The property that matters is that
+    it cannot be mistaken for a cluster that was read and found empty.
+    """
+    document = build(rendered, database_observed=deployed_output.NOT_OBSERVED)
+    observed = document["database"]["observed"]
+    assert observed["status"] == "not_observed"
+    assert observed["server_version"] is None
+    assert observed["extensions"] is None
+    assert observed["memory"] is None
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        pytest.param({"status": "not_observed", "server_version": "18.4"}, id="version-while-not"),
+        pytest.param(
+            {"status": "not_observed", "extensions": {"vector": "0.8.6"}}, id="ext-while-not"
+        ),
+        pytest.param(
+            {"status": "not_observed", "memory": {"anon_mb": 1, "shmem_mb": 1, "file_mb": 1}},
+            id="memory-while-not",
+        ),
+    ],
+)
+def test_not_observed_cannot_carry_a_measurement(rendered: dict, broken: dict) -> None:
+    """The half-filled block is the failure mode worth refusing.
+
+    A status saying nothing was read, beside a value that could only have come
+    from reading, is this repository's recurring defect in one object.
+    """
+    observed = {**deployed_output.NOT_OBSERVED, **broken}
+    with pytest.raises(ManifestError):
+        build(rendered, database_observed=observed)
+
+
+def test_an_observed_block_is_required(rendered: dict) -> None:
+    """Omitting it entirely must fail rather than default to a measurement."""
+    document = build(rendered)
+    del document["database"]["observed"]
+    with pytest.raises(ManifestError):
+        deployed_output.validate_deployed_document(document)
+
+
+def test_a_rendered_document_cannot_carry_an_observed_block(rendered: dict) -> None:
+    """The rendered branch has no `observed`, so this must not validate.
+
+    The two branches have separate definitions precisely so that this is a
+    schema failure rather than a convention nobody checks (ADR 0012).
+    """
+    smuggled = json.loads(json.dumps(rendered))
+    smuggled["database"]["observed"] = dict(deployed_output.NOT_OBSERVED)
+    with pytest.raises(ManifestError):
+        config.validate_against_schema(smuggled, "outputs.schema.json")
 
 
 def test_a_placeholder_the_schema_cannot_see_is_refused(rendered: dict) -> None:

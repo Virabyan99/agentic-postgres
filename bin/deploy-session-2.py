@@ -511,6 +511,11 @@ def main(argv: list[str] | None = None) -> int:
             "compose_model_sha256": _model_digest(release, rendered_directory),
         },
         health_status=health_status,
+        # This path deploys through Session 2 and interrogates no cluster, so
+        # the honest database observation is that nobody looked. Session 3's
+        # `bin/session-03-check.sh --mode host` is what replaces this, and it
+        # replaces the block wholesale rather than filling in members.
+        database_observed=deployed_output.NOT_OBSERVED,
     )
     destination = deployed_output.write_deployed_document(
         document, deployed_output.deployed_path(key)

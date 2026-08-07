@@ -44,6 +44,7 @@ MUST_DIFFER = (
     ("compose", "networks", "internal"),
     ("compose", "volumes", "postgres"),
     ("database", "name"),
+    ("database", "container"),
     ("routes", "rest"),
     ("routes", "app"),
     ("routes", "mcp"),
@@ -65,6 +66,12 @@ MAY_MATCH = (
     ("project", "environment"),
     ("database", "pooled", "status"),
     ("database", "direct", "status"),
+    # The memory budget is a capacity decision, not an identity. Two projects
+    # left at the defaults have the same one, and asserting that here is what
+    # stops a future reader from adding it to MUST_DIFFER on the assumption
+    # that everything under `database` is project-scoped.
+    ("database", "budget", "shared_buffers_mb"),
+    ("database", "budget", "unreclaimable_mb"),
     ("inputs", "capabilities_sha256"),
     ("inputs", "versions_lock_sha256"),
     ("inputs", "source_specification_sha256"),

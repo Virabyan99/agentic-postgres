@@ -118,7 +118,82 @@ CROSS_FIELD_RELATIONS: tuple[str, ...] = (
     "Neither base path may overlap a reserved route",
     "`database.pooled_public_cidrs` must be non-empty when `database.pooled_public` is true, "
     "and may not contain a default route",
+    "`database.shm_size_mb` must be at least `database.shared_buffers_mb`",
+    "`database.memory_limit_mb` must exceed the derived unreclaimable budget",
+    "The derived unreclaimable budget must not exceed the per-project memory guardrail",
 )
+
+# ---------------------------------------------------------------------------
+# The Session 3 memory budget (D52, plan §3.3)
+# ---------------------------------------------------------------------------
+
+#: Defaults for the manifest's database budget. Duplicated from
+#: `schemas/project.schema.json` because JSON Schema `default` annotates, it does
+#: not populate — a validator will happily accept a document without these keys
+#: and hand it back unchanged. ADR 0007 keeps the *bounds* in the schema and this
+#: is not a bound; `test_budget_defaults_match_the_schema` asserts the two
+#: agree, so the duplication cannot drift silently.
+DATABASE_BUDGET_DEFAULTS: dict[str, int] = {
+    "shared_buffers_mb": 128,
+    "max_connections": 50,
+    "work_mem_mb": 4,
+    "maintenance_work_mem_mb": 64,
+    "memory_limit_mb": 768,
+    "shm_size_mb": 256,
+}
+
+#: Anonymous memory charged per backend, in MiB. Measured, not reasoned: two
+#: clusters at the defaults held 62 MiB of anonymous memory across 49 backends,
+#: which is ~1.3 MiB each. Charged at 2 so the guardrail is conservative in the
+#: direction that costs a redeploy rather than an OOM kill.
+#:
+#: `work_mem` deliberately does not appear here. The obvious formula charges
+#: `max_connections * work_mem`, which at the defaults would be 200 MiB per
+#: cluster of memory that measurement says is never allocated: `work_mem` is a
+#: per-sort-node ceiling, taken on demand and released, not a per-backend
+#: reservation. Charging it would make the guardrail refuse configurations that
+#: fit comfortably, and a guardrail that cries wolf gets raised.
+PER_BACKEND_ANON_MB = 2
+
+#: What one host may commit to PostgreSQL clusters, in MiB, across every project
+#: deployed on it. The host is 3814 MiB with no swap and roughly 681 MiB already
+#: held by Traefik, the socket proxy and the project containers. This leaves
+#: well over a gigabyte unspoken for, deliberately: with no swap the OOM killer
+#: is the only backstop, and it does not choose politely — it can take Traefik,
+#: which drops every project's ingress at once.
+HOST_MEMORY_GUARDRAIL_MB = 1600
+
+
+def unreclaimable_mb(budget: dict[str, int]) -> int:
+    """What the host must actually find for this cluster, in MiB.
+
+    Page cache is excluded because it is reclaimable, and on a no-swap box that
+    is the only distinction that matters: the kernel will evict cache under
+    pressure and will kill a process rather than evict shared memory. A figure
+    that summed everything the container touches would be larger, more
+    impressive, and useless for deciding whether a second cluster fits.
+    """
+    return (
+        budget["shared_buffers_mb"]
+        + budget["maintenance_work_mem_mb"]
+        + budget["max_connections"] * PER_BACKEND_ANON_MB
+    )
+
+
+def database_budget(database: dict[str, Any]) -> dict[str, int]:
+    """Resolve the manifest's budget against the defaults, and derive the total.
+
+    Returns a new mapping; the manifest is not mutated. The derived member is
+    computed here rather than at every call site so there is one answer to
+    "how much does this cluster cost", which is the whole point of ADR 0002
+    applied to a number instead of a name.
+    """
+    resolved = {
+        key: int(database.get(key, default)) for key, default in DATABASE_BUDGET_DEFAULTS.items()
+    }
+    resolved["unreclaimable_mb"] = unreclaimable_mb(resolved)
+    return resolved
+
 
 #: Plan decision X. pgBackRest stanza names: lowercase alphanumeric plus `-`
 #: and `_`, starting alphanumeric, at most 63 characters. No whitespace and no
@@ -440,8 +515,44 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
             raise ManifestError(f"database.name exceeds 63 bytes: {name!r}")
 
     _validate_pooled_public(database)
+    _validate_memory_budget(database)
     _validate_storage(document.get("storage", {}))
     _validate_backup(document.get("backup", {}))
+
+
+def _validate_memory_budget(database: dict[str, Any]) -> None:
+    """The three relations JSON Schema cannot express (D52, plan §3.3).
+
+    All three refuse at render time, with no host involved, which is the only
+    point at which refusing is cheap: the alternative is an operator finding out
+    from a killed container which, with no swap, may not even be this one.
+    """
+    budget = database_budget(database)
+    required = budget["unreclaimable_mb"]
+
+    if budget["shm_size_mb"] < budget["shared_buffers_mb"]:
+        raise ManifestError(
+            f"database.shm_size_mb ({budget['shm_size_mb']}) is below "
+            f"database.shared_buffers_mb ({budget['shared_buffers_mb']}); "
+            "PostgreSQL's dynamic shared memory lands in /dev/shm, and a parallel "
+            "query that cannot allocate there fails at run time, not at start"
+        )
+
+    if budget["memory_limit_mb"] <= required:
+        raise ManifestError(
+            f"database.memory_limit_mb ({budget['memory_limit_mb']}) does not exceed the "
+            f"unreclaimable budget ({required} MiB). A container limit caps page cache "
+            "as well as anonymous memory, so a limit set at the budget leaves the cluster "
+            "in permanent cache reclaim: it will run, and it will never report why it is slow"
+        )
+
+    if required > HOST_MEMORY_GUARDRAIL_MB:
+        raise ManifestError(
+            f"the derived unreclaimable budget ({required} MiB) exceeds the per-host "
+            f"guardrail ({HOST_MEMORY_GUARDRAIL_MB} MiB). Reduce shared_buffers_mb, "
+            "maintenance_work_mem_mb or max_connections; do not raise the guardrail to "
+            "match a manifest, because the host has no swap and nothing below it to give"
+        )
 
 
 def _validate_pooled_public(database: dict[str, Any]) -> None:

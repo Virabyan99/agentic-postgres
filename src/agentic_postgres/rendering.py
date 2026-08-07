@@ -136,7 +136,7 @@ def build_outputs(
     )
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
@@ -156,7 +156,13 @@ def build_outputs(
         },
         "database": {
             "name": identity.database_name,
+            "container": identity.postgres_container,
             "roles": dict(identity.roles),
+            # Resolved against the schema's defaults and totalled in one place
+            # (config.database_budget). No `observed` member: a rendered
+            # document has measured nothing, and on this branch the schema
+            # makes the field unrepresentable rather than merely null.
+            "budget": config.database_budget(project["database"]),
             "pooled": dict(unavailable_endpoint),
             "direct": dict(unavailable_endpoint),
         },

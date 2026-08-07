@@ -204,8 +204,14 @@ and live in `src/agentic_postgres/config.py`; they are listed separately.
 |---|---:|---:|---|
 | `api.max_rows` | 1 | 10,000 | Global PostgREST row-return ceiling. |
 | `backup.retain_full` | 1 | 12 | Full backup chains retained. |
+| `database.maintenance_work_mem_mb` | 16 | 512 | VACUUM and index-build working memory. Charged in full against the guardrail because one maintenance operation can hold it for a long time. |
 | `database.max_client_connections` | 1 | 10,000 | PgBouncer client connection ceiling. |
+| `database.max_connections` | 10 | 200 | PostgreSQL max_connections on the cluster itself, not the pooler's ceiling. Deliberately small: Session 4's answer to connection count is a pooler, and a large per-cluster limit would make the pooler decorative. |
+| `database.memory_limit_mb` | 128 | 4,096 | The container mem_limit. NOT the same number as the guardrail: a container limit caps page cache too, so a limit set equal to the unreclaimable budget makes the cluster live in permanent cache reclaim. Measured at 512 MiB with these defaults, two clusters pegged their limit with several hundred reclaim events and no OOM kill. Must exceed the derived unreclaimable budget. |
 | `database.pool_size` | 1 | 1,000 | Server-side pool size. Must not exceed max_client_connections. |
+| `database.shared_buffers_mb` | 16 | 1,024 | PostgreSQL shared_buffers. Counts in full against the memory guardrail: it is shared memory, which no swap can relieve and no cache reclaim can shrink. |
+| `database.shm_size_mb` | 64 | 1,024 | The container /dev/shm size. PostgreSQL's dynamic shared memory for parallel query lands here, and Docker's 64 MiB default is below the default shared_buffers. Must be at least shared_buffers_mb. |
+| `database.work_mem_mb` | 1 | 64 | Per-sort-node working memory. Allocated on demand, so it does not multiply by max_connections in practice; the guardrail charges a flat per-backend anonymous allowance instead. See the Session 3 plan 3.3. |
 | `mcp.max_response_bytes` | 1,024 | 10,485,760 | Agent response size ceiling. |
 | `mcp.max_result_rows` | 1 | 1,000 | Agent read row ceiling. Must not exceed api.max_rows. |
 | `storage.download_url_ttl_seconds` | 60 | 3,600 | Presigned download URL lifetime. |
@@ -220,6 +226,9 @@ enforced in `src/agentic_postgres/config.py`:
 - `api.public_base_path` and `mcp.public_base_path` must not overlap segment-wise
 - Neither base path may overlap a reserved route
 - `database.pooled_public_cidrs` must be non-empty when `database.pooled_public` is true, and may not contain a default route
+- `database.shm_size_mb` must be at least `database.shared_buffers_mb`
+- `database.memory_limit_mb` must exceed the derived unreclaimable budget
+- The derived unreclaimable budget must not exceed the per-project memory guardrail
 
 <!-- END GENERATED: bounds -->
 
