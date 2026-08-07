@@ -13,13 +13,18 @@ into one document describing neither, and the disagreement is exactly the signal
 worth having -- it means the external run measured a host that had already moved
 on.
 
+What each half records under `tests` is a set of *claims* -- guarantees named in
+the words the session is about -- resolved from the acceptance registry and the
+mode's JUnit artifacts by `agentic_postgres.evidence_claims`. It is not the name
+of the suite that ran (ADR 0025).
+
 Session 1's behaviour (`--session 1`, `--artifacts`) is untouched.
 
 Exit codes:
     0  evidence written and status is "passed"
     2  invalid operator input
-    5  a required input is missing or unparseable, the halves disagree, or the
-       session did not pass
+    5  a required input is missing or unparseable, the halves disagree, a claim
+       was not measured, or the session did not pass
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from agentic_postgres import evidence as evidence_module  # noqa: E402
+from agentic_postgres import evidence_claims  # noqa: E402
 from agentic_postgres.naming import canonical_json  # noqa: E402
 
 #: Fields that must agree between the host-side and external-side evidence.
@@ -57,33 +63,100 @@ def read_json(path: Path) -> dict:
         raise SystemExit(5) from None
 
 
-def write_half(mode: str, session: int, project_a_outputs: Path | None, output: Path) -> int:
+def suite_counts(paths: list[Path]) -> dict[str, int]:
+    """What the mode's own suite did, summed over its artifacts.
+
+    Recorded alongside the claims because a claim's verdict says nothing about
+    the rest of the run: a mode whose suite skipped forty tests and proved its
+    two claims is a different situation from one that skipped none, and ADR 0018
+    is the standing rule that a quiet skip must not read as a clean run.
+    """
+    totals = {"passed": 0, "failed": 0, "skipped": 0, "errors": 0}
+    for path in paths:
+        for name, value in evidence_module.parse_junit(path).items():
+            totals[name] += value
+    return totals
+
+
+def write_half(
+    mode: str,
+    session: int,
+    project_a_outputs: Path | None,
+    project_b_outputs: Path | None,
+    junit: list[Path],
+    output: Path,
+) -> int:
     """Write one environment's half of a multi-environment session's evidence.
 
-    The identifying fields come from the deployed document rather than from
+    The identifying fields come from the deployed documents rather than from
     arguments, so the two halves agree by construction when they measured the
     same deployment and disagree loudly when they did not. Asking the operator
     to pass the commit twice would let a copy-paste make them agree on paper.
+
+    ``project_keys`` names the deployment, not the measurement: both halves list
+    every deployed project, and which claims each half actually proved is what
+    ``tests`` and ``claims`` say. Recording only the projects a half touched
+    would make an asymmetric-but-correct pair of runs look like two different
+    systems to ``MUST_AGREE``.
     """
     if project_a_outputs is None:
         print("write-session-evidence: --mode requires --project-a-outputs", file=sys.stderr)
         return 2
+    if not junit:
+        print("write-session-evidence: --mode requires at least one --junit", file=sys.stderr)
+        return 2
 
     deployed = read_json(project_a_outputs)
+    keys = [deployed.get("project", {}).get("key")]
+    if project_b_outputs is not None:
+        keys.append(read_json(project_b_outputs).get("project", {}).get("key"))
+
+    try:
+        claims = evidence_claims.results_for_mode(mode, junit)
+    except evidence_claims.ClaimError as exc:
+        print(f"write-session-evidence: {exc}", file=sys.stderr)
+        print("write-session-evidence: no evidence file was written.", file=sys.stderr)
+        return 5
+
+    try:
+        counts = suite_counts(junit)
+    except evidence_module.EvidenceError as exc:
+        print(f"write-session-evidence: {exc}", file=sys.stderr)
+        print("write-session-evidence: no evidence file was written.", file=sys.stderr)
+        return 5
+
     document = {
         "schema_version": 1,
         "session": session,
         "mode": mode,
         "source_commit": deployed.get("source_commit"),
-        "project_keys": [deployed.get("project", {}).get("key")],
+        "project_keys": sorted(keys),
         "routes": deployed.get("routes"),
         "certificate_sha256": (deployed.get("tls") or {}).get("certificate_sha256"),
-        "tests": {f"{mode}_suite": "passed"},
+        "suites": {mode: counts},
+        "claims": claims,
+        "tests": {claim: result["status"] for claim, result in claims.items()},
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(canonical_json(document))
     print(f"write-session-evidence: wrote {output}")
+    print(
+        f"  {mode} suite            {counts['passed']} passed, {counts['failed']} failed, "
+        f"{counts['skipped']} skipped, {counts['errors']} errors"
+    )
+    for claim, result in sorted(claims.items()):
+        print(f"  {claim:<22}  {result['status']}")
+        for nodeid in result.get("missing_node_ids", []):
+            print(f"      no result recorded for {nodeid}")
+
+    unproved = sorted(claim for claim, result in claims.items() if result["status"] != "passed")
+    if unproved:
+        print(
+            f"write-session-evidence: these claims are not proved by this run: {unproved}",
+            file=sys.stderr,
+        )
+        return 5
     return 0
 
 
@@ -113,6 +186,20 @@ def merge(session: int, host_input: Path, external_input: Path, output: Path) ->
 
     merged = {**host, **external, "session": session, "mode": "merged"}
     merged["tests"] = {**(host.get("tests") or {}), **(external.get("tests") or {})}
+    merged["claims"] = {**(host.get("claims") or {}), **(external.get("claims") or {})}
+    merged["suites"] = {**(host.get("suites") or {}), **(external.get("suites") or {})}
+
+    # A claim neither half recorded is the failure mode this whole mechanism
+    # exists to make loud: the merged document would otherwise be silent about
+    # it, and silence reads as nothing to report.
+    unrecorded = sorted(set(evidence_claims.CLAIMS) - set(merged["tests"]))
+    if unrecorded:
+        print(
+            f"write-session-evidence: neither half recorded these claims: {unrecorded}. "
+            "One of the two environments did not run, or ran with -k.",
+            file=sys.stderr,
+        )
+        return 5
 
     failed = [name for name, status in merged["tests"].items() if status != "passed"]
     merged["status"] = "failed" if failed else "passed"
@@ -151,6 +238,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Write one half of a multi-environment session's evidence.",
     )
     parser.add_argument("--project-a-outputs", type=Path, help="Deployed document for project A.")
+    parser.add_argument("--project-b-outputs", type=Path, help="Deployed document for project B.")
+    parser.add_argument(
+        "--junit",
+        type=Path,
+        action="append",
+        default=[],
+        help="JUnit XML from this mode's run. Repeatable; claims are resolved from all of them.",
+    )
     args = parser.parse_args(argv)
 
     if not 1 <= args.session <= 12:
@@ -164,7 +259,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.mode:
         if not args.output:
             parser.error("--mode requires --output")
-        return write_half(args.mode, args.session, args.project_a_outputs, args.output)
+        return write_half(
+            args.mode,
+            args.session,
+            args.project_a_outputs,
+            args.project_b_outputs,
+            args.junit,
+            args.output,
+        )
 
     artifacts = args.artifacts or (REPO_ROOT / ".generated" / f"session-{args.session:02d}")
 

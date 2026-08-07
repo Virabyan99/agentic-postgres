@@ -88,3 +88,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0022](0022-forbidden-list-drifted-behind-compose.md) | The forbidden list drifted behind the Compose surface it covers | 2 | Accepted |
 | [0023](0023-isolation-proofs-read-the-edges-network-not-the-projects.md) | The isolation proofs read the edge's network, not the project's | 2 | Accepted |
 | [0024](0024-a-contract-test-asserted-the-absence-of-a-real-host-path.md) | A contract test asserted the absence of a real host path | 2 | Accepted |
+| [0025](0025-evidence-names-the-claim-not-the-suite.md) | Evidence names the claim, not the suite that ran | 2 | Accepted |

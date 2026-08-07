@@ -84,15 +84,20 @@ def test_argument_errors_are_reported_without_needing_root() -> None:
     assert invalid.returncode == 2
 
 
+#: The call that writes an evidence half. Both modes reach the writer through
+#: it, so "before the evidence step" is one string rather than two.
+EVIDENCE_CALL = "write_evidence"
+
+
 def test_baseline_only_returns_before_the_evidence_step(source: str) -> None:
     """A host verdict from a run where every project test skipped is a lie."""
     body = source.split("mode_host()", 1)[1].split("\n}", 1)[0]
     assert "host baseline PASSED" in body, "the baseline-only branch is gone"
-    assert body.index("host baseline PASSED") < body.index("write-session-evidence.py"), (
+    assert body.index("host baseline PASSED") < body.index(EVIDENCE_CALL), (
         "--baseline-only reaches the evidence step"
     )
     early_return = body.index("host baseline PASSED")
-    assert "return 0" in body[early_return : body.index("write-session-evidence.py")], (
+    assert "return 0" in body[early_return : body.index(EVIDENCE_CALL)], (
         "the baseline-only branch announces a result and then carries on regardless"
     )
 
@@ -111,3 +116,112 @@ def test_baseline_only_does_not_export_the_project_gate(source: str) -> None:
     assert any("-eq 0" in line for line in guards), (
         "APG_PROJECT_A_OUTPUTS is exported without checking --baseline-only"
     )
+
+
+# ---------------------------------------------------------------------------
+# What each mode hands the evidence writer (ADR 0025)
+# ---------------------------------------------------------------------------
+
+
+def function_body(source: str, name: str) -> str:
+    """One shell function's body, with quoting and line breaks normalised away.
+
+    The assertions below are about which arguments reach a command, and in
+    shell those are spread over continuations and wrapped in quotes that carry
+    no meaning here.
+    """
+    body = source.split(f"{name}()", 1)[1].split("\n}", 1)[0]
+    return " ".join(body.replace('"', "").replace("\\\n", " ").split())
+
+
+@pytest.mark.parametrize("mode", ["host", "external"])
+def test_each_mode_runs_its_static_claim_proofs(source: str, mode: str) -> None:
+    """A claim's proofs are not all environment-gated.
+
+    Each requirement also names contract tests that carry no marker, so the
+    mode's own ``-m`` selector never collects them. A claim missing them comes
+    out ``not_run``, and a half that reports ``not_run`` writes no evidence.
+    """
+    body = function_body(source, f"mode_{mode}")
+    assert f"run_claim_proofs {mode}" in body, f"{mode} mode never runs the static claim proofs"
+
+
+def test_the_writer_receives_both_artifacts_and_both_projects(source: str) -> None:
+    """Claims are resolved from JUnit, so the writer has to be given the JUnit.
+
+    Both files: the marker-selected suite, and the static proofs the marker
+    cannot collect. And both projects — ``MUST_AGREE`` compares
+    ``project_keys``, so a half naming one project of a two-project host would
+    be refused as describing a different system, which is the merge working
+    correctly on a lie.
+    """
+    body = function_body(source, EVIDENCE_CALL)
+    assert "--junit ${suite_junit}" in body
+    assert "--junit ${claims_junit}" in body
+    assert "--project-b-outputs ${PROJECT_B_OUTPUTS}" in body
+
+
+def test_the_claims_artifact_is_optional_and_stale_ones_are_removed(source: str) -> None:
+    """A mode may carry no claim, and then no claims file is produced.
+
+    Two failure modes sit here. Passing ``--junit`` for a file that does not
+    exist makes the writer refuse; leaving a previous run's file in place makes
+    it judge this run against that one. The writer is given the file only if it
+    exists, and ``run_claim_proofs`` deletes it before deciding whether to write
+    one.
+    """
+    assert "[ -f ${claims_junit} ] && arguments+=(--junit ${claims_junit})" in function_body(
+        source, EVIDENCE_CALL
+    )
+    proofs = function_body(source, "run_claim_proofs")
+    assert "rm -f ${junit}" in proofs
+    assert proofs.index("rm -f ${junit}") < proofs.index("nodeids+=")
+
+
+def test_a_failed_resolver_is_not_mistaken_for_an_empty_one(source: str) -> None:
+    """Both produce no node IDs, and only one of them is a legitimate run.
+
+    ``local listing="$(...)"`` returns the exit status of ``local``, so the
+    status has to be read on its own line. That trap has already cost this
+    repository one run: ``cmd; [ $? -eq 0 ]`` reported the exit code of ``[``.
+    """
+    proofs = function_body(source, "run_claim_proofs")
+    assert "listing=$(claim_static_nodeids ${mode}) status=$?" in proofs, (
+        "the resolver's exit status is not captured on its own line"
+    )
+    assert proofs.index("status=$?") < proofs.index("${#nodeids[@]} -eq 0")
+    assert "die 6" in proofs
+
+
+def test_no_claim_proofs_means_no_pytest_invocation(source: str) -> None:
+    """``pytest`` with no node IDs collects the whole suite.
+
+    The most expensive possible way to measure nothing, and it would write a
+    JUnit file the writer would then judge claims against.
+    """
+    proofs = function_body(source, "run_claim_proofs")
+    guard = proofs.index("${#nodeids[@]} -eq 0")
+    assert guard < proofs.index("-m pytest"), "the empty case reaches pytest"
+    assert "return 0" in proofs[guard : proofs.index("-m pytest")]
+
+
+@pytest.mark.parametrize("mode", ["host", "external"])
+def test_a_filtered_run_writes_no_evidence(source: str, mode: str) -> None:
+    """-k selects a subset; a subset cannot support a claim about the whole.
+
+    The same reasoning as --baseline-only, and the same shape: announce, and
+    return before the writer rather than after it.
+    """
+    body = function_body(source, f"mode_{mode}")
+    assert "evidence_is_supportable" in body, f"{mode} mode writes evidence from a -k run"
+    guard = body.index("evidence_is_supportable")
+    assert guard < body.index(EVIDENCE_CALL), (
+        f"{mode} mode reaches the writer before checking whether -k was used"
+    )
+    assert "return 0" in body[guard : body.index(EVIDENCE_CALL)]
+
+
+def test_the_filtered_run_guard_reads_the_keyword_variable(source: str) -> None:
+    """Guard the guard: a predicate that is always true would disable nothing."""
+    definition = source.split("evidence_is_supportable() {", 1)[1].split("}", 1)[0]
+    assert "KEYWORD" in definition

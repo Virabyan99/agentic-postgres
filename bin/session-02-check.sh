@@ -53,7 +53,8 @@ Usage: bin/session-02-check.sh --mode offline
             [--sentinel-file FILE]
        sudo bin/session-02-check.sh --mode host --host FILE --baseline-only
        bin/session-02-check.sh --mode external --public-ipv4 ADDR \
-            --project-a-outputs FILE [--public-ipv6 ADDR]
+            --project-a-outputs FILE [--project-b-outputs FILE] \
+            [--public-ipv6 ADDR]
 
   --mode offline   Contracts, schemas and models. No host, no network.
   --mode host      Everything measurable on the deployment host. Needs root.
@@ -62,6 +63,8 @@ Usage: bin/session-02-check.sh --mode offline
                    its own routing table, not the boundary.
 
   -k EXPRESSION    Restrict to matching tests. For iterating on one failure.
+                   Writes no evidence: a run that selected a subset cannot
+                   support a claim about the whole.
   --baseline-only  Host mode before anything is deployed: verify the host
                    baseline and skip every test that needs a project. Writes no
                    evidence, because a run where those tests never executed
@@ -176,6 +179,89 @@ run_suite() {
   "$(python_bin)" -m pytest "${arguments[@]}"
 }
 
+# A claim's proofs are not all environment-gated: each one also names contract
+# tests that run anywhere, which the mode's own marker selector therefore never
+# collects. They are run explicitly here rather than by widening the selector,
+# which would drag the whole contract suite into a deployment run. The node IDs
+# come from the acceptance registry, so a requirement that gains a test gains it
+# here without anyone editing this script.
+claim_static_nodeids() {
+  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "$1" <<'PYTHON'
+import sys
+
+from agentic_postgres.evidence_claims import static_nodeids_for_mode
+
+for nodeid in static_nodeids_for_mode(sys.argv[1]):
+    print(nodeid)
+PYTHON
+}
+
+# Writes ${junit} only if this mode has static proofs to run. An empty node-ID
+# list means this mode carries no claim, and running `pytest` with no arguments
+# would collect the whole suite -- the most expensive possible way to measure
+# nothing.
+run_claim_proofs() {
+  local mode="$1" junit="$2"
+  local -a nodeids=()
+  local listing status line
+
+  rm -f "${junit}"
+
+  # Declared, then assigned on its own line, then the status read on its own
+  # line. `local listing="$(...)"` returns the exit status of `local`, so a
+  # failed resolver would look like a mode that simply carries no claim -- and
+  # this run would then produce evidence asserting nothing.
+  listing=""
+  listing="$(claim_static_nodeids "${mode}")"
+  status=$?
+  [ "${status}" -eq 0 ] \
+    || die 6 "could not resolve the claim proofs for ${mode} mode (exit ${status})."
+
+  while IFS= read -r line; do
+    [ -n "${line}" ] && nodeids+=("${line}")
+  done <<<"${listing}"
+
+  if [ "${#nodeids[@]}" -eq 0 ]; then
+    printf 'No claim is measured in %s mode; there is nothing to run here.\n' "${mode}"
+    return 0
+  fi
+
+  "$(python_bin)" -m pytest -q --junitxml="${junit}" "${nodeids[@]}"
+}
+
+# One writer invocation for both modes. Two copies drifted apart once already
+# -- the host branch gained --project-b-outputs and the external one did not,
+# which the merge then reported as two different deployments.
+write_evidence() {
+  local mode="$1"
+  local suite_junit="${EVIDENCE_DIR}/session-02-${mode}-tests.xml"
+  local claims_junit="${EVIDENCE_DIR}/session-02-${mode}-claims.xml"
+
+  local -a arguments=(
+    --session 2 --mode "${mode}"
+    --project-a-outputs "${PROJECT_A_OUTPUTS}"
+    --junit "${suite_junit}"
+    --output "${EVIDENCE_DIR}/session-02-${mode}.json"
+  )
+  [ -f "${claims_junit}" ] && arguments+=(--junit "${claims_junit}")
+  [ -n "${PROJECT_B_OUTPUTS}" ] && arguments+=(--project-b-outputs "${PROJECT_B_OUTPUTS}")
+
+  "$(python_bin)" bin/write-session-evidence.py "${arguments[@]}"
+}
+
+# Evidence is written only by a run that selected everything. -k is for
+# iterating on one failure, and an evidence file produced from a filtered run
+# would report a claim on the strength of whichever tests the expression
+# happened to match -- the same reason --baseline-only writes none.
+evidence_is_supportable() {
+  [ -z "${KEYWORD}" ]
+}
+
+announce_no_evidence() {
+  printf '\nNo evidence written: -k selected a subset of the suite, so this run\n'
+  printf 'cannot support a claim about the whole.\n'
+}
+
 mode_offline() {
   step "1. Static quality"
   shellcheck deploy.sh bin/*.sh libexec/*
@@ -256,10 +342,17 @@ mode_host() {
     return 0
   fi
 
-  step "3. Host evidence"
-  "$(python_bin)" bin/write-session-evidence.py --session 2 --mode host \
-    --project-a-outputs "${PROJECT_A_OUTPUTS}" \
-    --output "${EVIDENCE_DIR}/session-02-host.json"
+  if ! evidence_is_supportable; then
+    announce_no_evidence
+    printf '\n\033[1msession-02-check: host PASSED\033[0m\n'
+    return 0
+  fi
+
+  step "3. Static proofs of the claims this run records"
+  run_claim_proofs host "${EVIDENCE_DIR}/session-02-host-claims.xml"
+
+  step "4. Host evidence"
+  write_evidence host
 
   printf '\n\033[1msession-02-check: host PASSED\033[0m\n'
 }
@@ -268,6 +361,12 @@ mode_external() {
   [ -n "${PUBLIC_IPV4}" ] || die 2 "--mode external requires --public-ipv4."
   [ -n "${PROJECT_A_OUTPUTS}" ] || die 2 "--mode external requires --project-a-outputs."
   [ -f "${PROJECT_A_OUTPUTS}" ] || die 2 "not found: ${PROJECT_A_OUTPUTS}"
+  # Optional, and not exported: no external test reads project B. It is here
+  # because the merge compares which deployment each half described, and a half
+  # that named one project of a two-project host would read as a different
+  # system rather than as the same one measured from outside.
+  [ -z "${PROJECT_B_OUTPUTS}" ] || [ -f "${PROJECT_B_OUTPUTS}" ] \
+    || die 2 "not found: ${PROJECT_B_OUTPUTS}"
 
   # Not enforceable from here -- the host could be behind the same NAT as the
   # operator -- so it is stated rather than checked, and the evidence records
@@ -284,10 +383,17 @@ mode_external() {
 
   run_suite "external" "${EVIDENCE_DIR}/session-02-external-tests.xml"
 
-  step "2. External evidence"
-  "$(python_bin)" bin/write-session-evidence.py --session 2 --mode external \
-    --project-a-outputs "${PROJECT_A_OUTPUTS}" \
-    --output "${EVIDENCE_DIR}/session-02-external.json"
+  if ! evidence_is_supportable; then
+    announce_no_evidence
+    printf '\n\033[1msession-02-check: external PASSED\033[0m\n'
+    return 0
+  fi
+
+  step "2. Static proofs of the claims this run records"
+  run_claim_proofs external "${EVIDENCE_DIR}/session-02-external-claims.xml"
+
+  step "3. External evidence"
+  write_evidence external
 
   printf '\n\033[1msession-02-check: external PASSED\033[0m\n'
 }
