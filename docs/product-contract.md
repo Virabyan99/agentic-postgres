@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 74 requirements**
+**P0 — 83 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -122,6 +122,15 @@ Priorities:
 | `SEC-SECRET-001` | 2 | Secret values appear in no image, repository file, Compose output, log, or evidence file, proved by searching for a real value rather than by asserting that none was written. |
 | `SEC-SECRET-002` | 2 | A materialized secret is a mode 0400 file owned by its declared consumer, mounted into that service and no other, proved by the mount list rather than by comparing digests of what each service read. |
 | `SEC-TLS-001` | 2 | The public origin serves TLS 1.2 or better with a certificate a default trust store accepts, permanently redirects plaintext, and serves the exact certificate the deployed document records. |
+| `DBX-MIG-001` | 3 | Bootstrap authority and migration authority are distinct and least privileged. Proved from the membership option columns, not from the role's own INHERIT attribute. See ADR 0026. |
+| `DBX-MIG-002` | 3 | Rendering a migration twice from one input produces identical bytes, and those bytes agree with the committed released lock. See ADR 0028. |
+| `DBX-MIG-003` | 3 | An applied migration cannot be silently edited, removed, or reordered; the preflight refuses on any disagreement between its five sources. |
+| `DBX-PG-001` | 3 | The locked PostgreSQL 18 image runs with pgvector present at the locked version, in the extensions schema rather than in public. |
+| `DBX-PG-002` | 3 | PostgreSQL publishes no host port, joins no edge network, and carries no Traefik label. It is reachable only on its own project network. |
+| `DBX-PG-003` | 3 | An existing data volume is bound to one project identity, and a mismatch is refused with exit 11 rather than adopted. See ADR 0030. |
+| `DEP-ISO-003` | 3 | Two deployed projects have isolated clusters, volumes, roles, credentials and identity sentinels, and neither project's credential authenticates against the other. |
+| `SEC-DB-001` | 3 | No runtime role holds SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS. Read from the catalog, never inferred from how a role was created. |
+| `SEC-DB-002` | 3 | The public, app and app_private schema boundaries match the contract, and the API roles cannot address the private schemas at all. |
 | `SEC-DEFAULT-001` | 3 | Default EXECUTE on newly created functions is revoked from PUBLIC. |
 | `SEC-FUNC-001` | 3 | An API role cannot execute a function it was not explicitly granted. |
 | `SEC-OWNER-001` | 3 | Objects are owned by a non-login role that no service connects as. |

@@ -51,6 +51,18 @@ def test_object_owner_is_a_non_login_role() -> None:
     unimplemented(3, "no service connects as the object owner")
 
 
+@pytest.mark.future(session=3, requirement="SEC-DB-001")
+def test_no_runtime_role_holds_a_dangerous_attribute() -> None:
+    unimplemented(
+        3, "no runtime role has SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS"
+    )
+
+
+@pytest.mark.future(session=3, requirement="SEC-DB-002")
+def test_schema_boundaries_match_the_contract() -> None:
+    unimplemented(3, "the public, app and app_private grants are exactly what the contract says")
+
+
 # ---------------------------------------------------------------------------
 # Session 5 — the REST surface cannot widen the authorization model
 # ---------------------------------------------------------------------------

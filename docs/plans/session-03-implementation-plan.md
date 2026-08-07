@@ -46,6 +46,8 @@ of those citations ambiguous.
 | **D50** | Add pytest markers `database`, `live_host`, `destructive`. | `pytest.ini` runs `--strict-markers`; `live_host` and `external` already exist; `tests/conftest.py::ENVIRONMENT_VARIABLES` is a **closed tuple** and `tests/contract/test_environment_gates.py` proves every `live_host`/`external` test carries a `requires_environment` gate naming a registered variable. | **`database` and `destructive` are declared in `pytest.ini`.** Any new gate variable joins the closed tuple in the same commit. `destructive` additionally requires the disposable target of D51. | An undeclared marker is an error, not a typo — and a gate naming an unregistered variable produces a test that silently never runs anywhere. | no |
 | **D51** | Destructive isolation tests use "a disposable third fixture or an explicitly recreated Project B test volume". | No disposable-project machinery exists. The only mutating live test is `test_removing_the_second_project_leaves_the_first_routed`, which stops Project B, checks Project A, restarts B, **and then asserts B came back**. | **Same discipline, and the disposable target is built explicitly.** A third project `project.gamma.yaml` (gitignored like the others) exists only to be destroyed, and every `destructive` test asserts its target is that project before touching anything. No destructive test may name `alpha-dev` or `beta-dev`. | A test that restores what it broke is why a failure to restore cannot pass silently. A destructive test with no declared target is one typo away from deleting the release-evidence project's volume. | no |
 | **D52** | `max_connections: 100`, `shared_buffers_mb: 256`, two clusters. | The host is **3814 MiB total, no swap, 2 vCPU, 33 GB free** (`ubuntu-4gb-hel1-4`), already running Traefik, the socket proxy and four project containers with ~681 MiB used. | **The schema enforces a per-project memory budget and Compose sets `mem_limit`.** Session 3 defaults are `shared_buffers_mb: 128`, `max_connections: 50`, `work_mem_mb: 4`, `maintenance_work_mem_mb: 64`, and rendering **fails** when the declared budget across a manifest exceeds the host guardrail. | With zero swap the OOM killer is the only backstop and it does not choose politely — it can take Traefik, which drops every project's ingress at once. `max_connections: 100` per cluster is also the wrong shape for a design whose Session 4 answer to connection count is a pooler. | no |
+| **D53** | *(§3.2 of this plan, before measurement)* Mounting the volume at the wrong path "produces a cluster that initialises into an anonymous volume and loses everything on recreate". | Measured against the locked digest, there are **three** behaviours, and the predicted one is not among them. `PGDATA` is `/var/lib/postgresql/18/docker`, but the image declares `VOLUME /var/lib/postgresql` — the *parent*. Mounting at **`/var/lib/postgresql/data`** (the pre-18 convention) makes the image **refuse to start, exit 1**, naming the unused mount. Mounting at **`PGDATA` itself** starts and persists, but Docker also creates a stray **anonymous volume** for the parent and splits the layout. Mounting at **`/var/lib/postgresql`** is correct: one mount, no anonymous volume. | **The mount target is `/var/lib/postgresql`, the declared `VOLUME`, not `PGDATA`.** The contract test asserts the target *and* that the service has exactly one volume mount, because "it persisted" is true of two of the three configurations and distinguishes nothing. | The dangerous configuration is the one that works. A test that only checked persistence would pass on the PGDATA mount and would not notice the anonymous volume until a `--renew-anon-volumes` or a `pg_upgrade` made it matter. The refusal case needs no guard: the image already stops. | no |
+| **D54** | *(§5 of this plan, as written)* Run 1 moves `CURRENT_SESSION` to `3` while the five existing Session 3 placeholders stay `future` until Run 6. | Those two cannot both hold. `test_no_requirement_at_or_before_the_gate_session_remains_future` fails for exactly `SEC-DEFAULT-001`, `SEC-FUNC-001`, `SEC-OWNER-001`, `SEC-RLS-001`, `SEC-VIEW-001` the moment the constant reads `3`, and the nine new IDs join them. Verified by running the gate's registry suite under `APG_ACCEPTANCE_SESSION=3`. | **`CURRENT_SESSION` moves in Run 6, not Run 1**, in the same commit that deletes all fourteen placeholders and replaces them with real tests. Run 1 ships the ADRs, the nine new IDs as placeholders, and the two marker declarations. | The alternatives were a red gate through Runs 1–5, which suspends the only signal that would catch a Run 2 regression, or an exemption inside the overdue check, which weakens a currently-passing P0 contract test to make an unrelated change convenient. The constant and the implementations it vouches for move together or the constant means nothing. | no |
 
 ---
 
@@ -121,11 +123,11 @@ The last line is worth stating plainly: `tests/external/test_session2_public_edg
 
 Three numbers the runbook tells us to assume must instead be measured, and each has already burned this repository once in a neighbouring form:
 
-- the PostgreSQL image's runtime **UID/GID**, which `secrets.required.yaml` consumers must match exactly (Session 2's `65532` is asserted against the service's `user:` for the same reason);
-- **`PGDATA`** for the PostgreSQL 18 image family — mounting the volume at `/var/lib/postgresql/data` when the image uses `/var/lib/postgresql/18/docker` produces a cluster that initialises into an anonymous volume and loses everything on recreate;
-- the **dbmate flags** `--migrations-table`, `--strict`, `--no-dump-schema` and `--env-file`, and on which subcommands the locked release accepts them.
+- the PostgreSQL image's runtime **UID/GID**, which `secrets.required.yaml` consumers must match exactly (Session 2's `65532` is asserted against the service's `user:` for the same reason). It is **not** `65532` here, and the container's default user is not the server's user: the entrypoint starts as root and drops privilege;
+- **`PGDATA`** for the PostgreSQL 18 image family, and separately the path the image declares as its `VOLUME` — which is not the same path. See D53: two of the three plausible mount targets persist data, so persistence is not the property that distinguishes them;
+- the **dbmate flags** `--migrations-table`, `--strict`, `--no-dump-schema` and `--env-file`, and on which subcommands the locked release accepts them. They do **not** all sit in one position: some are global-only and must precede the subcommand, and `--strict` is subcommand-only and exists on a proper subset of the subcommands. A flag in the wrong position is `exit 2`, which is loud, but a global flag silently omitted is not.
 
-`tests/contract/test_image_contracts.py` runs these against the locked digests and is the only place those values are written down.
+All three were measured against the locked digests before Run 1, and the answers changed two design decisions (D53, and the `user:`/secret-mode pairing in Run 3). **`tests/contract/test_image_contracts.py` is the only place the values themselves are written down** — deliberately not here, so that there is one authority and it is executable. The plan records only what the shape of the answer forced.
 
 ### 3.3 Capacity, stated as numbers
 
@@ -134,14 +136,23 @@ total 3814 MiB     swap 0     vCPU 2     free disk 33 GB
 in use before Session 3: ~681 MiB across traefik, socket-proxy and four project containers
 ```
 
-Zero swap is the constraint that matters. A PostgreSQL cluster's realistic ceiling is roughly `shared_buffers + maintenance_work_mem + (max_connections × work_mem × concurrent sorts)`. At the runbook's suggested `256 MB / 64 MB / 100 × 4 MB`, two clusters can plausibly ask for ~1.4 GB before anything else runs, and the OOM killer arbitrates with no swap to soften it — potentially by killing Traefik, which takes both projects' ingress down at once.
+Zero swap is the constraint that matters, but not in the way the arithmetic above suggests. **Two clusters at the D52 defaults were measured under load** — 49 backends each, driven with pgbench — and the formula `shared_buffers + maintenance_work_mem + (max_connections × work_mem × concurrent sorts)` turns out to describe almost nothing that the OOM killer looks at:
 
-Session 3 therefore treats the budget as a validated manifest field, not an operator's judgement:
+```
+per cluster, idle       anon   5 MiB   shmem  12 MiB   file(cache)  59 MiB
+per cluster, 49 backends anon  62 MiB   shmem 140 MiB   file(cache) 410 MiB
+```
+
+On a box with no swap, `file` is reclaimable and `anon + shmem` is not. The unreclaimable footprint is therefore **~218 MiB per cluster**, ~436 MiB for both, against ~3133 MiB free. `max_connections × work_mem` never materialises because `work_mem` is a per-sort-node ceiling allocated on demand, not a per-backend reservation. **The D52 defaults survive contact with two real clusters, with room.**
+
+The correction that matters is what `mem_limit` is. A container memory limit caps **page cache too**, so sizing it from the formula — which counts only anonymous memory — produces a limit the cluster reaches immediately and then lives against. At `mem_limit: 512m` both measured clusters pegged their limit exactly, with 361 and 366 reclaim events and no OOM kill: functional, and permanently thrashing its own cache. That is a performance cliff no green test would show, and it is the same defect pattern as everything else in this repository — a number that looked measured and was describing something other than what it was applied to.
+
+So the guardrail and the limit are two different numbers. **The guardrail is computed on unreclaimable memory (`shared_buffers + maintenance_work_mem + a per-backend anon allowance`), and `mem_limit` is set above it with deliberate cache headroom.** Session 3 therefore treats the budget as a validated manifest field, not an operator's judgement:
 
 - schema-enforced defaults `shared_buffers_mb: 128`, `max_connections: 50`, `work_mem_mb: 4`, `maintenance_work_mem_mb: 64`;
-- a declared host guardrail, and a **render-time failure** when the sum across deployed projects exceeds it;
-- explicit `mem_limit` and `shm_size` on the Compose service, consistent with those numbers;
-- `bin/session-03-check.sh --mode host` records observed RSS per cluster in evidence, so the guardrail is checked against reality rather than against arithmetic.
+- a declared host guardrail over **unreclaimable** memory, and a **render-time failure** when the sum across deployed projects exceeds it;
+- explicit `mem_limit` and `shm_size` on the Compose service, `mem_limit` set above the guardrail rather than equal to it. `shm_size` must exceed `shared_buffers`, since PostgreSQL's dynamic shared memory lands in `/dev/shm` and Docker's 64 MiB default is below the 128 MiB `shared_buffers`;
+- `bin/session-03-check.sh --mode host` records observed `anon`, `shmem` and `file` per cluster in evidence — the three separately, never a single "memory used" figure, because the whole point is that only two of them count.
 
 A `max_connections` of 50 is not a compromise. Session 4's answer to connection count is a pooler; a large per-cluster limit would make the pooler decorative.
 
@@ -198,9 +209,11 @@ Each run ends with `bin/session-01-check.sh` exiting `0` on a clean tree. Runs 1
 ### Run 1 — ADRs, requirements, and the session constant
 *Offline.*
 
-Write ADRs 0026–0031 and index them. Add the nine new requirement IDs to `tests/acceptance-registry.yaml`. Move `CURRENT_SESSION` to `3`. Declare the `database` and `destructive` markers.
+Write ADRs 0026–0031 and index them. Add the nine new requirement IDs to `tests/acceptance-registry.yaml`, each with a `future` placeholder. Declare the `database` and `destructive` markers.
 
-The five existing placeholders stay `future` for now — removing them here would make the gate demand implementations that do not exist yet. They come out in Run 6.
+**`CURRENT_SESSION` stays at `2` — it moves in Run 6 (D54).** The five existing placeholders stay `future` for the reason the runbook gives, and the nine new IDs need placeholders too: `test_every_registered_node_id_is_collectible` means a registered ID must name a test pytest can collect, and a placeholder is the only collectible thing that exists in Run 1. But a gate session of `3` makes all fourteen overdue under `test_no_requirement_at_or_before_the_gate_session_remains_future`, so the constant cannot move until the implementations do.
+
+The new placeholders go where their prefix family already lives: `SEC-DB-001/002` beside the other Session 3 security placeholders, `DEP-ISO-003` beside `DEP-ISO-001`, and the six `DBX-PG`/`DBX-MIG` IDs in a new `tests/contract/test_future_database_platform.py` marked `database`.
 
 ```
 python bin/render-acceptance-matrix.py --write     # regenerate both documents
@@ -240,7 +253,9 @@ Both new scripts join `tests/contract/test_cli_contract.py`'s script list and `t
 ### Run 6 — Promote `bin/migrate.sh`, write the five migrations
 *Offline.*
 
-`bin/migrate.sh` leaves `FUTURE_STUBS` and gains real command-contract tests (D48, ADR 0017). The five migrations are written. The five `future` placeholders in `test_future_security_boundaries.py` are deleted and replaced by real tests in `tests/security/test_session3_*.py`, gated on `live_host` and `APG_PROJECT_A_OUTPUTS`.
+`bin/migrate.sh` leaves `FUTURE_STUBS` and gains real command-contract tests (D48, ADR 0017). The five migrations are written.
+
+**All fourteen Session 3 placeholders are deleted and `CURRENT_SESSION` moves to `3`, in one commit (D54).** The five in `test_future_security_boundaries.py` and the two `SEC-DB-*` beside them become real tests in `tests/security/test_session3_*.py`; the six in `test_future_database_platform.py` and `DEP-ISO-003` become the contract, image and isolation tests Runs 3–5 prepared. The constant and the implementations it vouches for move together — that is the whole reason it is a gate input.
 
 This is the run where the gate stops being satisfiable offline: the new tests skip in a checkout and must not be written so that a skip looks like a pass.
 

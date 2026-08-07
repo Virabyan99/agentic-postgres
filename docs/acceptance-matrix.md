@@ -10,7 +10,7 @@ actually collect. That is checked by running a real collection and
 comparing node IDs, not by searching files for function names — a text
 search passes on a commented-out test.
 
-**78 requirements** — 74 P0, 17 active in Session 1, 61 owned by later sessions.
+**87 requirements** — 83 P0, 17 active in Session 1, 70 owned by later sessions.
 
 ## By session
 
@@ -18,7 +18,7 @@ search passes on a commented-out test.
 |---:|---:|---|
 | 1 | 17 | active |
 | 2 | 13 | placeholders owned by Session 2 |
-| 3 | 5 | placeholders owned by Session 3 |
+| 3 | 14 | placeholders owned by Session 3 |
 | 4 | 5 | placeholders owned by Session 4 |
 | 5 | 5 | placeholders owned by Session 5 |
 | 6 | 5 | placeholders owned by Session 6 |
@@ -75,6 +75,15 @@ search passes on a commented-out test.
 
 | ID | Priority | Guarantee | Proof |
 |---|---|---|---|
+| `DBX-MIG-001` | P0 | Bootstrap authority and migration authority are distinct and least privileged. Proved from the membership option columns, not from the role's own INHERIT attribute. See ADR 0026. | `tests/contract/test_future_database_platform.py::test_bootstrap_and_migration_authority_are_distinct` |
+| `DBX-MIG-002` | P0 | Rendering a migration twice from one input produces identical bytes, and those bytes agree with the committed released lock. See ADR 0028. | `tests/contract/test_future_database_platform.py::test_rendered_migrations_are_deterministic_and_match_their_source` |
+| `DBX-MIG-003` | P0 | An applied migration cannot be silently edited, removed, or reordered; the preflight refuses on any disagreement between its five sources. | `tests/contract/test_future_database_platform.py::test_an_applied_migration_cannot_be_edited_removed_or_reordered` |
+| `DBX-PG-001` | P0 | The locked PostgreSQL 18 image runs with pgvector present at the locked version, in the extensions schema rather than in public. | `tests/contract/test_future_database_platform.py::test_locked_postgres_image_provides_pgvector_at_the_locked_version` |
+| `DBX-PG-002` | P0 | PostgreSQL publishes no host port, joins no edge network, and carries no Traefik label. It is reachable only on its own project network. | `tests/contract/test_future_database_platform.py::test_postgres_is_unreachable_from_outside_the_project_network` |
+| `DBX-PG-003` | P0 | An existing data volume is bound to one project identity, and a mismatch is refused with exit 11 rather than adopted. See ADR 0030. | `tests/contract/test_future_database_platform.py::test_a_volume_belonging_to_another_project_is_refused` |
+| `DEP-ISO-003` | P0 | Two deployed projects have isolated clusters, volumes, roles, credentials and identity sentinels, and neither project's credential authenticates against the other. | `tests/contract/test_future_deployment.py::test_two_projects_have_isolated_clusters_and_identities` |
+| `SEC-DB-001` | P0 | No runtime role holds SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS. Read from the catalog, never inferred from how a role was created. | `tests/security/test_future_security_boundaries.py::test_no_runtime_role_holds_a_dangerous_attribute` |
+| `SEC-DB-002` | P0 | The public, app and app_private schema boundaries match the contract, and the API roles cannot address the private schemas at all. | `tests/security/test_future_security_boundaries.py::test_schema_boundaries_match_the_contract` |
 | `SEC-DEFAULT-001` | P0 | Default EXECUTE on newly created functions is revoked from PUBLIC. | `tests/security/test_future_security_boundaries.py::test_newly_created_function_is_not_executable_by_public` |
 | `SEC-FUNC-001` | P0 | An API role cannot execute a function it was not explicitly granted. | `tests/security/test_future_security_boundaries.py::test_api_role_cannot_execute_ungranted_functions` |
 | `SEC-OWNER-001` | P0 | Objects are owned by a non-login role that no service connects as. | `tests/security/test_future_security_boundaries.py::test_object_owner_is_a_non_login_role` |

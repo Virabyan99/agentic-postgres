@@ -448,6 +448,90 @@
     - tests/security/test_future_security_boundaries.py::test_object_owner_is_a_non_login_role
   description: Objects are owned by a non-login role that no service connects as.
 
+- id: SEC-DB-001
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/security/test_future_security_boundaries.py::test_no_runtime_role_holds_a_dangerous_attribute
+  description: >-
+    No runtime role holds SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or
+    BYPASSRLS. Read from the catalog, never inferred from how a role was
+    created.
+
+- id: SEC-DB-002
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/security/test_future_security_boundaries.py::test_schema_boundaries_match_the_contract
+  description: >-
+    The public, app and app_private schema boundaries match the contract, and
+    the API roles cannot address the private schemas at all.
+
+- id: DBX-PG-001
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/contract/test_future_database_platform.py::test_locked_postgres_image_provides_pgvector_at_the_locked_version
+  description: >-
+    The locked PostgreSQL 18 image runs with pgvector present at the locked
+    version, in the extensions schema rather than in public.
+
+- id: DBX-PG-002
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/contract/test_future_database_platform.py::test_postgres_is_unreachable_from_outside_the_project_network
+  description: >-
+    PostgreSQL publishes no host port, joins no edge network, and carries no
+    Traefik label. It is reachable only on its own project network.
+
+- id: DBX-PG-003
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/contract/test_future_database_platform.py::test_a_volume_belonging_to_another_project_is_refused
+  description: >-
+    An existing data volume is bound to one project identity, and a mismatch is
+    refused with exit 11 rather than adopted. See ADR 0030.
+
+- id: DBX-MIG-001
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/contract/test_future_database_platform.py::test_bootstrap_and_migration_authority_are_distinct
+  description: >-
+    Bootstrap authority and migration authority are distinct and least
+    privileged. Proved from the membership option columns, not from the role's
+    own INHERIT attribute. See ADR 0026.
+
+- id: DBX-MIG-002
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/contract/test_future_database_platform.py::test_rendered_migrations_are_deterministic_and_match_their_source
+  description: >-
+    Rendering a migration twice from one input produces identical bytes, and
+    those bytes agree with the committed released lock. See ADR 0028.
+
+- id: DBX-MIG-003
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/contract/test_future_database_platform.py::test_an_applied_migration_cannot_be_edited_removed_or_reordered
+  description: >-
+    An applied migration cannot be silently edited, removed, or reordered; the
+    preflight refuses on any disagreement between its five sources.
+
+- id: DEP-ISO-003
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/contract/test_future_deployment.py::test_two_projects_have_isolated_clusters_and_identities
+  description: >-
+    Two deployed projects have isolated clusters, volumes, roles, credentials
+    and identity sentinels, and neither project's credential authenticates
+    against the other.
+
 # ---------------------------------------------------------------------------
 # Session 4 — endpoints and clients
 # ---------------------------------------------------------------------------

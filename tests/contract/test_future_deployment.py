@@ -42,6 +42,14 @@ def test_removing_the_second_project_does_not_affect_the_first() -> None:
     unimplemented(12, "destructive removal is scoped to one project")
 
 
+# DEP-ISO-003 is Session 3's database-scoped slice of the isolation matrix that
+# DEP-ISO-001 covers in full at Session 12. It lives here rather than beside the
+# DBX placeholders so that every DEP-ISO requirement is found in one file.
+@pytest.mark.future(session=3, requirement="DEP-ISO-003")
+def test_two_projects_have_isolated_clusters_and_identities() -> None:
+    unimplemented(3, "separate clusters, volumes, roles, credentials and identity sentinels")
+
+
 @pytest.mark.future(session=11, requirement="OPS-001")
 def test_doctor_reports_required_checks_without_secrets() -> None:
     unimplemented(11, "container, TLS, database, backup, and disk checks, all redacted")

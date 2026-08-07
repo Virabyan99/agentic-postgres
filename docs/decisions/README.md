@@ -89,3 +89,9 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0023](0023-isolation-proofs-read-the-edges-network-not-the-projects.md) | The isolation proofs read the edge's network, not the project's | 2 | Accepted |
 | [0024](0024-a-contract-test-asserted-the-absence-of-a-real-host-path.md) | A contract test asserted the absence of a real host path | 2 | Accepted |
 | [0025](0025-evidence-names-the-claim-not-the-suite.md) | Evidence names the claim, not the suite that ran | 2 | Accepted |
+| [0026](0026-bootstrap-authority-is-separate-from-migration-authority.md) | Bootstrap authority is separate from migration authority | 3 | Accepted |
+| [0027](0027-the-output-schema-gains-a-version-and-a-migration-path.md) | The output schema gains a version, and a migration path with it | 3 | Accepted |
+| [0028](0028-source-migrations-are-templates-the-immutable-unit-is-the-rendered-payload.md) | Source migrations are templates; the immutable unit is the rendered payload | 3 | Accepted |
+| [0029](0029-request-identity-is-a-trusted-transaction-local-claim.md) | Request identity is a trusted transaction-local claim, not an authenticated one | 3 | Accepted |
+| [0030](0030-a-project-volume-carries-an-identity-and-a-mismatch-is-never-adopted.md) | A project volume carries an identity, and a mismatch is never adopted | 3 | Accepted |
+| [0031](0031-exit-code-11-the-data-is-not-yours.md) | Exit code 11: the data is not yours | 3 | Accepted |
