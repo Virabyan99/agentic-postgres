@@ -42,7 +42,13 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import deployed_output, edge_state, installed_release, runtime_override
+from agentic_postgres import (
+    deployed_output,
+    edge_state,
+    installed_release,
+    observation,
+    runtime_override,
+)
 from agentic_postgres.bootstrap_state import load_state, state_path
 from agentic_postgres.config import ManifestError, load_project_manifest
 from agentic_postgres.host_config import (
@@ -408,6 +414,21 @@ def main(argv: list[str] | None = None) -> int:
     edge["project_network_attached"] = True
 
     step("6. Observe and publish")
+    # Traefik's Docker provider polls, so the router for a container that has
+    # only just started is not wired at the instant `compose up --wait` returns.
+    # Observing once here recorded `unavailable` for a route that answered 200
+    # from two networks seconds later. The wait is bounded and still reports
+    # whatever it finds at the deadline.
+    print("  waiting for the route and its certificate to settle")
+    tls = observation.await_observation(
+        lambda: observe_tls(host, project["domain"]),
+        lambda observed: observed["status"] == "issued",
+    )
+    health_status = observation.await_observation(
+        lambda: observe_health(rendered["routes"]["health"]["url"]),
+        lambda observed: observed == "ready",
+    )
+
     document = deployed_output.build_deployed_document(
         rendered=rendered,
         source_commit=commit,
@@ -418,7 +439,7 @@ def main(argv: list[str] | None = None) -> int:
             "public_ipv6": host["host"]["expected_public_ipv6"],
         },
         edge=edge,
-        tls=observe_tls(host, project["domain"]),
+        tls=tls,
         bootstrap=bootstrap,
         secrets=secrets,
         runtime={
@@ -426,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
             "state_directory": str(state_directory),
             "compose_model_sha256": _model_digest(rendered_directory),
         },
-        health_status=observe_health(rendered["routes"]["health"]["url"]),
+        health_status=health_status,
     )
     destination = deployed_output.write_deployed_document(
         document, deployed_output.deployed_path(key)
