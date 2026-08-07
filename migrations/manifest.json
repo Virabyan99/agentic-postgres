@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "placeholders": {
+    "object_owner": {
+      "type": "identifier",
+      "source": "database.roles.object_owner",
+      "description": "Owns every object. A NOLOGIN role no service connects as; migrations SET LOCAL ROLE into it and RESET before dbmate stamps the version."
+    },
+    "app_runtime": {
+      "type": "identifier",
+      "source": "database.roles.app_runtime",
+      "description": "The runtime identity permitted on app.* directly. Still policy-bound: the tables carry FORCE row-level security."
+    },
+    "anon": {
+      "type": "identifier",
+      "source": "database.roles.anon",
+      "description": "The role an unauthenticated request becomes. Granted schema USAGE and nothing else."
+    },
+    "authenticated": {
+      "type": "identifier",
+      "source": "database.roles.authenticated",
+      "description": "A request carrying a validated identity from Session 6 onward. Reads through api views, writes through the RPCs."
+    },
+    "agent_reader": {
+      "type": "identifier",
+      "source": "database.roles.agent_reader",
+      "description": "Read-only agent identity."
+    },
+    "agent_writer": {
+      "type": "identifier",
+      "source": "database.roles.agent_writer",
+      "description": "Agent identity permitted to call the write RPCs."
+    }
+  },
+  "migrations": [
+    {
+      "version": "20260807120001",
+      "name": "schemas_and_default_privileges",
+      "template": "templates/0001-schemas-and-default-privileges.sql",
+      "placeholders": ["object_owner", "anon", "authenticated", "agent_reader", "agent_writer", "app_runtime"],
+      "description": "The four schemas, pgvector in extensions rather than public, and a default-deny posture for function execution."
+    },
+    {
+      "version": "20260807120002",
+      "name": "project_identity_and_ledger",
+      "template": "templates/0002-project-identity-and-ledger.sql",
+      "placeholders": ["object_owner"],
+      "description": "The single-row identity sentinel that binds this volume to one project, and the ledger recording which bytes each version applied."
+    },
+    {
+      "version": "20260807120003",
+      "name": "owner_scoped_tables_and_forced_rls",
+      "template": "templates/0003-owner-scoped-tables-and-forced-rls.sql",
+      "placeholders": ["object_owner", "app_runtime"],
+      "description": "notes and tasks under FORCE row-level security, keyed on a transaction-local identity claim that denies when absent."
+    },
+    {
+      "version": "20260807120004",
+      "name": "security_invoker_api_views",
+      "template": "templates/0004-security-invoker-api-views.sql",
+      "placeholders": ["object_owner", "authenticated", "agent_reader", "agent_writer"],
+      "description": "Read-only api views that run with the caller's authority, so the underlying row policy still applies."
+    },
+    {
+      "version": "20260807120005",
+      "name": "write_rpcs",
+      "template": "templates/0005-write-rpcs.sql",
+      "placeholders": ["object_owner", "authenticated", "agent_writer"],
+      "description": "Two write functions that derive ownership from the request identity and take no owner parameter."
+    }
+  ]
+}

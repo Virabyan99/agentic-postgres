@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/migration-manifest.schema.json",
+  "title": "Agentic Postgres migration manifest",
+  "description": "The ordered source of record for platform migrations: which versions exist, which template each one renders from, and which placeholders that template is allowed to use. It declares no SQL and no credential. The placeholder table is the whole substitution surface of the renderer -- a name absent from it cannot be substituted, which is what keeps the renderer incapable of emitting SQL a reviewer did not read. See docs/decisions/0028-source-migrations-are-templates-the-immutable-unit-is-the-rendered-payload.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "placeholders", "migrations"],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "placeholders": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/placeholder" },
+      "propertyNames": { "$ref": "#/$defs/placeholderName" },
+      "description": "Every placeholder any template may use, with its type and the path it is read from in the rendered outputs document."
+    },
+    "migrations": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/migration" }
+    }
+  },
+  "$defs": {
+    "placeholderName": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{2,47}$",
+      "not": {
+        "anyOf": [
+          { "pattern": "(^|_)password$" },
+          { "pattern": "(^|_)secret$" },
+          { "pattern": "(^|_)token$" },
+          { "pattern": "(^|_)credentials$" },
+          { "pattern": "(^|_)passphrase$" },
+          { "pattern": "_key$" },
+          { "pattern": "(^|_)url$" }
+        ]
+      },
+      "description": "Refused by terminal token, the same rule ADR 0008 applies to manifest keys. A migration must never carry a credential: the rendered payload is committed to a lock, recorded in a ledger, and readable by anything that can read the database. `url` is included because a connection string is the usual way a password arrives somewhere it was not meant to be."
+    },
+    "placeholder": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "source", "description"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["identifier", "literal"],
+          "description": "`identifier` is quoted as a SQL identifier, `literal` as a string literal. There is no `raw`: a raw type would let a manifest emit arbitrary SQL, which is exactly the capability the renderer is built without."
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*(\\.[a-z_][a-z0-9_]*)*$",
+          "description": "A dotted path into the rendered outputs.json document, which is the single authority for every derived identity. The renderer never consults `naming` directly; a second derivation path is how ADR 0023's defect arrives."
+        },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "name", "template", "placeholders", "description"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]{14}$",
+          "description": "dbmate's version stamp, UTC YYYYMMDDHHMMSS. Fixed at authoring time and never regenerated: it is the key the ledger and dbmate's own table agree on."
+        },
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,63}$" },
+        "template": {
+          "type": "string",
+          "pattern": "^templates/[0-9]{4}-[a-z0-9-]+\\.sql$",
+          "description": "Repository-relative to migrations/. The pattern admits no '/' beyond the fixed prefix and no '..', so a manifest cannot name a file outside the templates directory."
+        },
+        "placeholders": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/placeholderName" },
+          "description": "Exactly the placeholders this template uses. Both directions are checked: an undeclared use and a declared non-use are equally errors, because a stale declaration reads as evidence that a value still reaches the migration."
+        },
+        "description": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

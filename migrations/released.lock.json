@@ -1,0 +1,66 @@
+{
+  "migrations": [
+    {
+      "canonical_render_sha256": "4f49109db92a2b4b7a50b511f497cedbbd932d2ddbee95b797bf78036492fc41",
+      "name": "schemas_and_default_privileges",
+      "placeholders": [
+        "agent_reader",
+        "agent_writer",
+        "anon",
+        "app_runtime",
+        "authenticated",
+        "object_owner"
+      ],
+      "template": "templates/0001-schemas-and-default-privileges.sql",
+      "template_sha256": "80ff7f951c46cdf04ae31699df98800197c9955ed3d244f6418d53e106871884",
+      "version": "20260807120001"
+    },
+    {
+      "canonical_render_sha256": "0df09288e31440563cff8f5cdae53d2354dd3b374406df34f5278128e0571092",
+      "name": "project_identity_and_ledger",
+      "placeholders": [
+        "object_owner"
+      ],
+      "template": "templates/0002-project-identity-and-ledger.sql",
+      "template_sha256": "b57cf82776ab6e46e91ca538a03df0eeb13b3fbde7c6050d2e6bceba5776ba0f",
+      "version": "20260807120002"
+    },
+    {
+      "canonical_render_sha256": "09096e7aa270722b843cf5316b2fb862b8fda8607966aa4ba28d18411fcae03a",
+      "name": "owner_scoped_tables_and_forced_rls",
+      "placeholders": [
+        "app_runtime",
+        "object_owner"
+      ],
+      "template": "templates/0003-owner-scoped-tables-and-forced-rls.sql",
+      "template_sha256": "c8142d541fe82b78ed6e64d6169616ac84f31a6bfc6aeb010ac0df143fe4ba19",
+      "version": "20260807120003"
+    },
+    {
+      "canonical_render_sha256": "4b108fbba684aca622e2d718bfc94a8e5069f7b20b8887ee2cea7bae04ff8ecf",
+      "name": "security_invoker_api_views",
+      "placeholders": [
+        "agent_reader",
+        "agent_writer",
+        "authenticated",
+        "object_owner"
+      ],
+      "template": "templates/0004-security-invoker-api-views.sql",
+      "template_sha256": "e03ad9e7eb7cfbf2b5b237c52437a6a1920e3399d1bd327c207dfe674ef46e4f",
+      "version": "20260807120004"
+    },
+    {
+      "canonical_render_sha256": "08f1a19128ab29a3bb2b260532670f57fe0dcaa6079aa81dd56b8579446baab3",
+      "name": "write_rpcs",
+      "placeholders": [
+        "agent_writer",
+        "authenticated",
+        "object_owner"
+      ],
+      "template": "templates/0005-write-rpcs.sql",
+      "template_sha256": "47b64584ceba8e34cdd47e3f4bfe8fc37f6d6971dcb2c0073184c2ee72fe99d8",
+      "version": "20260807120005"
+    }
+  ],
+  "schema_version": 1
+}
