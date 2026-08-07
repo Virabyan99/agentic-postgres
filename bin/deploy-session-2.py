@@ -460,6 +460,18 @@ def main(argv: list[str] | None = None) -> int:
         fail(EXIT_VALIDATION, f"the project did not start:\n{started.stderr}")
     edge["project_network_attached"] = True
 
+    # Re-read, because starting the project changed it. `project-runtime.sh up`
+    # runs `materialize-secrets.sh`, which writes a *new* immutable generation
+    # and repoints `active-secret-generation.json` at it. The value captured in
+    # step 2 was the generation that was active before this deploy, so the
+    # document described one the deploy had already superseded, and the pointer
+    # and the document disagreed on every run after the first.
+    #
+    # Step 2 still checks the precondition; this observes the result. A deployed
+    # document records what is true when it is written, not what was true when
+    # the run began.
+    secrets = require_secret_generation(key)
+
     step("6. Observe and publish")
     # Traefik's Docker provider polls, so the router for a container that has
     # only just started is not wired at the instant `compose up --wait` returns.
