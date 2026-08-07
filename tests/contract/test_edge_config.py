@@ -231,11 +231,81 @@ def test_logs_are_structured(static_config: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _render_dynamic(acme_environment: str) -> str:
+    """Through the real substitution, not a hand-written stand-in.
+
+    This fixture used to be ``text.replace("__HSTS_BLOCK__", "")`` -- the
+    staging substitution, transcribed. Transcribing it meant the production
+    substitution was never rendered by any test, and the production one was the
+    broken one: it also replaced the placeholder inside the file's own header
+    comment, whose second and third lines then escaped the ``#`` into top-level
+    YAML. The file stopped parsing, Traefik's file provider discarded every
+    baseline middleware with it, and both hostnames served 404 behind valid
+    certificates.
+    """
+    import importlib.util
+
+    path = REPO_ROOT / "bin" / "render-config.py"
+    spec = importlib.util.spec_from_file_location("render_config_under_test", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module._substitute_hsts(DYNAMIC.read_text(encoding="utf-8"), acme_environment)
+
+
 @pytest.fixture(scope="module")
 def dynamic_config() -> dict[str, Any]:
-    text = DYNAMIC.read_text(encoding="utf-8")
-    # Empty is what edge.sh substitutes on staging.
-    return yaml.safe_load(text.replace("__HSTS_BLOCK__", ""))
+    return yaml.safe_load(_render_dynamic("staging"))
+
+
+@pytest.mark.parametrize("acme_environment", ["staging", "production"])
+def test_the_rendered_dynamic_config_parses_in_both_environments(acme_environment: str) -> None:
+    """The assertion whose absence cost a live outage.
+
+    A file Traefik cannot parse is not refused, it is discarded, and the only
+    symptom is that the middlewares it defined stop existing.
+    """
+    parsed = yaml.safe_load(_render_dynamic(acme_environment))
+
+    assert set(parsed) == {"tls", "http"}, (
+        f"the {acme_environment} render has top-level keys it should not: {sorted(parsed)}"
+    )
+    assert set(parsed["http"]["middlewares"]) == {
+        "apg-security-headers",
+        "apg-rate-limit",
+        "apg-baseline",
+    }, f"the {acme_environment} render lost a baseline middleware"
+
+
+def test_promotion_adds_hsts_and_staging_does_not() -> None:
+    """Both directions, because either alone passes for the wrong reason."""
+    staging = yaml.safe_load(_render_dynamic("staging"))["http"]["middlewares"]
+    production = yaml.safe_load(_render_dynamic("production"))["http"]["middlewares"]
+
+    assert "stsSeconds" not in staging["apg-security-headers"]["headers"]
+    assert production["apg-security-headers"]["headers"]["stsSeconds"] == 31_536_000
+
+
+def test_documenting_the_placeholder_cannot_inject_configuration() -> None:
+    """Guard the guard.
+
+    The header comment naming ``__HSTS_BLOCK__`` is what broke this, and it is
+    worth keeping -- an undocumented placeholder is worse. What must hold is
+    that documenting one cannot inject anything. Asserting the comment is still
+    present keeps the regression reachable: without it a later edit could
+    delete the comment, and the substitution would look correct again for a
+    reason unrelated to the fix.
+    """
+    assert "#   __HSTS_BLOCK__" in DYNAMIC.read_text(encoding="utf-8"), (
+        "the placeholder is no longer documented in a comment"
+    )
+
+    rendered = _render_dynamic("production")
+    documentation = [line for line in rendered.splitlines() if "empty on staging" in line]
+    assert len(documentation) == 1, documentation
+    assert documentation[0].lstrip().startswith("#"), (
+        f"the substitution escaped the comment: {documentation[0]!r}"
+    )
 
 
 def test_tls_minimum_version_is_at_least_1_2(dynamic_config: dict[str, Any]) -> None:

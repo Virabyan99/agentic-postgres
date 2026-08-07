@@ -28,6 +28,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
@@ -210,17 +212,21 @@ def edge_static(host: Path, destination: Path, acme_environment: str) -> int:
     if (problem := _clear_invented_directory(destination / "traefik.yaml")) is not None:
         print(f"render-config: {problem}", file=sys.stderr)
         return 5
+    if (problem := _yaml_problem("traefik.yaml", text)) is not None:
+        print(f"render-config: {problem}", file=sys.stderr)
+        return 5
     _write_config_file(destination / "traefik.yaml", text)
 
     dynamic = destination / "dynamic"
     dynamic.mkdir(parents=True, exist_ok=True)
     for path in sorted((source / "dynamic").glob("*.yaml")):
-        body = path.read_text(encoding="utf-8").replace(
-            "__HSTS_BLOCK__", _hsts_block(acme_environment)
-        )
+        body = _substitute_hsts(path.read_text(encoding="utf-8"), acme_environment)
         still_open = sorted(set(re.findall(r"__[A-Z_]+__", body)))
         if still_open:
             print(f"render-config: {path.name}: unsubstituted {still_open}", file=sys.stderr)
+            return 5
+        if (problem := _yaml_problem(path.name, body)) is not None:
+            print(f"render-config: {problem}", file=sys.stderr)
             return 5
         _write_config_file(dynamic / path.name, body)
 
@@ -228,7 +234,51 @@ def edge_static(host: Path, destination: Path, acme_environment: str) -> int:
     return 0
 
 
-def _hsts_block(acme_environment: str) -> str:
+def _yaml_problem(name: str, text: str) -> str | None:
+    """Refuse to write a rendered file Traefik will silently discard.
+
+    Nothing checked this, and "no unsubstituted placeholders" is a weaker claim
+    than it looks: a substitution can complete and still produce a document
+    that does not parse. Traefik's file provider does not fail loudly when one
+    does -- it drops the whole file, and the only symptom is that every
+    middleware defined in it stops existing. The routers referencing them are
+    rejected one by one with `middleware "..." does not exist`, and the
+    hostname answers 404 while holding a perfectly valid certificate.
+
+    Cheaper to refuse to write it.
+    """
+    try:
+        parsed = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        return f"{name}: the rendered configuration is not valid YAML: {exc}"
+    if not isinstance(parsed, dict):
+        return f"{name}: the rendered configuration is not a mapping, got {type(parsed).__name__}"
+    return None
+
+
+#: Only where the placeholder is the whole of a line, indentation aside.
+#:
+#: `str.replace` substitutes every occurrence, and `baseline.yaml` documents
+#: its own placeholder in a header comment:
+#:
+#:     # One placeholder is substituted by edge.sh:
+#:     #   __HSTS_BLOCK__   empty on staging; the HSTS header set after promotion.
+#:
+#: On staging the replacement is empty, so that comment stayed a comment and
+#: nothing was ever wrong. On production it is three lines, and the second and
+#: third escaped the `#` to become top-level YAML ahead of `tls:` -- which is
+#: how the first production render of this file made it unparseable, took every
+#: baseline middleware with it, and left both hostnames serving 404 behind a
+#: valid certificate.
+_HSTS_PLACEHOLDER = re.compile(r"^(?P<indent>[ \t]*)__HSTS_BLOCK__[ \t]*$", re.MULTILINE)
+
+#: Unindented. The indentation comes from wherever the placeholder sits, so
+#: this no longer has to know it is being pasted eight spaces deep into a file
+#: it cannot see.
+_HSTS_LINES = ("stsSeconds: 31536000", "stsIncludeSubdomains: true", "stsPreload: false")
+
+
+def _substitute_hsts(body: str, acme_environment: str) -> str:
     """Absent on staging, and that is the point.
 
     A browser that pins HSTS against a staging certificate keeps refusing the
@@ -236,8 +286,10 @@ def _hsts_block(acme_environment: str) -> str:
     for their visitors.
     """
     if acme_environment != "production":
-        return ""
-    return "stsSeconds: 31536000\n        stsIncludeSubdomains: true\n        stsPreload: false"
+        return _HSTS_PLACEHOLDER.sub("", body)
+    return _HSTS_PLACEHOLDER.sub(
+        lambda match: "\n".join(f"{match['indent']}{line}" for line in _HSTS_LINES), body
+    )
 
 
 def _clear_invented_directory(path: Path) -> str | None:
