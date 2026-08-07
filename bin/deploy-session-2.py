@@ -307,7 +307,11 @@ def observe_tls(host: dict[str, Any], domain: str) -> dict[str, Any]:
     """Read the certificate the edge is actually serving for this hostname."""
     unavailable = {
         "status": "unavailable",
-        "acme_environment": "staging",
+        # Read from the ACME store, not asserted. This was the literal
+        # `"staging"`, which no promotion could change and nothing ever
+        # measured -- so a deploy after `promote-acme` published a staging
+        # environment beside the fingerprint of a production certificate.
+        "acme_environment": edge_state.acme_environment(),
         "resolver": host["edge"]["acme_resolver_name"],
         "certificate_sha256": None,
         "not_before": None,

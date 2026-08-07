@@ -41,16 +41,64 @@ from agentic_postgres.installed_release import validate_commit
 
 STATE_PATH = Path("/etc/agentic-postgres/edge-state.json")
 
+#: Mirrors `EDGE_STATE_DIR` and `ACME_DIR` in `bin/edge.sh`, which owns the
+#: layout because it is what creates the directories.
+EDGE_STATE_DIR = Path("/var/lib/agentic-postgres/edge")
+ACME_DIR = EDGE_STATE_DIR / "acme"
+
 SCHEMA_VERSION = 1
 
 __all__ = [
+    "ACME_DIR",
+    "EDGE_STATE_DIR",
     "SCHEMA_VERSION",
     "STATE_PATH",
+    "acme_environment",
     "build_state",
     "load_state",
     "validate_state",
     "write_state",
 ]
+
+
+def acme_environment(*, acme_directory: Path = ACME_DIR) -> str:
+    """Which ACME environment the edge is on, read from the store that decides.
+
+    A non-empty `production.json` is the only evidence that promotion happened,
+    and it is the evidence `bin/edge.sh` has always used. This is that rule, in
+    the one place both callers can reach: `edge.sh` delegates here, the way its
+    `host_id` already does.
+
+    It is here because the deploy had a second answer, and the second answer was
+    the string `"staging"`, written as a literal into `observe_tls`'s result.
+    Never read from anywhere, and unable to say `production` on any host at any
+    time. It went unnoticed for as long as staging happened to be true, then
+    survived the promotion and reported a staging environment beside the correct
+    fingerprint of a production certificate -- one document disagreeing with
+    itself about one certificate.
+
+    That reaches further than tidiness. `test_hsts_is_present_on_the_https_
+    response` branches on this field, so with it pinned to `staging` the branch
+    that asserts HSTS *is* sent could never be taken: the promotion's most
+    visible effect had no test able to see it.
+    """
+    store = acme_directory / "production.json"
+    try:
+        # `is_file` as well as size, which is stricter than the `[ -s ]` this
+        # replaces: `-s` is true for a *directory* too, because directories have
+        # a non-zero size. That is not a hypothetical here. Compose's
+        # `create_host_path` invents a directory wherever a bind source is
+        # missing, and `render-config._clear_invented_directory` exists because
+        # it already did so to `traefik.yaml` on this host. An invented
+        # directory named `production.json` would have reported a promotion
+        # that never happened.
+        if not store.is_file():
+            return "staging"
+        return "production" if store.stat().st_size > 0 else "staging"
+    except OSError:
+        # Unreadable by this process. Nothing here has seen evidence of a
+        # promotion, and staging is the honest answer.
+        return "staging"
 
 
 def build_state(*, installed_release_commit: str, host_manifest_sha256: str) -> dict[str, Any]:

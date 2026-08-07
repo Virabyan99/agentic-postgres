@@ -224,3 +224,79 @@ def test_every_state_file_a_launcher_requires_has_a_writer() -> None:
         f"launchers require state files nothing in bin/ or src/ writes: {orphans}. "
         "The unit exits 3 on every boot and `systemctl enable` reports success regardless."
     )
+
+
+# ---------------------------------------------------------------------------
+# Which ACME environment the host is on
+# ---------------------------------------------------------------------------
+
+
+def test_an_empty_or_missing_production_store_reads_as_staging(tmp_path: Path) -> None:
+    """Matches `[ -s ]`: existing is not enough, it has to have content.
+
+    `promote-acme` truncates `production.json` to zero bytes before restarting
+    Traefik, so between those two moments the file exists and no certificate
+    has been issued into it. Treating existence as promotion would report
+    production during that window.
+    """
+    assert edge_state.acme_environment(acme_directory=tmp_path) == "staging"
+
+    (tmp_path / "production.json").write_text("", encoding="utf-8")
+    assert edge_state.acme_environment(acme_directory=tmp_path) == "staging"
+
+    (tmp_path / "staging.json").write_text('{"letsencrypt": {}}', encoding="utf-8")
+    assert edge_state.acme_environment(acme_directory=tmp_path) == "staging"
+
+
+def test_a_populated_production_store_reads_as_production(tmp_path: Path) -> None:
+    (tmp_path / "production.json").write_text('{"letsencrypt": {}}', encoding="utf-8")
+    assert edge_state.acme_environment(acme_directory=tmp_path) == "production"
+
+
+def test_a_directory_where_the_store_should_be_is_not_a_promotion(tmp_path: Path) -> None:
+    """Stricter than the `[ -s ]` this replaced, deliberately.
+
+    `-s` is true for a directory, because directories have a non-zero size --
+    and Compose's `create_host_path` invents a directory wherever a bind source
+    is missing. It has already done exactly that to `traefik.yaml` on this
+    host, which is why `render-config._clear_invented_directory` exists. An
+    invented directory named `production.json` must not read as a promotion
+    that never happened.
+    """
+    (tmp_path / "production.json").mkdir()
+    assert edge_state.acme_environment(acme_directory=tmp_path) == "staging"
+
+
+def test_nothing_decides_the_acme_environment_by_writing_it_down() -> None:
+    """The regression, in its general form.
+
+    `observe_tls` carried `"acme_environment": "staging"` as a literal in the
+    dictionary it returned. Nothing ever read it from anywhere, and it could
+    not say `production` on any host at any time, so every deployed document
+    written after the promotion reported staging beside the correct fingerprint
+    of a production certificate.
+
+    A literal on either side of this field is the shape of that defect,
+    wherever it turns up.
+    """
+    pattern = re.compile(r"""acme[_-]environment["']?\s*[:=]\s*["'](staging|production)["']""")
+
+    candidates = [path for path in (REPO_ROOT / "bin").iterdir() if path.is_file()]
+    candidates += list((REPO_ROOT / "src").rglob("*.py"))
+
+    offenders = []
+    for source in sorted(candidates):
+        if source.name == "edge_state.py":
+            continue
+        try:
+            text = source.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for number, line in enumerate(text.splitlines(), 1):
+            if pattern.search(line):
+                offenders.append(f"{source.relative_to(REPO_ROOT)}:{number}: {line.strip()}")
+
+    assert not offenders, (
+        f"these assert an ACME environment instead of reading it from the store: {offenders}. "
+        "Use edge_state.acme_environment()."
+    )

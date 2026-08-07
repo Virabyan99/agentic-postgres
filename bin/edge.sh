@@ -139,12 +139,20 @@ print(load_host_manifest(Path(sys.argv[1]))["host"]["id"])
 PYTHON
 }
 
+# Delegated, the way host_id above already is. This was four lines of shell,
+# and bin/deploy-session-2.py had its own answer -- the literal "staging",
+# which no promotion could change. Two answers to "which ACME environment is
+# this host on" is one too many, and the second one was wrong for the entire
+# life of every deployed document written after a promotion.
 acme_environment() {
-  if [ -s "${ACME_DIR}/production.json" ]; then
-    printf 'production'
-  else
-    printf 'staging'
-  fi
+  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "${ACME_DIR}" <<'PYTHON'
+import sys
+from pathlib import Path
+
+from agentic_postgres.edge_state import acme_environment
+
+print(acme_environment(acme_directory=Path(sys.argv[1])), end="")
+PYTHON
 }
 
 compose() {
