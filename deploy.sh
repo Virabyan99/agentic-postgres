@@ -43,6 +43,11 @@ Usage: ./deploy.sh --project FILE --capabilities FILE --render-only
   --project FILE       Path to a project manifest (non-secret).
   --capabilities FILE  Path to a capability manifest (non-secret).
   --host FILE          Path to the host manifest. Required to deploy.
+  --render-runtime-only
+                       Reserve this project's two host-loopback ports and write
+                       the runtime override that publishes them, without moving
+                       a container. Needs --host and root. Re-runnable: it marks
+                       no allocation active and publishes no readiness.
   --render-only        Validates inputs, stages outputs, validates the Compose
                        model, publishes the staged set atomically, and starts
                        no services. Needs no root and no host.
@@ -86,6 +91,7 @@ python_bin() {
 
 main() {
   local project="" capabilities="" host="" render_only=0 through_session=""
+  local render_runtime_only=0
 
   if [ "$#" -eq 0 ]; then
     usage >&2
@@ -100,6 +106,10 @@ main() {
         ;;
       --render-only)
         render_only=1
+        shift
+        ;;
+      --render-runtime-only)
+        render_runtime_only=1
         shift
         ;;
       --project)
@@ -164,8 +174,35 @@ main() {
     die 2 "--render-only and --through-session ask for different things; pass one."
   fi
 
+  if [ "${render_runtime_only}" -eq 1 ]; then
+    [ "${render_only}" -eq 1 ] && die 2 \
+      "--render-only needs no host and no root; --render-runtime-only needs both. Pass one."
+    [ -n "${through_session}" ] && die 2 \
+      "--render-runtime-only reserves and renders; --through-session deploys. Pass one."
+    [ -n "${host}" ] || die 2 "--render-runtime-only requires --host."
+    [ "$(id -u)" -eq 0 ] || die 3 \
+      "--render-runtime-only writes the root-owned runtime override and the host port registry."
+
+    # Reserve and publish-in-the-file, and move no container. This is the step
+    # that makes a publication recoverable: it can fail on its own and be re-run
+    # on its own, and the two things most likely to go wrong -- the allocation
+    # and the loopback binding -- are both cheaper to get wrong here than after
+    # a container has moved (D95, ADR 0042).
+    #
+    # What it deliberately does NOT do: materialize a secret, rotate a password,
+    # mark an allocation active, or publish `ready`. Every one of those is a
+    # claim about a running system, and nothing is running differently when this
+    # returns.
+    PYTHONPATH="${ROOT_DIR}/src" exec "$(python_bin)" \
+      "${ROOT_DIR}/bin/deploy-project.py" \
+      --host "${host}" \
+      --project "${project}" \
+      --capabilities "${capabilities}" \
+      --render-runtime-only
+  fi
+
   if [ "${render_only}" -ne 1 ] && [ -z "${through_session}" ]; then
-    die 10 "nothing to do: pass --render-only, or --through-session N to deploy."
+    die 10 "nothing to do: pass --render-only, --render-runtime-only, or --through-session N."
   fi
 
   if [ -n "${through_session}" ]; then

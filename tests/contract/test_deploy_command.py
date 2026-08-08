@@ -16,6 +16,7 @@ reporting success is the failure mode that gets discovered in production.
 
 from __future__ import annotations
 
+import os
 import subprocess
 
 import pytest
@@ -239,3 +240,126 @@ def test_the_runtime_env_is_not_written_into_the_rendered_directory() -> None:
     source = ENTRY_POINT.read_text(encoding="utf-8")
     assert "state_directory / " in source
     assert ".generated" not in source.split("runtime_compose_env")[1].split("\n")[0]
+
+
+# ---------------------------------------------------------------------------
+# --render-runtime-only (Session 4 Run 4, D95)
+# ---------------------------------------------------------------------------
+
+
+#: The operator entry point, which is not `ENTRY_POINT`: that is
+#: `bin/deploy-project.py`, the program deploy.sh execs. The mode guards below
+#: belong to the shell script, so they are driven through it. Naming this
+#: `deploy` as well would redefine the helper every earlier test in this file
+#: uses -- which it did, and seven of them started measuring the wrong program.
+OPERATOR_ENTRY_POINT = REPO_ROOT / "deploy.sh"
+
+
+def deploy_sh(*arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(OPERATOR_ENTRY_POINT), *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+
+
+def test_render_only_still_works_through_the_operator_entry_point() -> None:
+    """The standing non-negotiable, asserted beside the mode that could break it.
+
+    A second render mode is exactly the change that would quietly make the first
+    one require a host. `test_render_only_still_needs_no_host_and_no_root` above
+    already asserts this through `bin/deploy-project.py`; this asserts it through
+    `deploy.sh`, which is where the new mode's guards live and therefore where a
+    guard could catch the wrong mode.
+
+    Named differently from that one deliberately. The first version of this test
+    reused its name, which is not a duplicate so much as a deletion: the later
+    definition silently replaced the earlier, and the property everyone thought
+    was covered twice was covered once.
+    """
+    result = deploy_sh(
+        "--project",
+        "project.example.yaml",
+        "--capabilities",
+        "capabilities.example.yaml",
+        "--render-only",
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_a_runtime_render_without_a_host_is_refused() -> None:
+    result = deploy_sh(
+        "--project",
+        "project.example.yaml",
+        "--capabilities",
+        "capabilities.example.yaml",
+        "--render-runtime-only",
+    )
+    assert result.returncode == 2
+    assert "--host" in result.stderr
+
+
+def test_a_runtime_render_as_an_ordinary_user_is_refused() -> None:
+    """Root, and said before anything is read rather than after.
+
+    This writes the root-owned runtime override and the host port registry. A
+    permission error from halfway through would leave an operator asking which
+    half ran.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("this asserts the refusal an ordinary user gets")
+    result = deploy_sh(
+        "--project",
+        "project.example.yaml",
+        "--capabilities",
+        "capabilities.example.yaml",
+        "--host",
+        "host.example.yaml",
+        "--render-runtime-only",
+    )
+    assert result.returncode == 3
+    assert "root" in result.stderr
+
+
+def test_the_two_render_modes_are_not_combinable() -> None:
+    """They ask for different things, and one of them needs a host.
+
+    Accepting both would have to mean one silently winning, and which one is
+    not something an operator should have to know.
+    """
+    result = deploy_sh(
+        "--project",
+        "project.example.yaml",
+        "--capabilities",
+        "capabilities.example.yaml",
+        "--host",
+        "host.example.yaml",
+        "--render-only",
+        "--render-runtime-only",
+    )
+    assert result.returncode == 2
+
+
+def test_a_runtime_render_does_not_deploy() -> None:
+    """Asserted on the source, because the behaviour needs a host to observe.
+
+    The four things it must not do are the four that would make a failed run
+    unrecoverable: materialize a secret, start a container, mark an allocation
+    active, or publish readiness. Each is a claim about a running system, and
+    nothing is running differently when this returns.
+    """
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    body = source.split("def render_runtime_only(")[1].split("\ndef ")[0]
+
+    # Tokens, not words. The first version of this scan looked for "ready" and
+    # matched "already" in a comment, which is a test failing for a reason that
+    # has nothing to do with the property.
+    for forbidden in ("materialize-secrets", "project-runtime.sh", "port_allocations.activate"):
+        assert forbidden not in body, (
+            f"the runtime render references {forbidden!r}; it must reserve and render only"
+        )
+    assert '"ready"' not in body, "the runtime render publishes readiness"
+    assert "database-ports.sh" in body
+    assert "publications=" in body

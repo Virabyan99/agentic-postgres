@@ -31,6 +31,7 @@ SHELL_COMMANDS = (
     "bin/lock-dev-deps.sh",
     "bin/lock-versions.sh",
     "bin/materialize-secrets.sh",
+    "bin/database-ports.sh",
     "bin/db.sh",
     "bin/migrate.sh",
     "bin/postgres-bootstrap.sh",
@@ -45,6 +46,7 @@ SHELL_COMMANDS = (
 
 PYTHON_COMMANDS = (
     "bin/bootstrap-providers.py",
+    "bin/database-ports.py",
     "bin/db-verify.py",
     "bin/materialize-secrets.py",
     "bin/postgres-bootstrap.py",

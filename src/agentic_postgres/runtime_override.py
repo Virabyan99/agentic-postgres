@@ -16,11 +16,22 @@ middleware chain from its routes.
 
 from __future__ import annotations
 
+from ipaddress import ip_address
 from typing import Any
 
 import yaml
 
 from agentic_postgres.naming import HEALTH_ROUTE_PATH
+
+#: The two services Session 4 publishes on host loopback, and the ports they
+#: listen on *inside* the container. The pooler's is the 6432 convention rather
+#: than the image's own default of 5432, which Run 1 measured — a publication
+#: written against the convention while the daemon listened on the default
+#: would map a host port onto nothing.
+POOLER_SERVICE = "pgbouncer"
+POOLER_SERVICE_PORT = 6432
+DATABASE_SERVICE = "postgres"
+DATABASE_SERVICE_PORT = 5432
 
 #: The service in `compose.yaml` that carries the public route.
 ROUTED_SERVICE = "edge-probe"
@@ -37,17 +48,71 @@ MIGRATION_SERVICE = "dbmate"
 MIGRATIONS_MOUNT = "/migrations"
 
 __all__ = [
+    "DATABASE_SERVICE",
+    "DATABASE_SERVICE_PORT",
     "MIGRATIONS_MOUNT",
     "MIGRATION_SERVICE",
+    "POOLER_SERVICE",
+    "POOLER_SERVICE_PORT",
     "ROUTED_SERVICE",
     "ROUTED_SERVICE_PORT",
     "build_override",
+    "is_loopback",
+    "publication",
     "render_override",
 ]
 
 
+def publication(*, address: str, port: int, container_port: int) -> dict[str, Any]:
+    """One loopback publication, in long syntax so `host_ip` is a field.
+
+    Long syntax rather than `"127.0.0.1:15432:6432"` for one reason: ADR 0040
+    requires the tests to *read the published address*, and a string form makes
+    that a parsing exercise whose failure mode is a regex that matches the
+    wrong thing. Here the address is a key, and a publication that omits it is
+    missing a key rather than hiding one inside a string.
+
+    `mode: host` is explicit because the default differs between swarm and
+    non-swarm, and a publication whose reachability depends on which one Docker
+    thinks it is in is exactly the sort of thing that behaves one way here and
+    another way on the host.
+    """
+    if not is_loopback(address):
+        raise ValueError(
+            f"{address!r} is not a loopback address. Only the edge publishes on a "
+            "reachable address (ADR 0040); a database transport is reached through "
+            "a tunnel"
+        )
+    if not 1024 <= port <= 65535:
+        raise ValueError(f"published port {port} is outside the unprivileged range")
+
+    return {
+        "target": container_port,
+        "published": str(port),
+        "host_ip": address,
+        "protocol": "tcp",
+        "mode": "host",
+    }
+
+
+def is_loopback(address: str) -> bool:
+    """127.0.0.0/8 or ::1, and nothing else.
+
+    Written as a real address comparison rather than a `startswith("127.")`,
+    because `1270.0.0.1` starts with `127.` and `::1` does not.
+    """
+    try:
+        return ip_address(address).is_loopback
+    except ValueError:
+        return False
+
+
 def build_override(
-    *, router_name: str, https_entrypoint: str, rendered_directory: str
+    *,
+    router_name: str,
+    https_entrypoint: str,
+    rendered_directory: str,
+    publications: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
 
@@ -57,6 +122,17 @@ def build_override(
     start and therefore lives in the override `bin/project-runtime.sh` rewrites.
     Putting a per-start value in this file would leave dbmate reading whatever
     directory the last deploy happened to name.
+
+    ``publications`` is the allocated pair, or ``None`` before one exists. It is
+    optional because a project is deployed before it is published — the
+    allocation key is the instance UUID the volume carries, and on a first
+    deploy that UUID does not exist until the cluster has bootstrapped. So the
+    first `up` publishes nothing and a later privileged render adds it, which is
+    also what makes the publication re-runnable on its own.
+
+    **This file is the only place a database publication may be written.** The
+    committed model carries no `ports`, so a repository that could publish a
+    database port would be one clone away from publishing one.
     """
     if not router_name:
         raise ValueError("router_name is required")
@@ -68,8 +144,33 @@ def build_override(
     router = f"traefik.http.routers.{router_name}"
     service = f"traefik.http.services.{router_name}"
 
+    published: dict[str, Any] = {}
+    if publications is not None:
+        address = publications["address"]
+        published = {
+            POOLER_SERVICE: {
+                "ports": [
+                    publication(
+                        address=address,
+                        port=publications["pooled_port"],
+                        container_port=POOLER_SERVICE_PORT,
+                    )
+                ]
+            },
+            DATABASE_SERVICE: {
+                "ports": [
+                    publication(
+                        address=address,
+                        port=publications["direct_port"],
+                        container_port=DATABASE_SERVICE_PORT,
+                    )
+                ]
+            },
+        }
+
     return {
         "services": {
+            **published,
             # Read-only, and the only thing dbmate is given besides its
             # credential. It runs one command against one schema; a writable
             # mount would let a migration rewrite the set that produced it.
@@ -93,12 +194,19 @@ def build_override(
     }
 
 
-def render_override(*, router_name: str, https_entrypoint: str, rendered_directory: str) -> bytes:
+def render_override(
+    *,
+    router_name: str,
+    https_entrypoint: str,
+    rendered_directory: str,
+    publications: dict[str, Any] | None = None,
+) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
     document = build_override(
         router_name=router_name,
         https_entrypoint=https_entrypoint,
         rendered_directory=rendered_directory,
+        publications=publications,
     )
     header = (
         "# Generated from host.yaml and the rendered compose.env by ./deploy.sh.\n"

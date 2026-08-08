@@ -470,13 +470,133 @@ def _openssl_time(value: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def cluster_instance_uuid(container: str) -> str:
+    """Read the identity the volume carries, from the cluster that carries it.
+
+    Not from the deployed document, and not from anything the deploy computed:
+    this UUID exists precisely because it is a property of the *data*. Reading
+    it from a file that describes the data would make the allocation key a
+    derivation again, which is the thing ADR 0042 chose against.
+
+    This is also why a publication cannot be part of a first `up`. The UUID does
+    not exist until the cluster has bootstrapped an empty volume, and bootstrap
+    runs after `compose up --wait` returns.
+    """
+    result = subprocess.run(
+        [
+            "docker", "exec", "-i", container,
+            "psql", "-U", "postgres", "-d", "postgres", "-X", "-qtA",
+            "-c", "SELECT instance_uuid FROM app_private.project_identity",
+        ],
+        capture_output=True, text=True, check=False, timeout=60,
+    )  # fmt: skip
+    if result.returncode != 0:
+        fail(
+            EXIT_PRECONDITION,
+            f"could not read the project identity from {container}: {result.stderr.strip()}. "
+            "A publication is keyed by the identity the volume carries, so the cluster has "
+            "to be up and bootstrapped before its ports can be reserved.",
+        )
+    value = result.stdout.strip()
+    if not value:
+        fail(EXIT_PRECONDITION, f"{container} has no project identity row yet")
+    return value
+
+
+def render_runtime_only(arguments: argparse.Namespace) -> int:
+    """Reserve two ports and publish them in the override. Move nothing (D95).
+
+    The order matters and is the whole point: reserve, render, and stop. The
+    allocation stays `reserved` until something has connected to both endpoints,
+    which is `database-ports.sh verify`, which happens after a restart this
+    command deliberately does not perform. A crashed run therefore leaves a
+    reservation that can be proved unadopted rather than an active allocation
+    nothing is listening on.
+    """
+    if os.geteuid() != 0:
+        fail(EXIT_PREREQUISITE, "must run as root")
+
+    try:
+        host = load_host_manifest(arguments.host)
+        manifest = load_project_manifest(arguments.project)
+    except ManifestError as error:
+        fail(EXIT_INPUT, str(error))
+
+    key = derive_project_key(manifest["project"]["slug"], manifest["project"]["environment"])
+    state_directory = deployed_output.PROJECT_STATE_ROOT / key
+    if not (state_directory / "outputs.json").is_file():
+        fail(
+            EXIT_PRECONDITION,
+            f"{key} has no deployed document. A runtime render publishes ports for a "
+            "project that is already deployed; deploy it first.",
+        )
+
+    document = json.loads((state_directory / "outputs.json").read_text(encoding="utf-8"))
+    container = document["database"]["container"]
+    instance_uuid = cluster_instance_uuid(container)
+
+    access = host["database_access"]
+    step("1. Reserve two host-loopback ports")
+    reserved = run(
+        str(REPO_ROOT / "bin" / "database-ports.sh"),
+        "allocate",
+        "--host", str(arguments.host),
+        "--project-key", key,
+        "--instance-uuid", instance_uuid,
+    )  # fmt: skip
+    print(reserved.stdout, end="")
+    if reserved.returncode != 0:
+        fail(EXIT_VALIDATION, f"could not reserve ports for {key}:\n{reserved.stderr}")
+
+    shown = run(
+        str(REPO_ROOT / "bin" / "database-ports.sh"),
+        "show", "--instance-uuid", instance_uuid,
+    )  # fmt: skip
+    allocation = next(
+        (line.split() for line in shown.stdout.splitlines() if instance_uuid in line),
+        None,
+    )
+    if allocation is None:
+        fail(EXIT_PRECONDITION, f"no allocation recorded for {key} after reserving one")
+    pooled, direct = int(allocation[2]), int(allocation[3])
+
+    step("2. Render the override that publishes them")
+    rendered_directory = deployed_output.rendered_path(key)
+    payload = runtime_override.render_override(
+        router_name=_env_value(rendered_directory / "compose.env", "HEALTH_ROUTER_NAME"),
+        https_entrypoint=host["edge"]["https_entrypoint"],
+        rendered_directory=str(rendered_directory),
+        publications={
+            "address": access["loopback_address"],
+            "pooled_port": pooled,
+            "direct_port": direct,
+        },
+    )
+    _write_root_only(rendered_directory / "runtime-compose.override.yaml", payload)
+    print(f"  {rendered_directory / 'runtime-compose.override.yaml'}")
+    print(f"  pgbouncer -> {access['loopback_address']}:{pooled}")
+    print(f"  postgres  -> {access['loopback_address']}:{direct}")
+
+    print("\n\033[1mNothing was started, and no allocation was marked active.\033[0m")
+    print("Restart the project to apply the publication, then:")
+    print(f"  sudo bin/database-ports.sh verify --host <host.yaml> --instance-uuid {instance_uuid}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--host", required=True, type=Path)
     parser.add_argument("--project", required=True, type=Path)
     parser.add_argument("--capabilities", required=True, type=Path)
-    parser.add_argument("--through-session", required=True, type=int)
+    parser.add_argument("--through-session", type=int)
+    parser.add_argument("--render-runtime-only", action="store_true", dest="render_runtime_only")
     arguments = parser.parse_args(argv)
+
+    if arguments.render_runtime_only:
+        return render_runtime_only(arguments)
+
+    if arguments.through_session is None:
+        fail(EXIT_INPUT, "--through-session is required unless --render-runtime-only is given")
 
     # deploy.sh has already refused anything above what this release implements.
     # Checked again here rather than trusted, because this program is also what

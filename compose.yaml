@@ -375,6 +375,9 @@ services:
         "$$APG_APP_RUNTIME_ROLE" "$$app_password"
         "$$APG_POOL_ADMIN_USER" "$$admin_password"
         > /etc/pgbouncer/userlist.txt;
+        printf '127.0.0.1:%s:pgbouncer:%s:%s\n'
+        "$$APG_POOL_LISTEN_PORT" "$$APG_POOL_ADMIN_USER" "$$admin_password"
+        > /etc/pgbouncer/.pgpass;
         unset app_password admin_password;
         printf '%s\n'
         "[databases]"
@@ -398,9 +401,63 @@ services:
         "log_disconnections = 1"
         > /etc/pgbouncer/pgbouncer.ini;
         exec /usr/bin/pgbouncer /etc/pgbouncer/pgbouncer.ini
+    # WHAT THIS CHECK CAN AND CANNOT PROVE, because the ordering decides it.
+    #
+    # `project-runtime.sh up` runs `compose up --wait` and THEN the deploy runs
+    # postgres-bootstrap, which is what creates the application role. So at the
+    # moment this check first runs, on a first deploy, that role does not exist.
+    # A check that connected as it would fail `--wait` and take the deploy down
+    # with it -- so the backend round-trip belongs to the client proofs, which
+    # run after bootstrap, and not here.
+    #
+    # What it does prove is the failure Run 3 measured, which nothing else
+    # catches: the pooler logs `could not open auth_file ... Permission denied`
+    # as an ERROR and then GOES ON LISTENING. It comes up, accepts connections,
+    # and refuses every one. A port check calls that healthy. Authenticating to
+    # the admin console proves the user list was assembled AND is readable by
+    # uid 70, which is the whole of that failure.
+    #
+    # Then it reads the pool mode and the prepared-statement setting back out of
+    # the running daemon rather than out of the file that was meant to produce
+    # them -- a rendered ini nobody loaded is exactly the kind of value that
+    # looks measured and is not.
+    #
+    # The credential reaches psql through PGPASSFILE -- a 0600 file the
+    # entrypoint wrote into the same tmpfs -- rather than through the password
+    # environment variable libpq also accepts. Two reasons, and the first is not
+    # the obvious one:
+    #
+    #   * a password passed in a process's environment is readable at
+    #     /proc/<pid>/environ by the same user, and every process in this
+    #     container is the same user;
+    #   * Session 3 banned that variable's name from this model outright, on the
+    #     grounds that nothing here had a use for one. Narrowing that ban to
+    #     "only when read from a file" would have been a weakening dressed as a
+    #     refinement, and `test_no_database_credential_appears_in_the_model_or_the_env`
+    #     would have had to be edited to allow it. A pgpass file needs no
+    #     exception at all, which is why it is the better answer and not merely
+    #     the permitted one.
+    #
+    # `docker inspect` stores this check's OUTPUT as well as its command, so the
+    # awk prints nothing and the whole verdict is its exit status.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          PGPASSFILE=/etc/pgbouncer/.pgpass
+          psql -h 127.0.0.1 -p "$$APG_POOL_LISTEN_PORT" -U "$$APG_POOL_ADMIN_USER"
+          -d pgbouncer -w -X -qtA -c 'SHOW CONFIG' 2>/dev/null
+          | awk -F'|' '
+              $$1 == "pool_mode" && $$2 == "transaction" { mode = 1 }
+              $$1 == "max_prepared_statements" && $$2 + 0 > 0 { prepared = 1 }
+              END { exit !(mode && prepared) }'
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
     # `internal` only, no Traefik label of any kind. The pooler is reached from
-    # this project's own services and, once Run 5 publishes one, from a
-    # host-loopback port -- never across the edge network.
+    # this project's own services and, once the runtime override publishes one,
+    # from a host-loopback port -- never across the edge network.
     networks:
       - internal
 
