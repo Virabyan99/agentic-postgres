@@ -42,16 +42,73 @@ def run(command: Path, *args: str, cwd: Path | None = None):
     )
 
 
+@pytest.fixture
+def root_is_irrelevant() -> bool:
+    """Opt out of the module's root guard, for a test that only reads source.
+
+    The guard below is right about the tests it was written for and wrong about
+    these: reading a file cannot exercise a different branch under root, so
+    skipping them there reports "could not look" about something that was
+    perfectly visible.
+
+    It mattered because three of them are ``DBX-PG-003``'s offline proofs, and
+    the Session 3 host gate necessarily runs as root. A skip is not a pass, so
+    ``database_isolation`` came out ``failed`` on a host where all nine of its
+    live proofs had just passed — a claim that could not be proved in the only
+    mode that measures it (D79).
+
+    An opt-out rather than a narrowing: leaving the default as "skip under root"
+    means a privilege test that nobody remembered to classify keeps today's safe
+    behaviour, and the tests that opt out say so in their own signature.
+    """
+    return True
+
+
 @pytest.fixture(autouse=True)
-def _refuse_to_run_as_root() -> None:
+def _refuse_to_run_as_root(request: pytest.FixtureRequest) -> None:
     """These assertions are about what happens *without* root.
 
     Run as root they would exercise the opposite branch and pass for the wrong
     reason, so the suite says it could not look rather than reporting a verdict
     (ADR 0018).
     """
+    if "root_is_irrelevant" in request.fixturenames:
+        return
     if os.geteuid() == 0:
         pytest.skip("this suite asserts the unprivileged refusals")
+
+
+def test_the_root_opt_out_is_only_used_by_tests_that_read_source(root_is_irrelevant) -> None:
+    """Guard the opt-out. It is one word away from disabling the guard.
+
+    It opts out itself, and has to: a guard that skips in the environment the
+    thing it guards was introduced for would be watching nothing there.
+
+    A test that invokes a command and opts out would run its privileged branch
+    under root and pass for the wrong reason -- which is exactly what the guard
+    exists to prevent, reintroduced by the mechanism that narrows it. Read with
+    ``ast`` rather than by regex: a call inside a comprehension or a ``with``
+    body is still a call.
+    """
+    import ast
+
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"), filename=__file__)
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef) or not node.name.startswith("test_"):
+            continue
+        argument_names = {argument.arg for argument in node.args.args}
+        if "root_is_irrelevant" not in argument_names:
+            continue
+        called = {
+            child.func.id
+            for child in ast.walk(node)
+            if isinstance(child, ast.Call) and isinstance(child.func, ast.Name)
+        }
+        assert "run" not in called, (
+            f"{node.name} opts out of the root guard and invokes a command. "
+            "Under root it would exercise the privileged branch and pass for "
+            "the wrong reason."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +285,7 @@ def test_check_is_the_default_mode() -> None:
     assert source.index('MODE="check"') < source.index("parse_args")
 
 
-def test_bootstrap_names_no_flag_that_adopts_a_volume() -> None:
+def test_bootstrap_names_no_flag_that_adopts_a_volume(root_is_irrelevant) -> None:
     """ADR 0030: a mismatch is refused, and there is no override.
 
     Asserted on the operator surface rather than on the comparison logic,
@@ -247,7 +304,7 @@ def test_neither_command_can_remove_a_volume(command: Path) -> None:
         assert forbidden not in source, f"{command.name} contains {forbidden!r}"
 
 
-def test_the_exit_code_for_a_foreign_volume_is_eleven() -> None:
+def test_the_exit_code_for_a_foreign_volume_is_eleven(root_is_irrelevant) -> None:
     """ADR 0031. Documented on the command that raises it, and nowhere else
     reused: `11` answers exactly one question."""
     source = BOOTSTRAP.read_text(encoding="utf-8")
@@ -257,7 +314,7 @@ def test_the_exit_code_for_a_foreign_volume_is_eleven() -> None:
     assert helper.count("EXIT_IDENTITY_MISMATCH") >= 2
 
 
-def test_identity_comparison_uses_only_immutable_fields() -> None:
+def test_identity_comparison_uses_only_immutable_fields(root_is_irrelevant) -> None:
     """ADR 0030: not the source commit, manifest checksum, or template version.
 
     Those change on every legitimate redeploy, and a check that fires on a
