@@ -43,6 +43,47 @@ property worth having: convergence, not idempotence by accident.
 
 Nothing here accepts a credential as an argument, and no value is ever printed.
 
+`--plan` needs no root in a checkout. On a host it needs `sudo` to read the
+project's recorded state, which is root-owned; without it the command says so
+and exits `3` rather than treating unreadable state as an absent project (D67).
+
+## The control-plane credential
+
+`--apply` is the only mode that needs it, and it is **not** the per-project
+runtime credential under `/etc/agentic-postgres/credentials/<key>/`. That one
+belongs to a read-only identity, lives on the host permanently, and is read on
+every project start. This one can create projects, machine identities and secret
+values — which is why it is passed by path, used once, and does not have to stay
+on the host at all.
+
+**Format: two non-empty lines.** Universal Auth client ID first, client secret
+second. Nothing else — no JSON, despite the `.json` in the example path above,
+which is a filename this repository never parses. A file with any other number
+of non-empty lines is refused by name and line count, and its contents are never
+echoed (that refusal exists because an earlier version passed the file whole as
+a bearer token, and `http.client` printed the rejected value).
+
+```
+7f3c1e2a-0000-0000-0000-000000000000
+st.abcd1234...
+```
+
+Write it root-owned and `0600`, and remove it when the bootstrap is done:
+
+```bash
+sudo install -m 0600 -o root -g root /dev/null \
+     /root/.config/agentic-postgres/infisical.json
+sudo nano /root/.config/agentic-postgres/infisical.json   # two lines, no quotes
+# ... run --apply ...
+sudo shred -u /root/.config/agentic-postgres/infisical.json
+```
+
+Removing it is the recommendation rather than an oversight, which is why a later
+session may find it absent: it carries organisation-level authority and the host
+has no standing need for it between bootstraps. Re-create it from the provider
+when the next `--apply` needs one — a new Universal Auth client secret on the
+same control-plane identity, shown exactly once.
+
 ## What it writes
 
 | Path | Mode | Contents |
