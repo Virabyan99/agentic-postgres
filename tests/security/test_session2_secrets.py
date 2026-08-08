@@ -300,19 +300,62 @@ def test_no_container_mounts_another_projects_secret_directory(
     assert not offenders, f"containers mount another project's secret directory: {offenders}"
 
 
+def active_generation(project_key: str) -> str:
+    pointer = Path(SECRET_ROOT) / project_key / "active-secret-generation.json"
+    assert pointer.is_file(), f"{pointer} does not exist"
+    return json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
+
+
 def test_the_active_generation_pointer_names_a_real_generation(
     project_a: dict[str, Any],
 ) -> None:
+    """What the name says, and only that.
+
+    This used to also assert that the pointer equals
+    ``project_a["secrets"]["generation_id"]``, and that equality does not hold
+    and was never designed to. Every start materializes a *new* generation and
+    repoints; the deployed document records the generation the deploy verified
+    and is not rewritten afterwards, because rewriting it would mean systemd
+    mutating ``/etc`` state at every boot. The two therefore diverge at the first
+    restart. It passed for two sessions because on this host nothing had ever
+    restarted a project between a deploy and a gate -- Run 8 restarts them on
+    purpose, and a reboot restarts them without asking (D76, ADR 0038).
+
+    What that equality was reaching for is measured by the test below, against
+    the containers rather than against a second file.
+    """
     key = project_a["project"]["key"]
-    pointer = Path(SECRET_ROOT) / key / "active-secret-generation.json"
-    assert pointer.is_file(), f"{pointer} does not exist"
-
-    recorded = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
-    assert recorded == project_a["secrets"]["generation_id"], (
-        "the deployed document and the active pointer disagree about the generation"
-    )
-
-    generation = Path(SECRET_ROOT) / key / "generations" / recorded
+    generation = Path(SECRET_ROOT) / key / "generations" / active_generation(key)
     assert generation.is_dir(), f"{generation} does not exist"
     assert oct(generation.stat().st_mode & 0o777) == "0o700"
     assert generation.stat().st_uid == 0, "the generation directory is not root-owned"
+
+
+def test_the_running_containers_mount_the_generation_the_pointer_names(
+    project_a: dict[str, Any],
+) -> None:
+    """The live claim: what is mounted is what the pointer says is current.
+
+    Strictly stronger than the equality it replaces. Two files agreeing said
+    nothing about any running process; this fails if a container is still
+    holding a superseded generation -- which is exactly the state a restart that
+    materialized but did not recreate would leave behind, and exactly what a
+    rotation has to produce and then clear.
+    """
+    key = project_a["project"]["key"]
+    active = f"{SECRET_ROOT}/{key}/generations/{active_generation(key)}/"
+    generations_root = f"{SECRET_ROOT}/{key}/generations/"
+
+    stale: list[str] = []
+    for name in project_containers(key):
+        mounts = json.loads(
+            output("docker", "inspect", "--format", "{{json .Mounts}}", name) or "[]"
+        )
+        for mount in mounts:
+            source = str(mount.get("Source", ""))
+            if source.startswith(generations_root) and not source.startswith(active):
+                stale.append(f"{name} -> {source}")
+
+    assert not stale, (
+        f"containers hold a generation the pointer has superseded (active {active}): {stale}"
+    )

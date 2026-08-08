@@ -336,6 +336,7 @@
     - tests/security/test_session2_secrets.py::test_materialized_files_are_read_only_and_owned_by_the_declared_consumer
     - tests/security/test_session2_secrets.py::test_only_the_granted_service_mounts_a_secret
     - tests/security/test_session2_secrets.py::test_no_container_mounts_another_projects_secret_directory
+    - tests/security/test_session2_secrets.py::test_the_running_containers_mount_the_generation_the_pointer_names
     - tests/contract/test_secret_contract.py::test_consumer_ownership_matches_the_service_runtime_user
     - tests/contract/test_secret_contract.py::test_no_service_receives_a_secret_it_was_not_granted
   description: >-
