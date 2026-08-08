@@ -70,6 +70,38 @@ def test_a_well_formed_state_document_validates() -> None:
     bootstrap_state.validate_state(make_state())
 
 
+def test_every_required_secret_the_contract_declares_can_be_recorded_as_managed() -> None:
+    """The enum is closed on purpose, and that is what let it drift.
+
+    `managed_resources` is what destruction reads, so free text is out. But a
+    closed enum whose only secret was `session2_sentinel` meant Session 3 could
+    declare two more credentials in `secrets.required.yaml` and nothing would
+    notice that the provider bootstrap still created one — which is how Run 7's
+    first host command met `HTTP 404` from the provider, one step into a
+    deployment (D66).
+
+    Asserted from the committed contract rather than from a list written here,
+    so the next session's secret fails this test on the day it is declared
+    rather than on the day someone deploys it.
+    """
+    from agentic_postgres.secrets_contract import load_secret_contract
+
+    contract = load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    declared = {secret["name"] for secret in contract["secrets"] if secret["required"]}
+
+    schema = json.loads(
+        (REPO_ROOT / "schemas" / "bootstrap-state.schema.json").read_text(encoding="utf-8")
+    )
+    allowed = set(schema["properties"]["managed_resources"]["items"]["enum"])
+
+    missing = sorted(declared - allowed)
+    assert not missing, (
+        f"secrets.required.yaml declares {missing}, which bootstrap state cannot record. "
+        "Add each name to the enum in schemas/bootstrap-state.schema.json — deliberately, "
+        "because that list is the licence to destroy them."
+    )
+
+
 def test_state_carries_no_secret_bearing_key() -> None:
     """`runtime_client_id` is a username. A client secret is not in this file.
 

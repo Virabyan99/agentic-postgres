@@ -43,6 +43,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from agentic_postgres import CURRENT_SESSION, REPO_ROOT
 from agentic_postgres.bootstrap_state import (
     BootstrapStateError,
     credential_paths,
@@ -55,12 +56,37 @@ from agentic_postgres.bootstrap_state import (
 from agentic_postgres.config import load_project_manifest
 from agentic_postgres.host_config import load_host_manifest
 from agentic_postgres.naming import project_key as derive_project_key
+from agentic_postgres.secrets_contract import active_secrets, load_secret_contract
 
 EXIT_INVALID = 2
 EXIT_PREREQUISITE = 3
 EXIT_PROVIDER = 7
 
 TIMEOUT = 30.0
+
+#: Bytes of entropy per generated secret value. `token_hex` rather than
+#: `token_urlsafe`: the migration credential is percent-encoded into a URL by
+#: the dbmate entrypoint, and while that encoding is total, a value with no
+#: characters needing it is one less thing that has to be right.
+SECRET_ENTROPY_BYTES = 32
+
+
+def declared_provider_secrets(session: int) -> list[dict[str, Any]]:
+    """Every secret this project must have at the provider, from the contract.
+
+    `secrets.required.yaml` is already the authority for what materialization
+    fetches. Until Run 7 it was not the authority for what bootstrap *creates*:
+    this file wrote one secret, `APG_SESSION2_SENTINEL`, by name. So Session 3's
+    two credentials existed nowhere, and Run 7's first host command failed with
+    `HTTP 404` from the provider (D66).
+
+    The folder comes from each secret's own `provider_path`, not from
+    `host.yaml`'s `runtime_folder`. Bootstrap used the latter and materialize
+    used the former, and they agreed for exactly as long as every secret lived
+    in `/runtime`.
+    """
+    contract = load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    return [secret for secret in active_secrets(contract, session) if secret["required"]]
 
 
 def fail(code: int, message: str) -> None:
@@ -272,24 +298,39 @@ class ControlPlane:
 
     def create_secret(
         self, project_id: str, environment: str, secret_path: str, name: str, value: str
-    ) -> None:
-        """Write one secret value into the project.
+    ) -> bool:
+        """Write one secret value into the project. True if this call created it.
 
         The value is passed and never returned, never printed, and never held
         beyond this call. Nothing in this file logs a request body, and this is
         the only method that is ever handed one that matters.
+
+        **An existing secret is left exactly as it is.** The provider answers a
+        conflict, and that is reported as "already present" rather than retried
+        as an update. Overwriting would rotate a live credential from a command
+        whose job is to create missing ones -- and for
+        `postgres_init_superuser_password` it would be worse than that: the
+        image reads it only when the data directory is empty, so a new value
+        would change the file and not the cluster, and materialization would
+        then deliver a password that does not work.
         """
-        self._call(
-            "POST",
-            f"/api/v3/secrets/raw/{urllib.parse.quote(name)}",
-            {
-                "workspaceId": project_id,
-                "environment": environment,
-                "secretPath": secret_path,
-                "secretValue": value,
-                "type": "shared",
-            },
-        )
+        try:
+            self._call(
+                "POST",
+                f"/api/v3/secrets/raw/{urllib.parse.quote(name)}",
+                {
+                    "workspaceId": project_id,
+                    "environment": environment,
+                    "secretPath": secret_path,
+                    "secretValue": value,
+                    "type": "shared",
+                },
+            )
+        except BootstrapStateError as exc:
+            if "HTTP 400" in str(exc) or "HTTP 409" in str(exc):
+                return False
+            raise
+        return True
 
     def create_client_secret(self, identity_id: str, description: str) -> tuple[str, str]:
         """Return ``(client_secret_id, client_secret)``.
@@ -367,27 +408,33 @@ def write_private(path: Path, content: str, *, mode: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def describe_plan(key: str, state: dict[str, Any] | None, digest: str) -> int:
+def describe_plan(key: str, state: dict[str, Any] | None, digest: str, session: int) -> int:
     print(f"project  {key}")
     print(f"state    {state_path(key)}")
+    print(f"session  {session}")
     print()
 
+    declared = declared_provider_secrets(session)
+
     if state is None:
-        for change in (
+        changes = [
             "create  Infisical project",
             "create  runtime machine identity",
             "create  Universal Auth client secret",
-            "create  session2 sentinel secret value",
+            *(f"create  secret value {secret['name']}" for secret in declared),
             "grant   identity access to the project, read-only",
-        ):
+        ]
+        for change in changes:
             print(f"  {change}")
         print()
-        print("5 change(s) proposed.")
+        print(f"{len(changes)} change(s) proposed.")
         return 0
 
     changes: list[str] = []
-    if "session2_sentinel" not in state.get("managed_resources", []):
-        changes.append("create  session2 sentinel secret value")
+    # Named one by one. "the sentinel is missing" was a sentence this command
+    # could say about exactly one secret; what an operator needs to know is
+    # which of the declared ones this project does not have.
+    changes.extend(f"create  secret value {name}" for name in missing_secret_names(state, session))
     if not is_converged(state, digest):
         recorded = state.get("provider_inputs_sha256", "none")
         changes.append(f"update  provider inputs changed ({recorded[:12]} -> {digest[:12]})")
@@ -407,15 +454,31 @@ def describe_plan(key: str, state: dict[str, Any] | None, digest: str) -> int:
     return 0
 
 
-def add_sentinel(
-    key: str, state: dict[str, Any], host: dict[str, Any], credential_file: Path
+def missing_secret_names(state: dict[str, Any], session: int) -> list[str]:
+    """Declared and required at this session, minus what this project owns."""
+    managed = set(state.get("managed_resources", []))
+    return [
+        secret["name"]
+        for secret in declared_provider_secrets(session)
+        if secret["name"] not in managed
+    ]
+
+
+def add_missing_secrets(
+    key: str, state: dict[str, Any], host: dict[str, Any], credential_file: Path, session: int
 ) -> int:
-    """Create the sentinel for a project that predates it, and record it.
+    """Create the declared secrets this project does not have yet, and record them.
+
+    Was `add_sentinel`, which created one secret named in this file. A project
+    bootstrapped in Session 2 has the sentinel and nothing else, so every later
+    session's credentials had to be created by hand -- and the way that surfaced
+    was `HTTP 404` from the provider in the middle of Run 7, one command into a
+    deployment (D66).
 
     Separate from the fresh-bootstrap path because it must not touch anything
     else. The identity, its client secret and the project all exist and are
-    working; the only thing being added is the one secret value, and the only
-    thing being changed in state is the list of what this project owns.
+    working; the only things being added are secret values, and the only thing
+    changing in state is the list of what this project owns.
     """
     infisical = host["infisical"]
     try:
@@ -423,33 +486,50 @@ def add_sentinel(
     except BootstrapStateError as exc:
         fail(EXIT_PREREQUISITE, str(exc))
 
+    pending = [
+        secret
+        for secret in declared_provider_secrets(session)
+        if secret["name"] in set(missing_secret_names(state, session))
+    ]
+
+    created: list[str] = []
+    adopted: list[str] = []
     try:
         control = ControlPlane.login(infisical["api_url"], operator_id, operator_secret)
-        # The folder first: Infisical resolves secretPath before writing and
-        # answers 404 when it does not exist.
-        control.ensure_folder(
-            state["infisical_project_id"], state["environment_slug"], state["runtime_folder"]
-        )
-        control.create_secret(
-            state["infisical_project_id"],
-            state["environment_slug"],
-            state["runtime_folder"],
-            "APG_SESSION2_SENTINEL",
-            secrets.token_hex(32),
-        )
+        for secret in pending:
+            # The folder first: Infisical resolves secretPath before writing and
+            # answers 404 when it does not exist. Per secret, because
+            # `provider_path` is per secret -- Session 3's two live in
+            # `/database`, not in the `/runtime` this used to assume.
+            control.ensure_folder(
+                state["infisical_project_id"],
+                state["environment_slug"],
+                secret["provider_path"],
+            )
+            fresh = control.create_secret(
+                state["infisical_project_id"],
+                state["environment_slug"],
+                secret["provider_path"],
+                secret["provider_key"],
+                secrets.token_hex(SECRET_ENTROPY_BYTES),
+            )
+            (created if fresh else adopted).append(secret["name"])
     except (BootstrapStateError, KeyError) as exc:
         fail(EXIT_PROVIDER, str(exc))
 
     document = dict(state)
-    document["managed_resources"] = sorted({*state["managed_resources"], "session2_sentinel"})
+    document["managed_resources"] = sorted({*state["managed_resources"], *created, *adopted})
     document["updated_at"] = now()
     validate_state(document)
     write_private(
         state_path(key), json.dumps(document, indent=2, sort_keys=True) + "\n", mode=0o600
     )
 
-    print(f"bootstrap-providers: created the session2 sentinel for {key}")
-    print(f"bootstrap-providers: recorded it in {state_path(key)}")
+    for name in created:
+        print(f"bootstrap-providers: created {name} for {key}")
+    for name in adopted:
+        print(f"bootstrap-providers: {name} was already present at the provider; not overwritten")
+    print(f"bootstrap-providers: recorded in {state_path(key)}")
     return 0
 
 
@@ -460,6 +540,7 @@ def apply(
     manifest_digest: str,
     host: dict[str, Any],
     credential_file: Path,
+    session: int,
 ) -> int:
     # Top-level sibling of `host`, not a child of it. The schema has
     # ["schema_version", "host", "ssh", "edge", "infisical"] at the root.
@@ -469,16 +550,17 @@ def apply(
         missing = needs_credential_repair(state)
         if is_converged(state, digest) and not missing:
             # Converged on inputs is not the same as complete. A project
-            # bootstrapped before the sentinel was implemented has every
-            # provider resource it needs except the one secret the whole session
-            # exists to trace, and the digest cannot see the difference --
-            # nothing about the manifest changed.
+            # bootstrapped in an earlier session has every provider resource
+            # that session declared and none that a later one added, and the
+            # digest cannot see the difference -- nothing about the manifest
+            # changed. This is the state alpha-dev was in when Run 7 asked the
+            # provider for a Session 3 credential and got a 404.
             #
-            # Adding the missing resource is what converge means. The
+            # Adding the missing resources is what converge means. The
             # alternative is --destroy and start again, which throws away a
-            # working identity and its credential to add one secret.
-            if "session2_sentinel" not in state.get("managed_resources", []):
-                return add_sentinel(key, state, host, credential_file)
+            # working identity and its credential to add a secret.
+            if missing_secret_names(state, session):
+                return add_missing_secrets(key, state, host, credential_file, session)
             print("bootstrap-providers: no changes.")
             return 0
         if missing:
@@ -528,16 +610,17 @@ def apply(
         # the provider. It is never written to this host, never printed, and not
         # kept after the call: the only copy is the provider's, and
         # materialize-secrets fetching it is the thing being proved.
-        control.ensure_folder(
-            project_id, infisical["environment_slug"], infisical["runtime_folder"]
-        )
-        control.create_secret(
-            project_id,
-            infisical["environment_slug"],
-            infisical["runtime_folder"],
-            "APG_SESSION2_SENTINEL",
-            secrets.token_hex(32),
-        )
+        for secret in declared_provider_secrets(session):
+            control.ensure_folder(
+                project_id, infisical["environment_slug"], secret["provider_path"]
+            )
+            control.create_secret(
+                project_id,
+                infisical["environment_slug"],
+                secret["provider_path"],
+                secret["provider_key"],
+                secrets.token_hex(SECRET_ENTROPY_BYTES),
+            )
     except (BootstrapStateError, KeyError) as exc:
         fail(EXIT_PROVIDER, str(exc))
 
@@ -586,13 +669,20 @@ def apply(
         "runtime_client_id": client_id,
         "active_client_secret_id": secret_id,
         "credential_files": paths,
-        "managed_resources": [
-            "project",
-            "runtime_identity",
-            "runtime_client_secret",
-            "runtime_folder",
-            "session2_sentinel",
-        ],
+        "managed_resources": sorted(
+            {
+                "project",
+                "runtime_identity",
+                "runtime_client_secret",
+                "runtime_folder",
+                # By contract name, one entry each. The enum in
+                # schemas/bootstrap-state.schema.json stays closed -- destruction
+                # reads this list -- and a contract test asserts the enum covers
+                # every required secret the contract declares, so the two cannot
+                # drift the way this file and secrets.required.yaml did.
+                *(secret["name"] for secret in declared_provider_secrets(session)),
+            }
+        ),
         "created_at": timestamp,
         "updated_at": timestamp,
     }
@@ -645,7 +735,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--mode", choices=["plan", "apply", "destroy"], required=True)
     parser.add_argument("--operator-credential-file", type=Path)
+    # Which secrets the contract requires is a function of the session, the same
+    # way it is for bin/materialize-secrets.sh. Optional and defaulted to what
+    # this release implements, because there is exactly one honest answer for an
+    # operator who does not pass it -- but printed on every run, because a
+    # default that decides which credentials exist should not be invisible.
+    parser.add_argument("--session", type=int, default=CURRENT_SESSION)
     arguments = parser.parse_args(argv)
+
+    if arguments.session < 1:
+        fail(EXIT_INVALID, "--session must be a positive integer")
 
     try:
         host = load_host_manifest(arguments.host)
@@ -669,7 +768,7 @@ def main(argv: list[str] | None = None) -> int:
     state = read_state(key)
 
     if arguments.mode == "plan":
-        return describe_plan(key, state, digest)
+        return describe_plan(key, state, digest, arguments.session)
     if arguments.mode == "destroy":
         return destroy(key, state, host, arguments.operator_credential_file)
 
@@ -677,7 +776,17 @@ def main(argv: list[str] | None = None) -> int:
         fail(EXIT_INVALID, "--apply requires --operator-credential-file")
     if not arguments.operator_credential_file.is_file():
         fail(EXIT_INVALID, f"credential file not found: {arguments.operator_credential_file}")
-    return apply(key, state, digest, manifest_digest, host, arguments.operator_credential_file)
+
+    print(f"bootstrap-providers: secrets required through session {arguments.session}")
+    return apply(
+        key,
+        state,
+        digest,
+        manifest_digest,
+        host,
+        arguments.operator_credential_file,
+        arguments.session,
+    )
 
 
 if __name__ == "__main__":

@@ -99,3 +99,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0033](0033-a-declared-grant-surface-that-nothing-rendered.md) | A declared grant surface that nothing rendered | 3 | Accepted |
 | [0034](0034-the-migration-plane-runs-a-container-and-assembles-its-own-url.md) | The migration plane runs a container, and assembles its own URL | 3 | Accepted |
 | [0035](0035-a-check-that-could-not-fail.md) | A check that could not fail | 3 | Accepted |
+| [0036](0036-the-provider-bootstrap-seeds-what-the-contract-declares.md) | The provider bootstrap seeds what the contract declares | 3 | Accepted |
