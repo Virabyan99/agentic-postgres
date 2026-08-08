@@ -210,7 +210,7 @@ def test_each_project_holds_only_its_own_secret_generation(
 
 
 def test_removing_the_second_project_leaves_the_first_routed(
-    as_root, sh, sh_status, project_a: dict[str, Any], project_b: dict[str, Any]
+    as_root, sh, sh_status, await_health, project_a: dict[str, Any], project_b: dict[str, Any]
 ) -> None:
     """The one deliberately mutating test, and it restores what it stopped.
 
@@ -218,6 +218,13 @@ def test_removing_the_second_project_leaves_the_first_routed(
     Proving otherwise requires stopping one, so this stops B, checks A, and
     starts B again — then asserts B came back, so a failure to restore cannot
     pass silently.
+
+    A's check is immediate and stays immediate: that is the claim, and a retry
+    there would let a route that came back *because B came back* pass. B's is
+    polled, because `systemctl start` returns when the containers are healthy and
+    the edge is attached, while Traefik discovers its backends a moment after
+    that. Session 2 never lost the race; a Session 3 project's stack is large
+    enough to reach the window (D75).
     """
     del as_root
     unit = f"agentic-postgres-project@{project_b['project']['key']}.service"
@@ -231,4 +238,4 @@ def test_removing_the_second_project_leaves_the_first_routed(
 
     code, stdout, _ = sh_status("systemctl", "is-active", unit)
     assert code == 0 and stdout.strip() == "active", f"{unit} was not restored: {stdout}"
-    assert health(project_b["project"]["domain"])["project_key"] == project_b["project"]["key"]
+    await_health(project_b["project"]["domain"], project_b["project"]["key"])

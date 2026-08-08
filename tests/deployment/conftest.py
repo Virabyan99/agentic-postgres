@@ -17,7 +17,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import ssl
 import subprocess
+import time
+import urllib.error
+import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -25,6 +29,7 @@ from typing import Any
 import pytest
 
 from agentic_postgres import REPO_ROOT
+from agentic_postgres.naming import HEALTH_ROUTE_PATH
 
 #: Signature of the plain-output command runner returned by the ``sh`` fixture.
 Runner = Callable[..., str]
@@ -165,6 +170,51 @@ def migration_password() -> Callable[[str], str]:
 
 #: Where the deploy installs each project's rendered output (ADR 0020).
 RENDERED_ROOT = Path("/var/lib/agentic-postgres/rendered")
+
+#: How long a route may take to reappear after its project restarts.
+#:
+#: Bounded, and short enough that a project which never comes back is a failure
+#: rather than a long wait. Measured cause: `systemctl start` returns when the
+#: containers are healthy and the edge is attached, but Traefik *discovers* its
+#: backends rather than being told about them, so the router for a recreated
+#: edge network appears a moment later. Session 2 never lost this race because a
+#: Session 2 project's stack came back in about a second; a Session 3 project
+#: takes long enough that the window is reachable (D75).
+ROUTE_RETURN_TIMEOUT_SECONDS = 90
+
+
+@pytest.fixture(scope="session")
+def await_health() -> Callable[[str, str], dict[str, Any]]:
+    """Poll a project's health route until it identifies that project.
+
+    Only for the moment *after* a restart. A steady-state assertion must stay
+    immediate: a route that is down while nothing is happening to it is a
+    failure, and wrapping that in a retry would turn a broken deployment into a
+    slow green.
+    """
+
+    def poll(hostname: str, project_key: str) -> dict[str, Any]:
+        context = ssl.create_default_context()
+        deadline = time.monotonic() + ROUTE_RETURN_TIMEOUT_SECONDS
+        last = "no attempt was made"
+        while time.monotonic() < deadline:
+            try:
+                with urllib.request.urlopen(
+                    f"https://{hostname}{HEALTH_ROUTE_PATH}", timeout=15, context=context
+                ) as response:
+                    payload = json.loads(response.read())
+                if payload.get("project_key") == project_key:
+                    return payload
+                last = f"answered for {payload.get('project_key')!r}"
+            except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+                last = f"{type(exc).__name__}: {exc}"
+            time.sleep(2)
+        pytest.fail(
+            f"https://{hostname}{HEALTH_ROUTE_PATH} did not identify {project_key} "
+            f"within {ROUTE_RETURN_TIMEOUT_SECONDS}s; last: {last}"
+        )
+
+    return poll
 
 
 @pytest.fixture(scope="session")

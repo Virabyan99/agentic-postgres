@@ -32,16 +32,11 @@ destructive volume tests are not written here (D51, D69).
 
 from __future__ import annotations
 
-import json
-import ssl
 import subprocess
 import time
-import urllib.request
 from typing import Any
 
 import pytest
-
-from agentic_postgres.naming import HEALTH_ROUTE_PATH
 
 pytestmark = [
     pytest.mark.p0,
@@ -160,14 +155,6 @@ def identity_predates_the_postmaster(document: dict[str, Any]) -> str:
     )
 
 
-def health(hostname: str) -> dict[str, Any]:
-    context = ssl.create_default_context()
-    with urllib.request.urlopen(
-        f"https://{hostname}{HEALTH_ROUTE_PATH}", timeout=30, context=context
-    ) as response:
-        return json.loads(response.read())
-
-
 def container_is_running(name: str) -> bool:
     result = subprocess.run(
         ["docker", "inspect", "--format", "{{.State.Running}}", name],
@@ -214,7 +201,7 @@ def test_restarting_the_container_preserves_the_cluster(project: dict[str, Any])
 
 
 def test_restarting_the_project_unit_brings_back_the_recorded_session(
-    as_root, sh, sh_status, project: dict[str, Any]
+    as_root, sh, sh_status, await_health, project: dict[str, Any]
 ) -> None:
     """The launcher reads the session; it does not repeat one (ADR 0032).
 
@@ -248,9 +235,10 @@ def test_restarting_the_project_unit_brings_back_the_recorded_session(
     assert state(project) == before, "the cluster changed across a unit restart"
     assert identity_predates_the_postmaster(project) == "true"
 
-    assert health(project["project"]["domain"])["project_key"] == key, (
-        "the project came back without its ingress"
-    )
+    # Polled, not asked once: `systemctl start` returns when the containers are
+    # healthy and the edge is attached, and Traefik discovers the backend a
+    # moment after that (D75). This assertion passed on its first run by luck.
+    await_health(project["project"]["domain"], key)
 
 
 def test_the_active_secret_generation_opens_the_cluster(
