@@ -19,11 +19,14 @@ from agentic_postgres.naming import HEALTH_ROUTE_PATH
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 ROUTER = "apg-alpha-dev-health"
+RENDERED = "/var/lib/agentic-postgres/rendered/alpha-dev"
 
 
 @pytest.fixture
 def labels() -> dict[str, str]:
-    document = runtime_override.build_override(router_name=ROUTER, https_entrypoint="websecure")
+    document = runtime_override.build_override(
+        router_name=ROUTER, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
     return document["services"][runtime_override.ROUTED_SERVICE]["labels"]
 
 
@@ -69,14 +72,53 @@ def test_the_router_and_service_names_agree(labels: dict[str, str]) -> None:
 
 
 def test_the_rendered_document_is_parseable_yaml() -> None:
-    payload = runtime_override.render_override(router_name=ROUTER, https_entrypoint="websecure")
+    payload = runtime_override.render_override(
+        router_name=ROUTER, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
     document = yaml.safe_load(payload.decode("utf-8"))
     assert runtime_override.ROUTED_SERVICE in document["services"]
 
 
-@pytest.mark.parametrize("field", ["router_name", "https_entrypoint"])
+@pytest.mark.parametrize("field", ["router_name", "https_entrypoint", "rendered_directory"])
 def test_an_empty_input_is_refused(field: str) -> None:
-    arguments = {"router_name": ROUTER, "https_entrypoint": "websecure"}
+    arguments = {
+        "router_name": ROUTER,
+        "https_entrypoint": "websecure",
+        "rendered_directory": RENDERED,
+    }
     arguments[field] = ""
     with pytest.raises(ValueError):
         runtime_override.build_override(**arguments)
+
+
+# ---------------------------------------------------------------------------
+# The migration mount (D60). The rendered set is the one generated artifact a
+# container reads, and dbmate is handed a directory rather than a file list --
+# so the *path* is what decides which migrations run.
+# ---------------------------------------------------------------------------
+
+
+def test_the_migration_service_is_given_the_projects_own_rendered_set() -> None:
+    document = runtime_override.build_override(
+        router_name=ROUTER, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
+    volumes = document["services"][runtime_override.MIGRATION_SERVICE]["volumes"]
+    assert volumes == [f"{RENDERED}/migrations:{runtime_override.MIGRATIONS_MOUNT}:ro"]
+
+
+def test_the_migration_mount_is_read_only() -> None:
+    """A writable mount would let a migration rewrite the set that produced it."""
+    document = runtime_override.build_override(
+        router_name=ROUTER, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
+    for volume in document["services"][runtime_override.MIGRATION_SERVICE]["volumes"]:
+        assert volume.endswith(":ro"), volume
+
+
+def test_a_relative_rendered_directory_is_refused() -> None:
+    """Compose resolves a relative bind against its project directory, which is
+    the installed release -- not this project's rendered output."""
+    with pytest.raises(ValueError):
+        runtime_override.build_override(
+            router_name=ROUTER, https_entrypoint="websecure", rendered_directory="rendered/alpha"
+        )

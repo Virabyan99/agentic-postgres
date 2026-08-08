@@ -175,11 +175,25 @@ def test_freeze_lock_is_the_only_writer() -> None:
     assert len(writes) == 1, f"the lock is written in {len(writes)} places"
 
 
-def test_status_and_render_need_no_root() -> None:
-    """A read that required privilege is one an operator runs as root by habit."""
-    for subcommand in ("render", "status"):
+def test_render_needs_no_root() -> None:
+    """A read that required privilege is one an operator runs as root by habit.
+
+    `status` was in this test until Run 7 and passed for a reason that has
+    stopped being true: it printed the rendered set and connected to nothing.
+    It now runs dbmate against the ledger, which is a container, which needs
+    root. The distinction this test keeps is between what reports on this
+    release -- `render`, `verify-lock` -- and what reports on a cluster.
+    """
+    result = run(MIGRATE, *MANIFEST, "render")
+    assert result.returncode == 0, result.stderr
+
+
+def test_the_subcommands_that_reach_a_cluster_refuse_without_root() -> None:
+    """Both of them. `status` reading the ledger is still starting a container."""
+    for subcommand in ("status", "up"):
         result = run(MIGRATE, *MANIFEST, subcommand)
-        assert result.returncode == 0, f"{subcommand}: {result.stderr}"
+        assert result.returncode == 3, f"{subcommand}: {result.stdout}{result.stderr}"
+        assert "root" in result.stderr
 
 
 def test_render_reports_a_digest_per_migration() -> None:

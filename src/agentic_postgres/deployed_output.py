@@ -96,6 +96,7 @@ def build_deployed_document(
     runtime: dict[str, Any],
     health_status: str,
     database_observed: dict[str, Any],
+    deployed_through_session: int,
 ) -> dict[str, Any]:
     """Assemble a deployed document from a rendered one plus observed facts.
 
@@ -122,6 +123,12 @@ def build_deployed_document(
         "schema_version": SCHEMA_VERSION,
         "document_kind": "deployed",
         "source_commit": source_commit,
+        # What was actually deployed, recorded beside the commit that deployed
+        # it. The systemd launcher reads this at boot to decide which secrets to
+        # materialize and which Compose profiles to start; without it, a
+        # restart is a guess (D59, ADR 0032). A rendered document has no such
+        # field and cannot: rendering happens with no host and deploys nothing.
+        "deployed_through_session": deployed_through_session,
         "project": {
             "slug": rendered["project"]["slug"],
             "environment": rendered["project"]["environment"],

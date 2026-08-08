@@ -20,11 +20,25 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT_DIR
 
+# The highest session this release can deploy, read from the package rather
+# than declared here. One value, one place: the gate already fails when the
+# tree's implementations and CURRENT_SESSION disagree, so binding this to the
+# same constant means a release cannot be asked to deploy a session it does not
+# implement, and cannot refuse one it does.
+max_deployable_session() {
+  "$(python_bin)" -c '
+import sys
+sys.path.insert(0, sys.argv[1] + "/src")
+from agentic_postgres import CURRENT_SESSION
+print(CURRENT_SESSION)
+' "${ROOT_DIR}"
+}
+
 usage() {
   cat <<'USAGE'
 Usage: ./deploy.sh --project FILE --capabilities FILE --render-only
        sudo ./deploy.sh --host FILE --project FILE --capabilities FILE \
-            --through-session 2
+            --through-session N
 
   --project FILE       Path to a project manifest (non-secret).
   --capabilities FILE  Path to a capability manifest (non-secret).
@@ -160,8 +174,17 @@ main() {
     esac
     # Refused rather than clamped. Clamping to what this release can do would
     # deploy less than the operator asked for and report success.
-    [ "${through_session}" -le 2 ] \
-      || die 10 "this release deploys through session 2; asked for ${through_session}."
+    #
+    # The ceiling is read from the release, not written here. A literal in this
+    # script is a second declaration of which session the tree implements, and
+    # the two disagree the moment either is edited -- which is exactly what
+    # happened: `CURRENT_SESSION` moved to 3 in Run 6 and this line still said
+    # 2, so the release that implements Session 3 refused to deploy it (D59).
+    local deployable
+    deployable="$(max_deployable_session)" \
+      || die 3 "could not read this release's session; the package is not importable."
+    [ "${through_session}" -le "${deployable}" ] \
+      || die 10 "this release deploys through session ${deployable}; asked for ${through_session}."
     [ -n "${host}" ] || die 2 "--through-session requires --host."
     [ -f "${host}" ] || die 2 "host manifest not found: ${host}"
 
@@ -174,10 +197,11 @@ main() {
     # would select the system interpreter, which has neither yaml nor
     # jsonschema -- the failure would be a ModuleNotFoundError from inside a
     # deployment, after the render had already run.
-    exec "$(python_bin)" "${ROOT_DIR}/bin/deploy-session-2.py" \
+    exec "$(python_bin)" "${ROOT_DIR}/bin/deploy-project.py" \
       --host "${host}" \
       --project "${project}" \
-      --capabilities "${capabilities}"
+      --capabilities "${capabilities}" \
+      --through-session "${through_session}"
   fi
 
   # Step 4 of the runbook §11 order: verify local prerequisites before doing

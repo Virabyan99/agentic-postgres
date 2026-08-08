@@ -20,7 +20,7 @@ import subprocess
 
 import pytest
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import CURRENT_SESSION, REPO_ROOT
 from agentic_postgres.host_config import (
     EDGE_COMPOSE_ENV_KEYS,
     RUNTIME_COMPOSE_ENV_KEYS,
@@ -32,7 +32,7 @@ from agentic_postgres.rendering import COMPOSE_ENV_KEYS
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 DEPLOY = REPO_ROOT / "deploy.sh"
-ENTRY_POINT = REPO_ROOT / "bin" / "deploy-session-2.py"
+ENTRY_POINT = REPO_ROOT / "bin" / "deploy-project.py"
 
 PROJECT = "project.example.yaml"
 CAPABILITIES = "capabilities.example.yaml"
@@ -89,9 +89,16 @@ def test_deploying_requires_a_host_manifest() -> None:
     assert "--host" in result.stderr
 
 
-@pytest.mark.parametrize("session", ["3", "9", "99"])
-def test_a_later_session_is_refused_not_clamped(session: str) -> None:
-    """Deploying less than was asked for and reporting success is the worst answer."""
+@pytest.mark.parametrize("beyond", [1, 2, 97])
+def test_a_later_session_is_refused_not_clamped(beyond: int) -> None:
+    """Deploying less than was asked for and reporting success is the worst answer.
+
+    Parametrized on `CURRENT_SESSION + n` rather than on the literals 3, 9, 99.
+    Those were correct while the ceiling was 2 and became a test of the wrong
+    number the moment the release implemented Session 3 -- the same duplicated
+    constant the script itself no longer holds (D59). What is asserted is the
+    rule: one past the ceiling is refused, and the refusal names the ceiling.
+    """
     result = deploy(
         "--host",
         HOST,
@@ -100,10 +107,31 @@ def test_a_later_session_is_refused_not_clamped(session: str) -> None:
         "--capabilities",
         CAPABILITIES,
         "--through-session",
-        session,
+        str(CURRENT_SESSION + beyond),
     )
     assert result.returncode == 10
-    assert "session 2" in result.stderr
+    assert f"session {CURRENT_SESSION}" in result.stderr
+
+
+def test_the_session_this_release_implements_is_not_refused() -> None:
+    """The other half, and the half a ceiling test alone cannot give you.
+
+    A release that refused its own session would fail every deployment of the
+    work it contains, and every assertion above would still pass. This gets as
+    far as the root check, which is the first thing after the ceiling.
+    """
+    result = deploy(
+        "--host",
+        HOST,
+        "--project",
+        PROJECT,
+        "--capabilities",
+        CAPABILITIES,
+        "--through-session",
+        str(CURRENT_SESSION),
+    )
+    assert result.returncode == 3, result.stderr
+    assert "root" in result.stderr
 
 
 @pytest.mark.parametrize("session", ["two", "2.0", "-1", ""])

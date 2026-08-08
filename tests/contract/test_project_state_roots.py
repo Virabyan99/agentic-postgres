@@ -158,14 +158,14 @@ def test_compose_sh_looks_for_the_override_where_the_deploy_writes_it(
     tmp_path: Path, code_only
 ) -> None:
     """`bin/compose.sh` resolves `OVERRIDE_PATH` relative to its own
-    project-directory argument. `bin/deploy-session-2.py` must therefore write
+    project-directory argument. `bin/deploy-project.py` must therefore write
     `runtime-compose.override.yaml` into the same directory it installs the
     rendered output into, or compose.sh's `[ -f "${OVERRIDE_PATH}" ]` check
     looks in a directory nothing ever wrote it to.
 
     The compose.sh half is exercised for real: `configure_project_scope` is
     the actual function, run against the real fixture directory. The
-    deploy-session-2.py half stays source-text (it requires root and a
+    deploy-project.py half stays source-text (it requires root and a
     provisioned host to run for real, same as
     test_deploy_establishes_roots.py), but is read with `code_only` so a
     comment cannot satisfy it.
@@ -191,22 +191,20 @@ def test_compose_sh_looks_for_the_override_where_the_deploy_writes_it(
     assert result.returncode == 0, result.stderr
     assert result.stdout == str(project_dir / "runtime-compose.override.yaml")
 
-    deploy_source = code_only(
-        (REPO_ROOT / "bin" / "deploy-session-2.py").read_text(encoding="utf-8")
-    )
+    deploy_source = code_only((REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8"))
     assert 'staging / "runtime-compose.override.yaml"' in deploy_source, (
-        "bin/deploy-session-2.py no longer writes the override into the staged "
+        "bin/deploy-project.py no longer writes the override into the staged "
         "rendered directory before the atomic move"
     )
     assert "deployed_output.rendered_path(key)" in deploy_source, (
-        "bin/deploy-session-2.py no longer installs the rendered directory at "
+        "bin/deploy-project.py no longer installs the rendered directory at "
         "deployed_output.rendered_path(key)"
     )
 
 
 def test_state_directory_pattern_accepts_the_path_the_deploy_passes() -> None:
     """`schemas/outputs.schema.json`'s `runtime.state_directory` pattern must
-    accept the path `bin/deploy-session-2.py` actually passes:
+    accept the path `bin/deploy-project.py` actually passes:
     `PROJECT_STATE_ROOT/<key>`. Built from the real
     `deployed_output.PROJECT_STATE_ROOT` constant and matched against the
     pattern read out of the schema file, so neither side restates the other

@@ -197,16 +197,30 @@ def test_the_migration_service_is_also_project_internal() -> None:
 
 
 def test_no_database_credential_appears_in_the_model_or_the_env() -> None:
-    """The credential reaches dbmate by env-var name, never by value.
+    """The credential reaches dbmate by value only inside the container.
 
-    `--env APG_MIGRATION_DATABASE_URL` names a variable the runtime override
-    fills from a secret file. A connection string here -- or in compose.env,
-    which is world-readable within its 0600 directory and is interpolated into
-    process arguments -- would put a password where `docker inspect` shows it.
+    The model does contain the *shape* of a connection URL, and from Run 7 it
+    has to: the entrypoint assembles one from three interpolated identifiers and
+    a password it reads out of a mounted file, because a stored URL would embed
+    three derived names in an operator-entered value (ADR 0034).
+
+    So the assertion is about the userinfo, not about the substring. Every
+    `postgres://` in the model must be followed by variable references all the
+    way to the `@`: a literal anywhere in there is a credential in the model,
+    which is the thing being forbidden. `postgresql://` and `PGPASSWORD` stay
+    banned outright -- nothing here has a use for either.
     """
     text = MODEL.read_text(encoding="utf-8")
-    for marker in ("postgresql://", "postgres://", "PGPASSWORD"):
+    for marker in ("postgresql://", "PGPASSWORD"):
         assert marker not in text, f"compose.yaml contains {marker}"
+
+    urls = re.findall(r"postgres://([^@\s]*)@", text)
+    assert urls, "the model no longer assembles a connection URL; this test is measuring nothing"
+    for userinfo in urls:
+        for part in userinfo.split(":"):
+            assert part.startswith("$"), (
+                f"compose.yaml has a literal in a connection URL's userinfo: {part!r}"
+            )
 
     for directory in (ALPHA, ALPINE):
         env = (directory / "compose.env").read_text(encoding="utf-8")
@@ -473,7 +487,7 @@ def test_first_subcommand_skips_a_flags_value(tmp_path: Path) -> None:
     proves it returns the subcommand rather than the value of a flag written
     ahead of it -- for both call shapes this repository actually uses
     (``--profile session2 up``/``down`` in bin/project-runtime.sh, and
-    ``--profile contract config`` in bin/deploy-session-2.py's
+    ``--profile contract config`` in bin/deploy-project.py's
     ``_model_digest``) and for the ``--flag=value`` form, which needs no
     entry in ``SUBCOMMAND_VALUE_FLAGS`` because it consumes nothing further.
     """
@@ -485,21 +499,57 @@ def test_first_subcommand_skips_a_flags_value(tmp_path: Path) -> None:
 
 
 def test_the_runtime_allowlist_excludes_container_entry_verbs() -> None:
-    """`exec`, `attach`, `run`, `cp`, `watch` and `scale` all reach inside or
-    otherwise start a container.
+    """`exec`, `attach`, `cp`, `watch` and `scale` all reach inside a container.
 
-    Nothing in Session 2's documented path needs them, so --runtime does not
-    grant them even to root. `watch` and `scale` are excluded for the same
-    reason `exec`/`attach`/`run`/`cp` are (ADR 0022 added them to FORBIDDEN
-    without adding them here). Asserted against the script's allowlist
-    because proving it at runtime would need a root test process.
+    --runtime does not grant them even to root. `run` was among them until
+    Session 3, when the migration plane needed a one-shot container and said so
+    in an ADR, which is the process the old comment on this list asked for
+    (ADR 0034). It is the only addition, and it arrives with two refusals that
+    the rest of the allowlist does not need -- asserted below, because `run`
+    without them is a way to execute anything as root inside a project's
+    network with its secrets mounted.
+
+    Asserted against the script's allowlist because proving it at runtime would
+    need a root test process.
     """
     text = COMPOSE_SH.read_text(encoding="utf-8")
     allowed = re.search(r'RUNTIME_ALLOWED="([^"]*)"', text)
     assert allowed is not None
     permitted = set(allowed.group(1).split())
-    assert permitted == {"up", "down", "restart", "build", "ps", "config", "logs"}
-    assert not permitted & {"exec", "attach", "run", "cp", "start", "create", "watch", "scale"}
+    assert permitted == {"up", "down", "restart", "build", "ps", "config", "logs", "run"}
+    assert not permitted & {"exec", "attach", "cp", "start", "create", "watch", "scale"}
+
+    refused = re.search(r'RUN_FORBIDDEN_FLAGS="([^"]*)"', text)
+    assert refused is not None, "run is permitted with no flag refusals at all"
+    flags = set(refused.group(1).split())
+    assert {"--entrypoint", "-e", "--env", "--volume", "-v", "--user", "-u"} <= flags
+
+
+@pytest.mark.parametrize(
+    "flag",
+    [("--entrypoint", "sh"), ("-e", "APG_X=1"), ("--env", "APG_X=1"), ("-v", "/etc:/etc")],
+    ids=["entrypoint", "short-env", "long-env", "volume"],
+)
+def test_run_refuses_the_flags_that_would_replace_the_reviewed_model(flag: tuple[str, ...]) -> None:
+    """Declared and enforced are different things.
+
+    The list above says which flags are refused; this runs the command. Both,
+    because a list is only a comment until something reads it, and this one
+    guards the difference between "start the service the model declares" and
+    "start anything, as root, on that network".
+
+    Unprivileged on purpose: the refusal is checked before the --runtime gate,
+    so it does not depend on who asked.
+    """
+    result = compose(ALPHA, "--profile", "migration", "run", *flag, "dbmate")
+    assert result.returncode == 10, result.stderr
+    assert flag[0] in result.stderr
+
+
+def test_run_with_an_equals_form_flag_is_refused_too() -> None:
+    """`--entrypoint=sh` is the same request as `--entrypoint sh`."""
+    result = compose(ALPHA, "--profile", "migration", "run", "--entrypoint=sh", "dbmate")
+    assert result.returncode == 10, result.stderr
 
 
 def test_the_forbidden_list_is_pinned_to_the_audited_compose_surface() -> None:

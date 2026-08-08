@@ -95,3 +95,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0029](0029-request-identity-is-a-trusted-transaction-local-claim.md) | Request identity is a trusted transaction-local claim, not an authenticated one | 3 | Accepted |
 | [0030](0030-a-project-volume-carries-an-identity-and-a-mismatch-is-never-adopted.md) | A project volume carries an identity, and a mismatch is never adopted | 3 | Accepted |
 | [0031](0031-exit-code-11-the-data-is-not-yours.md) | Exit code 11: the data is not yours | 3 | Accepted |
+| [0032](0032-the-session-a-release-deploys-is-read-not-repeated.md) | The session a release deploys through is read, not repeated | 3 | Accepted |
+| [0033](0033-a-declared-grant-surface-that-nothing-rendered.md) | A declared grant surface that nothing rendered | 3 | Accepted |
+| [0034](0034-the-migration-plane-runs-a-container-and-assembles-its-own-url.md) | The migration plane runs a container, and assembles its own URL | 3 | Accepted |
+| [0035](0035-a-check-that-could-not-fail.md) | A check that could not fail | 3 | Accepted |

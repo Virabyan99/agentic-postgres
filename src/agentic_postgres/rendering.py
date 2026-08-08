@@ -240,6 +240,12 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "POSTGRES_MEMORY_LIMIT",
     "POSTGRES_SHM_SIZE",
     "MIGRATIONS_TABLE",
+    # The one role name that reaches a container. dbmate's connection URL is
+    # assembled inside the migration container from this, the database name and
+    # a password file; the alternative -- storing a whole URL as the secret --
+    # would put a derived role name inside an operator-entered value, where
+    # nothing checks it against `naming.ROLE_SUFFIXES` (D60).
+    "MIGRATION_ROLE_NAME",
 )
 
 #: Where dbmate records applied versions. A constant rather than a manifest
@@ -282,6 +288,7 @@ def build_compose_env(identity: naming.ProjectIdentity, budget: dict[str, int]) 
         "POSTGRES_MEMORY_LIMIT": f"{budget['memory_limit_mb']}m",
         "POSTGRES_SHM_SIZE": f"{budget['shm_size_mb']}m",
         "MIGRATIONS_TABLE": MIGRATIONS_TABLE,
+        "MIGRATION_ROLE_NAME": identity.roles["migration_user"],
     }
     lines = [
         "# Generated. Do not edit; do not shell-source.",
@@ -447,6 +454,75 @@ def publish(staging: Path, target: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+#: The rendered migration set is the one generated artifact a *container* reads,
+#: and it is read by a service that runs as uid 65532. Everything else under
+#: `.generated/<key>/` is 0600 because it is read only by root or by the
+#: operator who rendered it; a 0600 file bind-mounted into a non-root container
+#: is a migration run that fails with "permission denied" from inside dbmate,
+#: which is a long way from where the mode was set.
+#:
+#: The enclosing directory stays 0700 root-owned on the host, so widening these
+#: two modes does not make the SQL readable by anyone who could not already
+#: traverse to it. And the SQL carries no secret: it is templates plus derived
+#: identifiers, and `assert_output_is_secret_free` has already run over the
+#: document every one of those identifiers comes from.
+MIGRATION_FILE_MODE = 0o644
+MIGRATION_DIRECTORY_MODE = 0o755
+
+#: What the rendered set records about itself, beside the SQL.
+MIGRATION_MANIFEST_NAME = "rendered-manifest.json"
+
+
+def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path:
+    """Render this project's migration set into `<directory>/migrations/`.
+
+    A rendered payload, not a template: ADR 0028 makes the *rendered* text the
+    immutable unit, and this is where it becomes a file. The digest recorded
+    beside each one is the digest of exactly these bytes, so `migrate.sh` can
+    refuse a file edited after it was rendered without re-rendering it to find
+    out.
+    """
+    from agentic_postgres import migrations
+
+    manifest = migrations.load_manifest()
+    target = directory / "migrations"
+    target.mkdir(mode=MIGRATION_DIRECTORY_MODE)
+
+    entries = []
+    for entry in manifest["migrations"]:
+        payload = migrations.render_migration(entry, manifest, document)
+        # dbmate orders by filename and parses `<version>_<name>.sql`. The name
+        # is built from the manifest's own two fields rather than from the
+        # template's filename: the template path is an input this repository
+        # controls, and the applied version is a value the ledger keeps forever.
+        filename = f"{entry['version']}_{entry['name']}.sql"
+        path = target / filename
+        path.write_text(payload, encoding="utf-8")
+        path.chmod(MIGRATION_FILE_MODE)
+        entries.append(
+            {
+                "version": entry["version"],
+                "name": entry["name"],
+                "file": filename,
+                "sha256": migrations.digest(payload),
+            }
+        )
+
+    manifest_path = target / MIGRATION_MANIFEST_NAME
+    manifest_path.write_text(
+        naming.canonical_json(
+            {
+                "project_key": document["project"]["key"],
+                "migrations_table": MIGRATIONS_TABLE,
+                "migrations": entries,
+            }
+        ).decode("utf-8"),
+        encoding="utf-8",
+    )
+    manifest_path.chmod(MIGRATION_FILE_MODE)
+    return target
+
+
 def render_project(
     project_path: Path,
     capabilities_path: Path,
@@ -506,6 +582,13 @@ def render_project(
 
             for name in ("outputs.json", "compose.env", "rendered-summary.txt"):
                 refuse_symlink(staging / name)
+
+            # From the validated document that was just written, not from the
+            # in-memory object and not from `identity`. The migration renderer
+            # reads every identifier out of outputs.json precisely so that the
+            # SQL and the Compose model cannot be derived from two different
+            # readings of the same manifest (ADR 0002, ADR 0028).
+            write_rendered_migrations(staging, document)
 
             if validate_compose:
                 _validate_staged_compose(staging)

@@ -1,6 +1,6 @@
 """Waiting for a fact to settle, without inventing one.
 
-`bin/deploy-session-2.py` observes the certificate and the health route the
+`bin/deploy-project.py` observes the certificate and the health route the
 moment `compose up --wait` returns. Traefik's Docker provider polls, so a router
 for a container that has only just started is not wired yet at that instant. The
 first deployment of Project A recorded `tls: unavailable` and

@@ -59,8 +59,9 @@ Subcommands:
   --runtime       Read the installed rendered document under /var/lib.
   --help          Show this message.
 
-`status`, `render` and `verify-lock` need no root and no cluster beyond what
-they report. `up` needs both.
+`render` and `verify-lock` need no root and no cluster: they report what this
+release would apply. `status` and `up` both run dbmate in a container against
+the cluster, so both need root and a running project.
 
 There is no `down`. Released platform migrations are fix-forward only: every
 down block raises AP900, and the remedy for a mistake is a new migration.
@@ -133,23 +134,27 @@ main() {
     verify-lock)
       "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode verify-lock ;;
     render|status|up)
-      local key document
+      local key rendered_dir document
       key="$(project_key)"
       if [ "${RUNTIME}" -eq 1 ]; then
-        document="${RENDERED_ROOT}/${key}/outputs.json"
+        rendered_dir="${RENDERED_ROOT}/${key}"
       else
-        document="${ROOT_DIR}/.generated/${key}/outputs.json"
+        rendered_dir="${ROOT_DIR}/.generated/${key}"
       fi
+      document="${rendered_dir}/outputs.json"
       [ -f "${document}" ] \
         || die 4 "no rendered document for ${key} at ${document}; the project was never deployed here."
 
-      if [ "${SUBCOMMAND}" = "up" ]; then
-        [ "$(id -u)" -eq 0 ] || die 3 "'up' requires root."
+      # `status` reads the ledger, which means it starts a container, which
+      # means it needs what any container start needs here. It was cheaper to
+      # pretend otherwise while it printed a list and connected to nothing.
+      if [ "${SUBCOMMAND}" = "up" ] || [ "${SUBCOMMAND}" = "status" ]; then
+        [ "$(id -u)" -eq 0 ] || die 3 "'${SUBCOMMAND}' requires root: it runs a container."
         command -v docker >/dev/null 2>&1 || die 3 "docker is not on PATH."
       fi
 
       "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" \
-        --mode "${SUBCOMMAND}" --outputs "${document}" ;;
+        --mode "${SUBCOMMAND}" --outputs "${document}" --rendered-dir "${rendered_dir}" ;;
   esac
 }
 

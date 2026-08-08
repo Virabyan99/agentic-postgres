@@ -140,7 +140,7 @@ PYTHON
 }
 
 # Delegated, the way host_id above already is. This was four lines of shell,
-# and bin/deploy-session-2.py had its own answer -- the literal "staging",
+# and bin/deploy-project.py had its own answer -- the literal "staging",
 # which no promotion could change. Two answers to "which ACME environment is
 # this host on" is one too many, and the second one was wrong for the entire
 # life of every deployed document written after a promotion.

@@ -648,9 +648,7 @@ ROUTER = "apg-alpha-dev-health"
 
 @pytest.fixture
 def labels() -> dict[str, str]:
-    document = runtime_override.build_override(
-        router_name=ROUTER, https_entrypoint="websecure"
-    )
+    document = runtime_override.build_override(router_name=ROUTER, https_entrypoint="websecure")
     return document["services"][runtime_override.ROUTED_SERVICE]["labels"]
 
 
@@ -696,9 +694,7 @@ def test_the_router_and_service_names_agree(labels: dict[str, str]) -> None:
 
 
 def test_the_rendered_document_is_parseable_yaml() -> None:
-    payload = runtime_override.render_override(
-        router_name=ROUTER, https_entrypoint="websecure"
-    )
+    payload = runtime_override.render_override(router_name=ROUTER, https_entrypoint="websecure")
     document = yaml.safe_load(payload.decode("utf-8"))
     assert runtime_override.ROUTED_SERVICE in document["services"]
 
@@ -779,8 +775,7 @@ def build_override(*, router_name: str, https_entrypoint: str) -> dict[str, Any]
                 "labels": {
                     "traefik.enable": "true",
                     f"{router}.rule": (
-                        "Host(`${PROJECT_DOMAIN:?required}`) && "
-                        f"Path(`{HEALTH_ROUTE_PATH}`)"
+                        f"Host(`${{PROJECT_DOMAIN:?required}}`) && Path(`{HEALTH_ROUTE_PATH}`)"
                     ),
                     f"{router}.entrypoints": https_entrypoint,
                     f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
@@ -795,17 +790,13 @@ def build_override(*, router_name: str, https_entrypoint: str) -> dict[str, Any]
 
 def render_override(*, router_name: str, https_entrypoint: str) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
-    document = build_override(
-        router_name=router_name, https_entrypoint=https_entrypoint
-    )
+    document = build_override(router_name=router_name, https_entrypoint=https_entrypoint)
     header = (
         "# Generated from host.yaml and the rendered compose.env by ./deploy.sh.\n"
         "# Do not edit; do not shell-source. Router label keys are rendered\n"
         "# because Compose cannot interpolate inside a label key (ADR 0013).\n"
     )
-    body = yaml.safe_dump(
-        document, sort_keys=True, default_flow_style=False, width=10_000
-    )
+    body = yaml.safe_dump(document, sort_keys=True, default_flow_style=False, width=10_000)
     return (header + body).encode("utf-8")
 ```
 

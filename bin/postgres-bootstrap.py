@@ -25,6 +25,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -32,17 +33,71 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from agentic_postgres import migrations
+from agentic_postgres.secrets_contract import SECRET_ROOT
 
 EXIT_CONTRACT = 5
 EXIT_CHECK_FAILED = 6
 EXIT_UNREACHABLE = 9
 EXIT_IDENTITY_MISMATCH = 11
 
+
 #: Compared on a mismatch. Deliberately only the immutable fields: the source
 #: commit, manifest checksum and template version all change on a legitimate
 #: redeploy, and a check that fires on a valid volume is one operators learn to
 #: override (ADR 0030).
 IDENTITY_FIELDS = ("project_key", "database_name", "compose_project_name", "instance_uuid")
+
+
+def await_cluster(container: str, database: str, *, attempts: int = 60, delay: float = 2.0) -> None:
+    """Wait for the cluster, not for the port.
+
+    The image runs a *temporary* server on the Unix socket during
+    initialisation, and `pg_isready` answers on it. So does the healthcheck
+    Compose waits for, which means `up --wait` can return while initdb is still
+    running its bootstrap scripts -- and the first statement after it fails with
+    "the database system is starting up", or worse, succeeds against a server
+    that is about to be shut down and restarted.
+
+    Two consecutive successful queries, not one. A single success is exactly
+    what the temporary server produces.
+    """
+    consecutive = 0
+    for _ in range(attempts):
+        probe = subprocess.run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                container,
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                database,
+                "-X",
+                "-qtA",
+                "-c",
+                "SELECT 1;",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        if probe.returncode == 0 and probe.stdout.strip() == "1":
+            consecutive += 1
+            if consecutive == 2:
+                return
+        else:
+            consecutive = 0
+        time.sleep(delay)
+
+    print(
+        f"postgres-bootstrap: {container} never answered two consecutive queries; "
+        "the cluster is not accepting connections.",
+        file=sys.stderr,
+    )
+    raise SystemExit(EXIT_UNREACHABLE)
 
 
 def psql(container: str, database: str, sql: str, *, read_only: bool = False) -> str:
@@ -152,12 +207,58 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     statements.append(
         f"CREATE SCHEMA IF NOT EXISTS app_private AUTHORIZATION {q(roles['object_owner'])};"
     )
+
+    # dbmate's own ledger, and the narrowest grants that let dbmate keep it.
+    # This is a bootstrap-plane object (plan §6.1) because dbmate creates it
+    # *itself*, before any migration runs and therefore before anything can
+    # `SET ROLE` -- so without this, `migrate up` fails on the first statement
+    # it issues with "permission denied for schema app_private", which is what
+    # Run 7 measured. Created here, owned by the object owner, and reachable by
+    # the migration plane through three grants and no more.
+    #
+    # Shape taken from dbmate 2.34.1: one varchar(255) primary key called
+    # `version`. `CREATE TABLE IF NOT EXISTS` on the dbmate side then finds it
+    # present and proceeds.
+    # USAGE *and* CREATE. Measured: dbmate issues `CREATE TABLE IF NOT EXISTS`
+    # on every run, and PostgreSQL checks CREATE on the schema before the
+    # IF NOT EXISTS short-circuits -- so a role that can read and write the
+    # ledger but not create in its schema fails on a table that already exists,
+    # with "permission denied for schema app_private" and no mention of the
+    # table it was not going to create.
+    #
+    # This concedes nothing the membership did not already imply: migration_user
+    # can SET ROLE to the schema's owner, so anything it could create with this
+    # grant it could already create by assuming that role. What the grant buys
+    # is that dbmate's own bookkeeping needs no SET ROLE, which dbmate has no
+    # way to issue.
+    statements.append(f"GRANT USAGE, CREATE ON SCHEMA app_private TO {q(roles['migration_user'])};")
+    statements.append(
+        "CREATE TABLE IF NOT EXISTS app_private.schema_migrations "
+        "(version varchar(255) NOT NULL PRIMARY KEY);"
+    )
+    statements.append(
+        f"ALTER TABLE app_private.schema_migrations OWNER TO {q(roles['object_owner'])};"
+    )
+    statements.append(
+        "GRANT SELECT, INSERT, DELETE ON app_private.schema_migrations "
+        f"TO {q(roles['migration_user'])};"
+    )
     statements.append(
         "CREATE TABLE IF NOT EXISTS app_private.project_identity ("
         "singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton), "
         "project_key text NOT NULL, database_name text NOT NULL, "
         "compose_project_name text NOT NULL, instance_uuid uuid NOT NULL, "
         "bound_at timestamptz NOT NULL DEFAULT now());"
+    )
+    # Two creators, one table, and until Run 7 they disagreed about who owns it.
+    # This statement runs as the superuser, so the table it creates is owned by
+    # `postgres`; migration 0002 creates the same table IF NOT EXISTS under
+    # `SET LOCAL ROLE object_owner` and then COMMENTs on it -- which failed with
+    # "must be owner of table project_identity" on a cluster where bootstrap got
+    # there first, which is every cluster. Ownership is stated rather than left
+    # to whichever plane created it.
+    statements.append(
+        f"ALTER TABLE app_private.project_identity OWNER TO {q(roles['object_owner'])};"
     )
     # Same rule as the role loop above: every value is quoted through
     # `quote_literal`, which raises on anything that is not a plain string.
@@ -177,6 +278,187 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     )
     statements.append(bind_identity)
     return statements
+
+
+def check_violations(container: str, database: str, document: dict[str, Any]) -> list[str]:
+    """What is wrong with this cluster, read from the catalog.
+
+    `--check` used to print how many statements *would* run and return 0. It
+    could not fail: `EXIT_CHECK_FAILED` was defined, documented in the script's
+    header, and never raised. A check that cannot go red is a green light
+    measuring nothing, and it was the first command Run 7 was going to run
+    against a real cluster (D61).
+
+    Every question below is asked of `pg_roles`, `pg_auth_members`,
+    `pg_namespace`, `pg_extension` or `has_database_privilege` -- never of the
+    statement list this program would have run, which would only prove that
+    this program agrees with itself.
+    """
+    database_block = document["database"]
+    roles = database_block["roles"]
+    literal = migrations.quote_literal
+    violations: list[str] = []
+
+    # One query per fact, and each returns a value that is false when the fact
+    # is absent -- rather than one big query whose empty result would be read
+    # as "nothing wrong".
+    declared = sorted(roles.values())
+    present = set(
+        query(
+            container,
+            database,
+            f"SELECT rolname FROM pg_roles WHERE rolname IN "  # noqa: S608
+            f"({', '.join(literal(name) for name in declared)});",
+        ).splitlines()
+    )
+    violations += [f"role {name} does not exist" for name in declared if name not in present]
+
+    over_privileged = query(
+        container,
+        database,
+        "SELECT rolname FROM pg_roles WHERE rolname IN "  # noqa: S608
+        f"({', '.join(literal(name) for name in declared)}) AND (rolsuper OR rolcreatedb "
+        "OR rolcreaterole OR rolreplication OR rolbypassrls);",
+    ).splitlines()
+    violations += [
+        f"role {name} holds an attribute it must not" for name in over_privileged if name
+    ]
+
+    # The three membership options, read as three columns. Inferring them from
+    # the member role's own rolinherit is the reading that passes for the wrong
+    # reason (ADR 0026).
+    #
+    # `boolean || text` yields 'true'/'false', not the 't'/'f' psql prints in a
+    # table. Measured, not assumed -- the first version of this expected 'f f t'
+    # and reported a violation against a cluster that was correct, which is the
+    # same defect in the other direction.
+    owner_literal = literal(roles["object_owner"])
+    member_literal = literal(roles["migration_user"])
+    membership = query(
+        container,
+        database,
+        "SELECT coalesce(string_agg(m.admin_option || ' ' || m.inherit_option "  # noqa: S608
+        "|| ' ' || m.set_option, ','), 'absent') FROM pg_auth_members m "
+        f"JOIN pg_roles owner ON owner.oid = m.roleid AND owner.rolname = {owner_literal} "
+        f"JOIN pg_roles member ON member.oid = m.member AND member.rolname = {member_literal};",
+    )
+    if membership != "false false true":
+        violations.append(
+            f"{roles['migration_user']} membership of {roles['object_owner']} is "
+            f"'{membership}', expected 'false false true' (admin, inherit, set)"
+        )
+
+    # The migration plane cannot connect without both. A role with LOGIN and a
+    # null verifier authenticates against nothing and fails at dbmate.
+    credential = query(
+        container,
+        database,
+        "SELECT rolcanlogin::text || ' ' || (rolpassword IS NOT NULL)::text "  # noqa: S608
+        f"FROM pg_authid WHERE rolname = {member_literal};",
+    )
+    if credential != "true true":
+        violations.append(
+            f"{roles['migration_user']} is not able to log in "
+            f"(canlogin/verifier: '{credential or 'absent'}')"
+        )
+
+    for schema in ("extensions", "app_private"):
+        exists = query(
+            container,
+            database,
+            f"SELECT count(*)::text FROM pg_namespace WHERE nspname = {literal(schema)};",  # noqa: S608
+        )
+        if exists != "1":
+            violations.append(f"schema {schema} does not exist")
+
+    vector = query(
+        container, database, "SELECT count(*)::text FROM pg_extension WHERE extname = 'vector';"
+    )
+    if vector != "1":
+        violations.append("extension vector is not installed")
+
+    public_connect = query(
+        container,
+        database,
+        f"SELECT has_database_privilege('public', {literal(database_block['name'])}, "
+        "'CONNECT')::text;",
+    )
+    if public_connect != "false":
+        violations.append(f"PUBLIC still holds CONNECT on {database_block['name']}")
+
+    # Guarded by existence. `has_database_privilege` raises on a role that does
+    # not exist, and an unhandled raise here aborts the whole check with exit 1
+    # -- so `--check` against a fresh cluster reported a crash instead of the
+    # thirteen missing roles it was looking at. A check must be able to describe
+    # the state it is most often run against.
+    if roles["object_owner"] in present:
+        owner_create = query(
+            container,
+            database,
+            f"SELECT has_database_privilege({literal(roles['object_owner'])}, "
+            f"{literal(database_block['name'])}, 'CREATE')::text;",
+        )
+        if owner_create != "true":
+            violations.append(f"{roles['object_owner']} does not hold CREATE on the database")
+
+    return violations
+
+
+def apply_credential(container: str, database: str, role: str, password: str) -> None:
+    """Give `migration_user` its verifier. Never printed, never in argv.
+
+    Kept out of `build_statements` on purpose: that list is what `--check`
+    describes and what an operator may be shown, and a password does not belong
+    in something whose whole value is that it can be read.
+    """
+    statement = (
+        f"ALTER ROLE {migrations.quote_identifier(role)} "
+        f"LOGIN PASSWORD {migrations.quote_literal(password)};"
+    )
+    psql(container, database, statement)
+
+
+def read_migration_password(project_key: str) -> str:
+    """The materialized value, from the generation the project points at.
+
+    Read here rather than granted to a container: the bootstrap plane is root on
+    the host, and a second declared consumer would materialize a second copy of
+    one credential -- two files for a rotation to reach instead of one.
+    """
+    pointer = Path(SECRET_ROOT) / project_key / "active-secret-generation.json"
+    if not pointer.is_file():
+        print(
+            f"postgres-bootstrap: no active secret generation for {project_key}; "
+            "run bin/materialize-secrets.sh first.",
+            file=sys.stderr,
+        )
+        raise SystemExit(EXIT_CONTRACT)
+
+    generation = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
+    path = (
+        Path(SECRET_ROOT)
+        / project_key
+        / "generations"
+        / generation
+        / "dbmate"
+        / "migration_user_password"
+    )
+    if not path.is_file():
+        print(
+            f"postgres-bootstrap: generation {generation} has no migration credential at {path}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(EXIT_CONTRACT)
+
+    # Trailing newlines only. The dbmate entrypoint reads the same file with
+    # `$(cat ...)`, which strips exactly that and nothing else; a `.strip()`
+    # here would also take leading whitespace and set the role to a value the
+    # container does not present.
+    value = path.read_text(encoding="utf-8").rstrip("\n")
+    if not value:
+        print("postgres-bootstrap: the migration credential is empty.", file=sys.stderr)
+        raise SystemExit(EXIT_CONTRACT)
+    return value
 
 
 def read_identity(container: str, database: str) -> dict[str, str] | None:
@@ -253,6 +535,11 @@ def main() -> int:
         )
         return EXIT_UNREACHABLE
 
+    # Before the first query, not after a failure. `up --wait` returns while the
+    # image's temporary init server is still answering, so without this the
+    # first statement of a fresh deploy is a race the deploy usually loses.
+    await_cluster(container, database)
+
     observed = read_identity(container, database)
     if observed is not None:
         assert_identity_matches(observed, document)
@@ -266,16 +553,42 @@ def main() -> int:
     statements = build_statements(document, instance_uuid)
 
     if arguments.mode == "check":
-        print(f"postgres-bootstrap: --check, {len(statements)} statements would run")
+        violations = check_violations(container, database, document)
+        print(f"postgres-bootstrap: --check, {len(statements)} statements would converge")
         print(f"  container      {container}")
         print(f"  database       {database}")
         print(f"  identity       {'bound' if observed else 'not yet bound'}")
         print(f"  roles declared {len(document['database']['roles'])}")
+        if violations:
+            print(f"  violations     {len(violations)}")
+            for violation in violations:
+                print(f"    - {violation}")
+            return EXIT_CHECK_FAILED
+        print("  violations     none")
         return 0
 
     psql(container, database, "\n".join(statements))
+    apply_credential(
+        container,
+        database,
+        document["database"]["roles"]["migration_user"],
+        read_migration_password(document["project"]["key"]),
+    )
     print(f"postgres-bootstrap: {len(statements)} statements applied to {database}")
     print(f"  identity {instance_uuid}")
+    print("  migration credential set")
+
+    # Applied, then read back. The statements above returning 0 says psql
+    # accepted them, which is not the same as the catalog holding what they
+    # asked for -- Run 4's ALTER DEFAULT PRIVILEGES reported success and stored
+    # nothing, and that is the standing reason this function does not trust its
+    # own return code.
+    remaining = check_violations(container, database, document)
+    if remaining:
+        print("postgres-bootstrap: applied, but the cluster does not agree:", file=sys.stderr)
+        for violation in remaining:
+            print(f"  - {violation}", file=sys.stderr)
+        return EXIT_CHECK_FAILED
     return 0
 
 

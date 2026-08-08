@@ -24,6 +24,15 @@
 #      generated output under /var/lib/agentic-postgres/rendered/<key>/ (ADR 0020).
 #   8  secrets could not be materialized
 #   9  the edge attachment failed
+#
+# The session this project was deployed through arrives as `--through-session`
+# and is never assumed. It selects three things that must agree: which secrets
+# are materialized, which Compose profiles start, and therefore which services
+# exist to receive a grant. Hard-coding `2` in all three -- which is what this
+# script did until Session 3 -- is correct for exactly as long as 2 is the only
+# value anyone passes, and then it silently deploys the wrong release. The
+# caller that has no operator to ask (the systemd launcher) reads it back from
+# the project's own deployed document; see D59.
 
 set -euo pipefail
 
@@ -37,17 +46,22 @@ readonly PROJECT_KEY_PATTERN='^[a-z][a-z0-9-]{4,47}$'
 ACTION=""
 PROJECT_KEY=""
 HOST_MANIFEST=""
+THROUGH_SESSION=""
 
 usage() {
   cat <<'USAGE'
-Usage: bin/project-runtime.sh --host FILE --project-key KEY <up|down|status>
+Usage: bin/project-runtime.sh --host FILE --project-key KEY \
+         --through-session N <up|down|status>
 
   up      Materialize secrets, start the project, then attach the edge.
   down    Detach the edge, then stop the project. Volumes are preserved.
   status  Report container state. Changes nothing, needs no root.
 
-  --host FILE        The host manifest.
-  --project-key KEY  The project key. Validated before use as a path component.
+  --host FILE           The host manifest.
+  --project-key KEY     The project key. Validated before use as a path component.
+  --through-session N   The session this project is deployed through. Required
+                        for up and down; it selects the secret set and the
+                        Compose profiles, which must be the same N.
 
 Ordering is not configurable. Attach happens after the containers are healthy
 so a route never points at something that is not serving; detach happens before
@@ -55,11 +69,33 @@ teardown so Compose can remove a network that still has no endpoint on it.
 USAGE
 }
 
+# The profiles that make up a deployment through session N, cumulative. A
+# session-3 project runs the session-2 services too; `migration` is deliberately
+# absent, because dbmate is a one-shot the migration plane runs, not a service
+# `up` starts.
+session_profiles() {
+  local session="$1" n
+  local -a profiles=()
+  for n in $(seq 2 "${session}"); do
+    profiles+=(--profile "session${n}")
+  done
+  printf '%s\n' "${profiles[@]}"
+}
+
 die() {
   local code="$1"
   shift
   printf 'project-runtime: %s\n' "$*" >&2
   exit "$code"
+}
+
+# Ubuntu ships no bare `python`, and systemd starts this with no venv on PATH.
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then printf '%s\n' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then command -v python3
+  elif command -v python >/dev/null 2>&1; then command -v python
+  else die 3 "no Python interpreter found (looked for .venv/bin/python, python3, python)."
+  fi
 }
 
 parse_arguments() {
@@ -74,6 +110,11 @@ parse_arguments() {
       --project-key)
         [ "$#" -ge 2 ] || die 2 "--project-key requires a value."
         PROJECT_KEY="$2"
+        shift 2
+        ;;
+      --through-session)
+        [ "$#" -ge 2 ] || die 2 "--through-session requires a value."
+        THROUGH_SESSION="$2"
         shift 2
         ;;
       up|down|status)
@@ -93,6 +134,16 @@ parse_arguments() {
   if [ "${ACTION}" != "status" ]; then
     [ -n "${HOST_MANIFEST}" ] || die 2 "--host is required for ${ACTION}."
     [ -f "${HOST_MANIFEST}" ] || die 2 "host manifest not found: ${HOST_MANIFEST}"
+
+    # Required, not defaulted. A default here would be the hard-coded 2 this
+    # flag exists to remove: a caller that forgot to pass it would start a
+    # subset of the deployment and report success.
+    [ -n "${THROUGH_SESSION}" ] || die 2 "--through-session is required for ${ACTION}."
+    case "${THROUGH_SESSION}" in
+      ''|*[!0-9]*) die 2 "--through-session takes a session number, got: ${THROUGH_SESSION}" ;;
+    esac
+    [ "${THROUGH_SESSION}" -ge 2 ] \
+      || die 2 "--through-session must be at least 2; sessions before that start nothing."
   fi
 }
 
@@ -136,8 +187,21 @@ main() {
       "${ROOT_DIR}/bin/materialize-secrets.sh" \
         --project "${state}/manifest.yaml" \
         --requirements "${state}/secrets.required.yaml" \
-        --session 2 \
+        --session "${THROUGH_SESSION}" \
         || die 8 "secrets could not be materialized for ${PROJECT_KEY}."
+
+      # Between materialization and start, and in that order for a reason that
+      # is not stylistic: materialization has just written a *new* generation
+      # and repointed the project at it, so a grant surface rendered before
+      # this line names the directory the previous start used. Compose would
+      # mount a file that still exists, from a generation nothing refreshes --
+      # and the failure would appear at the next rotation, not here.
+      "$(python_bin)" "${ROOT_DIR}/bin/render-secret-override.py" \
+        --project-key "${PROJECT_KEY}" \
+        --requirements "${state}/secrets.required.yaml" \
+        --session "${THROUGH_SESSION}" \
+        --rendered-dir "${rendered}" \
+        || die 8 "the secret grant surface could not be rendered for ${PROJECT_KEY}."
 
       # --build, because Compose only builds an image that is missing. Without
       # it a project started once kept its first image for good: a new immutable
@@ -145,7 +209,10 @@ main() {
       # never see it, while the deploy reported success. Layer caching makes
       # this near-free when nothing changed, and a release is meant to be what
       # is actually running.
-      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime --profile session2 up -d --build --wait \
+      local -a profiles=()
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" up -d --build --wait \
         || die 9 "the project did not become healthy."
 
       # Last, and only now that --wait has returned.
@@ -166,7 +233,10 @@ main() {
 
       # No -v. The Postgres volume outlives the project by design; removing it
       # here would make `systemctl restart` a data-loss command.
-      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime --profile session2 down \
+      local -a profiles=()
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" down \
         || die 9 "the project did not stop cleanly."
 
       printf 'project-runtime: %s is down. Volumes are preserved.\n' "${PROJECT_KEY}"

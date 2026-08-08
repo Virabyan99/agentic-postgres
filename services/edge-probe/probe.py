@@ -53,7 +53,7 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "apg-edge-probe"
     sys_version = ""
 
-    def do_GET(self) -> None:  # noqa: N802 - name fixed by BaseHTTPRequestHandler
+    def do_GET(self) -> None:  # name fixed by BaseHTTPRequestHandler
         started = time.monotonic()
         request_id = self.headers.get("X-Request-ID") or str(uuid.uuid4())
 
@@ -68,11 +68,14 @@ class Handler(BaseHTTPRequestHandler):
         # other path still miss, and the log below still records only the fixed
         # constant, so no caller-supplied text can reach it.
         if urlsplit(self.path).path == HEALTH_PATH:
-            status, payload = 200, {
-                "status": "ok",
-                "project_key": PROJECT_KEY,
-                "session": SESSION,
-            }
+            status, payload = (
+                200,
+                {
+                    "status": "ok",
+                    "project_key": PROJECT_KEY,
+                    "session": SESSION,
+                },
+            )
         else:
             # No path echo, no container metadata, no server banner beyond the
             # fixed name above. An unknown route must reveal nothing.
@@ -98,7 +101,7 @@ class Handler(BaseHTTPRequestHandler):
             duration_ms=round((time.monotonic() - started) * 1000, 3),
         )
 
-    def log_message(self, format: str, *args: object) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: object) -> None:
         """Silence the base class.
 
         Its default writes the raw request line to stderr, which would put the

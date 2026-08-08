@@ -219,9 +219,22 @@ services:
   # in the wrong position exits 2 with "flag provided but not defined"; a global
   # flag silently omitted writes the ledger somewhere else entirely.
   #
-  # No connection string here. `--env` names an environment variable that the
-  # runtime override supplies from a secret file, so the URL -- which carries a
-  # password -- never enters compose.env, the model, or a process argument.
+  # No connection string here, and none anywhere a process can be listed. The
+  # URL is assembled inside the container, by the entrypoint below, from three
+  # derived identifiers Compose interpolates and one password read out of a
+  # mounted file. Nothing that carries the password appears in compose.env, in
+  # the resolved model, in `docker inspect`, or in argv on either side of the
+  # daemon -- which is what `--env NAME` was always for, and what nothing was
+  # supplying until Session 3's Run 7 (D60).
+  #
+  # The URL is assembled rather than stored whole. A stored URL embeds a role
+  # name, a host and a database name that `naming.py` also derives; when the two
+  # drift, the cluster answers "password authentication failed", which is the
+  # one error nobody debugs by re-reading a manifest.
+  #
+  # `exec` matters: without it dbmate runs as a child of the shell and the
+  # container's exit status is the shell's. `"$@"` carries the subcommand
+  # bin/migrate.sh appends, so this list is the whole of what can be run here.
   dbmate:
     image: ${DBMATE_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
@@ -232,16 +245,48 @@ services:
     tmpfs: [/tmp]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
-    entrypoint: ["/usr/local/bin/dbmate"]
-    command:
-      - --env
-      - APG_MIGRATION_DATABASE_URL
-      - --migrations-dir
-      - /migrations
-      - --migrations-table
-      - ${MIGRATIONS_TABLE:?required}
-      - --no-dump-schema
-      - status
+    # Identifiers, all three. `sslmode=disable` is honest rather than lax: this
+    # connection crosses a Docker network declared `internal: true`, which has
+    # no route off the host, and the cluster serves no TLS certificate for any
+    # peer to verify. A `require` that cannot be satisfied would either fail or
+    # be silently downgraded, and neither is better than saying what this is.
+    environment:
+      APG_MIGRATION_ROLE: ${MIGRATION_ROLE_NAME:?required}
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_MIGRATIONS_TABLE: ${MIGRATIONS_TABLE:?required}
+    # Unbraced shell references throughout, and not for style. The braced
+    # escaped form is a literal Compose never interpolates, but it is
+    # indistinguishable from a real required interpolation to anything reading
+    # this file with a regex -- including test_every_interpolation_is_required,
+    # which exists to catch a bare one that would render empty. A form that
+    # cannot be confused for the thing being forbidden is worth the braces.
+    # Every byte of the password percent-encoded, not just the ones that look
+    # dangerous. Measured: a base64 credential containing `/` parsed as a path
+    # separator and dbmate reported `invalid port` -- a message that names
+    # neither the password nor the file it came from. Encoding the whole value
+    # is total: it cannot be wrong for an input nobody thought of, and the
+    # provider chooses this value, not this repository.
+    #
+    # `$(cat ...)` strips trailing newlines and nothing else, which is exactly
+    # what bin/postgres-bootstrap.py's `.rstrip("\n")` does to the same file.
+    # The two readings must agree byte for byte or the role is set to one value
+    # and dbmate presents another.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        set -eu;
+        raw="$$(cat /run/secrets/migration_user_password)";
+        password="$$(printf %s "$$raw" | od -An -tx1 -v | tr -d ' \n' | sed 's/../%&/g')";
+        APG_MIGRATION_DATABASE_URL="postgres://$$APG_MIGRATION_ROLE:$$password@postgres:5432/$$APG_DATABASE_NAME?sslmode=disable"
+        exec /usr/local/bin/dbmate
+        --env APG_MIGRATION_DATABASE_URL
+        --migrations-dir /migrations
+        --migrations-table "$$APG_MIGRATIONS_TABLE"
+        --no-dump-schema
+        "$$@"
+      - dbmate
+    command: [status]
     networks:
       - internal
 

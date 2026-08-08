@@ -96,6 +96,11 @@ def build(rendered: dict, **overrides):
         "rendered": rendered,
         "source_commit": COMMIT,
         "health_status": "ready",
+        # Required with no default in the builder, for the reason
+        # `database_observed` is: a default would let a caller that deployed a
+        # subset publish a document claiming the whole of it, and the systemd
+        # launcher reads exactly this field at boot to decide what to restore.
+        "deployed_through_session": 3,
         **OBSERVED,
         **overrides,
     }

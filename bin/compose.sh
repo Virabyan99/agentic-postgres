@@ -51,14 +51,28 @@ readonly EDGE_MODEL="${ROOT_DIR}/infra/edge/compose.yaml"
 readonly FORBIDDEN="up run start create restart exec attach cp watch scale"
 
 # What --runtime actually permits. Deliberately smaller than FORBIDDEN's
-# complement: exec, attach, run and cp reach inside a running container and
-# nothing in Session 2's documented path needs them. An operator who does can
-# say so in an ADR.
-readonly RUNTIME_ALLOWED="up down restart build ps config logs"
+# complement: exec, attach and cp reach inside a running container and nothing
+# in the documented path needs them.
+#
+# `run` joined the list in Session 3, in the ADR this comment used to ask for
+# (ADR 0034). The migration plane is a one-shot container -- dbmate applies a
+# set and exits -- and `up` is the wrong shape for it: it would leave a service
+# in the project's steady state whose job is finished. What makes `run`
+# tolerable here is the pair of refusals below: the entrypoint of a service may
+# not be replaced from the command line, and no environment value may be
+# injected there. Without those, `run` is a way to execute anything as root
+# inside a project's network with its secrets mounted.
+readonly RUNTIME_ALLOWED="up down restart build ps config logs run"
+
+# Flags that turn `run` from "start this reviewed service" into "start
+# something else". --entrypoint replaces the command the model declares;
+# -e/--env is how a credential enters a container through argv, which is the
+# one thing every secret decision in this repository is arranged to prevent.
+readonly RUN_FORBIDDEN_FLAGS="--entrypoint -e --env --env-file --volume -v --user -u --publish -p"
 
 # Subcommands that need a reachable daemon. `config` is rendered entirely by
 # the client, so it deliberately is not in this list.
-readonly NEEDS_DAEMON="ps top logs events port images kill down stop rm wait up restart build"
+readonly NEEDS_DAEMON="ps top logs events port images kill down stop rm wait up restart build run"
 
 # Compose global flags that consume the following token as their value, so
 # that token must never be mistaken for the subcommand. A flag written
@@ -86,14 +100,14 @@ readonly PROJECT_STATE_ROOT="/etc/agentic-postgres/projects"
 
 # Subcommands whose effect on a running container makes a secret-source check
 # worth paying for before they run.
-readonly VALIDATES_SECRETS="up restart"
+readonly VALIDATES_SECRETS="up restart run"
 
 # Subcommands that start containers and therefore need the runtime override
 # to already exist. down, ps, logs, config and build must stay usable without
 # it -- a project whose override is missing (a partially installed rendered
 # directory, or one deployed by an older release) must still be inspectable
 # and tearable-down, which is exactly when an operator needs them.
-readonly OVERRIDE_REQUIRED="up restart"
+readonly OVERRIDE_REQUIRED="up restart run"
 
 RUNTIME=0
 EDGE=0
@@ -103,6 +117,7 @@ TEMP_ENV=""
 MODEL=""
 PROJECT_NAME=""
 OVERRIDE_PATH=""
+SECRETS_OVERRIDE_PATH=""
 declare -a COMPOSE_ARGS=()
 declare -a ENV_FILE_ARGS=()
 declare -a MODEL_FILE_ARGS=()
@@ -340,6 +355,13 @@ configure_project_scope() {
   # before anything else is said about the project.
   OVERRIDE_PATH="${PROJECT_DIR}/runtime-compose.override.yaml"
 
+  # The second override: the `secrets:` block and the per-service grants, whose
+  # source paths name the generation that is active right now. Written by
+  # bin/project-runtime.sh on every start, because materialization supersedes
+  # the generation each time. It is loaded after the router override, so a
+  # single `--file` ordering decides both.
+  SECRETS_OVERRIDE_PATH="${PROJECT_DIR}/secrets-compose.override.yaml"
+
   if [ "${RUNTIME}" -eq 1 ] && [ -f "${runtime_env}" ]; then
     assert_disjoint "${LOCK_ENV}" "${runtime_env}"
     assert_disjoint "${project_env}" "${runtime_env}"
@@ -347,6 +369,9 @@ configure_project_scope() {
   fi
   if [ "${RUNTIME}" -eq 1 ] && [ -f "${OVERRIDE_PATH}" ]; then
     MODEL_FILE_ARGS+=(--file "${OVERRIDE_PATH}")
+  fi
+  if [ "${RUNTIME}" -eq 1 ] && [ -f "${SECRETS_OVERRIDE_PATH}" ]; then
+    MODEL_FILE_ARGS+=(--file "${SECRETS_OVERRIDE_PATH}")
   fi
 }
 
@@ -399,6 +424,19 @@ main() {
   local subcommand
   subcommand="$(first_subcommand)"
 
+  # Checked in both modes and before the privilege gate, so the answer does not
+  # depend on who asked. A flag list is refused by name rather than by position:
+  # `--entrypoint=sh` and `--entrypoint sh` are the same request.
+  if [ "${subcommand}" = "run" ]; then
+    local argument flag
+    for argument in "${COMPOSE_ARGS[@]+"${COMPOSE_ARGS[@]}"}"; do
+      flag="${argument%%=*}"
+      if in_list "${flag}" "${RUN_FORBIDDEN_FLAGS}"; then
+        die 10 "'${flag}' is refused with run: it would replace what the reviewed model declares."
+      fi
+    done
+  fi
+
   if [ "${RUNTIME}" -eq 1 ]; then
     [ "$(id -u)" -eq 0 ] || die 3 "--runtime requires root; Docker access is root-equivalent."
     if ! in_list "${subcommand}" "${RUNTIME_ALLOWED}"; then
@@ -411,6 +449,14 @@ main() {
     if [ "${EDGE}" -eq 0 ] && in_list "${subcommand}" "${OVERRIDE_REQUIRED}"; then
       [ -f "${OVERRIDE_PATH}" ] \
         || die 3 "no runtime override for ${PROJECT_KEY} at ${OVERRIDE_PATH}; the project is unroutable without it."
+      # Same rule, same reason. Without the grant surface every service starts
+      # with an empty /run/secrets: the cluster fails to initialise, which is
+      # loud, and a service that merely *reads* a credential starts and
+      # misbehaves later, which is not. Absence is refused rather than treated
+      # as "this project has no secrets" -- that is a claim only the contract
+      # can make, and it is made by rendering an empty block.
+      [ -f "${SECRETS_OVERRIDE_PATH}" ] \
+        || die 3 "no secret grant surface for ${PROJECT_KEY} at ${SECRETS_OVERRIDE_PATH}; it is written by bin/project-runtime.sh after materialization."
     fi
   elif in_list "${subcommand}" "${FORBIDDEN}"; then
     die 10 "'${subcommand}' would start or create a container; this requires --runtime with root."

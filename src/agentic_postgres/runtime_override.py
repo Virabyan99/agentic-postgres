@@ -29,7 +29,16 @@ ROUTED_SERVICE = "edge-probe"
 #: the probe publishes none, because only Traefik publishes a host port.
 ROUTED_SERVICE_PORT = 8080
 
+#: The migration plane's service, and where its rendered set appears inside it.
+#: The path is the one `compose.yaml` passes to `--migrations-dir`; the two
+#: living in two files is exactly how dbmate ends up reporting "no migrations
+#: found" against a directory that has five.
+MIGRATION_SERVICE = "dbmate"
+MIGRATIONS_MOUNT = "/migrations"
+
 __all__ = [
+    "MIGRATIONS_MOUNT",
+    "MIGRATION_SERVICE",
     "ROUTED_SERVICE",
     "ROUTED_SERVICE_PORT",
     "build_override",
@@ -37,18 +46,36 @@ __all__ = [
 ]
 
 
-def build_override(*, router_name: str, https_entrypoint: str) -> dict[str, Any]:
-    """Build the override document for one project's health route."""
+def build_override(
+    *, router_name: str, https_entrypoint: str, rendered_directory: str
+) -> dict[str, Any]:
+    """Build the override document for one project's health route and migrations.
+
+    Two deploy-time facts, in the file the deploy writes. The rendered
+    directory's *path* is one of them: it is stable for the life of the
+    deployment, unlike the secret generation, which is superseded on every
+    start and therefore lives in the override `bin/project-runtime.sh` rewrites.
+    Putting a per-start value in this file would leave dbmate reading whatever
+    directory the last deploy happened to name.
+    """
     if not router_name:
         raise ValueError("router_name is required")
     if not https_entrypoint:
         raise ValueError("https_entrypoint is required")
+    if not rendered_directory or not rendered_directory.startswith("/"):
+        raise ValueError("rendered_directory must be an absolute path")
 
     router = f"traefik.http.routers.{router_name}"
     service = f"traefik.http.services.{router_name}"
 
     return {
         "services": {
+            # Read-only, and the only thing dbmate is given besides its
+            # credential. It runs one command against one schema; a writable
+            # mount would let a migration rewrite the set that produced it.
+            MIGRATION_SERVICE: {
+                "volumes": [f"{rendered_directory}/migrations:{MIGRATIONS_MOUNT}:ro"]
+            },
             ROUTED_SERVICE: {
                 "labels": {
                     "traefik.enable": "true",
@@ -61,14 +88,18 @@ def build_override(*, router_name: str, https_entrypoint: str) -> dict[str, Any]
                     f"{router}.service": router_name,
                     f"{service}.loadbalancer.server.port": str(ROUTED_SERVICE_PORT),
                 }
-            }
+            },
         }
     }
 
 
-def render_override(*, router_name: str, https_entrypoint: str) -> bytes:
+def render_override(*, router_name: str, https_entrypoint: str, rendered_directory: str) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
-    document = build_override(router_name=router_name, https_entrypoint=https_entrypoint)
+    document = build_override(
+        router_name=router_name,
+        https_entrypoint=https_entrypoint,
+        rendered_directory=rendered_directory,
+    )
     header = (
         "# Generated from host.yaml and the rendered compose.env by ./deploy.sh.\n"
         "# Do not edit; do not shell-source. Router label keys are rendered\n"

@@ -44,7 +44,18 @@ PRIVILEGED_INVOCATIONS = (
     ("bin/edge.sh", ("--host", "host.example.yaml", "up")),
     ("bin/edge.sh", ("--host", "host.example.yaml", "down")),
     ("bin/docker-firewall.sh", ("reconcile",)),
-    ("bin/project-runtime.sh", ("--host", "host.example.yaml", "--project-key", "alpha-dev", "up")),
+    (
+        "bin/project-runtime.sh",
+        (
+            "--host",
+            "host.example.yaml",
+            "--project-key",
+            "alpha-dev",
+            "--through-session",
+            "3",
+            "up",
+        ),
+    ),
 )
 
 #: Flags that would put a secret value into argv, and therefore into `ps`.
@@ -479,9 +490,15 @@ def test_the_project_runtime_attaches_after_starting_and_detaches_before_stoppin
         assert index >= 0, f"{needle!r} is absent from bin/project-runtime.sh"
         return index
 
-    assert at("materialize-secrets.sh") < at("--profile session2 up")
-    assert at("--profile session2 up") < at("attach --project-key")
-    assert at("detach --project-key") < at("--profile session2 down")
+    # The profile list stopped being a literal in Session 3 -- it is built from
+    # the session the project was deployed through -- so the ordering is
+    # measured against the two commands themselves. Anchoring on
+    # `"${profiles[@]}" up` keeps it precise: that string appears once, in the
+    # arm that starts containers.
+    assert at("materialize-secrets.sh") < at("render-secret-override.py")
+    assert at("render-secret-override.py") < at('"${profiles[@]}" up')
+    assert at('"${profiles[@]}" up') < at("attach --project-key")
+    assert at("detach --project-key") < at('"${profiles[@]}" down')
 
 
 def test_teardown_never_removes_volumes() -> None:

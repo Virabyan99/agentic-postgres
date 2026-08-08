@@ -183,7 +183,12 @@ def test_the_catalog_records_forced_row_level_security(project_a: dict[str, Any]
         "JOIN pg_namespace n ON n.oid = c.relnamespace "
         "WHERE n.nspname = 'app' AND c.relkind = 'r';",
     )
-    assert observed == "notes=t/t tasks=t/t", observed
+    # `true`, not `t`. `boolean || text` yields the full word; `t` is what psql
+    # *prints* in a table, and this concatenates rather than prints. The
+    # expectation was written from the printed form by a run that had no cluster
+    # to check it against, and would have failed on first contact with any
+    # cluster (D63). The property being asserted was right all along.
+    assert observed == "notes=true/true tasks=true/true", observed
 
 
 def test_a_caller_cannot_update_a_row_into_another_owner(
@@ -233,9 +238,20 @@ def test_the_view_returns_the_callers_rows_not_the_owners(
         project_a, roles["authenticated"], "SELECT count(*) FROM api.notes;", OWNER_B
     )
     total = sql(project_a, "SELECT count(*) FROM app.notes;")
-    assert seen_by_a == "1", seen_by_a
-    assert seen_by_b == "1", seen_by_b
-    assert int(total) >= 2, "the seed did not produce rows for both owners"
+
+    # Compared against what each owner actually has, not against the literal 1.
+    # The seed adds a row per run, so a fixed count is a test that passes once
+    # on a virgin cluster and fails on every re-run -- including the second gate
+    # of a convergence check and every run after a reboot (D63). What is being
+    # proved is that a caller sees its own rows and only those, and that there
+    # are rows it cannot see; both survive re-seeding.
+    owned_by_a = sql(project_a, f"SELECT count(*) FROM app.notes WHERE owner_id = '{OWNER_A}';")
+    owned_by_b = sql(project_a, f"SELECT count(*) FROM app.notes WHERE owner_id = '{OWNER_B}';")
+
+    assert seen_by_a == owned_by_a, f"A saw {seen_by_a} of its {owned_by_a} rows"
+    assert seen_by_b == owned_by_b, f"B saw {seen_by_b} of its {owned_by_b} rows"
+    assert int(owned_by_a) >= 1 and int(owned_by_b) >= 1, "the seed produced no rows"
+    assert int(total) > int(seen_by_a), "there are no rows A is being kept from"
 
 
 # ---------------------------------------------------------------------------
@@ -438,4 +454,6 @@ def test_the_migration_membership_options_are_read_from_the_catalog(
         f"WHERE member.rolname = '{roles['migration_user']}' "
         f"AND grantor.rolname = '{roles['object_owner']}';",
     )
-    assert observed == "f f t", f"expected admin=f inherit=f set=t, got {observed!r}"
+    assert observed == "false false true", (
+        f"expected admin=false inherit=false set=true, got {observed!r}"
+    )

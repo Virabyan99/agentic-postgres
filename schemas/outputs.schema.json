@@ -184,6 +184,7 @@
         "schema_version",
         "document_kind",
         "source_commit",
+        "deployed_through_session",
         "project",
         "host",
         "edge",
@@ -201,6 +202,11 @@
         "schema_version": { "type": "integer", "enum": [3] },
         "document_kind": { "const": "deployed" },
         "source_commit": { "$ref": "#/$defs/commit" },
+        "deployed_through_session": {
+          "type": "integer",
+          "minimum": 2,
+          "description": "The session this project was deployed through. Read back by the systemd launcher at boot to choose the secret set and the Compose profiles, so that a restart brings up what the deploy brought up rather than a subset of it. Absent from the rendered branch by construction: a render deploys nothing. Minimum 2 because sessions before that start no container at all."
+        },
         "project": {
           "type": "object",
           "additionalProperties": false,

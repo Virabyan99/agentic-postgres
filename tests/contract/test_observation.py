@@ -153,6 +153,6 @@ def test_the_deploy_waits_for_both_observations(code_only) -> None:
     """
     from agentic_postgres import REPO_ROOT
 
-    body = code_only((REPO_ROOT / "bin" / "deploy-session-2.py").read_text(encoding="utf-8"))
+    body = code_only((REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8"))
     assert "await_observation" in body, "the deploy observes once and records the race"
     assert body.count("await_observation") >= 2, "both tls and health must wait"

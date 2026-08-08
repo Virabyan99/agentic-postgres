@@ -94,18 +94,33 @@ main() {
   requirements="${STATE_ROOT}/${project_key}/secrets.required.yaml"
   [ -f "${manifest}" ] || die 4 "no copied project manifest: ${manifest}"
 
+  # Read back, not assumed. This launcher runs at boot with no operator to ask
+  # which session the project was deployed through, and the two things that
+  # depend on the answer -- which secrets are materialized and which Compose
+  # profiles start -- are exactly the two that must not disagree with what the
+  # deploy did. A literal here was correct while 2 was the only value, and
+  # would have brought a Session 3 project back up without its cluster (D59).
+  local session
+  session="$(jq -r '.deployed_through_session // empty' "${deployment}")"
+  [ -n "${session}" ] \
+    || die 4 "${deployment} records no deployed_through_session; redeploy this project with a release that writes it."
+  case "${session}" in
+    ''|*[!0-9]*) die 2 "recorded deployed_through_session is not a number: ${session}" ;;
+  esac
+
   case "${action}" in
     materialize)
       [ -f "${requirements}" ] || die 4 "no copied secret contract: ${requirements}"
       exec "${release}/bin/materialize-secrets.sh" \
-        --project "${manifest}" --requirements "${requirements}" --session 2
+        --project "${manifest}" --requirements "${requirements}" --session "${session}"
       ;;
     attach|detach|status)
       exec "${release}/bin/edge-network.sh" "${action}" --project-key "${project_key}"
       ;;
     up|down)
       exec "${release}/bin/project-runtime.sh" \
-        --host "${HOST_MANIFEST}" --project-key "${project_key}" "${action}"
+        --host "${HOST_MANIFEST}" --project-key "${project_key}" \
+        --through-session "${session}" "${action}"
       ;;
   esac
 }

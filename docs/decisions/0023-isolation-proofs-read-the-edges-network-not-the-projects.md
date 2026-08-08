@@ -63,7 +63,8 @@ against a host where `edge-network.sh attach` had never run.
 
 ```python
 internal = sorted(
-    name for name in networks
+    name
+    for name in networks
     if any(name.startswith(project["project"]["key"]) for project in (project_a, project_b))
     and not name.endswith("-edge")
 )

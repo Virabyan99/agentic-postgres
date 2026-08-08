@@ -1,6 +1,6 @@
 """Every file the launcher and the runtime open is written by the deploy.
 
-This is a source-level contract, not a behavioural one: `bin/deploy-session-2.py`
+This is a source-level contract, not a behavioural one: `bin/deploy-project.py`
 requires root and a provisioned host, so the test asserts that the code names
 each destination and installs it atomically, and the host run proves the rest.
 """
@@ -16,7 +16,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 @pytest.fixture(scope="module")
 def source() -> str:
-    return (REPO_ROOT / "bin" / "deploy-session-2.py").read_text(encoding="utf-8")
+    return (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(
