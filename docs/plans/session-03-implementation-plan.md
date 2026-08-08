@@ -446,6 +446,32 @@ passes. Systemd `Documentation=` lines are untouched — changing one means
 reinstalling units, and the four documents are reachable from the two the units
 already name.
 
+**Measured.** The gate passes on the host over two clusters: **126 passed, 0
+failed, 0 skipped**, and all six claims — `isolation`, `secret_leakage`,
+`least_privilege`, `row_level_security`, `database_isolation`,
+`boot_convergence` — `passed`. `evidence/session-03.json` records `status:
+passed` for both projects; the plan's `jq` expression returns `true`; the
+acceptance matrix is current at 88 requirements; the tree is clean; and
+`bin/session-01-check.sh` exits 0 on the host with all four projects rendered
+and 0 identity collisions.
+
+Two defects, both found by the gate's first execution rather than by reading:
+
+**D79** — three of `DBX-PG-003`'s offline proofs skipped under root, so
+`database_isolation` came out `failed` on a host where all nine of its live
+proofs had just passed. A claim that could not be proved in the only mode that
+measures it.
+
+**D80** — the last command in this checklist exited **127**. `python: command
+not found`, from the gate whose exiting 0 is the standing non-negotiable, in the
+one invocation nobody had used.
+
+`evidence/session-03.json` records `source_commit` as the release the projects
+are **running**, which is the deploy that brought them up and not the checkout
+the gate ran from. That is the deployed document's field and it means what it
+says; the commits after it change tests, documents and the gate, and nothing the
+launcher executes at boot.
+
 ---
 
 ## 6. The two execution planes
