@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 
 from agentic_postgres import REPO_ROOT
+from agentic_postgres.deployed_output import SCHEMA_VERSION
 from agentic_postgres.evidence import ISOLATED_FIELDS, at, collision_count
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
@@ -34,19 +35,75 @@ NULLABLE_FIELDS = (
 )
 
 
+#: The project this repository renders from its own committed example manifest.
+#: Named, not discovered -- see below.
+FIXTURE_PROJECT = "fixture-alpha-dev"
+
+
 def load_fixture() -> dict[str, Any]:
     """A real rendered document, used as the shape to vary from.
 
-    Built from the committed v1 fixture's structure rather than hand-written, so
-    a schema change surfaces here instead of leaving this module testing a shape
-    the renderer no longer produces.
+    A rendered document rather than a hand-written one, so a schema change
+    surfaces here instead of leaving this module testing a shape the renderer no
+    longer produces.
+
+    **Named, not "the first thing in `.generated/`".** That is what this did, and
+    it was green on a development machine for the reason that machine renders
+    only the two committed fixtures. On the deployment host `.generated/` also
+    holds `alpha-dev` and `beta-dev` -- real projects, rendered by the
+    *previously installed release*, so schema v2 documents with no
+    `database.container`. `sorted()` put one of them first and six tests failed
+    with `KeyError: 'container'` on a host where nothing was wrong (D64).
+
+    The shape being varied from has to come from this release. A directory
+    listing is not a version, which is why the assertion below is not redundant
+    with naming the directory.
     """
-    generated = REPO_ROOT / ".generated"
-    for directory in sorted(generated.iterdir()):
-        outputs = directory / "outputs.json"
-        if outputs.is_file():
-            return json.loads(outputs.read_text(encoding="utf-8"))
-    pytest.skip("no rendered project is available; run ./deploy.sh --render-only first")
+    outputs = REPO_ROOT / ".generated" / FIXTURE_PROJECT / "outputs.json"
+    if not outputs.is_file():
+        pytest.skip(f"{FIXTURE_PROJECT} is not rendered; run ./deploy.sh --render-only first")
+
+    document = json.loads(outputs.read_text(encoding="utf-8"))
+    assert document["schema_version"] == SCHEMA_VERSION, (
+        f"{outputs} is schema v{document['schema_version']} and this release renders "
+        f"v{SCHEMA_VERSION}; every test below would be varying a shape the renderer "
+        "no longer produces"
+    )
+    return document
+
+
+def test_a_document_from_an_older_release_is_refused_not_skipped(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """The general form of D64, asserted where it was actually wrong.
+
+    `.generated/` is a by-product directory. On the deployment host it holds the
+    real projects as the *previous* release rendered them, and `collision_count`
+    reads a field that release did not emit. Skipping those would keep the count
+    at `0` while silently removing a real project from it — the failure mode is
+    an isolation check that means less than it did the run before and says
+    nothing about the change.
+    """
+    from agentic_postgres import evidence
+
+    generated = tmp_path / ".generated"
+    (generated / "current-dev").mkdir(parents=True)
+    (generated / "current-dev" / "outputs.json").write_text(
+        json.dumps({"schema_version": SCHEMA_VERSION}), encoding="utf-8"
+    )
+    (generated / "legacy-dev").mkdir()
+    (generated / "legacy-dev" / "outputs.json").write_text(
+        json.dumps({"schema_version": SCHEMA_VERSION - 1}), encoding="utf-8"
+    )
+
+    monkeypatch.setattr(evidence, "REPO_ROOT", tmp_path)
+    with pytest.raises(evidence.EvidenceError) as raised:
+        evidence.load_rendered()
+
+    message = str(raised.value)
+    assert "legacy-dev" in message, "the refusal does not name the project to re-render"
+    assert "--render-only" in message, "the refusal does not name the remedy"
+    assert "current-dev" not in message
 
 
 def put(document: dict[str, Any], pointer: tuple[str, ...], value: Any) -> None:

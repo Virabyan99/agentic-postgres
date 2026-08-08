@@ -26,6 +26,7 @@ from typing import Any
 import yaml
 
 from agentic_postgres import REPO_ROOT
+from agentic_postgres.deployed_output import SCHEMA_VERSION as OUTPUTS_SCHEMA_VERSION
 
 EVIDENCE_SCHEMA_VERSION = 1
 
@@ -172,15 +173,47 @@ def count_future_placeholders() -> int:
 
 
 def load_rendered() -> dict[str, dict[str, Any]]:
+    """Every project rendered here, and all of them from this release.
+
+    `.generated/` is a by-product directory, so what it holds is whatever has
+    been rendered on this machine — which on the deployment host includes the
+    real projects, rendered by the *previously installed* release. Those are
+    schema v2 documents, and `collision_count` reads `database.container`, which
+    v2 does not have: six contract tests and the evidence step failed with
+    `KeyError: 'container'` on a host where nothing was actually wrong (D64).
+
+    Refused rather than skipped. Comparing two projects across two schema
+    versions compares different things, and quietly dropping the stale one would
+    remove a real project from the isolation count at exactly the moment
+    somebody upgraded the release — the count would still be `0`, and it would
+    mean less than it did the run before. The remedy is one command per project
+    and needs no root.
+    """
     generated = REPO_ROOT / ".generated"
     rendered: dict[str, dict[str, Any]] = {}
+    stale: dict[str, Any] = {}
+
     for directory in sorted(generated.iterdir()):
         if directory.name.startswith(".") or not directory.is_dir():
             continue
         outputs = directory / "outputs.json"
         if not outputs.is_file():
             continue
-        rendered[directory.name] = json.loads(outputs.read_text(encoding="utf-8"))
+        document = json.loads(outputs.read_text(encoding="utf-8"))
+        if document.get("schema_version") != OUTPUTS_SCHEMA_VERSION:
+            stale[directory.name] = document.get("schema_version")
+            continue
+        rendered[directory.name] = document
+
+    if stale:
+        listed = ", ".join(f"{name} (v{version})" for name, version in sorted(stale.items()))
+        raise EvidenceError(
+            f"these projects were rendered by an older release: {listed}. "
+            f"This release renders v{OUTPUTS_SCHEMA_VERSION}. Re-render each one with "
+            "`./deploy.sh --project <manifest> --capabilities <manifest> --render-only` "
+            "-- it needs no root -- or remove the directory if the project is gone. "
+            "A collision count over two schema versions compares different documents."
+        )
 
     if not rendered:
         raise EvidenceError("no rendered project was found under .generated/")
