@@ -192,6 +192,53 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
         f"{q(roles['migration_user'])}, {q(roles['app_runtime'])};"
     )
 
+    # CONNECT only, for the application runtime role. CREATE and TEMPORARY are
+    # deliberately absent and are not an oversight to be tidied up later: CREATE
+    # on the database is the authority to make a schema, and TEMPORARY is a way
+    # to materialize data outside every policy this system writes.
+    #
+    # Session 4 adds the membership that gives it everything it does have. The
+    # three options are each load-bearing and each read directly from the
+    # catalog by the authorization tests, never inferred from the role's own
+    # rolinherit (ADR 0026's lesson, applied to a second role):
+    #
+    #   INHERIT TRUE  an application must not have to SET ROLE to do its job;
+    #   SET FALSE     so it cannot deliberately *become* `authenticated` and
+    #                 escape whatever a later session attaches to its own
+    #                 identity -- Session 6 makes the request claim authentic,
+    #                 and a role that could shed its own identity would shed
+    #                 that with it;
+    #   ADMIN FALSE   so it cannot grant this membership onward.
+    statements.append(
+        f"GRANT {q(roles['authenticated'])} TO {q(roles['app_runtime'])} "
+        f"WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;"
+    )
+
+    # Role-level settings, here rather than in the migration that revokes the
+    # runtime role's direct reach. `ALTER ROLE ... SET` on *another* role needs
+    # authority the migration plane does not hold, and the migration plane is
+    # deliberately not a superuser -- so this is the plane that can do it (D102).
+    #
+    # A search_path of exactly `api`: the runtime role reaches data through the
+    # api surface, and a path that included `app` would let an unqualified name
+    # resolve to a base table it no longer has rights on, turning a permission
+    # error into a confusing one. `pg_temp` is last on purpose -- first, it lets
+    # a temporary object shadow a real one.
+    statements.append(
+        f"ALTER ROLE {q(roles['app_runtime'])} SET search_path = api, pg_temp;"
+    )
+    # Conservative, and bounded rather than absent. An application that holds a
+    # server connection open in an idle transaction holds it out of the pool for
+    # as long as it lasts, and in transaction pooling that is the whole pool's
+    # problem rather than its own.
+    statements.append(
+        f"ALTER ROLE {q(roles['app_runtime'])} SET statement_timeout = '30s';"
+    )
+    statements.append(
+        f"ALTER ROLE {q(roles['app_runtime'])} "
+        f"SET idle_in_transaction_session_timeout = '60s';"
+    )
+
     # Superuser work, and the reason this plane exists. pgvector is untrusted,
     # so CREATE EXTENSION requires superuser -- measured, not assumed. The
     # schema is created AUTHORIZATION the owner so that a later migration can
@@ -404,18 +451,133 @@ def check_violations(container: str, database: str, document: dict[str, Any]) ->
     return violations
 
 
-def apply_credential(container: str, database: str, role: str, password: str) -> None:
-    """Give `migration_user` its verifier. Never printed, never in argv.
+def apply_credential(
+    container: str, database: str, role: str, password: str, *, connection_limit: int | None = None
+) -> None:
+    """Give a role its verifier. Never printed, never in argv.
 
     Kept out of `build_statements` on purpose: that list is what `--check`
     describes and what an operator may be shown, and a password does not belong
     in something whose whole value is that it can be read.
+
+    The password reaches the server over the container-local socket, inside one
+    statement, through `quote_literal`. It is not an argument to anything: the
+    SQL goes to psql's stdin, which is why `psql()` takes a string rather than
+    building a command line.
+
+    `connection_limit` is applied in the same statement as `LOGIN`, so a role
+    never exists in a state where it can log in without a bound. The two as
+    separate statements would leave a window -- short, and long enough for an
+    application that reconnects in a loop.
     """
+    limit = "" if connection_limit is None else f" CONNECTION LIMIT {int(connection_limit)}"
     statement = (
         f"ALTER ROLE {migrations.quote_identifier(role)} "
-        f"LOGIN PASSWORD {migrations.quote_literal(password)};"
+        f"LOGIN{limit} PASSWORD {migrations.quote_literal(password)};"
     )
     psql(container, database, statement)
+
+
+def read_secret(project_key: str, consumer: str, name: str) -> str:
+    """One materialized value, from the generation the project points at.
+
+    Read from the filesystem here rather than granted to the bootstrap plane as
+    a container: this plane is root on the host, and a second declared consumer
+    would materialize a second copy of one credential -- two files for a
+    rotation to reach instead of one.
+    """
+    pointer = Path(SECRET_ROOT) / project_key / "active-secret-generation.json"
+    if not pointer.is_file():
+        print(
+            f"postgres-bootstrap: no active secret generation for {project_key}; "
+            "run bin/materialize-secrets.sh first.",
+            file=sys.stderr,
+        )
+        raise SystemExit(EXIT_CONTRACT)
+
+    generation = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
+    path = Path(SECRET_ROOT) / project_key / "generations" / generation / consumer / name
+    if not path.is_file():
+        print(
+            f"postgres-bootstrap: generation {generation} has no {name} at {path}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(EXIT_CONTRACT)
+
+    # Trailing newlines only. Every container that reads one of these files does
+    # it with `$(cat ...)`, which strips exactly that and nothing else; a
+    # `.strip()` here would also take leading whitespace and set the role to a
+    # value the container does not present.
+    value = path.read_text(encoding="utf-8").rstrip("\n")
+    if not value:
+        print(f"postgres-bootstrap: {name} is empty.", file=sys.stderr)
+        raise SystemExit(EXIT_CONTRACT)
+    return value
+
+
+#: Sessions the connection budget must leave room for besides the application:
+#: the migration plane, the bootstrap plane itself, and an operator holding a
+#: psql open while something is wrong. Small, and deliberately not zero -- a
+#: budget with no slack is one where the first thing to fail is the tool you
+#: would use to find out why.
+OPERATIONAL_CONNECTION_HEADROOM = 5
+
+
+def connection_budget(container: str, database: str) -> tuple[int, int]:
+    """Ask the server, rather than the manifest, what it will actually allow.
+
+    D94's rule. `max_connections` is in the manifest too, and the manifest is
+    what *asked* for it -- but the running server is what enforces it, and the
+    two differ the moment a container is started with an override or an older
+    generation of the model. A budget computed from the file would be right
+    until the day it mattered.
+    """
+    maximum = int(query(container, database, "SHOW max_connections").strip())
+    reserved = int(query(container, database, "SHOW superuser_reserved_connections").strip())
+    return maximum, reserved
+
+
+def app_runtime_connection_limit(maximum: int, reserved: int) -> int:
+    """What one application may hold, leaving the rest reachable.
+
+    Returned rather than applied so the arithmetic is testable without a
+    cluster: the interesting cases are a tiny `max_connections` and a large
+    reservation, and both produce a limit this function must refuse to make
+    absurd rather than a negative number PostgreSQL would take as "unlimited".
+    """
+    available = maximum - reserved - OPERATIONAL_CONNECTION_HEADROOM
+    if available < 1:
+        raise ValueError(
+            f"max_connections={maximum} with {reserved} reserved leaves nothing for an "
+            f"application after {OPERATIONAL_CONNECTION_HEADROOM} operational sessions. "
+            "Raise database.max_connections, or lower the reservation; do not remove "
+            "the headroom, because it is what leaves a psql available when this is wrong"
+        )
+    return available
+
+
+def app_runtime_password_available(project_key: str) -> bool:
+    """Is the runtime credential in the generation this project points at?
+
+    A project materialized through session 3 has no such file, and this program
+    has to keep working on exactly those projects — they are what the
+    convergence path is for. So the absence is a fact to report, not an error to
+    raise, and the role stays NOLOGIN until a session-4 materialization gives it
+    something to be.
+    """
+    pointer = Path(SECRET_ROOT) / project_key / "active-secret-generation.json"
+    if not pointer.is_file():
+        return False
+    generation = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
+    path = (
+        Path(SECRET_ROOT)
+        / project_key
+        / "generations"
+        / generation
+        / "pgbouncer"
+        / "app_runtime_password"
+    )
+    return path.is_file()
 
 
 def read_migration_password(project_key: str) -> str:
@@ -568,15 +730,43 @@ def main() -> int:
         return 0
 
     psql(container, database, "\n".join(statements))
+
+    key = document["project"]["key"]
+    roles = document["database"]["roles"]
+
     apply_credential(
         container,
         database,
-        document["database"]["roles"]["migration_user"],
-        read_migration_password(document["project"]["key"]),
+        roles["migration_user"],
+        read_secret(key, "dbmate", "migration_user_password"),
     )
     print(f"postgres-bootstrap: {len(statements)} statements applied to {database}")
     print(f"  identity {instance_uuid}")
     print("  migration credential set")
+
+    # The application runtime role, activated from the pooler's own materialized
+    # file. Session 4's addition, and idempotent for the same reason the rest of
+    # this program is: a redeploy re-issues it and the catalog ends up where it
+    # already was.
+    #
+    # Skipped, loudly, when the file is not there. A project materialized
+    # through an earlier session has no such secret, and refusing outright would
+    # make this program unusable on the very projects the convergence path
+    # exists for.
+    if app_runtime_password_available(key):
+        maximum, reserved = connection_budget(container, database)
+        limit = app_runtime_connection_limit(maximum, reserved)
+        apply_credential(
+            container,
+            database,
+            roles["app_runtime"],
+            read_secret(key, "pgbouncer", "app_runtime_password"),
+            connection_limit=limit,
+        )
+        print(f"  runtime credential set, CONNECTION LIMIT {limit}")
+        print(f"    from the server: max_connections {maximum}, reserved {reserved}")
+    else:
+        print("  runtime credential absent from this generation; role left NOLOGIN")
 
     # Applied, then read back. The statements above returning 0 says psql
     # accepted them, which is not the same as the catalog holding what they

@@ -67,6 +67,13 @@
       "template": "templates/0005-write-rpcs.sql",
       "placeholders": ["object_owner", "authenticated", "agent_writer"],
       "description": "Two write functions that derive ownership from the request identity and take no owner parameter."
+    },
+    {
+      "version": "20260808120006",
+      "name": "app_runtime_least_privilege",
+      "template": "templates/0006-app-runtime-least-privilege.sql",
+      "placeholders": ["object_owner", "app_runtime"],
+      "description": "The application runtime role loses the direct reach into app and app_private that Session 3 granted it, default privileges included, and holds only what membership in authenticated carries. See SEC-DBX-002 and ADR 0041."
     }
   ]
 }

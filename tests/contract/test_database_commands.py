@@ -254,10 +254,20 @@ def test_the_subcommands_that_reach_a_cluster_refuse_without_root() -> None:
 
 
 def test_render_reports_a_digest_per_migration() -> None:
+    """One line per migration, counted against the manifest rather than a literal.
+
+    The name says "per migration", so the assertion should too. It said `== 5`
+    until a sixth migration existed.
+    """
+    import json
+
+    manifest = json.loads(
+        (REPO_ROOT / "migrations" / "manifest.json").read_text(encoding="utf-8")
+    )
     result = run(MIGRATE, *MANIFEST, "render")
     assert result.returncode == 0, result.stderr
     lines = [line for line in result.stdout.splitlines() if line.strip()]
-    assert len(lines) == 5, result.stdout
+    assert len(lines) == len(manifest["migrations"]), result.stdout
 
 
 def test_two_subcommands_at_once_are_refused_by_migrate() -> None:

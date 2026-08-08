@@ -68,8 +68,22 @@ def write_manifest(tmp_path: Path, document: dict[str, Any]) -> Path:
 
 
 def test_the_committed_manifest_loads(manifest: dict[str, Any]) -> None:
+    """A count, not a number.
+
+    This asserted `== 5` until Session 4 added a sixth migration, at which point
+    it failed for a reason that had nothing to do with the manifest loading. The
+    property worth having is that the manifest lists every template on disk and
+    no more; a literal restates the answer and has to be edited by whoever adds
+    a migration, which is the one person least likely to notice it is wrong.
+    """
     assert manifest["schema_version"] == 1
-    assert len(manifest["migrations"]) == 5
+
+    listed = {entry["template"] for entry in manifest["migrations"]}
+    on_disk = {
+        f"templates/{path.name}"
+        for path in (REPO_ROOT / "migrations" / "templates").glob("*.sql")
+    }
+    assert listed == on_disk, "the manifest and templates/ disagree about what exists"
 
 
 def test_versions_are_unique_and_ordered(manifest: dict[str, Any]) -> None:
