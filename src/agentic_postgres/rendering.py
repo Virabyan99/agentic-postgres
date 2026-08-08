@@ -279,7 +279,43 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # would put a derived role name inside an operator-entered value, where
     # nothing checks it against `naming.ROLE_SUFFIXES` (D60).
     "MIGRATION_ROLE_NAME",
+    # Session 4. All project-derived, so this is still the right file: the
+    # allocated host port is NOT here, because it comes from host state and a
+    # host-derived value in a rendered file would break the determinism
+    # contract. It goes in the root-owned runtime env file instead.
+    "POSTGRES_SERVICE_HOST",
+    "APP_RUNTIME_ROLE_NAME",
+    "PGBOUNCER_LISTEN_PORT",
+    "PGBOUNCER_ADMIN_USER",
+    "PGBOUNCER_POOL_MODE",
+    "PGBOUNCER_POOL_SIZE",
+    "PGBOUNCER_MAX_CLIENT_CONN",
+    "PGBOUNCER_MAX_PREPARED_STATEMENTS",
+    "PGBOUNCER_QUERY_WAIT_TIMEOUT",
+    "PGBOUNCER_IDLE_TRANSACTION_TIMEOUT",
+    "PGBOUNCER_SERVER_LIFETIME",
 )
+
+#: The pooler's port on its own project network. 6432 is the PgBouncer
+#: convention; the locked image's own default is 5432, measured in Run 1, which
+#: is why this is written down rather than left to the image.
+PGBOUNCER_LISTEN_PORT = 6432
+
+#: Transaction pooling is the only mode Session 4 supports, and this constant is
+#: why it cannot be configured away. A manifest field would let a failing client
+#: test be fixed by selecting session pooling, which the plan forbids in so many
+#: words; the consequences of transaction mode are documented instead.
+PGBOUNCER_POOL_MODE = "transaction"
+
+#: The pooler's admin identity. Not a database role: PgBouncer's admin console
+#: is a virtual database the daemon answers itself.
+PGBOUNCER_ADMIN_USER = "pgbouncer_admin"
+
+#: The Compose service name the cluster is reachable under on its own project
+#: network. A constant rather than a derived name because it is the *service*
+#: name inside one project's Compose model, which is scoped by the project
+#: already; deriving it would make two projects' models differ for no reason.
+POSTGRES_SERVICE_HOST = "postgres"
 
 #: Where dbmate records applied versions. A constant rather than a manifest
 #: field: the ledger's location is part of the migration contract, and a
@@ -287,7 +323,9 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
 MIGRATIONS_TABLE = "app_private.schema_migrations"
 
 
-def build_compose_env(identity: naming.ProjectIdentity, budget: dict[str, int]) -> bytes:
+def build_compose_env(
+    identity: naming.ProjectIdentity, budget: dict[str, int], database: dict[str, Any]
+) -> bytes:
     """Exactly :data:`COMPOSE_ENV_KEYS`, in that order, and nothing else.
 
     Anything from ``versions.env`` belongs to ``versions.env``, and anything
@@ -299,7 +337,20 @@ def build_compose_env(identity: naming.ProjectIdentity, budget: dict[str, int]) 
     Resolving it here would be a second place that decides what a manifest
     without a `shared_buffers_mb` means, and the two would agree until one of
     them was changed.
+
+    ``database`` is the manifest's ``database`` block, and it is required rather
+    than optional. The pool settings that have schema defaults are resolved
+    against ``config.POOL_DEFAULTS``; ``pool_size`` and ``max_client_connections``
+    have none, because the schema makes them required — so they are read
+    directly and a manifest missing one raises here rather than rendering an
+    invented number that would look measured.
     """
+    settings: dict[str, int] = {
+        key: int(database.get(key, default)) for key, default in config.POOL_DEFAULTS.items()
+    }
+    settings["pool_size"] = int(database["pool_size"])
+    settings["max_client_connections"] = int(database["max_client_connections"])
+
     values = {
         "COMPOSE_PROJECT_NAME": identity.compose_project_name,
         "EDGE_NETWORK_NAME": identity.edge_network,
@@ -322,6 +373,19 @@ def build_compose_env(identity: naming.ProjectIdentity, budget: dict[str, int]) 
         "POSTGRES_SHM_SIZE": f"{budget['shm_size_mb']}m",
         "MIGRATIONS_TABLE": MIGRATIONS_TABLE,
         "MIGRATION_ROLE_NAME": identity.roles["migration_user"],
+        "POSTGRES_SERVICE_HOST": POSTGRES_SERVICE_HOST,
+        "APP_RUNTIME_ROLE_NAME": identity.roles["app_runtime"],
+        "PGBOUNCER_LISTEN_PORT": str(PGBOUNCER_LISTEN_PORT),
+        "PGBOUNCER_ADMIN_USER": PGBOUNCER_ADMIN_USER,
+        "PGBOUNCER_POOL_MODE": PGBOUNCER_POOL_MODE,
+        "PGBOUNCER_POOL_SIZE": str(settings["pool_size"]),
+        "PGBOUNCER_MAX_CLIENT_CONN": str(settings["max_client_connections"]),
+        "PGBOUNCER_MAX_PREPARED_STATEMENTS": str(settings["max_prepared_statements"]),
+        # Seconds, with the unit in the name rather than in a suffix: PgBouncer
+        # reads a bare integer as seconds and would take `20s` as a parse error.
+        "PGBOUNCER_QUERY_WAIT_TIMEOUT": str(settings["query_wait_timeout_seconds"]),
+        "PGBOUNCER_IDLE_TRANSACTION_TIMEOUT": str(settings["idle_transaction_timeout_seconds"]),
+        "PGBOUNCER_SERVER_LIFETIME": str(settings["server_lifetime_seconds"]),
     }
     lines = [
         "# Generated. Do not edit; do not shell-source.",
@@ -604,7 +668,7 @@ def render_project(
             write_private(staging / "outputs.json", naming.canonical_json(outputs))
             write_private(
                 staging / "compose.env",
-                build_compose_env(identity, outputs["database"]["budget"]),
+                build_compose_env(identity, outputs["database"]["budget"], project["database"]),
             )
             write_private(staging / "rendered-summary.txt", build_summary(outputs))
 

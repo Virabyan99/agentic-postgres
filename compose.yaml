@@ -290,6 +290,120 @@ services:
     networks:
       - internal
 
+  # Session 4's transaction pooler. Everything below that looks like hardening
+  # is a requirement with a test behind it.
+  #
+  # `user: "70:70"` is the pooler image's own uid/gid, measured against the
+  # locked digest in Run 1 -- a third number after the cluster's 999 and Session
+  # 2's 65532. Unlike the cluster image this one sets a default user, so the
+  # process never runs as root and there is no window in which it could fix up a
+  # file's ownership. secrets.required.yaml names the same two numbers and
+  # tests/contract/test_secret_contract.py cross-checks them.
+  #
+  # No `ports` here. Session 4 publishes a host-loopback port, but a publication
+  # is written only into the root-owned runtime override, never into this file:
+  # a repository that could publish a database port would be one clone away from
+  # publishing one (ADR 0040).
+  #
+  # `/etc/pgbouncer` is a tmpfs, and that is load-bearing rather than tidy. The
+  # user list contains a plaintext credential, and this is the mount that keeps
+  # it off every persistent path -- the image ships a world-readable
+  # `userlist.txt` in that directory, so without the tmpfs the entrypoint would
+  # be writing a secret into an image layer's directory on the container
+  # filesystem.
+  #
+  # WHAT WAS MEASURED, because two plausible answers here are wrong:
+  #
+  #   * A plaintext user list under `auth_type = scram-sha-256` authenticates
+  #     the client AND lets the pooler log in upstream: the cluster records
+  #     `method=scram-sha-256` for the pooler's own connection. Storing the
+  #     server's SCRAM verifier instead also works, and is unavailable to us --
+  #     it can only be read from the cluster, which means the role must already
+  #     exist, and this file has to work on the run that creates it.
+  #   * The pooler logs `could not open auth_file ... Permission denied` as an
+  #     ERROR and then GOES ON LISTENING. It comes up, it accepts connections,
+  #     and it refuses every one of them. Nothing about a listening port
+  #     distinguishes a working pooler from that one, which is why the health
+  #     check in Run 4 authenticates rather than connects.
+  #
+  # The entrypoint follows dbmate's pattern for the same reason: the credential
+  # is read from a mounted file inside the container and never becomes an
+  # environment variable, a Compose interpolation, or an argument. `docker
+  # inspect` on this container shows identifiers and nothing else.
+  #
+  # `umask 077` before anything is written, rather than a chmod afterwards: a
+  # chmod leaves a window in which the file exists at the default mode, and the
+  # window is only short, not absent.
+  pgbouncer:
+    image: ${PGBOUNCER_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [session4]
+    restart: "on-failure:5"
+    user: "70:70"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+    tmpfs:
+      - /etc/pgbouncer:rw,mode=0700,uid=70,gid=70
+      - /tmp:rw,mode=0700,uid=70,gid=70
+    environment:
+      APG_POOL_LISTEN_PORT: ${PGBOUNCER_LISTEN_PORT:?required}
+      APG_CLUSTER_HOST: ${POSTGRES_SERVICE_HOST:?required}
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_APP_RUNTIME_ROLE: ${APP_RUNTIME_ROLE_NAME:?required}
+      APG_POOL_ADMIN_USER: ${PGBOUNCER_ADMIN_USER:?required}
+      APG_POOL_MODE: ${PGBOUNCER_POOL_MODE:?required}
+      APG_POOL_SIZE: ${PGBOUNCER_POOL_SIZE:?required}
+      APG_MAX_CLIENT_CONN: ${PGBOUNCER_MAX_CLIENT_CONN:?required}
+      APG_MAX_PREPARED_STATEMENTS: ${PGBOUNCER_MAX_PREPARED_STATEMENTS:?required}
+      APG_QUERY_WAIT_TIMEOUT: ${PGBOUNCER_QUERY_WAIT_TIMEOUT:?required}
+      APG_IDLE_TRANSACTION_TIMEOUT: ${PGBOUNCER_IDLE_TRANSACTION_TIMEOUT:?required}
+      APG_SERVER_LIFETIME: ${PGBOUNCER_SERVER_LIFETIME:?required}
+    # Unbraced `$$` throughout, matching dbmate: the braced escaped form is a
+    # literal Compose never interpolates, but it is indistinguishable from a
+    # real required interpolation to anything reading this file with a regex.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - >
+        set -eu;
+        umask 077;
+        app_password="$$(cat /run/secrets/app_runtime_password)";
+        admin_password="$$(cat /run/secrets/pgbouncer_admin_password)";
+        printf '"%s" "%s"\n"%s" "%s"\n'
+        "$$APG_APP_RUNTIME_ROLE" "$$app_password"
+        "$$APG_POOL_ADMIN_USER" "$$admin_password"
+        > /etc/pgbouncer/userlist.txt;
+        unset app_password admin_password;
+        printf '%s\n'
+        "[databases]"
+        "$$APG_DATABASE_NAME = host=$$APG_CLUSTER_HOST port=5432 dbname=$$APG_DATABASE_NAME"
+        ""
+        "[pgbouncer]"
+        "listen_addr = 0.0.0.0"
+        "listen_port = $$APG_POOL_LISTEN_PORT"
+        "auth_type = scram-sha-256"
+        "auth_file = /etc/pgbouncer/userlist.txt"
+        "admin_users = $$APG_POOL_ADMIN_USER"
+        "pool_mode = $$APG_POOL_MODE"
+        "default_pool_size = $$APG_POOL_SIZE"
+        "max_client_conn = $$APG_MAX_CLIENT_CONN"
+        "max_prepared_statements = $$APG_MAX_PREPARED_STATEMENTS"
+        "query_wait_timeout = $$APG_QUERY_WAIT_TIMEOUT"
+        "idle_transaction_timeout = $$APG_IDLE_TRANSACTION_TIMEOUT"
+        "server_lifetime = $$APG_SERVER_LIFETIME"
+        "ignore_startup_parameters = extra_float_digits"
+        "log_connections = 1"
+        "log_disconnections = 1"
+        > /etc/pgbouncer/pgbouncer.ini;
+        exec /usr/bin/pgbouncer /etc/pgbouncer/pgbouncer.ini
+    # `internal` only, no Traefik label of any kind. The pooler is reached from
+    # this project's own services and, once Run 5 publishes one, from a
+    # host-loopback port -- never across the edge network.
+    networks:
+      - internal
+
 networks:
   edge:
     name: ${EDGE_NETWORK_NAME:?required}

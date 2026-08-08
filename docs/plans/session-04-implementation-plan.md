@@ -254,7 +254,43 @@ The Prisma major is settled here (D86), and the PgBouncer candidate is either ke
 Outputs schema v4 on both branches, `access_profiles`, the `v3 → v4` migration in `output_migrations.py`, a committed `tests/fixtures/outputs-v3.json`, and the standing rule that migration never produces a *deployed* document. The port-allocation registry schema. The project manifest's pool fields, with validation: `pool_size >= 1`, `max_client_connections >= pool_size`, `max_prepared_statements > 0`, timeouts inside committed bounds, and `pooled_public: true` failing closed with a stable unsupported-profile error. Host manifest gains its `database_access` section and its schema version moves with old readers failing closed.
 
 ### Run 3 — Secrets and the pooler's grant surface
-*Offline, then one host materialization.*
+*Offline, then one host materialization.* **Offline half done; the host materialization is outstanding.**
+
+> **The pooler service landed here rather than in Run 4**, because the secret
+> contract cross-checks every consumer against a real Compose service and its
+> `user:`. A secret naming `pgbouncer` as its consumer cannot be declared before
+> the service exists. Run 4 keeps the port allocator, the publication, the
+> health check and `--render-runtime-only`.
+>
+> **Measured, against the entrypoint Compose actually renders** — not the one in
+> the source file, which is a different string:
+>
+> - A **plaintext** user list under `auth_type = scram-sha-256` authenticates the
+>   client *and* lets the pooler log in upstream; the cluster records
+>   `method=scram-sha-256` for the pooler's own connection. The SCRAM-verifier
+>   form also works and is unavailable here: it can only be read from the
+>   cluster, so the role would have to exist before the file that creates it.
+> - The rendered entrypoint produces a correct INI, a `0600` user list in tmpfs,
+>   an application login that succeeds, a wrong password that is refused, and an
+>   admin console answering `SHOW CONFIG` with `pool_mode=transaction`,
+>   `max_prepared_statements=100`. No credential in `docker inspect` or the log.
+> - **The pooler starts and listens when it cannot read its auth file.** It logs
+>   `could not open auth_file … Permission denied` as an ERROR and goes on
+>   accepting connections, refusing every one. Nothing about a listening port
+>   distinguishes that from a working pooler, which is why Run 4's health check
+>   must authenticate rather than connect — asserted now, so a `pg_isready`
+>   health check fails a test rather than passing review.
+>
+> **Two harness bugs worth recording**, both of which made a probe report
+> nothing while looking like a result. `docker compose config` **re-escapes**
+> `$` as `$$`, so the printed model is not the string the container receives —
+> extracting it verbatim gives `sh` a `$$` to expand into its own PID. And
+> `</dev/null` on a `docker run` that is being *fed* by a pipe silently emptied
+> both secrets, so the first run measured two zero-byte credentials. The
+> `</dev/null` habit is for commands that might read stdin, never for one whose
+> stdin is the input.
+
+
 
 `app_runtime_password` and `pgbouncer_admin_password` join `secrets.required.yaml` with their consumers, uids, gids and modes. Per ADR 0036 the provider bootstrap creates whatever the contract declares, so a project bootstrapped in an earlier session converges by acquiring them; an existing secret is adopted, never overwritten. The Compose grant surface follows automatically from ADR 0033 — nothing new renders it, which is the point of having built it.
 
