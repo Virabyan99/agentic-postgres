@@ -261,9 +261,7 @@ def test_render_reports_a_digest_per_migration() -> None:
     """
     import json
 
-    manifest = json.loads(
-        (REPO_ROOT / "migrations" / "manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((REPO_ROOT / "migrations" / "manifest.json").read_text(encoding="utf-8"))
     result = run(MIGRATE, *MANIFEST, "render")
     assert result.returncode == 0, result.stderr
     lines = [line for line in result.stdout.splitlines() if line.strip()]

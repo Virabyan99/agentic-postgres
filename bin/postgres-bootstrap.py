@@ -224,19 +224,14 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     # resolve to a base table it no longer has rights on, turning a permission
     # error into a confusing one. `pg_temp` is last on purpose -- first, it lets
     # a temporary object shadow a real one.
-    statements.append(
-        f"ALTER ROLE {q(roles['app_runtime'])} SET search_path = api, pg_temp;"
-    )
+    statements.append(f"ALTER ROLE {q(roles['app_runtime'])} SET search_path = api, pg_temp;")
     # Conservative, and bounded rather than absent. An application that holds a
     # server connection open in an idle transaction holds it out of the pool for
     # as long as it lasts, and in transaction pooling that is the whole pool's
     # problem rather than its own.
+    statements.append(f"ALTER ROLE {q(roles['app_runtime'])} SET statement_timeout = '30s';")
     statements.append(
-        f"ALTER ROLE {q(roles['app_runtime'])} SET statement_timeout = '30s';"
-    )
-    statements.append(
-        f"ALTER ROLE {q(roles['app_runtime'])} "
-        f"SET idle_in_transaction_session_timeout = '60s';"
+        f"ALTER ROLE {q(roles['app_runtime'])} SET idle_in_transaction_session_timeout = '60s';"
     )
 
     # Superuser work, and the reason this plane exists. pgvector is untrusted,

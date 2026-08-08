@@ -80,8 +80,7 @@ def test_the_committed_manifest_loads(manifest: dict[str, Any]) -> None:
 
     listed = {entry["template"] for entry in manifest["migrations"]}
     on_disk = {
-        f"templates/{path.name}"
-        for path in (REPO_ROOT / "migrations" / "templates").glob("*.sql")
+        f"templates/{path.name}" for path in (REPO_ROOT / "migrations" / "templates").glob("*.sql")
     }
     assert listed == on_disk, "the manifest and templates/ disagree about what exists"
 
