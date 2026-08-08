@@ -4,24 +4,31 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 2 of 12 complete.** The repository defines a contract *and*
+**Status: Session 3 of 12 complete.** The repository defines a contract *and*
 deploys. Two isolated projects run on one hardened host behind one shared
-Traefik edge on Let's Encrypt production certificates. It still starts no
-PostgreSQL and opens no database connection — that is Session 4. See
+Traefik edge on Let's Encrypt production certificates, each with **its own
+PostgreSQL 18 cluster** — forced row-level security, a locked pgvector, and a
+migration plane that cannot write its own audit record. There is still no
+client-facing database endpoint: the cluster publishes no host port and joins no
+edge network, and connecting to one from outside its project is Session 4. See
 [What is intentionally unavailable](#what-is-intentionally-unavailable).
 
-- [Session 2 operator guide](docs/session-02-operator-guide.md) — **start here to deploy**
+- [Session 3 operator guide](docs/session-03-operator-guide.md) — **start here to deploy a project with its database**
+- [The database](docs/database.md) · [Migrations](docs/migrations.md) · [Database security](docs/database-security.md)
+- [Session 2 operator guide](docs/session-02-operator-guide.md) — the host, the edge, and the secret store
 - [Host baseline](docs/host-baseline.md) · [Provider bootstrap](docs/provider-bootstrap.md) · [Project isolation](docs/project-isolation.md) · [Secret handling](docs/secret-handling.md)
 - [Product contract](docs/product-contract.md) — scope, requirement IDs, non-goals, change control
 - [Architecture decisions](docs/decisions/README.md)
 - [Handoff — environment and workflow](docs/handoff.md) — machine specifics, git, known traps
-- [Session 2 implementation plan](docs/plans/session-02-implementation-plan.md) — divergence table, decision log, build order
+- [Session 3 implementation plan](docs/plans/session-03-implementation-plan.md) — divergence table, decision log, build order
 
 > `bin/session-01-check.sh` exits 0 from a clean tree, **including on the
 > deployment host with both projects running**. `bin/session-02-check.sh` runs
 > in three environments — `offline`, `host`, `external` — because a port scan
 > run on the host traverses its own routing table and can report "closed" for a
-> port the world can reach.
+> port the world can reach. `bin/session-03-check.sh` runs in two: there is
+> nothing new to see from outside a cluster that publishes no port, and a mode
+> that measured nothing would still write evidence saying it had run.
 
 ---
 

@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import CURRENT_SESSION, REPO_ROOT
 from agentic_postgres import evidence_claims as claims
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
@@ -30,6 +30,17 @@ WRITER = REPO_ROOT / "bin" / "write-session-evidence.py"
 #: document. Quoted rather than paraphrased: this is the consumer, and a claim
 #: renamed without renaming it here is the defect ADR 0025 records.
 PLAN_JQ_EXPRESSION = '.tests.secret_leakage=="passed" and .tests.isolation=="passed"'
+
+#: The exact expression the Session 3 plan's Run 9 runs, for the same reason.
+SESSION_THREE_JQ_EXPRESSION = (
+    '.tests.row_level_security=="passed" and .tests.database_isolation=="passed"'
+)
+
+#: The session whose halves the merge fixtures below build. Pinned to 2 rather
+#: than to ``CURRENT_SESSION``: those tests exercise the two-environment merge,
+#: and Session 3 has one environment (D45). The single-half path is tested
+#: separately, at ``CURRENT_SESSION``.
+HALF_SESSION = 2
 
 _BODIES = {
     "passed": "",
@@ -85,9 +96,54 @@ def test_the_claims_the_plan_checks_by_name_exist() -> None:
         assert key in claims.CLAIMS
 
 
+def test_the_claims_the_session_three_plan_checks_by_name_exist() -> None:
+    for key in ("row_level_security", "database_isolation"):
+        assert f".tests.{key}" in SESSION_THREE_JQ_EXPRESSION
+        assert key in claims.CLAIMS
+
+
 def test_every_claim_names_registered_requirements() -> None:
     for claim in claims.CLAIMS:
         assert claims.claim_nodeids(claim), f"{claim} resolves to no test"
+
+
+# ---------------------------------------------------------------------------
+# Which session a claim belongs to (ADR 0039)
+# ---------------------------------------------------------------------------
+
+
+def test_a_claims_session_is_the_latest_of_its_requirements() -> None:
+    """Derived from the registry, so a claim cannot lie about when it started."""
+    assert claims.claim_session("isolation") == 2
+    assert claims.claim_session("secret_leakage") == 2
+    for claim in ("least_privilege", "row_level_security", "database_isolation"):
+        assert claims.claim_session(claim) == 3, claim
+
+
+def test_claims_are_cumulative_and_a_later_one_is_not_backdated() -> None:
+    """The property that makes one CLAIMS table safe for several gates.
+
+    Session 2's gate must not report a verdict on a guarantee Session 2 does not
+    offer -- and ``merge`` refuses to write a document that is silent about a
+    claim, so a Session 3 claim visible to Session 2 would have made the Session
+    2 merge unsatisfiable by any pair of runs.
+    """
+    two = set(claims.claims_through_session(2))
+    three = set(claims.claims_through_session(3))
+
+    assert two == {"isolation", "secret_leakage"}
+    assert two < three, "Session 3 must keep making Session 2's promises"
+    assert "database_isolation" in three - two
+
+
+def test_every_claim_belongs_to_a_session_the_release_has_reached() -> None:
+    """A claim owned by a future session would be unprovable and permanently
+    absent from the evidence of every session that can run."""
+    for claim in claims.CLAIMS:
+        session = claims.claim_session(claim)
+        assert session <= CURRENT_SESSION, (
+            f"{claim} belongs to session {session}, which this release has not reached"
+        )
 
 
 def test_every_claim_node_id_names_a_real_test() -> None:
@@ -116,7 +172,7 @@ def test_at_least_one_environment_carries_a_claim() -> None:
     network with no IPv6 transit, and a claim that cannot pass is an invented
     blocker rather than a measurement.
     """
-    measured = {mode: claims.claims_for_mode(mode) for mode in claims.MODE_MARKERS}
+    measured = {mode: claims.claims_for_mode(mode, CURRENT_SESSION) for mode in claims.MODE_MARKERS}
     assert any(measured.values()), f"no claim is measured anywhere: {measured}"
 
 
@@ -127,8 +183,8 @@ def test_a_mode_that_carries_a_claim_has_a_static_proof_to_run() -> None:
     one that has claims, because those claims would be permanently ``not_run``.
     """
     for mode in claims.MODE_MARKERS:
-        static = claims.static_nodeids_for_mode(mode)
-        if not claims.claims_for_mode(mode):
+        static = claims.static_nodeids_for_mode(mode, CURRENT_SESSION)
+        if not claims.claims_for_mode(mode, CURRENT_SESSION):
             assert not static, f"{mode} carries no claim but resolved proofs {static}"
             continue
         assert static, f"{mode} has no environment-free claim proof"
@@ -288,7 +344,7 @@ def run_writer(*args: str) -> subprocess.CompletedProcess[str]:
 
 def write_host_half(tmp_path: Path, output: Path, *, skip: str | None = None) -> Path:
     outcomes: dict[str, str] = {}
-    for claim in claims.claims_for_mode("host"):
+    for claim in claims.claims_for_mode("host", HALF_SESSION):
         outcomes |= all_passing(claim)
     if skip is not None:
         outcomes[skip] = "skipped"
@@ -321,7 +377,7 @@ EXTERNAL_TEST = "tests/external/test_session2_public_edge.py::test_the_scan_can_
 
 def write_external_half(tmp_path: Path, output: Path) -> Path:
     outcomes: dict[str, str] = {EXTERNAL_TEST: "passed"}
-    for claim in claims.claims_for_mode("external"):
+    for claim in claims.claims_for_mode("external", HALF_SESSION):
         outcomes |= all_passing(claim)
 
     artifact = write_junit(tmp_path / "external-tests.xml", outcomes)
@@ -356,7 +412,7 @@ def test_a_half_records_both_project_keys(tmp_path: Path) -> None:
 
 def test_a_half_records_only_the_claims_of_its_own_mode(tmp_path: Path) -> None:
     host = json.loads(write_host_half(tmp_path, tmp_path / "host.json").read_text(encoding="utf-8"))
-    assert set(host["tests"]) == set(claims.claims_for_mode("host"))
+    assert set(host["tests"]) == set(claims.claims_for_mode("host", HALF_SESSION))
 
 
 def test_a_half_carries_its_suite_counts(tmp_path: Path) -> None:
@@ -369,7 +425,7 @@ def test_a_half_refuses_when_a_claim_is_not_proved(tmp_path: Path) -> None:
     skipped = claims.claim_nodeids("isolation")[0]
     output = tmp_path / "host.json"
     outcomes: dict[str, str] = {}
-    for claim in claims.claims_for_mode("host"):
+    for claim in claims.claims_for_mode("host", HALF_SESSION):
         outcomes |= all_passing(claim)
     outcomes[skipped] = "skipped"
 
@@ -431,7 +487,7 @@ def test_the_merged_document_satisfies_the_plans_check(tmp_path: Path) -> None:
     assert document["status"] == "passed"
     for claim in ("secret_leakage", "isolation"):
         assert document["tests"][claim] == "passed", claim
-    assert set(document["tests"]) == set(claims.CLAIMS)
+    assert set(document["tests"]) == set(claims.claims_through_session(HALF_SESSION))
     assert set(document["suites"]) == {"host", "external"}
 
 
@@ -460,9 +516,77 @@ def test_a_claim_neither_half_recorded_stops_the_merge(tmp_path: Path) -> None:
         str(tmp_path / "session-02.json"),
     )
     assert result.returncode == 5
-    for claim in claims.CLAIMS:
+    for claim in claims.claims_through_session(HALF_SESSION):
         assert claim in result.stderr
     assert not (tmp_path / "session-02.json").exists()
+
+
+def test_a_session_with_one_environment_merges_a_single_half(tmp_path: Path) -> None:
+    """Session 3 has no external gate, so its evidence has one half (D45, D78).
+
+    The merge still runs: it is what computes ``status`` and what refuses a
+    document that is silent about a claim. Skipping it and renaming the half
+    would produce a session document with no verdict in it.
+    """
+    outcomes: dict[str, str] = {}
+    for claim in claims.claims_for_mode("host", CURRENT_SESSION):
+        outcomes |= all_passing(claim)
+    artifact = write_junit(tmp_path / "host-tests.xml", outcomes)
+
+    half = tmp_path / "session-03-host.json"
+    written = run_writer(
+        "--session", str(CURRENT_SESSION),
+        "--mode", "host",
+        "--project-a-outputs", str(deployed(tmp_path, "alpha-dev")),
+        "--project-b-outputs", str(deployed(tmp_path, "beta-dev")),
+        "--junit", str(artifact),
+        "--output", str(half),
+    )  # fmt: skip
+    assert written.returncode == 0, written.stdout + written.stderr
+
+    merged = tmp_path / "session-03.json"
+    result = run_writer(
+        "--session", str(CURRENT_SESSION),
+        "--host-input", str(half),
+        "--output", str(merged),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    document = json.loads(merged.read_text(encoding="utf-8"))
+    assert document["status"] == "passed"
+    assert document["session"] == CURRENT_SESSION
+    assert set(document["tests"]) == set(claims.claims_through_session(CURRENT_SESSION))
+    for claim in ("row_level_security", "database_isolation"):
+        assert document["tests"][claim] == "passed", claim
+
+
+def test_a_single_half_is_refused_for_a_session_that_has_an_external_claim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard that keeps the convenience from becoming a hole.
+
+    Without it, omitting ``--external-input`` for a session whose claims are
+    partly measured from outside would produce a document whose ``status`` was
+    computed from half the guarantees -- and it would say ``passed``.
+    """
+    del monkeypatch
+    host = write_host_half(tmp_path, tmp_path / "host.json")
+    result = run_writer(
+        "--session", str(HALF_SESSION),
+        "--host-input", str(host),
+        "--output", str(tmp_path / "session-02.json"),
+    )  # fmt: skip
+
+    if claims.claims_for_mode("external", HALF_SESSION):
+        assert result.returncode == 2
+        assert "measured from outside" in result.stderr
+        assert not (tmp_path / "session-02.json").exists()
+    else:
+        # Session 2 carries no external claim either, for the SEC-NET-001 reason
+        # recorded beside CLAIMS, so the omission is legitimate there too. The
+        # branch is kept so that reinstating that claim turns this test back into
+        # the refusal it is named for rather than silently passing.
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_halves_describing_different_deployments_are_refused(tmp_path: Path) -> None:

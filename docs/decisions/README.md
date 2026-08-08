@@ -102,3 +102,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0036](0036-the-provider-bootstrap-seeds-what-the-contract-declares.md) | The provider bootstrap seeds what the contract declares | 3 | Accepted |
 | [0037](0037-an-installed-launcher-resolves-a-release-and-nothing-else.md) | An installed launcher resolves a release and nothing else | 3 | Accepted |
 | [0038](0038-the-deployed-document-records-the-generation-it-verified.md) | The deployed document records the generation it verified, not the one that is current | 3 | Accepted |
+| [0039](0039-a-claim-belongs-to-the-session-that-introduced-it.md) | A claim belongs to the session that introduced it | 3 | Accepted |

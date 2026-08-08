@@ -185,13 +185,18 @@ run_suite() {
 # which would drag the whole contract suite into a deployment run. The node IDs
 # come from the acceptance registry, so a requirement that gains a test gains it
 # here without anyone editing this script.
+#
+# The session is passed because `CLAIMS` is one dictionary and the gates are
+# not: this gate is answerable for Session 2's claims, and reporting a verdict
+# on a Session 3 guarantee would be this gate claiming something Session 2 does
+# not offer (ADR 0039).
 claim_static_nodeids() {
   PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "$1" <<'PYTHON'
 import sys
 
 from agentic_postgres.evidence_claims import static_nodeids_for_mode
 
-for nodeid in static_nodeids_for_mode(sys.argv[1]):
+for nodeid in static_nodeids_for_mode(sys.argv[1], 2):
     print(nodeid)
 PYTHON
 }

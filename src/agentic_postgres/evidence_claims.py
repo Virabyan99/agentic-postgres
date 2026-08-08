@@ -49,8 +49,7 @@ MODE_MARKERS = {"host": "live_host", "external": "external"}
 
 #: Claim name -> the acceptance requirements whose tests prove it.
 #:
-#: The two the Session 2 plan's Run 8 checks by name, and no more. A
-#: ``public_boundary`` claim over ``SEC-NET-001`` was written and removed: that
+#: A ``public_boundary`` claim over ``SEC-NET-001`` was written and removed: that
 #: requirement's proofs include an IPv6 scan, the deployment host holds a global
 #: IPv6 address, and no network available to run the external gate from has IPv6
 #: transit. The claim could only ever come out ``failed`` — not because the
@@ -59,9 +58,27 @@ MODE_MARKERS = {"host": "live_host", "external": "external"}
 #: recorded as a divergence and in ``docs/host-baseline.md`` instead, which is
 #: what an unmeasured surface deserves. Both modes stay implemented, so the day
 #: a scan can be run from an IPv6 network the claim is three lines.
+#:
+#: Session 3 adds four. Not every Session 3 requirement is a claim, and the
+#: reason is structural rather than editorial: a claim needs at least one proof
+#: that runs against a deployment (see ``claim_mode``), and ``DBX-MIG-002`` and
+#: ``DBX-MIG-003`` are about render determinism and preflight refusal — both
+#: entirely properties of a checkout. They are proved, and they appear in the
+#: acceptance matrix; they are not guarantees about a running system, so this
+#: session's evidence does not name them as ones.
 CLAIMS: dict[str, tuple[str, ...]] = {
     "isolation": ("DEP-ISO-002",),
     "secret_leakage": ("SEC-SECRET-001", "SEC-SECRET-002"),
+    "least_privilege": ("SEC-DB-001", "SEC-DB-002", "DBX-MIG-001"),
+    "row_level_security": (
+        "SEC-RLS-001",
+        "SEC-VIEW-001",
+        "SEC-FUNC-001",
+        "SEC-DEFAULT-001",
+        "SEC-OWNER-001",
+    ),
+    "database_isolation": ("DEP-ISO-003", "DBX-PG-003"),
+    "boot_convergence": ("DEP-BOOT-001",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().
@@ -78,21 +95,60 @@ class ClaimError(RuntimeError):
 
 
 @cache
-def _registry() -> dict[str, tuple[str, ...]]:
+def _registry() -> dict[str, dict[str, object]]:
     entries = yaml.safe_load(REGISTRY_PATH.read_text(encoding="utf-8"))
     if not entries:
         raise ClaimError(f"{REGISTRY_PATH} is empty")
-    return {entry["id"]: tuple(entry.get("test_nodeids") or ()) for entry in entries}
+    return {
+        entry["id"]: {
+            "nodeids": tuple(entry.get("test_nodeids") or ()),
+            "target_session": entry["target_session"],
+        }
+        for entry in entries
+    }
+
+
+def _requirement(requirement: str) -> dict[str, object]:
+    try:
+        return _registry()[requirement]
+    except KeyError:
+        raise ClaimError(f"{requirement} is not in the acceptance registry") from None
 
 
 def requirement_nodeids(requirement: str) -> tuple[str, ...]:
-    try:
-        nodeids = _registry()[requirement]
-    except KeyError:
-        raise ClaimError(f"{requirement} is not in the acceptance registry") from None
+    nodeids = _requirement(requirement)["nodeids"]
     if not nodeids:
         raise ClaimError(f"{requirement} lists no test node IDs")
-    return nodeids
+    return nodeids  # type: ignore[return-value]
+
+
+def claim_session(claim: str) -> int:
+    """The session a claim belongs to: the latest of its requirements'.
+
+    Derived from the registry rather than declared beside the claim, for the
+    same reason ``claim_mode`` is derived from markers: a claim that gains a
+    requirement from a later session becomes that session's claim without
+    anyone remembering to say so.
+
+    It exists because ``CLAIMS`` is one dictionary and the gates are not.
+    Session 2's evidence must not report a verdict on a guarantee Session 2 did
+    not make -- and, worse, ``merge`` refuses to write a document that is silent
+    about a claim, so a Session 3 claim in the flat set would have made the
+    Session 2 merge unsatisfiable by any pair of runs (ADR 0039).
+    """
+    if claim not in CLAIMS:
+        raise ClaimError(f"unknown claim: {claim}")
+    return max(int(_requirement(name)["target_session"]) for name in CLAIMS[claim])
+
+
+def claims_through_session(session: int) -> tuple[str, ...]:
+    """Every claim a gate for ``session`` is answerable for, cumulatively.
+
+    Cumulative because the product is: Session 3 does not stop having to keep
+    secrets out of its images. The Session 3 gate therefore proves Session 2's
+    claims as well, and its evidence records them.
+    """
+    return tuple(claim for claim in sorted(CLAIMS) if claim_session(claim) <= session)
 
 
 def claim_nodeids(claim: str) -> tuple[str, ...]:
@@ -198,13 +254,19 @@ def claim_mode(claim: str) -> str:
     return modes[0]
 
 
-def claims_for_mode(mode: str) -> tuple[str, ...]:
+def claims_for_mode(mode: str, session: int) -> tuple[str, ...]:
+    """The claims of ``mode`` that a gate for ``session`` is answerable for.
+
+    ``session`` is required rather than defaulted. A default would be a fourth
+    place that knows which session is current, and the one thing every caller
+    here does know is which session's gate it is.
+    """
     if mode not in MODE_MARKERS:
         raise ClaimError(f"unknown mode: {mode}. Expected one of {sorted(MODE_MARKERS)}.")
-    return tuple(claim for claim in sorted(CLAIMS) if claim_mode(claim) == mode)
+    return tuple(claim for claim in claims_through_session(session) if claim_mode(claim) == mode)
 
 
-def static_nodeids_for_mode(mode: str) -> tuple[str, ...]:
+def static_nodeids_for_mode(mode: str, session: int) -> tuple[str, ...]:
     """The claim proofs of ``mode`` that carry no environment marker.
 
     They run anywhere, so the mode's own ``-m live_host`` (or ``-m external``)
@@ -217,7 +279,7 @@ def static_nodeids_for_mode(mode: str) -> tuple[str, ...]:
     collects the entire suite.
     """
     nodeids: dict[str, None] = {}
-    for claim in claims_for_mode(mode):
+    for claim in claims_for_mode(mode, session):
         for nodeid in claim_nodeids(claim):
             if not environment_markers(nodeid):
                 nodeids[nodeid] = None
@@ -318,7 +380,9 @@ def claim_result(claim: str, outcomes: dict[tuple[str, str], str]) -> dict[str, 
     return result
 
 
-def results_for_mode(mode: str, junit_paths: list[Path]) -> dict[str, dict[str, object]]:
+def results_for_mode(
+    mode: str, session: int, junit_paths: list[Path]
+) -> dict[str, dict[str, object]]:
     """Every claim this mode is responsible for, judged against its artifacts."""
     outcomes = junit_outcomes(junit_paths)
-    return {claim: claim_result(claim, outcomes) for claim in claims_for_mode(mode)}
+    return {claim: claim_result(claim, outcomes) for claim in claims_for_mode(mode, session)}

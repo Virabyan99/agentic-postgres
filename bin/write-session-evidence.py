@@ -112,7 +112,7 @@ def write_half(
         keys.append(read_json(project_b_outputs).get("project", {}).get("key"))
 
     try:
-        claims = evidence_claims.results_for_mode(mode, junit)
+        claims = evidence_claims.results_for_mode(mode, session, junit)
     except evidence_claims.ClaimError as exc:
         print(f"write-session-evidence: {exc}", file=sys.stderr)
         print("write-session-evidence: no evidence file was written.", file=sys.stderr)
@@ -160,10 +160,33 @@ def write_half(
     return 0
 
 
-def merge(session: int, host_input: Path, external_input: Path, output: Path) -> int:
-    """Combine the host and external halves, refusing to paper over a mismatch."""
+def merge(session: int, host_input: Path, external_input: Path | None, output: Path) -> int:
+    """Combine the halves, refusing to paper over a mismatch.
+
+    ``external_input`` is optional, and optional under one condition only: no
+    claim this session is answerable for is measured in external mode. Session 3
+    has no external gate — ``SEC-NET-001``'s scan is Session 2's, and there is
+    nothing new to see from outside a cluster that publishes no port (D45) — so
+    its evidence has one half and merging is that half plus a verdict.
+
+    The condition is checked rather than assumed. Omitting the argument for a
+    session that *does* carry an external claim would otherwise produce a
+    document whose `status` was computed from half the guarantees, which is the
+    failure this function's unrecorded-claims check exists to prevent.
+    """
     host = read_json(host_input)
-    external = read_json(external_input)
+    if external_input is None:
+        expected = evidence_claims.claims_for_mode("external", session)
+        if expected:
+            print(
+                "write-session-evidence: --host-input alone is not enough for session "
+                f"{session}: {sorted(expected)} are measured from outside the host.",
+                file=sys.stderr,
+            )
+            return 2
+        external: dict[str, object] = {}
+    else:
+        external = read_json(external_input)
 
     disagreements = [
         f"{field}: host={host.get(field)!r} external={external.get(field)!r}"
@@ -192,7 +215,7 @@ def merge(session: int, host_input: Path, external_input: Path, output: Path) ->
     # A claim neither half recorded is the failure mode this whole mechanism
     # exists to make loud: the merged document would otherwise be silent about
     # it, and silence reads as nothing to report.
-    unrecorded = sorted(set(evidence_claims.CLAIMS) - set(merged["tests"]))
+    unrecorded = sorted(set(evidence_claims.claims_through_session(session)) - set(merged["tests"]))
     if unrecorded:
         print(
             f"write-session-evidence: neither half recorded these claims: {unrecorded}. "
@@ -252,8 +275,13 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--session must be between 1 and 12")
 
     if args.host_input or args.external_input:
-        if not (args.host_input and args.external_input and args.output):
-            parser.error("merging requires --host-input, --external-input and --output")
+        # --external-input is optional; --host-input is not. Every session that
+        # writes halves has a host half, because a claim with no live proof is
+        # refused at resolution time. A session with no external claim (Session
+        # 3) merges one half into a verdict; `merge` refuses the omission for a
+        # session that does carry one.
+        if not (args.host_input and args.output):
+            parser.error("merging requires --host-input and --output")
         return merge(args.session, args.host_input, args.external_input, args.output)
 
     if args.mode:

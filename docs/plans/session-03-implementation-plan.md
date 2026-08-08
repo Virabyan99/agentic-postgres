@@ -69,6 +69,8 @@ of those citations ambiguous.
 | **D74** | *(Run 8, as first written)* A password login attempted over TCP inside the cluster's own container proves whether a credential authenticates. | **It proves nothing.** The image's `pg_hba.conf` carries `host all all 127.0.0.1/32 trust` above its `host all all all scram-sha-256` line, so a loopback connection is trusted exactly as the Unix socket is. Measured: a login with a deliberately wrong password returned `1` and exit `0`. | **The login is attempted from a separate container on the project's internal network**, using the same digest-pinned image, which is where dbmate's connection arrives from and the only path that reaches the line that checks a password. | The negative test failed rather than passing, because it asserts a refusal and got a success — but the *control* is what makes that reliable, and the control is why this was found on first execution instead of being read as a green isolation proof. A boundary test that runs on the wrong side of the boundary is the defect pattern with a network address in place of a value. | no |
 | **D75** | *(`test_removing_the_second_project_leaves_the_first_routed`, since Session 2)* When `systemctl start` returns, the project's health route answers. | It does not, quite. `systemctl start` returns when the containers are healthy and `edge-network.sh attach` has run; Traefik then has to *discover* the backend on a network that `compose down` removed and `compose up` recreated, and the router appears a moment later. The test asked once and got `404`. Session 2 never lost the race: a Session 2 project's stack came back in about a second, and the window was never open long enough to reach. Verified transient — both routes answered `200` with the right project key when asked again by hand. | **The assertion made after a restart polls, bounded at 90 seconds; the assertion made while the other project is stopped stays immediate.** That split is the point: A's route answering is the claim under test, and a retry there would let a route that came back *because B came back* pass. The same immediate assertion in Run 8's own unit-restart test passed on its first run by luck and is polled now too. | Not a weakening: what is asserted is unchanged and still fails, with the last error, if the project does not come back. What changed is an assumption that a discovered backend appears synchronously, which was never true and was only ever hidden by how little a Session 2 project had to start. | no |
 | **D76** | *(`test_the_active_generation_pointer_names_a_real_generation`, since Session 2)* The deployed document's `secrets.generation_id` equals the generation `active-secret-generation.json` points at. | They agree at the end of a deploy and diverge at the next start. Every `up` materializes a **new** generation and repoints; the deployed document is written once and is not rewritten. The test passed for two sessions because nothing on this host had ever restarted a project between a deploy and a gate — Run 8 restarts them deliberately, and the reboot restarted them without asking. The gate failed with two correct values that were never supposed to be the same one. The test's own name says what it is for, and three of its four assertions measure that; the fourth measured something else. | **ADR 0038.** The document records the generation the deploy *verified*; the pointer records what is *current*; nothing asserts they are equal. The equality is replaced by a strictly stronger test that compares the **running containers' mounts** against the pointer. | Rewriting the document at boot was the alternative, and it would mean systemd mutating root-owned `/etc` on a path with no operator present, to stop a historical record from being historical. Two files agreeing said nothing about any running process; a container still holding a superseded generation is the state a start that materialized but did not recreate leaves behind, and that is now what fails. | **yes** |
+| **D77** | *(D49)* `evidence_claims.py` gains three claims and the writer keeps working. | `CLAIMS` is one dictionary and there are now two gates. Left flat, `bin/session-02-check.sh` resolves Session 3's claims, cannot prove them, and reports them `not_run` — a completed session's gate failing over a guarantee it does not make. Worse: `merge` refuses to write a document that is *silent* about a claim, so Session 3's entries would make the **Session 2 merge unsatisfiable by any pair of runs**. A guard built to catch an unmeasured claim would have become a permanent blocker on a session that is already deployed. | **ADR 0039.** A claim's session is the latest `target_session` of the requirements it names, read from the registry rather than declared. `claims_for_mode`, `static_nodeids_for_mode` and `results_for_mode` take a required `session`. Claims are cumulative, so the Session 3 gate proves Session 2's two as well. Four claims, not three: `boot_convergence` is added because `DEP-BOOT-001` did not exist when D49 was written. | The plan named three claims before Run 8 added a fourth requirement, and leaving `DEP-BOOT-001` unnamed would put Session 3's most consequential live property — that a rebooted project comes back with its data — outside the evidence file. `DBX-MIG-002` and `DBX-MIG-003` are deliberately not claims: both are properties of a checkout, and a claim with no live proof is refused at resolution time. | **yes** |
+| **D78** | *(§5 Run 9)* `python bin/write-session-evidence.py --session 3 …` produces `evidence/session-03.json`. | There is nothing to merge. `write_half` writes one environment's half and carries no `status`; `merge` computes `status` and refuses a document silent about a claim, and it required **both** `--host-input` and `--external-input`. Session 3 has one environment (D45), so neither path produced a session document. | **`--external-input` becomes optional, and only when no claim of that session is measured in external mode.** The condition is checked, not assumed: omitting it for a session that *does* carry an external claim exits 2 naming the claims. Merging one half is then the half plus a verdict. | Renaming the half to `session-03.json` was the alternative and it is worse in a specific way: the half has no `status` field, so the session document would carry no verdict, and the unrecorded-claims check — the thing that stops a half nobody ran from passing unnoticed — would never run at all. | no |
 | **D54** | *(§5 of this plan, as written)* Run 1 moves `CURRENT_SESSION` to `3` while the five existing Session 3 placeholders stay `future` until Run 6. | Those two cannot both hold. `test_no_requirement_at_or_before_the_gate_session_remains_future` fails for exactly `SEC-DEFAULT-001`, `SEC-FUNC-001`, `SEC-OWNER-001`, `SEC-RLS-001`, `SEC-VIEW-001` the moment the constant reads `3`, and the nine new IDs join them. Verified by running the gate's registry suite under `APG_ACCEPTANCE_SESSION=3`. | **`CURRENT_SESSION` moves in Run 6, not Run 1**, in the same commit that deletes all fourteen placeholders and replaces them with real tests. Run 1 ships the ADRs, the nine new IDs as placeholders, and the two marker declarations. | The alternatives were a red gate through Runs 1–5, which suspends the only signal that would catch a Run 2 regression, or an exemption inside the overdue check, which weakens a currently-passing P0 contract test to make an unrelated change convenient. The constant and the implementations it vouches for move together or the constant means nothing. | no |
 
 ---
@@ -398,20 +400,49 @@ test, and a guard over an empty set is a check whose first red would be its firs
 execution.
 
 ### Run 9 — Gate, evidence, documentation
-*Both environments.*
+*Both environments — and there are only two of them.*
 
 ```
+bin/session-03-check.sh --mode offline
 sudo bin/session-03-check.sh --mode host --host host.yaml \
   --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
-  --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json
-python bin/write-session-evidence.py --session 3 …
+  --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
+  --sentinel-file "$(derive from active-secret-generation.json)"
+python bin/write-session-evidence.py --session 3 \
+  --host-input evidence/session-03-host.json --output evidence/session-03.json
 jq -e '.tests.row_level_security=="passed" and .tests.database_isolation=="passed"' evidence/session-03.json
 python bin/render-acceptance-matrix.py --check
 git status --porcelain
 bin/session-01-check.sh
 ```
 
-Documentation: `docs/database.md`, `docs/migrations.md`, `docs/database-security.md`, `docs/session-03-operator-guide.md` — flat in `docs/`, added to `REQUIRED_PATHS`, and linked from `README.md` and `docs/handoff.md`. If a systemd unit's `Documentation=` gains one of them, `test_every_documentation_url_names_a_file_that_exists` will hold the reference to a file that exists.
+`--project-b-outputs` is **required** in host mode, unlike Session 2's gate:
+`database_isolation` is a claim about two clusters, and with one project every
+proof of it skips, the claim resolves to `not_run`, and the run fails anyway —
+after doing all the work.
+
+**The claims are session-owned (D77, ADR 0039).** `CLAIMS` is one dictionary and
+there are now two gates; left flat, Session 3's entries would have made the
+*Session 2* merge unsatisfiable by any pair of runs, because `merge` refuses a
+document that is silent about a claim. A claim's session is now the latest
+`target_session` of the requirements it names, and claims are cumulative — the
+Session 3 gate proves Session 2's two as well. Four new claims, not three:
+`boot_convergence` exists because `DEP-BOOT-001` did not, when D49 was written.
+
+**One environment means one half (D78).** `merge` gained an optional
+`--external-input`, permitted only when no claim of that session is measured
+externally, so a session document still gets its `status` and still refuses to
+be silent about a claim.
+
+Documentation: `docs/database.md`, `docs/migrations.md`,
+`docs/database-security.md`, `docs/session-03-operator-guide.md` — flat in
+`docs/`, added to `REQUIRED_PATHS`, and linked from `README.md` and
+`docs/handoff.md`. `bin/session-03-check.sh` joins `SHELL_COMMANDS`, which is an
+inventory rather than an assertion: the addition subjects the new gate to the
+preamble, `--help`, CRLF and secret-argument checks every other command already
+passes. Systemd `Documentation=` lines are untouched — changing one means
+reinstalling units, and the four documents are reachable from the two the units
+already name.
 
 ---
 

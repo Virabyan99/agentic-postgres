@@ -109,13 +109,30 @@ edit.
 Everything else about operating it is in the
 [Session 2 operator guide](session-02-operator-guide.md).
 
-## Starting Session 3
+## The database
+
+Session 3 gave every project its own PostgreSQL 18 cluster. Four documents, and
+the operator guide is the entry point:
+
+- [Session 3 operator guide](session-03-operator-guide.md) — deploying a project
+  with its database, the gate, the evidence, and the traps
+- [The database](database.md) — the image, the volume, the memory budget, the
+  identity a volume carries
+- [Migrations](migrations.md) — templates, the rendered payload, dbmate, and why
+  the ledger is written by the superuser
+- [Database security](database-security.md) — thirteen roles, two authorities,
+  forced RLS, and one statement that reports success and stores nothing
+
+`bin/session-03-check.sh` is the gate, in two modes. There is no external mode.
+
+## Starting Session 4
 
 Read, in this order:
 
-1. [The Session 2 divergence table and decision log](plans/session-02-implementation-plan.md)
+1. [The Session 3 divergence table and decision log](plans/session-03-implementation-plan.md)
    — every ambiguity that was closed, and why. **New ambiguities go there or
-   into an ADR; they do not get resolved inline.**
+   into an ADR; they do not get resolved inline.** The Session 2 table is
+   [here](plans/session-02-implementation-plan.md) and is still cited by number.
 2. [The product contract](product-contract.md) and the
    [ADRs](decisions/README.md).
 3. [The acceptance matrix](acceptance-matrix.md).
@@ -136,3 +153,12 @@ filesystem fact standing in for a logic test, and an evidence key naming the
 suite that ran rather than the thing it proved. Each passed for exactly as long
 as its wrong answer happened to coincide with the right one. When a test is
 green, ask what would have to break for it to go red.
+
+Session 3 produced it again, in a form worth naming separately: **a proof that
+had never been executed against the thing it describes.** A `--check` that could
+not fail. A grant surface nothing rendered. Three tests asserting psql's printed
+booleans. Two tests reading a key that exists only on the other branch of the
+output schema. A password check run on the side of the boundary the image
+trusts. And a launcher fix that shipped inside two installed releases and was
+never once run, because the only thing that installed launchers was
+provisioning. Green, all of it, until something executed it.
