@@ -70,7 +70,7 @@ from source; it is reached only by the promotion in step 6.
 ```bash
 bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml --plan
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
-     --apply --operator-credential-file /root/.config/agentic-postgres/infisical.json
+     --apply --operator-credential-file /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
 ```
 
 Run `--plan` again afterwards. It must report no changes.

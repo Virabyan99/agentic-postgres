@@ -31,7 +31,7 @@ bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml --plan
 
 # Creates what is missing and records the identifiers.
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
-     --apply --operator-credential-file /root/.config/agentic-postgres/infisical.json
+     --apply --operator-credential-file /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
 
 # Removes, by ID, exactly what the state file says we own.
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
@@ -57,11 +57,15 @@ values — which is why it is passed by path, used once, and does not have to st
 on the host at all.
 
 **Format: two non-empty lines.** Universal Auth client ID first, client secret
-second. Nothing else — no JSON, despite the `.json` in the example path above,
-which is a filename this repository never parses. A file with any other number
-of non-empty lines is refused by name and line count, and its contents are never
-echoed (that refusal exists because an earlier version passed the file whole as
-a bearer token, and `http.client` printed the rejected value).
+second. Nothing else — not JSON, whatever the filename suggests. A file with any
+other number of non-empty lines is refused by name and line count, and its
+contents are never echoed (that refusal exists because an earlier version passed
+the file whole as a bearer token, and `http.client` printed the rejected value).
+
+The path above is the one this host actually uses. Until Run 7 these examples
+named `/root/.config/agentic-postgres/infisical.json`, which never existed
+anywhere: an operator following the document would have created an empty file at
+a path nothing had ever written, and concluded the credential was lost.
 
 ```
 7f3c1e2a-0000-0000-0000-000000000000
@@ -71,11 +75,19 @@ st.abcd1234...
 Write it root-owned and `0600`, and remove it when the bootstrap is done:
 
 ```bash
-sudo install -m 0600 -o root -g root /dev/null \
-     /root/.config/agentic-postgres/infisical.json
-sudo nano /root/.config/agentic-postgres/infisical.json   # two lines, no quotes
+CRED=/root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
+sudo install -m 0600 -o root -g root /dev/null "$CRED"
+sudo nano "$CRED"          # two lines, no quotes
 # ... run --apply ...
-sudo shred -u /root/.config/agentic-postgres/infisical.json
+sudo shred -u "$CRED"
+```
+
+**`nano` leaves a copy.** Interrupted, it writes the buffer to `<file>.save`
+beside the original, and that copy holds the credential at whatever mode nano
+chose. Check for one and shred it too:
+
+```bash
+sudo find /root/.config/agentic-postgres -name '*.save' -print
 ```
 
 Removing it is the recommendation rather than an oversight, which is why a later
