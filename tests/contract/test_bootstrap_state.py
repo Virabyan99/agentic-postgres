@@ -70,6 +70,53 @@ def test_a_well_formed_state_document_validates() -> None:
     bootstrap_state.validate_state(make_state())
 
 
+def test_unreadable_state_is_a_prerequisite_failure_not_an_absent_project() -> None:
+    """D67: `None` from `read_state` has to mean absent, and only absent.
+
+    The state file and its directory are root-owned `0600`/`0700`, so an
+    unprivileged reader gets `PermissionError` out of `pathlib.is_file()` — a
+    traceback from a command whose `--help` said it needs no root. It looked
+    fine in a checkout because there is no `/etc/agentic-postgres` here at all,
+    so the path really is absent and the error never fires. It fires on a host.
+
+    Folding unreadable into absent would be worse than the traceback: `--plan`
+    would propose creating an Infisical project, a machine identity and a client
+    secret for a project that already has all three.
+    """
+    import importlib.util
+    import os
+
+    if os.geteuid() == 0:
+        pytest.skip(
+            "root can traverse a directory with no execute bit; this proves nothing as root"
+        )
+
+    specification = importlib.util.spec_from_file_location(
+        "bootstrap_providers", REPO_ROOT / "bin" / "bootstrap-providers.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+
+    # A real unreadable path, not a mock: the failure is `pathlib.is_file()`
+    # raising, and only a directory the caller cannot traverse produces it.
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as temporary:
+        closed = Path(temporary) / "projects"
+        closed.mkdir()
+        (closed / "bootstrap-state.json").write_text("{}", encoding="utf-8")
+        closed.chmod(0o000)
+        try:
+            module.state_path = lambda key: closed / "bootstrap-state.json"
+            with pytest.raises(SystemExit) as raised:
+                module.read_state("alpha-dev")
+        finally:
+            closed.chmod(0o700)
+
+    assert raised.value.code == 3, "unreadable state is reported as something other than exit 3"
+
+
 def test_every_required_secret_the_contract_declares_can_be_recorded_as_managed() -> None:
     """The enum is closed on purpose, and that is what let it drift.
 

@@ -47,7 +47,9 @@ Usage: bin/bootstrap-providers.sh --host FILE --project FILE --plan
             --confirm PROJECT_KEY
 
   --plan     Report what would be created or changed. Contacts the provider
-             read-only and writes nothing. Needs no root.
+             read-only and writes nothing. Needs no root in a checkout; on a
+             host it needs sudo to read this project's recorded state, which
+             is root-owned, and says so rather than treating it as absent.
   --apply    Create what is missing and record the resulting identifiers.
   --destroy  Remove the resources this project's state file says we own, by ID.
 

@@ -21,8 +21,11 @@ created exactly one secret, and created it by name:
 
 ```python
 control.create_secret(
-    project_id, infisical["environment_slug"], infisical["runtime_folder"],
-    "APG_SESSION2_SENTINEL", secrets.token_hex(32),
+    project_id,
+    infisical["environment_slug"],
+    infisical["runtime_folder"],
+    "APG_SESSION2_SENTINEL",
+    secrets.token_hex(32),
 )
 ```
 

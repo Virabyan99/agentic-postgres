@@ -369,13 +369,41 @@ class ControlPlane:
 
 
 def read_state(key: str) -> dict[str, Any] | None:
+    """The recorded state, or None if this project has none.
+
+    "None" has to mean *absent*, and only absent. The state file and the
+    directory holding it are root-owned and `0600`/`0700`, so an unprivileged
+    reader gets `PermissionError` from `is_file()` — an unhandled traceback out
+    of `pathlib`, from a command whose own `--help` says it needs no root
+    (D67). It looked fine here because this checkout has no
+    `/etc/agentic-postgres` at all, so the path is genuinely absent and the
+    error never fires.
+
+    Unreadable is reported as a prerequisite, never folded into absent. Folding
+    it in would make `--plan` propose creating an Infisical project, a machine
+    identity and a client secret for a project that already has all three.
+    """
     path = state_path(key)
-    if not path.is_file():
+    try:
+        exists = path.is_file()
+    except PermissionError:
+        fail(
+            EXIT_PREREQUISITE,
+            f"{path} exists but cannot be read by this user. Provider state is root-owned; "
+            "re-run with sudo. It is not being treated as absent, because that would "
+            "propose creating a project, an identity and a credential that already exist.",
+        )
+        raise  # unreachable
+
+    if not exists:
         return None
     if path.is_symlink():
         fail(EXIT_INVALID, f"{path} is a symlink, which is not accepted for state")
     try:
         return validate_state(json.loads(path.read_text(encoding="utf-8")))
+    except PermissionError:
+        fail(EXIT_PREREQUISITE, f"{path} cannot be read by this user; re-run with sudo.")
+        raise  # unreachable
     except (json.JSONDecodeError, BootstrapStateError) as exc:
         fail(EXIT_PROVIDER, f"{path} is unusable: {exc}. Refusing to guess what we own.")
         raise  # unreachable
