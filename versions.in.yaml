@@ -40,6 +40,21 @@ images:
   # boundary -- the proxy process itself still has the socket mounted -- and the
   # threat model says so rather than implying otherwise.
   DOCKER_SOCKET_PROXY_IMAGE: docker.io/tecnativa/docker-socket-proxy:0.3.0
+  # Session 4 kept this candidate rather than bumping it (D85). The runbook
+  # called 1.25.2 "the minimum accepted security baseline" on the strength of a
+  # changelog; ADR 0019 is the standing lesson about version claims read from
+  # documentation. What was measured against this digest instead:
+  #
+  #   PgBouncer 1.24.1, psql and pg_isready present (17.5), uid/gid 70, and a
+  #   protocol-level named prepared statement reusable after an *observed*
+  #   backend change with max_prepared_statements = 100 -- and unusable across
+  #   the same change with 0, which is what proves the first result is the
+  #   pooler working rather than the client landing on the same backend.
+  #
+  # Every behaviour Session 4 needs is present. Bump this when a measurement
+  # asks for it, and re-measure the same three things when you do. The values
+  # live in tests/contract/test_image_contracts.py, which is executable; no
+  # PGBOUNCER_MINIMUM_VERSION floor is written here (D98).
   PGBOUNCER_IMAGE: docker.io/edoburu/pgbouncer:v1.24.1-p1
   POSTGREST_IMAGE: docker.io/postgrest/postgrest:v13.0.4
   PGBACKREST_IMAGE: docker.io/woblerr/pgbackrest:2.55.1
@@ -77,5 +92,13 @@ feature_floors:
 packages:
   FASTAPI_VERSION: "0.121.2"
   FASTMCP_VERSION: "2.14.1"
+  # Session 4 targets this major deliberately (D86). The runbook's fixture was
+  # written for Prisma 7 -- prisma.config.ts, DIRECT_URL as the CLI datasource,
+  # no `directUrl` datasource field -- which is a different configuration model,
+  # not a newer version of this one. In 6.x `directUrl` exists and is exactly
+  # the mechanism two transports need: the client through the pooler, migrate
+  # through the direct endpoint. Bumping to 7 would be a fixture rewrite bought
+  # with no measured need. The acceptance report names the configuration model
+  # it tested, and a fixture may not straddle both.
   PRISMA_VERSION: "6.19.1"
   SCALAR_VERSION: "1.36.4"

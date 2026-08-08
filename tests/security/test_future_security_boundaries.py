@@ -36,6 +36,32 @@ def unimplemented(session: int, what: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Session 4 — the two transports do not widen the authorization model
+#
+# SEC-DBX-001 is the negative half of ADR 0040: publication and public
+# reachability are different properties, and this is the one that says so from
+# outside. It is not satisfied by the model-side check that every publication
+# carries a loopback host_ip -- that proves what was configured, not what is
+# reachable.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.future(session=4, requirement="SEC-DBX-001")
+def test_neither_transport_is_reachable_from_a_non_loopback_address() -> None:
+    unimplemented(4, "both allocated ports closed from off-host while 443 is open")
+
+
+@pytest.mark.future(session=4, requirement="SEC-DBX-002")
+def test_the_app_runtime_role_holds_no_ownership_or_ddl() -> None:
+    unimplemented(4, "no ownership, no base schema, no DDL, and no SET ROLE to anything")
+
+
+@pytest.mark.future(session=4, requirement="SEC-DBX-003")
+def test_pooled_session_state_does_not_survive_release() -> None:
+    unimplemented(4, "transaction-local claims and a deliberately set session GUC are both gone")
+
+
+# ---------------------------------------------------------------------------
 # Session 5 — the REST surface cannot widen the authorization model
 # ---------------------------------------------------------------------------
 

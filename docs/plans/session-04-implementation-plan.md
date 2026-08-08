@@ -41,6 +41,8 @@ at **D80**.
 | **D95** | `deploy.sh --render-runtime-only`, a privileged render submode. | `deploy.sh --render-only` exists, needs no host and no root, and **keeping it working is a standing non-negotiable**. A second render mode is not forbidden, but D46 settled that the deploy's ordering stays operator-visible and that a step belongs inside the deploy when it "cannot fail on its own". | **Adopt it, with the boundary D46 sets.** A privileged runtime render that reserves a port allocation and publishes a validated override without touching containers can fail on its own and be re-run on its own, so it earns its place. It must not materialize secrets, rotate a password, mark an allocation `active`, or publish `ready`. `--render-only` is untouched and stays the only render a checkout can perform. | The value is real: port allocation and loopback publication are the two things most likely to go wrong, and both are cheaper to get wrong before any container moves. | no |
 | **D96** | An installed root-owned broker at `/usr/local/libexec/agentic-postgres/database-access`, exposed through a narrow `sudo -n` rule. | **ADR 0037 constrains that directory**: an installed launcher may resolve a release and nothing else, because one copy serves projects deployed through releases it has never seen. A broker that validates policy, reads state and returns secrets is exactly the kind of release-owned logic that ADR forbids there — and the reason it forbids it is that a Session 2 launcher ran `--session 2` against a Session 3 project for three runs. | **The broker follows the trampoline split.** `libexec/agentic-postgres-database-access` resolves the project's recorded release and `exec`s `<release>/libexec/database-access`, which holds every policy decision. The deploy installs the trampoline with the others; the structural test that a launcher holds no answer a release owns covers it automatically. | The alternative is a second privileged host-global program that ages independently of the releases it serves, which is the defect ADR 0037 was written for, reintroduced in the one place that hands out credentials. | no |
 | **D97** | `bin/pool.sh` and `bin/database-ports.sh` are new commands with their own conventions. | Every command in `bin/` is subject to `test_cli_contract.py`: it must exist, be `100755` **in the git index**, carry the shell preamble, expose `--help` exiting 0, reject unknown options, obey the exit-code convention, work from any directory, print no environment, and document no secret argument. New commands join `SHELL_COMMANDS`. | **Adopt the commands, subject to the inventory.** Adding them to `SHELL_COMMANDS` is what subjects them to those checks; it is an inventory addition rather than a weakening. | Writing through the `\\wsl$` share strips the executable bit, and the index mode is what the contract checks — a stripped bit is a test failure rather than a silent break. This has cost time in every session so far. | no |
+| **D98** | *(Run 1, from this plan's own D85)* Record the measured pooler version as a `PGBOUNCER_MINIMUM_VERSION` feature floor. | The floor mechanism derives the resolved version from the image **tag** and compares with `as_version`, which strips non-digits per component: `v1.24.1-p1` becomes `(1, 24, 11)`, and a downgrade to `1.24.0-p1` becomes `(1, 24, 1)` — which is not less than a floor of `1.24.1`. The comparator cannot express the precision the measurement has. | **No floor. The exact version is asserted in `tests/contract/test_image_contracts.py`** by running `pgbouncer --version` against the locked digest, alongside the two behavioural measurements that are the actual reason the version was kept. | This plan's §5 says that module is "the only place the values themselves are written down… so that there is one authority and it is executable". A floor here would be a second, weaker authority for the same fact — the shape ADR 0035 named "a check that could not fail". | no |
+| **D99** | *(Run 1, discovered)* Nothing in the runbook. | `PYTHON_RUNTIME_IMAGE` selects the **rolling tag** `docker.io/library/python:3.12-slim`, and re-locking during Run 1 moved its digest — the tag was re-pushed between 2026-08-05 and 2026-08-08. `versions.env` separately asserts `PYTHON_VERSION=3.12.13`, checked against `.python-version`. So the repository's interpreter is pinned to a patch and the image every first-party service is built `FROM` is pinned only to a minor, and **nothing compared them**. | **A test measures the base image's Python against `PYTHON_VERSION`.** They agree today (3.12.13 both sides), which is the point: the check exists before they disagree, not after. Tightening the tag to `3.12.13-slim` is a candidate change and is left as an open item, not made silently in this run. | The project's signature defect, found in its own lock file: a value that looked pinned and was pinned one component short. The next 3.12.x push moves the container's interpreter with nothing to notice. | no |
 
 ---
 
@@ -119,6 +121,38 @@ Session 3 used two. Session 4 restores the third, and unlike Session 3's case it
 
 ### 3.2 Three numbers that must be measured before anything is published
 
+> **Measured in Run 1.** All three, against the locked digests, on Docker 29.5.2.
+> The values live in `tests/contract/test_image_contracts.py`, not here.
+>
+> 1. **A published loopback port matches `host all all all scram-sha-256`**, not
+>    the trust line. The server sees the bridge gateway (`172.17.0.1`), and a
+>    wrong password is refused. The control — the same wrong password over the
+>    container's own loopback — matched the `127.0.0.1/32 trust` line and
+>    succeeded, which is what makes the first result mean anything. **Session 4
+>    ships without an HBA plane**, and the fact is asserted by a test that runs
+>    wherever Docker does, including in the host gate, because it is a property
+>    of the daemon rather than of this repository.
+> 2. **The pooler image carries `psql` and `pg_isready` (17.5).** The readiness
+>    check has a client. It also runs as **uid/gid 70** with a default user set,
+>    so unlike the cluster it never starts as root — a third UID after 999 and
+>    65532, and secrets granted to it must be readable by 70 at mount time.
+> 3. **Prepared-statement tracking works at the locked 1.24.1.** A named
+>    statement is reusable across an *observed* backend change with
+>    `max_prepared_statements = 100`, and unusable across the same change with
+>    `0`. The negative case is what proves the positive one is the pooler
+>    working rather than the client landing on the same backend. **No bump**
+>    (D85, D98).
+>
+> One hazard found while measuring: the image's documented configuration
+> interface is `DATABASE_URL`, whose password the entrypoint parses and writes
+> into the user list, and whose own comment notes that `docker inspect` will
+> show it. That interface is unusable here. Session 4 mounts a rendered INI
+> instead, which works because the entrypoint skips generation when a config
+> already exists — asserted, because it is the load-bearing half.
+>
+> The memory measurement of §3.3 is **not** among these and remains open; it
+> needs the saturation test in Run 8.
+
 Each of these has a plausible answer that is wrong, and each has a neighbouring form that has already cost this project a run:
 
 - **Which `pg_hba.conf` line a published loopback port matches** (D90). Docker NAT should make the source the bridge gateway, landing on `scram-sha-256`. If it lands on the `127.0.0.1/32 trust` line instead, publishing a port grants unauthenticated access to every process on the host, and every credential test still passes.
@@ -182,7 +216,7 @@ The Prisma migration test creates a schema in the **live project database**. It 
 Runs are sized so each ends with a green gate and a reviewable commit. The offline runs come first and carry no host risk; nothing touches a published port until Run 5.
 
 ### Run 1 — ADRs, requirement IDs, versions, and the three measurements
-*Offline, plus a container runtime.*
+*Offline, plus a container runtime.* **Done.**
 
 ADRs 0040–0043 as drafts of record. The ten new requirement IDs added as `future` placeholders. `CURRENT_SESSION` stays `3` (D54).
 
@@ -285,11 +319,16 @@ Session 4 adds claims, not a format (D91). Each names registry requirements and 
 |---|---|
 | `pooled_transport` | `DBX-002`, `DBX-POOL-001`, `DBX-POOL-002`, `DBX-POOL-003` |
 | `direct_transport` | `DBX-001`, `DBX-003`, `DBX-005`, `SEC-DBX-001` |
-| `client_compatibility` | `DBX-004` *(P1 — see below)* |
 | `connection_tooling` | `DX-DB-001`, `DX-DB-002` |
 | `database_isolation` | gains `DEP-ISO-004` |
 
-`client_compatibility` over a **P1** requirement is a deliberate choice with a consequence: a P1 proof that fails still fails its claim, and the claim still fails the evidence document. If Session 4 wants `DBX-004` deferrable, it must not be the sole member of a claim. Decide that in Run 1, not in Run 10.
+**Decided in Run 1: there is no `client_compatibility` claim, and `DBX-004` belongs to no claim.**
+
+The draft put `DBX-004` — Node `pg` and Psycopg through the pooler, the session's only **P1** — alone over a claim of its own, and said to decide that here rather than in Run 10. Giving it companions would not have fixed it: a claim fails if any of its proofs fails, and under ADR 0025 a proof absent from the artifact is `not_run` rather than `passed`, so either way a deferrable requirement would have decided the evidence document.
+
+A claim is the thing a release blocks on. `DBX-004` is P1 precisely because it must not block one. Belonging to no claim is what makes its priority mean something, and it is not thereby unwatched: the registry carries it, the acceptance matrix prints it, and the gate's rule that no requirement owned by session ≤ 4 may remain a placeholder still forces it to be implemented and run in Session 4. It may then fail without failing the release, which is what P1 says and what a claim over it would have quietly overridden.
+
+Client compatibility as a property is still claimed — `DBX-001` and `DBX-003` under `direct_transport`, `DBX-002` under `pooled_transport`. What disappears is a claim named after an activity rather than after a guarantee, which is the shape ADR 0025 replaced in the first place.
 
 Claims resolve their session from the registry (ADR 0039), so all five above resolve to 4 and Session 3's six remain provable and proved.
 
@@ -335,6 +374,7 @@ Claims resolve their session from the registry (ADR 0039), so all five above res
 - **The Infisical control-plane identity still holds organisation admin**, and a `.save` copy of that credential is still on the host.
 - **Secret generations accumulate with no pruning.** Session 4 adds two secrets per project and a rotation procedure, which makes this the session where pruning stops being free to defer — and ADR 0038 records the constraint pruning must respect: a deployed document names the generation it verified, and removing it without saying so turns an audit trail into a dangling identifier.
 - **`bin/restore-test.sh` remains the last `FUTURE_STUB`** after `bin/connect.sh` leaves.
+- **`PYTHON_RUNTIME_IMAGE` selects a rolling minor tag** (D99). A test now compares the image's Python against `PYTHON_VERSION`, so a drift is loud rather than silent, but the candidate is still `3.12-slim`. Tightening it to `3.12.13-slim` would make the two pins agree by construction instead of by assertion; it is a deliberate candidate change with a re-lock behind it, so it is recorded here rather than made in passing.
 
 ---
 

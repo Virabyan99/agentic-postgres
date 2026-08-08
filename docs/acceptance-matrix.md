@@ -10,7 +10,7 @@ actually collect. That is checked by running a real collection and
 comparing node IDs, not by searching files for function names — a text
 search passes on a commented-out test.
 
-**88 requirements** — 84 P0, 17 active in Session 1, 71 owned by later sessions.
+**98 requirements** — 94 P0, 17 active in Session 1, 81 owned by later sessions.
 
 ## By session
 
@@ -19,7 +19,7 @@ search passes on a commented-out test.
 | 1 | 17 | active |
 | 2 | 13 | placeholders owned by Session 2 |
 | 3 | 15 | placeholders owned by Session 3 |
-| 4 | 5 | placeholders owned by Session 4 |
+| 4 | 15 | placeholders owned by Session 4 |
 | 5 | 5 | placeholders owned by Session 5 |
 | 6 | 5 | placeholders owned by Session 6 |
 | 7 | 4 | placeholders owned by Session 7 |
@@ -100,6 +100,16 @@ search passes on a commented-out test.
 | `DBX-003` | P0 | psql connects through both the direct and pooled endpoints. | `tests/integration/test_future_database_clients.py::test_psql_works_on_both_endpoints` |
 | `DBX-004` | P1 | Node and Python drivers round-trip a query through the pooler. | `tests/integration/test_future_database_clients.py::test_node_and_python_clients_work_through_the_pooler` |
 | `DBX-005` | P0 | The direct endpoint is not publicly reachable. | `tests/integration/test_future_database_clients.py::test_direct_postgresql_is_not_publicly_reachable` |
+| `DBX-POOL-001` | P0 | The pooler runs in transaction mode with explicit, bounded limits and non-zero prepared-statement tracking, read from its own configuration rather than from the file that was meant to produce it. | `tests/integration/test_future_database_clients.py::test_the_pooler_runs_in_transaction_mode_with_bounded_limits` |
+| `DBX-POOL-002` | P0 | More clients than the server-connection budget complete their transactions, and the number of server connections is observed never to exceed it. | `tests/integration/test_future_database_clients.py::test_client_concurrency_stays_inside_the_server_budget` |
+| `DBX-POOL-003` | P0 | A protocol-level named prepared statement is reusable after the pooler has moved the client to a different backend, proved by observing the backend change rather than by assuming it. | `tests/integration/test_future_database_clients.py::test_a_named_prepared_statement_survives_a_backend_change` |
+| `DBX-PORT-001` | P0 | Host-loopback allocations are stable across redeploy, restart and reboot, two projects never share one, and an allocation is matched by the instance UUID the volume carries. See ADR 0042. | `tests/contract/test_future_deployment.py::test_host_loopback_allocations_are_stable_and_unshared` |
+| `DEP-ISO-004` | P0 | Two projects have distinct pooled and direct ports, credentials, pooler configuration and user lists, and neither project's credential opens the other. | `tests/contract/test_future_deployment.py::test_two_projects_share_no_transport_credential_or_pool` |
+| `DX-DB-001` | P0 | The connection helper opens and cleans a verified tunnel for each transport, refuses an unverified host key, and prints no credential. | `tests/contract/test_future_deployment.py::test_the_connection_helper_opens_and_cleans_a_verified_tunnel` |
+| `DX-DB-002` | P0 | The installed access broker enforces project and profile authorization and returns nothing to an unauthorized caller, including no distinction between "no such project" and "not yours". See ADR 0043. | `tests/contract/test_future_deployment.py::test_the_access_broker_returns_nothing_to_an_unauthorized_caller` |
+| `SEC-DBX-001` | P0 | Neither transport is reachable from a non-loopback address; every publication carries an explicit loopback host_ip and only the edge publishes a public port. See ADR 0040. | `tests/security/test_future_security_boundaries.py::test_neither_transport_is_reachable_from_a_non_loopback_address` |
+| `SEC-DBX-002` | P0 | The application runtime role holds no ownership, no base-schema addressability and no DDL, and cannot become any other role. | `tests/security/test_future_security_boundaries.py::test_the_app_runtime_role_holds_no_ownership_or_ddl` |
+| `SEC-DBX-003` | P0 | Transaction-local claim state, and deliberately set session-level state, are both absent for the next client of a released pooled connection. | `tests/security/test_future_security_boundaries.py::test_pooled_session_state_does_not_survive_release` |
 
 ### Session 5
 

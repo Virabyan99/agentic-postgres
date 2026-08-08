@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 84 requirements**
+**P0 — 94 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -141,6 +141,16 @@ Priorities:
 | `DBX-002` | 4 | Prisma Client operates through the pooled endpoint. |
 | `DBX-003` | 4 | psql connects through both the direct and pooled endpoints. |
 | `DBX-005` | 4 | The direct endpoint is not publicly reachable. |
+| `DBX-POOL-001` | 4 | The pooler runs in transaction mode with explicit, bounded limits and non-zero prepared-statement tracking, read from its own configuration rather than from the file that was meant to produce it. |
+| `DBX-POOL-002` | 4 | More clients than the server-connection budget complete their transactions, and the number of server connections is observed never to exceed it. |
+| `DBX-POOL-003` | 4 | A protocol-level named prepared statement is reusable after the pooler has moved the client to a different backend, proved by observing the backend change rather than by assuming it. |
+| `DBX-PORT-001` | 4 | Host-loopback allocations are stable across redeploy, restart and reboot, two projects never share one, and an allocation is matched by the instance UUID the volume carries. See ADR 0042. |
+| `DEP-ISO-004` | 4 | Two projects have distinct pooled and direct ports, credentials, pooler configuration and user lists, and neither project's credential opens the other. |
+| `DX-DB-001` | 4 | The connection helper opens and cleans a verified tunnel for each transport, refuses an unverified host key, and prints no credential. |
+| `DX-DB-002` | 4 | The installed access broker enforces project and profile authorization and returns nothing to an unauthorized caller, including no distinction between "no such project" and "not yours". See ADR 0043. |
+| `SEC-DBX-001` | 4 | Neither transport is reachable from a non-loopback address; every publication carries an explicit loopback host_ip and only the edge publishes a public port. See ADR 0040. |
+| `SEC-DBX-002` | 4 | The application runtime role holds no ownership, no base-schema addressability and no DDL, and cannot become any other role. |
+| `SEC-DBX-003` | 4 | Transaction-local claim state, and deliberately set session-level state, are both absent for the next client of a released pooled connection. |
 | `API-CACHE-001` | 5 | An API migration reloads the schema cache and updates OpenAPI. |
 | `API-LIMIT-001` | 5 | Row limits and timeouts are enforced by the server, not the client. |
 | `API-SCHEMA-001` | 5 | Only the api schema is exposed, matching a committed allowlist. |
