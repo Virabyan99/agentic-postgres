@@ -61,6 +61,9 @@ of those citations ambiguous.
 | **D66** | *(§5 Run 7)* `sudo bin/materialize-secrets.sh … --session 3` materializes the Session 3 secrets. | It exits `8`: `HTTP 404` from the provider, because the two secrets exist nowhere. `bin/materialize-secrets.py` reads `secrets.required.yaml`; `bin/bootstrap-providers.py` created exactly one secret and created it **by name** — `"APG_SESSION2_SENTINEL"`, a literal. One writer with a hard-coded name and one reader with a declared contract, agreeing for exactly as long as the contract had one entry. The folder had the same shape and had not bitten: bootstrap wrote into `host.yaml`'s `runtime_folder` while materialization reads each secret's `provider_path`, and both said `/runtime` until Session 3 said `/database`. | **ADR 0036.** `declared_provider_secrets(session)` drives creation from the contract; `add_sentinel` becomes `add_missing_secrets`, so a project bootstrapped in an earlier session converges by acquiring what a later one declared. An existing secret is adopted, never overwritten. `managed_resources` stays a closed enum — it is the licence to destroy — and a contract test asserts it covers every required secret the contract declares. | Overwriting would have been the worse fix: `postgres_init_superuser_password` is read by the image only when the data directory is empty, so a new value changes the file and not the cluster, and materialization then delivers a password that cannot open the database it is for. | **yes** |
 | **D67** | *(`bin/bootstrap-providers.sh --help`)* `--plan` "contacts the provider read-only and writes nothing. Needs no root." | It raises `PermissionError` out of `pathlib.is_file()` and prints a traceback. The state file and its directory are root-owned `0600`/`0700`, so an unprivileged reader cannot even stat it. Invisible in a checkout, where there is no `/etc/agentic-postgres` and the path is genuinely absent. | **Unreadable is a prerequisite failure (exit 3) naming sudo, never folded into "absent".** The help text says what is actually true. The test creates a directory the caller cannot traverse rather than mocking, because the failure is `is_file()` raising. | Folding it into absent would be worse than the traceback: `--plan` would propose creating an Infisical project, a machine identity and a client secret for a project that already has all three. Found by running `--plan` on the host as a pre-flight before handing the operator an `--apply`. | no |
 | **D68** | *(`docs/provider-bootstrap.md`, `docs/session-02-operator-guide.md`)* `--apply` takes `--operator-credential-file /root/.config/agentic-postgres/infisical.json`. | **That path has never existed on any host.** The real one is `/root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential`, which is what Session 2 used and what the host's shell history records. The document also never said what the file contains — `read_operator_credential` wants exactly two non-empty lines, client ID then client secret, while `.json` implies a document nothing here parses — nor that removing it after use is correct, so a later session finds it absent and cannot tell whether that is expected. | **Both documents name the real path.** The format is stated, distinguished from the per-project runtime credential, and its absence is described as the recommended end state with instructions to re-create it. The `.save` file `nano` leaves behind is named too: it is a second copy of a credential at whatever mode nano chose. | Following the document produced an empty file at a path nothing had ever written, and the reasonable conclusion from that is "the credential is lost" — which would have meant re-issuing organisation-level authority that was sitting intact one directory away. An example path is not a fact until something has run it. | no |
+| **D69** | *(§5 Run 8, D51)* Destructive volume tests run against a disposable third project `project.gamma.yaml`, built for the purpose. | Building it costs three real external resources for a target whose only purpose is to be destroyed: a DNS record, an Infisical project with a machine identity and a client secret, and a production certificate — `bin/project-runtime.sh up` needs installed state under `/etc/agentic-postgres/projects/<key>/`, which only `deploy.sh` writes, and a project deployed with no DNS record makes Traefik retry ACME against the 5/hour cap. Against that: **no Session 3 requirement names a destructive test.** `DEP-REMOVE-001` is owned by Session 12 and still a placeholder; `DBX-PG-003`'s five node IDs are all implemented and passing. | **The disposable project is not built, and no `destructive` test is written.** The marker stays declared in `pytest.ini`. The machinery — the gitignored manifest, the target guard, the closed-tuple gate variable — arrives in the run that writes the first destructive test, and that test's requirement is what pays for it. | The alternative on offer was the guard without the tests: a fixture that refuses a target which is not the disposable project, and a contract test that every `destructive` test uses it, over a set of zero. That is ADR 0035's defect with a different subject — a check whose first red would be its first execution. Session 3's destructive claim is that a volume is bound to one identity and a mismatch is refused, and that is measured non-destructively by pointing one project's document at the other's cluster, which risks neither project's data. | no |
+| **D70** | *(`tests/acceptance-registry.yaml`)* `DEP-ISO-003` claims "neither project's credential authenticates against the other". | Six node IDs, and **not one of them presented a credential to anything.** They compare names, containers, volumes, sentinels and rows. The clause read as covered because the role names differ — but the construction that difference makes obvious, presenting A's role name to B, fails with `role "…" does not exist` and measures nothing about the password. | **The foreign password is presented against the target's *own* migration role**, which exists there, so authentication is the only thing that can refuse it. Plus a control asserting each project's own credential does open its own cluster: a cluster that refuses every password passes the negative test completely. | This is the pattern the whole repository is written against, in the one place nobody looks — the registry's own prose. A description is not a proof, and a P0 requirement whose statement is broader than its node IDs is a claim the evidence file will report as `passed`. | no |
+| **D71** | *(§2.2)* Session 3 adds exactly nine requirement IDs. | Ten. Run 8's third paragraph — "confirm systemd restores both projects from the recorded immutable release, secrets are still valid, data persists" — is a claim no requirement owns. `DEP-REL-001` covers what systemd runs, not what survives; `DEP-002`, "re-running deployment converges without destroying data", is Session 11 and is about redeploy, not restart. Session 3 is the first session in which a project holds anything a restart could lose. | **`DEP-BOOT-001` is added**, P0, target session 3: a project restarted by systemd, or restored after a reboot, comes back from the release its document records, through the session that document records, with its identity and applied migrations intact. Its proofs live in `tests/deployment/test_session3_convergence.py`. | A restart is the one path where a wrong answer is silent: the unit goes active, the edge attaches, the health route answers with the right project key, and no cluster started. That is exactly what the pre-ADR-0032 launcher did, and every signal above the container was green for it. The container is therefore what is asserted, and `bound_at < pg_postmaster_start_time()` is what distinguishes data that survived from data that was recreated. | no |
 | **D54** | *(§5 of this plan, as written)* Run 1 moves `CURRENT_SESSION` to `3` while the five existing Session 3 placeholders stay `future` until Run 6. | Those two cannot both hold. `test_no_requirement_at_or_before_the_gate_session_remains_future` fails for exactly `SEC-DEFAULT-001`, `SEC-FUNC-001`, `SEC-OWNER-001`, `SEC-RLS-001`, `SEC-VIEW-001` the moment the constant reads `3`, and the nine new IDs join them. Verified by running the gate's registry suite under `APG_ACCEPTANCE_SESSION=3`. | **`CURRENT_SESSION` moves in Run 6, not Run 1**, in the same commit that deletes all fourteen placeholders and replaces them with real tests. Run 1 ships the ADRs, the nine new IDs as placeholders, and the two marker declarations. | The alternatives were a red gate through Runs 1–5, which suspends the only signal that would catch a Run 2 regression, or an exemption inside the overdue check, which weakens a currently-passing P0 contract test to make an unrelated change convenient. The constant and the implementations it vouches for move together or the constant means nothing. | no |
 
 ---
@@ -94,6 +97,11 @@ Added only where no placeholder covers the claim. Prefixes follow the frozen cat
 | `SEC-DB-001` | No runtime role holds superuser, `CREATEDB`, `CREATEROLE`, replication, or `BYPASSRLS` | P0 |
 | `SEC-DB-002` | `public`, `app` and `app_private` boundaries match the contract | P0 |
 | `DEP-ISO-003` | Two projects have isolated clusters, volumes, roles, credentials and identity sentinels | P0 |
+| `DEP-BOOT-001` | A restarted or rebooted project returns from the recorded release, through the recorded session, with its data | P0 |
+
+`DEP-BOOT-001` is the tenth, added in Run 8 (**D71**). The other nine were
+written before the first cluster existed, and none of them covers the sentence
+Run 8 ends on: that a project restored by systemd comes back with its data.
 
 `SEC-RLS-002` and `SEC-RLS-003` from the runbook are folded into `SEC-RLS-001`: one requirement may name many node IDs, and "notes" and "tasks" are two tables under one claim, not two claims. The forced-RLS-includes-the-owner case is a node ID under `SEC-RLS-001` as well.
 
@@ -310,13 +318,47 @@ identical ledger digest, identical role digest, `0` migrations applied on the
 second pass, and the volume's instance UUID recovered rather than regenerated.
 
 ### Run 8 — Project B, isolation, convergence
-*Second cluster.*
+*Second cluster. The first run in which two of anything exist.*
 
-Repeat Run 7 for `project.beta.yaml`, then the isolation suite: A's migration credential fails against B and vice versa, A's role names do not exist in B, a row written to A is absent from B, stopping B leaves A healthy, and an identity mismatch against an existing volume is refused.
+Repeat Run 7 for `project.beta.yaml`. The path is the one Run 7 built and
+measured, so this is a deploy rather than a construction — and it is also the
+only way `beta-dev` becomes restartable again, since its Session 2 document
+records no `deployed_through_session` and the launcher refuses rather than guess
+(ADR 0032).
 
-Restart the container, restart the project unit, and reboot the host in a maintenance window. Confirm systemd restores both projects from the recorded immutable release, secrets are still valid, data persists, and the security suite is still green.
+```
+sudo bin/materialize-secrets.sh --project project.beta.yaml --requirements secrets.required.yaml --session 3
+sudo ./deploy.sh --host host.yaml --project project.beta.yaml --capabilities capabilities.yaml --through-session 3
+```
 
-Destructive volume tests run against the disposable third project only (D51).
+**Three of the isolation suite's five claims were already written and passing
+offline; two were not, and one of those two the registry already asserted in
+prose.** `DEP-ISO-003` has said since Run 1 that "neither project's credential
+authenticates against the other" and had no node ID behind it (**D70**). Stopping
+one cluster and asking the other a question it needs its own cluster to answer
+had none either. Both are added; the credential test carries a control, because a
+cluster that refuses every password passes the negative half completely.
+
+Restart the container, restart the project unit, then reboot the host in a
+maintenance window. This is where `DEP-BOOT-001` comes from (**D71**): the claim
+that a project comes back with its data belonged to no requirement, and a restart
+is the one path where the wrong answer is silent — the unit goes active, the edge
+attaches, the health route answers with the right project key, and no cluster
+started. So the assertion is on the container, and persistence is
+`bound_at < pg_postmaster_start_time()` rather than a snapshot comparison: a
+snapshot shows the numbers did not change, which a cluster that never restarted
+also shows.
+
+The reboot itself is an operator procedure and not a committed test — a test
+cannot reboot the host it is running on and still be there to report. What is
+committed is the restart-level proof, which holds on any host at any time; the
+reboot is verified by re-running the host gate afterwards against a snapshot
+taken before it.
+
+Destructive volume tests are **not** written here and the disposable third
+project is not built (**D69**). No Session 3 requirement names a destructive
+test, and a guard over an empty set is a check whose first red would be its first
+execution.
 
 ### Run 9 — Gate, evidence, documentation
 *Both environments.*

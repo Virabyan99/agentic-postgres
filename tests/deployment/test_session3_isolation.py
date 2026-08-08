@@ -9,10 +9,11 @@ two sets of labels. What is measured here is that each project's cluster
 genuinely does not contain the other's objects, and that a volume carrying one
 project's identity is refused to the other.
 
-Nothing here is destructive. The one mutating action is an insert into each
-project's own tables, and neither project's teardown is exercised: destructive
-volume tests run against the disposable third project only (D51), which is
-Run 8's work.
+Nothing here is destructive. Two tests mutate and both restore: an insert into a
+project's own tables, and a stop of one cluster followed by a start and an
+assertion that it came back. No volume is removed and no project is torn down --
+destructive volume tests run against the disposable third project only (D51),
+which does not exist and is not built here (D69).
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -193,6 +195,90 @@ def test_the_databases_have_different_names(
     project_a: dict[str, Any], project_b: dict[str, Any]
 ) -> None:
     assert project_a["database"]["name"] != project_b["database"]["name"]
+
+
+def test_each_projects_migration_credential_opens_its_own_cluster(
+    as_root, migration_password, pg_login, project_a: dict[str, Any], project_b: dict[str, Any]
+) -> None:
+    """Guard the guard, and it is not optional here.
+
+    The test below asserts that a login fails. A cluster that refuses every
+    password -- because the role was never given one, because the credential
+    rotated out from under the materializer, because ``psql`` cannot reach the
+    port at all -- passes it completely. This is the control that says the
+    refusal below is about *whose* password it was.
+    """
+    del as_root
+    for document in (project_a, project_b):
+        key = document["project"]["key"]
+        code, stdout, stderr = pg_login(
+            document, document["database"]["roles"]["migration_user"], migration_password(key)
+        )
+        assert code == 0 and stdout.strip() == "1", (
+            f"{key}'s own migration credential does not open {key}: {stderr.strip()}"
+        )
+
+
+def test_neither_projects_migration_credential_opens_the_other(
+    as_root, migration_password, pg_login, project_a: dict[str, Any], project_b: dict[str, Any]
+) -> None:
+    """The clause of DEP-ISO-003 that had no proof behind it.
+
+    The requirement has said "neither project's credential authenticates against
+    the other" since Run 1 and nothing measured it. What made that comfortable is
+    that the role names differ, so the obvious construction -- A's role name
+    against B -- fails with "role does not exist" and proves nothing about the
+    credential. The password is therefore presented against **the target's own
+    migration role**, which does exist there. The only reason it can fail is that
+    the value is wrong.
+    """
+    del as_root
+    for document, other in ((project_a, project_b), (project_b, project_a)):
+        target = document["project"]["key"]
+        foreign_password = migration_password(other["project"]["key"])
+        code, stdout, stderr = pg_login(
+            document, document["database"]["roles"]["migration_user"], foreign_password
+        )
+        assert code != 0, (
+            f"{other['project']['key']}'s migration credential opened {target}: {stdout.strip()}"
+        )
+        assert "password authentication failed" in stderr, (
+            f"the login against {target} failed for a reason other than the password, "
+            f"so this proves nothing: {stderr.strip()}"
+        )
+        assert foreign_password not in stderr + stdout, "the failure printed the credential"
+
+
+def test_stopping_one_projects_cluster_leaves_the_other_serving(
+    as_root, sh, project_a: dict[str, Any], project_b: dict[str, Any]
+) -> None:
+    """Isolation that holds only while both clusters are healthy is not isolation.
+
+    Session 2 proves the routing half of this by stopping B's whole project
+    (``test_removing_the_second_project_leaves_the_first_routed``). What is new
+    at Session 3 is shared kernel memory and a shared page cache: two postmasters
+    on a 2-vCPU box with no swap. B's cluster is stopped, A is asked a question
+    that requires its own cluster to answer it, and B is started again -- and
+    then asserted to have come back, so a failure to restore cannot pass silently.
+    """
+    del as_root
+    container = project_b["database"]["container"]
+
+    sh("docker", "stop", container)
+    try:
+        answered = sql(project_a, "SELECT count(*)::text FROM app_private.migration_ledger;")
+        assert answered.isdigit() and int(answered) > 0, (
+            f"A could not answer while B's cluster was stopped: {answered}"
+        )
+    finally:
+        sh("docker", "start", container)
+
+    for _ in range(60):
+        if sql(project_b, "SELECT 1;") == "1":
+            break
+        time.sleep(2)
+    else:
+        pytest.fail(f"{container} did not come back after being stopped")
 
 
 # ---------------------------------------------------------------------------

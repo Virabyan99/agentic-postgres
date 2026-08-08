@@ -563,10 +563,32 @@
     - tests/deployment/test_session3_isolation.py::test_a_row_written_to_one_project_is_absent_from_the_other
     - tests/deployment/test_session3_isolation.py::test_each_project_has_its_own_identity_sentinel
     - tests/deployment/test_session3_isolation.py::test_the_databases_have_different_names
+    - tests/deployment/test_session3_isolation.py::test_each_projects_migration_credential_opens_its_own_cluster
+    - tests/deployment/test_session3_isolation.py::test_neither_projects_migration_credential_opens_the_other
+    - tests/deployment/test_session3_isolation.py::test_stopping_one_projects_cluster_leaves_the_other_serving
   description: >-
     Two deployed projects have isolated clusters, volumes, roles, credentials
     and identity sentinels, and neither project's credential authenticates
     against the other.
+
+# The credential clause of the description above carried no node ID until
+# Run 8 (D70). It read as proved because the role names differ -- but the
+# construction that difference makes obvious, presenting A's role name to B,
+# fails with "role does not exist" and says nothing about the password. The
+# proof presents the foreign password against the target's *own* migration role.
+
+- id: DEP-BOOT-001
+  priority: P0
+  target_session: 3
+  test_nodeids:
+    - tests/deployment/test_session3_convergence.py::test_restarting_the_container_preserves_the_cluster
+    - tests/deployment/test_session3_convergence.py::test_restarting_the_project_unit_brings_back_the_recorded_session
+    - tests/deployment/test_session3_convergence.py::test_the_active_secret_generation_opens_the_cluster
+    - tests/security/test_session2_installed_release.py::test_the_running_containers_come_from_an_installed_release
+  description: >-
+    A project restarted by systemd, or restored after a reboot, comes back from
+    the release its deployed document records, through the session that document
+    records, with its cluster identity and applied migrations intact.
 
 # ---------------------------------------------------------------------------
 # Session 4 — endpoints and clients

@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 83 requirements**
+**P0 — 84 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -128,6 +128,7 @@ Priorities:
 | `DBX-PG-001` | 3 | The locked PostgreSQL 18 image runs with pgvector present at the locked version, in the extensions schema rather than in public. |
 | `DBX-PG-002` | 3 | PostgreSQL publishes no host port, joins no edge network, and carries no Traefik label. It is reachable only on its own project network. |
 | `DBX-PG-003` | 3 | An existing data volume is bound to one project identity, and a mismatch is refused with exit 11 rather than adopted. See ADR 0030. |
+| `DEP-BOOT-001` | 3 | A project restarted by systemd, or restored after a reboot, comes back from the release its deployed document records, through the session that document records, with its cluster identity and applied migrations intact. |
 | `DEP-ISO-003` | 3 | Two deployed projects have isolated clusters, volumes, roles, credentials and identity sentinels, and neither project's credential authenticates against the other. |
 | `SEC-DB-001` | 3 | No runtime role holds SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS. Read from the catalog, never inferred from how a role was created. |
 | `SEC-DB-002` | 3 | The public, app and app_private schema boundaries match the contract, and the API roles cannot address the private schemas at all. |

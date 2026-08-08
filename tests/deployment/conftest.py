@@ -125,3 +125,87 @@ def running_containers(sh: Runner) -> list[dict[str, Any]]:
     """Every running container, as parsed JSON rather than scraped columns."""
     raw = sh("docker", "ps", "--format", "{{json .}}")
     return [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+
+#: Where the materializer writes a project's secret generations (ADR 0020).
+SECRET_ROOT = Path("/var/lib/agentic-postgres/secrets")
+
+
+@pytest.fixture(scope="session")
+def migration_password() -> Callable[[str], str]:
+    """One project's live migration credential, from the generation it points at.
+
+    Root-only, and read the same way ``bin/postgres-bootstrap.py`` reads it --
+    through ``active-secret-generation.json`` rather than by listing
+    ``generations/`` and taking the newest. The generations accumulate; the
+    pointer is the only statement about which one the project is using, and a
+    directory listing sorted by name is a fact about mtime standing in for that.
+
+    ``.rstrip("\\n")`` and nothing more, because the dbmate entrypoint reads the
+    same file with ``$(cat ...)``, which strips exactly trailing newlines. A
+    ``.strip()`` here would produce a value the container does not present and a
+    login failure nobody could explain.
+    """
+
+    def read(project_key: str) -> str:
+        pointer = SECRET_ROOT / project_key / "active-secret-generation.json"
+        if not pointer.is_file():
+            pytest.fail(f"{project_key} has no active secret generation at {pointer}")
+        generation = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
+        path = SECRET_ROOT / project_key / "generations" / generation / "dbmate"
+        path = path / "migration_user_password"
+        if not path.is_file():
+            pytest.fail(f"generation {generation} of {project_key} has no migration credential")
+        value = path.read_text(encoding="utf-8").rstrip("\n")
+        assert value, f"the migration credential for {project_key} is empty"
+        return value
+
+    return read
+
+
+@pytest.fixture(scope="session")
+def pg_login() -> Callable[[dict[str, Any], str, str], tuple[int, str, str]]:
+    """Attempt a password login against a project's cluster. Returns, never judges.
+
+    Over TCP to ``127.0.0.1`` *inside* the container on purpose: the Unix socket
+    authenticates by peer and would report success for a password nobody checked,
+    which is the whole subject of the test that uses this.
+
+    The password crosses on **stdin** and is read into a shell variable in the
+    container. It is never an argument to ``docker`` or to ``psql``, never in the
+    container's declared environment, and so appears in no process listing, no
+    ``docker inspect`` and no log.
+    """
+
+    def login(document: dict[str, Any], role: str, password: str) -> tuple[int, str, str]:
+        # `export` on its own line rather than as a `VAR=v exec ...` prefix: a
+        # prefix assignment to a special builtin persists in the shell but is not
+        # required to be exported, and `exec` replaces that shell. Measured
+        # failure mode is a password prompt psql then refuses because of `-w`,
+        # which reads as a wrong password.
+        script = (
+            'PGPASSWORD="$(cat)"; export PGPASSWORD; '
+            'exec psql -h 127.0.0.1 -U "$1" -d "$2" -w -X -qtA -c "SELECT 1"'
+        )
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                document["database"]["container"],
+                "sh",
+                "-c",
+                script,
+                "sh",
+                role,
+                document["database"]["name"],
+            ],
+            input=password,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        return result.returncode, result.stdout, result.stderr
+
+    return login
