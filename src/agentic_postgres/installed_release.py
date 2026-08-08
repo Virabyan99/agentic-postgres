@@ -33,6 +33,17 @@ from pathlib import Path
 #: Where installed releases live. Absolute and outside any checkout.
 RELEASE_ROOT = Path("/opt/agentic-postgres/releases")
 
+#: Where the systemd units look for the launchers they execute. The units name
+#: this path literally, which is why the launchers installed here must be
+#: release-independent: one copy serves every project on the host.
+LIBEXEC_ROOT = Path("/usr/local/libexec/agentic-postgres")
+
+#: Only files with this prefix are installed into ``LIBEXEC_ROOT``. The release
+#: side of the launcher (``libexec/project-launcher``) deliberately lacks it, so
+#: that no copy of it can exist outside a release -- a second copy would be a
+#: second answer to which session a project was deployed through.
+LAUNCHER_PREFIX = "agentic-postgres-"
+
 #: A full commit. Abbreviations are refused: they are ambiguous over time, and
 #: an ambiguous path component is one that can be made to resolve elsewhere.
 #:
@@ -196,6 +207,62 @@ def harden(path: Path) -> None:
         os.chown(current, 0, 0)
         mode = current.stat().st_mode
         os.chmod(current, mode & ~GROUP_OTHER_WRITE)
+
+
+def reconcile_launchers(release: Path, libexec: Path = LIBEXEC_ROOT) -> list[str]:
+    """Install this release's trampolines into ``libexec``. Returns what changed.
+
+    ``bin/provision-host.sh`` installs these once, when the host is built, and
+    for two sessions nothing installed them again. A release therefore shipped
+    its own launcher, correct and tested, to a host that went on executing the
+    copy from whenever it was last provisioned -- which is how a launcher fixed
+    in Run 7 was still running ``--session 2`` against two Session 3 projects in
+    Run 8 (D72). The deploy installs the code; it has to install the indirection
+    too, or "the release is what runs" is true of everything except the one file
+    that decides what runs.
+
+    One copy serves every project on the host, including projects deployed
+    through other releases, so overwriting it from whichever project deployed
+    last is only safe because of what these files are now allowed to contain:
+    release resolution and nothing else (ADR 0037). That is asserted structurally
+    in ``tests/contract/test_host_infrastructure.py``, not assumed here.
+
+    Idempotent, and silent when nothing differs: the returned list is what the
+    deploy prints, so an unchanged launcher produces no line rather than a line
+    saying nothing happened.
+    """
+    if os.geteuid() != 0:
+        raise ReleaseError("installing launchers requires root")
+
+    origin_root = release / "libexec"
+    if not origin_root.is_dir():
+        raise ReleaseError(f"release carries no libexec directory: {origin_root}")
+
+    libexec.mkdir(parents=True, exist_ok=True)
+    os.chown(libexec, 0, 0)
+    os.chmod(libexec, 0o755)  # noqa: S103
+
+    changed: list[str] = []
+    for origin in sorted(origin_root.glob(f"{LAUNCHER_PREFIX}*")):
+        if not origin.is_file() or origin.is_symlink():
+            continue
+        # agentic-postgres-edge -> edge. The units invoke the short name; the
+        # long name exists so the repository directory is self-describing.
+        target = libexec / origin.name.removeprefix(LAUNCHER_PREFIX)
+        payload = origin.read_bytes()
+        if target.is_file() and not target.is_symlink() and target.read_bytes() == payload:
+            continue
+        # Written beside and renamed, not truncated in place: systemd may be
+        # executing this file right now, and a partially written launcher is one
+        # a reboot would run.
+        staging = target.with_name(f".{target.name}.new")
+        staging.write_bytes(payload)
+        os.chown(staging, 0, 0)
+        os.chmod(staging, 0o755)  # noqa: S103
+        staging.replace(target)
+        changed.append(target.name)
+
+    return changed
 
 
 def installed_commits(root: Path = RELEASE_ROOT) -> list[str]:

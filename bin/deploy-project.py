@@ -536,6 +536,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"  release {commit[:12]} at {release}")
 
+    # The indirection travels with the code it resolves. Until Run 8 only
+    # provisioning installed these, so a host kept executing whatever launcher
+    # it was built with: the copy running here was two sessions old and passed
+    # `--session 2` to a Session 3 project, wrote a secret generation holding
+    # Session 2's secret set, repointed the project at it, and only then failed
+    # (D72, ADR 0037).
+    refreshed = installed_release.reconcile_launchers(release)
+    if refreshed:
+        print(f"  launchers refreshed from this release: {', '.join(refreshed)}")
+
     step("4. Root-owned configuration and generated output")
     state_directory = _establish_directory(deployed_output.PROJECT_STATE_ROOT / key)
 

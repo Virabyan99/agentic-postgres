@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+#
+# The release side of the project launcher (ADR 0037).
+#
+# Reached only through /usr/local/libexec/agentic-postgres/project, the stable
+# trampoline that resolves which release a project was deployed through. By the
+# time this runs, the project key has been validated, root has been checked, and
+# the release this file lives in is the one that deployed the project named on
+# the command line. That is the property the split exists for: everything below
+# is a fact about *this* release -- which sessions exist, which secrets they
+# declare, which script performs an action -- and a project deployed through an
+# older release runs that release's copy of this file instead.
+#
+# It is deliberately NOT named agentic-postgres-*: `bin/provision-host.sh`
+# installs `libexec/agentic-postgres-*` into /usr/local/libexec, and this file
+# must never be installed there. A copy outside a release would be a second
+# answer to "which session was this deployed through", which is the question
+# D59 and D72 were both about.
+#
+# Exit codes: 2 invalid input, 3 missing prerequisite, 4 missing runtime
+# prerequisite, 8 secret failure, 9 edge failure.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ROOT_DIR
+
+readonly STATE_ROOT="/etc/agentic-postgres/projects"
+readonly HOST_MANIFEST="/etc/agentic-postgres/host.yaml"
+
+die() {
+  local code="$1"
+  shift
+  printf 'project-launcher: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: <release>/libexec/project-launcher <project-key> <action>
+
+Actions: materialize | up | down | attach | detach | status
+
+Runs this release's scripts for one deployed project. Invoked by
+/usr/local/libexec/agentic-postgres/project, never directly.
+USAGE
+}
+
+main() {
+  case "${1-}" in
+    --help|-h) usage; return 0 ;;
+    "") usage >&2; die 2 "a project key is required." ;;
+  esac
+
+  local project_key="$1"
+  local action="${2-}"
+
+  case "${action}" in
+    materialize|up|down|attach|detach|status) ;;
+    "") usage >&2; die 2 "an action is required." ;;
+    *) usage >&2; die 2 "unknown action: ${action}" ;;
+  esac
+
+  [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+
+  # The state file names the copied manifests. They are copies under
+  # /etc/agentic-postgres/projects/, not paths into anyone's checkout, so a
+  # deployed project keeps working after the operator deletes their clone.
+  local deployment manifest requirements
+  deployment="${STATE_ROOT}/${project_key}/outputs.json"
+  manifest="${STATE_ROOT}/${project_key}/manifest.yaml"
+  requirements="${STATE_ROOT}/${project_key}/secrets.required.yaml"
+  [ -f "${deployment}" ] || die 4 "no deployment state for ${project_key}: ${deployment}"
+  [ -f "${manifest}" ] || die 4 "no copied project manifest: ${manifest}"
+
+  # Read back, not assumed. This runs at boot with no operator to ask which
+  # session the project was deployed through, and the two things that depend on
+  # the answer -- which secrets are materialized and which Compose profiles
+  # start -- are exactly the two that must not disagree with what the deploy
+  # did. A literal here was correct while 2 was the only value, and brought a
+  # Session 3 project back up without its cluster while reporting a clean start
+  # (D59); the copy that actually ran on the host still held that literal three
+  # runs after it was fixed here (D72).
+  local session
+  session="$(jq -r '.deployed_through_session // empty' "${deployment}")"
+  [ -n "${session}" ] \
+    || die 4 "${deployment} records no deployed_through_session; redeploy this project with a release that writes it."
+  case "${session}" in
+    ''|*[!0-9]*) die 2 "recorded deployed_through_session is not a number: ${session}" ;;
+  esac
+
+  case "${action}" in
+    materialize)
+      [ -f "${requirements}" ] || die 4 "no copied secret contract: ${requirements}"
+      exec "${ROOT_DIR}/bin/materialize-secrets.sh" \
+        --project "${manifest}" --requirements "${requirements}" --session "${session}"
+      ;;
+    attach|detach|status)
+      exec "${ROOT_DIR}/bin/edge-network.sh" "${action}" --project-key "${project_key}"
+      ;;
+    up|down)
+      exec "${ROOT_DIR}/bin/project-runtime.sh" \
+        --host "${HOST_MANIFEST}" --project-key "${project_key}" \
+        --through-session "${session}" "${action}"
+      ;;
+  esac
+}
+
+main "$@"

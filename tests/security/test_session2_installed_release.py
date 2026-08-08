@@ -132,6 +132,43 @@ def test_the_launchers_are_root_owned_and_not_writable_by_others() -> None:
         assert stat.st_mode & 0o100, f"{path} is not executable"
 
 
+def test_the_installed_launchers_are_the_ones_this_release_ships() -> None:
+    """The check that was missing, and the one D72 needed.
+
+    Every assertion above characterises the *release*, and every one of them
+    passed on a host whose launchers were two sessions old. Nothing compared the
+    file systemd actually executes against the file the repository ships,
+    because until Run 8 nothing but provisioning ever installed one -- so the
+    two were expected to drift and the drift had no name.
+
+    Byte comparison against the checkout, not against a project's recorded
+    release: with ADR 0037 a launcher resolves a release and holds nothing a
+    release owns, so all of them should be identical anyway, and the checkout is
+    the one copy that is under review. A checkout moved to a commit nobody
+    deployed fails this, and that failure says the right thing -- the host is
+    running a launcher that is not the one in this tree.
+    """
+    repository = Path(__file__).resolve().parents[2] / "libexec"
+    libexec = Path("/usr/local/libexec/agentic-postgres")
+
+    shipped = sorted(repository.glob("agentic-postgres-*"))
+    assert shipped, "the repository ships no launchers"
+
+    stale = []
+    for origin in shipped:
+        installed = libexec / origin.name.removeprefix("agentic-postgres-")
+        if not installed.is_file():
+            stale.append(f"{installed} is not installed")
+        elif installed.read_bytes() != origin.read_bytes():
+            stale.append(f"{installed} differs from {origin}")
+
+    assert not stale, (
+        "the host executes launchers other than the ones this release ships: "
+        + "; ".join(stale)
+        + ". Deploy a project to reinstall them."
+    )
+
+
 def test_the_running_containers_come_from_an_installed_release(
     project_a: dict[str, Any], release: Path
 ) -> None:

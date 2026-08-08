@@ -492,3 +492,95 @@ def test_launcher_names_match_the_paths_the_units_invoke() -> None:
         )
     available = {name.removeprefix("agentic-postgres-") for name in LAUNCHERS}
     assert invoked <= available, f"units invoke launchers that do not exist: {invoked - available}"
+
+
+# ---------------------------------------------------------------------------
+# ADR 0037 — an installed launcher may resolve a release and nothing else
+# ---------------------------------------------------------------------------
+#
+# One copy of each launcher serves every project on the host, including projects
+# deployed through different releases, and until Run 8 the only thing that ever
+# installed one was `bin/provision-host.sh`. So the copy that actually ran was
+# whatever the host was built with: a launcher fixed in Run 7 was still passing
+# `--session 2` to two Session 3 projects in Run 8 (D72).
+#
+# Two halves close it. The deploy now installs the launchers from the release,
+# which is asserted in tests/contract/test_installed_release.py; and an installed
+# launcher may no longer contain anything a release could change, which is what
+# makes overwriting a shared file from one project's deploy safe. This block is
+# the second half, and it is structural rather than textual on purpose -- the
+# question is not whether the word "session" appears, it is whether the file can
+# hold an answer that belongs to a release.
+
+
+def test_the_project_trampoline_delegates_to_the_release() -> None:
+    text = (LIBEXEC / "agentic-postgres-project").read_text(encoding="utf-8")
+    assert 'readonly RELEASE_LAUNCHER="libexec/project-launcher"' in text
+    assert 'exec "${launcher}" "$@"' in text
+
+
+@pytest.mark.parametrize("name", LAUNCHERS)
+def test_an_installed_launcher_holds_no_answer_a_release_owns(code_only, name: str) -> None:
+    """The session, the profile set and the secret contract are release facts.
+
+    Asserted over code with comments stripped, because the comment above each of
+    these files explains exactly why they must not appear -- and a scan that
+    counted the explanation as a violation would have to be weakened until it
+    counted nothing.
+    """
+    source = code_only((LIBEXEC / name).read_text(encoding="utf-8"))
+    for forbidden in ("--session", "--through-session", "--profile", "secrets.required.yaml"):
+        assert forbidden not in source, (
+            f"libexec/{name} names {forbidden}, which is a property of a release. "
+            "One copy of this file serves projects deployed through releases it "
+            "has never seen; it may resolve a release, not answer for one."
+        )
+
+
+def test_the_release_side_launcher_is_not_installed_anywhere() -> None:
+    """`libexec/project-launcher` must never reach /usr/local/libexec.
+
+    A copy outside a release would be a second answer to the question the split
+    exists to have exactly one answer to. The prefix is what keeps it out, so the
+    prefix is what is asserted -- in the installer and in the module the deploy
+    calls, which are two different implementations of the same rule.
+    """
+    assert (LIBEXEC / "project-launcher").is_file()
+    assert not (LIBEXEC / "project-launcher").name.startswith("agentic-postgres-")
+
+    provision = (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
+    assert '"${ROOT_DIR}"/libexec/agentic-postgres-*' in provision
+
+    from agentic_postgres import installed_release
+
+    assert installed_release.LAUNCHER_PREFIX == "agentic-postgres-"
+    installed = {
+        path.name.removeprefix("agentic-postgres-") for path in LIBEXEC.glob("agentic-postgres-*")
+    }
+    assert "project-launcher" not in installed
+
+
+def test_the_release_side_launcher_is_executable_in_the_git_index() -> None:
+    """Extensionless, so `bin/*.sh` globs miss it and the \\\\wsl$ share strips
+    the bit invisibly. The trampoline refuses a launcher that is not executable,
+    which turns a stripped bit into a project that will not start at boot."""
+    result = subprocess.run(
+        ["git", "ls-files", "--stage", "--", "libexec/project-launcher"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.startswith("100755 "), (
+        f"libexec/project-launcher is not 100755 in the git index: {result.stdout.strip()!r}"
+    )
+
+
+def test_the_release_side_launcher_reads_the_session_from_the_document() -> None:
+    """What moved out of the trampoline has to have landed somewhere."""
+    text = (LIBEXEC / "project-launcher").read_text(encoding="utf-8")
+    assert ".deployed_through_session" in text
+    assert "--through-session" in text
+    assert '--session "${session}"' in text
+    assert "set -euo pipefail" in text
+    assert "must run as root" in text

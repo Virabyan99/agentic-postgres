@@ -118,10 +118,12 @@ def test_the_two_projects_run_separate_containers(
 
 
 def test_the_two_projects_use_separate_volumes(
-    project_a: dict[str, Any], project_b: dict[str, Any]
+    as_root, rendered_document, project_a: dict[str, Any], project_b: dict[str, Any]
 ) -> None:
-    left = project_a["compose"]["volumes"]["postgres"]
-    right = project_b["compose"]["volumes"]["postgres"]
+    """The volume name is on the rendered branch, not the deployed one (D73)."""
+    del as_root
+    left = rendered_document(project_a["project"]["key"])["compose"]["volumes"]["postgres"]
+    right = rendered_document(project_b["project"]["key"])["compose"]["volumes"]["postgres"]
     assert left != right
 
     for name in (left, right):
@@ -197,14 +199,23 @@ def test_the_databases_have_different_names(
     assert project_a["database"]["name"] != project_b["database"]["name"]
 
 
+def internal_network(rendered_document, document: dict[str, Any]) -> str:
+    return rendered_document(document["project"]["key"])["compose"]["networks"]["internal"]
+
+
 def test_each_projects_migration_credential_opens_its_own_cluster(
-    as_root, migration_password, pg_login, project_a: dict[str, Any], project_b: dict[str, Any]
+    as_root,
+    rendered_document,
+    migration_password,
+    pg_login,
+    project_a: dict[str, Any],
+    project_b: dict[str, Any],
 ) -> None:
     """Guard the guard, and it is not optional here.
 
     The test below asserts that a login fails. A cluster that refuses every
     password -- because the role was never given one, because the credential
-    rotated out from under the materializer, because ``psql`` cannot reach the
+    rotated out from under the materializer, because the client cannot reach the
     port at all -- passes it completely. This is the control that says the
     refusal below is about *whose* password it was.
     """
@@ -212,7 +223,10 @@ def test_each_projects_migration_credential_opens_its_own_cluster(
     for document in (project_a, project_b):
         key = document["project"]["key"]
         code, stdout, stderr = pg_login(
-            document, document["database"]["roles"]["migration_user"], migration_password(key)
+            document,
+            internal_network(rendered_document, document),
+            document["database"]["roles"]["migration_user"],
+            migration_password(key),
         )
         assert code == 0 and stdout.strip() == "1", (
             f"{key}'s own migration credential does not open {key}: {stderr.strip()}"
@@ -220,7 +234,12 @@ def test_each_projects_migration_credential_opens_its_own_cluster(
 
 
 def test_neither_projects_migration_credential_opens_the_other(
-    as_root, migration_password, pg_login, project_a: dict[str, Any], project_b: dict[str, Any]
+    as_root,
+    rendered_document,
+    migration_password,
+    pg_login,
+    project_a: dict[str, Any],
+    project_b: dict[str, Any],
 ) -> None:
     """The clause of DEP-ISO-003 that had no proof behind it.
 
@@ -231,13 +250,20 @@ def test_neither_projects_migration_credential_opens_the_other(
     credential. The password is therefore presented against **the target's own
     migration role**, which does exist there. The only reason it can fail is that
     the value is wrong.
+
+    The connection arrives from another container on the target's internal
+    network, which is where dbmate's arrives from and the only place a password
+    is checked at all: the image trusts loopback (D74).
     """
     del as_root
     for document, other in ((project_a, project_b), (project_b, project_a)):
         target = document["project"]["key"]
         foreign_password = migration_password(other["project"]["key"])
         code, stdout, stderr = pg_login(
-            document, document["database"]["roles"]["migration_user"], foreign_password
+            document,
+            internal_network(rendered_document, document),
+            document["database"]["roles"]["migration_user"],
+            foreign_password,
         )
         assert code != 0, (
             f"{other['project']['key']}'s migration credential opened {target}: {stdout.strip()}"
@@ -286,38 +312,60 @@ def test_stopping_one_projects_cluster_leaves_the_other_serving(
 # ---------------------------------------------------------------------------
 
 
-def test_bootstrap_refuses_a_volume_belonging_to_another_project(
-    project_a: dict[str, Any], project_b: dict[str, Any], tmp_path: Path
-) -> None:
-    """Exit 11, and nothing changed (ADR 0030, ADR 0031).
-
-    Constructed by pointing A's document at B's cluster rather than by moving a
-    volume: the comparison under test is the sentinel row against the document,
-    and this exercises it without putting either project's data at risk.
-    """
-    foreign = json.loads(json.dumps(project_a))
-    foreign["database"]["container"] = project_b["database"]["container"]
-    foreign["database"]["name"] = project_b["database"]["name"]
-    document = tmp_path / "foreign-outputs.json"
-    document.write_text(json.dumps(foreign), encoding="utf-8")
-
-    before = sql(project_b, "SELECT project_key FROM app_private.project_identity;")
-
-    result = subprocess.run(
+def bootstrap_against(document_path: Path, state_root: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
         [
             str(Path(__file__).resolve().parents[2] / "bin" / "postgres-bootstrap.py"),
             "--outputs",
-            str(document),
+            str(document_path),
             "--mode",
             "apply",
             "--state-root",
-            str(tmp_path),
+            str(state_root),
         ],
         capture_output=True,
         text=True,
         check=False,
         timeout=180,
     )
+
+
+def write_foreign_document(
+    rendered_a: dict[str, Any], project_b: dict[str, Any], tmp_path: Path
+) -> Path:
+    """A's rendered document, pointed at B's cluster.
+
+    Built from the **rendered** branch because that is what ``--outputs`` takes:
+    ``assert_identity_matches`` compares ``compose.project_name``, which exists
+    only there, and a deployed document produced ``KeyError: 'compose'`` instead
+    of the refusal under test (D73). Pointing a document at the wrong cluster
+    rather than moving a volume exercises the same comparison without putting
+    either project's data anywhere near it.
+    """
+    foreign = json.loads(json.dumps(rendered_a))
+    foreign["database"]["container"] = project_b["database"]["container"]
+    foreign["database"]["name"] = project_b["database"]["name"]
+    path = tmp_path / "foreign-outputs.json"
+    path.write_text(json.dumps(foreign), encoding="utf-8")
+    return path
+
+
+def test_bootstrap_refuses_a_volume_belonging_to_another_project(
+    as_root,
+    rendered_document,
+    project_a: dict[str, Any],
+    project_b: dict[str, Any],
+    tmp_path: Path,
+) -> None:
+    """Exit 11, and nothing changed (ADR 0030, ADR 0031)."""
+    del as_root
+    document = write_foreign_document(
+        rendered_document(project_a["project"]["key"]), project_b, tmp_path
+    )
+
+    before = sql(project_b, "SELECT project_key FROM app_private.project_identity;")
+
+    result = bootstrap_against(document, tmp_path)
     assert result.returncode == 11, f"got {result.returncode}: {result.stderr}"
     assert "belongs to a different project" in result.stderr
 
@@ -326,30 +374,19 @@ def test_bootstrap_refuses_a_volume_belonging_to_another_project(
 
 
 def test_the_refusal_message_carries_no_secret(
-    project_a: dict[str, Any], project_b: dict[str, Any], tmp_path: Path
+    as_root,
+    rendered_document,
+    project_a: dict[str, Any],
+    project_b: dict[str, Any],
+    tmp_path: Path,
 ) -> None:
     """Every field it reports is a derived, non-secret identity."""
-    foreign = json.loads(json.dumps(project_a))
-    foreign["database"]["container"] = project_b["database"]["container"]
-    foreign["database"]["name"] = project_b["database"]["name"]
-    document = tmp_path / "foreign-outputs.json"
-    document.write_text(json.dumps(foreign), encoding="utf-8")
-
-    result = subprocess.run(
-        [
-            str(Path(__file__).resolve().parents[2] / "bin" / "postgres-bootstrap.py"),
-            "--outputs",
-            str(document),
-            "--mode",
-            "apply",
-            "--state-root",
-            str(tmp_path),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=180,
+    del as_root
+    document = write_foreign_document(
+        rendered_document(project_a["project"]["key"]), project_b, tmp_path
     )
+
+    result = bootstrap_against(document, tmp_path)
     combined = result.stdout + result.stderr
     for forbidden in ("password", "PASSWORD", "postgresql://", "secret"):
         assert forbidden not in combined, f"the refusal printed {forbidden!r}"

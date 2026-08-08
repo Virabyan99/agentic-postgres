@@ -163,13 +163,52 @@ def migration_password() -> Callable[[str], str]:
     return read
 
 
+#: Where the deploy installs each project's rendered output (ADR 0020).
+RENDERED_ROOT = Path("/var/lib/agentic-postgres/rendered")
+
+
 @pytest.fixture(scope="session")
-def pg_login() -> Callable[[dict[str, Any], str, str], tuple[int, str, str]]:
+def rendered_document() -> Callable[[str], dict[str, Any]]:
+    """One project's rendered document, as installed on the host.
+
+    The deployed document does not carry ``compose``: the two branches of
+    ``outputs.schema.json`` are deliberately different documents, and the volume
+    name, the network names and the Compose project name live only on the
+    rendered branch. Two Session 3 tests read ``document["compose"]`` out of a
+    deployed document and had never run, because both need two deployed projects
+    and there was only ever one (D73).
+
+    Read from ``/var/lib/agentic-postgres/rendered/<key>/`` rather than from the
+    checkout's ``.generated/``: the installed copy is the one the running
+    containers were started from, and the checkout's is whatever the operator
+    last rendered.
+    """
+
+    def read(project_key: str) -> dict[str, Any]:
+        path = RENDERED_ROOT / project_key / "outputs.json"
+        if not path.is_file():
+            pytest.fail(f"{project_key} has no installed rendered document at {path}")
+        document = json.loads(path.read_text(encoding="utf-8"))
+        assert document["document_kind"] == "rendered", (
+            f"{path} is a {document['document_kind']} document"
+        )
+        return document
+
+    return read
+
+
+@pytest.fixture(scope="session")
+def pg_login() -> Callable[[dict[str, Any], str, str, str], tuple[int, str, str]]:
     """Attempt a password login against a project's cluster. Returns, never judges.
 
-    Over TCP to ``127.0.0.1`` *inside* the container on purpose: the Unix socket
-    authenticates by peer and would report success for a password nobody checked,
-    which is the whole subject of the test that uses this.
+    **From a container on the project's internal network, not from inside the
+    cluster's own container.** The first version of this ran ``psql -h 127.0.0.1``
+    inside the postgres container and every login succeeded, including one with a
+    deliberately wrong password -- the image's ``pg_hba.conf`` carries
+    ``host all all 127.0.0.1/32 trust`` above its ``scram-sha-256`` line, so
+    loopback is trusted exactly as the Unix socket is (D74). Only a connection
+    arriving from another address reaches the line that checks a password, which
+    is also the line dbmate's connection reaches.
 
     The password crosses on **stdin** and is read into a shell variable in the
     container. It is never an argument to ``docker`` or to ``psql``, never in the
@@ -177,26 +216,36 @@ def pg_login() -> Callable[[dict[str, Any], str, str], tuple[int, str, str]]:
     ``docker inspect`` and no log.
     """
 
-    def login(document: dict[str, Any], role: str, password: str) -> tuple[int, str, str]:
+    def login(
+        document: dict[str, Any], network: str, role: str, password: str
+    ) -> tuple[int, str, str]:
         # `export` on its own line rather than as a `VAR=v exec ...` prefix: a
         # prefix assignment to a special builtin persists in the shell but is not
-        # required to be exported, and `exec` replaces that shell. Measured
-        # failure mode is a password prompt psql then refuses because of `-w`,
-        # which reads as a wrong password.
+        # required to be exported, and `exec` replaces that shell. `-w` so that a
+        # rejected password fails instead of waiting on a prompt nobody answers.
         script = (
             'PGPASSWORD="$(cat)"; export PGPASSWORD; '
-            'exec psql -h 127.0.0.1 -U "$1" -d "$2" -w -X -qtA -c "SELECT 1"'
+            'exec psql -h "$1" -p 5432 -U "$2" -d "$3" -w -X -qtA -c "SELECT 1"'
         )
         result = subprocess.run(
             [
                 "docker",
-                "exec",
-                "-i",
-                document["database"]["container"],
+                "run",
+                "--rm",
+                "--interactive",
+                "--network",
+                network,
+                "--entrypoint",
                 "sh",
+                _postgres_image(),
                 "-c",
                 script,
                 "sh",
+                # The service name, which is what resolves on the internal
+                # network and what the dbmate entrypoint connects to. The
+                # container name would not resolve: Compose names the container
+                # and the network alias differently.
+                "postgres",
                 role,
                 document["database"]["name"],
             ],
@@ -204,8 +253,22 @@ def pg_login() -> Callable[[dict[str, Any], str, str], tuple[int, str, str]]:
             capture_output=True,
             text=True,
             check=False,
-            timeout=60,
+            timeout=120,
         )
         return result.returncode, result.stdout, result.stderr
 
     return login
+
+
+def _postgres_image() -> str:
+    """The digest-pinned cluster image, reused as a client.
+
+    The same image the cluster runs, so the client's libpq is the one the server
+    was built against and a failure is about the credential rather than about a
+    protocol version.
+    """
+    for line in (REPO_ROOT / "versions.env").read_text(encoding="utf-8").splitlines():
+        name, _, value = line.partition("=")
+        if name.strip() == "POSTGRES_IMAGE":
+            return value.strip()
+    pytest.fail("POSTGRES_IMAGE is absent from versions.env")

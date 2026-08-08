@@ -21,11 +21,13 @@ import pytest
 
 from agentic_postgres.installed_release import (
     COMMIT_PATTERN,
+    LAUNCHER_PREFIX,
     ReleaseError,
     assert_clean,
     assert_trustworthy,
     install,
     installed_commits,
+    reconcile_launchers,
     release_path,
     resolve_commit,
     validate_commit,
@@ -204,3 +206,49 @@ def test_installed_commits_ignores_anything_not_named_for_a_commit(tmp_path: Pat
 
 def test_installed_commits_is_empty_when_nothing_is_installed(tmp_path: Path) -> None:
     assert installed_commits(tmp_path / "absent") == []
+
+
+# ---------------------------------------------------------------------------
+# ADR 0037 — the deploy installs the indirection, not only the code
+# ---------------------------------------------------------------------------
+
+
+def test_reconciling_launchers_requires_root(tmp_path: Path) -> None:
+    """It writes into /usr/local/libexec and chowns to root; nothing less does.
+
+    Asserted rather than assumed because the failure without it is silent in the
+    worst way: a non-root deploy that skipped the step would leave the host
+    executing the previous launcher while reporting a successful release
+    install, which is the exact shape of the defect this function closes.
+    """
+    if os.geteuid() == 0:
+        pytest.skip("this asserts the refusal, which does not apply to root")
+    with pytest.raises(ReleaseError, match="requires root"):
+        reconcile_launchers(tmp_path, libexec=tmp_path / "libexec")
+
+
+def test_the_launcher_prefix_excludes_the_release_side_launcher() -> None:
+    """`libexec/project-launcher` must not be installable by this path.
+
+    The prefix is the only thing keeping it out of /usr/local/libexec, where a
+    copy would be a second answer to which session a project was deployed
+    through -- the question D59 and D72 were both about.
+    """
+    assert LAUNCHER_PREFIX == "agentic-postgres-"
+    assert not "project-launcher".startswith(LAUNCHER_PREFIX)
+
+
+def test_the_deploy_reconciles_the_launchers_it_ships(code_only) -> None:
+    """Wired into the deploy, not merely available to it.
+
+    A source assertion because the behaviour needs root and a real release; the
+    behaviour itself is measured on the host by
+    ``test_the_installed_launchers_are_the_ones_this_release_ships``.
+    """
+    source = code_only(
+        (Path(__file__).resolve().parents[2] / "bin" / "deploy-project.py").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert "installed_release.reconcile_launchers(release)" in source
+    assert source.index("installed_release.install(") < source.index("reconcile_launchers")

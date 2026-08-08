@@ -254,7 +254,7 @@ def test_restarting_the_project_unit_brings_back_the_recorded_session(
 
 
 def test_the_active_secret_generation_opens_the_cluster(
-    as_root, migration_password, pg_login, project: dict[str, Any]
+    as_root, rendered_document, migration_password, pg_login, project: dict[str, Any]
 ) -> None:
     """A valid secret is one that opens the cluster, not one whose file exists.
 
@@ -272,8 +272,11 @@ def test_the_active_secret_generation_opens_the_cluster(
     del as_root
     key = project["project"]["key"]
     code, stdout, stderr = pg_login(
-        project, project["database"]["roles"]["migration_user"], migration_password(key)
+        project,
+        rendered_document(key)["compose"]["networks"]["internal"],
+        project["database"]["roles"]["migration_user"],
+        migration_password(key),
     )
     assert code == 0 and stdout.strip() == "1", (
-        f"the active secret generation does not open {key}: {stderr}"
+        f"the active secret generation does not open {key}: {stderr.strip()}"
     )

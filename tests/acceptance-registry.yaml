@@ -585,6 +585,7 @@
     - tests/deployment/test_session3_convergence.py::test_restarting_the_project_unit_brings_back_the_recorded_session
     - tests/deployment/test_session3_convergence.py::test_the_active_secret_generation_opens_the_cluster
     - tests/security/test_session2_installed_release.py::test_the_running_containers_come_from_an_installed_release
+    - tests/security/test_session2_installed_release.py::test_the_installed_launchers_are_the_ones_this_release_ships
   description: >-
     A project restarted by systemd, or restored after a reboot, comes back from
     the release its deployed document records, through the session that document

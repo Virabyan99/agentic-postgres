@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Stable root-owned launcher for one project.
+# Stable root-owned trampoline for one project.
 # Installed at /usr/local/libexec/agentic-postgres/project.
 #
 # Invoked by agentic-postgres-project@.service, whose instance name (%i) is the
@@ -10,14 +10,36 @@
 # answer to. The answer is that %i is validated against the project-key pattern
 # before it is used, and every path is derived from it rather than accepted.
 #
+# THIS FILE RESOLVES A RELEASE AND NOTHING ELSE (ADR 0037).
+#
+# It is installed by `bin/provision-host.sh` at provisioning time and refreshed
+# by every deploy, and one copy serves every project on the host -- including
+# projects deployed through different releases. So anything it knows, it knows on
+# behalf of releases it has never seen. It used to know which session to
+# materialize and which script each action runs; both are properties of a
+# release, and the copy sitting on the host was written before Session 3 existed.
+# It ran `--session 2` against a Session 3 project, wrote a secret generation
+# holding Session 2's secret set, repointed the project at it, and only then
+# failed (D72).
+#
+# What is left here is the part that cannot come from a release, because it is
+# what finds the release: validate the instance name, read the deployed
+# document, and hand over to that release's own launcher. Everything else lives
+# in `libexec/project-launcher`, which ships inside the release and is therefore
+# always the version that deployed the project it is launching.
+#
 # Exit codes: 2 invalid input, 3 missing prerequisite, 4 missing runtime
-# prerequisite, 8 secret failure, 9 edge failure.
+# prerequisite. Anything else is the release launcher's, passed through by exec.
 
 set -euo pipefail
 
 readonly STATE_ROOT="/etc/agentic-postgres/projects"
 readonly RELEASE_ROOT="/opt/agentic-postgres/releases"
-readonly HOST_MANIFEST="/etc/agentic-postgres/host.yaml"
+
+# The one path this file and every release must agree on. It is the interface,
+# and it is deliberately a single fixed name rather than a per-action mapping:
+# a mapping is a fact about a release, and this file may not hold one.
+readonly RELEASE_LAUNCHER="libexec/project-launcher"
 
 # Same shape as schemas/outputs.schema.json's projectKey: a slug of at least 3
 # characters, a hyphen, and an environment of at least 2.
@@ -37,8 +59,9 @@ Usage: /usr/local/libexec/agentic-postgres/project <project-key> <action>
 Actions: materialize | up | down | attach | detach | status
 
 Resolves the installed release recorded in that project's deployed outputs
-document and runs that release's scripts. Not intended for direct operator use;
-systemd invokes it through agentic-postgres-project@<project-key>.service.
+document and executes that release's own launcher. Not intended for direct
+operator use; systemd invokes it through
+agentic-postgres-project@<project-key>.service.
 USAGE
 }
 
@@ -49,7 +72,6 @@ main() {
   esac
 
   local project_key="$1"
-  local action="${2-}"
 
   # Validated before it becomes a path component. This is the check that makes
   # the systemd instance name safe.
@@ -57,11 +79,10 @@ main() {
     die 2 "not a valid project key: ${project_key}"
   fi
 
-  case "${action}" in
-    materialize|up|down|attach|detach|status) ;;
-    "") usage >&2; die 2 "an action is required." ;;
-    *) usage >&2; die 2 "unknown action: ${action}" ;;
-  esac
+  # The action is passed through unexamined. Which actions exist is a property
+  # of a release, and a list here would be a second definition of it -- the
+  # kind that agrees right up until a release adds one.
+  [ "$#" -ge 2 ] || { usage >&2; die 2 "an action is required."; }
 
   [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
   command -v jq >/dev/null 2>&1 || die 3 "jq is not installed."
@@ -86,43 +107,18 @@ main() {
   owner="$(stat -c '%U' "${release}")"
   [ "${owner}" = "root" ] || die 2 "installed release is owned by ${owner}, expected root."
 
-  # The state file names the copied manifests. They are copies under
-  # /etc/agentic-postgres/projects/, not paths into anyone's checkout, so a
-  # deployed project keeps working after the operator deletes their clone.
-  local manifest requirements
-  manifest="${STATE_ROOT}/${project_key}/manifest.yaml"
-  requirements="${STATE_ROOT}/${project_key}/secrets.required.yaml"
-  [ -f "${manifest}" ] || die 4 "no copied project manifest: ${manifest}"
+  local launcher="${release}/${RELEASE_LAUNCHER}"
+  # Named rather than guessed at: a release that predates ADR 0037 has its
+  # launcher logic in the installed copy of this file, which no longer holds
+  # any. Saying so is the whole point -- the alternative is falling back to
+  # whatever this file happens to know, which is how a Session 3 project got
+  # started as a Session 2 one.
+  [ -f "${launcher}" ] \
+    || die 4 "release ${commit} carries no ${RELEASE_LAUNCHER}; it predates ADR 0037. Redeploy ${project_key}."
+  [ -L "${launcher}" ] && die 2 "${launcher} is a symlink, which is not accepted."
+  [ -x "${launcher}" ] || die 4 "${launcher} is not executable."
 
-  # Read back, not assumed. This launcher runs at boot with no operator to ask
-  # which session the project was deployed through, and the two things that
-  # depend on the answer -- which secrets are materialized and which Compose
-  # profiles start -- are exactly the two that must not disagree with what the
-  # deploy did. A literal here was correct while 2 was the only value, and
-  # would have brought a Session 3 project back up without its cluster (D59).
-  local session
-  session="$(jq -r '.deployed_through_session // empty' "${deployment}")"
-  [ -n "${session}" ] \
-    || die 4 "${deployment} records no deployed_through_session; redeploy this project with a release that writes it."
-  case "${session}" in
-    ''|*[!0-9]*) die 2 "recorded deployed_through_session is not a number: ${session}" ;;
-  esac
-
-  case "${action}" in
-    materialize)
-      [ -f "${requirements}" ] || die 4 "no copied secret contract: ${requirements}"
-      exec "${release}/bin/materialize-secrets.sh" \
-        --project "${manifest}" --requirements "${requirements}" --session "${session}"
-      ;;
-    attach|detach|status)
-      exec "${release}/bin/edge-network.sh" "${action}" --project-key "${project_key}"
-      ;;
-    up|down)
-      exec "${release}/bin/project-runtime.sh" \
-        --host "${HOST_MANIFEST}" --project-key "${project_key}" \
-        --through-session "${session}" "${action}"
-      ;;
-  esac
+  exec "${launcher}" "$@"
 }
 
 main "$@"
