@@ -42,7 +42,7 @@ at **D80**.
 | **D96** | An installed root-owned broker at `/usr/local/libexec/agentic-postgres/database-access`, exposed through a narrow `sudo -n` rule. | **ADR 0037 constrains that directory**: an installed launcher may resolve a release and nothing else, because one copy serves projects deployed through releases it has never seen. A broker that validates policy, reads state and returns secrets is exactly the kind of release-owned logic that ADR forbids there — and the reason it forbids it is that a Session 2 launcher ran `--session 2` against a Session 3 project for three runs. | **The broker follows the trampoline split.** `libexec/agentic-postgres-database-access` resolves the project's recorded release and `exec`s `<release>/libexec/database-access`, which holds every policy decision. The deploy installs the trampoline with the others; the structural test that a launcher holds no answer a release owns covers it automatically. | The alternative is a second privileged host-global program that ages independently of the releases it serves, which is the defect ADR 0037 was written for, reintroduced in the one place that hands out credentials. | no |
 | **D97** | `bin/pool.sh` and `bin/database-ports.sh` are new commands with their own conventions. | Every command in `bin/` is subject to `test_cli_contract.py`: it must exist, be `100755` **in the git index**, carry the shell preamble, expose `--help` exiting 0, reject unknown options, obey the exit-code convention, work from any directory, print no environment, and document no secret argument. New commands join `SHELL_COMMANDS`. | **Adopt the commands, subject to the inventory.** Adding them to `SHELL_COMMANDS` is what subjects them to those checks; it is an inventory addition rather than a weakening. | Writing through the `\\wsl$` share strips the executable bit, and the index mode is what the contract checks — a stripped bit is a test failure rather than a silent break. This has cost time in every session so far. | no |
 | **D98** | *(Run 1, from this plan's own D85)* Record the measured pooler version as a `PGBOUNCER_MINIMUM_VERSION` feature floor. | The floor mechanism derives the resolved version from the image **tag** and compares with `as_version`, which strips non-digits per component: `v1.24.1-p1` becomes `(1, 24, 11)`, and a downgrade to `1.24.0-p1` becomes `(1, 24, 1)` — which is not less than a floor of `1.24.1`. The comparator cannot express the precision the measurement has. | **No floor. The exact version is asserted in `tests/contract/test_image_contracts.py`** by running `pgbouncer --version` against the locked digest, alongside the two behavioural measurements that are the actual reason the version was kept. | This plan's §5 says that module is "the only place the values themselves are written down… so that there is one authority and it is executable". A floor here would be a second, weaker authority for the same fact — the shape ADR 0035 named "a check that could not fail". | no |
-| **D100** | *(§5 of this plan, as written)* Run 5 deploys Project A through session 4, while the fifteen Session 4 requirements stay `future` until Runs 7–8 and `CURRENT_SESSION` moves with them (§2.3, D54). | **Those two cannot both hold.** `bin/deploy-project.py` refuses `--through-session` above `CURRENT_SESSION`, so no session-4 deploy is possible while the constant reads `3`. And moving the constant to `4` makes exactly fifteen requirements overdue under `test_no_requirement_at_or_before_the_gate_session_remains_future` — `DBX-001..005`, `DBX-POOL-001..003`, `DBX-PORT-001`, `DEP-ISO-004`, `DX-DB-001/002`, `SEC-DBX-001..003` — verified by running the registry suite under `APG_ACCEPTANCE_SESSION=4`. This is D54 again, one session on, and this plan reproduced it while quoting it. | **Open — the sequencing is a decision, recorded here rather than resolved inline.** The two shapes are: *(a)* Session 3's, where every real test is written first, the constant moves in one run, and all host work follows; or *(b)* separating the acceptance session from the highest deployable session, which is two constants for two genuinely different questions and the shape ADR 0037 was written about. | Found in Run 3 rather than in the middle of Run 5's first publication, which is the whole reason the host half of a run is attempted early. Note what is *not* in conflict: `bin/bootstrap-providers.sh` already takes `--session` explicitly, so the provider half can converge at session 4 today; only the deploy has the ceiling. | no |
+| **D100** | *(§5 of this plan, as written)* Run 5 deploys Project A through session 4, while the fifteen Session 4 requirements stay `future` until Runs 7–8 and `CURRENT_SESSION` moves with them (§2.3, D54). | **Those two cannot both hold.** `bin/deploy-project.py` refuses `--through-session` above `CURRENT_SESSION`, so no session-4 deploy is possible while the constant reads `3`. And moving the constant to `4` makes exactly fifteen requirements overdue under `test_no_requirement_at_or_before_the_gate_session_remains_future` — `DBX-001..005`, `DBX-POOL-001..003`, `DBX-PORT-001`, `DEP-ISO-004`, `DX-DB-001/002`, `SEC-DBX-001..003` — verified by running the registry suite under `APG_ACCEPTANCE_SESSION=4`. This is D54 again, one session on, and this plan reproduced it while quoting it. | **Session 3's shape, decided after Run 3.** Every real test is written first, `CURRENT_SESSION` moves to 4 in one commit that deletes all fifteen placeholders (Run 8), and every host operation follows it (Runs 9–10). The build order in §5 is re-sequenced accordingly: the deploy moves from Run 5 to Run 9. The alternative — separating the acceptance session from a highest-deployable session — was rejected as a second answer to \"what session is this tree\", which is the shape ADR 0037 was written about. | Found in Run 3 rather than in the middle of Run 5's first publication, which is the whole reason the host half of a run is attempted early. Note what is *not* in conflict: `bin/bootstrap-providers.sh` already takes `--session` explicitly, so the provider half can converge at session 4 today; only the deploy has the ceiling. | no |
 | **D99** | *(Run 1, discovered)* Nothing in the runbook. | `PYTHON_RUNTIME_IMAGE` selects the **rolling tag** `docker.io/library/python:3.12-slim`, and re-locking during Run 1 moved its digest — the tag was re-pushed between 2026-08-05 and 2026-08-08. `versions.env` separately asserts `PYTHON_VERSION=3.12.13`, checked against `.python-version`. So the repository's interpreter is pinned to a patch and the image every first-party service is built `FROM` is pinned only to a minor, and **nothing compared them**. | **A test measures the base image's Python against `PYTHON_VERSION`.** They agree today (3.12.13 both sides), which is the point: the check exists before they disagree, not after. Tightening the tag to `3.12.13-slim` is a candidate change and is left as an open item, not made silently in this run. | The project's signature defect, found in its own lock file: a value that looked pinned and was pinned one component short. The next 3.12.x push moves the container's interpreter with nothing to notice. | no |
 
 ---
@@ -317,26 +317,24 @@ Outputs schema v4 on both branches, `access_profiles`, the `v3 → v4` migration
 
 The PgBouncer entrypoint assembles its user list in tmpfs at `0600`, from mounted secret files, and never writes it to a persistent volume. No password enters `compose.env`, the resolved model, `docker inspect`, argv on either side of the daemon, or a log.
 
-### Run 4 — The pooler service and the port allocator
-*Offline model, then a host allocation that publishes nothing.*
+### Run 4 — The port allocator and the privileged render
+*Offline.*
 
-The `pgbouncer` service under the `session4` profile: internal network only, no Traefik label, no edge attachment, `no-new-privileges`, capabilities dropped, fixed non-root user, read-only root filesystem with tmpfs for runtime state, bounded logging, and a health check that proves the admin identity, the pool mode, the prepared-statement setting and a backend round-trip — without a password in a health command or its output.
+The pooler service itself landed in Run 3 (D89's consumer cross-check forced it). What remains here is its health check — proving the admin identity, the pool mode, the prepared-statement setting and a backend round-trip, **without a password in a health command or its output**, and without being satisfiable by a listening port, which Run 3 measured is not the same thing.
 
 `bin/database-ports.sh` with `allocate`, `verify`, `show`, `release`, under a host lock, validating the registry before mutation, checking both the registry and actual bind availability, allocating both ports as one transaction, and reusing an existing allocation on redeploy.
 
-`deploy.sh --render-runtime-only` (D95) lands here: it can reserve and render without moving a container, which is what makes Run 5 recoverable.
+`deploy.sh --render-runtime-only` (D95) lands here: it can reserve and render without moving a container, which is what makes the first publication recoverable.
 
-### Run 5 — Activate the runtime role, publish, and converge Project A
-*Host. The first run that changes what is reachable.*
+### Run 5 — Role activation and the migration that carries it
+*Offline. The code, not its execution.*
 
 The role activation is a privileged, idempotent bootstrap action: `LOGIN` and a SCRAM password set over the container-local socket from the mounted secret, never through argv and never printed; `NOINHERIT` preserved at role level with `authenticated` membership granted `INHERIT TRUE, SET FALSE, ADMIN FALSE`; `NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS` preserved; `CONNECT` granted, `CREATE` and `TEMPORARY` not; an explicit `CONNECTION LIMIT` that fits the computed budget.
 
 The migration that belongs in database history — grants through `authenticated`, a safe `search_path`, conservative statement and idle-transaction timeouts, explicit revocations — is a normal immutable migration in `migrations/templates/`, named in `manifest.json`, frozen in `released.lock.json`, and recorded in the ledger **by the superuser** (ADR 0034). Password changes are secret lifecycle and appear in no migration.
 
-Then: allocate, publish, converge, verify from the host, and **scan from off-host before anything reports `ready`** (§4.1).
-
 ### Run 6 — The connection helper and the access broker
-*Host and an unprivileged workstation.*
+*Offline.*
 
 `bin/connect.sh` leaves `FUTURE_STUBS` (D88) with `tunnel`, `psql`, `print-env`, `exec`, `status` and `stop`. Least-privileged defaults: `psql` defaults to `runtime_direct`; migration authority requires explicit selection and prints a warning; no command silently substitutes a migration credential because a direct transport was chosen.
 
@@ -344,29 +342,41 @@ SSH host-key verification is required and `StrictHostKeyChecking=no` is refused;
 
 The broker follows D96's trampoline split, with enumerated operations, no caller-supplied path, no arbitrary secret name, and a policy file that is root-owned, schema-validated and atomically published.
 
-### Run 7 — Client compatibility
-*Host, through the helper.*
+### Run 7 — Client fixtures
+*Offline.*
 
-`psql` first, because it is the client with no framework between it and the boundary, and it settles `DBX-003`. Then Node `pg`, then Psycopg 3, then Prisma — runtime through the pooler, migration through the direct transport against the disposable schema (§4.4).
+`psql` first, because it is the client with no framework between it and the boundary. Then Node `pg`, then Psycopg 3, then Prisma at the locked major (D86) — runtime through the pooler, migration through the direct transport against the disposable schema (§4.4).
 
-Every fixture pins dependencies through committed lock files, sets `application_name`, uses parameterized queries, sets request claims inside explicit transactions, proves User A cannot see User B's rows, and exits non-zero on an unexpected row count. **A prepared-statement test may not be made to pass by disabling prepared statements**, unless it is explicitly the documented fallback case and named as one.
+Every fixture pins dependencies through committed lock files, sets `application_name`, uses parameterized queries, sets request claims inside explicit transactions, proves User A cannot see User B's rows, and exits non-zero on an unexpected row count. **A prepared-statement test may not be made to pass by disabling prepared statements**, unless it is explicitly the documented fallback case and named as one. Fixtures live under `services/clients/<name>/` (Run 1).
 
-### Run 8 — Pool behaviour, session state, and Project B
-*Host, two projects.*
+### Run 8 — Activation
+*Offline. The run D100 exists for.*
 
-Multiplexing proved by observation rather than connectivity: more clients than `default_pool_size`, short concurrent transactions, and server connections observed to stay inside the budget. Queue behaviour bounded by a fixture-local timeout shorter than the gate's, so a saturation test can fail without stalling the run. Session-state negative tests as **product contracts**, not defects: transaction-local claims vanish at commit, a deliberately set session GUC is absent for the next client because the reset policy ran, and a prepared statement survives a proven backend change.
+**All fifteen Session 4 placeholders are deleted and replaced with real tests, and `CURRENT_SESSION` moves from 3 to 4, in one commit.** `DBX-001..005`, `DBX-POOL-001..003`, `DBX-PORT-001`, `DEP-ISO-004`, `DX-DB-001/002` and `SEC-DBX-001..003` — the exact fifteen the registry suite names under `APG_ACCEPTANCE_SESSION=4`.
 
-Then Project B, and `DEP-ISO-004` with the credential clause proved the way D70 requires.
+The constant and the implementations it vouches for move together, or the constant means nothing. That is D54's rule and this is the third time it has decided a build order.
 
-### Run 9 — Restart, reboot, rotation
-*Host, one maintenance window.*
+The tests written here are host- and external-marked, so they are deselected in an offline gate and the Session 1 gate stays green. That is also the risk this run carries: a test that is deselected everywhere it is written is a test nobody has seen fail, and **D70 is what that costs** — a claim that read as proved for two runs behind six node IDs, none of which presented a credential to anything. Every test written here states, in its own docstring, what would have to break for it to go red.
+
+`DEP-ISO-004`'s credential clause gains a node ID of its own here, which the registry records as an activation obligation rather than leaving to memory.
+
+### Run 9 — The host sequence
+*Host, and off-host for the negative proof. The first run that changes what is reachable.*
+
+Deploy Project A through session 4 — now possible, because Run 8 moved the constant. Bootstrap converges the two new secrets at the provider (Run 3 measured that it will), materialization writes them at `0400 70:70`, the runtime role is activated, and its migration is applied and recorded by the superuser.
+
+Then: allocate, publish, converge, verify from the host, and **scan from off-host before anything reports `ready`** (§4.1).
+
+Then the proofs Runs 4–7 wrote: the clients through the helper; multiplexing observed rather than assumed — more clients than `default_pool_size`, short concurrent transactions, server connections observed to stay inside the budget; queue behaviour bounded by a fixture-local timeout shorter than the gate's, so a saturation test can fail without stalling the run; session-state negative tests as **product contracts** — transaction-local claims vanish at commit, a deliberately set session GUC is absent for the next client, and a prepared statement survives a *proven* backend change.
+
+Then Project B, and `DEP-ISO-004` with the credential clause proved the way D70 requires: the foreign password against the target's **own** role, from a container on the target's internal network.
+
+### Run 10 — Restart, reboot, rotation, and the gate
+*Host, one maintenance window, then all three environments.*
 
 The restart matrix extends `DEP-BOOT-001`, which Run 8 of Session 3 added: pooler restart with the cluster up, cluster restart with the pooler configured, project unit restart, and a reboot. After each, allocations are unchanged, both transports recover, and no public listener appears. One controlled credential rotation with its brief planned interruption, ending with the old credential proved to fail.
 
 Two procedural lessons from Session 3's reboot, both of which cost a run: **a post-reboot check must wait for the units to reach `active`** rather than run at `up 0 min`, and **a value the suite writes may not be compared for equality across a reboot** — identity and ledger for equality, ordinary rows for never-lost.
-
-### Run 10 — Gate, evidence, documentation
-*All three environments.*
 
 `bin/session-04-check.sh` in the shape D82 settles. Claims added to `evidence_claims.CLAIMS` (D91), session-owned and cumulative, so the Session 4 gate proves Sessions 2 and 3's claims as well. Documentation: `docs/database-connections.md`, `docs/client-compatibility.md`, `docs/pool-operations.md`, `docs/session-04-operator-guide.md` — flat in `docs/`, in `REQUIRED_PATHS`, linked from `README.md` and `docs/handoff.md`, and recording **what was measured** rather than what was intended.
 
