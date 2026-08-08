@@ -373,6 +373,25 @@ reboot is verified by re-running the host gate afterwards against a snapshot
 taken before it. It is also the only thing that would have caught D72 without
 Run 8, and it would have caught it by leaving both projects down.
 
+**Measured.** Both projects came back from the recorded release with no operator
+present, and the gate passed on the rebooted host: 123 passed, 0 failed, 0
+skipped, `isolation passed`, `secret_leakage passed`. Identity, ledger, recorded
+session and recorded commit identical across the reboot for both projects, with
+each identity row older than the postmaster now serving it.
+
+Two things about the procedure itself, both of which cost a run:
+
+*A boot-time assertion has to wait for the boot.* The first post-reboot run
+executed at `up 0 min` with both units still `activating`, and reported ten
+failures that all said the host was still booting. It waits now.
+
+*The snapshot compared a value the suite writes.* `app.notes` is inserted into
+once per isolation run, so a gate between the snapshot and the comparison moves
+it, and the comparator reported a change the reboot had not caused. Identity,
+ledger, session and commit are compared for equality; rows are compared for
+never-lost. This is the defect the whole document is about, produced by the
+script written to detect it.
+
 Destructive volume tests are **not** written here and the disposable third
 project is not built (**D69**). No Session 3 requirement names a destructive
 test, and a guard over an empty set is a check whose first red would be its first
