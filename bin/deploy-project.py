@@ -56,6 +56,7 @@ from agentic_postgres import (
     edge_state,
     installed_release,
     observation,
+    rendering,
     runtime_override,
 )
 from agentic_postgres.bootstrap_state import load_state, state_path
@@ -132,15 +133,32 @@ def _restore_checkout_ownership(path: Path) -> None:
     `/var/lib/agentic-postgres/rendered/`; this tree is a by-product of running
     the renderer here, so handing it back costs nothing. Best-effort on purpose:
     a deploy must not fail because it could not tidy up a scratch directory.
+
+    **The lock file counts.** `rendering.project_lock` opens
+    `.generated/.locks/<key>.lock` at mode 0600, and under sudo that file is
+    root's. It sits outside the rendered directory, so restoring only that
+    directory left the lock behind — and the *next* unprivileged render of that
+    project died with `PermissionError` on the lock, before it had validated
+    anything. Latent since Session 2: alpha-dev had been deployed under sudo and
+    nobody re-rendered it as the operator until Run 7 (D65).
     """
     uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
     if not (uid and gid):
         return
-    try:
-        for target in (path, *path.rglob("*")):
+
+    targets = [path, *path.rglob("*")]
+    locks = rendering.LOCK_ROOT
+    if locks.is_dir():
+        targets += [locks, *locks.glob("*.lock")]
+
+    for target in targets:
+        try:
             os.chown(target, int(uid), int(gid))
-    except OSError:
-        pass
+        except OSError:
+            # Per target, not per run. One unreachable path must not stop the
+            # rest from being handed back -- which is what a single try around
+            # the whole loop did.
+            continue
 
 
 def _install_file(source: Path, destination: Path) -> None:

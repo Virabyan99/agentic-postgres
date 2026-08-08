@@ -40,6 +40,20 @@ def test_the_install_is_atomic(source: str) -> None:
     assert "os.replace" in source
 
 
+def test_the_render_lock_is_handed_back_with_the_rendered_directory(source: str) -> None:
+    """D65: the lock lives outside the directory the deploy restores.
+
+    `rendering.project_lock` opens `.generated/.locks/<key>.lock` at 0600, and
+    under sudo that file belongs to root. Restoring only the rendered directory
+    left it behind, so the next *unprivileged* render of that project died with
+    `PermissionError` on the lock before it had validated anything. Latent since
+    Session 2 and found on the host in Run 7, three sessions after the deploy
+    that caused it.
+    """
+    body = source.split("def _restore_checkout_ownership")[1].split("\ndef ")[0]
+    assert "LOCK_ROOT" in body, "the deploy restores the rendered directory but not the lock"
+
+
 def test_the_router_name_is_read_back_not_re_derived(source: str, code_only) -> None:
     """Deriving the router name a second time creates a second path to the same
     answer; the deployed document would describe a project the render never
