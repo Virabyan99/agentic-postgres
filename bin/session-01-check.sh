@@ -14,13 +14,36 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 cd "$ROOT_DIR"
 
+# Interpreter resolution, in this order and for these reasons:
+#
+#   1. the repository's own venv, because `sudo` resets PATH to secure_path and
+#      a venv the operator activated is therefore invisible to this script;
+#   2. python3, because Ubuntu ships no bare `python` and has not for years;
+#   3. python, for a machine where the venv is already on PATH.
+#
+# A bare `python` is a standing trap this repository documents, and five Session
+# 2 scripts walked into it. This one walked into it too, and stayed there until
+# Run 9 ran the gate under sudo on the host and got `python: command not found`
+# from line 23 -- exit 127, from the command whose exiting 0 is the standing
+# non-negotiable. It works when a venv is active, which is every way anyone had
+# run it (D80).
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then printf '%s' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then command -v python3
+  elif command -v python >/dev/null 2>&1; then command -v python
+  else
+    printf 'session-01-check: no Python interpreter found.\n' >&2
+    exit 3
+  fi
+}
+
 # Derived from the package, never written here as a literal (ADR 0014). A
 # hard-coded value made the registry policy and the tree's own CURRENT_SESSION
 # disagree the moment Session 2 activated its requirements, and no ordering of
 # two commits kept both green. tests/contract/test_gate_contract.py asserts that
 # no session number is written into this file.
 APG_ACCEPTANCE_SESSION="$(
-  PYTHONPATH="${ROOT_DIR}/src" python -c \
+  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" -c \
     'from agentic_postgres import CURRENT_SESSION; print(CURRENT_SESSION)'
 )"
 export APG_ACCEPTANCE_SESSION
@@ -74,8 +97,8 @@ step "2. Static quality and lock checks"
 # libexec/* is named explicitly: those launchers are extensionless, so the
 # bin/*.sh glob misses them, and they are the scripts systemd runs as root.
 shellcheck deploy.sh bin/*.sh libexec/*
-python -m ruff check src bin tests
-python -m ruff format --check src bin tests
+"$(python_bin)" -m ruff check src bin tests
+"$(python_bin)" -m ruff format --check src bin tests
 bin/lock-dev-deps.sh --check
 bin/lock-versions.sh --check
 
@@ -105,7 +128,7 @@ done
 # already contract (CFG-005), so this asks "which directory did this manifest
 # produce" using the answer the renderer itself published.
 mapfile -t RENDERED_DIRS < <(
-  PYTHONPATH="${ROOT_DIR}/src" python - "${FIXTURES[@]}" <<'PYTHON'
+  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "${FIXTURES[@]}" <<'PYTHON'
 import hashlib
 import json
 import sys
@@ -142,24 +165,24 @@ printf 'rendered:%s\n' "$(printf ' %s' "${RENDERED_DIRS[@]##*/}")"
 step "4. Active contract tests, with machine-readable output"
 # ---------------------------------------------------------------------------
 mkdir -p .generated/session-01
-python -m pytest -q -m "contract and not future" \
+"$(python_bin)" -m pytest -q -m "contract and not future" \
   --junitxml=.generated/session-01/contract-tests.xml
 
 # ---------------------------------------------------------------------------
 step "5. Full P0 inventory and registry policy"
 # ---------------------------------------------------------------------------
-python -m pytest --collect-only -q -m p0 \
+"$(python_bin)" -m pytest --collect-only -q -m p0 \
   > .generated/session-01/p0-collection.txt
-python -m pytest -q tests/contract/test_acceptance_registry.py
-python -m pytest -q tests/contract/test_future_marker_policy.py
+"$(python_bin)" -m pytest -q tests/contract/test_acceptance_registry.py
+"$(python_bin)" -m pytest -q tests/contract/test_future_marker_policy.py
 
 # ---------------------------------------------------------------------------
 step "6. Generated documentation is current"
 # ---------------------------------------------------------------------------
 # --check only. This gate demanded a clean tree in step 1, so a generator that
 # self-healed here would dirty the tree it just required be clean.
-python bin/render-acceptance-matrix.py --check
-python bin/render-config.py --bounds-doc --check
+"$(python_bin)" bin/render-acceptance-matrix.py --check
+"$(python_bin)" bin/render-config.py --bounds-doc --check
 
 # ---------------------------------------------------------------------------
 step "7. Compose validates and no project container is running"
@@ -219,7 +242,7 @@ if [ "${ALLOW_DIRTY}" -eq 1 ]; then
   exit 0
 fi
 
-python bin/write-session-evidence.py --session 1
+"$(python_bin)" bin/write-session-evidence.py --session 1
 
 printf '\n\033[1msession-01-check: PASSED\033[0m\n'
 printf 'Session 1 deployed no infrastructure service and started no container.\n'
