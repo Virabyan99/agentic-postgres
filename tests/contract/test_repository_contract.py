@@ -124,6 +124,7 @@ REQUIRED_PATHS = (
     "docs/plans/session-02-implementation-plan.md",
     "schemas/bootstrap-state.schema.json",
     "schemas/capabilities.schema.json",
+    "schemas/database-port-allocations.schema.json",
     "schemas/host.schema.json",
     "schemas/outputs.schema.json",
     "schemas/project.schema.json",
@@ -137,7 +138,13 @@ REQUIRED_PATHS = (
     "src/agentic_postgres/output_migrations.py",
     "src/agentic_postgres/rendering.py",
     "src/agentic_postgres/secrets_contract.py",
+    # Every superseded output version, kept because the migration path is only
+    # provable against documents that were actually shipped. A hand-built
+    # fixture would drift from what a host is running and the migrator would be
+    # proved against a document that never existed.
     "tests/fixtures/outputs-v1.json",
+    "tests/fixtures/outputs-v2.json",
+    "tests/fixtures/outputs-v3.json",
     "tests/acceptance-registry.yaml",
     "tests/conftest.py",
     # The three Session 2 execution environments. Listed because the registry

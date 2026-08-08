@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/outputs.schema.json",
   "title": "Agentic Postgres generated outputs",
-  "description": "The automation contract, version 3. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. See docs/decisions/0012-output-document-kinds.md and docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md.",
+  "description": "The automation contract, version 4. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. Version 4 added `database.access_profiles`, three ways to reach the two transports (ADR 0041), and closed the endpoint conditional so that an `available` endpoint must actually carry a host, a port, a password-free URL and a secret reference. See docs/decisions/0012-output-document-kinds.md, docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md and docs/decisions/0041-two-transports-three-access-profiles.md.",
   "type": "object",
   "oneOf": [
     { "$ref": "#/$defs/renderedDocument" },
@@ -29,7 +29,7 @@
         "template_version"
       ],
       "properties": {
-        "schema_version": { "type": "integer", "enum": [3] },
+        "schema_version": { "type": "integer", "enum": [4] },
         "document_kind": { "const": "rendered" },
         "inputs": {
           "type": "object",
@@ -199,7 +199,7 @@
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
-        "schema_version": { "type": "integer", "enum": [3] },
+        "schema_version": { "type": "integer", "enum": [4] },
         "document_kind": { "const": "deployed" },
         "source_commit": { "$ref": "#/$defs/commit" },
         "deployed_through_session": {
@@ -363,23 +363,8 @@
     "renderedDatabase": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "container", "roles", "budget", "pooled", "direct"],
-      "description": "Version 3. The rendered branch carries no `observed` block at all -- not an empty one, not a nulled one. ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be unrepresentable here rather than merely constrained. That is why the two branches have separate definitions instead of one shared one.",
-      "properties": {
-        "name": { "$ref": "#/$defs/postgresIdentifier" },
-        "container": { "$ref": "#/$defs/composeName" },
-        "roles": { "$ref": "#/$defs/databaseRoles" },
-        "budget": { "$ref": "#/$defs/databaseBudget" },
-        "pooled": { "$ref": "#/$defs/endpoint" },
-        "direct": { "$ref": "#/$defs/endpoint" }
-      }
-    },
-
-    "deployedDatabase": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["name", "container", "roles", "budget", "pooled", "direct", "observed"],
-      "description": "Version 3. Identical to the rendered branch plus `observed`, which is the only block here that is a measurement rather than a derivation.",
+      "required": ["name", "container", "roles", "budget", "pooled", "direct", "access_profiles"],
+      "description": "Version 4. The rendered branch carries no `observed` block at all -- not an empty one, not a nulled one. ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be unrepresentable here rather than merely constrained. That is why the two branches have separate definitions instead of one shared one. Version 4 added `access_profiles` (ADR 0041).",
       "properties": {
         "name": { "$ref": "#/$defs/postgresIdentifier" },
         "container": { "$ref": "#/$defs/composeName" },
@@ -387,6 +372,32 @@
         "budget": { "$ref": "#/$defs/databaseBudget" },
         "pooled": { "$ref": "#/$defs/endpoint" },
         "direct": { "$ref": "#/$defs/endpoint" },
+        "access_profiles": { "$ref": "#/$defs/accessProfiles" }
+      }
+    },
+
+    "deployedDatabase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "container",
+        "roles",
+        "budget",
+        "pooled",
+        "direct",
+        "access_profiles",
+        "observed"
+      ],
+      "description": "Version 4. Identical to the rendered branch plus `observed`, which is the only block here that is a measurement rather than a derivation.",
+      "properties": {
+        "name": { "$ref": "#/$defs/postgresIdentifier" },
+        "container": { "$ref": "#/$defs/composeName" },
+        "roles": { "$ref": "#/$defs/databaseRoles" },
+        "budget": { "$ref": "#/$defs/databaseBudget" },
+        "pooled": { "$ref": "#/$defs/endpoint" },
+        "direct": { "$ref": "#/$defs/endpoint" },
+        "access_profiles": { "$ref": "#/$defs/accessProfiles" },
         "observed": { "$ref": "#/$defs/databaseObserved" }
       }
     },
@@ -545,7 +556,7 @@
         "url",
         "password_secret_ref"
       ],
-      "description": "Session 2 still knows no tunnel host, bound port, or credential, so every field is null with an explicit unavailable status on both document kinds. Angle-bracket placeholders that resemble connection strings are not permitted.",
+      "description": "Version 4 made the available case as constrained as the unavailable one. Through version 3 the conditional bound only `unavailable`, so a document could claim `available` with every field still null and validate -- an endpoint that says it exists and tells you nothing. Angle-bracket placeholders that resemble connection strings are not permitted, and the URL may not carry a password: `postgresql://role@host:port/db` is the shape, and a `role:secret@` userinfo fails the pattern rather than being redacted later by something that might forget.",
       "properties": {
         "status": { "type": "string", "enum": ["unavailable", "available"] },
         "available_from_session": { "type": "integer", "minimum": 1, "maximum": 12 },
@@ -565,6 +576,72 @@
           "url": { "type": "null" },
           "password_secret_ref": { "type": "null" }
         }
+      },
+      "else": {
+        "properties": {
+          "host": { "type": "string", "minLength": 1 },
+          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+          "url": { "$ref": "#/$defs/postgresUrl" },
+          "password_secret_ref": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "postgresUrl": {
+      "type": "string",
+      "pattern": "^postgresql://[a-z_][a-z0-9_]*@[a-z0-9.-]+:[0-9]{1,5}/[a-z_][a-z0-9_]*(\\?[A-Za-z0-9._~=&%-]+)?$",
+      "maxLength": 512,
+      "description": "A role and a host, never a password. The userinfo component admits one identifier and no colon, so `postgresql://role:secret@host/db` cannot validate. This is the same rule `httpsUrl` states for the public surfaces, applied where it matters most."
+    },
+
+    "accessProfiles": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime_pooled", "runtime_direct", "migration_direct"],
+      "description": "Version 4, ADR 0041. Three ways to reach two transports. The endpoints say *where*; these say *as whom*, so a reader can answer 'what may this credential do' without consulting the code. Each profile's transport is fixed by a const here rather than merely typed, because a profile named `runtime_pooled` that pointed at the direct transport would be a document that validates and lies.",
+      "properties": {
+        "runtime_pooled": {
+          "allOf": [
+            { "$ref": "#/$defs/accessProfile" },
+            { "properties": { "transport": { "const": "pooled" } } }
+          ]
+        },
+        "runtime_direct": {
+          "allOf": [
+            { "$ref": "#/$defs/accessProfile" },
+            { "properties": { "transport": { "const": "direct" } } }
+          ]
+        },
+        "migration_direct": {
+          "allOf": [
+            { "$ref": "#/$defs/accessProfile" },
+            { "properties": { "transport": { "const": "direct" } } }
+          ]
+        }
+      }
+    },
+
+    "accessProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "available_from_session", "transport", "role", "password_secret_ref"],
+      "description": "`transport` and `role` are derivations and are present from the first render: the transport is fixed by the profile's name and the role comes from `naming`, so nulling them while unavailable would hide a fact the document already knows. `password_secret_ref` is the one member that waits, because a secret reference names something that must have been declared.",
+      "properties": {
+        "status": { "type": "string", "enum": ["unavailable", "available"] },
+        "available_from_session": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "transport": { "type": "string", "enum": ["pooled", "direct"] },
+        "role": { "$ref": "#/$defs/postgresIdentifier" },
+        "password_secret_ref": { "type": ["string", "null"] }
+      },
+      "if": {
+        "properties": { "status": { "const": "unavailable" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": { "password_secret_ref": { "type": "null" } }
+      },
+      "else": {
+        "properties": { "password_secret_ref": { "type": "string", "minLength": 1 } }
       }
     }
   }

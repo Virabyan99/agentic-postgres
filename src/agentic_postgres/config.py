@@ -24,7 +24,6 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
-from ipaddress import ip_network
 from pathlib import Path
 from typing import Any
 
@@ -116,8 +115,10 @@ CROSS_FIELD_RELATIONS: tuple[str, ...] = (
     "`mcp.max_result_rows` must not exceed `api.max_rows`",
     "`api.public_base_path` and `mcp.public_base_path` must not overlap segment-wise",
     "Neither base path may overlap a reserved route",
-    "`database.pooled_public_cidrs` must be non-empty when `database.pooled_public` is true, "
-    "and may not contain a default route",
+    "`database.pooled_public` must be false and `database.pooled_public_cidrs` empty; "
+    "a public pooler is not a supported profile (ADR 0040)",
+    "`database.query_wait_timeout_seconds` must be less than "
+    "`database.idle_transaction_timeout_seconds`",
     "`database.shm_size_mb` must be at least `database.shared_buffers_mb`",
     "`database.memory_limit_mb` must exceed the derived unreclaimable budget",
     "The derived unreclaimable budget must not exceed the per-project memory guardrail",
@@ -140,6 +141,17 @@ DATABASE_BUDGET_DEFAULTS: dict[str, int] = {
     "maintenance_work_mem_mb": 64,
     "memory_limit_mb": 768,
     "shm_size_mb": 256,
+}
+
+#: Defaults for the manifest's pool settings, duplicated from
+#: `schemas/project.schema.json` for the same reason as the budget defaults
+#: above: JSON Schema `default` annotates, it does not populate.
+#: `test_pool_defaults_match_the_schema` asserts the two agree.
+POOL_DEFAULTS: dict[str, int] = {
+    "max_prepared_statements": 100,
+    "query_wait_timeout_seconds": 20,
+    "idle_transaction_timeout_seconds": 60,
+    "server_lifetime_seconds": 3600,
 }
 
 #: Anonymous memory charged per backend, in MiB. Measured, not reasoned: two
@@ -515,6 +527,7 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
             raise ManifestError(f"database.name exceeds 63 bytes: {name!r}")
 
     _validate_pooled_public(database)
+    _validate_pool(database)
     _validate_memory_budget(database)
     _validate_storage(document.get("storage", {}))
     _validate_backup(document.get("backup", {}))
@@ -555,31 +568,65 @@ def _validate_memory_budget(database: dict[str, Any]) -> None:
         )
 
 
-def _validate_pooled_public(database: dict[str, Any]) -> None:
-    cidrs = database.get("pooled_public_cidrs") or []
-    if not database.get("pooled_public"):
-        if cidrs:
-            raise ManifestError(
-                "database.pooled_public_cidrs must be empty when pooled_public is false"
-            )
-        return
+#: The refusal `pooled_public: true` gets. A constant because it is a contract:
+#: an operator reads it, a test matches it, and the operator guide quotes it.
+#: An error message that drifts is an error message somebody has to re-learn.
+UNSUPPORTED_PUBLIC_POOL = (
+    "database.pooled_public is not a supported profile (ADR 0040). The pooler is "
+    "reachable on a host-loopback publication and through a verified tunnel, and "
+    "on no other path. There is no allowlist that makes a public bind supported, "
+    "so this is refused rather than narrowed. Use bin/connect.sh."
+)
 
-    if not cidrs:
+
+def _validate_pooled_public(database: dict[str, Any]) -> None:
+    """Fail closed on the one configuration Session 4 removed.
+
+    Through Session 3 this accepted `pooled_public: true` with a non-empty CIDR
+    allowlist and validated the CIDRs. ADR 0040 draws the boundary at loopback
+    instead, and an allowlisted public bind is on the wrong side of it. Note
+    which direction that moved: everything this function used to accept, it now
+    refuses, and it accepts nothing it did not accept before.
+
+    The CIDR parsing is gone with the configuration it validated. Keeping it
+    would leave code that carefully checks the shape of a value nothing may set.
+    """
+    cidrs = database.get("pooled_public_cidrs") or []
+
+    if database.get("pooled_public"):
+        raise ManifestError(UNSUPPORTED_PUBLIC_POOL)
+
+    if cidrs:
         raise ManifestError(
-            "database.pooled_public is true, so pooled_public_cidrs must be non-empty; "
-            "exposing the pooler to an unstated audience is not a default"
+            "database.pooled_public_cidrs must be empty: no non-loopback source "
+            "reaches the pooler directly (ADR 0040)"
         )
 
-    for entry in cidrs:
-        try:
-            network = ip_network(entry, strict=True)
-        except ValueError as exc:
-            raise ManifestError(f"invalid CIDR in pooled_public_cidrs: {entry!r} ({exc})") from exc
-        if network.prefixlen == 0:
-            raise ManifestError(
-                f"pooled_public_cidrs may not contain a default route: {entry!r}; "
-                "an allowlist that allows everything is not an allowlist"
-            )
+
+def _validate_pool(database: dict[str, Any]) -> None:
+    """The pool relations JSON Schema cannot express.
+
+    `max_prepared_statements` has its floor in the schema, where ADR 0007 says a
+    bound belongs. What is here is the relation the schema cannot state: the
+    queue timeout must be shorter than the idle-transaction timeout, because a
+    client that waits longer for a connection than a stuck transaction is
+    allowed to hold one turns a bounded failure into an unbounded one.
+    """
+    query_wait = database.get(
+        "query_wait_timeout_seconds", POOL_DEFAULTS["query_wait_timeout_seconds"]
+    )
+    idle_transaction = database.get(
+        "idle_transaction_timeout_seconds", POOL_DEFAULTS["idle_transaction_timeout_seconds"]
+    )
+
+    if query_wait >= idle_transaction:
+        raise ManifestError(
+            f"database.query_wait_timeout_seconds ({query_wait}) must be less than "
+            f"database.idle_transaction_timeout_seconds ({idle_transaction}). A client "
+            "that is allowed to wait for a server connection longer than a stuck "
+            "transaction is allowed to hold one will queue behind it rather than fail, "
+            "and a queue with no error at the end of it is a hang"
+        )
 
 
 def _validate_storage(storage: dict[str, Any]) -> None:

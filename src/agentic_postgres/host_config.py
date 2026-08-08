@@ -92,6 +92,23 @@ def unrestricted_ssh_sources(document: dict[str, Any]) -> list[str]:
     return [c for c in document["ssh"]["allowed_source_cidrs"] if c in _DEFAULT_ROUTES]
 
 
+#: Ports a project's transports occupy: one pooled, one direct (ADR 0041).
+PORTS_PER_PROJECT = 2
+
+#: 80 and 443 are deliberately NOT listed here, and the reason is worth keeping.
+#:
+#: The first version of this module checked them, and the check could not fail:
+#: `allocatablePort` has a minimum of 1024, so a range containing 80 or 443 must
+#: start below 1024, which the schema refuses first. The tests written for it
+#: passed — on the schema's error, not on this one — which is ADR 0035's "a
+#: check that could not fail" reproduced exactly, by the run that was reading
+#: that ADR at the time.
+#:
+#: `ssh.port` is checked instead, in `_validate_database_access`, because it is
+#: the one host listener that can legitimately sit above 1024 and therefore the
+#: one an allocation range can actually reach.
+UNREACHABLE_BY_RANGE: tuple[int, ...] = (80, 443)
+
 #: Where the edge plane's rendered configuration and ACME state live. Root-owned
 #: and outside the repository: `traefik.yaml` names the ACME environment, and
 #: that selection must not be editable by anyone who can write to a checkout.
@@ -184,6 +201,46 @@ def _validate_semantics(document: dict[str, Any]) -> None:
     _validate_addresses(host)
     _validate_cidrs(ssh["allowed_source_cidrs"])
     _validate_networks(edge)
+    _validate_database_access(document["database_access"], ssh_port=ssh["port"])
+
+
+def _validate_database_access(access: dict[str, Any], *, ssh_port: int) -> None:
+    """The range relations, and the listeners a range may not swallow.
+
+    The schema bounds each port and constrains the address to loopback. What it
+    cannot say is that the range runs the right way, that it is wide enough to
+    be worth having, or that it does not contain the SSH port — and the last of
+    those is the one that matters, because an allocator handed a range
+    containing the port it is reached over will eventually take it.
+
+    `ssh.port` is read from the manifest rather than assumed to be 22, which is
+    also why it is the only listener checked here: see `UNREACHABLE_BY_RANGE`
+    for why checking 80 and 443 was a check that could not fail.
+    """
+    start = access["port_range_start"]
+    end = access["port_range_end"]
+
+    if start >= end:
+        raise ManifestError(
+            f"database_access.port_range_start ({start}) must be below "
+            f"database_access.port_range_end ({end})"
+        )
+
+    width = end - start + 1
+    if width < PORTS_PER_PROJECT * 2:
+        raise ManifestError(
+            f"database_access declares {width} allocatable ports; a project takes "
+            f"{PORTS_PER_PROJECT} and this host is built to run more than one, so a "
+            f"range narrower than {PORTS_PER_PROJECT * 2} cannot serve its purpose"
+        )
+
+    if start <= ssh_port <= end:
+        raise ManifestError(
+            f"database_access port range {start}-{end} contains {ssh_port} (ssh.port). "
+            "An allocator works through its range; a range that contains a listener "
+            "this host depends on will reach it, and the failure arrives as a service "
+            "that cannot bind rather than as a bad allocation"
+        )
 
 
 def _validate_os_releases(declared: list[str]) -> None:

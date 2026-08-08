@@ -343,41 +343,111 @@ def test_two_projects_at_the_defaults_fit_the_host(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_public_pool_requires_a_cidr_allowlist(tmp_path: Path, base: dict[str, Any]) -> None:
+# A public pooler is no longer a supported profile (ADR 0040). Through Session 3
+# these tests proved that `pooled_public: true` was accepted with a validated
+# CIDR allowlist and refused without one. Their replacements are strictly
+# stronger: every input the old tests *accepted* is now refused, and nothing the
+# old tests refused is now accepted. That direction is the requirement ADR 0017
+# sets for replacing a passing test, and it is worth stating rather than
+# assuming, because the easy version of this change would have been to delete
+# the four tests that no longer applied.
+
+
+def test_a_public_pool_is_refused_outright(tmp_path: Path, base: dict[str, Any]) -> None:
     base["database"]["pooled_public"] = True
     base["database"]["pooled_public_cidrs"] = []
+    with pytest.raises(config.ManifestError, match="not a supported profile"):
+        check(tmp_path, base)
+
+
+@pytest.mark.parametrize(
+    "cidrs",
+    [
+        pytest.param(["203.0.113.0/24"], id="one-specific-network"),
+        pytest.param(["203.0.113.0/24", "2001:db8::/32"], id="two-specific-networks"),
+        pytest.param(["10.0.0.0/8"], id="private-network"),
+    ],
+)
+def test_no_allowlist_makes_a_public_pool_supported(
+    tmp_path: Path, base: dict[str, Any], cidrs: list[str]
+) -> None:
+    """The case the old suite accepted, and the reason this replacement is stricter.
+
+    `test_public_pool_accepts_a_specific_network` passed a well-formed allowlist
+    and asserted the manifest loaded. A narrow allowlist is still a public bind,
+    and ADR 0040 draws the boundary at loopback rather than at audience.
+    """
+    base["database"]["pooled_public"] = True
+    base["database"]["pooled_public_cidrs"] = cidrs
     with pytest.raises(config.ManifestError):
         check(tmp_path, base)
 
 
-@pytest.mark.parametrize("cidr", ["0.0.0.0/0", "::/0"])
-def test_public_pool_rejects_a_default_route(
-    tmp_path: Path, base: dict[str, Any], cidr: str
+def test_the_refusal_names_the_supported_path(tmp_path: Path, base: dict[str, Any]) -> None:
+    """An operator who asked for this needs to be told what to do instead.
+
+    A refusal that only says no leaves them to guess, and the likeliest guess is
+    to publish the port by hand outside the runtime override, which is the one
+    path nothing here can prevent.
+    """
+    base["database"]["pooled_public"] = True
+    with pytest.raises(config.ManifestError) as raised:
+        check(tmp_path, base)
+    assert "ADR 0040" in str(raised.value)
+    assert "connect.sh" in str(raised.value)
+
+
+def test_cidrs_must_be_empty_even_when_the_pool_is_private(
+    tmp_path: Path, base: dict[str, Any]
 ) -> None:
-    base["database"]["pooled_public"] = True
-    base["database"]["pooled_public_cidrs"] = [cidr]
-    with pytest.raises(config.ManifestError, match="default route"):
-        check(tmp_path, base)
-
-
-def test_public_pool_rejects_a_malformed_cidr(tmp_path: Path, base: dict[str, Any]) -> None:
-    base["database"]["pooled_public"] = True
-    base["database"]["pooled_public_cidrs"] = ["203.0.113.5/24"]  # host bits set
-    with pytest.raises(config.ManifestError, match="invalid CIDR"):
-        check(tmp_path, base)
-
-
-def test_public_pool_accepts_a_specific_network(tmp_path: Path, base: dict[str, Any]) -> None:
-    base["database"]["pooled_public"] = True
-    base["database"]["pooled_public_cidrs"] = ["203.0.113.0/24", "2001:db8::/32"]
-    assert len(check(tmp_path, base)["database"]["pooled_public_cidrs"]) == 2
-
-
-def test_cidrs_must_be_empty_when_pool_is_private(tmp_path: Path, base: dict[str, Any]) -> None:
     base["database"]["pooled_public"] = False
     base["database"]["pooled_public_cidrs"] = ["203.0.113.0/24"]
-    with pytest.raises(config.ManifestError, match="must be empty"):
+    with pytest.raises(config.ManifestError):
         check(tmp_path, base)
+
+
+# ---------------------------------------------------------------------------
+# Pool settings (Session 4 Run 2)
+# ---------------------------------------------------------------------------
+
+
+def test_pool_defaults_match_the_schema() -> None:
+    """The duplication in config.POOL_DEFAULTS cannot drift silently."""
+    schema = config.load_schema("project.schema.json")
+    properties = schema["properties"]["database"]["properties"]
+    for key, value in config.POOL_DEFAULTS.items():
+        assert properties[key]["default"] == value, key
+
+
+def test_prepared_statement_tracking_cannot_be_disabled(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """0 is the value that breaks the clients, so it is out of bounds.
+
+    Measured against the locked image in Run 1: at 0, a named prepared statement
+    is unusable the moment transaction pooling moves the client to a different
+    backend. This is the setting a failing client test must never be fixed by
+    lowering, so it cannot be lowered that far.
+    """
+    base["database"]["max_prepared_statements"] = 0
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, base)
+
+
+def test_the_queue_timeout_must_be_shorter_than_the_idle_transaction_timeout(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    base["database"]["query_wait_timeout_seconds"] = 60
+    base["database"]["idle_transaction_timeout_seconds"] = 60
+    with pytest.raises(config.ManifestError, match="must be less than"):
+        check(tmp_path, base)
+
+
+def test_the_default_pool_settings_are_consistent(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The defaults must satisfy the relation, or every manifest fails closed."""
+    for key in list(config.POOL_DEFAULTS):
+        base["database"].pop(key, None)
+    assert check(tmp_path, base)["database"].get("pooled_public") is False
 
 
 def test_disabled_storage_must_not_declare_a_bucket(tmp_path: Path, base: dict[str, Any]) -> None:

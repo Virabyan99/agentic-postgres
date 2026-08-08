@@ -101,7 +101,7 @@ Priorities:
 | `CFG-007` | 1 | A render that fails validation or publication leaves the previous valid render byte-identical and removes its staging directory. |
 | `CFG-008` | 1 | The renderer refuses symlinked inputs and output targets. |
 | `CFG-009` | 1 | Secret-bearing keys are rejected in manifests and in output, without false positives for safe reference names such as password_secret_ref. |
-| `CFG-010` | 1 | Public pooler exposure requires a specific CIDR allowlist; a default route is not an allowlist. |
+| `CFG-010` | 1 | A publicly exposed pooler is not a supported profile: pooled_public must be false and its allowlist empty, and the refusal names the supported path. See ADR 0040. |
 | `CFG-011` | 1 | Route trees may not collide with a reserved route or with each other, and overlap is decided segment-wise rather than by string prefix. |
 | `CFG-012` | 1 | Two similar projects render fully disjoint identities, compared over parsed semantic fields rather than by duplicate-string search. |
 | `CFG-013` | 1 | The capability surface is empty by default, cannot be enabled without a live backing contract, and cannot express SQL or a raw query. |
@@ -215,11 +215,15 @@ and live in `src/agentic_postgres/config.py`; they are listed separately.
 |---|---:|---:|---|
 | `api.max_rows` | 1 | 10,000 | Global PostgREST row-return ceiling. |
 | `backup.retain_full` | 1 | 12 | Full backup chains retained. |
+| `database.idle_transaction_timeout_seconds` | 10 | 600 | How long a client may hold a server connection inside an idle transaction. Cannot be disabled here, because in transaction pooling one idle transaction holds a server connection out of the pool for as long as it lasts. |
 | `database.maintenance_work_mem_mb` | 16 | 512 | VACUUM and index-build working memory. Charged in full against the guardrail because one maintenance operation can hold it for a long time. |
 | `database.max_client_connections` | 1 | 10,000 | PgBouncer client connection ceiling. |
 | `database.max_connections` | 10 | 200 | PostgreSQL max_connections on the cluster itself, not the pooler's ceiling. Deliberately small: Session 4's answer to connection count is a pooler, and a large per-cluster limit would make the pooler decorative. |
+| `database.max_prepared_statements` | 1 | 1,000 | How many protocol-level named prepared statements the pooler tracks per connection. Must be non-zero: at 0 a named statement is unusable the moment transaction pooling moves the client to a different backend, which was measured against the locked image rather than read from its documentation. This is the setting a failing client test must never be 'fixed' by lowering. |
 | `database.memory_limit_mb` | 128 | 4,096 | The container mem_limit. NOT the same number as the guardrail: a container limit caps page cache too, so a limit set equal to the unreclaimable budget makes the cluster live in permanent cache reclaim. Measured at 512 MiB with these defaults, two clusters pegged their limit with several hundred reclaim events and no OOM kill. Must exceed the derived unreclaimable budget. |
 | `database.pool_size` | 1 | 1,000 | Server-side pool size. Must not exceed max_client_connections. |
+| `database.query_wait_timeout_seconds` | 1 | 120 | How long a client may wait for a server connection before the pooler gives up. Bounded above so a saturated pool fails rather than stalling: an unbounded queue turns a capacity problem into a hang, and a hang has no error message to act on. |
+| `database.server_lifetime_seconds` | 60 | 86,400 | How long a server connection is reused before the pooler retires it. Bounded above so that a rotated credential cannot be held indefinitely by a long-lived backend, and below so that recycling does not become the dominant cost. |
 | `database.shared_buffers_mb` | 16 | 1,024 | PostgreSQL shared_buffers. Counts in full against the memory guardrail: it is shared memory, which no swap can relieve and no cache reclaim can shrink. |
 | `database.shm_size_mb` | 64 | 1,024 | The container /dev/shm size. PostgreSQL's dynamic shared memory for parallel query lands here, and Docker's 64 MiB default is below the default shared_buffers. Must be at least shared_buffers_mb. |
 | `database.work_mem_mb` | 1 | 64 | Per-sort-node working memory. Allocated on demand, so it does not multiply by max_connections in practice; the guardrail charges a flat per-backend anonymous allowance instead. See the Session 3 plan 3.3. |
@@ -236,7 +240,8 @@ enforced in `src/agentic_postgres/config.py`:
 - `mcp.max_result_rows` must not exceed `api.max_rows`
 - `api.public_base_path` and `mcp.public_base_path` must not overlap segment-wise
 - Neither base path may overlap a reserved route
-- `database.pooled_public_cidrs` must be non-empty when `database.pooled_public` is true, and may not contain a default route
+- `database.pooled_public` must be false and `database.pooled_public_cidrs` empty; a public pooler is not a supported profile (ADR 0040)
+- `database.query_wait_timeout_seconds` must be less than `database.idle_transaction_timeout_seconds`
 - `database.shm_size_mb` must be at least `database.shared_buffers_mb`
 - `database.memory_limit_mb` must exceed the derived unreclaimable budget
 - The derived unreclaimable budget must not exceed the per-project memory guardrail

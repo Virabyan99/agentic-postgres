@@ -3,7 +3,7 @@
 Status: proposed
 Date: 2026-08-08
 Session: 4, Run 1
-Affects: SEC-NET-001, SEC-NET-002, DBX-PG-002, SEC-DBX-001
+Affects: SEC-NET-001, SEC-NET-002, DBX-PG-002, SEC-DBX-001, CFG-010
 
 Accepted in Run 5, the run that first publishes a port. Drafted now because it
 is the constraint Runs 2–4 are designed against, and because the measurement it
@@ -87,6 +87,16 @@ for rather than the proxy they happened to use.**
 5. The DOCKER-USER policy is untouched. Loopback traffic does not traverse
    `FORWARD`, so `test_policy_permits_exactly_eighty_and_four_four_three` still
    holds and still means what it said.
+
+6. **`database.pooled_public` becomes an unsupported profile rather than a
+   configurable one.** The manifest has carried it since Session 1, with an
+   allowlist and a rule that a default route is not an allowlist — which is
+   `CFG-010`, a Session 1 P0. A narrow allowlist is still a public bind, so the
+   requirement is versioned here too: `pooled_public` must be false, the
+   allowlist must be empty, and the refusal names `bin/connect.sh` so an
+   operator who wanted the feature is told what replaces it. The field stays
+   declarable on purpose, because an unknown-key error reads like a typo and
+   this is a decision.
 
 ## Consequences
 

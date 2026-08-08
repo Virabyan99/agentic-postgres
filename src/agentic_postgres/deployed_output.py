@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 PROJECT_STATE_ROOT = Path("/etc/agentic-postgres/projects")
 RENDERED_ROOT = Path("/var/lib/agentic-postgres/rendered")
 

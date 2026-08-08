@@ -110,7 +110,7 @@ def build(rendered: dict, **overrides):
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 3
+    assert document["schema_version"] == 4
     assert document["project"]["key"] == KEY
 
 

@@ -5,9 +5,13 @@
   "description": "Non-secret configuration for one deployment host. Separate from project configuration on purpose: a host is shared by projects, and folding host facts into project.yaml would make a project manifest un-portable and would make the deterministic render depend on where it happened to run. additionalProperties is false at every level. This file never contains a credential; docs/decisions/0008-sensitive-key-policy.md is applied to it by the loader.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "host", "ssh", "edge", "infisical"],
+  "required": ["schema_version", "host", "ssh", "edge", "infisical", "database_access"],
   "properties": {
-    "schema_version": { "type": "integer", "enum": [1] },
+    "schema_version": {
+      "type": "integer",
+      "enum": [2],
+      "description": "Version 2 added `database_access` (Session 4). The enum is a single value rather than a list of accepted ones on purpose: a reader that predates version 2 rejects a version 2 document instead of parsing it and silently ignoring the section that says which ports may be published, and a reader at version 2 rejects a version 1 document instead of allocating ports inside a range nobody declared. Both directions fail closed."
+    },
 
     "host": {
       "type": "object",
@@ -150,6 +154,21 @@
           "description": "The literal folder may be identical across projects. Isolation comes from the full (project_id, environment_slug, runtime_folder) tuple, not from distinct folder strings."
         }
       }
+    },
+
+    "database_access": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loopback_address", "port_range_start", "port_range_end"],
+      "description": "Where this host may publish database transports, and the range it may allocate from (ADR 0040, ADR 0042). Host-level rather than per-project because a port range is a property of the machine: two projects cannot each declare their own without one of them being wrong.",
+      "properties": {
+        "loopback_address": {
+          "$ref": "#/$defs/loopbackAddress",
+          "description": "The address every project publication binds. Constrained to loopback by the pattern, so `0.0.0.0` is a schema failure rather than an operator decision. This is the schema half of ADR 0040; the model and the live host are checked separately, because a value that is right in a file and wrong in a running container is the case that matters."
+        },
+        "port_range_start": { "$ref": "#/$defs/allocatablePort" },
+        "port_range_end": { "$ref": "#/$defs/allocatablePort" }
+      }
     }
   },
 
@@ -176,6 +195,17 @@
     "providerSlug": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]{0,62}$"
+    },
+    "loopbackAddress": {
+      "type": "string",
+      "pattern": "^(127\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])|::1)$",
+      "description": "127.0.0.0/8 or ::1, and nothing else. Written as a pattern rather than checked only in code because a host manifest is read by more than one program, and the one that forgets to check is the one that publishes."
+    },
+    "allocatablePort": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535,
+      "description": "Unprivileged ports only. The range must also avoid the listeners this host already has; that is a relation between values and is checked by the loader, not here."
     }
   }
 }

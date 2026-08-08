@@ -15,7 +15,7 @@
 # host address; provision-host.sh --check proves the configured address is
 # genuinely assigned to the host before any mutation.
 
-schema_version: 1
+schema_version: 2
 
 host:
   id: apg-vps-01
@@ -86,3 +86,19 @@ infisical:
   # the full (project_id, environment_slug, runtime_folder) tuple, not from
   # requiring different folder strings.
   runtime_folder: /runtime
+
+# Session 4 (ADR 0040, ADR 0042). Where this host may publish a project's
+# database transports, and the range it may allocate from.
+#
+# The address is constrained to loopback by the schema, so 0.0.0.0 is a
+# validation failure rather than an operator decision: a published database
+# port is reachable by anything that can reach the address it binds, and a
+# tunnel is the only intended path.
+#
+# The range must not contain a listener this host depends on -- ssh.port, 80
+# and 443 are all checked against it -- because an allocator works through its
+# range and will eventually reach whatever is inside it.
+database_access:
+  loopback_address: 127.0.0.1
+  port_range_start: 15432
+  port_range_end: 15531

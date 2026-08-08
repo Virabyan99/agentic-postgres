@@ -1,9 +1,11 @@
-"""Output schema migration and document-kind rejection (ADR 0012, ADR 0027).
+"""Output schema migration and document-kind rejection (ADR 0012, 0027, 0041).
 
-Both fixtures are real renders, not hand-built objects: ``outputs-v1.json`` is a
-Session 1 render and ``outputs-v2.json`` is a Session 2 one. A hand-built
-fixture drifts away from what was actually shipped, and then the migrator is
-proved to handle a document that never existed.
+All three fixtures are real renders, not hand-built objects: ``outputs-v1.json``
+is a Session 1 render, ``outputs-v2.json`` a Session 2 one, and
+``outputs-v3.json`` a Session 3 one — the version every deployed host is running
+at the time version 4 was written. A hand-built fixture drifts away from what
+was actually shipped, and then the migrator is proved to handle a document that
+never existed.
 
 Two negative properties carry more weight here than the positive one:
 
@@ -17,6 +19,13 @@ Two negative properties carry more weight here than the positive one:
 The v3 step adds a third: it refuses to *derive* anything. `database.budget`
 comes from a manifest and `database.container` from ``naming``, and this module
 holds neither, so both are supplied by the caller and shape-checked.
+
+The v4 step is the interesting one, because there it *could* derive. A profile's
+transport is fixed by its name and its role is already in ``database.roles``, so
+a migrator could fill both in and be right. It validates instead — a supplied
+profile naming a role the document does not declare is refused rather than
+corrected — because deriving would make this module a second authority on which
+role serves which profile, and ADR 0002 allows one derivation path per name.
 """
 
 from __future__ import annotations
@@ -34,6 +43,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 FIXTURE_V1 = REPO_ROOT / "tests" / "fixtures" / "outputs-v1.json"
 FIXTURE_V2 = REPO_ROOT / "tests" / "fixtures" / "outputs-v2.json"
+FIXTURE_V3 = REPO_ROOT / "tests" / "fixtures" / "outputs-v3.json"
 
 CONTRACT_DIGEST = sha256((REPO_ROOT / "secrets.required.yaml").read_bytes()).hexdigest()
 
@@ -42,6 +52,32 @@ CONTRACT_DIGEST = sha256((REPO_ROOT / "secrets.required.yaml").read_bytes()).hex
 #: producing a fixture that agrees only with itself.
 BUDGET = config.database_budget({})
 CONTAINER = "apg-fixture-alpha-dev-postgres-1"
+
+
+def profiles_for(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """What a caller supplies for the v4 step (ADR 0041).
+
+    Built from the document's *own* declared roles rather than written out as
+    literals, for the same reason ``BUDGET`` comes from the real resolver: a
+    literal role name here would agree only with itself, and would keep agreeing
+    after ``naming`` changed.
+
+    Every profile is ``unavailable`` with a null secret reference, which is the
+    only thing a migration may produce. An archived document records no bound
+    port and no provisioned credential, so a profile claiming otherwise would be
+    a deployment invented by a migrator.
+    """
+    roles = document["database"]["roles"]
+    return {
+        name: {
+            "status": "unavailable",
+            "available_from_session": 4,
+            "transport": transport,
+            "role": roles["migration_user" if name == "migration_direct" else "app_runtime"],
+            "password_secret_ref": None,
+        }
+        for name, transport in output_migrations.ACCESS_PROFILE_TRANSPORTS.items()
+    }
 
 
 @pytest.fixture
@@ -56,19 +92,34 @@ def v2_fixture() -> dict[str, Any]:
 
 
 @pytest.fixture
+def v3_fixture() -> dict[str, Any]:
+    """The committed Session 3 render."""
+    return json.loads(FIXTURE_V3.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
 def v2(v1: dict[str, Any]) -> dict[str, Any]:
     """The v1 fixture advanced one step."""
     return output_migrations.migrate_v1_to_v2(v1, secrets_contract_sha256=CONTRACT_DIGEST)
 
 
 @pytest.fixture
-def v3(v1: dict[str, Any]) -> dict[str, Any]:
-    """The whole chain, v1 -> v2 -> v3, through the public entry point."""
+def v3(v2: dict[str, Any]) -> dict[str, Any]:
+    """The v1 fixture advanced two steps, stopping at 3."""
+    return output_migrations.migrate_v2_to_v3(
+        v2, database_budget=BUDGET, database_container=CONTAINER
+    )
+
+
+@pytest.fixture
+def v4(v1: dict[str, Any]) -> dict[str, Any]:
+    """The whole chain, v1 -> v2 -> v3 -> v4, through the public entry point."""
     return output_migrations.migrate_rendered(
         v1,
         secrets_contract_sha256=CONTRACT_DIGEST,
         database_budget=BUDGET,
         database_container=CONTAINER,
+        access_profiles=profiles_for(v1),
     )
 
 
@@ -155,6 +206,7 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         secrets_contract_sha256=CONTRACT_DIGEST,
         database_budget=BUDGET,
         database_container=CONTAINER,
+        access_profiles=profiles_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
 
@@ -165,18 +217,29 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
 
 
 def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, Any]) -> None:
-    migrated = output_migrations.migrate_v2_to_v3(
+    """The v2 step alone no longer produces a valid document, and should not.
+
+    Migrating v2 -> v3 lands on a version the schema stopped accepting when it
+    moved to 4. That is the version bump working: what has to be true is that
+    the *chain* reaches something valid, not that any single link does.
+    """
+    at_three = output_migrations.migrate_v2_to_v3(
         v2_fixture, database_budget=BUDGET, database_container=CONTAINER
     )
-    assert migrated["schema_version"] == 3
+    assert at_three["schema_version"] == 3
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(at_three, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v3_to_v4(at_three, access_profiles=profiles_for(at_three))
+    assert migrated["schema_version"] == 4
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
-def test_the_whole_chain_validates(v3: dict[str, Any]) -> None:
-    """v1 -> v2 -> v3 end to end, not only the newest link (ADR 0027)."""
-    assert v3["schema_version"] == 3
-    assert v3["document_kind"] == "rendered"
-    config.validate_against_schema(v3, "outputs.schema.json")
+def test_the_whole_chain_validates(v4: dict[str, Any]) -> None:
+    """v1 -> v2 -> v3 -> v4 end to end, not only the newest link (ADR 0027)."""
+    assert v4["schema_version"] == 4
+    assert v4["document_kind"] == "rendered"
+    config.validate_against_schema(v4, "outputs.schema.json")
 
 
 def test_v3_carries_the_supplied_budget_and_container(v3: dict[str, Any]) -> None:
@@ -241,12 +304,13 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             secrets_contract_sha256="<computed SHA-256>",
             database_budget=BUDGET,
             database_container=CONTAINER,
+            access_profiles=profiles_for(v1),
         )
 
 
-def test_migrated_inputs_carry_the_supplied_digest(v3: dict[str, Any]) -> None:
-    assert v3["inputs"]["secrets_contract_sha256"] == CONTRACT_DIGEST
-    assert len(v3["inputs"]) == 5
+def test_migrated_inputs_carry_the_supplied_digest(v4: dict[str, Any]) -> None:
+    assert v4["inputs"]["secrets_contract_sha256"] == CONTRACT_DIGEST
+    assert len(v4["inputs"]) == 5
 
 
 @pytest.mark.parametrize(
@@ -303,7 +367,7 @@ def test_the_migrator_never_derives_a_container_name() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_current_version_document_is_not_migrated_again(v3: dict[str, Any]) -> None:
+def test_a_current_version_document_is_not_migrated_again(v4: dict[str, Any]) -> None:
     """Replaces the v2 form of this assertion, applied to the current version.
 
     ADR 0017's rule: a test may only be replaced by a stricter one. This is the
@@ -311,15 +375,16 @@ def test_a_current_version_document_is_not_migrated_again(v3: dict[str, Any]) ->
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 3"):
+    with pytest.raises(MigrationError, match="already version 4"):
         output_migrations.migrate_rendered(
-            v3,
+            v4,
             secrets_contract_sha256=CONTRACT_DIGEST,
             database_budget=BUDGET,
             database_container=CONTAINER,
+            access_profiles=profiles_for(v4),
         )
-    with pytest.raises(MigrationError, match="already version 3"):
-        output_migrations.migrate_v2_to_v3(v3, database_budget=BUDGET, database_container=CONTAINER)
+    with pytest.raises(MigrationError, match="already version 4"):
+        output_migrations.migrate_v3_to_v4(v4, access_profiles=profiles_for(v4))
 
 
 def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any]) -> None:
@@ -330,12 +395,13 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1 and 2"):
+    with pytest.raises(MigrationError, match="only versions 1, 2 and 3"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
             database_budget=BUDGET,
             database_container=CONTAINER,
+            access_profiles=profiles_for(v1),
         )
 
 
@@ -347,6 +413,7 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             secrets_contract_sha256=CONTRACT_DIGEST,
             database_budget=BUDGET,
             database_container=CONTAINER,
+            access_profiles=profiles_for(v1),
         )
 
 
@@ -367,6 +434,7 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             secrets_contract_sha256=CONTRACT_DIGEST,
             database_budget=BUDGET,
             database_container=CONTAINER,
+            access_profiles=profiles_for(v1),
         )
 
 
@@ -435,3 +503,152 @@ def test_an_unknown_document_kind_is_refused() -> None:
 def test_a_missing_schema_version_is_refused() -> None:
     with pytest.raises(MigrationError, match="schema_version"):
         output_migrations.detect_version({"document_kind": "rendered"})
+
+
+# ---------------------------------------------------------------------------
+# v3 -> v4 (ADR 0041)
+# ---------------------------------------------------------------------------
+
+
+def test_v3_fixture_is_version_three_and_no_longer_validates(v3_fixture: dict[str, Any]) -> None:
+    """The committed Session 3 render, and the claim that makes v4 a real bump.
+
+    This is the version every deployed host is running right now, so a v3
+    document that still validated would mean the bump had changed a label and
+    nothing else.
+    """
+    assert output_migrations.detect_version(v3_fixture) == 3
+    assert v3_fixture["document_kind"] == "rendered"
+    assert "access_profiles" not in v3_fixture["database"]
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(v3_fixture, "outputs.schema.json")
+
+
+def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, Any]) -> None:
+    migrated = output_migrations.migrate_v3_to_v4(
+        v3_fixture, access_profiles=profiles_for(v3_fixture)
+    )
+    assert migrated["schema_version"] == 4
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+
+def test_v4_carries_three_profiles_over_two_transports(v4: dict[str, Any]) -> None:
+    profiles = v4["database"]["access_profiles"]
+    assert set(profiles) == {"runtime_pooled", "runtime_direct", "migration_direct"}
+    assert {profile["transport"] for profile in profiles.values()} == {"pooled", "direct"}
+    assert profiles["runtime_pooled"]["role"] == profiles["runtime_direct"]["role"]
+    assert profiles["migration_direct"]["role"] != profiles["runtime_direct"]["role"]
+
+
+def test_v4_leaves_every_profile_unprovisioned(v4: dict[str, Any]) -> None:
+    """A migration of an archived document cannot produce a deployment."""
+    for name, profile in v4["database"]["access_profiles"].items():
+        assert profile["status"] == "unavailable", name
+        assert profile["password_secret_ref"] is None, name
+        assert profile["available_from_session"] == 4, name
+
+
+def test_v4_preserves_every_other_database_member(v3_fixture: dict[str, Any]) -> None:
+    migrated = output_migrations.migrate_v3_to_v4(
+        v3_fixture, access_profiles=profiles_for(v3_fixture)
+    )
+    for key in ("name", "container", "roles", "budget", "pooled", "direct"):
+        assert migrated["database"][key] == v3_fixture["database"][key], key
+
+
+def test_v4_adds_no_observed_block(v4: dict[str, Any]) -> None:
+    assert "observed" not in v4["database"]
+
+
+def test_profile_transports_agree_with_the_schema() -> None:
+    """The migrator's copy of the pairing, checked against the authority.
+
+    The schema fixes each profile's transport with a `const`; this module keeps
+    its own mapping so that it depends on nothing. Two copies of a fact need a
+    test between them, or they are two facts.
+    """
+    schema = config.load_schema("outputs.schema.json")
+    profiles = schema["$defs"]["accessProfiles"]["properties"]
+    from_schema = {
+        name: definition["allOf"][1]["properties"]["transport"]["const"]
+        for name, definition in profiles.items()
+    }
+    assert from_schema == output_migrations.ACCESS_PROFILE_TRANSPORTS
+
+
+def test_a_profile_naming_the_wrong_transport_is_refused(v3_fixture: dict[str, Any]) -> None:
+    profiles = profiles_for(v3_fixture)
+    profiles["runtime_pooled"]["transport"] = "direct"
+    with pytest.raises(MigrationError, match="that profile is the 'pooled' transport"):
+        output_migrations.migrate_v3_to_v4(v3_fixture, access_profiles=profiles)
+
+
+def test_a_profile_naming_an_undeclared_role_is_refused(v3_fixture: dict[str, Any]) -> None:
+    """The reason this module validates rather than derives.
+
+    A caller that invents a role name gets a refusal naming the document's own
+    declaration, not a document that quietly carries a role nothing created.
+    """
+    profiles = profiles_for(v3_fixture)
+    profiles["migration_direct"]["role"] = "apg_some_other_project_migration_user"
+    with pytest.raises(MigrationError, match=r"does not declare in database.roles"):
+        output_migrations.migrate_v3_to_v4(v3_fixture, access_profiles=profiles)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        pytest.param("status", "available", id="status"),
+        pytest.param("password_secret_ref", "app_runtime_password", id="secret-ref"),
+    ],
+)
+def test_a_provisioned_profile_is_refused(
+    v3_fixture: dict[str, Any], field: str, value: str
+) -> None:
+    """Either half alone is enough to refuse, which is why both are parametrized.
+
+    A v3 document records no bound port and no credential. A migrator that
+    accepted `available` would be publishing a deployment nobody performed, and
+    one that accepted a secret reference would be naming a secret that may never
+    have been declared.
+    """
+    profiles = profiles_for(v3_fixture)
+    profiles["runtime_direct"][field] = value
+    with pytest.raises(MigrationError, match="claims to be provisioned"):
+        output_migrations.migrate_v3_to_v4(v3_fixture, access_profiles=profiles)
+
+
+@pytest.mark.parametrize(
+    "profiles",
+    [
+        pytest.param({}, id="empty"),
+        pytest.param({"runtime_pooled": {}}, id="partial"),
+        pytest.param(
+            {
+                "runtime_pooled": {},
+                "runtime_direct": {},
+                "migration_direct": {},
+                "runtime_extra": {},
+            },
+            id="extra-profile",
+        ),
+    ],
+)
+def test_an_incomplete_profile_set_is_refused(v3_fixture: dict[str, Any], profiles: dict) -> None:
+    with pytest.raises(MigrationError, match="access_profiles must have exactly"):
+        output_migrations.migrate_v3_to_v4(v3_fixture, access_profiles=profiles)
+
+
+def test_a_profile_missing_a_member_is_refused(v3_fixture: dict[str, Any]) -> None:
+    profiles = profiles_for(v3_fixture)
+    del profiles["runtime_direct"]["role"]
+    with pytest.raises(MigrationError, match="must have exactly"):
+        output_migrations.migrate_v3_to_v4(v3_fixture, access_profiles=profiles)
+
+
+def test_a_v3_document_is_still_refused_by_the_v2_step(v3_fixture: dict[str, Any]) -> None:
+    """Each single step keeps its own narrow refusal as the chain grows."""
+    with pytest.raises(MigrationError, match="already version 3"):
+        output_migrations.migrate_v2_to_v3(
+            v3_fixture, database_budget=BUDGET, database_container=CONTAINER
+        )

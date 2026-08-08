@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/database-port-allocations.schema.json",
+  "title": "Agentic Postgres host port allocations",
+  "description": "Host-global state at /etc/agentic-postgres/database-port-allocations.json, following edge-state.json as the precedent for host-level JSON state (ADR 0020). Each allocation is keyed by the instance UUID the project's data volume carries, not by the project key and not by a freshly minted identifier: that UUID is the only identity in this system bound to the data rather than to the configuration that produced it, so a restored volume brings its allocation's identity with it (ADR 0042). The project key is recorded for humans to read; the UUID is what is matched. Written atomically, validated before every mutation, and never rewritten in place.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "allocations"],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "allocations": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/allocation" },
+      "description": "Order is not significant and is not relied upon. Uniqueness of ports and of instance UUIDs is a cross-item relation that JSON Schema cannot express; it is enforced in code and tested, because `uniqueItems` compares whole objects and would happily admit two allocations that differ only in their timestamps while sharing a port."
+    }
+  },
+  "$defs": {
+    "allocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instance_uuid",
+        "project_key",
+        "pooled_port",
+        "direct_port",
+        "state",
+        "reserved_at",
+        "activated_at",
+        "released_at"
+      ],
+      "properties": {
+        "instance_uuid": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "description": "app_private.project_identity.instance_uuid, generated once on the first bootstrap of an empty volume and recovered on every bootstrap since (ADR 0030). Lowercase, because a hex comparison that is case-sensitive in one place and not another is a mismatch nobody sees."
+        },
+        "project_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*[a-z0-9]$",
+          "maxLength": 63,
+          "description": "Recorded so an operator reading this file knows what they are looking at. Never the match key: two projects can share a key across a rebuild, and one project can change it."
+        },
+        "pooled_port": { "$ref": "#/$defs/allocatedPort" },
+        "direct_port": { "$ref": "#/$defs/allocatedPort" },
+        "state": {
+          "type": "string",
+          "enum": ["reserved", "active", "released"],
+          "description": "reserved -> active only after the endpoint checks pass, so a crashed first deploy leaves a reservation that can be proved unadopted rather than an active allocation nothing is listening on. released is terminal for that allocation record and requires an explicit operator action after project shutdown."
+        },
+        "reserved_at": { "$ref": "#/$defs/timestamp" },
+        "activated_at": { "$ref": "#/$defs/nullableTimestamp" },
+        "released_at": { "$ref": "#/$defs/nullableTimestamp" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "state": { "const": "reserved" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "activated_at": { "type": "null" },
+              "released_at": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "state": { "const": "active" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": {
+              "activated_at": { "$ref": "#/$defs/timestamp" },
+              "released_at": { "type": "null" }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": { "state": { "const": "released" } },
+            "required": ["state"]
+          },
+          "then": {
+            "properties": { "released_at": { "$ref": "#/$defs/timestamp" } }
+          }
+        }
+      ]
+    },
+    "allocatedPort": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 65535,
+      "description": "Above the privileged range, because nothing here needs to bind one and a registry that can express 22 or 443 is a registry that can be asked to take them. The host manifest narrows this further to a declared range; this is the outer bound the file itself will hold."
+    },
+    "timestamp": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$",
+      "description": "UTC, second resolution, Z-suffixed. The same shape the rest of this system's published observations use."
+    },
+    "nullableTimestamp": {
+      "type": ["string", "null"],
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+    }
+  }
+}

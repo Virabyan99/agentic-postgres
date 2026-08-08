@@ -225,7 +225,31 @@ Then the three measurements of §3.2, each written into a contract test rather t
 The Prisma major is settled here (D86), and the PgBouncer candidate is either kept or bumped (D85), with the reason recorded.
 
 ### Run 2 — Schemas and static contracts
-*Offline.*
+*Offline.* **Done.**
+
+> Two things Run 2 found that the plan did not anticipate.
+>
+> **`CFG-010` had to be versioned.** It is a *Session 1* P0 — "public pooler
+> exposure requires a specific CIDR allowlist" — and ADR 0040 removes the
+> configuration it describes. D83 anticipated reopening `SEC-NET-001/002`; it
+> did not anticipate that the manifest has carried `pooled_public` with an
+> allowlist since Session 1. The replacement is stricter in the direction ADR
+> 0017 requires: every input the old pair accepted is now refused, and nothing
+> it refused is now accepted.
+>
+> **A check that could not fail, written while reading the ADR about them.** The
+> host range validator originally refused a range containing 80 or 443. It could
+> not fail: `allocatablePort` has a minimum of 1024, so any range containing
+> those must start below 1024 and the schema refuses first. Both tests passed —
+> on the schema's error, not the check's. Only `ssh.port` can legitimately sit
+> above 1024, so it is the only listener checked, and the constant that used to
+> hold 80 and 443 now records why they are not there.
+>
+> **Consequence to carry into Run 5:** every deployed document on the host is
+> version 3 and no longer validates. Nothing the host *executes* reads the
+> version — the launchers and `project-runtime.sh` do not validate it — so
+> nothing breaks before the redeploy, but the redeploy is what makes the host's
+> state readable by this code again.
 
 Outputs schema v4 on both branches, `access_profiles`, the `v3 → v4` migration in `output_migrations.py`, a committed `tests/fixtures/outputs-v3.json`, and the standing rule that migration never produces a *deployed* document. The port-allocation registry schema. The project manifest's pool fields, with validation: `pool_size >= 1`, `max_client_connections >= pool_size`, `max_prepared_statements > 0`, timeouts inside committed bounds, and `pooled_public: true` failing closed with a stable unsupported-profile error. Host manifest gains its `database_access` section and its schema version moves with old readers failing closed.
 

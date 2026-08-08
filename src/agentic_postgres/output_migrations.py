@@ -29,10 +29,20 @@ which this module deliberately does not import — the copy of
 two agree. So `migrate_rendered` requires the caller to supply both, and
 refuses without them. It never derives a name and never invents a number.
 
-`migrate_rendered` migrates *to the current version*, chaining v1 -> v2 -> v3
-through the single-step functions rather than jumping. A jump would mean the
-v1 -> v2 step stopped being exercised the moment v3 existed, and the archived
-documents this module exists for are exactly the ones that need the long path.
+Version 4 is the same story a third time, and the most tempting one to get
+wrong. It adds `database.access_profiles`, and two of a profile's five members
+genuinely *are* derivable from a v3 document — the transport is fixed by the
+profile's name, and the role is already sitting in `database.roles`. Deriving
+them would work. It would also make this module a second authority on which
+role serves which profile, and ADR 0002 allows one derivation path per name. So
+the caller supplies the profiles and this module *validates* them: a profile
+naming a role the document does not declare is refused, not corrected.
+
+`migrate_rendered` migrates *to the current version*, chaining
+v1 -> v2 -> v3 -> v4 through the single-step functions rather than jumping. A
+jump would mean the v1 -> v2 step stopped being exercised the moment v3 existed,
+and the archived documents this module exists for are exactly the ones that need
+the long path.
 """
 
 from __future__ import annotations
@@ -64,10 +74,31 @@ _V1_REQUIRED = frozenset(
 #: handles, so the deployed-only keys are absent by construction.
 _V2_REQUIRED = _V1_REQUIRED | {"document_kind"}
 
+#: A v3 document has the same top-level keys as a v2 one. Version 3 added two
+#: members *inside* `database`, so the outer shape did not move — which is why
+#: this is an alias rather than a copy: writing the set out again would invite
+#: the two to drift and say nothing when they did.
+_V3_REQUIRED = _V2_REQUIRED
+
 #: The current output schema version. Everything else in this module is written
-#: in terms of it so that adding v4 means adding one function and moving one
+#: in terms of it so that adding v5 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 3
+CURRENT_VERSION = 4
+
+#: The three access profiles a v4 document carries (ADR 0041), and the transport
+#: each one is fixed to. The schema states the same pairing with a `const`; this
+#: is the migrator's copy, and ``test_profile_transports_agree_with_the_schema``
+#: asserts the two match rather than trusting that they do.
+ACCESS_PROFILE_TRANSPORTS: dict[str, str] = {
+    "runtime_pooled": "pooled",
+    "runtime_direct": "direct",
+    "migration_direct": "direct",
+}
+
+#: Members of an access profile in a v4 document.
+ACCESS_PROFILE_MEMBERS = frozenset(
+    {"status", "available_from_session", "transport", "role", "password_secret_ref"}
+)
 
 #: Members of `database.budget` in a v3 document. Kept in step with
 #: ``config.database_budget``; imported rather than copied would pull the whole
@@ -145,11 +176,12 @@ def migrate_rendered(
     secrets_contract_sha256: str,
     database_budget: dict[str, int],
     database_container: str,
+    access_profiles: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Migrate a version 1 or 2 ``rendered`` document to the current version.
+    """Migrate a version 1, 2 or 3 ``rendered`` document to the current version.
 
     Chains the single-step functions rather than jumping, so a v1 document
-    still exercises the v1 -> v2 step that a direct v1 -> v3 path would have
+    still exercises the v1 -> v2 step that a direct v1 -> v4 path would have
     quietly retired.
 
     Every argument is required for the same reason: each is a value the input
@@ -162,17 +194,19 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2}:
-        raise MigrationError(f"only versions 1 and 2 can be migrated, got {version}")
+    if version not in {1, 2, 3}:
+        raise MigrationError(f"only versions 1, 2 and 3 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
+    if detect_version(document) == 2:
+        document = migrate_v2_to_v3(
+            document,
+            database_budget=database_budget,
+            database_container=database_container,
+        )
 
-    return migrate_v2_to_v3(
-        document,
-        database_budget=database_budget,
-        database_container=database_container,
-    )
+    return migrate_v3_to_v4(document, access_profiles=access_profiles)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -296,6 +330,92 @@ def migrate_v2_to_v3(
     return migrated
 
 
+def migrate_v3_to_v4(
+    document: dict[str, Any], *, access_profiles: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
+    """Return a version 4 ``rendered`` document derived from a version 3 one.
+
+    Version 4 adds `database.access_profiles` (ADR 0041). Two of a profile's
+    five members *are* derivable from a v3 document — `transport` is fixed by
+    the profile's name and `role` is already in `database.roles` — and the
+    module still does not derive them. It validates them instead: the caller
+    supplies profiles, and a profile naming a role the document does not declare
+    is refused rather than accepted or corrected.
+
+    That is the difference that matters. Deriving would make this module a
+    second authority on which role serves which profile, and ADR 0002 allows one
+    derivation path per name. Validating makes it a check on somebody else's
+    answer, which is the only job it can do without becoming the thing it is
+    checking.
+
+    A v3 document knows no bound port and no provisioned credential, so every
+    profile it gains must be `unavailable` with a null secret reference. A
+    migrator that accepted an `available` profile would be inventing a
+    deployment.
+    """
+    version = detect_version(document)
+    if version == 4:
+        raise MigrationError("document is already version 4; migration would be a no-op")
+    if version != 3:
+        raise MigrationError(f"only version 3 can be migrated to 4, got {version}")
+
+    require_kind(document, "rendered")
+
+    missing = _V3_REQUIRED - set(document)
+    if missing:
+        raise MigrationError(f"not a complete version 3 document; missing {sorted(missing)}")
+    unexpected = set(document) - _V3_REQUIRED
+    if unexpected:
+        raise MigrationError(
+            f"document carries fields no version 3 rendered document has: {sorted(unexpected)}"
+        )
+
+    declared_roles = document["database"].get("roles")
+    if not isinstance(declared_roles, dict):
+        raise MigrationError("database.roles is missing; this is not a version 3 document")
+
+    supplied = set(access_profiles)
+    if supplied != set(ACCESS_PROFILE_TRANSPORTS):
+        raise MigrationError(
+            f"access_profiles must have exactly {sorted(ACCESS_PROFILE_TRANSPORTS)}, "
+            f"got {sorted(supplied)}"
+        )
+
+    for name, profile in access_profiles.items():
+        if not isinstance(profile, dict):
+            raise MigrationError(f"access profile {name!r} is not an object")
+        members = set(profile)
+        if members != set(ACCESS_PROFILE_MEMBERS):
+            raise MigrationError(
+                f"access profile {name!r} must have exactly "
+                f"{sorted(ACCESS_PROFILE_MEMBERS)}, got {sorted(members)}"
+            )
+        if profile["transport"] != ACCESS_PROFILE_TRANSPORTS[name]:
+            raise MigrationError(
+                f"access profile {name!r} names transport {profile['transport']!r}; "
+                f"that profile is the {ACCESS_PROFILE_TRANSPORTS[name]!r} transport"
+            )
+        if profile["role"] not in set(declared_roles.values()):
+            raise MigrationError(
+                f"access profile {name!r} names role {profile['role']!r}, which this "
+                "document does not declare in database.roles"
+            )
+        if profile["status"] != "unavailable" or profile["password_secret_ref"] is not None:
+            raise MigrationError(
+                f"access profile {name!r} claims to be provisioned. A version 3 document "
+                "records no bound port and no credential, so migrating one cannot produce "
+                "an available profile; that is a deployment, not a migration"
+            )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["schema_version"] = 4
+    migrated["database"]["access_profiles"] = {
+        name: _copy(profile) for name, profile in access_profiles.items()
+    }
+
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -305,6 +425,8 @@ def _copy(value: Any) -> Any:
 
 
 __all__ = [
+    "ACCESS_PROFILE_MEMBERS",
+    "ACCESS_PROFILE_TRANSPORTS",
     "BUDGET_MEMBERS",
     "CURRENT_VERSION",
     "HEALTH_ROUTE_PATH",
@@ -314,5 +436,6 @@ __all__ = [
     "migrate_rendered",
     "migrate_v1_to_v2",
     "migrate_v2_to_v3",
+    "migrate_v3_to_v4",
     "require_kind",
 ]

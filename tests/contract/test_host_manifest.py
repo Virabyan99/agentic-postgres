@@ -486,3 +486,139 @@ def test_a_slug_in_the_organization_id_field_is_rejected(
     document["infisical"]["organization_id"] = "my-team"
     with pytest.raises(ManifestError):
         host_config.load_host_manifest(write(tmp_path, document))
+
+
+# ---------------------------------------------------------------------------
+# database_access (Session 4 Run 2; ADR 0040, ADR 0042)
+# ---------------------------------------------------------------------------
+
+
+def test_the_manifest_is_version_two(example: dict[str, Any]) -> None:
+    assert example["schema_version"] == 2
+
+
+def test_a_version_one_manifest_is_refused(tmp_path: Path, example: dict[str, Any]) -> None:
+    """Both directions of the version bump fail closed.
+
+    A reader at version 2 must refuse a version 1 document rather than allocate
+    ports inside a range nobody declared. The other direction -- a reader that
+    predates version 2 meeting a version 2 document -- is enforced by that
+    reader's own copy of the enum, which is what makes a single-value enum the
+    right shape here rather than a list of accepted versions.
+    """
+    document = copy.deepcopy(example)
+    document["schema_version"] = 1
+    document.pop("database_access")
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, document))
+
+
+def test_a_version_two_manifest_without_the_section_is_refused(
+    tmp_path: Path, example: dict[str, Any]
+) -> None:
+    document = copy.deepcopy(example)
+    document.pop("database_access")
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, document))
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        pytest.param("0.0.0.0", id="wildcard-v4"),  # noqa: S104 -- the value under refusal
+        pytest.param("::", id="wildcard-v6"),
+        pytest.param("203.0.113.10", id="the-hosts-public-address"),
+        pytest.param("10.0.0.5", id="private-lan"),
+        pytest.param("128.0.0.1", id="one-bit-off-loopback"),
+    ],
+)
+def test_a_non_loopback_publication_address_is_refused(
+    tmp_path: Path, example: dict[str, Any], address: str
+) -> None:
+    """ADR 0040 stated in the schema, where more than one program will read it.
+
+    `128.0.0.1` is in this list on purpose: it differs from `127.0.0.1` by one
+    bit and by one character, and a pattern written as a loose prefix match
+    would admit it.
+    """
+    document = copy.deepcopy(example)
+    document["database_access"]["loopback_address"] = address
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, document))
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "127.0.0.2", "::1"])
+def test_a_loopback_publication_address_is_accepted(
+    tmp_path: Path, example: dict[str, Any], address: str
+) -> None:
+    document = copy.deepcopy(example)
+    document["database_access"]["loopback_address"] = address
+    host_config.load_host_manifest(write(tmp_path, document))
+
+
+def test_a_range_that_runs_backwards_is_refused(tmp_path: Path, example: dict[str, Any]) -> None:
+    document = copy.deepcopy(example)
+    document["database_access"]["port_range_start"] = 15531
+    document["database_access"]["port_range_end"] = 15432
+    with pytest.raises(ManifestError, match="must be below"):
+        host_config.load_host_manifest(write(tmp_path, document))
+
+
+def test_a_range_too_narrow_for_two_projects_is_refused(
+    tmp_path: Path, example: dict[str, Any]
+) -> None:
+    """The range is a property of the host, and this host runs two projects."""
+    document = copy.deepcopy(example)
+    document["database_access"]["port_range_start"] = 15432
+    document["database_access"]["port_range_end"] = 15434
+    with pytest.raises(ManifestError, match="cannot serve its purpose"):
+        host_config.load_host_manifest(write(tmp_path, document))
+
+
+@pytest.mark.parametrize("port", list(host_config.UNREACHABLE_BY_RANGE))
+def test_the_web_listeners_are_out_of_range_by_construction(
+    tmp_path: Path, example: dict[str, Any], port: int
+) -> None:
+    """80 and 443 need no semantic check, and this test says why rather than pretending.
+
+    The first version of this suite asserted that a range containing 80 or 443
+    was refused, and it passed -- on the schema's minimum-1024 error, not on the
+    range check it was written for. The range check for those two ports could
+    not fail, which is ADR 0035's shape. What is true and worth asserting is the
+    structural fact underneath: a range cannot reach a privileged port at all,
+    so the refusal comes from the bound rather than from a listener inventory
+    that would need maintaining.
+    """
+    document = copy.deepcopy(example)
+    document["database_access"]["port_range_start"] = port - 10
+    document["database_access"]["port_range_end"] = port + 10
+    with pytest.raises(ManifestError, match="minimum of 1024"):
+        host_config.load_host_manifest(write(tmp_path, document))
+
+
+def test_a_range_containing_the_declared_ssh_port_is_refused(
+    tmp_path: Path, example: dict[str, Any]
+) -> None:
+    """Read from the manifest, not assumed to be 22.
+
+    A check written against the default would pass on a host that moved SSH
+    while permitting exactly the collision it exists to prevent. The range here
+    deliberately excludes 22, so only reading `ssh.port` can catch it.
+    """
+    document = copy.deepcopy(example)
+    document["ssh"]["port"] = 15500
+    document["database_access"]["port_range_start"] = 15432
+    document["database_access"]["port_range_end"] = 15531
+    with pytest.raises(ManifestError, match="15500"):
+        host_config.load_host_manifest(write(tmp_path, document))
+
+
+@pytest.mark.parametrize("port", [22, 80, 443, 1023])
+def test_a_privileged_port_cannot_bound_the_range(
+    tmp_path: Path, example: dict[str, Any], port: int
+) -> None:
+    document = copy.deepcopy(example)
+    document["database_access"]["port_range_start"] = port
+    document["database_access"]["port_range_end"] = 20000
+    with pytest.raises(ManifestError):
+        host_config.load_host_manifest(write(tmp_path, document))

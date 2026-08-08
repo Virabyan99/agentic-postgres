@@ -128,6 +128,38 @@ def build_outputs(
         "password_secret_ref": None,
     }
 
+    # Three profiles over two transports (ADR 0041). `transport` and `role` are
+    # written from the first render because both are derivations this function
+    # already holds -- the transport is fixed by the profile's name, the role
+    # comes from `naming`. `password_secret_ref` stays null until a secret by
+    # that name has actually been declared, and `status` stays `unavailable`
+    # until a role has been activated and a transport published. Writing a
+    # secret reference here now would name something that does not exist, which
+    # is the failure this repository keeps producing in other clothes.
+    access_profiles = {
+        "runtime_pooled": {
+            "status": "unavailable",
+            "available_from_session": 4,
+            "transport": "pooled",
+            "role": identity.roles["app_runtime"],
+            "password_secret_ref": None,
+        },
+        "runtime_direct": {
+            "status": "unavailable",
+            "available_from_session": 4,
+            "transport": "direct",
+            "role": identity.roles["app_runtime"],
+            "password_secret_ref": None,
+        },
+        "migration_direct": {
+            "status": "unavailable",
+            "available_from_session": 4,
+            "transport": "direct",
+            "role": identity.roles["migration_user"],
+            "password_secret_ref": None,
+        },
+    }
+
     required_secret_names = sorted(
         secret["name"]
         for secret in secrets_contract.active_secrets(
@@ -136,7 +168,7 @@ def build_outputs(
     )
 
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
@@ -165,6 +197,7 @@ def build_outputs(
             "budget": config.database_budget(project["database"]),
             "pooled": dict(unavailable_endpoint),
             "direct": dict(unavailable_endpoint),
+            "access_profiles": {name: dict(profile) for name, profile in access_profiles.items()},
         },
         "routes": {
             "rest": identity.route_rest,

@@ -127,11 +127,22 @@
   priority: P0
   target_session: 1
   test_nodeids:
-    - tests/contract/test_project_manifest.py::test_public_pool_requires_a_cidr_allowlist
-    - tests/contract/test_project_manifest.py::test_public_pool_rejects_a_default_route
+    - tests/contract/test_project_manifest.py::test_a_public_pool_is_refused_outright
+    - tests/contract/test_project_manifest.py::test_no_allowlist_makes_a_public_pool_supported
+    - tests/contract/test_project_manifest.py::test_the_refusal_names_the_supported_path
+    - tests/contract/test_project_manifest.py::test_cidrs_must_be_empty_even_when_the_pool_is_private
   description: >-
-    Public pooler exposure requires a specific CIDR allowlist; a default route
-    is not an allowlist.
+    A publicly exposed pooler is not a supported profile: pooled_public must be
+    false and its allowlist empty, and the refusal names the supported path.
+    See ADR 0040.
+
+# Through Session 3 this requirement read "public pooler exposure requires a
+# specific CIDR allowlist; a default route is not an allowlist", proved by two
+# tests. ADR 0040 removed the configuration that statement was about, so the
+# statement was versioned rather than left standing over tests that no longer
+# describe it. The replacement is stronger in the direction ADR 0017 requires:
+# every input the old pair accepted -- a public pooler with a well-formed
+# allowlist -- is now refused, and nothing the old pair refused is now accepted.
 
 - id: CFG-011
   priority: P0
