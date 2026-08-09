@@ -128,6 +128,36 @@ REQUIRED_PATHS = (
     "services/edge-probe/probe.py",
     "services/secret-check/Dockerfile",
     "services/secret-check/check.py",
+    # The Session 4 client compatibility fixtures (DBX-001..005). Listed for the
+    # same reason the two above are: the registry points requirement proofs at
+    # them, and a lock file or a probe that silently vanished would take its P0
+    # evidence with it. The lock files are named individually because they are
+    # what makes "pins dependencies through committed lock files" a fact rather
+    # than an intention -- `npm ci` and `pip --require-hashes` both fail without
+    # them, but only at build time, on a host.
+    "services/clients/psql/Dockerfile",
+    "services/clients/psql/entrypoint.sh",
+    "services/clients/psql/probe.sh",
+    "services/clients/node-pg/Dockerfile",
+    "services/clients/node-pg/entrypoint.sh",
+    "services/clients/node-pg/package.json",
+    "services/clients/node-pg/package-lock.json",
+    "services/clients/node-pg/probe.mjs",
+    "services/clients/psycopg/Dockerfile",
+    "services/clients/psycopg/entrypoint.sh",
+    "services/clients/psycopg/probe.py",
+    "services/clients/psycopg/requirements.in",
+    "services/clients/psycopg/requirements.txt",
+    "services/clients/prisma/Dockerfile",
+    "services/clients/prisma/entrypoint.sh",
+    "services/clients/prisma/migrate.mjs",
+    "services/clients/prisma/package.json",
+    "services/clients/prisma/package-lock.json",
+    "services/clients/prisma/probe.mjs",
+    "services/clients/prisma/url.mjs",
+    "services/clients/prisma/prisma/schema.prisma",
+    "services/clients/prisma/prisma/migrations/migration_lock.toml",
+    "services/clients/prisma/prisma/migrations/20260809000000_fixture_init/migration.sql",
     "docs/plans/session-01-implementation-plan.md",
     "docs/plans/session-02-implementation-plan.md",
     "schemas/bootstrap-state.schema.json",

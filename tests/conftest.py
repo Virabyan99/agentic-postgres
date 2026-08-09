@@ -177,7 +177,7 @@ def pytest_report_header(config: pytest.Config) -> str:
 
 @pytest.fixture(scope="session")
 def code_only():
-    """Strip whole-line comments from a shell or Python source string.
+    """Strip whole-line comments from a source string.
 
     Ordering assertions over source text keep matching the prose that explains
     the ordering, which by construction sits above the code and therefore always
@@ -186,11 +186,34 @@ def code_only():
     ``body.index("install_units")`` point at the explanation rather than the
     call.
 
+    The same shape breaks *absence* assertions too, and Session 4 Run 7 hit it
+    six times in one module: a fixture whose comment explains why it refuses
+    ``?pgbouncer=true`` fails a scan for ``pgbouncer=true``, and the only way to
+    make that scan pass without this is to delete the explanation.
+
+    Three comment syntaxes, because this repository writes three: ``#`` for
+    shell, Python and YAML, ``//`` for the JavaScript client fixtures, and
+    ``--`` for SQL. Extended here rather than copied into a second helper, which
+    is the thing the next paragraph says this fixture exists to prevent.
+
+    **A SQL comment is ``--`` followed by whitespace or nothing**, and the
+    distinction is not pedantry: a bare ``--`` prefix also matches a shell
+    continuation line beginning with a long option. Stripping those removed
+    ``--edge-static`` from ``edge.sh``'s ``do_up`` and turned a passing ordering
+    assertion into a false failure the moment this was widened. The boundary is
+    where the failure put it.
+
     A fixture rather than a copied two-line helper, so the next test that scans
     source text inherits the fix instead of rediscovering the bug.
     """
 
+    def is_comment(line: str) -> bool:
+        stripped = line.lstrip()
+        if stripped.startswith(("#", "//")):
+            return True
+        return stripped == "--" or stripped.startswith("-- ")
+
     def strip(text: str) -> str:
-        return "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        return "\n".join(line for line in text.splitlines() if not is_comment(line))
 
     return strip

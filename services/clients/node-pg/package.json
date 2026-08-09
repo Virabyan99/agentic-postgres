@@ -1,0 +1,10 @@
+{
+  "name": "apg-client-node-pg",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Session 4 client compatibility fixture: node-postgres through the pooler.",
+  "dependencies": {
+    "pg": "8.16.3"
+  }
+}

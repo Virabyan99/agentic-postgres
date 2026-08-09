@@ -1,0 +1,13 @@
+{
+  "name": "apg-client-prisma",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Session 4 client compatibility fixture: Prisma Client through the pooler, Prisma Migrate through the direct transport.",
+  "dependencies": {
+    "@prisma/client": "6.19.1"
+  },
+  "devDependencies": {
+    "prisma": "6.19.1"
+  }
+}

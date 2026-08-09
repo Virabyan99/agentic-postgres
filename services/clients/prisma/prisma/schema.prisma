@@ -1,0 +1,37 @@
+// Session 4 client compatibility fixture: Prisma at the locked major (D86).
+//
+// `url` and `directUrl` are the entire reason this fixture exists in 6.x rather
+// than 7. In 6.x `directUrl` is a datasource field and is exactly the mechanism
+// two transports need: Prisma Client connects through `url` -- the pooler --
+// and Prisma Migrate connects through `directUrl` -- the direct transport.
+// Prisma 7 moved that into `prisma.config.ts` with DIRECT_URL as the CLI
+// datasource, which is a different configuration model rather than a newer
+// version of this one. The acceptance report names the model it tested, and a
+// fixture may not straddle both.
+//
+// Neither URL is written here. Both are assembled inside the container from a
+// credential that arrives as a file (ADR 0034's rule, applied a second time),
+// so no connection string carrying a password exists anywhere on disk, in the
+// Compose model, or in this repository.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// The migration target is a disposable schema in the live project database
+// (plan §4.4), never `api`, `app` or `app_private`. This model exists to give
+// Prisma Migrate something real to create and drop; it is not part of the
+// product's schema and nothing else references it.
+model FixtureRow {
+  id        String   @id @default(uuid()) @db.Uuid
+  label     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("fixture_rows")
+}

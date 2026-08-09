@@ -294,6 +294,18 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "PGBOUNCER_QUERY_WAIT_TIMEOUT",
     "PGBOUNCER_IDLE_TRANSACTION_TIMEOUT",
     "PGBOUNCER_SERVER_LIFETIME",
+    # Session 4 Run 7. The client compatibility fixtures reach the pooler by its
+    # Compose service name, the same way the cluster is reached by `postgres`.
+    "PGBOUNCER_SERVICE_HOST",
+    # Two identities the fixtures assert row isolation between. Constants rather
+    # than values generated per run: a fixture that invented its identities could
+    # pass by comparing two empty result sets, and a failure would not be
+    # reproducible from the evidence. They are UUIDs and nothing else -- no
+    # credential, no claim to authenticity. ADR 0029 is explicit that a claim is
+    # asserted rather than verified in Session 4.
+    "APG_FIXTURE_USER_A",
+    "APG_FIXTURE_USER_B",
+    "APG_DISPOSABLE_SCHEMA",
 )
 
 #: The pooler's port on its own project network. 6432 is the PgBouncer
@@ -316,6 +328,36 @@ PGBOUNCER_ADMIN_USER = "pgbouncer_admin"
 #: name inside one project's Compose model, which is scoped by the project
 #: already; deriving it would make two projects' models differ for no reason.
 POSTGRES_SERVICE_HOST = "postgres"
+
+#: The pooler's Compose service name, for the same reason and on the same terms.
+PGBOUNCER_SERVICE_HOST = "pgbouncer"
+
+#: The two identities the client fixtures prove row isolation between.
+#:
+#: Fixed, and version 5 UUIDs of nothing in particular -- they are opaque and
+#: only have to be two distinct valid UUIDs. Fixed rather than generated so that
+#: a run's evidence names the same identities every time and a failure can be
+#: reproduced from it; and because a fixture that generated its own could
+#: satisfy "A cannot see B's rows" by comparing two empty result sets. The
+#: fixtures also assert that each user sees *some* of its own rows, which is the
+#: half that stops that.
+FIXTURE_USER_A = "3f6c2a10-5d84-4f1e-9b7c-0a2d61e8c401"
+FIXTURE_USER_B = "8b41d9e2-7c05-4a63-8f19-2d5e70a3b902"
+
+#: The schema Prisma Migrate creates and drops in the live project database
+#: (plan §4.4).
+#:
+#: A derived constant, not a value chosen per run, and that is a divergence from
+#: §4.4 rather than an oversight (D109). Every interpolation in `compose.yaml`
+#: must be `:?required`, and every value in `compose.env` must be project-derived
+#: or the rendered output stops being deterministic — so a randomly chosen name
+#: cannot reach the model at all. What §4.4 actually buys is kept: the name is
+#: recorded in root-owned state before the drop, the drop targets only the
+#: recorded name, and the fixture refuses any of the protected schemas by name.
+#:
+#: `apg_` prefixed and unmistakable, so an operator who finds it in a database
+#: knows what created it.
+PRISMA_FIXTURE_SCHEMA = "apg_client_fixture"
 
 #: Where dbmate records applied versions. A constant rather than a manifest
 #: field: the ledger's location is part of the migration contract, and a
@@ -374,6 +416,10 @@ def build_compose_env(
         "MIGRATIONS_TABLE": MIGRATIONS_TABLE,
         "MIGRATION_ROLE_NAME": identity.roles["migration_user"],
         "POSTGRES_SERVICE_HOST": POSTGRES_SERVICE_HOST,
+        "PGBOUNCER_SERVICE_HOST": PGBOUNCER_SERVICE_HOST,
+        "APG_FIXTURE_USER_A": FIXTURE_USER_A,
+        "APG_FIXTURE_USER_B": FIXTURE_USER_B,
+        "APG_DISPOSABLE_SCHEMA": PRISMA_FIXTURE_SCHEMA,
         "APP_RUNTIME_ROLE_NAME": identity.roles["app_runtime"],
         "PGBOUNCER_LISTEN_PORT": str(PGBOUNCER_LISTEN_PORT),
         "PGBOUNCER_ADMIN_USER": PGBOUNCER_ADMIN_USER,

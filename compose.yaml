@@ -461,6 +461,140 @@ services:
     networks:
       - internal
 
+  # Session 4's client compatibility fixtures (DBX-001..005).
+  #
+  # `session4-verify`, not `session4`, and the distinction is the same one
+  # `secret-check` draws: `bin/project-runtime.sh::session_profiles` selects
+  # `session2..N`, so nothing here starts with a deploy. These are one-shot
+  # proofs that are run deliberately, `restart: "no"`, and a project running
+  # them continuously would be a project holding four extra connections against
+  # a budget the cluster computed for services that do work.
+  #
+  # Each is a declared consumer of app_runtime_password, so each gets its own
+  # materialized copy at its own uid. That is four more files a rotation has to
+  # reach, and secrets.required.yaml records why it is still the right shape:
+  # a shared mount would break the property the per-consumer layout exists for.
+  #
+  # THE CREDENTIAL NEVER BECOMES AN ENVIRONMENT VARIABLE. Three of the four read
+  # the mounted file and write a 0600 pgpass into their own tmpfs, which libpq
+  # and node-postgres both honour through PGPASSFILE. Prisma is the exception
+  # and is handled the way dbmate was (ADR 0034): it builds a URL at run time,
+  # inside the container, from the same file.
+  client-psql:
+    build:
+      context: ./services/clients/psql
+      args:
+        BASE_IMAGE: ${PGBOUNCER_IMAGE:?required}
+    profiles: [session4-verify]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    # Both transports, in one container. DBX-003 is a claim about the same role
+    # over two ports, and running it twice from one process tree is what makes
+    # a difference between them attributable to the transport.
+    environment:
+      APG_POOLED_HOST: ${PGBOUNCER_SERVICE_HOST:?required}
+      APG_POOLED_PORT: ${PGBOUNCER_LISTEN_PORT:?required}
+      APG_DIRECT_HOST: ${POSTGRES_SERVICE_HOST:?required}
+      APG_DIRECT_PORT: "5432"
+      PGUSER: ${APP_RUNTIME_ROLE_NAME:?required}
+      PGDATABASE: ${POSTGRES_DATABASE_NAME:?required}
+      PGSSLMODE: disable
+      APG_USER_A: ${APG_FIXTURE_USER_A:?required}
+      APG_USER_B: ${APG_FIXTURE_USER_B:?required}
+    networks:
+      - internal
+
+  client-node-pg:
+    build:
+      context: ./services/clients/node-pg
+      args:
+        BASE_IMAGE: ${NODE_RUNTIME_IMAGE:?required}
+    profiles: [session4-verify]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    environment:
+      PGHOST: ${PGBOUNCER_SERVICE_HOST:?required}
+      PGPORT: ${PGBOUNCER_LISTEN_PORT:?required}
+      PGUSER: ${APP_RUNTIME_ROLE_NAME:?required}
+      PGDATABASE: ${POSTGRES_DATABASE_NAME:?required}
+      PGSSLMODE: disable
+      APG_TRANSPORT: pooled
+      APG_USER_A: ${APG_FIXTURE_USER_A:?required}
+      APG_USER_B: ${APG_FIXTURE_USER_B:?required}
+    networks:
+      - internal
+
+  client-psycopg:
+    build:
+      context: ./services/clients/psycopg
+      args:
+        BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+    profiles: [session4-verify]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    environment:
+      PGHOST: ${PGBOUNCER_SERVICE_HOST:?required}
+      PGPORT: ${PGBOUNCER_LISTEN_PORT:?required}
+      PGUSER: ${APP_RUNTIME_ROLE_NAME:?required}
+      PGDATABASE: ${POSTGRES_DATABASE_NAME:?required}
+      PGSSLMODE: disable
+      APG_TRANSPORT: pooled
+      APG_USER_A: ${APG_FIXTURE_USER_A:?required}
+      APG_USER_B: ${APG_FIXTURE_USER_B:?required}
+    networks:
+      - internal
+
+  # One image, two modes. `client` is the default because it is the claim this
+  # service can make without any privileged setup; `migrate` needs the
+  # disposable schema to exist and is run by the Session 4 gate after the
+  # privileged half has created and recorded it (plan §4.4).
+  client-prisma:
+    build:
+      context: ./services/clients/prisma
+      args:
+        BASE_IMAGE: ${NODE_RUNTIME_IMAGE:?required}
+    profiles: [session4-verify]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    command: [client]
+    environment:
+      PGHOST: ${PGBOUNCER_SERVICE_HOST:?required}
+      PGPORT: ${PGBOUNCER_LISTEN_PORT:?required}
+      PGUSER: ${APP_RUNTIME_ROLE_NAME:?required}
+      PGDATABASE: ${POSTGRES_DATABASE_NAME:?required}
+      PGSSLMODE: disable
+      APG_TRANSPORT: pooled
+      APG_USER_A: ${APG_FIXTURE_USER_A:?required}
+      APG_USER_B: ${APG_FIXTURE_USER_B:?required}
+      # Only the migrate mode reads these three. Present unconditionally
+      # because a service whose environment depended on its command would be
+      # two services wearing one name, and `docker inspect` would show a
+      # different answer depending on when it was asked.
+      APG_MIGRATION_ROLE: ${MIGRATION_ROLE_NAME:?required}
+      APG_POOLED_HOST: ${PGBOUNCER_SERVICE_HOST:?required}
+      APG_POOLED_PORT: ${PGBOUNCER_LISTEN_PORT:?required}
+      APG_DIRECT_HOST: ${POSTGRES_SERVICE_HOST:?required}
+      APG_DIRECT_PORT: "5432"
+      APG_DISPOSABLE_SCHEMA: ${APG_DISPOSABLE_SCHEMA:?required}
+    networks:
+      - internal
+
 networks:
   edge:
     name: ${EDGE_NETWORK_NAME:?required}
