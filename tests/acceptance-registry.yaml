@@ -729,9 +729,17 @@
   test_nodeids:
     - tests/contract/test_future_deployment.py::test_the_access_broker_returns_nothing_to_an_unauthorized_caller
   description: >-
-    The installed access broker enforces project and profile authorization and
-    returns nothing to an unauthorized caller, including no distinction between
-    "no such project" and "not yours". See ADR 0043.
+    The access broker enforces project and profile authorization and returns
+    nothing to an unauthorized caller. Past the trampoline it decides
+    authorization before reading anything about the project, so "no such
+    project" and "not yours" are one refusal: the same exit code and the same
+    message, naming neither the project nor the profile. The trampoline itself
+    has to resolve the release from the deployed document before there is any
+    policy to consult, so project-key existence stays visible to an account
+    already named in the sudoers rule -- sudo is the coarse gate, the policy is
+    the fine one. Narrowed from "no distinction anywhere" by ADR 0043's
+    amendment on acceptance, because the original claim was true of the broker
+    and could never be true of the trampoline.
 
 - id: DEP-ISO-004
   priority: P0

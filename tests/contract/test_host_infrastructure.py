@@ -44,10 +44,25 @@ UNITS = (
 #: so the release-indirection assertions below do not apply to it. It has its
 #: own module, tests/contract/test_ssh_rollback.py, because what matters about
 #: it is different -- it runs unattended during a lockout.
+#:
+#: ``agentic-postgres-database-access`` is here and no unit invokes it: it is
+#: reached through a ``sudo -n`` rule rather than by systemd. Every assertion in
+#: this block still applies to it, and one of them is the reason it belongs --
+#: it is the launcher that stands in front of credentials, so "an installed
+#: launcher holds no answer a release owns" matters more here than anywhere.
 LAUNCHERS = (
     "agentic-postgres-edge",
     "agentic-postgres-project",
     "agentic-postgres-firewall",
+    "agentic-postgres-database-access",
+)
+
+#: The files that ship *inside* a release and are reached only through a
+#: trampoline. None of them may carry the installer's prefix, and none of them
+#: may share a basename with what a trampoline installs as.
+RELEASE_SIDE = (
+    "project-launcher",
+    "database-access-broker",
 )
 
 
@@ -537,16 +552,17 @@ def test_an_installed_launcher_holds_no_answer_a_release_owns(code_only, name: s
         )
 
 
-def test_the_release_side_launcher_is_not_installed_anywhere() -> None:
-    """`libexec/project-launcher` must never reach /usr/local/libexec.
+@pytest.mark.parametrize("name", RELEASE_SIDE)
+def test_the_release_side_launcher_is_not_installed_anywhere(name: str) -> None:
+    """A release-side file must never reach /usr/local/libexec.
 
     A copy outside a release would be a second answer to the question the split
     exists to have exactly one answer to. The prefix is what keeps it out, so the
     prefix is what is asserted -- in the installer and in the module the deploy
     calls, which are two different implementations of the same rule.
     """
-    assert (LIBEXEC / "project-launcher").is_file()
-    assert not (LIBEXEC / "project-launcher").name.startswith("agentic-postgres-")
+    assert (LIBEXEC / name).is_file()
+    assert not name.startswith("agentic-postgres-")
 
     provision = (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
     assert '"${ROOT_DIR}"/libexec/agentic-postgres-*' in provision
@@ -557,22 +573,41 @@ def test_the_release_side_launcher_is_not_installed_anywhere() -> None:
     installed = {
         path.name.removeprefix("agentic-postgres-") for path in LIBEXEC.glob("agentic-postgres-*")
     }
-    assert "project-launcher" not in installed
+    assert name not in installed
 
 
-def test_the_release_side_launcher_is_executable_in_the_git_index() -> None:
+def test_a_release_side_file_never_shares_a_basename_with_an_installed_one() -> None:
+    """`project` and `project-launcher` were named apart for a reason.
+
+    ADR 0043 first said the broker's release side would be `database-access`,
+    which is precisely what the trampoline installs as. Two files with opposite
+    rules under one basename is a name an operator reads wrong at 3am -- and
+    worse, a name a future glob catches. Amended on acceptance, and asserted here
+    so the amendment is a property rather than a paragraph.
+    """
+    installed = {
+        path.name.removeprefix("agentic-postgres-") for path in LIBEXEC.glob("agentic-postgres-*")
+    }
+    assert installed & set(RELEASE_SIDE) == set(), (
+        "a release-side file shares its basename with an installed launcher: "
+        f"{sorted(installed & set(RELEASE_SIDE))}"
+    )
+
+
+@pytest.mark.parametrize("name", RELEASE_SIDE)
+def test_the_release_side_launcher_is_executable_in_the_git_index(name: str) -> None:
     """Extensionless, so `bin/*.sh` globs miss it and the \\\\wsl$ share strips
     the bit invisibly. The trampoline refuses a launcher that is not executable,
     which turns a stripped bit into a project that will not start at boot."""
     result = subprocess.run(
-        ["git", "ls-files", "--stage", "--", "libexec/project-launcher"],
+        ["git", "ls-files", "--stage", "--", f"libexec/{name}"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         check=True,
     )
     assert result.stdout.startswith("100755 "), (
-        f"libexec/project-launcher is not 100755 in the git index: {result.stdout.strip()!r}"
+        f"libexec/{name} is not 100755 in the git index: {result.stdout.strip()!r}"
     )
 
 

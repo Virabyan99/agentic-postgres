@@ -188,7 +188,11 @@ def test_migrate_is_no_longer_a_stub() -> None:
     from tests.contract.test_cli_contract import FUTURE_STUBS
 
     assert "bin/migrate.sh" not in FUTURE_STUBS
-    assert "bin/connect.sh" in FUTURE_STUBS, "another stub's assertion was removed"
+    # `bin/connect.sh` left in Session 4 Run 6, under the same rule and with its
+    # own module of replacement assertions. Its absence here is checked rather
+    # than merely tolerated, so that this test keeps failing if the tuple is
+    # emptied for any other reason.
+    assert "bin/connect.sh" not in FUTURE_STUBS
     assert "bin/restore-test.sh" in FUTURE_STUBS, "another stub's assertion was removed"
 
     result = run(MIGRATE)

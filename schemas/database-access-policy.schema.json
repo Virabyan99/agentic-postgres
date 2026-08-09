@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/database-access-policy.schema.json",
+  "title": "Agentic Postgres database access policy",
+  "description": "Which local unix account may obtain which access profile of which project, read by the release-side broker (ADR 0043). Root-owned at /etc/agentic-postgres/database-access-policy.json, mode 0600, published atomically. It contains identifiers only -- account names, project keys and profile names -- and never a secret value, a role password or a connection string. A host with no policy file has no delegated access at all; that is the closed state, and it is why an absent file is an error rather than an empty allowance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "grants"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "enum": [1]
+    },
+    "grants": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/grant" },
+      "description": "May be empty. An empty list is a host that delegates nothing, which is a different statement from a missing file and has to be expressible."
+    }
+  },
+  "$defs": {
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unix_user", "project_key", "profiles"],
+      "description": "One account, one project, an enumerated set of profiles. There is deliberately no wildcard in any of the three fields. A grant that matched every project would silently cover projects deployed months later by someone else, which is the opposite of a decision an operator made; and a grant that matched every profile would hand out migration authority as a side effect of asking for runtime access.",
+      "properties": {
+        "unix_user": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+          "description": "A local account name, matching the pattern host.schema.json uses for ssh.operator_user. Resolved from SUDO_UID by the broker rather than taken from an argument: a caller-supplied identity is not an identity."
+        },
+        "project_key": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{4,47}$",
+          "description": "The same shape outputs.schema.json calls projectKey. Enumerated, never a pattern: see the note on wildcards above."
+        },
+        "profiles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/accessProfileName" },
+          "description": "Which profiles this account may obtain for this project. `migration_direct` is the one that carries schema authority, so it is written down separately rather than implied by holding any direct access at all."
+        }
+      }
+    },
+    "accessProfileName": {
+      "type": "string",
+      "enum": ["runtime_pooled", "runtime_direct", "migration_direct"],
+      "description": "The three profiles ADR 0041 defines. An enum rather than a pattern, because the profile name selects which secret the broker reads: a free-form string here would be an arbitrary secret name arriving from a file."
+    }
+  }
+}

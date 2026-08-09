@@ -106,4 +106,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0040](0040-a-loopback-publication-is-not-a-public-port.md) | A loopback publication is not a public port | 4 | Proposed |
 | [0041](0041-two-transports-three-access-profiles.md) | Two transports, three access profiles | 4 | Proposed |
 | [0042](0042-host-port-allocation-is-state-keyed-by-the-volumes-identity.md) | Host port allocation is state, keyed by the identity the volume carries | 4 | Proposed |
-| [0043](0043-the-access-broker-is-a-release-reached-through-a-trampoline.md) | The access broker is a release, reached through a trampoline | 4 | Proposed |
+| [0043](0043-the-access-broker-is-a-release-reached-through-a-trampoline.md) | The access broker is a release, reached through a trampoline | 4 | Accepted, amended |

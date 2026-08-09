@@ -1,0 +1,130 @@
+#!/usr/bin/env bash
+#
+# Stable root-owned trampoline for the database access broker (ADR 0043).
+# Installed at /usr/local/libexec/agentic-postgres/database-access.
+#
+# Invoked through a narrow `sudo -n` rule by `bin/connect.sh` on a developer's
+# machine, over SSH. It is the only path by which an unprivileged account can
+# reach a database credential on this host, and the sudoers rule names this file
+# by a path that never changes -- which is the practical reason the split below
+# is cheap as well as correct.
+#
+# THIS FILE RESOLVES A RELEASE AND NOTHING ELSE (ADR 0037).
+#
+# The runbook put the whole broker here: policy, state and secrets, in one
+# installed program. That directory is the one ADR 0037 constrains, and for a
+# reason this repository paid for -- one copy of a file here serves every project
+# on the host, including projects deployed through releases it has never seen. A
+# Session 2 launcher ran `--session 2` against a Session 3 project for three runs
+# and every proof passed throughout (D72). Putting that shape in the one program
+# that hands out credentials is the worst available place for it.
+#
+# So what is left here is the part that cannot come from a release, because it is
+# what finds the release: validate the project key, read the deployed document,
+# and hand over. Which profiles exist, who may have them, which secret each maps
+# to and what is returned are all decisions, and decisions live in
+# `libexec/database-access-broker`, which ships inside the release.
+#
+# ONE THING THIS FILE CANNOT HIDE. It reads the deployed document before any
+# policy is consulted, because that document is what names the release. So its
+# failures do distinguish "no such project" from "a project you may not have" --
+# a caller who is in the sudoers rule can learn which project keys are deployed
+# here. ADR 0043's point 5 is therefore a property of the broker, not of this
+# path, and it is amended to say so rather than asserted by a test that would be
+# measuring the wrong file. The coarse gate is sudo: an account not named in the
+# rule cannot run this at all.
+#
+# Exit codes: 2 invalid input, 3 missing prerequisite, 4 missing runtime
+# prerequisite. Anything else is the release broker's, passed through by exec.
+
+set -euo pipefail
+
+readonly STATE_ROOT="/etc/agentic-postgres/projects"
+readonly RELEASE_ROOT="/opt/agentic-postgres/releases"
+
+# The one path this file and every release must agree on. A fixed name rather
+# than a per-operation mapping: a mapping is a fact about a release, and this
+# file may not hold one.
+readonly RELEASE_BROKER="libexec/database-access-broker"
+
+# Same shape as schemas/outputs.schema.json's projectKey.
+readonly PROJECT_KEY_PATTERN='^[a-z][a-z0-9-]{4,47}$'
+
+die() {
+  local code="$1"
+  shift
+  printf 'agentic-postgres-database-access: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: sudo /usr/local/libexec/agentic-postgres/database-access <project-key> <operation> [...]
+
+Operations: endpoint | password
+
+Resolves the installed release recorded in that project's deployed outputs
+document and executes that release's own broker, which decides whether the
+calling account may have what it asked for. Not intended for direct operator
+use; bin/connect.sh invokes it over SSH.
+
+No secret is accepted as an argument. Nothing is written.
+USAGE
+}
+
+main() {
+  case "${1-}" in
+    --help|-h) usage; return 0 ;;
+    "") usage >&2; die 2 "a project key is required." ;;
+  esac
+
+  local project_key="$1"
+
+  # Validated before it becomes a path component, and before anything else is
+  # read. This is what makes the argument safe to interpolate below.
+  if ! printf '%s' "${project_key}" | grep -Eq "${PROJECT_KEY_PATTERN}"; then
+    die 2 "not a valid project key: ${project_key}"
+  fi
+
+  # The operation is passed through unexamined. Which operations exist is a
+  # property of a release, and a list here would be a second definition of it --
+  # the kind that agrees right up until a release adds one.
+  [ "$#" -ge 2 ] || { usage >&2; die 2 "an operation is required."; }
+
+  [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+  command -v jq >/dev/null 2>&1 || die 3 "jq is not installed."
+
+  local deployment="${STATE_ROOT}/${project_key}/outputs.json"
+  [ -f "${deployment}" ] || die 4 "no deployment state for ${project_key}: ${deployment}"
+  [ -L "${deployment}" ] && die 2 "${deployment} is a symlink, which is not accepted."
+
+  local commit release
+  commit="$(jq -r '.source_commit // empty' "${deployment}")"
+  [ -n "${commit}" ] || die 4 "${deployment} records no source commit."
+  case "${commit}" in
+    *[!0-9a-f]* | "") die 2 "recorded release commit is not hexadecimal: ${commit}" ;;
+  esac
+  [ "${#commit}" -eq 40 ] || die 2 "recorded release commit is not 40 characters: ${commit}"
+
+  release="${RELEASE_ROOT}/${commit}"
+  [ -d "${release}" ] || die 4 "installed release is missing: ${release}"
+  [ -L "${release}" ] && die 2 "installed release path is a symlink: ${release}"
+
+  local owner
+  owner="$(stat -c '%U' "${release}")"
+  [ "${owner}" = "root" ] || die 2 "installed release is owned by ${owner}, expected root."
+
+  local broker="${release}/${RELEASE_BROKER}"
+  # Named rather than guessed at. A release predating ADR 0043 carries no
+  # broker, and saying so is the whole point: the alternative is falling back to
+  # whatever this file happens to know, which is how a Session 3 project got
+  # started as a Session 2 one.
+  [ -f "${broker}" ] \
+    || die 4 "release ${commit} carries no ${RELEASE_BROKER}; it predates ADR 0043. Redeploy ${project_key}."
+  [ -L "${broker}" ] && die 2 "${broker} is a symlink, which is not accepted."
+  [ -x "${broker}" ] || die 4 "${broker} is not executable."
+
+  exec "${broker}" "$@"
+}
+
+main "$@"

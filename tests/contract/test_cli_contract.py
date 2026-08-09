@@ -31,6 +31,7 @@ SHELL_COMMANDS = (
     "bin/lock-dev-deps.sh",
     "bin/lock-versions.sh",
     "bin/materialize-secrets.sh",
+    "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/db.sh",
     "bin/migrate.sh",
@@ -46,6 +47,7 @@ SHELL_COMMANDS = (
 
 PYTHON_COMMANDS = (
     "bin/bootstrap-providers.py",
+    "bin/database-access.py",
     "bin/database-ports.py",
     "bin/db-verify.py",
     "bin/materialize-secrets.py",
@@ -57,16 +59,14 @@ PYTHON_COMMANDS = (
 
 #: Commands that document a future capability and refuse to pretend otherwise.
 #:
-#: ``bin/bootstrap-providers.sh`` left this tuple in Session 2 and
-#: ``bin/migrate.sh`` in Session 3, each in the run that implemented it. ADR
-#: 0017 records why that is legitimate and what replaced the assertion: both
-#: now carry real command-contract tests, which are stricter than the one they
-#: left. Emptying this tuple is not a way to make ``test_future_stub_exits_ten``
-#: pass, and the two commands still here are still stubs.
-FUTURE_STUBS = (
-    "bin/connect.sh",
-    "bin/restore-test.sh",
-)
+#: ``bin/bootstrap-providers.sh`` left this tuple in Session 2, ``bin/migrate.sh``
+#: in Session 3 and ``bin/connect.sh`` in Session 4, each in the run that
+#: implemented it. ADR 0017 records why that is legitimate and what replaced the
+#: assertion: all three now carry real command-contract tests, which are stricter
+#: than the one they left. Emptying this tuple is not a way to make
+#: ``test_future_stub_exits_ten`` pass, and the one command still here is still a
+#: stub.
+FUTURE_STUBS = ("bin/restore-test.sh",)
 
 
 def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None):
@@ -171,10 +171,27 @@ def test_bootstrap_providers_is_no_longer_a_stub() -> None:
     assert "required" in result.stderr.lower()
 
 
+def test_connect_is_no_longer_a_stub() -> None:
+    """ADR 0017, third application. Asserted here as well as in FUTURE_STUBS.
+
+    A bare invocation used to be exit ``10``, "unavailable this session". It is
+    now a missing required input, which is ``2``. Stated directly so that
+    removing it from ``FUTURE_STUBS`` without implementing it fails here rather
+    than passing quietly, which is the whole reason ADR 0017 exists.
+    """
+    result = run(str(REPO_ROOT / "bin" / "connect.sh"))
+    assert result.returncode == 2, (
+        f"expected 2 (missing required input), got {result.returncode}. "
+        "A 10 here means the command went back to being a stub."
+    )
+    assert "required" in result.stderr.lower()
+
+
 def test_the_remaining_stubs_are_the_ones_later_sessions_own() -> None:
     """Guard the guard: emptying FUTURE_STUBS must not make its tests vacuous."""
-    assert set(FUTURE_STUBS) == {"bin/connect.sh", "bin/restore-test.sh"}
+    assert set(FUTURE_STUBS) == {"bin/restore-test.sh"}
     assert "bin/bootstrap-providers.sh" not in FUTURE_STUBS
+    assert "bin/connect.sh" not in FUTURE_STUBS
 
 
 @pytest.mark.parametrize("relative", FUTURE_STUBS)

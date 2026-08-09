@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+#
+# The release side of the database access broker (ADR 0043).
+#
+# Reached only through /usr/local/libexec/agentic-postgres/database-access, the
+# stable trampoline that resolves which release a project was deployed through.
+# By the time this runs, the project key has been validated, root has been
+# checked, and the release this file lives in is the one that deployed the
+# project named on the command line. That is the property the split exists for:
+# everything below is a fact about *this* release -- which profiles exist, which
+# secret each maps to, what a caller is entitled to -- and a project deployed
+# through an older release runs that release's copy instead.
+#
+# It is deliberately NOT named agentic-postgres-*: `bin/provision-host.sh` and
+# `installed_release.reconcile_launchers` both install `libexec/agentic-postgres-*`
+# into /usr/local/libexec, and this file must never be installed there. A copy
+# outside a release would be a second answer to "what may this caller have",
+# ageing independently of the releases it answers for.
+#
+# It is also not named `database-access`, though ADR 0043 first said it would be.
+# The trampoline installs as `database-access`, so two files with opposite rules
+# would share one basename -- exactly the confusion `project` and
+# `project-launcher` were named apart to avoid. Amended on acceptance.
+#
+# This file is a wrapper and holds no policy of its own. The policy is in
+# `agentic_postgres.access_policy` and the resolution in
+# `agentic_postgres.access_broker`, both importable and both testable with no
+# root, no host and no cluster -- which is the reason they are not written here
+# in shell.
+#
+# Exit codes are `bin/database-access.py`'s, passed through by exec.
+
+set -euo pipefail
+
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly ROOT_DIR
+
+die() {
+  local code="$1"
+  shift
+  printf 'database-access-broker: %s\n' "$*" >&2
+  exit "$code"
+}
+
+usage() {
+  cat <<'USAGE'
+Usage: <release>/libexec/database-access-broker <project-key> <operation> [profile]
+
+Operations: endpoint | password
+
+Resolves one access profile of one deployed project for the account that
+invoked sudo. Invoked by /usr/local/libexec/agentic-postgres/database-access,
+never directly.
+USAGE
+}
+
+# Ubuntu ships no bare `python`, sudo resets PATH to secure_path, and an
+# installed release carries no virtualenv -- `git archive` exports tracked files
+# and .venv is not one. So the fallback to python3 is the path that actually
+# runs on a host, and the venv branch is what runs from a developer's checkout.
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then
+    printf '%s' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    die 3 "no Python interpreter found (looked for .venv/bin/python, python3, python)."
+  fi
+}
+
+main() {
+  case "${1-}" in
+    --help|-h) usage; return 0 ;;
+    "") usage >&2; die 2 "a project key is required." ;;
+  esac
+
+  local project_key="$1"
+  shift
+
+  local operation="${1-}"
+  case "${operation}" in
+    endpoint|password) shift ;;
+    "") usage >&2; die 2 "an operation is required." ;;
+    *) usage >&2; die 2 "unknown operation: ${operation}" ;;
+  esac
+
+  [ "$(id -u)" -eq 0 ] || die 3 "must run as root."
+
+  # The trampoline's order is <project-key> <operation>, matching the project
+  # launcher's <project-key> <action>; the Python surface reads
+  # <operation> <project-key> like every other subcommand-first CLI here. The
+  # reordering happens once, here, rather than either side compromising.
+  PYTHONPATH="${ROOT_DIR}/src" exec "$(python_bin)" \
+    "${ROOT_DIR}/bin/database-access.py" "${operation}" "${project_key}" "$@"
+}
+
+main "$@"

@@ -35,6 +35,13 @@ readonly BACKUP_ROOT="/var/backups/agentic-postgres"
 readonly SSH_SNIPPET="/etc/ssh/sshd_config.d/00-agentic-postgres-ssh.conf"
 readonly ROLLBACK_UNIT="apg-ssh-rollback"
 readonly UFW_ROLLBACK_UNIT="apg-ufw-rollback"
+# The one sudo rule this system installs (ADR 0043). It names the database
+# access trampoline by a path that never changes, so it is written once here and
+# never rewritten per release -- which is the practical reason that split is
+# cheap as well as correct. The rule permits invoking one program; what that
+# program hands over is decided by the release it resolves to and by the policy
+# file, neither of which sudo knows anything about.
+readonly SUDOERS_FILE="/etc/sudoers.d/agentic-postgres-database-access"
 
 # The directives whose *resolved* value decides whether an operator can still
 # get in, and whether the hardening did anything. One list, used both by --check
@@ -281,7 +288,7 @@ check_baseline() {
   # Exec* target is absent fails at boot with a message about the unit rather
   # than about the missing file.
   local launcher
-  for launcher in edge project firewall ssh-rollback; do
+  for launcher in edge project firewall ssh-rollback database-access; do
     if [ -x "${LIBEXEC}/${launcher}" ]; then
       ok "launcher ${launcher}"
     else
@@ -289,6 +296,30 @@ check_baseline() {
       violations=$((violations + 1))
     fi
   done
+
+  # The sudo rule, checked for the two things that make it either useless or
+  # dangerous: a mode sudo refuses to read, and a rule naming an account that is
+  # not the operator this host is configured for.
+  if [ -f "${SUDOERS_FILE}" ]; then
+    local sudoers_mode
+    sudoers_mode="$(stat -c '%a' "${SUDOERS_FILE}")"
+    if [ "${sudoers_mode}" = "440" ]; then
+      ok "sudoers rule ${SUDOERS_FILE}"
+    else
+      bad "${SUDOERS_FILE} is mode ${sudoers_mode}; sudo ignores a file that is not 0440 or tighter"
+      violations=$((violations + 1))
+    fi
+    if grep -q "^$(host_field ssh.operator_user) ALL=(root) NOPASSWD: ${LIBEXEC}/database-access\$" \
+      "${SUDOERS_FILE}"; then
+      ok "sudoers rule names the configured operator and one program"
+    else
+      bad "${SUDOERS_FILE} does not name $(host_field ssh.operator_user) and ${LIBEXEC}/database-access"
+      violations=$((violations + 1))
+    fi
+  else
+    bad "${SUDOERS_FILE} is absent; bin/connect.sh cannot reach the access broker"
+    violations=$((violations + 1))
+  fi
 
   local unit
   for unit in agentic-postgres-docker-firewall.service agentic-postgres-edge.service \
@@ -508,6 +539,52 @@ install_launchers() {
   note "installed $(find "${LIBEXEC}" -maxdepth 1 -type f | wc -l) launcher(s) into ${LIBEXEC}"
 }
 
+# The `sudo -n` rule bin/connect.sh reaches the broker through (ADR 0043).
+#
+# Written to a temporary file and checked with `visudo -cf` BEFORE it is
+# installed. A syntactically invalid file in /etc/sudoers.d does not break one
+# rule, it breaks sudo -- on a host whose only administrative path is sudo over
+# SSH. That is a lockout with the same shape as the sshd one this script already
+# arms a rollback timer for, and it is avoidable for the cost of one check.
+#
+# Mode 0440 because sudo refuses to read a file that is group- or
+# world-writable, and refusing to read it is refusing every rule in it.
+install_database_access_sudoers() {
+  local operator="$1"
+  command -v visudo >/dev/null 2>&1 || die 3 "visudo is not installed; refusing to write a sudoers file that cannot be checked."
+
+  install -d -m 0755 -o root -g root /etc/sudoers.d
+
+  local staging
+  staging="$(mktemp)"
+  {
+    printf '# Managed by bin/provision-host.sh (ADR 0043). Do not edit by hand.\n'
+    printf '#\n'
+    printf '# One program, by a path that never changes. The trampoline resolves the\n'
+    printf '# release a project was deployed through and hands over to that release,\n'
+    printf '# which decides whether this account may have what it asked for.\n'
+    printf '%s ALL=(root) NOPASSWD: %s/database-access\n' "${operator}" "${LIBEXEC}"
+  } > "${staging}"
+
+  if ! visudo -cf "${staging}" >/dev/null; then
+    rm -f "${staging}"
+    die 6 "the generated sudoers rule did not pass visudo; nothing was installed."
+  fi
+
+  install -m 0440 -o root -g root "${staging}" "${SUDOERS_FILE}"
+  rm -f "${staging}"
+
+  # Checked again in place, because what matters is that the whole of
+  # /etc/sudoers parses with this file in it, not that the fragment did on its
+  # own. An include that is individually valid can still collide.
+  if ! visudo -c >/dev/null; then
+    rm -f "${SUDOERS_FILE}"
+    die 6 "sudo policy did not parse with ${SUDOERS_FILE} installed; it was removed."
+  fi
+
+  note "installed ${SUDOERS_FILE} for ${operator}"
+}
+
 # Docker comes from Docker's own apt repository, not from Ubuntu's.
 #
 # Ubuntu's docker.io package lags, and more importantly it does not ship the
@@ -667,6 +744,9 @@ apply_baseline() {
   # therefore installs everything, skips SSH, and prints an arm command that now
   # names a file that is actually there; the second --apply does the hardening.
   install_launchers
+  # After the launchers, because the rule names a file and a rule pointing at a
+  # path that does not exist is one sudo accepts and nothing can use.
+  install_database_access_sudoers "$(host_field ssh.operator_user)"
   # Before install_units, which enables the firewall unit. Enabling a unit whose
   # launcher cannot resolve a release is how an operator learns to ignore a
   # failing service.

@@ -118,16 +118,25 @@ bin/session-01-check.sh
 Requires a clean tracked tree. CI runs this exact script; there is no second,
 divergent definition of "passing".
 
-### 12. Bootstrap providers — *future session (2)*
+### 12. Bootstrap providers — *implemented in Session 2*
 
 `bin/bootstrap-providers.sh` is the only command permitted to provision
-external resources. It currently documents its future inputs and exits `10`.
+external resources. It documented its future inputs and exited `10` when this
+guide was written; Session 2 implemented it, so a bare invocation is now
+missing input (`2`) rather than an unavailable capability.
 
-### 13. Connect to the database and run migrations — *future session (3–4)*
+### 13. Connect to the database and run migrations — *implemented in Sessions 3–4*
 
-`bin/connect.sh` and `bin/migrate.sh` document their contracts and exit `10`.
-Migrations always use the direct endpoint; transaction pooling breaks DDL and
-advisory-lock semantics.
+`bin/migrate.sh` left the stub list in Session 3 and `bin/connect.sh` in
+Session 4; both are real commands with real exit codes. Migrations always use
+the direct endpoint; transaction pooling breaks DDL and advisory-lock
+semantics.
+
+`bin/connect.sh` opens an SSH forward to one *access profile* and records it,
+and defaults to `runtime_direct` — the application role. It prints no password
+under any flag: `exec` puts the credential in a `0600` file and names it to the
+child through `PGPASSFILE`. `bin/restore-test.sh` is now the only command still
+documenting a future capability.
 
 ### 14. Rehearse a restore — *future session (10)*
 

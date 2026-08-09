@@ -110,9 +110,17 @@ REQUIRED_PATHS = (
     "infra/host/daemon.json",
     "infra/host/docker-user-rules.v4",
     "infra/host/docker-user-rules.v6",
+    "libexec/agentic-postgres-database-access",
     "libexec/agentic-postgres-edge",
     "libexec/agentic-postgres-firewall",
     "libexec/agentic-postgres-project",
+    # The release sides of the two trampolines. Listed because the trampoline
+    # refuses a release that does not carry its counterpart and names the
+    # project to redeploy: a file that silently left the archive would turn
+    # every project on the host into one that has to be redeployed to be
+    # reachable, and the first sign of it would be on a host.
+    "libexec/database-access-broker",
+    "libexec/project-launcher",
     "systemd/agentic-postgres-docker-firewall.service",
     "systemd/agentic-postgres-edge.service",
     "systemd/agentic-postgres-project@.service",
@@ -124,12 +132,15 @@ REQUIRED_PATHS = (
     "docs/plans/session-02-implementation-plan.md",
     "schemas/bootstrap-state.schema.json",
     "schemas/capabilities.schema.json",
+    "schemas/database-access-policy.schema.json",
     "schemas/database-port-allocations.schema.json",
     "schemas/host.schema.json",
     "schemas/outputs.schema.json",
     "schemas/project.schema.json",
     "schemas/secret-contract.schema.json",
     "src/agentic_postgres/__init__.py",
+    "src/agentic_postgres/access_broker.py",
+    "src/agentic_postgres/access_policy.py",
     "src/agentic_postgres/bootstrap_state.py",
     "src/agentic_postgres/config.py",
     "src/agentic_postgres/evidence.py",
