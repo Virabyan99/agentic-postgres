@@ -58,33 +58,17 @@ def test_new_team_member_completes_the_documented_path() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session 4 — port allocation, the connection helper, and two-project isolation
+# Session 4 — activated in Run 8
 #
-# DEP-ISO-004's credential clause carries its own node ID deliberately. D70:
-# DEP-ISO-003 claimed the same property for two runs behind six node IDs, and
-# not one of them presented a credential to anything.
+# The four placeholders that were here are gone rather than kept beside their
+# implementations: a placeholder next to a real test is a second, weaker claim
+# about the same requirement, which is what
+# test_no_requirement_is_claimed_by_two_placeholders exists to prevent.
+#
+#   DBX-PORT-001, DEP-ISO-004  -> tests/deployment/test_session4_transports.py
+#                                 tests/deployment/test_session4_isolation.py
+#   DX-DB-001, DX-DB-002       -> tests/external/test_session4_public_transports.py
+#
+# DEP-ISO-004's credential clause gained a node ID of its own, which is what the
+# comment that used to sit here said Run 8 would have to do (D70).
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.future(session=4, requirement="DBX-PORT-001")
-def test_host_loopback_allocations_are_stable_and_unshared() -> None:
-    unimplemented(4, "allocations survive redeploy, restart and reboot, keyed by the instance UUID")
-
-
-@pytest.mark.future(session=4, requirement="DX-DB-001")
-def test_the_connection_helper_opens_and_cleans_a_verified_tunnel() -> None:
-    unimplemented(4, "a verified tunnel per transport, cleaned up, with no credential printed")
-
-
-@pytest.mark.future(session=4, requirement="DX-DB-002")
-def test_the_access_broker_returns_nothing_to_an_unauthorized_caller() -> None:
-    unimplemented(4, "an unauthorized caller learns nothing, including whether the project exists")
-
-
-# One placeholder, not two: a requirement may carry only one, which is what
-# test_no_requirement_is_claimed_by_two_placeholders enforces. Activating this
-# in Run 8 must therefore *add* a node ID for the credential clause rather than
-# rely on this one to cover both halves -- see the registry comment on D70.
-@pytest.mark.future(session=4, requirement="DEP-ISO-004")
-def test_two_projects_share_no_transport_credential_or_pool() -> None:
-    unimplemented(4, "distinct ports, credentials, pooler configuration and user lists")

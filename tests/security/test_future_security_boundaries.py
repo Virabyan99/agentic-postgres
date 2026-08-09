@@ -36,29 +36,17 @@ def unimplemented(session: int, what: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session 4 — the two transports do not widen the authorization model
+# Session 4 — activated in Run 8
 #
-# SEC-DBX-001 is the negative half of ADR 0040: publication and public
-# reachability are different properties, and this is the one that says so from
-# outside. It is not satisfied by the model-side check that every publication
-# carries a loopback host_ip -- that proves what was configured, not what is
-# reachable.
+#   SEC-DBX-001  -> tests/external/test_session4_public_transports.py
+#   SEC-DBX-002, SEC-DBX-003 -> tests/deployment/test_session4_boundaries.py
+#
+# The last two live under tests/deployment/ and carry the `security` marker. The
+# marker decides what runs and what the evidence records; the directory decides
+# which conftest is in scope, and the fixtures that make them measurable are
+# there. A second copy of "how a materialized credential is read" was not worth
+# a directory convention.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.future(session=4, requirement="SEC-DBX-001")
-def test_neither_transport_is_reachable_from_a_non_loopback_address() -> None:
-    unimplemented(4, "both allocated ports closed from off-host while 443 is open")
-
-
-@pytest.mark.future(session=4, requirement="SEC-DBX-002")
-def test_the_app_runtime_role_holds_no_ownership_or_ddl() -> None:
-    unimplemented(4, "no ownership, no base schema, no DDL, and no SET ROLE to anything")
-
-
-@pytest.mark.future(session=4, requirement="SEC-DBX-003")
-def test_pooled_session_state_does_not_survive_release() -> None:
-    unimplemented(4, "transaction-local claims and a deliberately set session GUC are both gone")
 
 
 # ---------------------------------------------------------------------------

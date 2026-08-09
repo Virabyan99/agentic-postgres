@@ -94,6 +94,12 @@ ENVIRONMENT_VARIABLES = (
     "APG_PUBLIC_IPV4",
     "APG_PUBLIC_IPV6",
     "APG_SECRET_SENTINEL_FILE",
+    # Session 4. `bin/connect.sh` and the access broker are reached over SSH
+    # from a developer's machine, so the external suite needs a destination.
+    # `user@host`, not a hostname: the account is half of what the sudoers rule
+    # and the access policy both key on, and supplying only the host would leave
+    # the identity under test to whatever the local username happens to be.
+    "APG_SSH_DESTINATION",
 )
 
 

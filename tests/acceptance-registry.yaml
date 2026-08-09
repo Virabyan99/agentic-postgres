@@ -611,35 +611,35 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/integration/test_future_database_clients.py::test_prisma_migrate_uses_the_direct_url
+    - tests/deployment/test_session4_transports.py::test_prisma_migrate_runs_through_the_direct_transport
   description: Prisma Migrate runs through the direct endpoint.
 
 - id: DBX-002
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/integration/test_future_database_clients.py::test_prisma_client_uses_the_pooled_url
+    - tests/deployment/test_session4_transports.py::test_prisma_client_works_through_the_pooler
   description: Prisma Client operates through the pooled endpoint.
 
 - id: DBX-003
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/integration/test_future_database_clients.py::test_psql_works_on_both_endpoints
+    - tests/deployment/test_session4_transports.py::test_psql_works_through_both_transports
   description: psql connects through both the direct and pooled endpoints.
 
 - id: DBX-004
   priority: P1
   target_session: 4
   test_nodeids:
-    - tests/integration/test_future_database_clients.py::test_node_and_python_clients_work_through_the_pooler
+    - tests/deployment/test_session4_transports.py::test_node_and_python_drivers_work_through_the_pooler
   description: Node and Python drivers round-trip a query through the pooler.
 
 - id: DBX-005
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/integration/test_future_database_clients.py::test_direct_postgresql_is_not_publicly_reachable
+    - tests/external/test_session4_public_transports.py::test_the_direct_endpoint_is_not_publicly_reachable
   description: The direct endpoint is not publicly reachable.
 
 # The ten below were added in Session 4 Run 1, for claims none of DBX-001..005
@@ -651,7 +651,7 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/integration/test_future_database_clients.py::test_the_pooler_runs_in_transaction_mode_with_bounded_limits
+    - tests/deployment/test_session4_transports.py::test_the_pooler_runs_transaction_mode_with_bounded_limits
   description: >-
     The pooler runs in transaction mode with explicit, bounded limits and
     non-zero prepared-statement tracking, read from its own configuration rather
@@ -661,7 +661,7 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/integration/test_future_database_clients.py::test_client_concurrency_stays_inside_the_server_budget
+    - tests/deployment/test_session4_transports.py::test_more_clients_than_the_pool_stay_inside_the_server_budget
   description: >-
     More clients than the server-connection budget complete their transactions,
     and the number of server connections is observed never to exceed it.
@@ -670,7 +670,7 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/integration/test_future_database_clients.py::test_a_named_prepared_statement_survives_a_backend_change
+    - tests/deployment/test_session4_transports.py::test_a_named_prepared_statement_survives_an_observed_backend_change
   description: >-
     A protocol-level named prepared statement is reusable after the pooler has
     moved the client to a different backend, proved by observing the backend
@@ -680,7 +680,8 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_host_loopback_allocations_are_stable_and_unshared
+    - tests/deployment/test_session4_transports.py::test_the_allocation_is_active_and_keyed_by_the_volumes_identity
+    - tests/deployment/test_session4_transports.py::test_the_published_ports_are_the_ones_the_registry_allocated
   description: >-
     Host-loopback allocations are stable across redeploy, restart and reboot,
     two projects never share one, and an allocation is matched by the instance
@@ -690,7 +691,7 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_neither_transport_is_reachable_from_a_non_loopback_address
+    - tests/external/test_session4_public_transports.py::test_neither_transport_is_reachable_from_a_non_loopback_address
   description: >-
     Neither transport is reachable from a non-loopback address; every
     publication carries an explicit loopback host_ip and only the edge publishes
@@ -700,7 +701,7 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_the_app_runtime_role_holds_no_ownership_or_ddl
+    - tests/deployment/test_session4_boundaries.py::test_the_app_runtime_role_holds_no_ownership_or_ddl
   description: >-
     The application runtime role holds no ownership, no base-schema
     addressability and no DDL, and cannot become any other role.
@@ -709,7 +710,7 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_pooled_session_state_does_not_survive_release
+    - tests/deployment/test_session4_boundaries.py::test_pooled_session_state_does_not_survive_release
   description: >-
     Transaction-local claim state, and deliberately set session-level state, are
     both absent for the next client of a released pooled connection.
@@ -718,7 +719,7 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_the_connection_helper_opens_and_cleans_a_verified_tunnel
+    - tests/external/test_session4_public_transports.py::test_the_connection_helper_opens_and_cleans_a_verified_tunnel
   description: >-
     The connection helper opens and cleans a verified tunnel for each transport,
     refuses an unverified host key, and prints no credential.
@@ -727,7 +728,7 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_the_access_broker_returns_nothing_to_an_unauthorized_caller
+    - tests/external/test_session4_public_transports.py::test_the_access_broker_returns_nothing_to_an_unauthorized_caller
   description: >-
     The access broker enforces project and profile authorization and returns
     nothing to an unauthorized caller. Past the trampoline it decides
@@ -745,7 +746,8 @@
   priority: P0
   target_session: 4
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_two_projects_share_no_transport_credential_or_pool
+    - tests/deployment/test_session4_isolation.py::test_two_projects_hold_distinct_transports_pools_and_user_lists
+    - tests/deployment/test_session4_isolation.py::test_one_projects_runtime_credential_is_refused_by_the_others_cluster
   description: >-
     Two projects have distinct pooled and direct ports, credentials, pooler
     configuration and user lists, and neither project's credential opens the
