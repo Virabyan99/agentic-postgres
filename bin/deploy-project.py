@@ -56,6 +56,7 @@ from agentic_postgres import (
     edge_state,
     installed_release,
     observation,
+    port_allocations,
     rendering,
     runtime_override,
 )
@@ -503,6 +504,36 @@ def cluster_instance_uuid(container: str) -> str:
     return value
 
 
+def _live_allocation(project_key: str) -> dict[str, Any] | None:
+    """This project's live port allocation, or ``None``.
+
+    Searched by project key because the deployed document records no instance
+    UUID (D106), and ambiguity is refused rather than resolved by taking a first
+    match: two live records for one key means the deploy cannot tell which
+    cluster a published port reaches, and every assertion downstream would still
+    pass. Released records are excluded, so a project whose ports were given up
+    publishes `unavailable` rather than a number nothing is serving.
+    """
+    path = Path(port_allocations.REGISTRY_PATH)
+    if not path.is_file():
+        return None
+    registry = json.loads(path.read_text(encoding="utf-8"))
+    live = [
+        allocation
+        for allocation in port_allocations.live_allocations(registry)
+        if allocation["project_key"] == project_key
+    ]
+    if len(live) > 1:
+        fail(
+            EXIT_VALIDATION,
+            f"{len(live)} live port allocations record the project key {project_key}. "
+            "The registry is keyed by the volume's instance UUID and records the key "
+            "only for humans; publishing an endpoint from either would be publishing "
+            "a port that may reach the other cluster.",
+        )
+    return live[0] if live else None
+
+
 def render_runtime_only(arguments: argparse.Namespace) -> int:
     """Reserve two ports and publish them in the override. Move nothing (D95).
 
@@ -784,8 +815,28 @@ def main(argv: list[str] | None = None) -> int:
         lambda observed: observed == "ready",
     )
 
+    # The transports, read out of the host's own allocation registry rather than
+    # assumed from the fact that a pooler is running. `active` and nothing less
+    # (D112): a reservation means two ports were set aside and nothing has
+    # connected to either, and §4.1 puts the off-host scan before the promotion
+    # that makes it active. So the first deploy of a project publishes
+    # `unavailable`, the operator publishes and verifies, and the next deploy is
+    # what records that the endpoints answer.
+    transports = deployed_output.observe_transports(
+        rendered=rendered,
+        loopback_address=host["database_access"]["loopback_address"],
+        allocation=_live_allocation(key),
+    )
+    for transport in ("pooled", "direct"):
+        block = transports[transport]
+        print(
+            f"  {transport:<8} {block['status']}"
+            + (f" {block['host']}:{block['port']}" if block["status"] == "available" else "")
+        )
+
     document = deployed_output.build_deployed_document(
         rendered=rendered,
+        transports=transports,
         source_commit=commit,
         host={
             "id": host["host"]["id"],

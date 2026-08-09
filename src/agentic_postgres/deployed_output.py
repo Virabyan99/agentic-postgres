@@ -34,10 +34,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import config
+from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
 SCHEMA_VERSION = 4
+
+#: Which declared secret backs each access profile. Derived from the broker's
+#: own mapping rather than restated: the broker reads that mapping to decide
+#: which file to open and refuses a document whose recorded reference disagrees
+#: with it, so a second copy here would be a deployment the release will not
+#: serve.
+SECRET_FOR_PROFILE = {name: secret for name, (secret, _) in access_policy.PROFILE_SECRETS.items()}
 PROJECT_STATE_ROOT = Path("/etc/agentic-postgres/projects")
 RENDERED_ROOT = Path("/var/lib/agentic-postgres/rendered")
 
@@ -84,9 +91,78 @@ def rendered_path(project_key: str, *, root: Path = RENDERED_ROOT) -> Path:
     return root / project_key
 
 
+def observe_transports(
+    *,
+    rendered: dict[str, Any],
+    loopback_address: str,
+    allocation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """The `pooled`, `direct` and `access_profiles` blocks, as measured.
+
+    **This is the writer those three blocks did not have.** The render
+    hard-codes all of them `unavailable` with null references, deliberately —
+    a render knows no port and no host. `build_deployed_document` then carried
+    the rendered `database` block through verbatim, so a project deployed
+    through session 4, with a healthy pooler and materialized secrets, still
+    published a document saying every transport was unavailable. Three readers
+    depend on the field and nothing set it: the access broker refuses any
+    profile that is not `available`, the external suite reads the ports out of
+    it, and §4.1 says deployed output may not report ready before the negative
+    checks pass — which presumes it eventually reports something else. Found by
+    deploying, not by reading (D112).
+
+    **Availability is gated on the allocation being `active`, not on it
+    existing.** `reserved` means two ports were set aside and nothing has
+    connected to either; `active` means `database-ports.sh verify` connected to
+    both. Publishing `available` off a reservation would claim an endpoint
+    answers because something once intended it to — and §4.1 puts the off-host
+    scan *before* that promotion, so it would also be making the claim ahead of
+    the check that guards it.
+
+    Pure: it takes an allocation rather than reading a registry, so the cases
+    that matter — no allocation, a reservation, a released record — are testable
+    with no host.
+    """
+    database = rendered["database"]
+    profiles = {name: dict(profile) for name, profile in database["access_profiles"].items()}
+    endpoints = {"pooled": dict(database["pooled"]), "direct": dict(database["direct"])}
+
+    if allocation is None or allocation.get("state") != "active":
+        return {**endpoints, "access_profiles": profiles}
+
+    runtime_role = profiles["runtime_pooled"]["role"]
+    name = database["name"]
+
+    for transport, port in (
+        ("pooled", allocation["pooled_port"]),
+        ("direct", allocation["direct_port"]),
+    ):
+        endpoints[transport] = {
+            "status": "available",
+            "available_from_session": endpoints[transport]["available_from_session"],
+            "host": loopback_address,
+            "port": port,
+            # A role and a host, never a password. The schema's `postgresUrl`
+            # pattern admits one identifier in the userinfo component and no
+            # colon, so a credential-bearing URL cannot validate here rather
+            # than being redacted later by something that might forget. The
+            # endpoint says *where*; `access_profiles` says as whom, which is
+            # why one URL for two roles is not a loss of information.
+            "url": f"postgresql://{runtime_role}@{loopback_address}:{port}/{name}",
+            "password_secret_ref": SECRET_FOR_PROFILE["runtime_pooled"],
+        }
+
+    for profile_name, profile in profiles.items():
+        profile["status"] = "available"
+        profile["password_secret_ref"] = SECRET_FOR_PROFILE[profile_name]
+
+    return {**endpoints, "access_profiles": profiles}
+
+
 def build_deployed_document(
     *,
     rendered: dict[str, Any],
+    transports: dict[str, Any] | None = None,
     source_commit: str,
     host: dict[str, Any],
     edge: dict[str, Any],
@@ -171,7 +247,16 @@ def build_deployed_document(
         # caller that measured nothing produce a document indistinguishable
         # from one that did, and `NOT_OBSERVED` exists so that saying so is
         # one import rather than four literals.
-        "database": {**rendered["database"], "observed": dict(database_observed)},
+        # Derived members carried from the render, the measured observation, and
+        # the three transport blocks -- which are the only members a render
+        # cannot know and a deploy must therefore supply. `transports=None`
+        # keeps the rendered values, which is the honest answer for a session-2
+        # or session-3 deployment where no transport exists to describe.
+        "database": {
+            **rendered["database"],
+            **(transports or {}),
+            "observed": dict(database_observed),
+        },
         "template_version": rendered["template_version"],
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
