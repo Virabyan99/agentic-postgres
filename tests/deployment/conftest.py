@@ -490,7 +490,17 @@ def compose_service(sh: Runner) -> Callable[[str, str], dict[str, Any]]:
         document = json.loads(raw)
         if service not in document["services"]:
             pytest.fail(f"{project_key}'s model has no service {service}")
-        return document["services"][service]
+        definition = dict(document["services"][service])
+        # The top-level secrets map, carried alongside. A service's `secrets:`
+        # entry names a secret; only the top-level block says which file it is.
+        # Run 9's first runner read the service's `volumes:` and nothing else,
+        # so every fixture started with no credential mounted and exited 8
+        # saying so -- a harness fault that reads exactly like a broken
+        # materialization.
+        definition["_secret_files"] = {
+            name: entry.get("file") for name, entry in (document.get("secrets") or {}).items()
+        }
+        return definition
 
     return read
 
@@ -573,6 +583,21 @@ def run_client_fixture(
             arguments += ["--env", f"{key}={value}"]
         for volume in definition.get("volumes", []):
             arguments += ["--volume", f"{volume['source']}:{volume['target']}:ro"]
+
+        # Compose mounts a declared secret at /run/secrets/<name>; `docker run`
+        # has no such notion, so the grant surface is reconstructed here from
+        # the model rather than assumed. Reconstructed from the MODEL, not from
+        # the secret root: the point of running the fixture is to exercise what
+        # the deploy actually granted it, and a path built here from a project
+        # key would still mount a file when the grant had been removed.
+        secret_files = definition.get("_secret_files", {})
+        for entry in definition.get("secrets", []):
+            name = entry["source"] if isinstance(entry, dict) else entry
+            source = secret_files.get(name)
+            if not source:
+                pytest.fail(f"{service} is granted {name} and the model names no file for it")
+            target = f"/run/secrets/{name}"
+            arguments += ["--volume", f"{source}:{target}:ro"]
         arguments += [f"{rendered['compose']['project_name']}-{service}", *command]
 
         result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=300)
