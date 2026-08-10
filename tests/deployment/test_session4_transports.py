@@ -400,46 +400,56 @@ def test_the_published_ports_are_the_ones_the_registry_allocated(
     """
     document = project_a
     allocation = allocation_for(key(document))
-    pooled_container = document["database"]["container"].replace("-postgres-1", "-pgbouncer-1")
+    network = document["edge"]["project_internal_network"]
+    cluster = document["database"]["container"]
+    pooler = cluster.replace("-postgres-1", "-pgbouncer-1")
 
-    for transport, container, container_port, port in (
-        ("pooled", pooled_container, INTERNAL_POOL_PORT, allocation["pooled_port"]),
-        ("direct", document["database"]["container"], 5432, allocation["direct_port"]),
-    ):
+    # Nothing is published, and that is asserted rather than assumed. An empty
+    # PortBindings is the state ADR 0044 requires; a non-empty one means a
+    # publication was reintroduced, which on an internal network would do
+    # nothing today and would open a port the day the network changed.
+    for container in (pooler, cluster):
         bindings = json.loads(
             sh("docker", "inspect", "-f", "{{json .HostConfig.PortBindings}}", container)
         )
-        published = bindings.get(f"{container_port}/tcp")
-        assert published, (
-            f"{container} publishes nothing on {container_port}; the registry allocates "
-            f"{port} for the {transport} transport"
-        )
-        assert len(published) == 1, f"{transport} is published {len(published)} times: {published}"
-        assert published[0]["HostPort"] == str(port), (
-            f"{transport} is published on {published[0]['HostPort']}, and the registry "
-            f"allocates {port}. A saved tunnel then reaches something other than it names"
-        )
-        assert _is_loopback(published[0]["HostIp"]), (
-            f"{transport} is published on {published[0]['HostIp']}:{port}, which is not a "
-            "loopback address (ADR 0040)"
+        assert bindings in ({}, None), (
+            f"{container} publishes {bindings}; ADR 0044 says nothing is published"
         )
 
+    # What the registry allocates is the developer's NEAR end, so nothing on the
+    # host should be listening on it. If something is, the allocator handed out
+    # a port that was already in use and a tunnel would fail to bind.
+    for transport, port in (
+        ("pooled", allocation["pooled_port"]),
+        ("direct", allocation["direct_port"]),
+    ):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-            probe.settimeout(5.0)
-            assert probe.connect_ex(("127.0.0.1", port)) == 0, (
-                f"nothing answers on 127.0.0.1:{port}, which the registry allocates for "
-                f"the {transport} transport"
+            probe.settimeout(2.0)
+            assert probe.connect_ex(("127.0.0.1", port)) != 0, (
+                f"something already answers on 127.0.0.1:{port}, which the registry "
+                f"allocates as the near end of a {transport} tunnel"
             )
 
-
-def _is_loopback(address: str) -> bool:
-    """A real address comparison. `1270.0.0.1` starts with `127.` and is not."""
-    from ipaddress import ip_address
-
-    try:
-        return ip_address(address).is_loopback
-    except ValueError:
-        return False
+    # And the far end answers, at the container address the broker resolves and
+    # `bin/connect.sh` forwards to. This is the half that would go red if the
+    # pooler stopped serving.
+    for transport, container, port in (
+        ("pooled", pooler, INTERNAL_POOL_PORT),
+        ("direct", cluster, 5432),
+    ):
+        address = sh(
+            "docker",
+            "inspect",
+            "-f",
+            f'{{{{ (index .NetworkSettings.Networks "{network}").IPAddress }}}}',
+            container,
+        ).strip()
+        assert address, f"{container} has no address on {network}"
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(5.0)
+            assert probe.connect_ex((address, port)) == 0, (
+                f"nothing answers at {address}:{port}, the far end of the {transport} tunnel"
+            )
 
 
 # ---------------------------------------------------------------------------

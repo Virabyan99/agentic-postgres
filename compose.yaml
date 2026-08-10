@@ -334,6 +334,17 @@ services:
   # `umask 077` before anything is written, rather than a chmod afterwards: a
   # chmod leaves a window in which the file exists at the default mode, and the
   # window is only short, not absent.
+  #
+  # `server_reset_query_always = 1` IS LOAD-BEARING, and Run 9 measured what its
+  # absence costs. PgBouncer runs `server_reset_query` only in SESSION pooling
+  # unless this is set: in transaction mode it assumes an application leaves no
+  # session state behind. A client that ran `set_config('apg.leak_probe', ...,
+  # false)` and disconnected left that GUC on the server connection, and the
+  # NEXT CLIENT read it back (D116). A transaction-local claim vanishes at
+  # commit on its own, so the dangerous half is exactly the half nothing was
+  # cleaning up -- and `SET ROLE`, `search_path` and a session GUC all travel
+  # the same way. SEC-DBX-003 is the proof, and it went red here before it went
+  # green.
   pgbouncer:
     image: ${PGBOUNCER_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
@@ -396,6 +407,8 @@ services:
         "query_wait_timeout = $$APG_QUERY_WAIT_TIMEOUT"
         "idle_transaction_timeout = $$APG_IDLE_TRANSACTION_TIMEOUT"
         "server_lifetime = $$APG_SERVER_LIFETIME"
+        "server_reset_query = DISCARD ALL"
+        "server_reset_query_always = 1"
         "ignore_startup_parameters = extra_float_digits"
         "log_connections = 1"
         "log_disconnections = 1"
