@@ -122,6 +122,15 @@ CROSS_FIELD_RELATIONS: tuple[str, ...] = (
     "`database.shm_size_mb` must be at least `database.shared_buffers_mb`",
     "`database.memory_limit_mb` must exceed the derived unreclaimable budget",
     "The derived unreclaimable budget must not exceed the per-project memory guardrail",
+    "`api.rest.request_body_max_bytes` must equal `api.rest.request_body_memory_bytes`",
+    "`api.rest.pool_max_idle_seconds` must be less than `api.rest.pool_max_lifetime_seconds`",
+    "`api.rest.pool_size` plus its reserved connections, `database.pool_size`, and the "
+    "administration reserve must fit `database.max_connections`",
+    "`api.rest.allowed_cors_origins` must contain the project's own HTTPS origin when the "
+    "REST service is enabled",
+    "`api.rest.statement_timeouts` may name only roles the platform derives",
+    "The derived REST prefix and the PostgREST documentation prefix must not overlap "
+    "segment-wise, and neither may overlap the MCP prefix",
 )
 
 # ---------------------------------------------------------------------------
@@ -166,6 +175,75 @@ POOL_DEFAULTS: dict[str, int] = {
 #: reservation. Charging it would make the guardrail refuse configurations that
 #: fit comfortably, and a guardrail that cries wolf gets raised.
 PER_BACKEND_ANON_MB = 2
+
+# ---------------------------------------------------------------------------
+# The Session 5 REST service (plan §5 Run 2)
+# ---------------------------------------------------------------------------
+
+#: Defaults for `api.rest`, duplicated from `schemas/project.schema.json` for the
+#: same reason as the budget and pool defaults above: JSON Schema `default`
+#: annotates, it does not populate. `test_rest_defaults_match_the_schema` asserts
+#: the two agree.
+#:
+#: `enabled` is `false`, and that is the load-bearing default. A project manifest
+#: written before Session 5 declares no REST service, and the honest render for
+#: one is a project that publishes no REST route -- not a project that quietly
+#: acquires a public API because a schema had a default.
+API_REST_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "request_body_max_bytes": 1048576,
+    "request_body_memory_bytes": 1048576,
+    "pool_size": 10,
+    "pool_acquisition_timeout_seconds": 5,
+    "pool_max_idle_seconds": 30,
+    "pool_max_lifetime_seconds": 1800,
+    "anonymous_access": "deny_data",
+    # Empty, so a service that names no origins permits no cross-origin browser
+    # request. Combined with the rule that an enabled service must name its own
+    # origin, the only way to reach this default is to declare no REST service.
+    "allowed_cors_origins": [],
+}
+
+#: What PostgREST takes out of the cluster's connection budget beyond its pool.
+#:
+#: One for the `LISTEN` connection the schema cache needs -- it is held for the
+#: process's life and is not drawn from the pool -- and two for startup and
+#: recovery, because a pool that is being re-established while the old
+#: connections are still closing is briefly over its own size. Measured as a
+#: reservation rather than reasoned from documentation: what matters is that the
+#: number is charged at all, since the failure it prevents is a cluster refusing
+#: connections to the pooler because the API took the last of them.
+POSTGREST_RESERVED_CONNECTIONS = 3
+
+#: Held back for migrations, backups, a direct developer session and PostgreSQL's
+#: own `superuser_reserved_connections`. If this is exhausted, the operation that
+#: cannot get a connection is the one that would have fixed the problem.
+ADMINISTRATION_RESERVED_CONNECTIONS = 5
+
+#: The documentation prefix, relative to the reserved `/docs` root. `/docs` is
+#: already in RESERVED_BASE_PATHS and `routes.docs` is already derived
+#: unconditionally, so Session 5 claims nothing new -- it publishes one page
+#: underneath a root Session 11's index will own.
+DOCS_REST_PATH = "/docs/rest"
+
+#: Suffix appended to `api.public_base_path` for the REST surface. Kept in step
+#: with `naming.derive`'s `route_rest`, which is the single derivation of the
+#: URL; this is the path half of it, held here because the manifest layer has to
+#: compare prefixes and must not import a URL to do it.
+REST_PATH_SUFFIX = "/rest"
+
+
+def postgrest_connection_budget(rest: dict[str, Any]) -> int:
+    """How many cluster connections the REST service commits to.
+
+    Its pool plus the reservations above. One function so there is one answer,
+    which is ADR 0002's rule applied to a number instead of a name -- and so the
+    figure a deployed document publishes is the figure the manifest was checked
+    against, rather than a second sum that agrees today.
+    """
+    size = int(rest.get("pool_size", API_REST_DEFAULTS["pool_size"]))
+    return size + POSTGREST_RESERVED_CONNECTIONS
+
 
 #: What one host may commit to PostgreSQL clusters, in MiB, across every project
 #: deployed on it. The host is 3814 MiB with no swap and roughly 681 MiB already
@@ -361,26 +439,49 @@ def bounds_table(schema_name: str = "project.schema.json") -> list[dict[str, Any
 
     The schema is the sole authority. This exists so documentation can be
     generated from it rather than restating it.
+
+    Local ``$ref``s are followed, and that is not a refinement. Session 5 put
+    the REST service in ``$defs`` and referenced it from ``api.rest``; a walk
+    that stopped at the reference would have generated a bounds table missing
+    eight fields, and the table would still have looked complete -- which is the
+    failure mode ADR 0007 exists to prevent, arriving through the generator
+    rather than through the schema.
     """
+    schema = load_schema(schema_name)
     rows: list[dict[str, Any]] = []
 
-    def walk(node: Any, pointer: str) -> None:
-        if not isinstance(node, dict):
-            return
+    def resolve(
+        node: dict[str, Any], seen: frozenset[str]
+    ) -> tuple[dict[str, Any], frozenset[str]]:
+        reference = node.get("$ref")
+        if not isinstance(reference, str) or not reference.startswith("#/$defs/"):
+            return node, seen
+        name = reference.removeprefix("#/$defs/")
+        if name in seen:
+            # A self-referential definition would otherwise walk forever. There
+            # is none today; refusing to follow one twice is cheaper than
+            # discovering there is by hanging the documentation build.
+            return {}, seen
+        return schema.get("$defs", {}).get(name, {}), seen | {name}
+
+    def walk(node: dict[str, Any], pointer: str, seen: frozenset[str]) -> None:
         for key, value in node.get("properties", {}).items():
             child = f"{pointer}.{key}" if pointer else key
-            if isinstance(value, dict) and ("minimum" in value or "maximum" in value):
+            if not isinstance(value, dict):
+                continue
+            resolved, child_seen = resolve(value, seen)
+            if "minimum" in resolved or "maximum" in resolved:
                 rows.append(
                     {
                         "field": child,
-                        "minimum": value.get("minimum"),
-                        "maximum": value.get("maximum"),
-                        "description": value.get("description", ""),
+                        "minimum": resolved.get("minimum"),
+                        "maximum": resolved.get("maximum"),
+                        "description": resolved.get("description", ""),
                     }
                 )
-            walk(value, child)
+            walk(resolved, child, child_seen)
 
-    walk(load_schema(schema_name), "")
+    walk(schema, "", frozenset())
     return sorted(rows, key=lambda row: row["field"])
 
 
@@ -529,6 +630,8 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
     _validate_pooled_public(database)
     _validate_pool(database)
     _validate_memory_budget(database)
+    _validate_rest_service(api, database=database, domain=project["domain"])
+    _validate_route_boundaries(api, mcp)
     _validate_storage(document.get("storage", {}))
     _validate_backup(document.get("backup", {}))
 
@@ -627,6 +730,151 @@ def _validate_pool(database: dict[str, Any]) -> None:
             "transaction is allowed to hold one will queue behind it rather than fail, "
             "and a queue with no error at the end of it is a hang"
         )
+
+
+def _validate_rest_service(api: dict[str, Any], *, database: dict[str, Any], domain: str) -> None:
+    """The `api.rest` relations JSON Schema cannot express (Session 5, Run 2).
+
+    Bounds are in the schema, where ADR 0007 says a bound belongs. What is here
+    is every rule that compares two fields, and one that compares a field against
+    a derivation.
+
+    An absent section is not an error and not a default-filled service: it is a
+    project that does not serve REST. Everything below is skipped for it, which
+    is why the first check is the one that returns.
+    """
+    rest = api.get("rest")
+    if rest is None:
+        return
+
+    resolved = {**API_REST_DEFAULTS, **rest}
+
+    if not resolved["enabled"]:
+        # A disabled service still has its numbers checked. A manifest that
+        # carries an unusable configuration behind `enabled: false` is a
+        # manifest that fails on the day somebody flips one boolean, which is
+        # the worst possible day to find out.
+        _validate_rest_numbers(resolved)
+        return
+
+    _validate_rest_numbers(resolved)
+
+    budget = postgrest_connection_budget(resolved)
+    committed = budget + database["pool_size"] + ADMINISTRATION_RESERVED_CONNECTIONS
+    ceiling = int(database.get("max_connections", DATABASE_BUDGET_DEFAULTS["max_connections"]))
+    if committed > ceiling:
+        raise ManifestError(
+            f"the connection budget does not fit: api.rest.pool_size "
+            f"({resolved['pool_size']}) plus {POSTGREST_RESERVED_CONNECTIONS} reserved, "
+            f"database.pool_size ({database['pool_size']}), and "
+            f"{ADMINISTRATION_RESERVED_CONNECTIONS} held for administration come to "
+            f"{committed}, above database.max_connections ({ceiling}). The connection "
+            "that cannot be opened is the pooler's or the migration's, and neither "
+            "reports the reason as a capacity problem"
+        )
+
+    origin = f"https://{domain}"
+    if origin not in resolved.get("allowed_cors_origins", []):
+        raise ManifestError(
+            f"api.rest.allowed_cors_origins does not contain {origin!r}. The "
+            "documentation page this session publishes issues its requests from the "
+            "project's own origin, so a list that omits it disables the page it was "
+            "written for and reports it as a browser error"
+        )
+
+    _validate_statement_timeouts(resolved.get("statement_timeouts", {}))
+
+
+def _validate_rest_numbers(rest: dict[str, Any]) -> None:
+    """The two comparisons between REST fields, checked enabled or not."""
+    if rest["request_body_max_bytes"] != rest["request_body_memory_bytes"]:
+        raise ManifestError(
+            f"api.rest.request_body_max_bytes ({rest['request_body_max_bytes']}) must "
+            f"equal api.rest.request_body_memory_bytes "
+            f"({rest['request_body_memory_bytes']}). A memory limit below the accepted "
+            "size is how a request body reaches the proxy's disk, where nothing is "
+            "auditing it and nothing is deleting it on a schedule"
+        )
+
+    if rest["pool_max_idle_seconds"] >= rest["pool_max_lifetime_seconds"]:
+        raise ManifestError(
+            f"api.rest.pool_max_idle_seconds ({rest['pool_max_idle_seconds']}) must be "
+            f"less than api.rest.pool_max_lifetime_seconds "
+            f"({rest['pool_max_lifetime_seconds']}). An idle timeout at or above the "
+            "lifetime never fires, so the setting reads as configured and does nothing"
+        )
+
+
+#: Bounds on a parsed statement timeout, in milliseconds. Below the floor a
+#: legitimate query fails and the repair is to raise the timeout, which is how a
+#: timeout becomes decorative; above the ceiling a single statement can hold a
+#: connection out of a bounded pool for longer than the pool tolerates.
+STATEMENT_TIMEOUT_MS = (100, 60_000)
+
+
+def _validate_statement_timeouts(timeouts: dict[str, Any]) -> None:
+    """Bounded durations, on roles that exist.
+
+    The second half is the one worth having. A timeout set on a role nothing
+    derives is applied to nothing, reports nothing, and reads in the manifest
+    exactly like one that works -- so the role names are checked against
+    ``naming.ROLE_SUFFIXES`` rather than against a list written here, which would
+    keep agreeing with itself after the roles changed.
+    """
+    from agentic_postgres import naming
+
+    unknown = sorted(set(timeouts) - set(naming.ROLE_SUFFIXES))
+    if unknown:
+        raise ManifestError(
+            f"api.rest.statement_timeouts names {unknown}, which the platform does not "
+            f"derive. Known roles: {sorted(naming.ROLE_SUFFIXES)}. A timeout on a role "
+            "that does not exist is applied to nothing and says so nowhere"
+        )
+
+    floor, ceiling = STATEMENT_TIMEOUT_MS
+    for role, value in timeouts.items():
+        milliseconds = int(value[:-2]) if value.endswith("ms") else int(value[:-1]) * 1000
+        if not floor <= milliseconds <= ceiling:
+            raise ManifestError(
+                f"api.rest.statement_timeouts.{role} is {value!r} ({milliseconds} ms), "
+                f"outside {floor}-{ceiling} ms"
+            )
+
+
+def _validate_route_boundaries(api: dict[str, Any], mcp: dict[str, Any]) -> None:
+    """The three published prefixes, proved pairwise distinct (ADR 0005).
+
+    Session 5 publishes two more routes under prefixes it does not choose: the
+    REST surface at ``{api.public_base_path}/rest`` and its documentation at
+    ``/docs/rest``. Both are derived, so neither can be got wrong by a manifest
+    directly -- which is exactly why this is checked rather than assumed. The
+    manifest chooses ``api.public_base_path`` and ``mcp.public_base_path``, and a
+    pair such as ``/api`` and ``/api/rest`` would make one route's tree a prefix
+    of another's without either field looking wrong on its own.
+
+    ``/docs`` is already reserved and ``paths_overlap`` already refuses a base
+    path that collides with a reserved route, so the docs prefix cannot collide
+    with a manifest's choice today. It is compared anyway: the reserved list is a
+    tuple somebody can edit, and this states the consequence of editing it.
+    """
+    rest_prefix = f"{api['public_base_path']}{REST_PATH_SUFFIX}"
+    pairs = (
+        ("the REST prefix", rest_prefix, "the MCP prefix", mcp["public_base_path"]),
+        ("the REST prefix", rest_prefix, "the documentation prefix", DOCS_REST_PATH),
+        (
+            "the documentation prefix",
+            DOCS_REST_PATH,
+            "the MCP prefix",
+            mcp["public_base_path"],
+        ),
+    )
+    for left_name, left, right_name, right in pairs:
+        if paths_overlap(left, right):
+            raise ManifestError(
+                f"{left_name} {left!r} and {right_name} {right!r} overlap segment-wise; "
+                "one route tree is a prefix of the other, and the edge would answer "
+                "whichever router matched first"
+            )
 
 
 def _validate_storage(storage: dict[str, Any]) -> None:

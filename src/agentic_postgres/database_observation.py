@@ -23,14 +23,22 @@ which is what makes any of it testable without a host.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 __all__ = [
     "build_observation",
     "parse_extensions",
+    "parse_instance_uuid",
     "parse_memory_stat",
     "parse_server_version",
 ]
+
+#: Lowercase, matching `port_allocations._UUID` and both schemas. Normalising a
+#: mixed-case value here instead would make two spellings of one identity
+#: comparable in this module and different in the registry it exists to be
+#: matched against, which is a mismatch with no error message.
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 #: cgroup v2 keys, and only these three. `memory.current` is deliberately not
 #: read: it is the sum, and the sum is the number that hides which half grew.
@@ -86,17 +94,45 @@ def parse_memory_stat(raw: str) -> dict[str, int]:
     return values
 
 
-def build_observation(*, server_version: str, extensions: str, memory_stat: str) -> dict[str, Any]:
-    """The `observed` block, from three raw command outputs.
+def parse_instance_uuid(raw: str) -> str:
+    """`SELECT instance_uuid FROM app_private.project_identity`, validated.
+
+    The identity the volume carries, and the key the port registry is actually
+    keyed by. Validated rather than trusted because it is about to be compared
+    against the registry for equality: a value with a trailing newline, a
+    different case, or the word `(0 rows)` in it compares unequal to the record
+    that describes the same cluster, and the broker's answer to "these do not
+    match" is to refuse -- which would be right, about the wrong thing.
+    """
+    value = raw.strip()
+    if not _UUID.match(value):
+        raise ValueError(
+            f"not a lowercase instance UUID: {raw!r}. The port registry matches on "
+            "this string, so a value that is nearly one is worse than none"
+        )
+    return value
+
+
+def build_observation(
+    *, server_version: str, extensions: str, memory_stat: str, instance_uuid: str
+) -> dict[str, Any]:
+    """The `observed` block, from four raw command outputs.
 
     Every member is required and none defaults. A partial observation is not
-    published as a whole one: if any of the three could not be read, the caller
+    published as a whole one: if any of the four could not be read, the caller
     gets an exception and decides, rather than this function quietly filling a
     null into a document whose `status` says `observed`.
+
+    `instance_uuid` joined in version 5 (ADR 0053) and belongs here rather than
+    beside the derived members for the reason the whole block exists: it is not
+    derivable. It is generated once against an empty volume and recovered on
+    every bootstrap since, so it is the one identifier in this system bound to
+    the data rather than to the configuration that produced it.
     """
     return {
         "status": "observed",
         "server_version": parse_server_version(server_version),
         "extensions": parse_extensions(extensions),
         "memory": parse_memory_stat(memory_stat),
+        "instance_uuid": parse_instance_uuid(instance_uuid),
     }

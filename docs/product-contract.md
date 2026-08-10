@@ -225,6 +225,12 @@ and live in `src/agentic_postgres/config.py`; they are listed separately.
 | Field | Minimum | Maximum | Meaning |
 |---|---:|---:|---|
 | `api.max_rows` | 1 | 10,000 | Global PostgREST row-return ceiling. |
+| `api.rest.pool_acquisition_timeout_seconds` | 1 | 60 | How long a request waits for a connection before failing. Bounded above for the reason the pooler's queue timeout is: a request that waits without limit turns a capacity problem into a hang, and a hang has no error message to act on. |
+| `api.rest.pool_max_idle_seconds` | 5 | 3,600 | How long an unused pooled connection is kept. Must be less than pool_max_lifetime_seconds. |
+| `api.rest.pool_max_lifetime_seconds` | 60 | 86,400 | How long a pooled connection is reused before it is retired. Bounded above so a rotated credential cannot be held indefinitely by a long-lived connection -- the same reason database.server_lifetime_seconds is bounded. |
+| `api.rest.pool_size` | 1 | 100 | PostgREST's own connection pool, against the DIRECT transport rather than the pooler: it needs prepared statements and a LISTEN/NOTIFY channel for the schema cache, neither of which survives transaction pooling. Counted against database.max_connections together with the pooler's server pool and an administration reserve. |
+| `api.rest.request_body_max_bytes` | 1,024 | 10,485,760 | Largest accepted request body. Bounded above because the edge buffers what it accepts, and equal to request_body_memory_bytes for P0 so an accepted body stays in memory rather than spilling to proxy disk -- a spilled body is a request payload written to a filesystem nobody is auditing. |
+| `api.rest.request_body_memory_bytes` | 1,024 | 10,485,760 | How much of a request body the edge holds in memory. Must equal request_body_max_bytes; the pair exists because the two are separately configurable at the edge and a smaller memory limit is how bodies reach disk. |
 | `backup.retain_full` | 1 | 12 | Full backup chains retained. |
 | `database.idle_transaction_timeout_seconds` | 10 | 600 | How long a client may hold a server connection inside an idle transaction. Cannot be disabled here, because in transaction pooling one idle transaction holds a server connection out of the pool for as long as it lasts. |
 | `database.maintenance_work_mem_mb` | 16 | 512 | VACUUM and index-build working memory. Charged in full against the guardrail because one maintenance operation can hold it for a long time. |
@@ -256,6 +262,12 @@ enforced in `src/agentic_postgres/config.py`:
 - `database.shm_size_mb` must be at least `database.shared_buffers_mb`
 - `database.memory_limit_mb` must exceed the derived unreclaimable budget
 - The derived unreclaimable budget must not exceed the per-project memory guardrail
+- `api.rest.request_body_max_bytes` must equal `api.rest.request_body_memory_bytes`
+- `api.rest.pool_max_idle_seconds` must be less than `api.rest.pool_max_lifetime_seconds`
+- `api.rest.pool_size` plus its reserved connections, `database.pool_size`, and the administration reserve must fit `database.max_connections`
+- `api.rest.allowed_cors_origins` must contain the project's own HTTPS origin when the REST service is enabled
+- `api.rest.statement_timeouts` may name only roles the platform derives
+- The derived REST prefix and the PostgREST documentation prefix must not overlap segment-wise, and neither may overlap the MCP prefix
 
 <!-- END GENERATED: bounds -->
 

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/outputs.schema.json",
   "title": "Agentic Postgres generated outputs",
-  "description": "The automation contract, version 4. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. Version 4 added `database.access_profiles`, three ways to reach the two transports (ADR 0041), and closed the endpoint conditional so that an `available` endpoint must actually carry a host, a port, a password-free URL and a secret reference. See docs/decisions/0012-output-document-kinds.md, docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md and docs/decisions/0041-two-transports-three-access-profiles.md.",
+  "description": "The automation contract, version 5. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. Version 4 added `database.access_profiles`, three ways to reach the two transports (ADR 0041), and closed the endpoint conditional so that an `available` endpoint must actually carry a host, a port, a password-free URL and a secret reference. Version 5 is entirely on the deployed branch (ADR 0053): `routes` gains `rest` and `docs` as status-carrying objects beside `health`, a new `api` block records what the published surface actually serves, `jwt` appears for the first time carrying public metadata only, and `database.observed` gains the `instance_uuid` the port registry is keyed by. See docs/decisions/0012-output-document-kinds.md, docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md, docs/decisions/0041-two-transports-three-access-profiles.md, docs/decisions/0051-the-bootstrap-issuer-is-temporary-and-carries-its-own-expiry.md and docs/decisions/0053-outputs-version-5.md.",
   "type": "object",
   "oneOf": [
     { "$ref": "#/$defs/renderedDocument" },
@@ -29,7 +29,7 @@
         "template_version"
       ],
       "properties": {
-        "schema_version": { "type": "integer", "enum": [4] },
+        "schema_version": { "type": "integer", "enum": [5] },
         "document_kind": { "const": "rendered" },
         "inputs": {
           "type": "object",
@@ -189,6 +189,8 @@
         "host",
         "edge",
         "routes",
+        "api",
+        "jwt",
         "tls",
         "bootstrap",
         "secrets",
@@ -199,7 +201,7 @@
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
-        "schema_version": { "type": "integer", "enum": [4] },
+        "schema_version": { "type": "integer", "enum": [5] },
         "document_kind": { "const": "deployed" },
         "source_commit": { "$ref": "#/$defs/commit" },
         "deployed_through_session": {
@@ -252,19 +254,25 @@
         "routes": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["health"],
+          "required": ["health", "rest", "docs"],
+          "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them.",
           "properties": {
             "health": {
               "type": "object",
               "additionalProperties": false,
               "required": ["status", "url"],
+              "description": "The URL is present whatever the status, and deliberately so: the platform health path is the same string for every project whether or not it answers, and a null there would delete the address an operator needs in order to go and look. `rest` and `docs` are the other case -- see `publishedRoute`.",
               "properties": {
                 "status": { "type": "string", "enum": ["ready", "unavailable"] },
                 "url": { "$ref": "#/$defs/httpsUrl" }
               }
-            }
+            },
+            "rest": { "$ref": "#/$defs/publishedRoute" },
+            "docs": { "$ref": "#/$defs/publishedRoute" }
           }
         },
+        "api": { "$ref": "#/$defs/deployedApi" },
+        "jwt": { "$ref": "#/$defs/deployedJwt" },
         "tls": {
           "type": "object",
           "additionalProperties": false,
@@ -464,10 +472,14 @@
     "databaseObserved": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "server_version", "extensions", "memory"],
-      "description": "Measured against a running cluster, never derived. `not_observed` with four nulls is the honest state for a deployment that has not yet been read -- the same discipline `endpoint` uses, for the same reason: a zero or an empty object would be indistinguishable from a real measurement that happened to be empty.",
+      "required": ["status", "server_version", "extensions", "memory", "instance_uuid"],
+      "description": "Measured against a running cluster, never derived. `not_observed` with five nulls is the honest state for a deployment that has not yet been read -- the same discipline `endpoint` uses, for the same reason: a zero or an empty object would be indistinguishable from a real measurement that happened to be empty. Version 5 added `instance_uuid`, which is a measurement in the strictest sense available here: it is a property of the data rather than of the configuration that produced it, and it is read out of the cluster by the same query the port allocator uses (ADR 0053, D106).",
       "properties": {
         "status": { "type": "string", "enum": ["observed", "not_observed"] },
+        "instance_uuid": {
+          "oneOf": [{ "$ref": "#/$defs/instanceUuid" }, { "type": "null" }],
+          "description": "`app_private.project_identity.instance_uuid`. The port-allocation registry is keyed by it and records the project key only for humans; until version 5 the deployed document carried no copy, so the access broker searched live allocations by key and refused ambiguity rather than resolving it. Present here so the broker can match on the identity the registry actually uses."
+        },
         "server_version": {
           "type": ["string", "null"],
           "pattern": "^[0-9]+(\\.[0-9]+)*",
@@ -504,7 +516,188 @@
         "properties": {
           "server_version": { "type": "null" },
           "extensions": { "type": "null" },
-          "memory": { "type": "null" }
+          "memory": { "type": "null" },
+          "instance_uuid": { "type": "null" }
+        }
+      }
+    },
+
+    "publishedRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "url"],
+      "description": "A route this session publishes, and the honest way to say it was not published. `unavailable` forces a null URL -- unlike `health`, whose address exists for every project at every session. A deployment through session 4 serves no REST and no documentation, and naming a URL for a surface nothing is listening on would be exactly the failure `endpoint` was tightened in version 4 to prevent: a record that claims to exist and points at nothing.",
+      "properties": {
+        "status": { "type": "string", "enum": ["ready", "unavailable"] },
+        "url": {
+          "oneOf": [{ "$ref": "#/$defs/httpsUrl" }, { "type": "null" }]
+        }
+      },
+      "if": {
+        "properties": { "status": { "const": "unavailable" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": { "url": { "type": "null" } }
+      },
+      "else": {
+        "properties": { "url": { "$ref": "#/$defs/httpsUrl" } }
+      }
+    },
+
+    "deployedApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "exposed_schema",
+        "max_rows",
+        "request_body_max_bytes",
+        "pool_size",
+        "connection_budget_reserved",
+        "api_surface_sha256",
+        "canonical_openapi_sha256",
+        "project_openapi_sha256"
+      ],
+      "description": "What the published REST surface actually serves, version 5 (ADR 0053). Three checksums rather than one: the reviewed surface contract, the project-neutral canonical snapshot, and the per-project document actually published. A single 'contract checksum' would be unable to say which of the three moved, and the three move for different reasons -- a reviewed change, a PostgREST upgrade, and a project's own host and title. No direct service address appears: `postgrest:3000` is a runtime detail and a published one is a way around the edge's limits. No admin URL appears, because the admin surface binds container loopback and is not a network service.",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ready", "unavailable"],
+          "description": "`unavailable` is the state of every project deployed through a session before 5, and of a session-5 project whose REST surface did not come up. It forces every other member null, so a partially-filled block cannot be published as an observation."
+        },
+        "exposed_schema": {
+          "oneOf": [{ "$ref": "#/$defs/postgresIdentifier" }, { "type": "null" }],
+          "description": "The one schema PostgREST is configured to expose. Recorded because `db-schemas` is the boundary that decides what a request can name at all, and a reader should not have to open a rendered configuration file to learn it."
+        },
+        "max_rows": { "type": ["integer", "null"], "minimum": 1, "maximum": 10000 },
+        "request_body_max_bytes": { "type": ["integer", "null"], "minimum": 1024 },
+        "pool_size": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000 },
+        "connection_budget_reserved": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "description": "What this service takes out of the cluster's connection budget: the pool, plus the LISTEN/NOTIFY connection the schema cache needs, plus startup and recovery headroom. Recorded rather than recomputed by a reader, because the number a reader would recompute is the one nobody checked against `max_connections`."
+        },
+        "api_surface_sha256": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+          "description": "contracts/postgrest-api-surface.yaml -- the hand-written reviewed intent."
+        },
+        "canonical_openapi_sha256": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+          "description": "contracts/postgrest-openapi.canonical.json -- the generated, project-neutral snapshot two projects share (ADR 0050)."
+        },
+        "project_openapi_sha256": {
+          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+          "description": "The document this project actually publishes, carrying its own host and title. Distinct from the canonical checksum by construction, and recorded so that 'the snapshot matches' can be a comparison rather than an assertion."
+        }
+      },
+      "if": {
+        "properties": { "status": { "const": "unavailable" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "exposed_schema": { "type": "null" },
+          "max_rows": { "type": "null" },
+          "request_body_max_bytes": { "type": "null" },
+          "pool_size": { "type": "null" },
+          "connection_budget_reserved": { "type": "null" },
+          "api_surface_sha256": { "type": "null" },
+          "canonical_openapi_sha256": { "type": "null" },
+          "project_openapi_sha256": { "type": "null" }
+        }
+      },
+      "else": {
+        "required": ["exposed_schema"],
+        "properties": {
+          "exposed_schema": { "$ref": "#/$defs/postgresIdentifier" },
+          "max_rows": { "type": "integer" },
+          "request_body_max_bytes": { "type": "integer" },
+          "pool_size": { "type": "integer" },
+          "connection_budget_reserved": { "type": "integer" },
+          "api_surface_sha256": { "$ref": "#/$defs/sha256" },
+          "canonical_openapi_sha256": { "$ref": "#/$defs/sha256" },
+          "project_openapi_sha256": { "$ref": "#/$defs/sha256" }
+        }
+      }
+    },
+
+    "deployedJwt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "issuer",
+        "audience",
+        "algorithm",
+        "active_kid",
+        "verification_kids",
+        "public_jwks_sha256",
+        "temporary",
+        "retire_after"
+      ],
+      "description": "Public token metadata, version 5 (ADR 0051, ADR 0053). Every member here is something a verifier is entitled to hold: an issuer, an audience, an algorithm, key identifiers and a digest of the public JWKS. No private JWK, no signing key reference and no token appears -- not as a redacted field, not as a reference, not at all. `temporary` is state a later gate reads rather than prose nobody executes: SEC-BOOT-001 compares it against `deployed_through_session` and goes red on the deployment that should have replaced the bootstrap issuer.",
+      "properties": {
+        "status": { "type": "string", "enum": ["ready", "unavailable"] },
+        "issuer": {
+          "oneOf": [{ "$ref": "#/$defs/httpsUrl" }, { "type": "null" }],
+          "description": "The same string the rendered branch derives. It does not have to be dereferenceable in session 5; it has to be stable, because session 6 issues against it."
+        },
+        "audience": {
+          "type": ["string", "null"],
+          "pattern": "^urn:agentic-postgres:[a-z0-9-]+:[a-z0-9-]+$"
+        },
+        "algorithm": {
+          "type": ["string", "null"],
+          "enum": ["RS256", null],
+          "description": "Asymmetric, so the verifier holds no material that can sign. A symmetric algorithm would make every verifier an issuer, which is the property ADR 0051 refuses."
+        },
+        "active_kid": { "oneOf": [{ "$ref": "#/$defs/jwkThumbprint" }, { "type": "null" }] },
+        "verification_kids": {
+          "oneOf": [
+            {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/jwkThumbprint" },
+              "description": "The active key, and during a documented rotation overlap the one retiring key. Two is the ceiling on purpose: an unbounded set is a set nobody retires from."
+            },
+            { "type": "null" }
+          ]
+        },
+        "public_jwks_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
+        "temporary": { "type": ["boolean", "null"] },
+        "retire_after": {
+          "$ref": "#/$defs/nullableTimestamp",
+          "description": "The deadline the temporary issuer carries with it. Null when no rotation is in flight; a date when one is, so that 'the overlap window' is a value rather than an intention."
+        }
+      },
+      "if": {
+        "properties": { "status": { "const": "unavailable" } },
+        "required": ["status"]
+      },
+      "then": {
+        "properties": {
+          "issuer": { "type": "null" },
+          "audience": { "type": "null" },
+          "algorithm": { "type": "null" },
+          "active_kid": { "type": "null" },
+          "verification_kids": { "type": "null" },
+          "public_jwks_sha256": { "type": "null" },
+          "temporary": { "type": "null" },
+          "retire_after": { "type": "null" }
+        }
+      },
+      "else": {
+        "properties": {
+          "issuer": { "$ref": "#/$defs/httpsUrl" },
+          "audience": { "type": "string" },
+          "algorithm": { "type": "string" },
+          "active_kid": { "$ref": "#/$defs/jwkThumbprint" },
+          "verification_kids": { "type": "array", "minItems": 1 },
+          "public_jwks_sha256": { "$ref": "#/$defs/sha256" },
+          "temporary": { "type": "boolean" }
         }
       }
     },
@@ -515,6 +708,16 @@
       "description": "Lowercase hexadecimal. Documentation placeholders are not accepted."
     },
     "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "instanceUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "description": "Lowercase, identical to the pattern in database-port-allocations.schema.json. Two spellings of one identity are two identities to a string comparison, and the whole value of this field is that the two documents can be matched against each other."
+    },
+    "jwkThumbprint": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{43}$",
+      "description": "An RFC 7638 JWK thumbprint: the base64url SHA-256 of the canonical public key, so the identifier is a function of the key rather than a name somebody chose. 43 characters is the unpadded length; padding is not accepted, because a kid that compares unequal to itself across two encoders is a rotation that silently never completes."
+    },
     "projectKey": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,47}$" },
     "generationId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
     "providerId": {

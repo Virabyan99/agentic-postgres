@@ -384,6 +384,11 @@ def observe_database(database: dict[str, Any]) -> dict[str, Any]:
             server_version=psql("SHOW server_version;"),
             extensions=psql("SELECT extname || ' ' || extversion FROM pg_extension ORDER BY 1;"),
             memory_stat=memory.stdout,
+            # The same query `cluster_instance_uuid` runs, through the same psql
+            # this function already opened. Read here rather than passed in from
+            # the caller so that the deployed document's copy and the registry's
+            # key come from one place: the cluster.
+            instance_uuid=psql("SELECT instance_uuid FROM app_private.project_identity;"),
         )
     except ValueError as error:
         fail(EXIT_VALIDATION, f"the cluster's state could not be read: {error}")
@@ -512,34 +517,50 @@ def cluster_instance_uuid(container: str, database: str) -> str:
     return value
 
 
-def _live_allocation(project_key: str) -> dict[str, Any] | None:
+def _live_allocation(project_key: str, instance_uuid: str | None) -> dict[str, Any] | None:
     """This project's live port allocation, or ``None``.
 
-    Searched by project key because the deployed document records no instance
-    UUID (D106), and ambiguity is refused rather than resolved by taking a first
-    match: two live records for one key means the deploy cannot tell which
-    cluster a published port reaches, and every assertion downstream would still
-    pass. Released records are excluded, so a project whose ports were given up
-    publishes `unavailable` rather than a number nothing is serving.
+    Matched on the instance UUID when this deploy read one off the cluster, which
+    is the identity the registry is actually keyed by. Before outputs version 5
+    there was nothing to match on and this searched by project key, refusing
+    ambiguity rather than taking a first match (D106) -- two live records for one
+    key means the deploy cannot tell which cluster a published port reaches, and
+    every assertion downstream would still pass.
+
+    That path is kept for the deployment that reads no cluster: a session-2
+    deploy interrogates nothing, so it has no UUID and no business inventing one.
+    Released records are excluded either way, so a project whose ports were given
+    up publishes `unavailable` rather than a number nothing is serving.
     """
     path = Path(port_allocations.REGISTRY_PATH)
     if not path.is_file():
         return None
     registry = json.loads(path.read_text(encoding="utf-8"))
-    live = [
-        allocation
-        for allocation in port_allocations.live_allocations(registry)
-        if allocation["project_key"] == project_key
-    ]
-    if len(live) > 1:
+    live = port_allocations.live_allocations(registry)
+
+    if instance_uuid is not None:
+        matched = [a for a in live if a["instance_uuid"] == instance_uuid]
+        if matched and matched[0]["project_key"] != project_key:
+            fail(
+                EXIT_VALIDATION,
+                f"the live allocation for instance {instance_uuid} records the project "
+                f"key {matched[0]['project_key']!r}, and this deploy is {project_key!r}. "
+                "The cluster and the registry disagree about what this project is "
+                "called, and publishing an endpoint would resolve that disagreement by "
+                "picking one.",
+            )
+        return matched[0] if matched else None
+
+    keyed = [a for a in live if a["project_key"] == project_key]
+    if len(keyed) > 1:
         fail(
             EXIT_VALIDATION,
-            f"{len(live)} live port allocations record the project key {project_key}. "
+            f"{len(keyed)} live port allocations record the project key {project_key}. "
             "The registry is keyed by the volume's instance UUID and records the key "
             "only for humans; publishing an endpoint from either would be publishing "
             "a port that may reach the other cluster.",
         )
-    return live[0] if live else None
+    return keyed[0] if keyed else None
 
 
 def render_runtime_only(arguments: argparse.Namespace) -> int:
@@ -835,7 +856,7 @@ def main(argv: list[str] | None = None) -> int:
     transports = deployed_output.observe_transports(
         rendered=rendered,
         loopback_address=host["database_access"]["loopback_address"],
-        allocation=_live_allocation(key),
+        allocation=_live_allocation(key, database_observed["instance_uuid"]),
     )
     for transport in ("pooled", "direct"):
         block = transports[transport]
@@ -864,6 +885,16 @@ def main(argv: list[str] | None = None) -> int:
             "compose_model_sha256": _model_digest(release, rendered_directory),
         },
         health_status=health_status,
+        # Version 5's three publication facts, and the honest values for a
+        # deployment that publishes none of them. Session 5's runs replace these
+        # with observations of a running PostgREST; until then a deploy that
+        # wrote anything else would be claiming a surface it did not start.
+        # There is deliberately no default for any of them: a default is how a
+        # session-4 deployment would come to describe a session-5 shape.
+        rest_status="unavailable",
+        docs_status="unavailable",
+        api=deployed_output.API_NOT_PUBLISHED,
+        jwt=deployed_output.JWT_NOT_PUBLISHED,
         # Measured above when this deploy started a cluster, and `NOT_OBSERVED`
         # when it did not. A session-2 deployment interrogates nothing, and the
         # honest record of that is four nulls rather than an empty object a

@@ -38,11 +38,20 @@ role serves which profile, and ADR 0002 allows one derivation path per name. So
 the caller supplies the profiles and this module *validates* them: a profile
 naming a role the document does not declare is refused, not corrected.
 
+Version 5 is the first one that asks this module for nothing, and that is worth
+saying rather than leaving to be noticed. Everything version 5 adds is on the
+*deployed* branch -- published route statuses, an API observation block, public
+token metadata, the cluster's instance UUID -- and this module migrates rendered
+documents only. So the v4 -> v5 step takes no new argument, invents no field and
+changes one integer. It is still a step, still chained, and still refuses a
+document that is not a complete v4 rendered one, because the alternative is a
+version bump that no code path exercises.
+
 `migrate_rendered` migrates *to the current version*, chaining
-v1 -> v2 -> v3 -> v4 through the single-step functions rather than jumping. A
-jump would mean the v1 -> v2 step stopped being exercised the moment v3 existed,
-and the archived documents this module exists for are exactly the ones that need
-the long path.
+v1 -> v2 -> v3 -> v4 -> v5 through the single-step functions rather than
+jumping. A jump would mean the v1 -> v2 step stopped being exercised the moment
+v3 existed, and the archived documents this module exists for are exactly the
+ones that need the long path.
 """
 
 from __future__ import annotations
@@ -80,10 +89,14 @@ _V2_REQUIRED = _V1_REQUIRED | {"document_kind"}
 #: the two to drift and say nothing when they did.
 _V3_REQUIRED = _V2_REQUIRED
 
+#: And a v4 rendered document has the same top-level keys again: version 4 added
+#: a member inside `database`. Same aliasing, same reason.
+_V4_REQUIRED = _V3_REQUIRED
+
 #: The current output schema version. Everything else in this module is written
-#: in terms of it so that adding v5 means adding one function and moving one
+#: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 4
+CURRENT_VERSION = 5
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -178,24 +191,27 @@ def migrate_rendered(
     database_container: str,
     access_profiles: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Migrate a version 1, 2 or 3 ``rendered`` document to the current version.
+    """Migrate a version 1, 2, 3 or 4 ``rendered`` document to the current version.
 
     Chains the single-step functions rather than jumping, so a v1 document
-    still exercises the v1 -> v2 step that a direct v1 -> v4 path would have
+    still exercises the v1 -> v2 step that a direct v1 -> v5 path would have
     quietly retired.
 
     Every argument is required for the same reason: each is a value the input
     document predates, and none of them is derivable from it. Defaulting any
     one would put an invented value in a document that automation reads as
-    authoritative.
+    authoritative. A v4 input needs none of them, and still passes them: the
+    entry point migrates *to the current version* from wherever it starts, and a
+    signature that changed shape with the input would make the caller decide
+    which arguments its archived document deserves.
     """
     version = detect_version(document)
     if version == CURRENT_VERSION:
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3}:
-        raise MigrationError(f"only versions 1, 2 and 3 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4}:
+        raise MigrationError(f"only versions 1, 2, 3 and 4 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -205,8 +221,10 @@ def migrate_rendered(
             database_budget=database_budget,
             database_container=database_container,
         )
+    if detect_version(document) == 3:
+        document = migrate_v3_to_v4(document, access_profiles=access_profiles)
 
-    return migrate_v3_to_v4(document, access_profiles=access_profiles)
+    return migrate_v4_to_v5(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -416,6 +434,53 @@ def migrate_v3_to_v4(
     return migrated
 
 
+def migrate_v4_to_v5(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 5 ``rendered`` document derived from a version 4 one.
+
+    The step that adds nothing, and the reason it exists anyway.
+
+    Version 5's additions are all on the deployed branch (ADR 0053): the
+    published route statuses, the `api` observation block, the public token
+    metadata and `database.observed.instance_uuid`. A rendered document has none
+    of those and must not grow them -- `routes.rest` and `routes.docs` are bare
+    URLs here and stay bare, because a status is a claim about a running service
+    and this branch describes a plan.
+
+    So this changes one integer. What it does not do is skip: an unmigrated v4
+    document does not validate against the current schema, and a chain that
+    jumped from 3 straight to 5 would leave the v3 -> v4 step unexercised for
+    every archived document that starts below it. It also still refuses -- a
+    deployed document, an incomplete one, or one carrying fields no v4 rendered
+    document has -- so a caller cannot use the cheap step as a way past the
+    checks the expensive ones make.
+    """
+    version = detect_version(document)
+    if version == 5:
+        raise MigrationError("document is already version 5; migration would be a no-op")
+    if version != 4:
+        raise MigrationError(f"only version 4 can be migrated to 5, got {version}")
+
+    require_kind(document, "rendered")
+
+    missing = _V4_REQUIRED - set(document)
+    if missing:
+        raise MigrationError(f"not a complete version 4 document; missing {sorted(missing)}")
+    unexpected = set(document) - _V4_REQUIRED
+    if unexpected:
+        raise MigrationError(
+            f"document carries fields no version 4 rendered document has: {sorted(unexpected)}"
+        )
+
+    if "access_profiles" not in document.get("database", {}):
+        raise MigrationError(
+            "database.access_profiles is missing; this is not a version 4 document"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["schema_version"] = 5
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -437,5 +502,6 @@ __all__ = [
     "migrate_v1_to_v2",
     "migrate_v2_to_v3",
     "migrate_v3_to_v4",
+    "migrate_v4_to_v5",
     "require_kind",
 ]

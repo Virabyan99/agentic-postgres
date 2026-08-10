@@ -1,0 +1,65 @@
+# The reviewed API surface. Hand-written, and deliberately not generated.
+#
+# ADR 0050: a contract produced from the thing it constrains cannot refuse it.
+# This file's whole function is to disagree with the catalog when the catalog is
+# wrong, which is what happened for two sessions before ADR 0048 -- four
+# documents described this surface, six migrations implemented a different one,
+# and every test that could have caught it was written from the code.
+#
+# What it describes is ADR 0003's example domain as ADR 0048 amends it. The
+# migration that makes the catalog match lands in Session 5 Run 5; until then
+# this file is the statement of what that migration must produce, which is the
+# only order in which a contract can constrain anything.
+#
+# Project-neutral, because the domain is. Two projects serve the same surface and
+# compare against the same file; a project that needs an object this does not
+# name needs a reviewed change here, not a second contract.
+schema_version: 1
+contract_id: notes-tasks-v1
+
+# One schema. `db-schemas` accepts a list, and every additional entry is a
+# boundary that has to be argued about on its own.
+exposed_schema: api
+
+relations:
+  # Both are security-invoker views over FORCE-RLS tables (migration 0004): the
+  # caller's row policy applies, so `owner_id` discloses to a caller only the id
+  # it already presented. Reads only -- every write is an RPC that derives
+  # ownership instead of accepting it.
+  notes:
+    kind: view
+    methods: [GET, HEAD]
+    columns: [id, owner_id, title, content, created_at, updated_at]
+  tasks:
+    kind: view
+    methods: [GET, HEAD]
+    # `note_id` is ADR 0048's one approved extension: it is additive, it breaks
+    # nothing ADR 0003 states, and removing it would drop a foreign key and its
+    # cascade from live data in order to tidy a document.
+    columns: [id, owner_id, note_id, title, description, status, created_at, updated_at]
+
+rpcs:
+  # Argument names are the PostgreSQL parameter names, exactly, because that is
+  # what a caller puts in the JSON body. The runbook's §7.2 names them without
+  # the `p_` prefix the functions actually carry; the prefix is what is there.
+  create_note:
+    methods: [POST]
+    arguments: [p_title, p_content]
+  # Operation 4 of ADR 0003, and the one the shipped migrations never had. A
+  # narrow transition rather than a general update, so that Session 8 has an
+  # approved shape to reference from `capabilities.yaml`; `p_expected_status`
+  # makes it optimistic rather than last-writer-wins.
+  update_task_status:
+    methods: [POST]
+    arguments: [p_task_id, p_expected_status, p_new_status]
+
+# Never published, under any grant. These four are the ones a misconfigured
+# `db-schemas` or a `db-extra-search-path` left at its default would actually
+# reach -- `public` is the default, `app` holds the base tables the views exist
+# to mediate, `app_private` holds the identity row and the pre-request function,
+# and `extensions` holds pgvector's operators.
+forbidden_schemas:
+  - public
+  - app
+  - app_private
+  - extensions

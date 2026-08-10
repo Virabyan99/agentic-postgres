@@ -26,6 +26,24 @@ database:
 api:
   public_base_path: /api
   max_rows: 500
+  rest:
+    enabled: true
+    request_body_max_bytes: 1048576
+    request_body_memory_bytes: 1048576
+    pool_size: 10
+    pool_acquisition_timeout_seconds: 5
+    pool_max_idle_seconds: 30
+    pool_max_lifetime_seconds: 1800
+    anonymous_access: deny_data
+    # This project's own origin, and only it. The two fixtures share a base path
+    # and differ in domain, so a CORS list copied between them is a list that
+    # names the other project -- which is the isolation failure this pair exists
+    # to catch.
+    allowed_cors_origins:
+      - https://fixture-alpine-dev.test
+    statement_timeouts:
+      anon: 2s
+      authenticated: 5s
 
 mcp:
   public_base_path: /mcp

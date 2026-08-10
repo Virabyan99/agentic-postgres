@@ -27,6 +27,10 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
 KEY = "fixture-alpha-dev"
 COMMIT = "a" * 40
+INSTANCE_UUID = "01927d3f-1a2b-7c4d-8e5f-6a7b8c9d0e1f"
+
+#: A 43-character base64url string, which is what an RFC 7638 thumbprint is.
+KID = "b" * 43
 
 
 @pytest.fixture(scope="module")
@@ -87,7 +91,35 @@ OBSERVED = {
         "server_version": "18.4",
         "extensions": {"vector": "0.8.6", "plpgsql": "1.0"},
         "memory": {"anon_mb": 62, "shmem_mb": 140, "file_mb": 410},
+        "instance_uuid": INSTANCE_UUID,
     },
+}
+
+#: A published API surface, version 5. Written out rather than taken from a
+#: constant so that the difference between this and `API_NOT_PUBLISHED` is
+#: visible in the file that asserts on it.
+PUBLISHED_API = {
+    "status": "ready",
+    "exposed_schema": "api",
+    "max_rows": 500,
+    "request_body_max_bytes": 1048576,
+    "pool_size": 10,
+    "connection_budget_reserved": 13,
+    "api_surface_sha256": "1" * 64,
+    "canonical_openapi_sha256": "2" * 64,
+    "project_openapi_sha256": "3" * 64,
+}
+
+PUBLISHED_JWT = {
+    "status": "ready",
+    "issuer": "https://fixture-alpha-dev.test/api/app/auth",
+    "audience": "urn:agentic-postgres:fixture-alpha:dev",
+    "algorithm": "RS256",
+    "active_kid": KID,
+    "verification_kids": [KID],
+    "public_jwks_sha256": "4" * 64,
+    "temporary": True,
+    "retire_after": None,
 }
 
 
@@ -96,6 +128,14 @@ def build(rendered: dict, **overrides):
         "rendered": rendered,
         "source_commit": COMMIT,
         "health_status": "ready",
+        # The version 5 default in this helper is the *unpublished* one, which
+        # is what a session-3 deployment publishes and what `deployed_through_session`
+        # below says this document is. The published shape is exercised by the
+        # tests that pass it explicitly.
+        "rest_status": "unavailable",
+        "docs_status": "unavailable",
+        "api": deployed_output.API_NOT_PUBLISHED,
+        "jwt": deployed_output.JWT_NOT_PUBLISHED,
         # Required with no default in the builder, for the reason
         # `database_observed` is: a default would let a caller that deployed a
         # subset publish a document claiming the whole of it, and the systemd
@@ -107,10 +147,23 @@ def build(rendered: dict, **overrides):
     return deployed_output.build_deployed_document(**arguments)
 
 
+def published(rendered: dict, **overrides):
+    """A session-5 document: both routes serving, both blocks filled in."""
+    arguments = {
+        "rest_status": "ready",
+        "docs_status": "ready",
+        "api": PUBLISHED_API,
+        "jwt": PUBLISHED_JWT,
+        "deployed_through_session": 5,
+        **overrides,
+    }
+    return build(rendered, **arguments)
+
+
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 4
+    assert document["schema_version"] == 5
     assert document["project"]["key"] == KEY
 
 
@@ -183,6 +236,7 @@ def test_a_deployment_that_measured_nothing_says_so(rendered: dict) -> None:
     assert observed["server_version"] is None
     assert observed["extensions"] is None
     assert observed["memory"] is None
+    assert observed["instance_uuid"] is None
 
 
 @pytest.mark.parametrize(
@@ -195,6 +249,10 @@ def test_a_deployment_that_measured_nothing_says_so(rendered: dict) -> None:
         pytest.param(
             {"status": "not_observed", "memory": {"anon_mb": 1, "shmem_mb": 1, "file_mb": 1}},
             id="memory-while-not",
+        ),
+        pytest.param(
+            {"status": "not_observed", "instance_uuid": INSTANCE_UUID},
+            id="uuid-while-not",
         ),
     ],
 )
@@ -227,6 +285,187 @@ def test_a_rendered_document_cannot_carry_an_observed_block(rendered: dict) -> N
     smuggled["database"]["observed"] = dict(deployed_output.NOT_OBSERVED)
     with pytest.raises(ManifestError):
         config.validate_against_schema(smuggled, "outputs.schema.json")
+
+
+# ---------------------------------------------------------------------------
+# Version 5: the published surface (ADR 0051, 0053)
+# ---------------------------------------------------------------------------
+
+
+def test_a_deployment_that_publishes_no_api_says_so(rendered: dict) -> None:
+    """The three constants, and the property that makes them worth having.
+
+    A session-4 deployment serves no REST and no documentation. What it must not
+    do is describe that state in a way a reader could mistake for a published
+    one -- so the routes name no URL, the API block names no schema, and the JWT
+    block names no issuer.
+    """
+    document = build(rendered)
+    assert document["routes"]["rest"] == {"status": "unavailable", "url": None}
+    assert document["routes"]["docs"] == {"status": "unavailable", "url": None}
+    assert document["api"] == deployed_output.API_NOT_PUBLISHED
+    assert document["jwt"] == deployed_output.JWT_NOT_PUBLISHED
+
+
+def test_a_published_route_carries_the_rendered_url_and_nothing_else(rendered: dict) -> None:
+    """One URL, one derivation (ADR 0053).
+
+    The deployed branch records a status against the render's URL rather than
+    building a second one. Asserted by equality with the rendered document, so a
+    future f-string here fails rather than agreeing until the base path changes.
+    """
+    document = published(rendered)
+    assert document["routes"]["rest"]["url"] == rendered["routes"]["rest"]
+    assert document["routes"]["docs"]["url"] == rendered["routes"]["docs"]
+    assert document["routes"]["rest"]["status"] == "ready"
+
+
+def test_an_unpublished_route_may_not_name_a_url(rendered: dict) -> None:
+    """The schema half of the same rule, from the other direction."""
+    document = published(rendered)
+    document["routes"]["rest"]["status"] = "unavailable"
+    with pytest.raises(ManifestError):
+        deployed_output.validate_deployed_document(document)
+
+
+def test_a_ready_route_may_not_have_a_null_url(rendered: dict) -> None:
+    document = published(rendered)
+    document["routes"]["docs"]["url"] = None
+    with pytest.raises(ManifestError):
+        deployed_output.validate_deployed_document(document)
+
+
+def test_the_health_route_keeps_its_url_when_it_is_unavailable(rendered: dict) -> None:
+    """`health` is deliberately the other case, and this says why in a test.
+
+    Its address is the same string for every project at every session whether or
+    not anything answers there, so nulling it would delete the thing an operator
+    needs in order to go and look. `rest` and `docs` are different: before
+    session 5 nothing is listening on either, so the URL would be describing a
+    surface that does not exist.
+    """
+    document = build(rendered, health_status="unavailable")
+    assert document["routes"]["health"]["url"] == rendered["routes"]["health"]["url"]
+
+
+@pytest.mark.parametrize("status", ["planned", "issued", "ready ", ""])
+def test_a_route_status_that_is_not_one_is_refused(rendered: dict, status: str) -> None:
+    """`planned` is in this list for the reason the health status was.
+
+    It is the rendered branch's word, it reads correctly, and copying it here
+    would publish a manifest's intention as an observation.
+    """
+    with pytest.raises(ManifestError, match="'ready' or 'unavailable'"):
+        build(rendered, rest_status=status)
+
+
+def test_a_published_api_needs_a_published_route(rendered: dict) -> None:
+    """The relation JSON Schema cannot state.
+
+    Every field in a ready `api` block would still be true of a surface no
+    request can arrive at, which is why this is checked rather than assumed.
+    """
+    with pytest.raises(ManifestError, match="no request can reach"):
+        build(rendered, api=PUBLISHED_API, rest_status="unavailable")
+
+
+def test_a_route_may_be_ready_while_the_api_block_is_not(rendered: dict) -> None:
+    """The converse is legal, and deliberately so.
+
+    A route that answers while the deploy could not read what it serves is a real
+    state. Refusing it would push the deploy towards publishing the block it
+    could not measure.
+    """
+    document = build(rendered, rest_status="ready")
+    assert document["routes"]["rest"]["status"] == "ready"
+    assert document["api"]["status"] == "unavailable"
+
+
+def test_a_partially_filled_api_block_is_refused(rendered: dict) -> None:
+    """`unavailable` with one real value is this project's recurring defect."""
+    with pytest.raises(ManifestError):
+        build(rendered, api={**deployed_output.API_NOT_PUBLISHED, "max_rows": 500})
+
+
+def test_a_ready_api_block_may_not_be_hollow(rendered: dict) -> None:
+    """And the other direction: `ready` with nulls would be a claim with no content."""
+    with pytest.raises(ManifestError):
+        published(rendered, api={**PUBLISHED_API, "canonical_openapi_sha256": None})
+
+
+def test_the_active_key_must_be_one_a_verifier_accepts(rendered: dict) -> None:
+    """Otherwise every token this issuer mints is refused by every verifier."""
+    with pytest.raises(ManifestError, match="verification_kids"):
+        published(rendered, jwt={**PUBLISHED_JWT, "verification_kids": ["c" * 43]})
+
+
+def test_a_rotation_overlap_carries_at_most_two_keys(rendered: dict) -> None:
+    """Two is the ceiling: an unbounded set is a set nobody retires from."""
+    document = published(
+        rendered,
+        jwt={
+            **PUBLISHED_JWT,
+            "verification_kids": [KID, "c" * 43],
+            "retire_after": "2026-09-01T00:00:00Z",
+        },
+    )
+    assert document["jwt"]["retire_after"] == "2026-09-01T00:00:00Z"
+
+    with pytest.raises(ManifestError):
+        published(rendered, jwt={**PUBLISHED_JWT, "verification_kids": [KID, "c" * 43, "d" * 43]})
+
+
+def test_a_symmetric_algorithm_is_not_representable(rendered: dict) -> None:
+    """ADR 0051: a verifier that holds a signing key is an issuer.
+
+    Refused by the schema rather than by a check somewhere in the issuer, because
+    the document is what a verifier reads and it should not be able to describe a
+    configuration where holding it is enough to mint.
+    """
+    with pytest.raises(ManifestError):
+        published(rendered, jwt={**PUBLISHED_JWT, "algorithm": "HS256"})
+
+
+def test_the_jwt_block_carries_no_private_material(rendered: dict) -> None:
+    """Asserted on the key set, so a member added later has to be looked at."""
+    document = published(rendered)
+    assert set(document["jwt"]) == {
+        "status",
+        "issuer",
+        "audience",
+        "algorithm",
+        "active_kid",
+        "verification_kids",
+        "public_jwks_sha256",
+        "temporary",
+        "retire_after",
+    }
+    deployed_output.validate_deployed_document(document)
+
+
+def test_no_service_address_is_emitted(rendered: dict) -> None:
+    """ADR 0053: `postgrest:3000` is the one field that would bypass the edge.
+
+    The admin surface is absent for a different reason -- it binds container
+    loopback and is not a network service -- and both absences are asserted on
+    the document's bytes so that a helpfully-added convenience field fails here.
+    """
+    document = published(rendered)
+    text = json.dumps(document)
+    assert "postgrest:3000" not in text
+    assert ":3001" not in text
+    for url in (document["routes"]["rest"]["url"], document["routes"]["docs"]["url"]):
+        assert url.startswith("https://")
+
+
+def test_the_instance_uuid_is_the_one_the_registry_is_keyed_by(rendered: dict) -> None:
+    """D106's debt, paid. The broker matches on this and nothing else."""
+    document = published(rendered)
+    assert document["database"]["observed"]["instance_uuid"] == INSTANCE_UUID
+
+    document["database"]["observed"]["instance_uuid"] = INSTANCE_UUID.upper()
+    with pytest.raises(ManifestError):
+        deployed_output.validate_deployed_document(document)
 
 
 def test_a_placeholder_the_schema_cannot_see_is_refused(rendered: dict) -> None:

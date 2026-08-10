@@ -155,7 +155,16 @@ def test_invalid_domain_is_rejected(tmp_path: Path, base: dict[str, Any], domain
 
 
 def test_punycode_domain_is_accepted(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The CORS origin moves with the domain, and that coupling is the point.
+
+    Session 5 requires the project's own HTTPS origin in
+    `api.rest.allowed_cors_origins`, so changing the domain and not the origin
+    now fails validation. That is the rule working: an allowlist that names the
+    old domain is an allowlist that disables the documentation page and reports
+    it as a browser error rather than as a manifest one.
+    """
     base["project"]["domain"] = "xn--bcher-kva.example.test"
+    base["api"]["rest"]["allowed_cors_origins"] = ["https://xn--bcher-kva.example.test"]
     assert check(tmp_path, base)["project"]["domain"] == "xn--bcher-kva.example.test"
 
 
@@ -218,6 +227,225 @@ def test_root_is_not_treated_as_a_reserved_prefix() -> None:
     """
     assert not config.paths_overlap("/api", "/")
     assert "/" not in config.RESERVED_BASE_PATHS
+
+
+# ---------------------------------------------------------------------------
+# Session 5: the REST service and its two derived prefixes
+# ---------------------------------------------------------------------------
+
+
+def test_rest_defaults_match_the_schema() -> None:
+    """`default` annotates; it does not populate. Same rule as the budget.
+
+    `config.API_REST_DEFAULTS` is what actually decides the value of an omitted
+    key, so a schema whose defaults drifted from it would document one number
+    and apply another.
+    """
+    schema = config.load_schema("project.schema.json")
+    properties = schema["$defs"]["restService"]["properties"]
+    from_schema = {key: value["default"] for key, value in properties.items() if "default" in value}
+    assert from_schema == {
+        key: value for key, value in config.API_REST_DEFAULTS.items() if key in from_schema
+    }
+    assert set(config.API_REST_DEFAULTS) <= set(properties)
+
+
+def test_a_manifest_without_a_rest_section_is_valid(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The whole section is optional, and that is a decision rather than slack.
+
+    Every project manifest written before Session 5 has no `api.rest`, including
+    the two on the deployment host that are gitignored operator inputs. Making
+    the section required would fail the next render on a host nobody had touched,
+    and the honest render for a project that declares no REST service is one that
+    publishes no REST route.
+    """
+    del base["api"]["rest"]
+    assert "rest" not in check(tmp_path, base)["api"]
+
+
+def test_a_disabled_rest_section_still_has_its_numbers_checked(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """Otherwise the manifest fails on the day somebody flips one boolean."""
+    base["api"]["rest"]["enabled"] = False
+    base["api"]["rest"]["allowed_cors_origins"] = []
+    base["api"]["rest"]["request_body_memory_bytes"] = 4096
+    with pytest.raises(config.ManifestError, match="request_body_memory_bytes"):
+        check(tmp_path, base)
+
+
+def test_the_body_limits_must_be_equal(tmp_path: Path, base: dict[str, Any]) -> None:
+    """A memory limit below the accepted size is how a body reaches proxy disk."""
+    base["api"]["rest"]["request_body_memory_bytes"] = 65536
+    with pytest.raises(config.ManifestError, match="request_body_memory_bytes"):
+        check(tmp_path, base)
+
+
+def test_the_idle_timeout_must_be_below_the_lifetime(tmp_path: Path, base: dict[str, Any]) -> None:
+    """At or above the lifetime it never fires, and reads as configured."""
+    base["api"]["rest"]["pool_max_idle_seconds"] = 1800
+    base["api"]["rest"]["pool_max_lifetime_seconds"] = 1800
+    with pytest.raises(config.ManifestError, match="pool_max_idle_seconds"):
+        check(tmp_path, base)
+
+
+def test_the_connection_budget_must_fit(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The pooler's pool, the API's pool, its reservations and the admin reserve.
+
+    The connection that cannot be opened when this is wrong is the pooler's or
+    the migration's, and neither reports the reason as a capacity problem.
+    """
+    base["api"]["rest"]["pool_size"] = 30
+    base["database"]["pool_size"] = 20
+    base["database"]["max_connections"] = 50
+    with pytest.raises(config.ManifestError, match="connection budget does not fit"):
+        check(tmp_path, base)
+
+
+def test_the_shipped_fixture_fits_its_own_budget() -> None:
+    """Guard the guard: a rule nothing satisfies is a rule nobody has tested."""
+    document = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
+    rest = document["api"]["rest"]
+    committed = (
+        config.postgrest_connection_budget(rest)
+        + document["database"]["pool_size"]
+        + config.ADMINISTRATION_RESERVED_CONNECTIONS
+    )
+    assert committed < config.DATABASE_BUDGET_DEFAULTS["max_connections"]
+
+
+def test_the_projects_own_origin_must_be_allowed(tmp_path: Path, base: dict[str, Any]) -> None:
+    base["api"]["rest"]["allowed_cors_origins"] = ["https://elsewhere.test"]
+    with pytest.raises(config.ManifestError, match="allowed_cors_origins"):
+        check(tmp_path, base)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        pytest.param("null", id="null"),
+        pytest.param("*", id="wildcard"),
+        pytest.param("https://*.example.test", id="wildcard-host"),
+        pytest.param("http://fixture-alpha-dev.test", id="not-https"),
+        pytest.param("https://fixture-alpha-dev.test/", id="trailing-slash"),
+        pytest.param("https://fixture-alpha-dev.test/app", id="path"),
+        pytest.param("https://fixture-alpha-dev.test?a=1", id="query"),
+        pytest.param("https://fixture-alpha-dev.test#f", id="fragment"),
+        pytest.param("https://user@fixture-alpha-dev.test", id="userinfo"),
+    ],
+)
+def test_a_cors_origin_that_is_not_an_exact_origin_is_refused(
+    tmp_path: Path, base: dict[str, Any], origin: str
+) -> None:
+    """`null` is in this list first for a reason.
+
+    It is the origin a sandboxed iframe and a `file://` document send, so an
+    allowlist containing it admits anything that can arrange to be opaque -- and
+    it is the one entry that looks like a placeholder rather than a permission.
+    """
+    base["api"]["rest"]["allowed_cors_origins"] = [
+        "https://fixture-alpha-dev.test",
+        origin,
+    ]
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, base)
+
+
+def test_a_duplicate_cors_origin_is_refused(tmp_path: Path, base: dict[str, Any]) -> None:
+    base["api"]["rest"]["allowed_cors_origins"] = [
+        "https://fixture-alpha-dev.test",
+        "https://fixture-alpha-dev.test",
+    ]
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, base)
+
+
+@pytest.mark.parametrize(
+    "duration",
+    [
+        pytest.param("0", id="bare-zero"),
+        pytest.param("0s", id="zero-seconds"),
+        pytest.param("5000", id="unitless"),
+        pytest.param("5 s", id="space"),
+        pytest.param("1m", id="minutes"),
+        pytest.param("1s500ms", id="compound"),
+        pytest.param("90s", id="above-the-ceiling"),
+        pytest.param("50ms", id="below-the-floor"),
+    ],
+)
+def test_a_statement_timeout_outside_the_grammar_is_refused(
+    tmp_path: Path, base: dict[str, Any], duration: str
+) -> None:
+    """`0` is the entry that matters: PostgreSQL reads it as *disabled*.
+
+    A grammar that admitted a bare integer or a zero would let a manifest turn
+    the timeout off while looking exactly like one that set it.
+    """
+    base["api"]["rest"]["statement_timeouts"]["authenticated"] = duration
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, base)
+
+
+def test_a_statement_timeout_on_a_role_that_does_not_exist_is_refused(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """Checked against `naming.ROLE_SUFFIXES`, not against a list written here.
+
+    A timeout set on a role nothing derives is applied to nothing and reports
+    nothing, and it reads in the manifest exactly like one that works. The
+    runbook names `api_documentation`; the platform derives no such role, and it
+    will be namable here on the day it does.
+    """
+    from agentic_postgres import naming
+
+    assert "api_documentation" not in naming.ROLE_SUFFIXES
+    base["api"]["rest"]["statement_timeouts"]["api_documentation"] = "5s"
+    with pytest.raises(config.ManifestError, match="does not derive"):
+        check(tmp_path, base)
+
+
+def test_anonymous_access_is_a_frozen_enumeration(tmp_path: Path, base: dict[str, Any]) -> None:
+    base["api"]["rest"]["anonymous_access"] = "read_public"
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, base)
+
+
+def test_the_rest_prefix_and_the_docs_prefix_are_distinct(base: dict[str, Any]) -> None:
+    """Both are derived, which is exactly why they are checked rather than assumed."""
+    rest = f"{base['api']['public_base_path']}{config.REST_PATH_SUFFIX}"
+    assert rest == "/api/rest"
+    assert config.DOCS_REST_PATH == "/docs/rest"
+    assert not config.paths_overlap(rest, config.DOCS_REST_PATH)
+    assert not config.paths_overlap(rest, base["mcp"]["public_base_path"])
+
+
+def test_a_base_path_that_would_swallow_the_docs_prefix_is_refused(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """`/docs` is reserved, so this is already refused -- and is asserted anyway.
+
+    The reserved list is a tuple somebody can edit. This states the consequence
+    of editing it: the documentation route and a project route would answer on
+    the same tree, and the edge would serve whichever router matched first.
+    """
+    base["mcp"]["public_base_path"] = "/docs/rest"
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, base)
+
+
+def test_the_mcp_prefix_may_not_swallow_the_rest_prefix(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """The pair a manifest can actually produce, and the one nothing else caught.
+
+    `api: /api` and `mcp: /api/rest` do not overlap under the existing check --
+    which compares the two *base* paths -- but the derived REST prefix is exactly
+    `/api/rest`, so the two published routes would be the same tree.
+    """
+    base["api"]["public_base_path"] = "/alpha"
+    base["mcp"]["public_base_path"] = "/alpha/rest"
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, base)
 
 
 # ---------------------------------------------------------------------------

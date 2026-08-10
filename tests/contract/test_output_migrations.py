@@ -1,11 +1,11 @@
-"""Output schema migration and document-kind rejection (ADR 0012, 0027, 0041).
+"""Output schema migration and document-kind rejection (ADR 0012, 0027, 0041, 0053).
 
-All three fixtures are real renders, not hand-built objects: ``outputs-v1.json``
-is a Session 1 render, ``outputs-v2.json`` a Session 2 one, and
-``outputs-v3.json`` a Session 3 one — the version every deployed host is running
-at the time version 4 was written. A hand-built fixture drifts away from what
-was actually shipped, and then the migrator is proved to handle a document that
-never existed.
+All four fixtures are real renders, not hand-built objects: ``outputs-v1.json``
+is a Session 1 render, ``outputs-v2.json`` a Session 2 one, ``outputs-v3.json``
+a Session 3 one, and ``outputs-v4.json`` the Session 4 render every deployed
+host is running at the time version 5 was written. A hand-built fixture drifts
+away from what was actually shipped, and then the migrator is proved to handle a
+document that never existed.
 
 Two negative properties carry more weight here than the positive one:
 
@@ -26,6 +26,13 @@ a migrator could fill both in and be right. It validates instead — a supplied
 profile naming a role the document does not declare is refused rather than
 corrected — because deriving would make this module a second authority on which
 role serves which profile, and ADR 0002 allows one derivation path per name.
+
+The v5 step is the opposite kind of interesting: it adds nothing at all, because
+everything version 5 added is on the deployed branch. What is asserted about it
+is therefore mostly what it still refuses — a deployed document, an incomplete
+one, one carrying fields no v4 rendered document has — because a step that
+changes one integer is exactly the one somebody would later be tempted to make a
+shortcut past the checks.
 """
 
 from __future__ import annotations
@@ -44,6 +51,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 FIXTURE_V1 = REPO_ROOT / "tests" / "fixtures" / "outputs-v1.json"
 FIXTURE_V2 = REPO_ROOT / "tests" / "fixtures" / "outputs-v2.json"
 FIXTURE_V3 = REPO_ROOT / "tests" / "fixtures" / "outputs-v3.json"
+FIXTURE_V4 = REPO_ROOT / "tests" / "fixtures" / "outputs-v4.json"
 
 CONTRACT_DIGEST = sha256((REPO_ROOT / "secrets.required.yaml").read_bytes()).hexdigest()
 
@@ -112,8 +120,20 @@ def v3(v2: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.fixture
-def v4(v1: dict[str, Any]) -> dict[str, Any]:
-    """The whole chain, v1 -> v2 -> v3 -> v4, through the public entry point."""
+def v4_fixture() -> dict[str, Any]:
+    """The committed Session 4 render."""
+    return json.loads(FIXTURE_V4.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def v4(v3: dict[str, Any]) -> dict[str, Any]:
+    """The v1 fixture advanced three steps, stopping at 4."""
+    return output_migrations.migrate_v3_to_v4(v3, access_profiles=profiles_for(v3))
+
+
+@pytest.fixture
+def v5(v1: dict[str, Any]) -> dict[str, Any]:
+    """The whole chain, v1 -> v2 -> v3 -> v4 -> v5, through the public entry point."""
     return output_migrations.migrate_rendered(
         v1,
         secrets_contract_sha256=CONTRACT_DIGEST,
@@ -230,16 +250,21 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
     with pytest.raises(config.ManifestError):
         config.validate_against_schema(at_three, "outputs.schema.json")
 
-    migrated = output_migrations.migrate_v3_to_v4(at_three, access_profiles=profiles_for(at_three))
-    assert migrated["schema_version"] == 4
+    at_four = output_migrations.migrate_v3_to_v4(at_three, access_profiles=profiles_for(at_three))
+    assert at_four["schema_version"] == 4
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(at_four, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v4_to_v5(at_four)
+    assert migrated["schema_version"] == 5
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
-def test_the_whole_chain_validates(v4: dict[str, Any]) -> None:
-    """v1 -> v2 -> v3 -> v4 end to end, not only the newest link (ADR 0027)."""
-    assert v4["schema_version"] == 4
-    assert v4["document_kind"] == "rendered"
-    config.validate_against_schema(v4, "outputs.schema.json")
+def test_the_whole_chain_validates(v5: dict[str, Any]) -> None:
+    """v1 -> v2 -> v3 -> v4 -> v5 end to end, not only the newest link (ADR 0027)."""
+    assert v5["schema_version"] == 5
+    assert v5["document_kind"] == "rendered"
+    config.validate_against_schema(v5, "outputs.schema.json")
 
 
 def test_v3_carries_the_supplied_budget_and_container(v3: dict[str, Any]) -> None:
@@ -308,9 +333,9 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
         )
 
 
-def test_migrated_inputs_carry_the_supplied_digest(v4: dict[str, Any]) -> None:
-    assert v4["inputs"]["secrets_contract_sha256"] == CONTRACT_DIGEST
-    assert len(v4["inputs"]) == 5
+def test_migrated_inputs_carry_the_supplied_digest(v5: dict[str, Any]) -> None:
+    assert v5["inputs"]["secrets_contract_sha256"] == CONTRACT_DIGEST
+    assert len(v5["inputs"]) == 5
 
 
 @pytest.mark.parametrize(
@@ -367,7 +392,7 @@ def test_the_migrator_never_derives_a_container_name() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_current_version_document_is_not_migrated_again(v4: dict[str, Any]) -> None:
+def test_a_current_version_document_is_not_migrated_again(v5: dict[str, Any]) -> None:
     """Replaces the v2 form of this assertion, applied to the current version.
 
     ADR 0017's rule: a test may only be replaced by a stricter one. This is the
@@ -375,16 +400,16 @@ def test_a_current_version_document_is_not_migrated_again(v4: dict[str, Any]) ->
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 4"):
+    with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_rendered(
-            v4,
+            v5,
             secrets_contract_sha256=CONTRACT_DIGEST,
             database_budget=BUDGET,
             database_container=CONTAINER,
-            access_profiles=profiles_for(v4),
+            access_profiles=profiles_for(v5),
         )
-    with pytest.raises(MigrationError, match="already version 4"):
-        output_migrations.migrate_v3_to_v4(v4, access_profiles=profiles_for(v4))
+    with pytest.raises(MigrationError, match="already version 5"):
+        output_migrations.migrate_v4_to_v5(v5)
 
 
 def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any]) -> None:
@@ -395,7 +420,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1, 2 and 3"):
+    with pytest.raises(MigrationError, match="only versions 1, 2, 3 and 4"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -525,10 +550,12 @@ def test_v3_fixture_is_version_three_and_no_longer_validates(v3_fixture: dict[st
 
 
 def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, Any]) -> None:
-    migrated = output_migrations.migrate_v3_to_v4(
+    at_four = output_migrations.migrate_v3_to_v4(
         v3_fixture, access_profiles=profiles_for(v3_fixture)
     )
-    assert migrated["schema_version"] == 4
+    assert at_four["schema_version"] == 4
+    migrated = output_migrations.migrate_v4_to_v5(at_four)
+    assert migrated["schema_version"] == 5
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -652,3 +679,100 @@ def test_a_v3_document_is_still_refused_by_the_v2_step(v3_fixture: dict[str, Any
         output_migrations.migrate_v2_to_v3(
             v3_fixture, database_budget=BUDGET, database_container=CONTAINER
         )
+
+
+# ---------------------------------------------------------------------------
+# v4 -> v5 (ADR 0053)
+# ---------------------------------------------------------------------------
+
+
+def test_v4_fixture_is_version_four_and_no_longer_validates(v4_fixture: dict[str, Any]) -> None:
+    """The committed Session 4 render -- the version every host is running now.
+
+    A v4 document that still validated would mean version 5 had changed a label
+    and nothing else, which is a real risk here precisely because the rendered
+    branch gained no field. The bump is real because the *schema* moved: the
+    rendered branch's `schema_version` enum accepts one value, and it is 5.
+    """
+    assert output_migrations.detect_version(v4_fixture) == 4
+    assert v4_fixture["document_kind"] == "rendered"
+    assert "access_profiles" in v4_fixture["database"]
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(v4_fixture, "outputs.schema.json")
+
+
+def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, Any]) -> None:
+    migrated = output_migrations.migrate_v4_to_v5(v4_fixture)
+    assert migrated["schema_version"] == 5
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+
+def test_v5_changes_exactly_one_field(v4_fixture: dict[str, Any]) -> None:
+    """The whole content of the step, asserted as a difference rather than described.
+
+    Version 5's additions are all on the deployed branch, so a rendered document
+    gains nothing. If a later change makes this step add a member, this fails --
+    which is the point: a rendered document that grew a status or a checksum
+    would be carrying an observation, and that is the boundary ADR 0012 draws.
+    """
+    migrated = output_migrations.migrate_v4_to_v5(v4_fixture)
+    assert migrated == {**v4_fixture, "schema_version": 5}
+
+
+def test_v5_adds_no_deployed_member(v4_fixture: dict[str, Any]) -> None:
+    """Named individually, because each one is a thing a migrator could invent."""
+    migrated = output_migrations.migrate_v4_to_v5(v4_fixture)
+    assert "api" not in migrated
+    assert "observed" not in migrated["database"]
+    assert isinstance(migrated["routes"]["rest"], str)
+    assert isinstance(migrated["routes"]["docs"], str)
+    assert set(migrated["jwt"]) == {"issuer", "audience"}
+
+
+def test_the_v5_step_still_refuses_a_deployed_document(v4_fixture: dict[str, Any]) -> None:
+    """The cheap step is not a way past the checks the expensive ones make."""
+    v4_fixture["document_kind"] = "deployed"
+    with pytest.raises(MigrationError, match="expected a 'rendered'"):
+        output_migrations.migrate_v4_to_v5(v4_fixture)
+
+
+def test_the_v5_step_refuses_an_incomplete_document(v4_fixture: dict[str, Any]) -> None:
+    del v4_fixture["jwt"]
+    with pytest.raises(MigrationError, match="not a complete version 4"):
+        output_migrations.migrate_v4_to_v5(v4_fixture)
+
+
+def test_the_v5_step_refuses_a_document_carrying_deployed_fields(
+    v4_fixture: dict[str, Any],
+) -> None:
+    v4_fixture["observed_at"] = "2026-08-11T00:00:00Z"
+    with pytest.raises(MigrationError, match="no version 4 rendered document has"):
+        output_migrations.migrate_v4_to_v5(v4_fixture)
+
+
+def test_a_v3_document_is_refused_by_the_v5_step(v3_fixture: dict[str, Any]) -> None:
+    """A v3 document has every top-level key a v4 one has, and is not one.
+
+    This is why the step looks inside `database` as well as at the top level:
+    version 4's addition was a member, so the outer shape alone cannot tell the
+    two apart, and a step that skipped v3 -> v4 would silently produce a v5
+    document with no `access_profiles` in it.
+    """
+    with pytest.raises(MigrationError, match="only version 4 can be migrated to 5"):
+        output_migrations.migrate_v4_to_v5(v3_fixture)
+
+    mislabelled = {**v3_fixture, "schema_version": 4}
+    with pytest.raises(MigrationError, match="access_profiles is missing"):
+        output_migrations.migrate_v4_to_v5(mislabelled)
+
+
+def test_the_v5_step_does_not_mutate_its_input(v4_fixture: dict[str, Any]) -> None:
+    before = json.dumps(v4_fixture, sort_keys=True)
+    output_migrations.migrate_v4_to_v5(v4_fixture)
+    assert json.dumps(v4_fixture, sort_keys=True) == before
+
+
+def test_a_v4_document_is_still_refused_by_the_v3_step(v4_fixture: dict[str, Any]) -> None:
+    """Each single step keeps its own narrow refusal as the chain grows."""
+    with pytest.raises(MigrationError, match="already version 4"):
+        output_migrations.migrate_v3_to_v4(v4_fixture, access_profiles=profiles_for(v4_fixture))

@@ -27,6 +27,30 @@ database:
 api:
   public_base_path: /api
   max_rows: 500
+  # Session 5. The whole section is optional: a manifest without it renders a
+  # project that publishes no REST route, which is what every project deployed
+  # before this session is.
+  rest:
+    enabled: true
+    # Equal, so an accepted body stays in memory rather than spilling to the
+    # proxy's disk.
+    request_body_max_bytes: 1048576
+    request_body_memory_bytes: 1048576
+    # 10 + 3 reserved, plus the pooler's 20 and 5 for administration, against
+    # database.max_connections (50 by default). 38 of 50.
+    pool_size: 10
+    pool_acquisition_timeout_seconds: 5
+    pool_max_idle_seconds: 30
+    pool_max_lifetime_seconds: 1800
+    anonymous_access: deny_data
+    # The project's own origin, because the documentation page issues its
+    # requests from it. Exact origins only: no path, no wildcard, no `null`.
+    allowed_cors_origins:
+      - https://fixture-alpha-dev.test
+    # Keyed by platform role suffix, and only roles the platform derives.
+    statement_timeouts:
+      anon: 2s
+      authenticated: 5s
 
 mcp:
   public_base_path: /mcp

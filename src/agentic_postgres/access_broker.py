@@ -59,6 +59,7 @@ __all__ = [
     "endpoint",
     "load_policy",
     "password",
+    "recorded_instance_uuid",
     "resolve_allocation",
 ]
 
@@ -196,22 +197,49 @@ def _loopback_address(*, etc_root: Path) -> str:
     return address
 
 
-def resolve_allocation(registry: dict[str, Any], project_key: str) -> dict[str, Any]:
-    """The live allocation for this project key, or a refusal.
+def resolve_allocation(
+    registry: dict[str, Any], project_key: str, *, instance_uuid: str | None = None
+) -> dict[str, Any]:
+    """The live allocation for this project, matched on the identity that is one.
 
-    **This is the one place the port registry is searched by project key**, and
-    the registry says in its own module docstring that the key is never the match
-    key: the authoritative identity is the volume's ``instance_uuid``, because two
-    projects can share a key across a rebuild and one project can change it.
+    The registry is keyed by the volume's ``instance_uuid`` and says in its own
+    module docstring that the project key is recorded for humans and is never the
+    match key: two projects can share a key across a rebuild, and one project can
+    change it. Until outputs version 5 the deployed document carried no copy of
+    the UUID, so this function had nothing else to search by (D106). It searched
+    by key and refused ambiguity rather than resolving it, which turned the
+    missing identifier into a visible failure instead of a credential handed out
+    for the wrong cluster.
 
-    The deployed document records no instance UUID, so the broker has nothing else
-    to search by. What it does instead of guessing is refuse ambiguity: released
-    records are excluded, and two *live* allocations carrying one key is an error
-    rather than a first match. That turns the missing identifier into a visible
-    failure on the day it would matter, instead of a credential handed out for the
-    wrong cluster. Recorded as a plan divergence; the fix is a document that
-    carries the UUID, which is a schema version.
+    **With a UUID it stops searching by key altogether.** The key is then checked
+    rather than used: an allocation whose recorded key disagrees with the project
+    being asked about is a refusal, because two documents describing one cluster
+    have to agree about what it is called before either can be trusted about
+    where it is.
+
+    Without one -- a document written by a release that predates version 5, or a
+    project whose cluster has never been read -- the old behaviour is exactly
+    preserved. It is not a fallback that guesses; it is the same refusal it
+    always was.
     """
+    if instance_uuid is not None:
+        allocation = port_allocations.find(registry, instance_uuid)
+        if allocation is None or allocation not in port_allocations.live_allocations(registry):
+            raise BrokerError(
+                4,
+                f"no live port allocation for instance {instance_uuid}. Its transports "
+                "have not been published, or the allocation was released",
+            )
+        if allocation["project_key"] != project_key:
+            raise BrokerError(
+                5,
+                f"the allocation for instance {instance_uuid} records the project key "
+                f"{allocation['project_key']!r}, and the deployed document being read is "
+                f"{project_key!r}. One of the two describes a cluster that has been "
+                "rebuilt or renamed, and the broker will not choose between them",
+            )
+        return allocation
+
     matches = [
         allocation
         for allocation in port_allocations.live_allocations(registry)
@@ -230,19 +258,37 @@ def resolve_allocation(registry: dict[str, Any], project_key: str) -> dict[str, 
             f"ports {sorted(p for m in matches for p in (m['pooled_port'], m['direct_port']))}. "
             "The registry is keyed by the volume's instance UUID and only records the "
             "key for humans; two live records for one key means the broker cannot tell "
-            "which cluster a credential would reach",
+            "which cluster a credential would reach. This document predates outputs "
+            "version 5 and carries no instance UUID; redeploy the project",
         )
     return matches[0]
 
 
-def _allocation(project_key: str, *, etc_root: Path) -> dict[str, Any]:
+def _allocation(
+    project_key: str, *, etc_root: Path, instance_uuid: str | None = None
+) -> dict[str, Any]:
     path = etc_root / "database-port-allocations.json"
     registry = _read_json(path, code=4)
     try:
         port_allocations.validate(registry)
     except (port_allocations.AllocationError, ManifestError) as error:
         raise BrokerError(5, f"{path} is not a usable port registry: {error}") from None
-    return resolve_allocation(registry, project_key)
+    return resolve_allocation(registry, project_key, instance_uuid=instance_uuid)
+
+
+def recorded_instance_uuid(document: dict[str, Any]) -> str | None:
+    """The cluster identity this deployed document observed, or ``None``.
+
+    ``None`` covers three different situations that are one situation here: a
+    document written before outputs version 5, a deployment that interrogated no
+    cluster, and a cluster whose identity could not be read. All three mean the
+    broker has no identity to match on, and the honest response to all three is
+    the same one -- fall back to the refusal that predates the field, rather than
+    to a guess.
+    """
+    observed = document.get("database", {}).get("observed", {})
+    uuid = observed.get("instance_uuid") if isinstance(observed, dict) else None
+    return uuid if isinstance(uuid, str) and uuid else None
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +393,11 @@ def endpoint(
     """
     document = _deployed_document(project_key, etc_root=etc_root)
     block = _profile_block(document, profile)
-    allocation = _allocation(project_key, etc_root=etc_root)
+    allocation = _allocation(
+        project_key,
+        etc_root=etc_root,
+        instance_uuid=recorded_instance_uuid(document),
+    )
 
     transport = access_policy.transport_for(profile)
     local_port = allocation["pooled_port"] if transport == "pooled" else allocation["direct_port"]

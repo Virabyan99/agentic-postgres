@@ -48,6 +48,9 @@ at **D126**.
 | **D146** | *(§10.1)* "When rejecting with SQLSTATE `PGRST`, put status and error-response headers — including `X-Request-ID`, `Cache-Control: no-store`, and `WWW-Authenticate: Bearer` for 401 — inside the `PGRST` error **`DETAIL`** JSON." | **The two halves are the other way round.** Measured against both versions: the **response body** is the JSON in `MESSAGE` — `{"code","message","details","hint"}`, with `code` and `message` obligatory — and the **status and headers** are the JSON in `DETAIL`. Raising the runbook's way produces `PGRST121`, *"Invalid JSON value for MESSAGE"*, and **HTTP 500**. Raising the measured way produces the intended **HTTP 401** with `WWW-Authenticate: Bearer` and the exact body. | **The measured shape**, and a test that raises each of the four pre-request refusals and asserts the status, the challenge and the body — not the SQL that produced them. | Getting this backwards does not produce a wrong message; it produces **a 500 where a 401 was intended**, which is an authentication refusal reported as a server fault. It would have passed any review that read the SQL, and it fails the first request that exercises it. | no |
 | **D147** | *(nothing in the runbook; §11.2 implies an ordinary image)* | **The PostgREST image is distroless.** No shell, no `wget`, no `curl` — `docker run --entrypoint sh` fails with *executable file not found*. It also declares no `ENTRYPOINT`, so an argument passed without `--entrypoint postgrest` lands in `exec` position and is reported as a missing executable. | **A Compose healthcheck can be neither `CMD-SHELL` nor an HTTP probe**, which leaves the binary itself — and that is what forced the version bump (D127), because v13.0.4's CLI has no probe subcommand at all. The Compose service names its command explicitly rather than inheriting one. | Recorded because the failure is silent in the worst direction: a `CMD-SHELL` healthcheck on a shell-less image is reported by Docker as an *unhealthy container*, and the obvious repair is to weaken the check rather than to notice the image. It is also the whole reason a two-major bump was cheaper than the alternatives — adding a shell to the image, or publishing the admin port that is bound to container loopback precisely so nothing can reach it. | no |
 | **D148** | *(§14.3)* Errors carry "no SQL query, role list, schema path, hint containing internal names, or failing row data". | **A missing pre-request function discloses the private schema and the function name to an unauthenticated caller.** `GET /thing` with an unresolvable `db-pre-request` returns 404 and `{"code":"42883", "message":"function app_private.does_not_exist() does not exist", "hint":"No function matches the given name…"}`. The row does not come out — it **fails closed** on the data, which is the important half — but `app_private` does. | **The error wrapper is not optional and it is not only for the RPCs.** Every path that can reach a client raises a `PGRST`-coded error with a controlled body, and `API-ERR-001` asserts the *absence of the internal name* rather than the presence of a code. With no `client-error-verbosity` to fall back on (D144), this is the only control there is. | The good news and the bad news arrived together: PostgREST fails closed on the data when its hook cannot resolve, which is the answer §3.2 measurement 2 was written to get. What it does not do is fail quietly, and a schema name is a small leak that tells an attacker exactly which schema to aim at. | no |
+| **D149** | *(§7.2)* The surface contract names RPC arguments `title`, `content`, `task_id`, `expected_status`, `new_status`. | **The functions carry a `p_` prefix**, and PostgREST maps JSON body keys straight onto PostgreSQL parameter names — so those five strings are not labels, they are the wire format. A contract naming `title` describes a request body no caller can send. Measured from `0005-write-rpcs.sql`, which shipped `api.create_note(p_title text, p_body text DEFAULT '')`. | **The contract names the parameters as they are**: `p_title`, `p_content`, `p_task_id`, `p_expected_status`, `p_new_status`. And the second half, which is a decision rather than a transcription: **Run 5 drops and recreates `api.create_note` so its parameter is `p_content`**, not `p_body`. `CREATE OR REPLACE FUNCTION` cannot rename a parameter, so this is a drop and a create inside the same migration, alongside the column rename ADR 0048 already requires. | Publishing `content` on the read surface while requiring `p_body` on the write surface is two names for one field, in the one session where the cost of fixing it is zero — no client exists yet, and after this session the name is in a generated OpenAPI document somebody has built against. The prefix itself stays: it is what distinguishes a parameter from the column it writes inside a function body, and renaming *that* away would be a change to five signatures to make a document read better. | no |
+| **D150** | *(§7.1)* Every project manifest carries an `api.rest` section, shown unconditionally with `enabled: true`. | **`host.yaml`, `project.alpha.yaml` and `project.beta.yaml` are gitignored operator inputs that exist only on the deployment host**, and none of them has ever seen this section. A required section makes the next render on that host fail against a manifest nobody has touched — before any of Session 5 has been deployed. | **The whole section is optional, and `enabled` defaults to `false`.** A project that declares no REST service publishes `routes.rest: unavailable` with a null URL, which is exactly what every project deployed before this session is. A *disabled* section still has its numbers validated, so a manifest carrying an unusable configuration behind one boolean fails on the day it is written rather than on the day the boolean is flipped. | The alternative is a schema change that breaks a host the operator cannot see from here, and whose repair is to edit two files that are deliberately not in the repository. It also states the right default: a public API is something a project asks for, not something it acquires because a schema had a default. | no |
+| **D151** | *(§7.1)* `statement_timeouts` names three roles: `anon`, `authenticated`, and `api_documentation`. | **The platform derives thirteen roles and `api_documentation` is not one of them.** `naming.ROLE_SUFFIXES` is the sole authority and a fourteenth entry is a Session 5 decision that belongs with the role's creation, not with a manifest key that references it. | **The manifest may name only roles the platform derives, checked against `naming.ROLE_SUFFIXES` rather than against a list written beside it.** The fixtures set `anon` and `authenticated`. The day the documentation role exists, it becomes namable here with no schema change and no test change. | A timeout set on a role nothing created is applied to nothing, reports nothing, and reads in the manifest exactly like one that works — this project's signature defect in a configuration file. Validating against the derivation rather than against an enumeration is what makes the check keep meaning something after the roles change. | no |
 
 ---
 
@@ -342,7 +345,41 @@ the reason recorded; the documentation delivery is settled (D128); and the
 answer to measurement 2 decides Run 4's start ordering (D139).
 
 ### Run 2 — Schemas and static contracts
-*Offline.*
+*Offline.* **Done.**
+
+> Outputs **version 5** is entirely on the deployed branch, which is the fact
+> that shaped the run. The rendered branch gained one integer: `routes.rest`,
+> `routes.docs`, `jwt.issuer` and `jwt.audience` have been derived since Session
+> 1 and stay their single derivation. So `migrate_v4_to_v5` takes no argument,
+> invents no field, and still refuses everything the expensive steps refuse —
+> `test_v5_changes_exactly_one_field` asserts the whole of it as a difference.
+>
+> **`routes.rest` and `routes.docs` null their URL when unavailable, and
+> `health` does not.** The asymmetry is deliberate and has its own test: the
+> health path is the same string for every project at every session whether or
+> not it answers, so nulling it would delete an address an operator needs; a
+> REST URL before Session 5 would name a surface nothing is listening on.
+>
+> **D106's debt is paid.** `database.observed.instance_uuid` is read by the same
+> query the port allocator uses, and `access_broker.resolve_allocation` matches
+> on it — the project key stops being a search term and becomes a *check*, with
+> a disagreement between the document and the registry refused rather than
+> resolved. The old key search survives untouched for documents that predate
+> version 5, which is every document on the host until it is redeployed.
+>
+> **`bounds_table` had to learn to follow `$ref`.** The REST service went into
+> `$defs`, and a generator that stopped at the reference would have produced a
+> bounds table missing eight fields — and it would have looked complete. That is
+> ADR 0007's failure arriving through the documentation generator rather than
+> through the schema.
+>
+> Three new divergences, all from writing the manifest section against what the
+> repository actually has: the RPC argument names carry a `p_` prefix and are the
+> wire format (D149), the section is optional because two host manifests are
+> gitignored operator inputs (D150), and a timeout may name only a role the
+> platform derives (D151).
+>
+> 2081 passed, 216 skipped.
 
 Outputs schema v5 on both branches: deployed `routes.rest` and `routes.docs` as
 status-carrying objects, the `api` observation block, the deployed `jwt` public
@@ -562,16 +599,21 @@ Both evidence halves, then the merge.
 
 ## 6. The API surface
 
-The runbook's §4.2 and §4.11 survive in substance. Restated against the real
-identifiers — **subject to ADR 0048**, which is the one thing in this section
-that is not yet decided (D129):
+The runbook's §4.2 and §4.11 survive in substance, restated against the real
+identifiers. **ADR 0048 decided it and Run 2 wrote it down**: the table below is
+now a summary of `contracts/postgrest-api-surface.yaml`, which is the authority,
+and D129 is closed.
 
 | Surface | Methods | Authority |
 |---|---|---|
 | `api.notes` | `GET`, `HEAD` | security-invoker view; the caller's row policy applies |
 | `api.tasks` | `GET`, `HEAD` | security-invoker view; the caller's row policy applies |
-| `api.create_note` | `POST` | `SECURITY DEFINER`, safe only because the base tables carry FORCE RLS (D58) |
-| the second write RPC | `POST` | named by ADR 0048 |
+| `api.create_note(p_title, p_content)` | `POST` | `SECURITY DEFINER`, safe only because the base tables carry FORCE RLS (D58) |
+| `api.update_task_status(p_task_id, p_expected_status, p_new_status)` | `POST` | ADR 0003's operation 4, which the shipped migrations never had; created in Run 5 |
+
+`api.create_task` is **retired** in Run 5 rather than published. Argument names
+carry the `p_` prefix the functions actually have, because PostgREST maps JSON
+body keys onto parameter names — see D149.
 
 No table-style `POST`/`PATCH`/`PUT`/`DELETE` is granted on the views. Tests use
 actual authorization results rather than `OPTIONS`, because view method discovery

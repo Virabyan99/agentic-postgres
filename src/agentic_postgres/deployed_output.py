@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -62,15 +62,65 @@ NOT_OBSERVED: dict[str, Any] = {
     "server_version": None,
     "extensions": None,
     "memory": None,
+    "instance_uuid": None,
 }
 
+#: The API block of a deployment that publishes no REST surface.
+#:
+#: Every project deployed through a session before 5 is in this state, and so is
+#: a session-5 project whose surface did not come up. It is a named constant for
+#: the same reason `NOT_OBSERVED` is: "there is no published API" is a fact, it
+#: has exactly one spelling, and a caller assembling eight nulls by hand would
+#: eventually assemble seven.
+API_NOT_PUBLISHED: dict[str, Any] = {
+    "status": "unavailable",
+    "exposed_schema": None,
+    "max_rows": None,
+    "request_body_max_bytes": None,
+    "pool_size": None,
+    "connection_budget_reserved": None,
+    "api_surface_sha256": None,
+    "canonical_openapi_sha256": None,
+    "project_openapi_sha256": None,
+}
+
+#: The token-metadata block of a deployment with no issuer.
+#:
+#: Note what is *not* here: the issuer and audience the rendered document
+#: derives. They are derivations and this branch could carry them at every
+#: session -- but an issuer recorded beside `status: unavailable` would name a
+#: verification authority for tokens nothing can mint, and ADR 0051's whole
+#: subject is that the bootstrap issuer's existence is a state somebody has to
+#: retire. Saying it does not exist yet is cheaper than explaining later why it
+#: appeared to.
+JWT_NOT_PUBLISHED: dict[str, Any] = {
+    "status": "unavailable",
+    "issuer": None,
+    "audience": None,
+    "algorithm": None,
+    "active_kid": None,
+    "verification_kids": None,
+    "public_jwks_sha256": None,
+    "temporary": None,
+    "retire_after": None,
+}
+
+#: A route that this deployment does not publish. `health` is deliberately not
+#: expressible this way: its URL is the same string for every project at every
+#: session, so nulling it would delete an address rather than withhold a claim.
+ROUTE_NOT_PUBLISHED: dict[str, Any] = {"status": "unavailable", "url": None}
+
 __all__ = [
+    "API_NOT_PUBLISHED",
+    "JWT_NOT_PUBLISHED",
     "NOT_OBSERVED",
     "PROJECT_STATE_ROOT",
     "RENDERED_ROOT",
+    "ROUTE_NOT_PUBLISHED",
     "SCHEMA_VERSION",
     "build_deployed_document",
     "deployed_path",
+    "published_route",
     "rendered_path",
     "validate_deployed_document",
     "write_deployed_document",
@@ -159,6 +209,25 @@ def observe_transports(
     return {**endpoints, "access_profiles": profiles}
 
 
+def published_route(rendered_url: str, status: str) -> dict[str, Any]:
+    """One `routes.rest` or `routes.docs` entry, from the render plus a status.
+
+    The URL is taken from the rendered document rather than rebuilt, so this
+    branch never becomes a second derivation of an address the render already
+    owns (ADR 0053). It is dropped when the status is not `ready`, because the
+    schema says an unpublished route names nothing -- and it says so rather than
+    leaving it optional because the value that would otherwise sit there is a
+    URL that reads exactly like a working one.
+    """
+    if status not in {"ready", "unavailable"}:
+        raise ManifestError(
+            f"a published route is 'ready' or 'unavailable', not {status!r}. "
+            "'planned' is the rendered branch's word, and copying it here would "
+            "publish a manifest's intention as an observation"
+        )
+    return {"status": status, "url": rendered_url if status == "ready" else None}
+
+
 def build_deployed_document(
     *,
     rendered: dict[str, Any],
@@ -171,6 +240,10 @@ def build_deployed_document(
     secrets: dict[str, Any],
     runtime: dict[str, Any],
     health_status: str,
+    rest_status: str,
+    docs_status: str,
+    api: dict[str, Any],
+    jwt: dict[str, Any],
     database_observed: dict[str, Any],
     deployed_through_session: int,
 ) -> dict[str, Any]:
@@ -189,6 +262,13 @@ def build_deployed_document(
     running route are different facts that happen to share a field name, and
     copying one into the other would publish "the health endpoint is fine"
     because a manifest once said it would be.
+
+    `rest_status`, `docs_status`, `api` and `jwt` are version 5's additions and
+    none of them defaults. A default would put a session-5 shape on a session-4
+    deployment, which is the same substitution `database_observed` refuses; the
+    honest values for a deployment that publishes no API are
+    :data:`API_NOT_PUBLISHED` and :data:`JWT_NOT_PUBLISHED`, named so that
+    "nothing was published" cannot be spelled two ways.
     """
     if rendered.get("document_kind") != "rendered":
         raise ManifestError(
@@ -235,8 +315,19 @@ def build_deployed_document(
             "health": {
                 "status": health_status,
                 "url": rendered["routes"]["health"]["url"],
-            }
+            },
+            # Version 5. Both URLs come from the render, which is their one
+            # derivation; what this branch adds is whether anything is serving
+            # them. `routes.docs` is the documentation root the rendered branch
+            # has carried since Session 1, and the REST documentation page lives
+            # under it -- so the status recorded here is the status of the page
+            # this session publishes, not a claim about a root reserved for a
+            # later index.
+            "rest": published_route(rendered["routes"]["rest"], rest_status),
+            "docs": published_route(rendered["routes"]["docs"], docs_status),
         },
+        "api": dict(api),
+        "jwt": dict(jwt),
         "tls": dict(tls),
         "bootstrap": dict(bootstrap),
         "secrets": dict(secrets),
@@ -280,7 +371,45 @@ def validate_deployed_document(document: Any) -> dict[str, Any]:
     config.assert_no_sensitive_keys(document)
 
     _refuse_placeholders(document)
+    _refuse_incoherent_publication(document)
     return document
+
+
+def _refuse_incoherent_publication(document: dict[str, Any]) -> None:
+    """The two version-5 relations JSON Schema cannot state.
+
+    **An `api` block that says `ready` needs a route that says `ready`.** The
+    block describes what a surface serves; the route says whether anything is
+    serving it. A document claiming a live API on an unpublished route is
+    describing a service reachable by nobody, and every downstream assertion --
+    the contract checksums, the row ceiling, the pool size -- would still be
+    true of a thing no request can arrive at. The converse is left legal on
+    purpose: a route that answers while the deploy could not read what it serves
+    is a real state, and the honest record of it is a ready route beside an
+    unavailable block.
+
+    **The active key must be one of the keys verifiers accept.** Otherwise
+    every token this issuer mints is rejected by every verifier that trusts this
+    document, and nothing in the shape of the document says so.
+    """
+    api = document.get("api", {})
+    routes = document.get("routes", {})
+    if api.get("status") == "ready" and routes.get("rest", {}).get("status") != "ready":
+        raise ManifestError(
+            "api.status is 'ready' while routes.rest is "
+            f"{routes.get('rest', {}).get('status')!r}. An API surface is served over a "
+            "route; a document that publishes the first without the second describes "
+            "something no request can reach"
+        )
+
+    jwt = document.get("jwt", {})
+    active, accepted = jwt.get("active_kid"), jwt.get("verification_kids")
+    if active is not None and active not in (accepted or []):
+        raise ManifestError(
+            f"jwt.active_kid {active!r} is not in jwt.verification_kids {accepted!r}. "
+            "Every token signed by the active key would be refused by every verifier "
+            "reading this document, and nothing else here would say so"
+        )
 
 
 def _refuse_placeholders(document: dict[str, Any]) -> None:

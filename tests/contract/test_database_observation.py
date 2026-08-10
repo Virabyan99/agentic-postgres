@@ -31,6 +31,7 @@ file_dirty 0
 
 SERVER_VERSION = "18.4 (Debian 18.4-1.pgdg13+3)\n"
 EXTENSIONS = "plpgsql 1.0\nvector 0.8.6\n"
+INSTANCE_UUID = "01927d3f-1a2b-7c4d-8e5f-6a7b8c9d0e1f\n"
 
 
 def test_the_three_memory_figures_are_kept_apart() -> None:
@@ -88,24 +89,77 @@ def test_a_malformed_extension_row_is_refused() -> None:
         observation.parse_extensions("vector\n")
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("(0 rows)\n", id="psql-said-nothing"),
+        pytest.param("01927D3F-1A2B-7C4D-8E5F-6A7B8C9D0E1F\n", id="uppercase"),
+        pytest.param("01927d3f1a2b7c4d8e5f6a7b8c9d0e1f\n", id="unhyphenated"),
+        pytest.param("01927d3f-1a2b-7c4d-8e5f-6a7b8c9d0e1f extra\n", id="trailing-token"),
+    ],
+)
+def test_an_instance_uuid_that_is_nearly_one_is_refused(raw: str) -> None:
+    """The registry matches on this string, so nearly-right is worse than absent.
+
+    Uppercase is in this list on purpose. It is the same identity to a person and
+    a different one to `==`, and the broker's answer to a mismatch is to refuse --
+    which would be the right answer about the wrong thing.
+    """
+    with pytest.raises(ValueError, match="instance UUID"):
+        observation.parse_instance_uuid(raw)
+
+
 def test_the_block_is_whole_or_it_is_an_exception() -> None:
     """No member defaults. A partial observation is not published as a whole
     one, and it is not downgraded to `not_observed` either -- that would record
     "nobody looked" about a deploy that looked and failed."""
     document = observation.build_observation(
-        server_version=SERVER_VERSION, extensions=EXTENSIONS, memory_stat=MEMORY_STAT
+        server_version=SERVER_VERSION,
+        extensions=EXTENSIONS,
+        memory_stat=MEMORY_STAT,
+        instance_uuid=INSTANCE_UUID,
     )
     assert document == {
         "status": "observed",
         "server_version": "18.4",
         "extensions": {"plpgsql": "1.0", "vector": "0.8.6"},
         "memory": {"anon_mb": 62, "shmem_mb": 140, "file_mb": 410},
+        "instance_uuid": "01927d3f-1a2b-7c4d-8e5f-6a7b8c9d0e1f",
     }
 
     with pytest.raises(ValueError):
         observation.build_observation(
-            server_version=SERVER_VERSION, extensions="", memory_stat=MEMORY_STAT
+            server_version=SERVER_VERSION,
+            extensions="",
+            memory_stat=MEMORY_STAT,
+            instance_uuid=INSTANCE_UUID,
         )
+    with pytest.raises(ValueError):
+        observation.build_observation(
+            server_version=SERVER_VERSION,
+            extensions=EXTENSIONS,
+            memory_stat=MEMORY_STAT,
+            instance_uuid="",
+        )
+
+
+def test_the_observed_members_are_exactly_what_the_schema_requires() -> None:
+    """Guard the guard: a builder that omitted a member the schema requires
+    would be caught by validation, but a builder that produced a member the
+    schema does not name would not be -- `additionalProperties` is checked on
+    the document, and this block is validated on its own in one test above.
+    """
+    from agentic_postgres import config
+
+    schema = config.load_schema("outputs.schema.json")["$defs"]["databaseObserved"]
+    built = observation.build_observation(
+        server_version=SERVER_VERSION,
+        extensions=EXTENSIONS,
+        memory_stat=MEMORY_STAT,
+        instance_uuid=INSTANCE_UUID,
+    )
+    assert set(built) == set(schema["required"]) == set(schema["properties"])
 
 
 def test_the_observation_validates_against_the_schema() -> None:
@@ -120,7 +174,10 @@ def test_the_observation_validates_against_the_schema() -> None:
     from agentic_postgres import config
 
     document = observation.build_observation(
-        server_version=SERVER_VERSION, extensions=EXTENSIONS, memory_stat=MEMORY_STAT
+        server_version=SERVER_VERSION,
+        extensions=EXTENSIONS,
+        memory_stat=MEMORY_STAT,
+        instance_uuid=INSTANCE_UUID,
     )
     schema = config.load_schema("outputs.schema.json")
     jsonschema.validate(document, {"$defs": schema["$defs"], **schema["$defs"]["databaseObserved"]})

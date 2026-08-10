@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/api-surface.schema.json",
+  "title": "Reviewed PostgREST API surface",
+  "description": "The hand-written half of ADR 0050: every relation, column, function and method the `api` schema is allowed to expose, named exactly. It is compared against the PostgreSQL catalog and against the generated OpenAPI document in both directions, so an object present in the database and absent here is a release failure even when its grants keep it out of OpenAPI -- because the next grant change publishes it. It is deliberately NOT generated: a contract derived from the thing it constrains cannot refuse it. It is also project-neutral, because the example domain is (ADR 0003, amended by ADR 0048): one contract describes every project that serves it, and a per-project extension is a reviewed delta rather than a second file. additionalProperties is false at every level, and every string is either a bare identifier or a member of a closed enumeration -- which is how 'the contract contains no SQL' is a property of the schema rather than a rule somebody remembers.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "contract_id", "exposed_schema", "relations", "rpcs", "forbidden_schemas"],
+  "properties": {
+    "schema_version": { "type": "integer", "enum": [1] },
+    "contract_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,63}$",
+      "description": "Names the surface, not the project. It changes when the reviewed shape changes, which is what makes 'which contract is this deployment serving' answerable from the deployed document."
+    },
+    "exposed_schema": {
+      "$ref": "#/$defs/identifier",
+      "description": "The one schema PostgREST is configured to expose. One, not a list: `db-schemas` accepts several and every additional entry is a boundary that has to be reasoned about separately."
+    },
+    "relations": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/relation" },
+      "propertyNames": { "$ref": "#/$defs/identifier" }
+    },
+    "rpcs": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/rpc" },
+      "propertyNames": { "$ref": "#/$defs/identifier" }
+    },
+    "forbidden_schemas": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/identifier" },
+      "description": "Schemas that must never appear in the published surface. Listed rather than inferred as 'everything except exposed_schema': a name written down is a name a test can look for, and the four that matter here -- `public`, `app`, `app_private`, `extensions` -- are the four a misconfigured `db-schemas` or `db-extra-search-path` would actually reach."
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[a-z_][a-z0-9_]*$",
+      "maxLength": 63,
+      "description": "A bare lowercase PostgreSQL identifier. The pattern is what forbids a wildcard, a quoted name, a schema qualification and a SQL fragment, all four at once: none of them can be spelled with these characters."
+    },
+    "relation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "methods", "columns"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["view"],
+          "description": "`view` only, and not as an oversight. Every published read passes through a security-invoker view over a FORCE-RLS table (ADR 0029, migration 0004); exposing a base table would run the caller's query against the table's own privileges and is the failure `security_invoker` exists to prevent."
+        },
+        "methods": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["GET", "HEAD"] },
+          "description": "Reads only. A view can be updatable in PostgreSQL's eyes and still carry no write grant, so method discovery over a view reflects updatability rather than authorization -- which is why the writes are RPCs and why this enumeration cannot express one."
+        },
+        "columns": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" },
+          "description": "Every column, in the order the view declares them. Order is kept because it makes a review diff readable; membership is what is compared."
+        }
+      }
+    },
+    "rpc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["methods", "arguments"],
+      "properties": {
+        "methods": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "type": "string", "enum": ["POST"] },
+          "description": "`POST` and nothing else. PostgREST will serve a `GET /rpc/...` for a function marked immutable or stable, which puts arguments in a query string and in every log and proxy cache between the caller and the database. These functions are volatile and write."
+        },
+        "arguments": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" },
+          "description": "The PostgreSQL parameter names, exactly. Not a friendlier spelling of them: PostgREST maps JSON body keys onto parameter names, so these strings are the wire format. An empty list is legal and means a function that takes nothing."
+        }
+      }
+    }
+  }
+}

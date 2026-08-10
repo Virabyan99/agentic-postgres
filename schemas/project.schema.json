@@ -161,7 +161,8 @@
           "minimum": 1,
           "maximum": 10000,
           "description": "Global PostgREST row-return ceiling."
-        }
+        },
+        "rest": { "$ref": "#/$defs/restService" }
       }
     },
     "mcp": {
@@ -267,6 +268,97 @@
         "properties": {
           "stanza": { "type": "null" },
           "repository_prefix": { "type": "null" }
+        }
+      }
+    }
+  },
+
+  "$defs": {
+    "restService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "description": "The PostgREST service, Session 5. Optional as a whole: a project manifest written before this session names no REST service, and a project that does not declare one publishes `routes.rest: unavailable` rather than failing to render. `api.max_rows` stays the sole row-limit authority and is deliberately NOT repeated here.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "request_body_max_bytes": {
+          "type": "integer",
+          "default": 1048576,
+          "minimum": 1024,
+          "maximum": 10485760,
+          "description": "Largest accepted request body. Bounded above because the edge buffers what it accepts, and equal to request_body_memory_bytes for P0 so an accepted body stays in memory rather than spilling to proxy disk -- a spilled body is a request payload written to a filesystem nobody is auditing."
+        },
+        "request_body_memory_bytes": {
+          "type": "integer",
+          "default": 1048576,
+          "minimum": 1024,
+          "maximum": 10485760,
+          "description": "How much of a request body the edge holds in memory. Must equal request_body_max_bytes; the pair exists because the two are separately configurable at the edge and a smaller memory limit is how bodies reach disk."
+        },
+        "pool_size": {
+          "type": "integer",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 100,
+          "description": "PostgREST's own connection pool, against the DIRECT transport rather than the pooler: it needs prepared statements and a LISTEN/NOTIFY channel for the schema cache, neither of which survives transaction pooling. Counted against database.max_connections together with the pooler's server pool and an administration reserve."
+        },
+        "pool_acquisition_timeout_seconds": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 1,
+          "maximum": 60,
+          "description": "How long a request waits for a connection before failing. Bounded above for the reason the pooler's queue timeout is: a request that waits without limit turns a capacity problem into a hang, and a hang has no error message to act on."
+        },
+        "pool_max_idle_seconds": {
+          "type": "integer",
+          "default": 30,
+          "minimum": 5,
+          "maximum": 3600,
+          "description": "How long an unused pooled connection is kept. Must be less than pool_max_lifetime_seconds."
+        },
+        "pool_max_lifetime_seconds": {
+          "type": "integer",
+          "default": 1800,
+          "minimum": 60,
+          "maximum": 86400,
+          "description": "How long a pooled connection is reused before it is retired. Bounded above so a rotated credential cannot be held indefinitely by a long-lived connection -- the same reason database.server_lifetime_seconds is bounded."
+        },
+        "anonymous_access": {
+          "type": "string",
+          "enum": ["deny_data"],
+          "default": "deny_data",
+          "description": "A frozen enumeration with one member. `anon` exists so an unauthenticated request has a role to be, not so that it can read: migration 0004 grants it nothing. The field is a single-valued enum rather than absent so that a manifest asking for anything else is refused by name instead of accepted as an unknown key."
+        },
+        "allowed_cors_origins": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "pattern": "^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:[0-9]{1,5})?$",
+            "maxLength": 253
+          },
+          "description": "Exact HTTPS origins: scheme, host, optional port, and nothing else. The pattern refuses a path, a query, a fragment, a wildcard, a userinfo component and the literal `null` in one place -- `null` is the origin a sandboxed iframe and a file:// document send, and an allowlist containing it is an allowlist that admits anything that can arrange to be opaque."
+        },
+        "statement_timeouts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]{0,4}(ms|s)$",
+            "description": "A strict duration: digits and a unit, no space, no compound, no zero. PostgreSQL reads a bare integer as milliseconds and `0` as *disabled*, so a grammar that admitted either would let a manifest turn the timeout off by looking like it set one."
+          },
+          "propertyNames": { "type": "string", "pattern": "^[a-z_][a-z0-9_]*$" },
+          "description": "Per-role statement_timeout, keyed by the platform role suffix. Only roles that exist may be named, which is checked against `naming.ROLE_SUFFIXES` rather than enumerated here: a timeout set on a role nothing created is a setting that never applies and never says so."
+        }
+      },
+      "if": {
+        "properties": { "enabled": { "const": false } },
+        "required": ["enabled"]
+      },
+      "then": {
+        "properties": {
+          "allowed_cors_origins": { "maxItems": 0 }
         }
       }
     }

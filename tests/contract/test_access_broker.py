@@ -80,7 +80,15 @@ def broker_endpoint(host, profile: str):
 # ---------------------------------------------------------------------------
 
 
-def deployed_document(**overrides: Any) -> dict[str, Any]:
+def deployed_document(*, instance_uuid: str | None = None, **overrides: Any) -> dict[str, Any]:
+    """A deployed document, at version 4 by default.
+
+    Version 4 is the default on purpose: it is what every host is running until
+    it is redeployed, and it is the shape in which the broker has no instance
+    UUID to match on. Passing ``instance_uuid`` produces the version 5 shape,
+    with a `database.observed` block carrying the identity the registry is keyed
+    by (ADR 0053).
+    """
     profiles = {
         "runtime_pooled": {
             "status": "available",
@@ -117,6 +125,15 @@ def deployed_document(**overrides: Any) -> dict[str, Any]:
             "access_profiles": profiles,
         },
     }
+    if instance_uuid is not None:
+        document["schema_version"] = 5
+        document["database"]["observed"] = {
+            "status": "observed",
+            "server_version": "18.4",
+            "extensions": {"plpgsql": "1.0"},
+            "memory": {"anon_mb": 1, "shmem_mb": 1, "file_mb": 1},
+            "instance_uuid": instance_uuid,
+        }
     document.update(overrides)
     return document
 
@@ -455,10 +472,15 @@ def test_two_live_allocations_for_one_key_refuse_rather_than_pick_the_first(host
     """The registry is keyed by the volume's instance UUID; the project key is
     recorded for humans and is explicitly not the match key.
 
-    The deployed document records no instance UUID, so this lookup has nothing
-    else to search by. What it does about that is refuse ambiguity rather than
-    take a first match -- because a first match here is a credential handed out
-    for the wrong cluster, and nothing downstream would notice.
+    **This is the version 4 path**, and it is still here because every host is
+    running a version 4 document until it is redeployed. Such a document records
+    no instance UUID, so the lookup has nothing else to search by. What it does
+    about that is refuse ambiguity rather than take a first match -- because a
+    first match here is a credential handed out for the wrong cluster, and
+    nothing downstream would notice.
+
+    The version 5 path below does not reach this refusal at all: it matches on
+    the identity and never enumerates by key.
     """
     host.write_registry(
         [
@@ -483,6 +505,119 @@ def test_a_released_record_alongside_a_live_one_is_not_ambiguity(host) -> None:
         ]
     )
     assert broker_endpoint(host, "runtime_direct")["local_port"] == DIRECT_PORT
+
+
+# ---------------------------------------------------------------------------
+# Version 5: the identifier it now has (ADR 0053, D106)
+# ---------------------------------------------------------------------------
+
+OTHER_UUID = "99999999-8888-7777-6666-555555555555"
+THIS_UUID = "11111111-2222-3333-4444-555555555555"
+
+
+def test_the_document_uuid_resolves_what_the_key_could_not(host) -> None:
+    """The whole reason `instance_uuid` reached the deployed document.
+
+    Two live allocations carry this project's key -- the exact situation the
+    version 4 broker refused, because either answer might be a credential for
+    the wrong cluster. With the identity in the document there is a right
+    answer, and it is not the first one in the file: the fixture deliberately
+    lists the *other* cluster first, so a lookup that fell back to enumeration
+    would return the wrong ports and pass.
+    """
+    host.write_document(deployed_document(instance_uuid=THIS_UUID))
+    host.write_registry(
+        [
+            allocation(uuid=OTHER_UUID, pooled=15442, direct=15443),
+            allocation(uuid=THIS_UUID),
+        ]
+    )
+    assert broker_endpoint(host, "runtime_direct")["local_port"] == DIRECT_PORT
+
+
+def test_a_document_naming_an_unregistered_instance_is_missing_state(host) -> None:
+    """Not a fallback to the key. A UUID with no allocation is exit 4.
+
+    Falling back would make the identifier advisory: the broker would use it
+    when it agreed and ignore it when it did not, which is the same as not
+    having it.
+    """
+    host.write_document(deployed_document(instance_uuid=OTHER_UUID))
+    with pytest.raises(BrokerError) as raised:
+        broker_endpoint(host, "runtime_direct")
+    assert raised.value.code == 4
+    assert OTHER_UUID in str(raised.value)
+
+
+def test_a_released_allocation_is_not_found_by_uuid_either(host) -> None:
+    host.write_document(deployed_document(instance_uuid=THIS_UUID))
+    host.write_registry([allocation(uuid=THIS_UUID, state="released")])
+    with pytest.raises(BrokerError) as raised:
+        broker_endpoint(host, "runtime_direct")
+    assert raised.value.code == 4
+
+
+def test_a_key_that_disagrees_with_the_registry_is_refused(host) -> None:
+    """The key stops being a search term and becomes a check.
+
+    Two records describing one cluster have to agree about what it is called
+    before either can be trusted about where it is. This is the rebuild case: the
+    volume kept its identity and the project was renamed around it.
+    """
+    host.write_document(deployed_document(instance_uuid=THIS_UUID))
+    host.write_registry([allocation(uuid=THIS_UUID, project_key="some-other-project")])
+    with pytest.raises(BrokerError) as raised:
+        broker_endpoint(host, "runtime_direct")
+    assert raised.value.code == 5
+    assert "some-other-project" in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "observed",
+    [
+        pytest.param(None, id="version-4-document"),
+        pytest.param(
+            {
+                "status": "not_observed",
+                "server_version": None,
+                "extensions": None,
+                "memory": None,
+                "instance_uuid": None,
+            },
+            id="nothing-was-read",
+        ),
+    ],
+)
+def test_a_document_with_no_identity_falls_back_to_the_old_refusal(host, observed) -> None:
+    """Three situations, one honest response.
+
+    A document written before version 5, a deployment that interrogated no
+    cluster, and a cluster whose identity could not be read all mean the same
+    thing: there is no identity to match on. The response to all three is the
+    refusal that predates the field, not a guess.
+    """
+    document = deployed_document()
+    if observed is not None:
+        document["database"]["observed"] = observed
+    host.write_document(document)
+    host.write_registry(
+        [allocation(uuid=THIS_UUID), allocation(uuid=OTHER_UUID, pooled=15442, direct=15443)]
+    )
+    with pytest.raises(BrokerError) as raised:
+        broker_endpoint(host, "runtime_direct")
+    assert raised.value.code == 5
+    assert "redeploy the project" in str(raised.value)
+
+
+def test_the_recorded_identity_is_read_from_the_one_place_it_lives(host) -> None:
+    """`recorded_instance_uuid` is total: it answers for every document shape."""
+    assert access_broker.recorded_instance_uuid(deployed_document()) is None
+    assert access_broker.recorded_instance_uuid({}) is None
+    assert access_broker.recorded_instance_uuid({"database": {"observed": None}}) is None
+    assert (
+        access_broker.recorded_instance_uuid(deployed_document(instance_uuid=THIS_UUID))
+        == THIS_UUID
+    )
 
 
 # ---------------------------------------------------------------------------

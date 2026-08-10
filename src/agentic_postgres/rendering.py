@@ -168,7 +168,13 @@ def build_outputs(
     )
 
     return {
-        "schema_version": 4,
+        # Version 5 adds nothing to this branch (ADR 0053): `routes.rest`,
+        # `routes.docs`, `jwt.issuer` and `jwt.audience` have been here since
+        # Session 1 and remain the single derivation of those values. What moved
+        # is the deployed branch, which now records a status and an observation
+        # against them. The version still advances here, because one document
+        # kind cannot be at a different schema version from the other.
+        "schema_version": 5,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
