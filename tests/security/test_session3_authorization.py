@@ -417,18 +417,51 @@ def test_no_runtime_role_holds_a_dangerous_attribute(
     assert observed == "", f"roles hold dangerous attributes: {observed}"
 
 
-def test_only_the_migration_user_may_log_in(
+def test_only_the_activated_roles_may_log_in(
     project_a: dict[str, Any], roles: dict[str, str]
 ) -> None:
-    """Plan §6.3: every other service identity is a NOLOGIN stub until its
-    owning session activates it deliberately."""
+    """The login set is derived from the deployed document, not written down.
+
+    Plan §6.3: every service identity is a NOLOGIN stub **until its owning
+    session activates it deliberately**. This test asserted the Session 3 half of
+    that sentence — ``observed in ("", migration_user)`` — and never encoded the
+    clause. Session 4 activates ``app_runtime`` with a credential, which is the
+    entire point of the session (ADR 0041), and this went red the first time the
+    whole host suite ran after that happened, five runs later (D124, ADR 0046).
+
+    What replaces it is stricter in three ways rather than looser in one:
+
+    *Equality, not membership.* The old assertion's ``""`` branch accepted a
+    cluster where the migration user could not log in at all — a broken
+    deployment reported as a passing security property.
+
+    *Derived from ``access_profiles``.* A role that gains LOGIN without being
+    published as a profile fails, and a profile published without its role being
+    able to log in fails. The catalog and the document have to agree.
+
+    *Still closed.* Any other service identity gaining LOGIN fails, which was the
+    original point and is unchanged.
+    """
+    profiles = project_a["database"]["access_profiles"]
+    # `migration_user` is Session 3's own activation and is expected on any
+    # deployment this module runs against; the profile roles are whatever the
+    # deployed session published. On a Session 3 deployment no profile is
+    # available, and the expected set is exactly the one name the old assertion
+    # allowed.
+    expected = {roles["migration_user"]} | {
+        profile["role"] for profile in profiles.values() if profile["status"] == "available"
+    }
+
     names = "', '".join(sorted(roles.values()))
     observed = sql(
         project_a,
         f"SELECT coalesce(string_agg(rolname, ',' ORDER BY rolname), '') FROM pg_roles "
         f"WHERE rolname IN ('{names}') AND rolcanlogin;",
     )
-    assert observed in ("", roles["migration_user"]), observed
+    assert {name for name in observed.split(",") if name} == expected, (
+        f"roles with LOGIN are {observed!r}; the deployed document says the "
+        f"activated set is {sorted(expected)}"
+    )
 
 
 # ---------------------------------------------------------------------------

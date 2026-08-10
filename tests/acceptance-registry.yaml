@@ -468,7 +468,7 @@
   target_session: 3
   test_nodeids:
     - tests/security/test_session3_authorization.py::test_the_object_owner_is_a_non_login_role
-    - tests/security/test_session3_authorization.py::test_only_the_migration_user_may_log_in
+    - tests/security/test_session3_authorization.py::test_only_the_activated_roles_may_log_in
   description: Objects are owned by a non-login role that no service connects as.
 
 - id: SEC-DB-001
@@ -533,7 +533,7 @@
   target_session: 3
   test_nodeids:
     - tests/security/test_session3_authorization.py::test_the_migration_membership_options_are_read_from_the_catalog
-    - tests/security/test_session3_authorization.py::test_only_the_migration_user_may_log_in
+    - tests/security/test_session3_authorization.py::test_only_the_activated_roles_may_log_in
   description: >-
     Bootstrap authority and migration authority are distinct and least
     privileged. Proved from the membership option columns, not from the role's
