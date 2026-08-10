@@ -335,16 +335,28 @@ services:
   # chmod leaves a window in which the file exists at the default mode, and the
   # window is only short, not absent.
   #
-  # `server_reset_query_always = 1` IS LOAD-BEARING, and Run 9 measured what its
-  # absence costs. PgBouncer runs `server_reset_query` only in SESSION pooling
-  # unless this is set: in transaction mode it assumes an application leaves no
-  # session state behind. A client that ran `set_config('apg.leak_probe', ...,
-  # false)` and disconnected left that GUC on the server connection, and the
-  # NEXT CLIENT read it back (D116). A transaction-local claim vanishes at
-  # commit on its own, so the dangerous half is exactly the half nothing was
-  # cleaning up -- and `SET ROLE`, `search_path` and a session GUC all travel
-  # the same way. SEC-DBX-003 is the proof, and it went red here before it went
-  # green.
+  # THE RESET QUERY IS TWO MEASURED FINDINGS, and the second is why it is not
+  # simply `DISCARD ALL`.
+  #
+  # `server_reset_query_always = 1` is load-bearing (D116). PgBouncer runs the
+  # reset query only in SESSION pooling unless this is set; in transaction mode
+  # it assumes an application leaves no session state behind. A client that ran
+  # `set_config('apg.leak_probe', ..., false)` and disconnected left that GUC on
+  # the server connection, and the NEXT CLIENT read it back. A transaction-local
+  # claim vanishes at commit on its own, so the dangerous half is exactly the
+  # half nothing was cleaning up -- and `SET ROLE`, `search_path` and a session
+  # GUC all travel the same way.
+  #
+  # `DISCARD ALL` then broke the other requirement (D117), because it includes
+  # `DEALLOCATE ALL`: every prepared statement on the connection went with the
+  # session state, and DBX-POOL-003 -- a named statement surviving a backend
+  # change -- cannot hold against a pooler that deallocates after every
+  # transaction. The four statements here are `DISCARD ALL` minus that one,
+  # which is the whole difference. `RESET ALL` is what actually clears a custom
+  # GUC set through `set_config`.
+  #
+  # Both requirements are real and neither was weakened to satisfy the other:
+  # SEC-DBX-003 and DBX-POOL-003 are proved against this one configuration.
   pgbouncer:
     image: ${PGBOUNCER_IMAGE:?required}
     platform: ${TARGET_PLATFORM:?required}
@@ -407,7 +419,7 @@ services:
         "query_wait_timeout = $$APG_QUERY_WAIT_TIMEOUT"
         "idle_transaction_timeout = $$APG_IDLE_TRANSACTION_TIMEOUT"
         "server_lifetime = $$APG_SERVER_LIFETIME"
-        "server_reset_query = DISCARD ALL"
+        "server_reset_query = DISCARD PLANS; DISCARD SEQUENCES; DISCARD TEMP; RESET ALL"
         "server_reset_query_always = 1"
         "ignore_startup_parameters = extra_float_digits"
         "log_connections = 1"

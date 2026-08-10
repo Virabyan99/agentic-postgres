@@ -536,21 +536,35 @@ for thread in threads:
 time.sleep(1)
 
 result = {"backend_changed": False, "reused_after_change": False, "attempts": 0}
+
+# A PROTOCOL-level prepared statement, which is the only kind PgBouncer
+# tracks. Run 1 measured that distinction against the locked image and the
+# first version of this probe ignored it: a SQL-level `PREPARE apg_probe`
+# is invisible to the pooler, so it lived on one server connection and
+# vanished with the reset query -- reported as "prepared statement does not
+# exist", which reads exactly like max_prepared_statements being zero.
+#
+# psycopg 3 sends a named parse after `prepare_threshold` executions of the
+# same query; `prepare=True` sends one immediately. The pooler is what
+# re-prepares it on whichever server the next transaction lands on.
+statement = "SELECT pg_backend_pid()"
 with psycopg.connect(conninfo, password=password, autocommit=False) as session:
     with session.transaction():
-        session.execute("PREPARE apg_probe AS SELECT pg_backend_pid()")
-        first = session.execute("EXECUTE apg_probe").fetchone()[0]
+        first = session.execute(statement, prepare=True).fetchone()[0]
     result["first_pid"] = first
 
     for attempt in range(1, 201):
         result["attempts"] = attempt
         with session.transaction():
-            current = session.execute("EXECUTE apg_probe").fetchone()[0]
+            current = session.execute(statement, prepare=True).fetchone()[0]
         if current != first:
             result["backend_changed"] = True
             result["changed_pid"] = current
+            # The statement is executed once more AFTER the observed change.
+            # That execution is the claim: the pooler re-prepared it on a
+            # server that had never seen it.
             with session.transaction():
-                again = session.execute("EXECUTE apg_probe").fetchone()[0]
+                again = session.execute(statement, prepare=True).fetchone()[0]
             result["reused_after_change"] = isinstance(again, int)
             break
 
