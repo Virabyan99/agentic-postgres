@@ -590,14 +590,22 @@ def run_client_fixture(
         # the secret root: the point of running the fixture is to exercise what
         # the deploy actually granted it, and a path built here from a project
         # key would still mount a file when the grant had been removed.
+        # `source` and `target` are two different names and using one for both
+        # is how Run 9 mounted the right file where nobody was looking. `source`
+        # is the namespaced secret -- `client-psql__app_runtime_password` --
+        # which exists so two services' copies stay distinct in one top-level
+        # block. `target` is the filename inside /run/secrets, and it is what
+        # the container opens. Mounting at the source name produced a container
+        # with its credential present, correct, and at a path its own entrypoint
+        # had no reason to try.
         secret_files = definition.get("_secret_files", {})
         for entry in definition.get("secrets", []):
             name = entry["source"] if isinstance(entry, dict) else entry
+            filename = entry.get("target", name) if isinstance(entry, dict) else name
             source = secret_files.get(name)
             if not source:
                 pytest.fail(f"{service} is granted {name} and the model names no file for it")
-            target = f"/run/secrets/{name}"
-            arguments += ["--volume", f"{source}:{target}:ro"]
+            arguments += ["--volume", f"{source}:/run/secrets/{filename}:ro"]
         arguments += [f"{rendered['compose']['project_name']}-{service}", *command]
 
         result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=300)
