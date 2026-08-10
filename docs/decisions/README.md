@@ -103,8 +103,9 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0037](0037-an-installed-launcher-resolves-a-release-and-nothing-else.md) | An installed launcher resolves a release and nothing else | 3 | Accepted |
 | [0038](0038-the-deployed-document-records-the-generation-it-verified.md) | The deployed document records the generation it verified, not the one that is current | 3 | Accepted |
 | [0039](0039-a-claim-belongs-to-the-session-that-introduced-it.md) | A claim belongs to the session that introduced it | 3 | Accepted |
-| [0040](0040-a-loopback-publication-is-not-a-public-port.md) | A loopback publication is not a public port | 4 | Proposed |
-| [0041](0041-two-transports-three-access-profiles.md) | Two transports, three access profiles | 4 | Proposed |
-| [0042](0042-host-port-allocation-is-state-keyed-by-the-volumes-identity.md) | Host port allocation is state, keyed by the identity the volume carries | 4 | Proposed |
+| [0040](0040-a-loopback-publication-is-not-a-public-port.md) | A loopback publication is not a public port | 4 | Accepted, superseded in part |
+| [0041](0041-two-transports-three-access-profiles.md) | Two transports, three access profiles | 4 | Accepted |
+| [0042](0042-host-port-allocation-is-state-keyed-by-the-volumes-identity.md) | Host port allocation is state, keyed by the identity the volume carries | 4 | Accepted, amended |
 | [0043](0043-the-access-broker-is-a-release-reached-through-a-trampoline.md) | The access broker is a release, reached through a trampoline | 4 | Accepted, amended |
 | [0044](0044-there-is-no-publication.md) | There is no publication | 4 | Accepted |
+| [0045](0045-a-claim-is-shaped-by-where-it-can-be-measured.md) | A claim is shaped by where it can be measured | 4 | Accepted |

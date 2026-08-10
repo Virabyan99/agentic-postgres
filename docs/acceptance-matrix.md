@@ -10,7 +10,7 @@ actually collect. That is checked by running a real collection and
 comparing node IDs, not by searching files for function names — a text
 search passes on a commented-out test.
 
-**98 requirements** — 94 P0, 17 active in Session 1, 81 owned by later sessions.
+**99 requirements** — 95 P0, 17 active in Session 1, 82 owned by later sessions.
 
 ## By session
 
@@ -19,7 +19,7 @@ search passes on a commented-out test.
 | 1 | 17 | active |
 | 2 | 13 | placeholders owned by Session 2 |
 | 3 | 15 | placeholders owned by Session 3 |
-| 4 | 15 | placeholders owned by Session 4 |
+| 4 | 16 | placeholders owned by Session 4 |
 | 5 | 5 | placeholders owned by Session 5 |
 | 6 | 5 | placeholders owned by Session 6 |
 | 7 | 4 | placeholders owned by Session 7 |
@@ -103,13 +103,14 @@ search passes on a commented-out test.
 | `DBX-POOL-001` | P0 | The pooler runs in transaction mode with explicit, bounded limits and non-zero prepared-statement tracking, read from its own configuration rather than from the file that was meant to produce it. | `tests/deployment/test_session4_transports.py::test_the_pooler_runs_transaction_mode_with_bounded_limits` |
 | `DBX-POOL-002` | P0 | More clients than the server-connection budget complete their transactions, and the number of server connections is observed never to exceed it. | `tests/deployment/test_session4_transports.py::test_more_clients_than_the_pool_stay_inside_the_server_budget` |
 | `DBX-POOL-003` | P0 | A protocol-level named prepared statement is reusable after the pooler has moved the client to a different backend, proved by observing the backend change rather than by assuming it. | `tests/deployment/test_session4_transports.py::test_a_named_prepared_statement_survives_an_observed_backend_change` |
-| `DBX-PORT-001` | P0 | Host-loopback allocations are stable across redeploy, restart and reboot, two projects never share one, and an allocation is matched by the instance UUID the volume carries. See ADR 0042. | `tests/deployment/test_session4_transports.py::test_the_allocation_is_active_and_keyed_by_the_volumes_identity`<br>`tests/deployment/test_session4_transports.py::test_the_published_ports_are_the_ones_the_registry_allocated` |
+| `DBX-PORT-001` | P0 | Host-loopback allocations are stable across redeploy, restart and reboot, two projects never share one, and an allocation is matched by the instance UUID the volume carries. See ADR 0042. | `tests/deployment/test_session4_transports.py::test_the_allocation_is_active_and_keyed_by_the_volumes_identity`<br>`tests/deployment/test_session4_transports.py::test_the_published_ports_are_the_ones_the_registry_allocated`<br>`tests/deployment/test_session4_convergence.py::test_restarting_the_pooler_keeps_the_allocation_and_both_transports`<br>`tests/deployment/test_session4_convergence.py::test_restarting_the_cluster_leaves_the_pooler_serving`<br>`tests/deployment/test_session4_convergence.py::test_restarting_the_project_unit_restores_both_transports`<br>`tests/deployment/test_session4_convergence.py::test_the_reboot_restored_the_projects_from_their_documents` |
 | `DEP-ISO-004` | P0 | Two projects have distinct pooled and direct ports, credentials, pooler configuration and user lists, and neither project's credential opens the other. | `tests/deployment/test_session4_isolation.py::test_two_projects_hold_distinct_transports_pools_and_user_lists`<br>`tests/deployment/test_session4_isolation.py::test_one_projects_runtime_credential_is_refused_by_the_others_cluster` |
 | `DX-DB-001` | P0 | The connection helper opens and cleans a verified tunnel for each transport, refuses an unverified host key, and prints no credential. | `tests/external/test_session4_public_transports.py::test_the_connection_helper_opens_and_cleans_a_verified_tunnel` |
 | `DX-DB-002` | P0 | The access broker enforces project and profile authorization and returns nothing to an unauthorized caller. Past the trampoline it decides authorization before reading anything about the project, so "no such project" and "not yours" are one refusal: the same exit code and the same message, naming neither the project nor the profile. The trampoline itself has to resolve the release from the deployed document before there is any policy to consult, so project-key existence stays visible to an account already named in the sudoers rule -- sudo is the coarse gate, the policy is the fine one. Narrowed from "no distinction anywhere" by ADR 0043's amendment on acceptance, because the original claim was true of the broker and could never be true of the trampoline. | `tests/external/test_session4_public_transports.py::test_the_access_broker_returns_nothing_to_an_unauthorized_caller` |
 | `SEC-DBX-001` | P0 | Neither transport is reachable from a non-loopback address; every publication carries an explicit loopback host_ip and only the edge publishes a public port. See ADR 0040. | `tests/external/test_session4_public_transports.py::test_neither_transport_is_reachable_from_a_non_loopback_address` |
 | `SEC-DBX-002` | P0 | The application runtime role holds no ownership, no base-schema addressability and no DDL, and cannot become any other role. | `tests/deployment/test_session4_boundaries.py::test_the_app_runtime_role_holds_no_ownership_or_ddl` |
 | `SEC-DBX-003` | P0 | Transaction-local claim state, and deliberately set session-level state, are both absent for the next client of a released pooled connection. | `tests/deployment/test_session4_boundaries.py::test_pooled_session_state_does_not_survive_release` |
+| `SEC-DBX-004` | P0 | A rotated application credential is replaced in both planes: the generation the project points at opens the pooled and the direct transport, and the generation it replaced opens neither. The split-brain state - PostgreSQL holding one password while the pooler holds another - passes a test of either transport taken alone, so all four combinations are measured in one run. See the Session 4 plan, section 4.3. | `tests/deployment/test_session4_convergence.py::test_a_rotated_credential_is_replaced_in_both_planes` |
 
 ### Session 5
 

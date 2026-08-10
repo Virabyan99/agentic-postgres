@@ -42,6 +42,15 @@ SESSION_THREE_JQ_EXPRESSION = (
 #: separately, at ``CURRENT_SESSION``.
 HALF_SESSION = 2
 
+#: The session whose evidence has exactly one half. Pinned to 3 for the same
+#: reason ``HALF_SESSION`` is pinned to 2: the test below is *about* a session
+#: with one environment, and Session 3 is the one that has one (D45, D78).
+#:
+#: It read ``CURRENT_SESSION`` until Session 4 restored the external gate (D82),
+#: at which point it began asserting that a two-environment session merges from a
+#: single half — the exact refusal the test after it exists to prove (ADR 0045).
+SINGLE_ENVIRONMENT_SESSION = 3
+
 _BODIES = {
     "passed": "",
     "failed": '<failure message="synthetic">synthetic</failure>',
@@ -176,20 +185,49 @@ def test_at_least_one_environment_carries_a_claim() -> None:
     assert any(measured.values()), f"no claim is measured anywhere: {measured}"
 
 
-def test_a_mode_that_carries_a_claim_has_a_static_proof_to_run() -> None:
-    """A scan over an empty set proves nothing and passes forever.
+def test_every_claim_proof_is_collected_by_exactly_one_selector() -> None:
+    """The gate runs two selectors per mode; between them they must cover a claim.
 
-    Emptiness is legitimate for a mode with no claim; it is not legitimate for
-    one that has claims, because those claims would be permanently ``not_run``.
+    This asserted, until ADR 0045, that a mode carrying a claim resolves at least
+    one proof with **no** environment marker. That was true of Sessions 2 and 3 by
+    accident — each of their claims happens to include a contract test — and it is
+    not the property that matters. Session 4's ``transport_boundary`` and
+    ``connection_tooling`` are proved entirely by tests marked ``external``, every
+    one of which ``-m external`` collects; nothing is missing from the artifact,
+    and the old assertion would have refused a correct claim table.
+
+    The coverage rule it was reaching for: every proof is collected either by the
+    mode's own marker or by the explicit node-ID list the gate runs. A proof in
+    neither set is one no selector collects, which makes its claim ``not_run``
+    forever — and ``not_run`` is a gate failure, so the defect surfaces on a host
+    rather than here.
+    """
+    for mode, marker in claims.MODE_MARKERS.items():
+        static = set(claims.static_nodeids_for_mode(mode, CURRENT_SESSION))
+        for nodeid in static:
+            assert not claims.environment_markers(nodeid), (
+                f"{nodeid} carries an environment marker and is also run explicitly"
+            )
+        for claim in claims.claims_for_mode(mode, CURRENT_SESSION):
+            for nodeid in claims.claim_nodeids(claim):
+                assert marker in claims.environment_markers(nodeid) or nodeid in static, (
+                    f"{claim}'s proof {nodeid} is collected by neither -m {marker} nor "
+                    "the explicit node-ID list; the claim would be not_run forever"
+                )
+
+
+def test_a_mode_that_carries_no_claim_resolves_no_proofs() -> None:
+    """The half of the assertion above that was measuring something.
+
+    A mode recording no claim must not resolve node IDs to run: the gate would be
+    running tests to support a verdict it does not write. Conditional rather than
+    universal, and the condition is a real branch — Session 2's external mode
+    carried no claim, and Session 4's does.
     """
     for mode in claims.MODE_MARKERS:
-        static = claims.static_nodeids_for_mode(mode, CURRENT_SESSION)
         if not claims.claims_for_mode(mode, CURRENT_SESSION):
+            static = claims.static_nodeids_for_mode(mode, CURRENT_SESSION)
             assert not static, f"{mode} carries no claim but resolved proofs {static}"
-            continue
-        assert static, f"{mode} has no environment-free claim proof"
-        for nodeid in static:
-            assert not claims.environment_markers(nodeid)
 
 
 def test_a_claim_spanning_both_environments_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -342,9 +380,11 @@ def run_writer(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def write_host_half(tmp_path: Path, output: Path, *, skip: str | None = None) -> Path:
+def write_host_half(
+    tmp_path: Path, output: Path, *, skip: str | None = None, session: int = HALF_SESSION
+) -> Path:
     outcomes: dict[str, str] = {}
-    for claim in claims.claims_for_mode("host", HALF_SESSION):
+    for claim in claims.claims_for_mode("host", session):
         outcomes |= all_passing(claim)
     if skip is not None:
         outcomes[skip] = "skipped"
@@ -352,7 +392,7 @@ def write_host_half(tmp_path: Path, output: Path, *, skip: str | None = None) ->
     artifact = write_junit(tmp_path / "host-tests.xml", outcomes)
     result = run_writer(
         "--session",
-        "2",
+        str(session),
         "--mode",
         "host",
         "--project-a-outputs",
@@ -528,14 +568,20 @@ def test_a_session_with_one_environment_merges_a_single_half(tmp_path: Path) -> 
     document that is silent about a claim. Skipping it and renaming the half
     would produce a session document with no verdict in it.
     """
+    session = SINGLE_ENVIRONMENT_SESSION
+    assert not claims.claims_for_mode("external", session), (
+        f"session {session} has acquired an external claim; this test no longer "
+        "describes a session with one environment"
+    )
+
     outcomes: dict[str, str] = {}
-    for claim in claims.claims_for_mode("host", CURRENT_SESSION):
+    for claim in claims.claims_for_mode("host", session):
         outcomes |= all_passing(claim)
     artifact = write_junit(tmp_path / "host-tests.xml", outcomes)
 
     half = tmp_path / "session-03-host.json"
     written = run_writer(
-        "--session", str(CURRENT_SESSION),
+        "--session", str(session),
         "--mode", "host",
         "--project-a-outputs", str(deployed(tmp_path, "alpha-dev")),
         "--project-b-outputs", str(deployed(tmp_path, "beta-dev")),
@@ -546,7 +592,7 @@ def test_a_session_with_one_environment_merges_a_single_half(tmp_path: Path) -> 
 
     merged = tmp_path / "session-03.json"
     result = run_writer(
-        "--session", str(CURRENT_SESSION),
+        "--session", str(session),
         "--host-input", str(half),
         "--output", str(merged),
     )  # fmt: skip
@@ -554,8 +600,8 @@ def test_a_session_with_one_environment_merges_a_single_half(tmp_path: Path) -> 
 
     document = json.loads(merged.read_text(encoding="utf-8"))
     assert document["status"] == "passed"
-    assert document["session"] == CURRENT_SESSION
-    assert set(document["tests"]) == set(claims.claims_through_session(CURRENT_SESSION))
+    assert document["session"] == session
+    assert set(document["tests"]) == set(claims.claims_through_session(session))
     for claim in ("row_level_security", "database_isolation"):
         assert document["tests"][claim] == "passed", claim
 
@@ -587,6 +633,43 @@ def test_a_single_half_is_refused_for_a_session_that_has_an_external_claim(
         # branch is kept so that reinstating that claim turns this test back into
         # the refusal it is named for rather than silently passing.
         assert result.returncode == 0, result.stdout + result.stderr
+
+
+#: The session that restored the external gate (D82). Pinned, like the two
+#: constants above, so the refusal below is exercised against a session that
+#: really does measure something from off-host.
+TWO_ENVIRONMENT_SESSION = 4
+
+
+def test_a_single_half_is_refused_at_the_session_with_two_environments(tmp_path: Path) -> None:
+    """The refusal above, actually run.
+
+    ``test_a_single_half_is_refused_for_a_session_that_has_an_external_claim``
+    takes its ``else`` branch for Session 2 and always has: Session 2 carries no
+    external claim, for the ``SEC-NET-001`` reason recorded beside ``CLAIMS``. So
+    the guard has been asserted about and never exercised. Session 4 carries two
+    external claims (ADR 0045), which makes this the first run of it.
+    """
+    session = TWO_ENVIRONMENT_SESSION
+    external = claims.claims_for_mode("external", session)
+    assert external, (
+        f"session {session} carries no external claim, so this test measures nothing; "
+        "the external gate was restored in Session 4 by D82"
+    )
+
+    host = write_host_half(tmp_path, tmp_path / "host.json", session=session)
+    output = tmp_path / f"session-{session:02d}.json"
+    result = run_writer(
+        "--session", str(session),
+        "--host-input", str(host),
+        "--output", str(output),
+    )  # fmt: skip
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "measured from outside" in result.stderr
+    for claim in external:
+        assert claim in result.stderr, f"the refusal does not name {claim}"
+    assert not output.exists(), "a document was written for a session measured by half"
 
 
 def test_halves_describing_different_deployments_are_refused(tmp_path: Path) -> None:

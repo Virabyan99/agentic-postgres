@@ -87,6 +87,14 @@ REQUIRED_PATHS = (
     "docs/migrations.md",
     "docs/database-security.md",
     "docs/session-03-operator-guide.md",
+    # The Session 4 operator documentation. The operator guide is the entry
+    # point; the other three are what it links to for the two transports, the
+    # four clients, and the pooler as a thing that is operated -- restarted,
+    # rebooted, and rotated through.
+    "docs/database-connections.md",
+    "docs/client-compatibility.md",
+    "docs/pool-operations.md",
+    "docs/session-04-operator-guide.md",
     "bin/bootstrap-providers.py",
     "bin/docker-firewall.sh",
     "bin/edge.sh",
@@ -100,6 +108,7 @@ REQUIRED_PATHS = (
     "bin/project-runtime.sh",
     "bin/provision-host.sh",
     "bin/session-02-check.sh",
+    "bin/session-04-check.sh",
     "src/agentic_postgres/infisical_client.py",
     "src/agentic_postgres/installed_release.py",
     "infra/edge/compose.yaml",

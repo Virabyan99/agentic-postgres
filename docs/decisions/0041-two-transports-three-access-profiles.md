@@ -1,11 +1,11 @@
 # 0041 — Two transports, three access profiles
 
-Status: proposed
+Status: accepted
 Date: 2026-08-08
 Session: 4, Run 1
 Affects: DBX-001, DBX-002, DBX-003, DBX-005, SEC-DBX-002
 
-Accepted in Run 2, the run that bumps the output schema.
+Accepted in Run 2, the run that bumped the output schema to version 4.
 
 ## Context
 

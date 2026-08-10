@@ -322,6 +322,59 @@ def test_every_adr_is_indexed() -> None:
     assert not missing, f"ADRs absent from docs/decisions/README.md: {missing}"
 
 
+#: Both spellings the ADRs use for their status line. 0001-0036 write
+#: ``- **Status:** Accepted``; 0037 onward write ``Status: accepted``. Two
+#: formats is a wart, and normalising the files would be a large diff over
+#: settled decisions for no gain — so the reader handles both and the check
+#: below is what actually matters.
+_STATUS_LINE = re.compile(r"^(?:-\s*\*\*Status:\*\*|Status:)\s*(.+)$", re.MULTILINE)
+
+
+def _declared_status(text: str) -> str:
+    """The first word of an ADR's own status line, lowercased.
+
+    The first word only: an ADR records its qualifications in the rest of the
+    line — ``accepted; the publication clause superseded by 0044`` — and the
+    index has room for a short form. Comparing whole strings would force the two
+    to be transcriptions of each other, which is how a table stops being updated.
+    """
+    match = _STATUS_LINE.search(text)
+    assert match, "no status line"
+    return match.group(1).strip().strip(".").split()[0].rstrip(";,").lower()
+
+
+def test_the_index_status_agrees_with_each_adr() -> None:
+    """An index that says ``Proposed`` about a decision the host is running.
+
+    ``test_every_adr_is_indexed`` checks that a row exists. Nothing checked what
+    the row said, and by the end of Session 4 three of them said ``Proposed``
+    about ADRs that had been built, deployed and measured for nine runs — 0041
+    still said so in its own header too. The index is the document the project
+    contract points a reader at, so a stale status there is a wrong answer given
+    confidently.
+
+    Compared on the first word, so ``accepted; superseded in part`` in the file
+    and ``Accepted, superseded in part`` in the row agree.
+    """
+    decisions = REPO_ROOT / "docs" / "decisions"
+    index = (decisions / "README.md").read_text(encoding="utf-8")
+    rows = {}
+    for line in index.splitlines():
+        if not line.startswith("| ["):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) == 4 and (name := re.search(r"\((\d{4}-[a-z0-9-]+\.md)\)", cells[0])):
+            rows[name.group(1)] = cells[3]
+
+    disagreements = []
+    for path in sorted(decisions.glob("[0-9][0-9][0-9][0-9]-*.md")):
+        declared = _declared_status(path.read_text(encoding="utf-8"))
+        listed = rows.get(path.name, "").split(",")[0].strip().lower()
+        if declared != listed:
+            disagreements.append(f"{path.name}: file says {declared!r}, index says {listed!r}")
+    assert not disagreements, disagreements
+
+
 def test_no_source_file_cites_a_missing_adr() -> None:
     """The reverse direction: a citation of an ADR that does not exist.
 

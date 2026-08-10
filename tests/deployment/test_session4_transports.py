@@ -381,22 +381,24 @@ def test_the_published_ports_are_the_ones_the_registry_allocated(
 ) -> None:
     """DBX-PORT-001, the other half: the registry, the host and the world agree.
 
-    **Not measured with `ss`, and that is the point** (D114). `daemon.json` sets
-    ``userland-proxy: false``, so Docker implements a publication as an iptables
-    DNAT rule and **no host process listens on the published port**. The first
-    version of this test asserted a listening socket, which this host's Docker
-    configuration never creates — a check that could not pass, which is ADR
-    0035's defect with its sign flipped. It would have reported a correct
-    publication as broken on every run.
+    **`HostConfig.PortBindings` is not evidence of anything** (D114). It records
+    what Docker was *asked* for. During Run 9 it read
+    ``6432/tcp -> 127.0.0.1:15432`` for a port with no DNAT rule and nothing
+    answering, and that field was read as a measurement — in the session whose
+    standing lesson is that a request is not a fact. The first version of this
+    test then explained the absent listener with ``userland-proxy: false``,
+    which is also wrong: Docker 29 binds a published port in ``dockerd`` itself
+    and ``ss`` reports it as ``0.0.0.0:443 users:(("dockerd"))``.
 
-    So the two things that are actually true of a publication are asserted
-    instead: Docker binds the container port to the allocated host port **on a
-    loopback address**, and a TCP connect to that address completes.
+    What is asserted now is the state ADR 0044 requires and both halves of what
+    it means. ``PortBindings`` is empty, so no publication was even requested;
+    and nothing on the host answers on either allocated port, because those are
+    the developer's NEAR end and a tunnel could not bind a port already in use.
 
-    Goes red if: a publication is written for a port the registry does not hold;
-    the registry holds a port nothing answers on; or — the one that matters —
-    ``HostIp`` is anything but loopback, which is the difference between a
-    developer's tunnel and a database on the internet.
+    Goes red if: a publication is reintroduced, which on an internal network
+    would do nothing today and would open a port the day the network changed;
+    or something else on the host holds an allocated port, which the allocator
+    is supposed to make impossible.
     """
     document = project_a
     allocation = allocation_for(key(document))

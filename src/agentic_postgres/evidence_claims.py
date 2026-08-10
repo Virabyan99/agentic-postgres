@@ -66,6 +66,32 @@ MODE_MARKERS = {"host": "live_host", "external": "external"}
 #: entirely properties of a checkout. They are proved, and they appear in the
 #: acceptance matrix; they are not guarantees about a running system, so this
 #: session's evidence does not name them as ones.
+#:
+#: Session 4 adds five, and two of them differ from the shape its plan drafted
+#: (ADR 0045).
+#:
+#: ``direct_transport`` was drafted as ``DBX-001, DBX-003, DBX-005,
+#: SEC-DBX-001`` — and ``claim_mode`` refuses it, correctly. The first two are
+#: proved on the host by running Prisma Migrate and ``psql``; the last two are
+#: proved from *off-host*, by failing to reach the same endpoint. One claim, two
+#: environments, and neither half of the evidence could report a verdict on it.
+#: So the guarantee is split where the measurement is: ``direct_transport`` is
+#: "the direct endpoint works for the tools that need it" and
+#: ``transport_boundary`` is "neither transport is reachable from outside".
+#: ``transport_boundary`` is also the external claim ``public_boundary`` could
+#: not be: its proofs scan IPv4 only, so unlike ``SEC-NET-001``'s it can pass
+#: from a network with no IPv6 transit.
+#:
+#: ``transport_isolation`` is separate from ``database_isolation`` for a reason
+#: that only appears when you follow the mechanism through. The plan says
+#: ``database_isolation`` *gains* ``DEP-ISO-004``; ``claim_session`` is the max
+#: of its requirements' sessions, so gaining a Session 4 requirement would move
+#: the whole claim to Session 4 — and ``claims_through_session(3)`` would then
+#: stop returning it. Session 3's gate would quietly stop recording a claim it
+#: has been recording, and the jq expression its operator guide documents would
+#: fail against freshly written evidence. Cumulative was meant to mean a later
+#: session keeps proving an earlier one's guarantees, not that a later
+#: requirement withdraws one from the earlier session's evidence.
 CLAIMS: dict[str, tuple[str, ...]] = {
     "isolation": ("DEP-ISO-002",),
     "secret_leakage": ("SEC-SECRET-001", "SEC-SECRET-002"),
@@ -79,6 +105,11 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     ),
     "database_isolation": ("DEP-ISO-003", "DBX-PG-003"),
     "boot_convergence": ("DEP-BOOT-001",),
+    "pooled_transport": ("DBX-002", "DBX-POOL-001", "DBX-POOL-002", "DBX-POOL-003"),
+    "direct_transport": ("DBX-001", "DBX-003"),
+    "transport_boundary": ("DBX-005", "SEC-DBX-001"),
+    "connection_tooling": ("DX-DB-001", "DX-DB-002"),
+    "transport_isolation": ("DEP-ISO-004",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().

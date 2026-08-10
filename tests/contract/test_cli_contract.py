@@ -42,6 +42,7 @@ SHELL_COMMANDS = (
     "bin/session-01-check.sh",
     "bin/session-02-check.sh",
     "bin/session-03-check.sh",
+    "bin/session-04-check.sh",
     "bin/smoke-test.sh",
 )
 

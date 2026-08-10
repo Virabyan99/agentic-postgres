@@ -100,6 +100,18 @@ ENVIRONMENT_VARIABLES = (
     # and the access policy both key on, and supplying only the host would leave
     # the identity under test to whatever the local username happens to be.
     "APG_SSH_DESTINATION",
+    # Session 4 Run 10. Two variables that admit a proof of something that
+    # *happened*, rather than of a state that holds.
+    #
+    # A reboot cannot be performed by a test that has to survive to report the
+    # result, and a rotation cannot be performed at all without changing a value
+    # at the provider. Both are therefore operator steps, and these are how the
+    # operator declares one was taken. Each is a claim, and each of the tests
+    # they admit is written to refuse a false one: the reboot proof asserts the
+    # postmaster postdates the boot, and the rotation proof asserts the
+    # credential it was handed is not the one that is active.
+    "APG_AFTER_REBOOT",
+    "APG_ROTATED_FROM_FILE",
 )
 
 

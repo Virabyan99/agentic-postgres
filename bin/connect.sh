@@ -112,8 +112,11 @@ Usage: bin/connect.sh tunnel    --project KEY --ssh USER@HOST [--profile NAME]
   --ssh-port N      Default 22.
   --ssh-option OPT  Passed to ssh as -o OPT. Options that disable host-key
                     verification are refused.
-  --local-port N    Default: the same number the host publishes on, so a
-                    documented command reads the same on both sides. If it is
+  --local-port N    Default: the number the port registry allocated to this
+                    project, so a documented command reads the same for
+                    everyone. Nothing is published on it at the far end (ADR
+                    0044) -- it is the near end of the forward, and it is
+                    allocated so two projects' tunnels never collide. If it is
                     busy this fails rather than choosing another silently.
   --all             stop only: every recorded tunnel.
 

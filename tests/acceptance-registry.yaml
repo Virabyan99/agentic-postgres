@@ -682,10 +682,32 @@
   test_nodeids:
     - tests/deployment/test_session4_transports.py::test_the_allocation_is_active_and_keyed_by_the_volumes_identity
     - tests/deployment/test_session4_transports.py::test_the_published_ports_are_the_ones_the_registry_allocated
+    # Run 10, the restart matrix. "Stable across restart and reboot" was in this
+    # description from Run 1 and proved by nothing until here: the two tests
+    # above measure one moment. Each of these restarts one thing and asserts the
+    # allocation is unchanged, both transports answer again, and no public
+    # listener appeared.
+    - tests/deployment/test_session4_convergence.py::test_restarting_the_pooler_keeps_the_allocation_and_both_transports
+    - tests/deployment/test_session4_convergence.py::test_restarting_the_cluster_leaves_the_pooler_serving
+    - tests/deployment/test_session4_convergence.py::test_restarting_the_project_unit_restores_both_transports
+    - tests/deployment/test_session4_convergence.py::test_the_reboot_restored_the_projects_from_their_documents
   description: >-
     Host-loopback allocations are stable across redeploy, restart and reboot,
     two projects never share one, and an allocation is matched by the instance
     UUID the volume carries. See ADR 0042.
+
+- id: SEC-DBX-004
+  priority: P0
+  target_session: 4
+  test_nodeids:
+    - tests/deployment/test_session4_convergence.py::test_a_rotated_credential_is_replaced_in_both_planes
+  description: >-
+    A rotated application credential is replaced in both planes: the generation
+    the project points at opens the pooled and the direct transport, and the
+    generation it replaced opens neither. The split-brain state - PostgreSQL
+    holding one password while the pooler holds another - passes a test of
+    either transport taken alone, so all four combinations are measured in one
+    run. See the Session 4 plan, section 4.3.
 
 - id: SEC-DBX-001
   priority: P0

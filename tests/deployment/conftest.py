@@ -248,8 +248,8 @@ def rendered_document() -> Callable[[str], dict[str, Any]]:
 
 
 @pytest.fixture(scope="session")
-def pg_login() -> Callable[[dict[str, Any], str, str, str], tuple[int, str, str]]:
-    """Attempt a password login against a project's cluster. Returns, never judges.
+def transport_login() -> Callable[..., tuple[int, str, str]]:
+    """Attempt a password login over either transport. Returns, never judges.
 
     **From a container on the project's internal network, not from inside the
     cluster's own container.** The first version of this ran ``psql -h 127.0.0.1``
@@ -264,10 +264,20 @@ def pg_login() -> Callable[[dict[str, Any], str, str, str], tuple[int, str, str]
     container. It is never an argument to ``docker`` or to ``psql``, never in the
     container's declared environment, and so appears in no process listing, no
     ``docker inspect`` and no log.
+
+    ``host`` and ``port`` are the service name and port on the project network --
+    ``postgres:5432`` or ``pgbouncer:6432``. The container name would not
+    resolve: Compose names the container and the network alias differently.
     """
 
     def login(
-        document: dict[str, Any], network: str, role: str, password: str
+        document: dict[str, Any],
+        network: str,
+        role: str,
+        password: str,
+        *,
+        host: str = "postgres",
+        port: int = 5432,
     ) -> tuple[int, str, str]:
         # `export` on its own line rather than as a `VAR=v exec ...` prefix: a
         # prefix assignment to a special builtin persists in the shell but is not
@@ -275,7 +285,7 @@ def pg_login() -> Callable[[dict[str, Any], str, str, str], tuple[int, str, str]
         # rejected password fails instead of waiting on a prompt nobody answers.
         script = (
             'PGPASSWORD="$(cat)"; export PGPASSWORD; '
-            'exec psql -h "$1" -p 5432 -U "$2" -d "$3" -w -X -qtA -c "SELECT 1"'
+            'exec psql -h "$1" -p "$2" -U "$3" -d "$4" -w -X -qtA -c "SELECT 1"'
         )
         result = subprocess.run(
             [
@@ -291,11 +301,8 @@ def pg_login() -> Callable[[dict[str, Any], str, str, str], tuple[int, str, str]
                 "-c",
                 script,
                 "sh",
-                # The service name, which is what resolves on the internal
-                # network and what the dbmate entrypoint connects to. The
-                # container name would not resolve: Compose names the container
-                # and the network alias differently.
-                "postgres",
+                host,
+                str(port),
                 role,
                 document["database"]["name"],
             ],
@@ -306,6 +313,27 @@ def pg_login() -> Callable[[dict[str, Any], str, str, str], tuple[int, str, str]
             timeout=120,
         )
         return result.returncode, result.stdout, result.stderr
+
+    return login
+
+
+@pytest.fixture(scope="session")
+def pg_login(
+    transport_login: Callable[..., tuple[int, str, str]],
+) -> Callable[[dict[str, Any], str, str, str], tuple[int, str, str]]:
+    """The direct transport, which is what every Session 3 caller means.
+
+    A wrapper rather than a second implementation. Session 4 needed the same
+    login against ``pgbouncer:6432``, and the choice was to widen this signature
+    at four call sites or to grow a second copy of the one piece of plumbing in
+    this file that handles a credential. Two copies of that is two places for the
+    password to stop crossing on stdin.
+    """
+
+    def login(
+        document: dict[str, Any], network: str, role: str, password: str
+    ) -> tuple[int, str, str]:
+        return transport_login(document, network, role, password)
 
     return login
 

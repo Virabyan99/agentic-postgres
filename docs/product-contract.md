@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 94 requirements**
+**P0 — 95 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -151,6 +151,7 @@ Priorities:
 | `SEC-DBX-001` | 4 | Neither transport is reachable from a non-loopback address; every publication carries an explicit loopback host_ip and only the edge publishes a public port. See ADR 0040. |
 | `SEC-DBX-002` | 4 | The application runtime role holds no ownership, no base-schema addressability and no DDL, and cannot become any other role. |
 | `SEC-DBX-003` | 4 | Transaction-local claim state, and deliberately set session-level state, are both absent for the next client of a released pooled connection. |
+| `SEC-DBX-004` | 4 | A rotated application credential is replaced in both planes: the generation the project points at opens the pooled and the direct transport, and the generation it replaced opens neither. The split-brain state - PostgreSQL holding one password while the pooler holds another - passes a test of either transport taken alone, so all four combinations are measured in one run. See the Session 4 plan, section 4.3. |
 | `API-CACHE-001` | 5 | An API migration reloads the schema cache and updates OpenAPI. |
 | `API-LIMIT-001` | 5 | Row limits and timeouts are enforced by the server, not the client. |
 | `API-SCHEMA-001` | 5 | Only the api schema is exposed, matching a committed allowlist. |

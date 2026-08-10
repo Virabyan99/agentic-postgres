@@ -125,14 +125,36 @@ the operator guide is the entry point:
 
 `bin/session-03-check.sh` is the gate, in two modes. There is no external mode.
 
-## Starting Session 4
+## The transports
+
+Session 4 gave every project a PgBouncer pool alongside the direct endpoint, and
+a developer a way to reach either. Four documents, and the operator guide is the
+entry point:
+
+- [Session 4 operator guide](session-04-operator-guide.md) — deploying the
+  transports, the gate in three modes, the two-half evidence, and the traps
+- [Database connections](database-connections.md) — the two transports, the three
+  access profiles, the tunnel, the broker, and why nothing is published
+- [Client compatibility](client-compatibility.md) — psql, Prisma, Node `pg` and
+  Psycopg, and what transaction pooling costs each of them
+- [Pool operations](pool-operations.md) — the settings that matter, the admin
+  console, the restart matrix, and the credential rotation
+
+`bin/session-04-check.sh` is the gate, in three modes, and it needs both the host
+and the external half: `transport_boundary` and `connection_tooling` are measured
+from off-host, so a session document cannot be written from a host run alone
+([ADR 0045](decisions/0045-a-claim-is-shaped-by-where-it-can-be-measured.md)).
+
+## Starting Session 5
 
 Read, in this order:
 
-1. [The Session 3 divergence table and decision log](plans/session-03-implementation-plan.md)
+1. [The Session 4 divergence table and decision log](plans/session-04-implementation-plan.md)
    — every ambiguity that was closed, and why. **New ambiguities go there or
-   into an ADR; they do not get resolved inline.** The Session 2 table is
-   [here](plans/session-02-implementation-plan.md) and is still cited by number.
+   into an ADR; they do not get resolved inline.** The Session 3 table is
+   [here](plans/session-03-implementation-plan.md) and the Session 2 one
+   [here](plans/session-02-implementation-plan.md); both are still cited by
+   number.
 2. [The product contract](product-contract.md) and the
    [ADRs](decisions/README.md).
 3. [The acceptance matrix](acceptance-matrix.md).

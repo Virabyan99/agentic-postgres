@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 #
-# Allocate, verify, show and release the host-loopback ports a project's two
-# database transports are published on (ADR 0042).
+# Allocate, verify, show and release the two host-loopback ports a project's
+# database transports are reached through (ADR 0042).
+#
+# They are the LOCAL end of a developer's tunnel, not a publication. Nothing
+# is published: Docker installs no rule and no listener for a container on an
+# `internal: true` network, so the tunnel targets the container endpoint on the
+# host's own bridge (ADR 0044). Everything this allocator does is unchanged by
+# that -- an allocation that moves still breaks every saved tunnel.
 #
 # The allocation key is the instance UUID the project's data volume carries --
 # `app_private.project_identity.instance_uuid`, generated once on the first
@@ -38,9 +44,10 @@ Usage: sudo bin/database-ports.sh allocate --host FILE --project-key KEY \
             Reuse is the default: a redeploy gets the same numbers back, because
             they are in somebody's saved tunnel. Both ports are reserved as one
             transaction; a project with one is a state nothing can converge.
-  verify    Connect to both published endpoints and, if both answer, promote the
-            reservation to active. A reservation nothing serves stays reserved,
-            which is what makes a crashed deploy provable rather than invisible.
+  verify    Connect to both container endpoints and, if both answer, promote
+            the reservation to active. A reservation nothing serves stays
+            reserved, which is what makes a crashed deploy provable rather
+            than invisible.
   release   Give up two ports. --project-key must match what the registry
             records, because this is the one operation that can hand a
             developer's port to another project.

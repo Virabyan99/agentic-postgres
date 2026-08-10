@@ -8,27 +8,36 @@ deployment topology rather than from application correctness.
 deploys. Two isolated projects run on one hardened host behind one shared
 Traefik edge on Let's Encrypt production certificates, each with **its own
 PostgreSQL 18 cluster** — forced row-level security, a locked pgvector, and a
-migration plane that cannot write its own audit record. There is still no
-client-facing database endpoint: the cluster publishes no host port and joins no
-edge network, and connecting to one from outside its project is Session 4. See
+migration plane that cannot write its own audit record. **Session 4 gave every
+project two database transports** — a PgBouncer pool and the direct endpoint —
+reached by a developer through an SSH tunnel and a privileged broker. Nothing is
+published: Docker installs no rule and no listener for a container on an
+`internal: true` network, so the tunnel targets the container endpoint on the
+host's own bridge. See
 [What is intentionally unavailable](#what-is-intentionally-unavailable).
 
-- [Session 3 operator guide](docs/session-03-operator-guide.md) — **start here to deploy a project with its database**
+- [Session 4 operator guide](docs/session-04-operator-guide.md) — **start here to give a project its transports**
+- [Database connections](docs/database-connections.md) · [Client compatibility](docs/client-compatibility.md) · [Pool operations](docs/pool-operations.md)
+- [Session 3 operator guide](docs/session-03-operator-guide.md) — deploying a project with its database
 - [The database](docs/database.md) · [Migrations](docs/migrations.md) · [Database security](docs/database-security.md)
 - [Session 2 operator guide](docs/session-02-operator-guide.md) — the host, the edge, and the secret store
 - [Host baseline](docs/host-baseline.md) · [Provider bootstrap](docs/provider-bootstrap.md) · [Project isolation](docs/project-isolation.md) · [Secret handling](docs/secret-handling.md)
 - [Product contract](docs/product-contract.md) — scope, requirement IDs, non-goals, change control
 - [Architecture decisions](docs/decisions/README.md)
 - [Handoff — environment and workflow](docs/handoff.md) — machine specifics, git, known traps
-- [Session 3 implementation plan](docs/plans/session-03-implementation-plan.md) — divergence table, decision log, build order
+- [Session 4 implementation plan](docs/plans/session-04-implementation-plan.md) — divergence table, decision log, build order
+- [Session 3 implementation plan](docs/plans/session-03-implementation-plan.md) — the previous session's, still cited by number
 
 > `bin/session-01-check.sh` exits 0 from a clean tree, **including on the
 > deployment host with both projects running**. `bin/session-02-check.sh` runs
 > in three environments — `offline`, `host`, `external` — because a port scan
 > run on the host traverses its own routing table and can report "closed" for a
-> port the world can reach. `bin/session-03-check.sh` runs in two: there is
+> port the world can reach. `bin/session-03-check.sh` runs in two: there was
 > nothing new to see from outside a cluster that publishes no port, and a mode
 > that measured nothing would still write evidence saying it had run.
+> `bin/session-04-check.sh` runs in three again, and **needs both halves**: two
+> of its claims are measured from off-host, so a session document cannot be
+> written from a host run alone.
 
 ---
 
