@@ -119,3 +119,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0053](0053-outputs-version-5.md) | Outputs version 5: the deployed document carries the public surface and the identity the broker needs | 5 | Accepted |
 | [0054](0054-a-secret-may-be-consumed-by-the-root-plane.md) | A secret may be consumed by the root plane, and says so | 5 | Accepted |
 | [0055](0055-the-contract-declares-what-kind-of-value-a-secret-is.md) | The contract declares what kind of value a secret is | 5 | Accepted |
+| [0056](0056-a-consumer-declares-the-format-its-file-is-written-in.md) | A consumer declares the format its file is written in | 5 | Accepted |

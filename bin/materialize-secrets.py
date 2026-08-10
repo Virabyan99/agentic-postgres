@@ -38,6 +38,7 @@ from agentic_postgres.secrets_contract import (
     active_secrets,
     consumer_directory,
     load_secret_contract,
+    render_secret,
     secret_source_path,
 )
 
@@ -224,7 +225,10 @@ def materialize(key: str, contract: dict[str, Any], session: int) -> int:
 
                 write_secret_file(
                     service_directory / consumer["target_file"],
-                    value,
+                    # The one transformation a secret value undergoes here, and
+                    # it is a pure function in `secrets_contract` so it can be
+                    # tested with no provider (ADR 0056). `raw` is the identity.
+                    render_secret(value, consumer),
                     uid=consumer["uid"],
                     gid=consumer["gid"],
                     mode=int(consumer["mode"], 8),

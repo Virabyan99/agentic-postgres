@@ -185,6 +185,14 @@ fixtures' — and `migration_user_password` reaches two. Per-consumer copies are
 what make "one service cannot read another's credential" true; the count is the
 price, and it is written down rather than reduced by sharing a mount.
 
+Those two counts are what Session 4 declared. Ask
+`bin/materialize-secrets.sh --plan --session N` rather than this paragraph: it
+prints every file, its owner and its mode, totals them, and contacts nothing
+(D108). Session 5 adds files that are not copies of either credential —
+including one written in **pgpass format** rather than as the raw value, because
+the service that reads it has no shell to wrap it (ADR 0056), and two on the
+**root plane** that no container receives at all (ADR 0054).
+
 `postgres_init_superuser_password` is the exception in the other direction: the
 image reads it only when the data directory is empty, so writing a new generation
 of that file changes the file and nothing else. Rotating it for real is a

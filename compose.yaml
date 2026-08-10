@@ -486,6 +486,134 @@ services:
     networks:
       - internal
 
+  # Session 5. The REST surface.
+  #
+  # NO ENTRYPOINT, NO CONFIG FILE, AND NO SHELL -- and that is measured rather
+  # than stylistic. The image is distroless (Run 1): no shell, no wget, no curl,
+  # and no declared ENTRYPOINT. Every other credential-holding service here
+  # assembles what it needs from its mounted secret in a few lines of `sh`;
+  # there is nothing in this container that can read one file and write another.
+  #
+  # So the whole configuration is `PGRST_*` in the environment, interpolated by
+  # Compose from the rendered compose.env -- every value a derived, non-secret
+  # identifier -- and the password is reached through `?passfile=` in the
+  # conninfo. Run 4 measured all four ways a password could arrive, with a
+  # control that put it inline to prove the rig was real. This is the one that
+  # keeps it out of the environment, the argument vector, the labels and
+  # `docker inspect`, all four of which were then checked on a running
+  # container. `.Args` is literally empty.
+  #
+  # The mounted file is `*:*:*:*:<password>`, written in that shape by the
+  # materializer because nothing here can wrap it (ADR 0056). Wildcards on
+  # purpose: naming the host, port, database and role would put four derived
+  # identifiers inside a secret file, and the symptom when one drifted would be
+  # `fe_sendauth: no password supplied` -- which sends the reader to the wrong
+  # file entirely.
+  postgrest:
+    image: ${POSTGREST_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [session5]
+    restart: "on-failure:5"
+    # Declared, not inherited. The image sets no USER, so "whatever the base
+    # image defaults to" is not even a well-defined answer here; 65532 is
+    # cross-checked against secrets.required.yaml by test_secret_contract.py.
+    user: "65532:65532"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 15s
+    # No command and no entrypoint override. The image declares no ENTRYPOINT,
+    # so the binary is the image's own CMD and the argument vector stays empty
+    # -- which is one of the four places a password must not be, and the
+    # easiest to keep empty by having nothing to put there.
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # The conninfo, password-free. `?passfile=` names a file rather than
+      # carrying a value, so this whole string is safe in `docker inspect`.
+      PGRST_DB_URI: postgres://${POSTGREST_AUTHENTICATOR_ROLE:?required}@${POSTGRES_SERVICE_HOST:?required}:5432/${POSTGRES_DATABASE_NAME:?required}?passfile=/run/secrets/postgrest_authenticator_pgpass
+      PGRST_DB_SCHEMAS: ${POSTGREST_EXPOSED_SCHEMA:?required}
+      PGRST_DB_ANON_ROLE: ${ANON_ROLE_NAME:?required}
+      # The three dangerous defaults, all set explicitly (Run 1). `db-config`
+      # true would let the database override this reviewed configuration;
+      # `db-extra-search-path` defaults to `public`, which is the whole of what
+      # ADR 0052 is about; and the hoisted transaction settings default to
+      # three rather than none.
+      PGRST_DB_CONFIG: "false"
+      PGRST_DB_EXTRA_SEARCH_PATH: ""
+      PGRST_DB_HOISTED_TX_SETTINGS: ""
+      # The schema cache reload channel. This is what makes a migration's
+      # NOTIFY reach a running service instead of requiring a restart.
+      PGRST_DB_CHANNEL_ENABLED: "true"
+      PGRST_DB_CHANNEL: pgrst
+      # Both off. An aggregate over rows a caller may read is still a way to
+      # learn about rows it may not; an execution plan discloses statistics,
+      # index names and row estimates for the same query.
+      PGRST_DB_AGGREGATES_ENABLED: "false"
+      PGRST_DB_PLAN_ENABLED: "false"
+      PGRST_DB_MAX_ROWS: ${POSTGREST_MAX_ROWS:?required}
+      PGRST_DB_POOL: ${POSTGREST_POOL_SIZE:?required}
+      PGRST_DB_POOL_ACQUISITION_TIMEOUT: ${POSTGREST_POOL_ACQUISITION_TIMEOUT:?required}
+      PGRST_DB_POOL_MAX_IDLETIME: ${POSTGREST_POOL_MAX_IDLE:?required}
+      PGRST_DB_POOL_MAX_LIFETIME: ${POSTGREST_POOL_MAX_LIFETIME:?required}
+      PGRST_DB_PREPARED_STATEMENTS: "true"
+      # `follow-privileges`, so the published document describes what the
+      # reading role may actually reach. It is not a security boundary -- an
+      # object hidden from OpenAPI is still there -- which is why the surface
+      # contract is compared against the catalog and not only against this
+      # (ADR 0050).
+      PGRST_OPENAPI_MODE: follow-privileges
+      PGRST_OPENAPI_SECURITY_ACTIVE: "true"
+      PGRST_JWT_AUD: ${JWT_AUDIENCE:?required}
+      PGRST_JWT_ROLE_CLAIM_KEY: .role
+      PGRST_SERVER_CORS_ALLOWED_ORIGINS: ${POSTGREST_CORS_ORIGINS:?required}
+      # 0.0.0.0 because the service answers its peers on the project network.
+      # The admin surface would follow this bind if left alone -- measured in
+      # Run 3, where /live and /ready answered a peer container -- so it is
+      # pinned to loopback below, and a peer being refused is a test.
+      PGRST_SERVER_HOST: 0.0.0.0
+      PGRST_SERVER_PORT: "3000"
+      PGRST_ADMIN_SERVER_HOST: 127.0.0.1
+      PGRST_ADMIN_SERVER_PORT: "3001"
+      PGRST_LOG_LEVEL: error
+      # Off. It logs the query, and a query carries its parameters.
+      PGRST_LOG_QUERY: disabled
+      # `PGRST_JWT_SECRET` IS DELIBERATELY ABSENT AT THIS RUN, and its absence
+      # is asserted rather than left to be noticed. It names the verification
+      # JWKS, which is derived from the bootstrap signing key by root tooling at
+      # deploy time -- and a service configured to read a file that no deploy has
+      # written yet does not start. Until it is set, every request is `anon`:
+      # a token is not rejected, it is not considered at all. That is the honest
+      # state for a session in which no role has been activated, and the run
+      # that renders the JWKS is the run that adds the key here.
+    # `postgrest --ready` is a CLIENT that reads its own configuration, not the
+    # running process's (D153) -- bare, it exits 1 with "Admin server is not
+    # running" against a service answering 200. It works here for a reason
+    # specific to this design: the configuration lives in the environment, so
+    # the probe's own configuration IS the service's. Measured exit 0 against a
+    # service answering 200, and it is why there is no config file to name.
+    #
+    # What it proves is the pool and the schema cache, which a port check does
+    # not. What it does NOT prove is the request path: D145 measured `--ready`
+    # returning 0 while every request 404'd, because a pre-request hook that
+    # cannot resolve does not stop the service starting. That half cannot be
+    # proved from inside a container with no HTTP client, so it belongs to the
+    # deploy's own verification and to API-REST-001 -- not here, where it would
+    # have to be faked.
+    healthcheck:
+      test: [CMD, postgrest, --ready]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    # Both networks. `edge` because Traefik reaches it there; `internal`
+    # because that is where the cluster is. It is the second service to
+    # straddle them, and the only one that serves a public route.
+    networks:
+      - edge
+      - internal
+
   # Session 4's client compatibility fixtures (DBX-001..005).
   #
   # `session4-verify`, not `session4`, and the distinction is the same one

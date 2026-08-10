@@ -52,6 +52,17 @@ ROOT_PLANE_DIRECTORY = "_root"
 #: file; `root` is a value no container may hold at all.
 PLANES = ("compose", "root")
 
+#: What the materializer writes into a consumer's file (ADR 0056).
+FORMATS = ("raw", "pgpass")
+
+#: The `pgpass` template. Wildcards in all four match fields, deliberately: the
+#: alternative names a host, a port, a database and a role that `naming.py`
+#: already derives, which is a second derivation path inside a secret file and a
+#: file that goes stale when any of them changes. The narrowing buys nothing --
+#: the file is `0400`, owned by the one uid its container runs as, and that
+#: container has exactly one connection target.
+PGPASS_TEMPLATE = "*:*:*:*:{value}\n"
+
 
 def load_secret_contract(path: Path) -> dict[str, Any]:
     """Parse, schema-validate and semantically validate the requirements file."""
@@ -116,6 +127,34 @@ def generation_directory(project_key: str, generation_id: str) -> str:
     return f"{SECRET_ROOT}/{project_key}/generations/{generation_id}"
 
 
+def render_secret(value: str, consumer: dict[str, Any]) -> str:
+    """The bytes this consumer's file gets, from the provider's value.
+
+    The one place a secret value is transformed at all, and it is a pure
+    function so that the transformation is testable without a provider, a host
+    or a file. Everything else in this module handles identifiers; this handles
+    a value and deliberately does nothing else with it -- it is not logged, not
+    measured, and not returned in an exception.
+    """
+    fmt = consumer["format"]
+    if fmt == "raw":
+        return value
+    if fmt == "pgpass":
+        # A newline in the value would end the pgpass line and make the rest a
+        # second, malformed entry -- silently, with libpq skipping it and the
+        # connection failing for a reason nothing states. Refused rather than
+        # escaped: the generator produces hex, so a value with a newline in it
+        # is a provider that handed back something nobody declared.
+        if "\n" in value or "\r" in value:
+            raise ManifestError(
+                "a pgpass-format secret value contains a line break, which would end "
+                "the line and leave the remainder as a malformed second entry. The "
+                "value is not what this consumer's contract declares"
+            )
+        return PGPASS_TEMPLATE.format(value=value)
+    raise ManifestError(f"no writer for secret format {fmt!r}")
+
+
 def consumer_directory(consumer: dict[str, Any]) -> str:
     """The generation subdirectory this consumer's file lands in.
 
@@ -164,6 +203,22 @@ def _validate_semantics(document: dict[str, Any]) -> None:
 
     for secret in secrets:
         _validate_consumers(secret)
+        _validate_formats(secret)
+
+
+def _validate_formats(secret: dict[str, Any]) -> None:
+    """A format has to make sense of the kind of value it is given (ADR 0056).
+
+    A pgpass line holding a PEM is not a thing. Refused at contract load rather
+    than at the first failed connection, where the message would be
+    `fe_sendauth` and the file would look plausible.
+    """
+    for consumer in secret["consumers"]:
+        if consumer["format"] == "pgpass" and secret["value_kind"] != "random_hex":
+            raise ManifestError(
+                f"secret {secret['name']!r} is a {secret['value_kind']} and a consumer "
+                "asks for it in pgpass format. A password file holds a password"
+            )
 
 
 def _validate_consumers(secret: dict[str, Any]) -> None:
@@ -225,6 +280,8 @@ def _reject_duplicates(values: list[Any], what: str, why: str) -> None:
 
 __all__ = [
     "CONTAINER_SECRET_DIR",
+    "FORMATS",
+    "PGPASS_TEMPLATE",
     "PLANES",
     "ROOT_PLANE_DIRECTORY",
     "SECRET_ROOT",
@@ -237,5 +294,6 @@ __all__ = [
     "granted_services",
     "is_root_plane",
     "load_secret_contract",
+    "render_secret",
     "secret_source_path",
 ]

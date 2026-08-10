@@ -58,6 +58,11 @@ one, and the four client fixtures' copies of the application credential. That
 number is the price of per-consumer isolation and it is what a rotation has to
 reach.
 
+That count is Session 4's, and later sessions add to it. Do not carry it
+forward: `bin/materialize-secrets.sh --plan --session N` prints every file it
+would write and totals them, contacts no provider and writes nothing, and is the
+authority for what a rotation has to reach at any session (D108).
+
 The deploy allocates two ports, verifies both container endpoints, promotes the
 allocation from `reserved` to `active`, and only then writes transports into the
 deployed document. A project whose allocation is still `reserved` reports every

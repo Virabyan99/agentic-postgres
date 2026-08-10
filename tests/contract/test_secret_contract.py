@@ -407,6 +407,106 @@ def test_the_documentation_credential_reaches_no_container(contract: dict[str, A
 
 
 # ---------------------------------------------------------------------------
+# The format a consumer's file is written in (ADR 0056)
+# ---------------------------------------------------------------------------
+
+
+def test_raw_is_the_identity(contract: dict[str, Any]) -> None:
+    """Every consumer but one gets the provider's bytes, unchanged."""
+    consumer = contract["secrets"][0]["consumers"][0]
+    assert consumer["format"] == "raw"
+    assert secrets_contract.render_secret("a-value", consumer) == "a-value"
+
+
+def test_pgpass_wraps_the_value_in_a_wildcard_line(contract: dict[str, Any]) -> None:
+    """Wildcards in all four match fields, and that is the decision.
+
+    Naming the host, port, database and role would put four derived identifiers
+    inside a materialized secret -- a second derivation path for names naming.py
+    owns, and a file that goes stale when any of them changes. The symptom then
+    is `fe_sendauth: no password supplied`, which sends the reader to the wrong
+    file entirely.
+    """
+    secret = next(s for s in contract["secrets"] if s["name"] == "postgrest_authenticator_password")
+    consumer = secret["consumers"][0]
+    assert secrets_contract.render_secret("hunter2", consumer) == "*:*:*:*:hunter2\n"
+
+
+def test_a_value_with_a_line_break_is_refused_in_pgpass_format(
+    contract: dict[str, Any],
+) -> None:
+    """It would end the line and leave the remainder as a malformed second entry.
+
+    libpq skips a malformed line silently, so the failure would be a connection
+    refused for a reason nothing states. The generator produces hex, so a value
+    with a newline in it is a provider that returned something nobody declared.
+    """
+    secret = next(s for s in contract["secrets"] if s["name"] == "postgrest_authenticator_password")
+    with pytest.raises(ManifestError, match="line break"):
+        secrets_contract.render_secret("first\nsecond", secret["consumers"][0])
+
+
+def test_the_pgpass_line_contains_only_the_value(contract: dict[str, Any]) -> None:
+    """Guard the guard: no host, no port, no database, no role.
+
+    Asserted against the derived names of a real project, so a template that
+    started interpolating one would fail here rather than in a connection.
+    """
+    from agentic_postgres import naming
+
+    identity = naming.derive(
+        slug="fixture-alpha",
+        environment="dev",
+        domain="fixture-alpha-dev.test",
+        api_base_path="/api",
+        mcp_base_path="/mcp",
+    )
+    secret = next(s for s in contract["secrets"] if s["name"] == "postgrest_authenticator_password")
+    line = secrets_contract.render_secret("hunter2", secret["consumers"][0])
+    for name in (identity.database_name, identity.roles["postgrest_authenticator"], "5432"):
+        assert name not in line, name
+
+
+def test_every_consumer_declares_a_format(contract: dict[str, Any]) -> None:
+    formats = {c["format"] for s in contract["secrets"] for c in s["consumers"]}
+    assert formats <= set(secrets_contract.FORMATS)
+    assert formats == set(secrets_contract.FORMATS), (
+        "a declared format that nothing uses is a writer nothing exercises"
+    )
+
+
+def test_a_consumer_with_no_format_is_refused(tmp_path: Path, raw: dict[str, Any]) -> None:
+    def mutate(document: dict[str, Any]) -> None:
+        del document["secrets"][0]["consumers"][0]["format"]
+
+    with pytest.raises(ManifestError):
+        load_mutated(tmp_path, raw, mutate)
+
+
+def test_an_unknown_format_is_refused(tmp_path: Path, raw: dict[str, Any]) -> None:
+    def mutate(document: dict[str, Any]) -> None:
+        document["secrets"][0]["consumers"][0]["format"] = "dotenv"
+
+    with pytest.raises(ManifestError):
+        load_mutated(tmp_path, raw, mutate)
+
+
+def test_a_pgpass_file_may_not_hold_a_key(tmp_path: Path, raw: dict[str, Any]) -> None:
+    """A password file holds a password.
+
+    Refused at contract load rather than at the first failed connection, where
+    the message would be `fe_sendauth` and the file would look plausible.
+    """
+
+    def mutate(document: dict[str, Any]) -> None:
+        secret = next(s for s in document["secrets"] if s["name"] == "bootstrap_jwt_signing_key")
+        secret["consumers"][0]["format"] = "pgpass"
+
+    with pytest.raises(ManifestError, match="password file holds a password"):
+        load_mutated(tmp_path, raw, mutate)
+
+
+# ---------------------------------------------------------------------------
 # The session filter
 # ---------------------------------------------------------------------------
 

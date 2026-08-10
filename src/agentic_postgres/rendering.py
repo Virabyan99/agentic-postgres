@@ -312,6 +312,27 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "APG_FIXTURE_USER_A",
     "APG_FIXTURE_USER_B",
     "APG_DISPOSABLE_SCHEMA",
+    # Session 5. The REST service is configured entirely from its environment,
+    # because its image has no shell to read a config file into (ADR 0056) --
+    # so every one of these is a value Compose interpolates straight into
+    # `PGRST_*`. All project-derived, all non-secret: the credential is a file
+    # named by `?passfile=` inside a conninfo built from three of them.
+    #
+    # `POSTGREST_CORS_ORIGINS` is the one that is not an identifier. It is a
+    # comma-joined list of exact HTTPS origins, validated in `config` before it
+    # reaches here, and it is here rather than in the runtime env file because
+    # it comes from the project manifest -- a host-derived value in a rendered
+    # file would break the determinism contract (ADR 0013).
+    "POSTGREST_AUTHENTICATOR_ROLE",
+    "ANON_ROLE_NAME",
+    "POSTGREST_EXPOSED_SCHEMA",
+    "POSTGREST_MAX_ROWS",
+    "POSTGREST_POOL_SIZE",
+    "POSTGREST_POOL_ACQUISITION_TIMEOUT",
+    "POSTGREST_POOL_MAX_IDLE",
+    "POSTGREST_POOL_MAX_LIFETIME",
+    "POSTGREST_CORS_ORIGINS",
+    "JWT_AUDIENCE",
 )
 
 #: The pooler's port on its own project network. 6432 is the PgBouncer
@@ -337,6 +358,14 @@ POSTGRES_SERVICE_HOST = "postgres"
 
 #: The pooler's Compose service name, for the same reason and on the same terms.
 PGBOUNCER_SERVICE_HOST = "pgbouncer"
+
+#: The one schema PostgREST exposes. A constant, not a manifest field: `db-schemas`
+#: is the boundary that decides what a request can name at all, and a project
+#: that could widen it from its own manifest could name `app` (ADR 0052).
+POSTGREST_EXPOSED_SCHEMA = "api"
+
+#: The Compose service name, as the edge and the internal network see it.
+POSTGREST_SERVICE_HOST = "postgrest"
 
 #: The two identities the client fixtures prove row isolation between.
 #:
@@ -372,7 +401,10 @@ MIGRATIONS_TABLE = "app_private.schema_migrations"
 
 
 def build_compose_env(
-    identity: naming.ProjectIdentity, budget: dict[str, int], database: dict[str, Any]
+    identity: naming.ProjectIdentity,
+    budget: dict[str, int],
+    database: dict[str, Any],
+    api: dict[str, Any] | None = None,
 ) -> bytes:
     """Exactly :data:`COMPOSE_ENV_KEYS`, in that order, and nothing else.
 
@@ -398,6 +430,15 @@ def build_compose_env(
     }
     settings["pool_size"] = int(database["pool_size"])
     settings["max_client_connections"] = int(database["max_client_connections"])
+
+    # Session 5. `api.rest` is optional (D150), so a manifest without it renders
+    # the defaults -- which include `enabled: false` and an empty CORS list. The
+    # keys are emitted either way: a service whose environment depended on
+    # whether a manifest section existed would be two services wearing one name,
+    # and `compose config` would resolve differently depending on which project
+    # produced the file.
+    api = api or {}
+    rest = {**config.API_REST_DEFAULTS, **(api.get("rest") or {})}
 
     values = {
         "COMPOSE_PROJECT_NAME": identity.compose_project_name,
@@ -438,6 +479,23 @@ def build_compose_env(
         "PGBOUNCER_QUERY_WAIT_TIMEOUT": str(settings["query_wait_timeout_seconds"]),
         "PGBOUNCER_IDLE_TRANSACTION_TIMEOUT": str(settings["idle_transaction_timeout_seconds"]),
         "PGBOUNCER_SERVER_LIFETIME": str(settings["server_lifetime_seconds"]),
+        "POSTGREST_AUTHENTICATOR_ROLE": identity.roles["postgrest_authenticator"],
+        "ANON_ROLE_NAME": identity.roles["anon"],
+        "POSTGREST_EXPOSED_SCHEMA": POSTGREST_EXPOSED_SCHEMA,
+        # `api.max_rows` is the sole row-limit authority and is required by the
+        # schema, so it is read directly rather than defaulted.
+        "POSTGREST_MAX_ROWS": str(int(api["max_rows"])) if api else "0",
+        "POSTGREST_POOL_SIZE": str(rest["pool_size"]),
+        "POSTGREST_POOL_ACQUISITION_TIMEOUT": str(rest["pool_acquisition_timeout_seconds"]),
+        "POSTGREST_POOL_MAX_IDLE": str(rest["pool_max_idle_seconds"]),
+        "POSTGREST_POOL_MAX_LIFETIME": str(rest["pool_max_lifetime_seconds"]),
+        # Comma-joined, which is what PostgREST parses. An empty list renders an
+        # empty string -- no cross-origin browser request is permitted -- rather
+        # than being omitted, because an unset variable is a required
+        # interpolation that fails and a project with no REST service still has
+        # to render.
+        "POSTGREST_CORS_ORIGINS": ",".join(rest["allowed_cors_origins"]),
+        "JWT_AUDIENCE": identity.jwt_audience,
     }
     lines = [
         "# Generated. Do not edit; do not shell-source.",
@@ -720,7 +778,12 @@ def render_project(
             write_private(staging / "outputs.json", naming.canonical_json(outputs))
             write_private(
                 staging / "compose.env",
-                build_compose_env(identity, outputs["database"]["budget"], project["database"]),
+                build_compose_env(
+                    identity,
+                    outputs["database"]["budget"],
+                    project["database"],
+                    project["api"],
+                ),
             )
             write_private(staging / "rendered-summary.txt", build_summary(outputs))
 

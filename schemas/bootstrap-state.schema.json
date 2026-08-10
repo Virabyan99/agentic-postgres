@@ -82,7 +82,8 @@
           "app_runtime_password",
           "pgbouncer_admin_password",
           "bootstrap_jwt_signing_key",
-          "docs_basic_auth_password"
+          "docs_basic_auth_password",
+          "postgrest_authenticator_password"
         ]
       },
       "description": "What this project created and is therefore allowed to destroy. An enum rather than free text: destruction reads this list, and a typo that silently widened it would be the worst possible bug in this file. A secret entry is the contract's own `name` from secrets.required.yaml, one per secret; test_bootstrap_state.py asserts this enum covers every required secret that file declares, because bootstrap creating one credential while materialization expected three is exactly the drift that produced a 404 in the middle of a deployment."

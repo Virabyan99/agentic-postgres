@@ -40,6 +40,7 @@ CONTRACT_ENTRIES = [
                 "uid": 65532,
                 "gid": 65532,
                 "mode": "0400",
+                "format": "raw",
             }
         ],
     }
@@ -121,6 +122,7 @@ def test_a_content_field_on_a_contract_entry_never_reaches_the_manifest(field: s
                     "uid": 65532,
                     "gid": 65532,
                     "mode": "0400",
+                    "format": "raw",
                     field: SENTINEL,
                 }
             ],
@@ -162,6 +164,7 @@ def test_a_target_file_may_not_escape_the_generation_directory() -> None:
                     "uid": 0,
                     "gid": 0,
                     "mode": "0400",
+                    "format": "raw",
                 }
             ],
         }

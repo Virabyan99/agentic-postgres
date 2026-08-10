@@ -54,6 +54,8 @@ at **D126**.
 | **D152** | *(§11.5)* The admin server is "container-loopback-only", and §11.7's negative test is that probes to `postgrest:3001` from another container fail. | **It binds whatever `server-host` binds.** Measured with a control: with `server-host = "0.0.0.0"` — which every containerised service needs — and only `admin-server-port` set, `--dump-config` reports `admin-server-host = "0.0.0.0"`, and `/live` and `/ready` **answered a peer container on the project network**. With `admin-server-host = "127.0.0.1"` the same peer is refused and `--ready` still works from inside. | **`admin-server-host` is set explicitly and the negative probe is a real test**, not a restatement of a property. The §11.7 assertion is right about what must be true and wrong about what makes it true: it would have passed against a configuration that published the admin surface to every container on the network, because nothing would have been probing for it. | The runbook's sentence is a description of a *default* that is not the default. A service is loopback-only when it is told to be, and the failure of not telling it is silent in the direction that matters — the admin surface answers, to the wrong audience, and every other check stays green. | no |
 | **D153** | *(§11.6, §19.2 step 10)* Container-local readiness is `postgrest --ready`. | **`--ready` is a client and it reads its own configuration, not the running process's.** Against a service answering 200: bare `--ready` exits **1** with *"Admin server is not running"*; `--ready /path/to/postgrest.conf` exits 0; `PGRST_ADMIN_SERVER_PORT` alone exits 1 with *"the `--ready` flag cannot be used when server-host is …"* because the default host is a wildcard; both `PGRST_ADMIN_SERVER_HOST` and `PGRST_ADMIN_SERVER_PORT` exit 0. | **The healthcheck names the configuration file**, and a contract test asserts that the bare form fails — so the obvious spelling cannot be written and pass. The healthcheck process therefore reads a file containing `db-uri`; it prints nothing, and Run 4's no-secret-in-logs assertion covers the command as well as the service. | This is D145 from the other side, and the pair is the whole lesson. `--ready` returns **0 while every request fails** when the hook cannot resolve, and **1 while every request succeeds** when nobody handed it a port. Neither direction is a readiness signal on its own, and the version bump this probe justified (D127) bought a mechanism that needs two more decisions before it means anything. | no |
 | **D154** | *(§13.2)* The public JWKS is "verification-only" and generation refuses a key carrying a private parameter — stated as a property of the pipeline. | **PostgREST does not refuse one.** A JWKS whose single key carried `d` was loaded and served a request normally. Nothing between the file and the verifier objects to a private key being published. | **Unchanged in substance and reclassified in weight.** `jwt_keys.assert_public` refuses all seven RFC 7518 private parameters, by name, against the complete set — and it is now known to be the *only* thing that would. `test_jwt_keys.py` asserts the refusal against a deliberately malformed input, one test per parameter, which is what ADR 0051 asked for and now the reason it asked. | The check was written as belt and braces over a service assumed to be doing the same thing. It is not: the service accepts what it is given. A generation bug that published the signing key would produce a working deployment, and the only signal would be the file itself. | no |
+| **D155** | *(§11.4, and this plan's own Run 4 paragraph)* "The entrypoint assembles the database URI in tmpfs at `0600` from the mounted secret file and never logs it" — the shape Session 4 used for the pooler, dbmate and three client fixtures. | **There is no entrypoint that can.** The image is distroless (D147): no shell, no `wget`, no `curl`, no declared `ENTRYPOINT`. Nothing in the container can read one file and write another. Run 4 measured the four ways a password could arrive instead, with a control that put it inline to prove the rig was real — inline works, `PGPASSFILE` works, `?passfile=` inside the conninfo works, and the `@file` form holding a whole URI works. | **The configuration is `PGRST_*` in the environment and the credential is a file named by `?passfile=`** (ADR 0056). Every environment value is a derived non-secret identifier interpolated by Compose; the mounted file is `*:*:*:*:<password>`, written in that shape by the materializer because nothing downstream can wrap it. Measured on a running container: the password is in no environment variable, no argument (`.Args` is empty), no label, no log line and nothing `docker inspect` prints, while the request path answers 200. | The `@file` form was the near miss: it works, and it would have put a derived role, host and database name inside an operator-facing value — which is D60 exactly, one session on. The wildcards in the pgpass line are the same decision at a smaller scale: naming the four match fields would put those identifiers in a secret file that goes stale when any of them changes, with `fe_sendauth: no password supplied` as the symptom and the wrong file as the place to look. | **yes — ADR 0056** |
+| **D156** | *(§11.6)* The container healthcheck proves readiness, and §19.2 step 10 verifies it. This plan's §5 adds D101's rule: a healthcheck must prove a failure a port check calls healthy. | **Half of that is reachable from inside this container and half is not.** `postgrest --ready` proves the pool and the schema cache, which a port check does not — that half is real, and it works bare here only because the configuration is in the environment, so the probe's own configuration *is* the service's (D153). The other half is the request path, and D145 measured `--ready` returning 0 while every request 404'd. With no HTTP client in the image, no check that traverses the surface can run inside the container. | **The healthcheck is `postgrest --ready` and the comment above it says what it cannot prove.** The request-path proof moves to the deploy's own verification and to `API-REST-001`, where it is a real request rather than a probe standing in for one. | Writing this down is the point. A healthcheck that proves the pool and is *described* as proving readiness is how D145 happens again — the failure it misses is precisely the one the deploy is otherwise most likely to have, and a green container beside a 404 is the shape this repository keeps producing. | no |
 
 ---
 
@@ -477,7 +479,47 @@ guide is written against the number the materialization plan prints, not against
 a number counted in prose (D108).
 
 ### Run 4 — The PostgREST service and its configuration
-*Offline.*
+*Offline, plus a container runtime for the credential measurements.* **Done.**
+
+> **The service has no entrypoint, no config file and no shell** (D155). That is
+> not a simplification, it is the only shape available: the image is distroless,
+> so nothing in the container can read a mounted secret and write a connection
+> string. Four ways a password could arrive were measured, with a control that
+> put it inline to prove the rig was real, and all four work. The one chosen
+> keeps it out of the environment, the argument vector, the labels and `docker
+> inspect` — all four checked afterwards on a running container, where `.Args`
+> is literally empty.
+>
+> The credential reaches libpq through a **pgpass file with wildcards in all
+> four match fields**, written in that shape by the materializer because nothing
+> downstream can wrap it (ADR 0056). Naming the host, port, database and role
+> would have put four derived identifiers into a secret file — D60's defect at a
+> smaller scale, with `fe_sendauth: no password supplied` as the symptom.
+>
+> **`postgrest --ready` works bare here**, which D153 said it would not. The
+> reason is specific to this design and worth stating: the probe reads its own
+> configuration, and its own configuration is the service's, because both come
+> from the same environment. What it proves is the pool and the schema cache;
+> what it cannot prove is the request path, and D156 records that rather than
+> letting the check be described as readiness.
+>
+> **It fails closed, and differently from the pooler.** With an unreadable
+> pgpass, PostgREST logs `fe_sendauth: no password supplied` and **exits 1**.
+> D101's pooler logged a permission error and went on listening, refusing every
+> connection while a port check called it healthy. Measured both ways.
+>
+> **`PGRST_JWT_SECRET` is deliberately absent**, and `test_no_verification_key_is_configured_yet`
+> asserts the absence. It names the verification JWKS, which root tooling derives
+> from the bootstrap signing key at deploy time, and a service pointed at a file
+> no deploy has written does not start. Until it is set every request is `anon` —
+> a token is not rejected, it is not considered — which is the honest state for a
+> session with no activated request role. The test goes red on the day the key is
+> added, which is the day the run that renders the JWKS has to say so.
+>
+> `postgrest_authenticator_password` arrives here rather than in Run 3, with its
+> consumer, for the reason Run 3 recorded. And `session_profiles` needed no
+> change: it has selected `session2..N` since Session 2, so it was already
+> cumulative.
 
 The service joins the root `compose.yaml` under a new `session5` profile;
 `bin/project-runtime.sh::session_profiles` becomes cumulative through 5. No host

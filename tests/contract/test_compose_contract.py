@@ -209,6 +209,14 @@ def test_no_database_credential_appears_in_the_model_or_the_env() -> None:
     way to the `@`: a literal anywhere in there is a credential in the model,
     which is the thing being forbidden. `postgresql://` and `PGPASSWORD` stay
     banned outright -- nothing here has a use for either.
+
+    Session 5 added the second URL and made the check understand Compose's own
+    syntax. `${VAR:?required}` contains a colon, so splitting the userinfo on
+    colons used to produce `?required}` and read it as a literal password. That
+    is a parser fault, not a finding: the references are expanded away first,
+    and what is asserted about the remainder is *stricter* than before -- every
+    part must now be either a variable reference or empty, where it previously
+    only had to start with `$`.
     """
     text = MODEL.read_text(encoding="utf-8")
     for marker in ("postgresql://", "PGPASSWORD"):
@@ -217,9 +225,14 @@ def test_no_database_credential_appears_in_the_model_or_the_env() -> None:
     urls = re.findall(r"postgres://([^@\s]*)@", text)
     assert urls, "the model no longer assembles a connection URL; this test is measuring nothing"
     for userinfo in urls:
-        for part in userinfo.split(":"):
-            assert part.startswith("$"), (
-                f"compose.yaml has a literal in a connection URL's userinfo: {part!r}"
+        # `${VAR}`, `${VAR:?required}` and the `$$VAR` a shell entrypoint sees.
+        # Replaced by a marker rather than deleted, so that `${A}:${B}` still
+        # shows two parts and an empty one cannot hide a dropped literal.
+        expanded = re.sub(r"\$\{[^}]*\}|\$\$[A-Za-z_][A-Za-z0-9_]*", "$", userinfo)
+        for part in expanded.split(":"):
+            assert part == "$", (
+                f"compose.yaml has a literal in a connection URL's userinfo: {part!r} "
+                f"(from {userinfo!r})"
             )
 
     for directory in (ALPHA, ALPINE):

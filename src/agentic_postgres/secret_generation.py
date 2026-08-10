@@ -64,6 +64,10 @@ def _entry(consumer: dict[str, Any]) -> dict[str, Any]:
         "uid": int(consumer["uid"]),
         "gid": int(consumer["gid"]),
         "mode": consumer["mode"],
+        # Placement includes shape. A file written in pgpass format is not the
+        # provider's value, and an operator reading this manifest to answer
+        # "what is in that file" would otherwise be told the wrong thing.
+        "format": consumer["format"],
     }
     if consumer["plane"] != "root":
         entry["service"] = consumer["service"]
