@@ -471,7 +471,7 @@ def _openssl_time(value: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def cluster_instance_uuid(container: str) -> str:
+def cluster_instance_uuid(container: str, database: str) -> str:
     """Read the identity the volume carries, from the cluster that carries it.
 
     Not from the deployed document, and not from anything the deploy computed:
@@ -482,11 +482,19 @@ def cluster_instance_uuid(container: str) -> str:
     This is also why a publication cannot be part of a first `up`. The UUID does
     not exist until the cluster has bootstrapped an empty volume, and bootstrap
     runs after `compose up --wait` returns.
+
+    **``database`` is a parameter, and the first version hard-coded it to
+    ``postgres``** (D113). ``-U postgres -d postgres`` reads perfectly naturally
+    and is the maintenance database: ``app_private.project_identity`` is created
+    by a migration inside the *project's* database, so the query returned
+    "relation does not exist" on a cluster where the row was sitting there the
+    whole time. It failed on the first host that ran it and could fail nowhere
+    else -- there is no offline path through this function.
     """
     result = subprocess.run(
         [
             "docker", "exec", "-i", container,
-            "psql", "-U", "postgres", "-d", "postgres", "-X", "-qtA",
+            "psql", "-U", "postgres", "-d", database, "-X", "-qtA",
             "-c", "SELECT instance_uuid FROM app_private.project_identity",
         ],
         capture_output=True, text=True, check=False, timeout=60,
@@ -564,7 +572,7 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
 
     document = json.loads((state_directory / "outputs.json").read_text(encoding="utf-8"))
     container = document["database"]["container"]
-    instance_uuid = cluster_instance_uuid(container)
+    instance_uuid = cluster_instance_uuid(container, document["database"]["name"])
 
     access = host["database_access"]
     step("1. Reserve two host-loopback ports")

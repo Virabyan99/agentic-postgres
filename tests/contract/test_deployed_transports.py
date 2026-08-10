@@ -169,6 +169,38 @@ def test_the_document_validates_once_the_transports_are_published() -> None:
         assert isinstance(block["password_secret_ref"], str) and block["password_secret_ref"]
 
 
+def test_the_identity_query_names_the_projects_database_not_the_maintenance_one() -> None:
+    """D113, and the only offline check there can be on this call.
+
+    ``app_private.project_identity`` is created by a migration inside the
+    *project's* database. The first version of ``cluster_instance_uuid``
+    connected with ``-U postgres -d postgres`` -- which reads perfectly
+    naturally, is the maintenance database, and returned "relation does not
+    exist" on a cluster where the row had been sitting for a session. There is
+    no offline path through that function: it runs ``docker exec``, so it
+    failed on the first host that ran it and could fail nowhere else.
+
+    So the assertion is structural, on the source: the database is a parameter
+    and no literal ``postgres`` is passed as ``-d``. Goes red the moment
+    somebody re-hard-codes it, which is the only way this comes back.
+    """
+    from agentic_postgres import REPO_ROOT
+
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    body = source.split("def cluster_instance_uuid(", 1)[1].split("\ndef ", 1)[0]
+
+    assert "def cluster_instance_uuid(container: str, database: str)" in source, (
+        "the database must be a parameter, not a literal inside the function"
+    )
+    assert '"-d", database,' in body, "the identity query does not use the database it was given"
+    assert '"-d", "postgres"' not in body, (
+        "the identity query connects to the maintenance database; "
+        "app_private.project_identity lives in the project's own database"
+    )
+    # And the caller passes the project's name rather than inventing one.
+    assert 'cluster_instance_uuid(container, document["database"]["name"])' in source
+
+
 def test_the_secret_reference_is_the_one_the_broker_will_look_for() -> None:
     """Two definitions of one fact, asserted to agree.
 
