@@ -27,6 +27,14 @@
 # and the check below fails loudly rather than silently falling back to
 # interpolation.
 #
+# `:user_a`, NOT `:'user_a'`. The quoted form is psql's SQL-LITERAL quoting,
+# which is right for interpolating into statement text and wrong here: psql
+# parses a meta-command's arguments before expanding variables, so the quotes
+# it adds are never stripped and arrive as part of the parameter. Run 9
+# measured the result -- `invalid input syntax for type uuid:
+# "'3f6c2a10-...'"` -- which is the fixture using the boundary it exists to
+# demonstrate incorrectly. A value passed to `\bind` is a value, not SQL.
+#
 # Exit codes: 0 every check passed, 2 bad input, 3 missing prerequisite,
 # 6 a check failed, 8 the credential could not be prepared.
 
@@ -133,16 +141,16 @@ SQL
 #    passed through.
 query <<'SQL' | expect "user A can write under a transaction-local claim" "t"
 BEGIN;
-SELECT set_config('app.user_id', $1, true) IS NOT NULL \bind :'user_a' \g
-SELECT (api.create_note($2)).owner_id = $1::uuid \bind :'user_a' 'psql fixture note (A)' \g
+SELECT set_config('app.user_id', $1, true) IS NOT NULL \bind :user_a \g
+SELECT (api.create_note($2)).owner_id = $1::uuid \bind :user_a 'psql fixture note (A)' \g
 COMMIT;
 SQL
 
 # 3. The same for user B, so there is something for A to fail to see.
 query <<'SQL' | expect "user B can write under its own claim" "t"
 BEGIN;
-SELECT set_config('app.user_id', $1, true) IS NOT NULL \bind :'user_b' \g
-SELECT (api.create_note($2)).owner_id = $1::uuid \bind :'user_b' 'psql fixture note (B)' \g
+SELECT set_config('app.user_id', $1, true) IS NOT NULL \bind :user_b \g
+SELECT (api.create_note($2)).owner_id = $1::uuid \bind :user_b 'psql fixture note (B)' \g
 COMMIT;
 SQL
 
@@ -151,19 +159,19 @@ SQL
 #    both would satisfy "cannot see the other user" while proving nothing.
 query <<'SQL' | expect "user A sees its own rows and none of user B's" "t"
 BEGIN;
-SELECT set_config('app.user_id', $1, true) IS NOT NULL \bind :'user_a' \g
+SELECT set_config('app.user_id', $1, true) IS NOT NULL \bind :user_a \g
 SELECT count(*) FILTER (WHERE owner_id = $1::uuid) > 0
    AND count(*) FILTER (WHERE owner_id <> $1::uuid) = 0
-  FROM api.notes \bind :'user_a' \g
+  FROM api.notes \bind :user_a \g
 COMMIT;
 SQL
 
 query <<'SQL' | expect "user B sees its own rows and none of user A's" "t"
 BEGIN;
-SELECT set_config('app.user_id', $1, true) IS NOT NULL \bind :'user_b' \g
+SELECT set_config('app.user_id', $1, true) IS NOT NULL \bind :user_b \g
 SELECT count(*) FILTER (WHERE owner_id = $1::uuid) > 0
    AND count(*) FILTER (WHERE owner_id <> $1::uuid) = 0
-  FROM api.notes \bind :'user_b' \g
+  FROM api.notes \bind :user_b \g
 COMMIT;
 SQL
 
