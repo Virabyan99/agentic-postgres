@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -278,32 +279,95 @@ def _profile_block(document: dict[str, Any], profile: str) -> dict[str, Any]:
     return block
 
 
+#: The port each transport listens on *inside* its container. Not the port a
+#: developer binds — that is the allocation, and the two are different numbers
+#: on purpose, because ADR 0042 allocates the near end from a host-wide range.
+CONTAINER_PORTS = {"pooled": 6432, "direct": 5432}
+
+
+def container_address(container: str, network: str) -> str:
+    """The container's current address on one network, read from Docker.
+
+    **Resolved per call and never written down** (ADR 0044). A container address
+    changes when the container is recreated, so a recorded one is right until the
+    next restart — this project's most frequent defect wearing a different hat.
+    The broker is privileged and on the host, so asking Docker at the moment it
+    answers costs one exec and removes the staleness entirely.
+    """
+    result = subprocess.run(  # noqa: S603
+        [  # noqa: S607
+            "docker",
+            "inspect",
+            "-f",
+            f'{{{{ (index .NetworkSettings.Networks "{network}").IPAddress }}}}',
+            container,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=30,
+    )
+    address = result.stdout.strip()
+    if result.returncode != 0 or not address or address == "<no value>":
+        raise BrokerError(
+            4,
+            f"could not read {container}'s address on {network}: "
+            f"{result.stderr.strip() or 'no address'}. The transports are reached "
+            "through an SSH forward to the container, so there is nothing to "
+            "forward to until it is running",
+        )
+    return address
+
+
 def endpoint(
     project_key: str,
     profile: str,
     *,
     etc_root: Path = ETC_ROOT,
+    resolve_address: Any = container_address,
 ) -> dict[str, Any]:
     """Where to connect and as whom. Contains no secret and never will.
 
-    Callers on a developer's machine build a connection string from this and
-    obtain the password separately, so that the two operations can be logged,
-    audited and refused independently — and so the common case, printing an
-    environment, involves no credential at all.
+    Two endpoints, and keeping them apart is the whole of ADR 0044.
+
+    **``host`` and ``port`` are the tunnel target** — the container's current
+    address on the project's own network, which ``bin/connect.sh`` forwards to
+    and nothing records. **``local_port`` is the allocated port** the developer
+    binds at the near end, which is stable across redeploy, restart and reboot
+    because it is keyed by the identity the volume carries. So a saved command
+    keeps working even though the address it forwards to does not.
+
+    Nothing is published. The host reaches the container because it is the
+    gateway of that bridge; the outside world reaches neither.
+
+    ``resolve_address`` is a parameter so a test can supply one. Everything else
+    here reads files under a root it was given, and one function that could only
+    run where Docker does would have taken the whole module's tests onto a host
+    with it.
     """
     document = _deployed_document(project_key, etc_root=etc_root)
     block = _profile_block(document, profile)
     allocation = _allocation(project_key, etc_root=etc_root)
 
     transport = access_policy.transport_for(profile)
-    port = allocation["pooled_port"] if transport == "pooled" else allocation["direct_port"]
+    local_port = allocation["pooled_port"] if transport == "pooled" else allocation["direct_port"]
+
+    # The pooled transport is the pooler's container, the direct one the
+    # cluster's. Derived from the recorded container name rather than rebuilt
+    # from the project key: the deployed document is what says which containers
+    # this project actually has.
+    container = document["database"]["container"]
+    if transport == "pooled":
+        container = container.replace("-postgres-1", "-pgbouncer-1")
 
     return {
         "project_key": project_key,
         "profile": profile,
         "transport": transport,
-        "host": _loopback_address(etc_root=etc_root),
-        "port": port,
+        "host": resolve_address(container, document["edge"]["project_internal_network"]),
+        "port": CONTAINER_PORTS[transport],
+        "local_port": local_port,
+        "local_address": _loopback_address(etc_root=etc_root),
         "role": block["role"],
         "database": document["database"]["name"],
         "allocation_state": allocation["state"],

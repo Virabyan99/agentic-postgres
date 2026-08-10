@@ -41,7 +41,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import config, host_config, port_allocations
+from agentic_postgres import access_broker, config, host_config, port_allocations
 from agentic_postgres.port_allocations import AllocationError
 
 EXIT_INVALID = 2
@@ -213,6 +213,34 @@ def command_allocate(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _container_endpoints(project_key: str) -> dict[str, tuple[str, int]]:
+    """Where each transport actually listens, from the deployed document.
+
+    The same resolution the broker performs, through the same function, so the
+    thing `verify` connects to is the thing `bin/connect.sh` will forward to.
+    Two implementations of "where is the pooler" would agree until the day one
+    of them was updated.
+    """
+    document = json.loads(
+        (Path("/etc/agentic-postgres/projects") / project_key / "outputs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    network = document["edge"]["project_internal_network"]
+    cluster = document["database"]["container"]
+    pooler = cluster.replace("-postgres-1", "-pgbouncer-1")
+    return {
+        "pooled": (
+            access_broker.container_address(pooler, network),
+            access_broker.CONTAINER_PORTS["pooled"],
+        ),
+        "direct": (
+            access_broker.container_address(cluster, network),
+            access_broker.CONTAINER_PORTS["direct"],
+        ),
+    }
+
+
 def command_verify(arguments: argparse.Namespace) -> int:
     """Check what is actually listening, then promote the reservation.
 
@@ -222,22 +250,30 @@ def command_verify(arguments: argparse.Namespace) -> int:
     they are different functions with different names rather than one with a
     flag.
     """
-    address, _ = access_settings(arguments.host)
-
     with HostLock():
         registry = load_registry(arguments.registry)
         allocation = port_allocations.find(registry, arguments.instance_uuid)
         if allocation is None:
             return fail(EXIT_MISSING_STATE, f"no allocation for {arguments.instance_uuid}")
 
+        # The CONTAINER endpoints, not the allocated ports (ADR 0044). Nothing is
+        # published, so connecting to the allocated port would prove only that
+        # the developer's near end is free -- which is what `allocate` already
+        # checked, and the opposite of what this command is for. The host reaches
+        # the container because it is the gateway of that bridge.
+        try:
+            endpoints = _container_endpoints(allocation["project_key"])
+        except access_broker.BrokerError as error:
+            return fail(error.code, str(error))
+
         unreachable = []
-        for transport in ("pooled_port", "direct_port"):
-            port = allocation[transport]
+        for transport, (address, port) in endpoints.items():
+            print(f"  {transport:<7} {address}:{port}")
             try:
                 with socket.create_connection((address, port), timeout=5):
                     pass
             except OSError as error:
-                unreachable.append(f"{transport.removesuffix('_port')} {port}: {error}")
+                unreachable.append(f"{transport} {address}:{port}: {error}")
 
         if unreachable:
             for line in unreachable:

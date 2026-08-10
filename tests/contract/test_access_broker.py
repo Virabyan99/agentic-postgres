@@ -48,6 +48,33 @@ OLD_PASSWORD = "the-credential-a-rotation-replaced"  # noqa: S105
 NEW_PASSWORD = "the-credential-the-pooler-is-mounting"  # noqa: S105
 
 
+#: The container address a stub resolver returns.
+#:
+#: ADR 0044 made the endpoint's `host` the container's current address on the
+#: project network, resolved from Docker at call time and never written down.
+#: `endpoint()` takes the resolver as a parameter precisely so that the rest of
+#: this module -- which reads files under a root it was given -- does not have
+#: to move onto a host to keep testing the parts that have nothing to do with
+#: Docker.
+CONTAINER_ADDRESS = "172.23.0.9"
+
+
+def stub_resolver(container: str, network: str) -> str:
+    """Record what was asked for, and answer without Docker."""
+    stub_resolver.calls.append((container, network))
+    return CONTAINER_ADDRESS
+
+
+stub_resolver.calls = []
+
+
+def broker_endpoint(host, profile: str):
+    """`endpoint()` with the stub resolver, so no test reaches for Docker."""
+    return access_broker.endpoint(
+        PROJECT, profile, etc_root=host.etc, resolve_address=stub_resolver
+    )
+
+
 # ---------------------------------------------------------------------------
 # A host, in a temporary directory
 # ---------------------------------------------------------------------------
@@ -83,7 +110,12 @@ def deployed_document(**overrides: Any) -> dict[str, Any]:
         "source_commit": "0" * 40,
         "deployed_through_session": 4,
         "project": {"key": PROJECT},
-        "database": {"name": DATABASE, "access_profiles": profiles},
+        "edge": {"project_internal_network": "apg-agentic-alpha-dev-internal"},
+        "database": {
+            "name": DATABASE,
+            "container": "apg-agentic-alpha-dev-postgres-1",
+            "access_profiles": profiles,
+        },
     }
     document.update(overrides)
     return document
@@ -285,18 +317,43 @@ def test_each_transport_gets_its_own_port(host) -> None:
     """The two ports differ, so a swapped mapping is visible rather than
     plausible. A pooled profile answered on the direct port would connect and
     work -- with none of the pooling the profile's name promises."""
-    pooled = access_broker.endpoint(PROJECT, "runtime_pooled", etc_root=host.etc)
-    direct = access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)
+    pooled = access_broker.endpoint(
+        PROJECT, "runtime_pooled", etc_root=host.etc, resolve_address=stub_resolver
+    )
+    direct = access_broker.endpoint(
+        PROJECT, "runtime_direct", etc_root=host.etc, resolve_address=stub_resolver
+    )
 
-    assert (pooled["transport"], pooled["port"]) == ("pooled", POOLED_PORT)
-    assert (direct["transport"], direct["port"]) == ("direct", DIRECT_PORT)
-    assert pooled["host"] == direct["host"] == LOOPBACK
+    # ADR 0044 split the endpoint in two, and the split is the point. `port` is
+    # the CONTAINER port -- the far end of the tunnel, which never varies -- and
+    # `local_port` is the ALLOCATED port the developer binds, which is what has
+    # to differ between the transports and stay stable across a redeploy.
+    assert (pooled["transport"], pooled["local_port"]) == ("pooled", POOLED_PORT)
+    assert (direct["transport"], direct["local_port"]) == ("direct", DIRECT_PORT)
+    assert pooled["port"] == access_broker.CONTAINER_PORTS["pooled"]
+    assert direct["port"] == access_broker.CONTAINER_PORTS["direct"]
+    assert pooled["local_port"] != direct["local_port"]
+
+    # The tunnel target is a container address, resolved per call and never
+    # written down; the near end is the host's loopback.
+    assert pooled["host"] == direct["host"] == CONTAINER_ADDRESS
+    assert pooled["local_address"] == direct["local_address"] == LOOPBACK
+
+    # And the two transports are resolved from DIFFERENT containers. One
+    # container answering for both is how a pooled profile ends up connecting
+    # straight to the cluster with none of the pooling its name promises.
+    pooled_container, direct_container = stub_resolver.calls[-2][0], stub_resolver.calls[-1][0]
+    assert pooled_container.endswith("-pgbouncer-1")
+    assert direct_container.endswith("-postgres-1")
+
     assert pooled["role"] == direct["role"] == RUNTIME_ROLE
     assert pooled["database"] == DATABASE
 
 
 def test_the_endpoint_carries_no_credential_and_no_reference_to_one(host) -> None:
-    answer = access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)
+    answer = access_broker.endpoint(
+        PROJECT, "runtime_direct", etc_root=host.etc, resolve_address=stub_resolver
+    )
     rendered = json.dumps(answer)
     assert NEW_PASSWORD not in rendered
     assert OLD_PASSWORD not in rendered
@@ -304,9 +361,12 @@ def test_the_endpoint_carries_no_credential_and_no_reference_to_one(host) -> Non
 
 
 def test_the_migration_profile_reports_the_migration_role(host) -> None:
-    answer = access_broker.endpoint(PROJECT, "migration_direct", etc_root=host.etc)
+    answer = access_broker.endpoint(
+        PROJECT, "migration_direct", etc_root=host.etc, resolve_address=stub_resolver
+    )
     assert answer["role"] == MIGRATION_ROLE
-    assert answer["port"] == DIRECT_PORT
+    assert answer["local_port"] == DIRECT_PORT
+    assert answer["port"] == access_broker.CONTAINER_PORTS["direct"]
 
 
 def test_a_rendered_document_is_refused(host) -> None:
@@ -314,7 +374,9 @@ def test_a_rendered_document_is_refused(host) -> None:
     assembled from nulls."""
     host.write_document(deployed_document(document_kind="rendered"))
     with pytest.raises(BrokerError) as raised:
-        access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)
+        access_broker.endpoint(
+            PROJECT, "runtime_direct", etc_root=host.etc, resolve_address=stub_resolver
+        )
     assert raised.value.code == 5
 
 
@@ -325,7 +387,9 @@ def test_an_unavailable_profile_is_missing_state_not_a_refusal(host) -> None:
     host.write_document(document)
 
     with pytest.raises(BrokerError) as raised:
-        access_broker.endpoint(PROJECT, "runtime_pooled", etc_root=host.etc)
+        access_broker.endpoint(
+            PROJECT, "runtime_pooled", etc_root=host.etc, resolve_address=stub_resolver
+        )
     assert raised.value.code == 4
 
 
@@ -343,7 +407,9 @@ def test_a_drifted_secret_reference_is_refused_rather_than_resolved(host) -> Non
     host.write_document(document)
 
     with pytest.raises(BrokerError) as raised:
-        access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)
+        access_broker.endpoint(
+            PROJECT, "runtime_direct", etc_root=host.etc, resolve_address=stub_resolver
+        )
     assert raised.value.code == 5
     assert "will not choose" in str(raised.value)
 
@@ -354,7 +420,9 @@ def test_a_document_without_access_profiles_names_the_fix(host) -> None:
     host.write_document(document)
 
     with pytest.raises(BrokerError) as raised:
-        access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)
+        access_broker.endpoint(
+            PROJECT, "runtime_direct", etc_root=host.etc, resolve_address=stub_resolver
+        )
     assert raised.value.code == 5
     assert "redeploy" in str(raised.value).lower()
 
@@ -362,7 +430,9 @@ def test_a_document_without_access_profiles_names_the_fix(host) -> None:
 def test_a_host_manifest_without_the_database_section_is_refused(host) -> None:
     (host.etc / "host.yaml").write_text("schema_version: 1\nssh:\n  port: 22\n", encoding="utf-8")
     with pytest.raises(BrokerError) as raised:
-        access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)
+        access_broker.endpoint(
+            PROJECT, "runtime_direct", etc_root=host.etc, resolve_address=stub_resolver
+        )
     assert raised.value.code == 5
     assert "loopback_address" in str(raised.value)
 
@@ -375,7 +445,9 @@ def test_a_host_manifest_without_the_database_section_is_refused(host) -> None:
 def test_a_released_allocation_does_not_answer_for_a_project(host) -> None:
     host.write_registry([allocation(state="released")])
     with pytest.raises(BrokerError) as raised:
-        access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)
+        access_broker.endpoint(
+            PROJECT, "runtime_direct", etc_root=host.etc, resolve_address=stub_resolver
+        )
     assert raised.value.code == 4
 
 
@@ -395,7 +467,9 @@ def test_two_live_allocations_for_one_key_refuse_rather_than_pick_the_first(host
         ]
     )
     with pytest.raises(BrokerError) as raised:
-        access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)
+        access_broker.endpoint(
+            PROJECT, "runtime_direct", etc_root=host.etc, resolve_address=stub_resolver
+        )
     assert raised.value.code == 5
     assert "instance UUID" in str(raised.value)
 
@@ -408,9 +482,7 @@ def test_a_released_record_alongside_a_live_one_is_not_ambiguity(host) -> None:
             allocation(),
         ]
     )
-    assert access_broker.endpoint(PROJECT, "runtime_direct", etc_root=host.etc)["port"] == (
-        DIRECT_PORT
-    )
+    assert broker_endpoint(host, "runtime_direct")["local_port"] == DIRECT_PORT
 
 
 # ---------------------------------------------------------------------------

@@ -599,25 +599,27 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
         fail(EXIT_PRECONDITION, f"no allocation recorded for {key} after reserving one")
     pooled, direct = int(allocation[2]), int(allocation[3])
 
-    step("2. Render the override that publishes them")
+    step("2. Render the override (which publishes nothing -- ADR 0044)")
     rendered_directory = deployed_output.rendered_path(key)
     payload = runtime_override.render_override(
         router_name=_env_value(rendered_directory / "compose.env", "HEALTH_ROUTER_NAME"),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
-        publications={
-            "address": access["loopback_address"],
-            "pooled_port": pooled,
-            "direct_port": direct,
-        },
     )
     _write_root_only(rendered_directory / "runtime-compose.override.yaml", payload)
     print(f"  {rendered_directory / 'runtime-compose.override.yaml'}")
-    print(f"  pgbouncer -> {access['loopback_address']}:{pooled}")
-    print(f"  postgres  -> {access['loopback_address']}:{direct}")
+
+    # The allocation names the port a DEVELOPER binds, not one this host opens
+    # (ADR 0044). Docker installs no rule and no listener for a container on an
+    # internal network, and the transports are reached instead by an SSH forward
+    # to the container's own address -- which the broker resolves per call and
+    # nothing writes down.
+    print(f"  {access['loopback_address']}:{pooled} is the near end of a pooled tunnel")
+    print(f"  {access['loopback_address']}:{direct} is the near end of a direct tunnel")
+    print("  no host port is opened; nothing is published")
 
     print("\n\033[1mNothing was started, and no allocation was marked active.\033[0m")
-    print("Restart the project to apply the publication, then:")
+    print("The allocation becomes active once both transports have answered:")
     print(f"  sudo bin/database-ports.sh verify --host <host.yaml> --instance-uuid {instance_uuid}")
     return 0
 

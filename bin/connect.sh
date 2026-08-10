@@ -360,15 +360,23 @@ command_tunnel() {
   endpoint="$(broker endpoint "${SSH_DESTINATION}")" || status=$?
   [ "${status}" -eq 0 ] || exit "${status}"
 
-  local remote_host remote_port role database
+  # The far end is the CONTAINER (ADR 0044). Nothing is published; the host
+  # reaches the container because it is the gateway of that bridge, and the
+  # outside world reaches neither. The near end is the ALLOCATED port, which is
+  # stable across redeploy, restart and reboot -- so a saved command keeps
+  # working even though the address it forwards to does not.
+  local remote_host remote_port role database allocated
   remote_host="$(printf '%s' "${endpoint}" | jq -r '.host')"
   remote_port="$(printf '%s' "${endpoint}" | jq -r '.port')"
+  allocated="$(printf '%s' "${endpoint}" | jq -r '.local_port')"
   role="$(printf '%s' "${endpoint}" | jq -r '.role')"
   database="$(printf '%s' "${endpoint}" | jq -r '.database')"
   [ -n "${remote_port}" ] && [ "${remote_port}" != "null" ] \
     || die 5 "the broker returned no port for ${PROJECT_KEY}/${PROFILE}."
+  [ -n "${allocated}" ] && [ "${allocated}" != "null" ] \
+    || die 5 "the broker returned no allocated local port for ${PROJECT_KEY}/${PROFILE}."
 
-  local local_port="${LOCAL_PORT:-${remote_port}}"
+  local local_port="${LOCAL_PORT:-${allocated}}"
   local file
   file="$(state_file "${PROJECT_KEY}" "${PROFILE}")"
 

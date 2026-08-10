@@ -362,4 +362,12 @@ def test_a_runtime_render_does_not_deploy() -> None:
         )
     assert '"ready"' not in body, "the runtime render publishes readiness"
     assert "database-ports.sh" in body
-    assert "publications=" in body
+    # ADR 0044 inverted this. It asserted that the runtime render passes
+    # publications; nothing is published now, and what the render still owes
+    # is the reservation and the override. Stricter in the direction that
+    # matters: `publications=` reaching this code path again would be a
+    # publication nobody decided to add.
+    assert "publications=" not in body, (
+        "the runtime render passes publications; ADR 0044 says nothing is published"
+    )
+    assert "no host port is opened" in body
