@@ -101,4 +101,13 @@ if (result.error) {
   console.error(`client-prisma: ${result.error.message}`);
   process.exit(6);
 }
+
+// The same closing line every other fixture prints, and it is a contract rather
+// than a courtesy: the harness asserts on it because an exit status of 0 from a
+// CLI that was never reached would look identical to success. Run 9 found the
+// gap from the other side -- this mode exited 0, having genuinely applied the
+// migration, and the assertion failed for want of a line nobody had written.
+if (result.status === 0) {
+  console.log("client-prisma: every check passed");
+}
 process.exit(result.status ?? 6);
