@@ -21,6 +21,7 @@ pooler does.
 from __future__ import annotations
 
 import json
+import socket
 import subprocess
 from typing import Any
 
@@ -378,25 +379,67 @@ def test_the_allocation_is_active_and_keyed_by_the_volumes_identity(
 def test_the_published_ports_are_the_ones_the_registry_allocated(
     project_a, allocation_for, sh
 ) -> None:
-    """DBX-PORT-001, the other half: the registry and the host agree.
+    """DBX-PORT-001, the other half: the registry, the host and the world agree.
 
-    A registry entry is a claim about what is published. This reads the listening
-    sockets and matches them against it.
+    **Not measured with `ss`, and that is the point** (D114). `daemon.json` sets
+    ``userland-proxy: false``, so Docker implements a publication as an iptables
+    DNAT rule and **no host process listens on the published port**. The first
+    version of this test asserted a listening socket, which this host's Docker
+    configuration never creates — a check that could not pass, which is ADR
+    0035's defect with its sign flipped. It would have reported a correct
+    publication as broken on every run.
 
-    Goes red if: a publication is written for a port the registry does not hold,
-    or the registry holds a port nothing is listening on. Either is a state where
-    a developer's saved tunnel reaches something other than what it names.
+    So the two things that are actually true of a publication are asserted
+    instead: Docker binds the container port to the allocated host port **on a
+    loopback address**, and a TCP connect to that address completes.
+
+    Goes red if: a publication is written for a port the registry does not hold;
+    the registry holds a port nothing answers on; or — the one that matters —
+    ``HostIp`` is anything but loopback, which is the difference between a
+    developer's tunnel and a database on the internet.
     """
-    allocation = allocation_for(key(project_a))
-    listening = sh("ss", "-H", "-lnt")
-    for transport, port in (
-        ("pooled", allocation["pooled_port"]),
-        ("direct", allocation["direct_port"]),
+    document = project_a
+    allocation = allocation_for(key(document))
+    pooled_container = document["database"]["container"].replace("-postgres-1", "-pgbouncer-1")
+
+    for transport, container, container_port, port in (
+        ("pooled", pooled_container, INTERNAL_POOL_PORT, allocation["pooled_port"]),
+        ("direct", document["database"]["container"], 5432, allocation["direct_port"]),
     ):
-        assert f":{port} " in listening, (
-            f"the registry allocates {port} for the {transport} transport and nothing "
-            f"is listening on it:\n{listening}"
+        bindings = json.loads(
+            sh("docker", "inspect", "-f", "{{json .HostConfig.PortBindings}}", container)
         )
+        published = bindings.get(f"{container_port}/tcp")
+        assert published, (
+            f"{container} publishes nothing on {container_port}; the registry allocates "
+            f"{port} for the {transport} transport"
+        )
+        assert len(published) == 1, f"{transport} is published {len(published)} times: {published}"
+        assert published[0]["HostPort"] == str(port), (
+            f"{transport} is published on {published[0]['HostPort']}, and the registry "
+            f"allocates {port}. A saved tunnel then reaches something other than it names"
+        )
+        assert _is_loopback(published[0]["HostIp"]), (
+            f"{transport} is published on {published[0]['HostIp']}:{port}, which is not a "
+            "loopback address (ADR 0040)"
+        )
+
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.settimeout(5.0)
+            assert probe.connect_ex(("127.0.0.1", port)) == 0, (
+                f"nothing answers on 127.0.0.1:{port}, which the registry allocates for "
+                f"the {transport} transport"
+            )
+
+
+def _is_loopback(address: str) -> bool:
+    """A real address comparison. `1270.0.0.1` starts with `127.` and is not."""
+    from ipaddress import ip_address
+
+    try:
+        return ip_address(address).is_loopback
+    except ValueError:
+        return False
 
 
 # ---------------------------------------------------------------------------
