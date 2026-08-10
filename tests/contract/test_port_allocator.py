@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+import yaml
 
 from agentic_postgres import port_allocations, runtime_override
 from agentic_postgres.port_allocations import AllocationError
@@ -312,53 +313,6 @@ def test_activating_an_unknown_identity_is_refused() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_publication_carries_an_explicit_loopback_address() -> None:
-    entry = runtime_override.publication(address="127.0.0.1", port=15432, container_port=6432)
-    assert entry["host_ip"] == "127.0.0.1"
-    assert entry["target"] == 6432
-    assert entry["published"] == "15432"
-    assert entry["mode"] == "host"
-
-
-@pytest.mark.parametrize(
-    "address",
-    [
-        pytest.param("0.0.0.0", id="wildcard-v4"),  # noqa: S104 -- the value under refusal
-        pytest.param("::", id="wildcard-v6"),
-        pytest.param("203.0.113.10", id="public"),
-        pytest.param("10.0.0.5", id="private-lan"),
-        pytest.param("", id="empty"),
-        pytest.param("1270.0.0.1", id="starts-with-127"),
-    ],
-)
-def test_a_publication_on_a_non_loopback_address_is_refused(address: str) -> None:
-    """`1270.0.0.1` is here because `startswith("127.")` would admit it."""
-    with pytest.raises(ValueError, match="not a loopback address"):
-        runtime_override.publication(address=address, port=15432, container_port=6432)
-
-
-@pytest.mark.parametrize("port", [22, 80, 443, 1023, 0, 65536])
-def test_a_publication_on_a_privileged_port_is_refused(port: int) -> None:
-    with pytest.raises(ValueError, match="unprivileged range"):
-        runtime_override.publication(address="127.0.0.1", port=port, container_port=6432)
-
-
-def test_the_override_publishes_both_transports_and_nothing_else() -> None:
-    document = runtime_override.build_override(
-        router_name="apg-alpha-dev-health",
-        https_entrypoint="websecure",
-        rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
-        publications={"address": "127.0.0.1", "pooled_port": 15432, "direct_port": 15433},
-    )
-    services = document["services"]
-    published = {name: service for name, service in services.items() if "ports" in service}
-    assert set(published) == {"pgbouncer", "postgres"}
-    assert published["pgbouncer"]["ports"][0]["target"] == 6432
-    assert published["postgres"]["ports"][0]["target"] == 5432
-    for service in published.values():
-        assert service["ports"][0]["host_ip"] == "127.0.0.1"
-
-
 def test_an_override_without_an_allocation_publishes_nothing() -> None:
     """A project is deployed before it is published, and the order is forced.
 
@@ -373,3 +327,62 @@ def test_an_override_without_an_allocation_publishes_nothing() -> None:
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )
     assert not [name for name, service in document["services"].items() if "ports" in service]
+
+
+# ---------------------------------------------------------------------------
+# ADR 0044 — nothing is published
+#
+# Three tests stood here: a publication on a non-loopback address is refused, a
+# publication on a privileged port is refused, and the override publishes both
+# transports and nothing else. They were correct for a design in which something
+# was published, and Run 9 measured that nothing can be: Docker installs no DNAT
+# rule and no listener for a container on an `internal: true` network.
+#
+# What replaces them is strictly stronger. The old pair refused a BAD
+# publication; this refuses ANY, including every input the old tests accepted.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("address", "port"),
+    [
+        ("127.0.0.1", 15432),  # the exact pair the old tests accepted
+        ("127.0.0.53", 15433),
+        ("::1", 15432),
+        ("0.0.0.0", 15432),  # noqa: S104 -- an input being refused, not a bind
+        ("62.238.99.122", 15432),
+        ("127.0.0.1", 443),
+        ("", 15432),
+    ],
+)
+def test_no_publication_can_be_built_at_all(address: str, port: int) -> None:
+    """ADR 0044. The capability is absent, not merely unused.
+
+    The first three rows are what the superseded design called *correct*: a
+    loopback address and an unprivileged port. They are refused here, which is
+    what makes this stricter than the tests it replaces rather than a relaxation
+    wearing an ADR number.
+
+    Goes red if somebody reintroduces a `ports:` entry for a database transport
+    — which would silently do nothing on an internal network, and would do
+    something the day the network stopped being internal.
+    """
+    with pytest.raises(RuntimeError, match="nothing is published"):
+        runtime_override.publication(address=address, port=port, container_port=6432)
+
+
+def test_the_override_carries_no_ports_entry_for_any_service() -> None:
+    """The other half: not just that the builder refuses, but that the document
+    it builds has no publication in it.
+
+    Goes red if a `ports:` key reaches the runtime override by any route,
+    including one that never calls `publication()`.
+    """
+    payload = runtime_override.render_override(
+        router_name="apg-alpha-dev-health",
+        https_entrypoint="websecure",
+        rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
+    )
+    document = yaml.safe_load(payload)
+    for name, service in document["services"].items():
+        assert "ports" not in service, f"{name} publishes a port; ADR 0044 says nothing does"

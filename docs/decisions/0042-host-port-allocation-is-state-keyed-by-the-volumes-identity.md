@@ -1,6 +1,13 @@
 # 0042 — Host port allocation is state, keyed by the identity the volume carries
 
-Status: proposed
+Status: accepted, amended by [0044](0044-there-is-no-publication.md)
+
+The allocation no longer names a port the host publishes; it names the LOCAL
+port a developer binds at the near end of a tunnel. Everything this ADR
+decides is unchanged by that: the key is still the identity the volume
+carries, the two ports are still allocated together and durable across
+redeploy, restart and reboot, and `reserved` still becomes `active` only
+after something has connected.
 Date: 2026-08-08
 Session: 4, Run 1
 Affects: DBX-PORT-001, DEP-ISO-004

@@ -64,35 +64,26 @@ __all__ = [
 
 
 def publication(*, address: str, port: int, container_port: int) -> dict[str, Any]:
-    """One loopback publication, in long syntax so `host_ip` is a field.
+    """Refused. Nothing is published (ADR 0044).
 
-    Long syntax rather than `"127.0.0.1:15432:6432"` for one reason: ADR 0040
-    requires the tests to *read the published address*, and a string form makes
-    that a parsing exercise whose failure mode is a regex that matches the
-    wrong thing. Here the address is a key, and a publication that omits it is
-    missing a key rather than hiding one inside a string.
+    This built a long-syntax `ports:` entry until Run 9, when the host proved
+    that Docker installs no DNAT rule and no listener for a container on an
+    `internal: true` network -- it accepts the request, records
+    `HostConfig.PortBindings`, and does nothing. The transports are reached by
+    an SSH forward to the container's own address on the host's bridge, so no
+    host port exists to bind at all.
 
-    `mode: host` is explicit because the default differs between swarm and
-    non-swarm, and a publication whose reachability depends on which one Docker
-    thinks it is in is exactly the sort of thing that behaves one way here and
-    another way on the host.
+    Kept as a refusal rather than deleted. The signature is what a future reader
+    reaches for when they want to publish a database port, and finding it raise
+    with the reason is worth more than finding nothing and writing it again.
     """
-    if not is_loopback(address):
-        raise ValueError(
-            f"{address!r} is not a loopback address. Only the edge publishes on a "
-            "reachable address (ADR 0040); a database transport is reached through "
-            "a tunnel"
-        )
-    if not 1024 <= port <= 65535:
-        raise ValueError(f"published port {port} is outside the unprivileged range")
-
-    return {
-        "target": container_port,
-        "published": str(port),
-        "host_ip": address,
-        "protocol": "tcp",
-        "mode": "host",
-    }
+    del address, port, container_port
+    raise RuntimeError(
+        "nothing is published (ADR 0044). A container on an internal network gets "
+        "no DNAT rule and no listener, and the transports are reached through an "
+        "SSH forward to the container's address on the host's own bridge. There is "
+        "no host port, which is why there is no bind address to get wrong."
+    )
 
 
 def is_loopback(address: str) -> bool:

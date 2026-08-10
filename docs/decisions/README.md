@@ -107,3 +107,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0041](0041-two-transports-three-access-profiles.md) | Two transports, three access profiles | 4 | Proposed |
 | [0042](0042-host-port-allocation-is-state-keyed-by-the-volumes-identity.md) | Host port allocation is state, keyed by the identity the volume carries | 4 | Proposed |
 | [0043](0043-the-access-broker-is-a-release-reached-through-a-trampoline.md) | The access broker is a release, reached through a trampoline | 4 | Accepted, amended |
+| [0044](0044-there-is-no-publication.md) | There is no publication | 4 | Accepted |

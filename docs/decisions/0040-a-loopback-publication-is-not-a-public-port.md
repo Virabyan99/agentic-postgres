@@ -1,6 +1,12 @@
 # 0040 — A loopback publication is not a public port
 
-Status: proposed
+Status: accepted; the publication clause superseded by [0044](0044-there-is-no-publication.md)
+
+Run 9 measured that Docker installs no DNAT rule and no listener for a
+container on an `internal: true` network, so there is no publication left to
+bind wrongly. Everything else here stands: the threat model, the refusal of
+`0.0.0.0`, `::`, host networking and a missing `host_ip`, the versioning of
+CFG-010, and the measured HBA table.
 Date: 2026-08-08
 Session: 4, Run 1
 Affects: SEC-NET-001, SEC-NET-002, DBX-PG-002, SEC-DBX-001, CFG-010
