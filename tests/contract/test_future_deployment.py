@@ -58,6 +58,27 @@ def test_new_team_member_completes_the_documented_path() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Session 5 — the API plane
+#
+# DEP-ISO-005 follows DEP-ISO-004's construction, and D70 is why it will need
+# node IDs of its own for the cross-project clause: "the routes differ" and
+# "one project's token is refused by the other" are different claims, and a
+# requirement whose description is broader than its node IDs is a claim the
+# evidence file reports as passed.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.future(session=5, requirement="DEP-ISO-005")
+def test_two_projects_share_no_api_route_token_or_credential() -> None:
+    unimplemented(5, "A's token, key and authenticator credential are all refused by B")
+
+
+@pytest.mark.future(session=5, requirement="DX-API-001")
+def test_the_request_broker_leaks_no_token() -> None:
+    unimplemented(5, "an authorized call succeeds with the token in no argv, log or output")
+
+
+# ---------------------------------------------------------------------------
 # Session 4 — activated in Run 8
 #
 # The four placeholders that were here are gone rather than kept beside their

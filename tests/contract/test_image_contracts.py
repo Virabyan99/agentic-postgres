@@ -38,6 +38,28 @@ Session 4 added three more, and two of them contradicted the runbook:
   that would have been catastrophic to assume: see the test at the bottom of
   this module, and note that it asserts the control as well as the result.
 
+Session 5 added four, and the runbook was wrong about three of them:
+
+* the PostgREST image is **distroless** -- no shell, no wget, no curl. A
+  healthcheck can therefore be neither ``CMD-SHELL`` nor an HTTP probe, and the
+  only thing that can look from inside the container is the binary itself. That
+  single fact is what forced the version bump.
+* **``postgrest --ready`` exists in 14.16 and not in 13.0.4**, which is why the
+  bump happened; and it **returns 0 while every request is failing**, which is
+  why it cannot be the whole healthcheck. It asks the admin server about the
+  pool and the schema cache. A service whose pre-request hook does not resolve
+  is refusing every request and is, by that probe, ready. This is D101's pooler
+  one session on: a listening port is not a working service, and now neither is
+  a green readiness endpoint.
+* **``client-error-verbosity`` exists in neither 13.0.4 nor 14.16.** The runbook
+  sets it in its required configuration baseline and asserts it in its gate; it
+  arrives in 16.0. A key read from documentation for a version that does not
+  have it is ADR 0019 exactly, in the runbook's own §11.3.
+* the **PGRST error shape is the other way round** from the runbook's: the
+  response body is the JSON in ``MESSAGE`` and the status and headers are the
+  JSON in ``DETAIL``. Following the runbook produces ``PGRST121`` and **HTTP
+  500** where a 401 was intended, so the difference is not cosmetic.
+
 Marked `database` rather than `contract`: these need a container runtime, and
 the Session 1 gate's `-m "contract and not future"` selection must stay
 runnable in a checkout. A runner without Docker reports that it could not look,
@@ -779,3 +801,263 @@ def test_the_model_puts_dbmate_flags_where_they_are_accepted() -> None:
         if flag.startswith("--"):
             allowed = DBMATE_SUBCOMMAND_FLAGS.get(subcommands[0], ())
             assert flag in allowed, f"{flag} follows {subcommands[0]}, which does not accept it"
+
+
+# ---------------------------------------------------------------------------
+# The locked PostgREST (Session 5 plan §3.2, D127)
+#
+# Everything here was measured against both v13.0.4 -- pinned since Session 1 --
+# and v14.16, before the bump was made. The bump has exactly one reason and it
+# is in this file rather than in the plan: on a distroless image with no shell
+# and no HTTP client, `postgrest --ready` is the only probe that can run inside
+# the container, and 13.0.4 does not have it.
+# ---------------------------------------------------------------------------
+
+#: What `postgrest --version` prints for the locked digest.
+POSTGREST_VERSION = "14.16"
+
+#: The complete key set the locked binary accepts, read from `--dump-config`.
+#: Written down here because a key the parser drops is a boundary that is not
+#: there, and nothing offline can tell the difference between a setting that is
+#: enforced and a setting that is ignored.
+POSTGREST_CONFIG_KEYS = frozenset(
+    {
+        "admin-server-host",
+        "admin-server-port",
+        "db-aggregates-enabled",
+        "db-anon-role",
+        "db-channel",
+        "db-channel-enabled",
+        "db-config",
+        "db-extra-search-path",
+        "db-hoisted-tx-settings",
+        "db-max-rows",
+        "db-plan-enabled",
+        "db-pool",
+        "db-pool-acquisition-timeout",
+        "db-pool-automatic-recovery",
+        "db-pool-max-idletime",
+        "db-pool-max-lifetime",
+        "db-pre-config",
+        "db-pre-request",
+        "db-prepared-statements",
+        "db-root-spec",
+        "db-schemas",
+        "db-tx-end",
+        "db-uri",
+        "jwt-aud",
+        "jwt-cache-max-entries",
+        "jwt-role-claim-key",
+        "jwt-secret",
+        "jwt-secret-is-base64",
+        "log-level",
+        "log-query",
+        "openapi-mode",
+        "openapi-security-active",
+        "openapi-server-proxy-uri",
+        "server-cors-allowed-origins",
+        "server-host",
+        "server-port",
+        "server-timing-enabled",
+        "server-trace-header",
+        "server-unix-socket",
+        "server-unix-socket-mode",
+    }
+)
+
+#: Set by the runbook's §11.3 baseline and asserted by its §16.2 gate. It does
+#: not exist before 16.0. Named rather than merely omitted, so that a later
+#: session reaching for it finds the measurement instead of the documentation.
+POSTGREST_KEYS_THAT_DO_NOT_EXIST_YET = ("client-error-verbosity",)
+
+#: Defaults that are dangerous rather than merely wrong, so the rendered
+#: configuration has to set them explicitly and a test has to prove it did.
+POSTGREST_DANGEROUS_DEFAULTS = {
+    # `public` in the request search path is the whole of what ADR 0052 and
+    # API-SCHEMA-001 are about, and it is what you get by not deciding.
+    "db-extra-search-path": "public",
+    # Database-sourced configuration overriding the reviewed file is the
+    # default. `db-config = false` is what turns the file into the authority.
+    "db-config": "true",
+    # Not empty. Three settings are hoisted unless this is set.
+    "db-hoisted-tx-settings": (
+        "statement_timeout,plan_filter.statement_cost_limit,default_transaction_isolation"
+    ),
+}
+
+
+@pytest.fixture(scope="module")
+def postgrest_image() -> str:
+    image = LOCK["POSTGREST_IMAGE"]
+    subprocess.run(
+        ["docker", "pull", "--platform", "linux/amd64", "-q", image],
+        capture_output=True,
+        check=False,
+        timeout=600,
+    )
+    return image
+
+
+def run_postgrest(*args: str, image: str) -> subprocess.CompletedProcess[str]:
+    """Run the binary, naming it explicitly.
+
+    The image declares no ``ENTRYPOINT``, so the shared ``run`` helper's
+    arguments land in ``exec`` position and ``--version`` comes back as an
+    executable that does not exist. Not a quirk worth hiding: it is the same
+    reason the Compose service must name its command rather than inherit one.
+    """
+    return subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "--entrypoint",
+            "postgrest",
+            image,
+            *args,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+
+
+@pytest.fixture(scope="module")
+def postgrest_dumped_config(postgrest_image: str, tmp_path_factory: pytest.TempPathFactory) -> dict:
+    """``--dump-config`` output, parsed.
+
+    It connects to the database before dumping, so it emits two PGRST000
+    warnings against an unreachable host and dumps anyway. Those go to stderr
+    and the dump goes to stdout, which is the only reason this is usable
+    offline.
+
+    It also prints ``db-uri`` **verbatim**, password included. This fixture
+    feeds it a deliberately worthless URI for that reason, and the Session 5
+    entrypoint must never dump a config carrying a real one to anywhere but a
+    protected tmpfs.
+    """
+    directory = tmp_path_factory.mktemp("postgrest-config")
+    directory.chmod(0o755)
+    (directory / "postgrest.conf").write_text(
+        'db-uri = "postgresql://nobody@127.0.0.1:1/nothing"\n'
+        'db-schemas = "api"\n'
+        'db-anon-role = "anon"\n',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "-v",
+            f"{directory}:/cfg:ro",
+            "--entrypoint",
+            "postgrest",
+            postgrest_image,
+            "--dump-config",
+            "/cfg/postgrest.conf",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    assert result.returncode == 0, result.stderr
+    settings: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        key, separator, value = line.partition(" = ")
+        if separator:
+            settings[key.strip()] = value.strip().strip('"')
+    assert settings, result.stdout
+    return settings
+
+
+@requires_docker
+def test_postgrest_reports_the_measured_version(postgrest_image: str) -> None:
+    result = run_postgrest("--version", image=postgrest_image)
+    assert result.returncode == 0, result.stderr
+    assert POSTGREST_VERSION in result.stdout, result.stdout
+
+
+@requires_docker
+def test_the_postgrest_image_has_no_shell(postgrest_image: str) -> None:
+    """The fact that decided the healthcheck, and then the version.
+
+    Distroless: no shell, no wget, no curl. A Compose healthcheck therefore
+    cannot be ``CMD-SHELL`` and cannot run an HTTP client, which leaves the
+    binary itself -- and on 13.0.4 the binary had no probe subcommand at all.
+
+    Asserted rather than assumed because the alternative failure is silent in
+    the worst way: a ``CMD-SHELL`` healthcheck on an image with no shell is
+    reported by Docker as an unhealthy container, and the obvious repair is to
+    weaken the check rather than to notice the image.
+    """
+    result = run("echo hi", image=postgrest_image, via_sh=True)
+    assert result.returncode != 0, "the image has a shell; the healthcheck constraint is wrong"
+    assert "executable file not found" in (result.stderr + result.stdout), result.stderr
+
+
+@requires_docker
+def test_postgrest_has_the_readiness_probe_that_forced_the_bump(postgrest_image: str) -> None:
+    """`--ready` is the whole reason 13.0.4 was left behind (D127)."""
+    result = run_postgrest("--help", image=postgrest_image)
+    assert result.returncode == 0, result.stderr
+    assert "--ready" in result.stdout, (
+        "the locked PostgREST has no --ready, and on a distroless image there is "
+        "then no way to probe it from inside its own container"
+    )
+
+
+@requires_docker
+def test_the_config_key_set_is_the_measured_one(postgrest_dumped_config: dict) -> None:
+    """Every key this session sets must be one the binary admits.
+
+    ADR 0019 is why this is a test rather than a reading. A floor was once
+    written to guarantee a Traefik key that exists in no version: the floor was
+    real, the feature was not, and nothing offline could tell the difference.
+    """
+    assert set(postgrest_dumped_config) == POSTGREST_CONFIG_KEYS, {
+        "unexpected": sorted(set(postgrest_dumped_config) - POSTGREST_CONFIG_KEYS),
+        "missing": sorted(POSTGREST_CONFIG_KEYS - set(postgrest_dumped_config)),
+    }
+
+
+@requires_docker
+@pytest.mark.parametrize("key", POSTGREST_KEYS_THAT_DO_NOT_EXIST_YET)
+def test_a_key_the_runbook_requires_does_not_exist(postgrest_dumped_config: dict, key: str) -> None:
+    """The runbook's own §11.3 sets it and its §16.2 asserts it (D144).
+
+    It arrives in 16.0. Recorded as a test rather than as a note because the day
+    it starts existing is the day this session's error-wrapper mitigation can be
+    reconsidered, and a passing test is a worse messenger than a failing one.
+    """
+    assert key not in postgrest_dumped_config, (
+        f"{key} now exists in the locked PostgREST. Session 5 works around its "
+        "absence in the RPC error wrapper; revisit that with an ADR."
+    )
+
+
+@requires_docker
+@pytest.mark.parametrize(("key", "value"), sorted(POSTGREST_DANGEROUS_DEFAULTS.items()))
+def test_the_dangerous_defaults_are_what_they_were_measured_to_be(
+    postgrest_dumped_config: dict, key: str, value: str
+) -> None:
+    """Three settings whose default is the thing this session must not have.
+
+    ``db-extra-search-path`` defaults to ``public``; ``db-config`` defaults to
+    letting the database override the reviewed file; ``db-hoisted-tx-settings``
+    defaults to hoisting three settings rather than none.
+
+    A rendered configuration that omitted any of them would be wrong in exactly
+    the direction nobody checks, so the render sets all three explicitly and
+    this records what "explicitly" is protecting against.
+    """
+    assert postgrest_dumped_config[key] == value, (
+        f"{key} no longer defaults to {value!r}; the render's explicit setting "
+        "was protecting against a default that has changed"
+    )

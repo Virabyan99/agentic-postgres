@@ -43,6 +43,11 @@ at **D126**.
 | **D141** | §12.1: configure "the protected Traefik access-log field policy to retain the **response** `X-Request-ID` for correlation while dropping request headers by default, **dropping query parameters**, and explicitly dropping `Authorization`, `Cookie`, `X-Request-ID`". | **`accessLog.fields.queryParameters` does not exist in Traefik, and ADR 0019 exists because a floor was once written to guarantee it.** Probed against the locked digest, `accessLog.fields` accepts exactly `defaultMode`, `headers` and `names`. The resolution shipped in Session 2 is that **`RequestPath` is dropped entirely**, because it carries the query string and there is no way to keep one without the other. The path is already gone from access logs; `RouterName` and `ServiceName` remain. | **The query-parameter clause is struck.** Header dropping and the response-header retention are real capabilities and are configured; whether `X-Request-ID` can be retained as a *response* field is measured against the locked digest before it is written, not read from a page. The proof is the outcome, as ADR 0019 rewrote it: a request carrying a secret-shaped query-string sentinel leaves no trace of it in any log layer. | This is the second time this exact key has been asked for by a document written from vendor documentation, and the first time cost a run and took the edge plane down. A setting that decides whether a token reaches a log is the last place to accept a documentation claim. | no |
 | **D142** | §5.3 requires "a hash/digest-locked Playwright + Chromium (or equivalently locked headless-browser harness) for Scalar storage/network assertions"; §16.8 asserts no credential in "HTML, JS, network log, local/session storage". | The dev toolchain is hash-locked through `uv pip compile` into `requirements-dev.txt`, and `requirements-dev.in` **pins nothing** — a carried-in open item that has produced a red gate in two sessions. A browser is several hundred megabytes of new dependency, and what it would prove is that a third party's page honours its own `persistAuth: false`. | **No browser.** The documentation page is a **static local snapshot**, so "no credential in the served bytes" is a byte scan of files this deployment wrote — stronger than a browser assertion, because it holds for every visitor rather than for the one that was driven. `persistAuth: false`, the empty plugin set, the absent proxy URL and the absent external document URL are asserted against the generated configuration. The one thing genuinely lost is "Scalar does not itself call out to a third party at runtime", and that is proved instead at the network layer: the container joins one network, holds no credential, and D128's measurement establishes the bundle is self-contained. | A proof whose subject is another project's runtime behaviour is a proof of the wrong thing. This deployment's obligations are: serve no credential, load nothing remote, and let no header through. All three are measurable without driving a browser, and each of the three is measured where it is *caused* rather than where it would be *observed*. | no |
 | **D143** | §14.4: PostgREST provides no general body-size control, so Traefik enforces `maxRequestBodyBytes` and `memRequestBodyBytes`; "requests one byte above the maximum receive HTTP 413 before reaching PostgREST" and "a body exactly at the limit reaches the upstream". | The reasoning is right and the middleware exists. Whether those two keys behave as stated against **the locked Traefik digest** is a documentation claim, and it is the same class of claim as D141's. | **Adopted, and measured before it is depended on.** Run 6 sends `limit` and `limit + 1` against the locked digest and asserts the two outcomes; the exact-boundary case must reach the upstream and receive a deterministic non-413 answer, which need not be a valid domain payload. `memRequestBodyBytes == maxRequestBodyBytes` for P0, with a test that no spill file is created — which is a filesystem observation of the running container, not an inference from the equality. | ADR 0019's lesson, applied prospectively for once rather than after an edge plane refuses to start. The boundary test is worth more than the middleware assertion: it fails whether the cause is a renamed key, a changed default, or a router the middleware was never attached to. | no |
+| **D144** | *(§11.3, §16.2)* `client-error-verbosity = "minimal"` is required configuration and the gate asserts it. | **It exists in neither the locked v13.0.4 nor the runbook's own v14.16.** Both dump exactly 40 configuration keys and neither includes it; it arrives in **16.0**, which is what `latest` resolves to today. The runbook asked the version it pins for a key that version does not have. | **The clause is struck, and the absence is asserted rather than noted.** `test_a_key_the_runbook_requires_does_not_exist` fails on the day it starts existing, because that is the day the workaround can be reconsidered. The workaround is that **every public error is raised deliberately**: the RPCs and the pre-request function raise `PGRST`-coded errors with controlled bodies, and an unexpected error is caught and converted rather than passed through. | ADR 0019's defect, in the runbook's own required-configuration list — and this time found before it was rendered rather than four runs after. The consequence is not cosmetic: without the global control, **PostgreSQL's message text reaches the client verbatim**, which is how D148's private schema name got out. | no |
+| **D145** | *(§11.6)* Readiness is `postgrest --ready`, which "checks database pool and schema cache"; §19.2 step 10 verifies "container-local readiness". | **It returns exit 0 while every request is failing.** Measured: PostgREST configured with a `db-pre-request` naming a function that does not exist starts, connects, loads the schema cache, listens, and answers `--ready` with `OK`. Every request to the API returns 404. The probe asks the admin server about the pool and the schema cache and about nothing else. | **`--ready` is necessary and not sufficient, and the healthcheck says so.** It is the liveness-and-pool half; the other half must traverse the surface the service exists to serve. Run 4 decides the exact shape under D139's constraint that a first deploy has no roles yet — but it may not be `--ready` alone. | **This is D101's pooler one session on, in the mechanism the runbook designates as the health check.** The pooler listened while refusing every connection; PostgREST reports *ready* while refusing every request. Nothing about the probe distinguishes the two, which is the entire lesson of that divergence and the reason it was worth measuring rather than reading. | no |
+| **D146** | *(§10.1)* "When rejecting with SQLSTATE `PGRST`, put status and error-response headers — including `X-Request-ID`, `Cache-Control: no-store`, and `WWW-Authenticate: Bearer` for 401 — inside the `PGRST` error **`DETAIL`** JSON." | **The two halves are the other way round.** Measured against both versions: the **response body** is the JSON in `MESSAGE` — `{"code","message","details","hint"}`, with `code` and `message` obligatory — and the **status and headers** are the JSON in `DETAIL`. Raising the runbook's way produces `PGRST121`, *"Invalid JSON value for MESSAGE"*, and **HTTP 500**. Raising the measured way produces the intended **HTTP 401** with `WWW-Authenticate: Bearer` and the exact body. | **The measured shape**, and a test that raises each of the four pre-request refusals and asserts the status, the challenge and the body — not the SQL that produced them. | Getting this backwards does not produce a wrong message; it produces **a 500 where a 401 was intended**, which is an authentication refusal reported as a server fault. It would have passed any review that read the SQL, and it fails the first request that exercises it. | no |
+| **D147** | *(nothing in the runbook; §11.2 implies an ordinary image)* | **The PostgREST image is distroless.** No shell, no `wget`, no `curl` — `docker run --entrypoint sh` fails with *executable file not found*. It also declares no `ENTRYPOINT`, so an argument passed without `--entrypoint postgrest` lands in `exec` position and is reported as a missing executable. | **A Compose healthcheck can be neither `CMD-SHELL` nor an HTTP probe**, which leaves the binary itself — and that is what forced the version bump (D127), because v13.0.4's CLI has no probe subcommand at all. The Compose service names its command explicitly rather than inheriting one. | Recorded because the failure is silent in the worst direction: a `CMD-SHELL` healthcheck on a shell-less image is reported by Docker as an *unhealthy container*, and the obvious repair is to weaken the check rather than to notice the image. It is also the whole reason a two-major bump was cheaper than the alternatives — adding a shell to the image, or publishing the admin port that is bound to container loopback precisely so nothing can reach it. | no |
+| **D148** | *(§14.3)* Errors carry "no SQL query, role list, schema path, hint containing internal names, or failing row data". | **A missing pre-request function discloses the private schema and the function name to an unauthenticated caller.** `GET /thing` with an unresolvable `db-pre-request` returns 404 and `{"code":"42883", "message":"function app_private.does_not_exist() does not exist", "hint":"No function matches the given name…"}`. The row does not come out — it **fails closed** on the data, which is the important half — but `app_private` does. | **The error wrapper is not optional and it is not only for the RPCs.** Every path that can reach a client raises a `PGRST`-coded error with a controlled body, and `API-ERR-001` asserts the *absence of the internal name* rather than the presence of a code. With no `client-error-verbosity` to fall back on (D144), this is the only control there is. | The good news and the bad news arrived together: PostgREST fails closed on the data when its hook cannot resolve, which is the answer §3.2 measurement 2 was written to get. What it does not do is fail quietly, and a schema name is a small leak that tells an attacker exactly which schema to aim at. | no |
 
 ---
 
@@ -155,13 +160,15 @@ the one that replaces a runbook mechanism rather than a runbook sentence.
 Written into `tests/contract/test_image_contracts.py`, not into this document,
 for the reason Session 4 gave: one authority, and it is executable.
 
-1. **PostgREST 13.0.4's complete configuration surface** (D127). Every key this
-   session intends to set, compared against what `--dump-config` emits. A key
-   the binary does not recognise is a boundary that is not there.
-2. **What PostgREST does when `db-pre-request` names a function that does not
-   exist**, and when the authenticator cannot authenticate (D139). Fails closed
-   is a deploy that stops; fails open is a public API with claim validation
-   silently disabled, and every other check still green.
+1. ~~**PostgREST 13.0.4's complete configuration surface**~~ (D127). **Done:**
+   forty keys, `client-error-verbosity` absent (D144), three dangerous defaults
+   recorded, and the version bumped to 14.16 for a measured reason (D147).
+2. ~~**What PostgREST does when `db-pre-request` names a function that does not
+   exist**~~ (D139). **Done, and it is the finding of the run:** it starts,
+   reports itself **ready**, and refuses every request (D145) — while failing
+   closed on the data and open on the schema name (D148). What remains of this
+   measurement is the authenticator half: what happens when the role cannot
+   authenticate, which needs the roles Run 5 creates.
 3. **Whether the documentation bundle loads anything at runtime** (D128). This
    decides the image-versus-build question and is a P0 property in its own right.
 4. **Traefik's `buffering` limits against the locked digest** (D143), by sending
@@ -277,7 +284,50 @@ Runs are sized so each ends with a green gate and a reviewable commit. The
 offline runs come first; nothing public exists until Run 9.
 
 ### Run 1 — ADRs, requirement IDs, versions, and the measurements
-*Offline, plus a container runtime.*
+*Offline, plus a container runtime.* **Done.**
+
+> **The measurements bumped the version, and the reason is not the runbook's.**
+> D127 said measure v13.0.4 first and bump only if a measurement requires one.
+> One did, and it is not a feature: **the image is distroless** (D147), so a
+> healthcheck can be neither a shell nor an HTTP probe, and **`postgrest
+> --ready` exists in 14.16 and not in 13.0.4**. On 13.0.4 there is no way to
+> probe PostgREST from inside its own container at all. The rest of the 13→14
+> delta is *one key* — `jwt-cache-max-lifetime` becomes `jwt-cache-max-entries`
+> — and both versions dump exactly 40. `latest` is 16.0 and was not adopted:
+> two majors of unmeasured configuration change, for one key this session
+> mitigates in the error wrapper.
+>
+> **`client-error-verbosity` exists in neither** (D144). The runbook sets it in
+> its required baseline and asserts it in its gate. It arrives in 16.0. That is
+> ADR 0019's defect inside the runbook's own §11.3, and it was found before
+> anything was rendered rather than four runs after.
+>
+> **The finding worth the whole run: `--ready` returned 0 while every request
+> returned 404** (D145). A PostgREST whose `db-pre-request` names a function
+> that does not exist starts, connects, loads its schema cache, listens, and
+> reports itself ready — and refuses every request. This is D101's pooler again
+> in the mechanism the runbook designates as the health check.
+>
+> **And the pre-request hook fails closed on data and open on names** (D148).
+> The row does not come out; `app_private` does, in the error message. With no
+> `client-error-verbosity` to fall back on, the deliberate error wrapper is the
+> only control there is.
+>
+> **The `PGRST` error shape is inverted** from the runbook's (D146): the body is
+> the JSON in `MESSAGE`, the status and headers are the JSON in `DETAIL`.
+> Following the runbook yields `PGRST121` and HTTP 500 where a 401 was intended.
+>
+> Two of my own probes were too weak to mean anything and were re-run.
+> `db-config = false` was measured against a table with one row and a role
+> setting asking for `db_max_rows = 1`, so the right and wrong answers were the
+> same bytes; with two rows and a `db-config = true` control it returns two and
+> one respectively, and the suppression is real. And the JWKS-from-a-file check
+> proved only that the container did not crash, which is not the same as the
+> file being loaded — that becomes a real proof in Run 3, when there is a signed
+> token to present.
+>
+> **`tests/contract/test_image_contracts.py` is where all of it lives**, not
+> here. Six tests, forty passing.
 
 **ADR 0048 first, before anything else is written.** The example domain the
 contract will state is decided here (D129), and if it converges the code, the

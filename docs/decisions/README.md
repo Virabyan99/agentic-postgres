@@ -111,3 +111,9 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0045](0045-a-claim-is-shaped-by-where-it-can-be-measured.md) | A claim is shaped by where it can be measured | 4 | Accepted |
 | [0046](0046-a-nologin-stub-is-a-fact-with-an-expiry-date.md) | A NOLOGIN stub is a fact with an expiry date | 4 | Accepted |
 | [0047](0047-an-absence-proof-expires-when-a-later-session-supplies-the-thing.md) | An absence proof expires when a later session supplies the thing | 4 | Accepted |
+| [0048](0048-the-example-domain-the-migrations-shipped.md) | The example domain the migrations shipped, and the one four documents describe | 5 | Accepted |
+| [0049](0049-one-scope-vocabulary.md) | One scope vocabulary, and it lives in the capability schema | 5 | Accepted |
+| [0050](0050-a-reviewed-api-surface-is-a-generated-artifact.md) | A reviewed API surface is a generated artifact with an update/check split | 5 | Accepted |
+| [0051](0051-the-bootstrap-issuer-is-temporary-and-carries-its-own-expiry.md) | The bootstrap issuer is temporary, asymmetric, and carries its own expiry | 5 | Accepted |
+| [0052](0052-the-pre-request-function-is-the-one-private-object-a-request-role-may-reach.md) | The pre-request function is the one private object a request role may reach | 5 | Accepted |
+| [0053](0053-outputs-version-5.md) | Outputs version 5: the deployed document carries the public surface and the identity the broker needs | 5 | Accepted |

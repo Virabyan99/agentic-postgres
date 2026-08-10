@@ -56,7 +56,34 @@ images:
   # live in tests/contract/test_image_contracts.py, which is executable; no
   # PGBOUNCER_MINIMUM_VERSION floor is written here (D98).
   PGBOUNCER_IMAGE: docker.io/edoburu/pgbouncer:v1.24.1-p1
-  POSTGREST_IMAGE: docker.io/postgrest/postgrest:v13.0.4
+  # Session 5 bumped this from v13.0.4, and the reason is a measurement rather
+  # than the runbook's assertion that 14.16 is required (D127). Measured against
+  # both digests, on Docker 29.5.2:
+  #
+  #   * The image is DISTROLESS. No shell, no wget, no curl -- `docker run
+  #     --entrypoint sh` fails with "executable file not found". So a Compose
+  #     healthcheck can be neither CMD-SHELL nor an HTTP probe; the only thing
+  #     that can look from inside the container is the postgrest binary.
+  #   * `postgrest --ready` exists in 14.16 and NOT in 13.0.4, whose CLI offers
+  #     only --version, --example, --dump-config and --dump-schema. On 13.0.4
+  #     there is no in-container probe at all, and every alternative is worse:
+  #     add a shell to the image, or publish the admin port that is bound to
+  #     container loopback precisely so nothing can reach it.
+  #   * The rest of the delta is ONE key: `jwt-cache-max-lifetime` becomes
+  #     `jwt-cache-max-entries`. Both versions dump exactly 40 keys.
+  #   * `client-error-verbosity` -- which the runbook's own required baseline
+  #     sets, and which its gate asserts -- exists in NEITHER version. It
+  #     arrives in 16.0. The runbook asked the version it pins for a key that
+  #     version does not have, which is ADR 0019's defect exactly (D144).
+  #
+  # And the thing to know before trusting the bump: `--ready` returned exit 0
+  # while every request to the API returned 404, because it asks the admin
+  # server about the pool and the schema cache and about nothing else. It is a
+  # necessary probe and not a sufficient one (D145).
+  #
+  # `latest` is 16.0 today. Not adopted: two majors of unmeasured configuration
+  # change, bought for one key this session mitigates in the error wrapper.
+  POSTGREST_IMAGE: docker.io/postgrest/postgrest:v14.16
   PGBACKREST_IMAGE: docker.io/woblerr/pgbackrest:2.55.1
   PYTHON_RUNTIME_IMAGE: docker.io/library/python:3.12-slim
   NODE_RUNTIME_IMAGE: docker.io/library/node:22-alpine

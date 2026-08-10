@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 95 requirements**
+**P0 — 105 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -153,10 +153,20 @@ Priorities:
 | `SEC-DBX-003` | 4 | Transaction-local claim state, and deliberately set session-level state, are both absent for the next client of a released pooled connection. |
 | `SEC-DBX-004` | 4 | A rotated application credential is replaced in both planes: the generation the project points at opens the pooled and the direct transport, and the generation it replaced opens neither. The split-brain state - PostgreSQL holding one password while the pooler holds another - passes a test of either transport taken alone, so all four combinations are measured in one run. See the Session 4 plan, section 4.3. |
 | `API-CACHE-001` | 5 | An API migration reloads the schema cache and updates OpenAPI. |
+| `API-CONTRACT-001` | 5 | The live OpenAPI, normalized, equals the committed snapshot, and the snapshot equals the reviewed API-surface allowlist; an unlisted object in the api schema fails the gate. |
+| `API-ERR-001` | 5 | The public error contract is stable and discloses no SQL, role name, schema path, internal hint, or another owner's row. |
 | `API-LIMIT-001` | 5 | Row limits and timeouts are enforced by the server, not the client. |
+| `API-REST-001` | 5 | HTTP reads reproduce the database's row-level result exactly: a caller sees its own rows and none of another's, and the same query run directly against the database agrees. |
+| `API-RPC-001` | 5 | The write surface is exactly the named RPCs; generic table and view writes are refused, ownership is derived rather than accepted, and each call changes at most one row. |
 | `API-SCHEMA-001` | 5 | Only the api schema is exposed, matching a committed allowlist. |
+| `DEP-ISO-005` | 5 | Two projects have distinct routes, authenticator credentials, issuers, audiences, keys, snapshots and documentation credentials, and neither's token or credential works against the other. |
+| `DX-API-001` | 5 | The request broker performs an authorized call without a token reaching argv, stdout, shell history, a log, or evidence. |
 | `SEC-ANON-001` | 5 | The anonymous role cannot reach protected resources. |
+| `SEC-API-001` | 5 | From a network that is not the host: the REST route answers over HTTPS with the approved surface, the documentation route refuses without a credential, and nothing else of the API plane is reachable. |
+| `SEC-BOOT-001` | 5 | The temporary bootstrap issuer signs with a private key no service holds, verifiers hold public material only, and the deployed document records the issuer as temporary against the session it was deployed through. |
+| `SEC-DOCS-001` | 5 | The documentation credential never reaches the documentation service, the served bytes carry no credential, and no API token is served to a browser. |
 | `SEC-PRIV-001` | 5 | No API role can address the app or app_private schemas. |
+| `SEC-ROLE-001` | 5 | Role switching cannot exceed the authenticator's granted memberships: a token naming an unactivated, privileged, or foreign-project role is refused. |
 | `API-ADMIN-001` | 6 | Admin endpoints require an explicit admin scope, not a role name. |
 | `API-AUTH-001` | 6 | Login issues a short-lived token and the identity endpoint reflects it. |
 | `SEC-CRED-001` | 6 | Raw user and agent credentials are never stored or logged. |

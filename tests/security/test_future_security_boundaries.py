@@ -64,8 +64,42 @@ def test_api_roles_cannot_reach_the_private_schema() -> None:
     unimplemented(5, "app and app_private are unreachable through PostgREST")
 
 
+@pytest.mark.future(session=5, requirement="SEC-ROLE-001")
+def test_role_switching_cannot_exceed_granted_memberships() -> None:
+    unimplemented(5, "an unactivated, privileged or foreign-project role is refused")
+
+
+@pytest.mark.future(session=5, requirement="SEC-BOOT-001")
+def test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key() -> None:
+    unimplemented(5, "verifiers hold public material, and the document records the expiry")
+
+
+@pytest.mark.future(session=5, requirement="SEC-DOCS-001")
+def test_the_documentation_credential_reaches_no_service_and_no_browser() -> None:
+    unimplemented(5, "the header is removed upstream and the served bytes carry nothing")
+
+
+# Marked here, activated elsewhere. SEC-API-001 is measured from a network that
+# is not the deployment host, so its implementation belongs under
+# tests/external/ -- the move SEC-DBX-001's placeholder made in Session 4, and
+# the reason a placeholder's directory is not a commitment. When it lands, every
+# one of its node IDs must carry the `external` marker: a requirement whose
+# proofs straddle two environments breaks every claim that contains it, because
+# `claim_mode` reads the union across a claim's requirements (ADR 0045).
+@pytest.mark.future(session=5, requirement="SEC-API-001")
+def test_nothing_but_the_approved_surface_is_reachable_from_outside() -> None:
+    unimplemented(5, "the REST route answers, the docs route refuses, nothing else replies")
+
+
 # ---------------------------------------------------------------------------
 # Session 6 — token validation
+#
+# SEC-JWT-001 and SEC-KEY-001 stay Session 6's. Session 5 issues bootstrap
+# tokens and validates them, and a Session 5 requirement for either would give
+# two IDs one meaning -- the call D47 made when it dropped API-DB-001 against
+# SEC-VIEW-001. Session 5's negative matrix is proved under SEC-ROLE-001 and
+# SEC-ANON-001; the key separation of the *temporary* issuer is SEC-BOOT-001,
+# which Session 6 retires rather than inherits (ADR 0051).
 # ---------------------------------------------------------------------------
 
 

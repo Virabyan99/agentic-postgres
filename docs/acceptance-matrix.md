@@ -10,7 +10,7 @@ actually collect. That is checked by running a real collection and
 comparing node IDs, not by searching files for function names — a text
 search passes on a commented-out test.
 
-**99 requirements** — 95 P0, 17 active in Session 1, 82 owned by later sessions.
+**109 requirements** — 105 P0, 17 active in Session 1, 92 owned by later sessions.
 
 ## By session
 
@@ -20,7 +20,7 @@ search passes on a commented-out test.
 | 2 | 13 | placeholders owned by Session 2 |
 | 3 | 15 | placeholders owned by Session 3 |
 | 4 | 16 | placeholders owned by Session 4 |
-| 5 | 5 | placeholders owned by Session 5 |
+| 5 | 15 | placeholders owned by Session 5 |
 | 6 | 5 | placeholders owned by Session 6 |
 | 7 | 4 | placeholders owned by Session 7 |
 | 8 | 6 | placeholders owned by Session 8 |
@@ -117,10 +117,20 @@ search passes on a commented-out test.
 | ID | Priority | Guarantee | Proof |
 |---|---|---|---|
 | `API-CACHE-001` | P0 | An API migration reloads the schema cache and updates OpenAPI. | `tests/integration/test_future_api.py::test_api_migration_reloads_the_schema_cache_and_updates_openapi` |
+| `API-CONTRACT-001` | P0 | The live OpenAPI, normalized, equals the committed snapshot, and the snapshot equals the reviewed API-surface allowlist; an unlisted object in the api schema fails the gate. | `tests/integration/test_future_api.py::test_the_live_openapi_matches_the_reviewed_contract` |
+| `API-ERR-001` | P0 | The public error contract is stable and discloses no SQL, role name, schema path, internal hint, or another owner's row. | `tests/integration/test_future_api.py::test_the_public_error_contract_discloses_nothing_internal` |
 | `API-LIMIT-001` | P0 | Row limits and timeouts are enforced by the server, not the client. | `tests/integration/test_future_api.py::test_row_limits_and_timeouts_are_enforced_server_side` |
+| `API-REST-001` | P0 | HTTP reads reproduce the database's row-level result exactly: a caller sees its own rows and none of another's, and the same query run directly against the database agrees. | `tests/integration/test_future_api.py::test_http_reads_reproduce_the_database_row_level_result` |
+| `API-RPC-001` | P0 | The write surface is exactly the named RPCs; generic table and view writes are refused, ownership is derived rather than accepted, and each call changes at most one row. | `tests/integration/test_future_api.py::test_writes_are_exactly_the_named_rpcs` |
 | `API-SCHEMA-001` | P0 | Only the api schema is exposed, matching a committed allowlist. | `tests/integration/test_future_api.py::test_only_the_api_schema_is_exposed` |
+| `DEP-ISO-005` | P0 | Two projects have distinct routes, authenticator credentials, issuers, audiences, keys, snapshots and documentation credentials, and neither's token or credential works against the other. | `tests/contract/test_future_deployment.py::test_two_projects_share_no_api_route_token_or_credential` |
+| `DX-API-001` | P0 | The request broker performs an authorized call without a token reaching argv, stdout, shell history, a log, or evidence. | `tests/contract/test_future_deployment.py::test_the_request_broker_leaks_no_token` |
 | `SEC-ANON-001` | P0 | The anonymous role cannot reach protected resources. | `tests/security/test_future_security_boundaries.py::test_anon_cannot_reach_protected_resources` |
+| `SEC-API-001` | P0 | From a network that is not the host: the REST route answers over HTTPS with the approved surface, the documentation route refuses without a credential, and nothing else of the API plane is reachable. | `tests/security/test_future_security_boundaries.py::test_nothing_but_the_approved_surface_is_reachable_from_outside` |
+| `SEC-BOOT-001` | P0 | The temporary bootstrap issuer signs with a private key no service holds, verifiers hold public material only, and the deployed document records the issuer as temporary against the session it was deployed through. | `tests/security/test_future_security_boundaries.py::test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key` |
+| `SEC-DOCS-001` | P0 | The documentation credential never reaches the documentation service, the served bytes carry no credential, and no API token is served to a browser. | `tests/security/test_future_security_boundaries.py::test_the_documentation_credential_reaches_no_service_and_no_browser` |
 | `SEC-PRIV-001` | P0 | No API role can address the app or app_private schemas. | `tests/security/test_future_security_boundaries.py::test_api_roles_cannot_reach_the_private_schema` |
+| `SEC-ROLE-001` | P0 | Role switching cannot exceed the authenticator's granted memberships: a token naming an unactivated, privileged, or foreign-project role is refused. | `tests/security/test_future_security_boundaries.py::test_role_switching_cannot_exceed_granted_memberships` |
 
 ### Session 6
 
