@@ -109,13 +109,25 @@ query() {
         -f - 2>&1
 }
 
+# The assertion is the LAST statement's value, and the whole output is kept for
+# the failure message.
+#
+# A block here runs several statements: the claim is set, then the thing being
+# checked is evaluated, and each `\g` prints a row. Comparing the whole output
+# against one expected value failed with `expected t, got t` followed by a
+# second `t` on its own line -- true, unreadable, and about the harness rather
+# than the property. Taking the last line is right rather than convenient: the
+# earlier statements are setup, and `ON_ERROR_STOP=1` already means a failure in
+# any of them ends the block before this runs.
 expect() {
     label="$1"
     wanted="$2"
     got="$(cat)"
     got="$(printf '%s' "${got}" | tr -d '\r')"
-    if [ "${got}" != "${wanted}" ]; then
-        printf 'client-psql: %s: expected %s, got %s\n' "${label}" "${wanted}" "${got}" >&2
+    last="$(printf '%s\n' "${got}" | grep -v '^[[:space:]]*$' | tail -n 1)"
+    if [ "${last}" != "${wanted}" ]; then
+        printf 'client-psql: %s: expected %s, got %s\n' "${label}" "${wanted}" "${last}" >&2
+        printf 'client-psql: full output was:\n%s\n' "${got}" >&2
         exit 6
     fi
     printf '  ok    %s\n' "${label}"
