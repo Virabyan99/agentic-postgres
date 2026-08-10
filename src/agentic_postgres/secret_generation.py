@@ -50,6 +50,26 @@ def manifest_path(project_key: str, generation: str, *, root: Path = SECRET_ROOT
     return root / project_key / "generations" / generation / "manifest.json"
 
 
+def _entry(consumer: dict[str, Any]) -> dict[str, Any]:
+    """One consumer, as the manifest records it.
+
+    The plane travels with it (ADR 0054). A manifest that recorded a root-plane
+    file as though a service held it would describe a grant surface that does
+    not exist -- and this file is what an operator reads to answer "who has
+    this", so a wrong answer here is worse than none.
+    """
+    entry = {
+        "plane": consumer["plane"],
+        "target_file": consumer["target_file"],
+        "uid": int(consumer["uid"]),
+        "gid": int(consumer["gid"]),
+        "mode": consumer["mode"],
+    }
+    if consumer["plane"] != "root":
+        entry["service"] = consumer["service"]
+    return entry
+
+
 def build_manifest(
     *,
     project_key: str,
@@ -66,16 +86,7 @@ def build_manifest(
     entries = [
         {
             "name": secret["name"],
-            "consumers": [
-                {
-                    "service": consumer["service"],
-                    "target_file": consumer["target_file"],
-                    "uid": int(consumer["uid"]),
-                    "gid": int(consumer["gid"]),
-                    "mode": consumer["mode"],
-                }
-                for consumer in secret["consumers"]
-            ],
+            "consumers": [_entry(consumer) for consumer in secret["consumers"]],
         }
         for secret in secrets
     ]

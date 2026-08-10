@@ -34,6 +34,7 @@ import os
 import re
 import secrets
 import ssl
+import subprocess
 import sys
 import tempfile
 import urllib.error
@@ -69,6 +70,71 @@ TIMEOUT = 30.0
 #: the dbmate entrypoint, and while that encoding is total, a value with no
 #: characters needing it is one less thing that has to be right.
 SECRET_ENTROPY_BYTES = 32
+
+#: Bits for a generated RSA signing key (ADR 0055). 2048 rather than 4096: it is
+#: what every JWT verifier accepts without configuration, and the key is
+#: temporary by construction -- Session 6 replaces the issuer entirely.
+RSA_KEY_BITS = 2048
+
+
+def generate_secret_value(kind: str) -> str:
+    """Create one secret value of the declared kind (ADR 0055).
+
+    The dispatch is exhaustive and raises on an unknown kind rather than falling
+    through to `token_hex`. That fall-through is the whole reason `value_kind`
+    exists: a 64-character hex string stored under a name that says *key* would
+    satisfy the contract, the manifest, the file mode and every check here, and
+    would fail several runs later as a JWKS derived from something that is not a
+    key -- with nothing in between naming the wrong value.
+    """
+    if kind == "random_hex":
+        return secrets.token_hex(SECRET_ENTROPY_BYTES)
+    if kind == "rsa_private_pem":
+        return generate_rsa_private_pem()
+    raise ValueError(
+        f"no generator for value_kind {kind!r}. Adding a secret of a new kind is a "
+        "deliberate change to this function, not a default"
+    )
+
+
+def generate_rsa_private_pem() -> str:
+    """A PKCS#8 RSA private key, from openssl.
+
+    openssl rather than a Python library, because this runs as root on the host
+    with the system interpreter -- `cryptography` is not in the hash-locked dev
+    toolchain and would not be present here if it were (ADR 0055). openssl is,
+    and its version is a host fact an operator can read.
+
+    The key goes to stdout and never to a file. A temporary file would be a
+    private key at rest outside the provider, on a path nothing here controls
+    the lifetime of.
+    """
+    result = subprocess.run(
+        [
+            "openssl",
+            "genpkey",
+            "-algorithm",
+            "RSA",
+            "-pkeyopt",
+            f"rsa_keygen_bits:{RSA_KEY_BITS}",
+            "-outform",
+            "PEM",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if result.returncode != 0:
+        raise ValueError(f"openssl could not generate a signing key: {result.stderr.strip()}")
+
+    pem = result.stdout
+    # Checked rather than assumed. openssl exiting 0 with output that is not a
+    # private key is not a case anybody expects, and it is exactly the case that
+    # would store a truncated value and pass.
+    if "BEGIN PRIVATE KEY" not in pem or "END PRIVATE KEY" not in pem:
+        raise ValueError("openssl produced output that is not a PKCS#8 private key")
+    return pem
 
 
 def declared_provider_secrets(session: int) -> list[dict[str, Any]]:
@@ -539,10 +605,10 @@ def add_missing_secrets(
                 state["environment_slug"],
                 secret["provider_path"],
                 secret["provider_key"],
-                secrets.token_hex(SECRET_ENTROPY_BYTES),
+                generate_secret_value(secret["value_kind"]),
             )
             (created if fresh else adopted).append(secret["name"])
-    except (BootstrapStateError, KeyError) as exc:
+    except (BootstrapStateError, KeyError, ValueError) as exc:
         fail(EXIT_PROVIDER, str(exc))
 
     document = dict(state)

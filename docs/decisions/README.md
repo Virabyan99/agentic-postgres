@@ -117,3 +117,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0051](0051-the-bootstrap-issuer-is-temporary-and-carries-its-own-expiry.md) | The bootstrap issuer is temporary, asymmetric, and carries its own expiry | 5 | Accepted |
 | [0052](0052-the-pre-request-function-is-the-one-private-object-a-request-role-may-reach.md) | The pre-request function is the one private object a request role may reach | 5 | Accepted |
 | [0053](0053-outputs-version-5.md) | Outputs version 5: the deployed document carries the public surface and the identity the broker needs | 5 | Accepted |
+| [0054](0054-a-secret-may-be-consumed-by-the-root-plane.md) | A secret may be consumed by the root plane, and says so | 5 | Accepted |
+| [0055](0055-the-contract-declares-what-kind-of-value-a-secret-is.md) | The contract declares what kind of value a secret is | 5 | Accepted |

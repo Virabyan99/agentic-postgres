@@ -36,7 +36,11 @@ from typing import Any
 
 import yaml
 
-from agentic_postgres.secrets_contract import active_secrets, secret_source_path
+from agentic_postgres.secrets_contract import (
+    active_secrets,
+    compose_consumers,
+    secret_source_path,
+)
 
 __all__ = [
     "OVERRIDE_FILENAME",
@@ -68,8 +72,13 @@ def build_secret_override(
     secrets: dict[str, Any] = {}
     services: dict[str, Any] = {}
 
+    # `compose_consumers`, not `secret["consumers"]`. A root-plane consumer
+    # (ADR 0054) gets no `secrets:` entry, no service grant and no mount -- and
+    # it gets them by not being iterated here, rather than by a filter somebody
+    # could reorder. There is no service name to key a grant under and no
+    # container that may hold the value.
     for secret in active_secrets(contract, session):
-        for consumer in secret["consumers"]:
+        for consumer in compose_consumers(secret):
             name = grant_name(consumer)
             secrets[name] = {"file": secret_source_path(project_key, generation_id, consumer)}
             grants = services.setdefault(consumer["service"], {"secrets": []})["secrets"]

@@ -60,6 +60,32 @@ Session 5 added four, and the runbook was wrong about three of them:
   JSON in ``DETAIL``. Following the runbook produces ``PGRST121`` and **HTTP
   500** where a 401 was intended, so the difference is not cosmetic.
 
+Run 3 measured the admin surface and the probe that reads it, against a real
+cluster, and both answers were the opposite of what had been assumed:
+
+* **the admin server binds whatever the public server binds.** With
+  ``server-host = "0.0.0.0"`` -- which every containerised service needs -- and
+  only ``admin-server-port`` set, ``/live`` and ``/ready`` answered a peer
+  container on the project network. ``admin-server-host = "127.0.0.1"`` refuses
+  that peer and leaves ``--ready`` working. The admin surface is loopback-only
+  when it is told to be, and not before.
+* **``postgrest --ready`` is a client that reads its own configuration**, not
+  the running process's. Bare, it exits 1 with *"Admin server is not running"*
+  against a service answering 200. It needs the config file as an argument, or
+  both ``PGRST_ADMIN_SERVER_HOST`` and ``PGRST_ADMIN_SERVER_PORT`` -- the port
+  alone is refused, because the default host is a wildcard and it will not probe
+  one. So the obvious healthcheck fails on a healthy container, which is D145
+  arriving from the other direction.
+
+And the measurement that closes Run 1's deferred item: **the JWKS file is
+genuinely loaded**, proved by three distinguishable answers rather than by the
+container not crashing. A token signed with the key returns 200; the same token
+against a different key set returns ``PGRST301`` *"No suitable key was found"*;
+a token signed by another key returns ``PGRST301`` *"None of the keys was able
+to decode the JWT"*. **A JWKS carrying ``d`` was accepted and served** --
+PostgREST does not refuse private material, so ``jwt_keys.assert_public`` is the
+only thing between a signing key and a published verification set.
+
 Marked `database` rather than `contract`: these need a container runtime, and
 the Session 1 gate's `-m "contract and not future"` selection must stay
 runnable in a checkout. A runner without Docker reports that it could not look,
@@ -263,7 +289,7 @@ def test_the_secret_contract_names_the_measured_uid() -> None:
         consumer
         for secret in contract["secrets"]
         for consumer in secret["consumers"]
-        if consumer["service"] == "postgres"
+        if consumer.get("service") == "postgres"
     ]
     assert consumers, "no secret is granted to the postgres service"
     for consumer in consumers:
@@ -925,26 +951,25 @@ def run_postgrest(*args: str, image: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.fixture(scope="module")
-def postgrest_dumped_config(postgrest_image: str, tmp_path_factory: pytest.TempPathFactory) -> dict:
-    """``--dump-config`` output, parsed.
+def dump_postgrest_config(directory: Path, image: str, extra: str = "") -> dict[str, str]:
+    """``--dump-config`` output, parsed, for a minimal config plus ``extra``.
 
     It connects to the database before dumping, so it emits two PGRST000
     warnings against an unreachable host and dumps anyway. Those go to stderr
     and the dump goes to stdout, which is the only reason this is usable
     offline.
 
-    It also prints ``db-uri`` **verbatim**, password included. This fixture
+    It also prints ``db-uri`` **verbatim**, password included. Every caller here
     feeds it a deliberately worthless URI for that reason, and the Session 5
     entrypoint must never dump a config carrying a real one to anywhere but a
     protected tmpfs.
     """
-    directory = tmp_path_factory.mktemp("postgrest-config")
+    directory.mkdir(parents=True, exist_ok=True)
     directory.chmod(0o755)
     (directory / "postgrest.conf").write_text(
         'db-uri = "postgresql://nobody@127.0.0.1:1/nothing"\n'
         'db-schemas = "api"\n'
-        'db-anon-role = "anon"\n',
+        'db-anon-role = "anon"\n' + extra,
         encoding="utf-8",
     )
     result = subprocess.run(
@@ -958,7 +983,7 @@ def postgrest_dumped_config(postgrest_image: str, tmp_path_factory: pytest.TempP
             f"{directory}:/cfg:ro",
             "--entrypoint",
             "postgrest",
-            postgrest_image,
+            image,
             "--dump-config",
             "/cfg/postgrest.conf",
         ],
@@ -975,6 +1000,11 @@ def postgrest_dumped_config(postgrest_image: str, tmp_path_factory: pytest.TempP
             settings[key.strip()] = value.strip().strip('"')
     assert settings, result.stdout
     return settings
+
+
+@pytest.fixture(scope="module")
+def postgrest_dumped_config(postgrest_image: str, tmp_path_factory: pytest.TempPathFactory) -> dict:
+    return dump_postgrest_config(tmp_path_factory.mktemp("postgrest-config"), postgrest_image)
 
 
 @requires_docker
@@ -1061,3 +1091,97 @@ def test_the_dangerous_defaults_are_what_they_were_measured_to_be(
         f"{key} no longer defaults to {value!r}; the render's explicit setting "
         "was protecting against a default that has changed"
     )
+
+
+# ---------------------------------------------------------------------------
+# The admin surface, and the probe that reads it (Session 5, Run 3)
+#
+# Two measurements, and the runbook and this repository's own Run 1 note were
+# each wrong about one of them.
+# ---------------------------------------------------------------------------
+
+#: What `server-host` must be for a container: the service has to answer its
+#: peers on the project network, so it cannot bind loopback. S104 is exactly the
+#: point of this constant -- the whole finding is that binding the request
+#: surface widely also binds the admin surface widely.
+POSTGREST_SERVICE_BIND = "0.0.0.0"  # noqa: S104
+
+
+@requires_docker
+def test_the_admin_server_binds_whatever_the_public_server_binds(
+    postgrest_image: str, tmp_path: Path
+) -> None:
+    """The admin surface is loopback-only when it is told to be, and not before.
+
+    Measured, with a control, because it is the kind of fact that gets written
+    down from documentation: with `server-host = "0.0.0.0"` and only
+    `admin-server-port` set, `admin-server-host` **mirrors the public bind** --
+    and `/live` and `/ready` were reached from a peer container on the project
+    network. Setting `admin-server-host = "127.0.0.1"` refuses that peer while
+    `--ready` from inside the container still answers.
+
+    That is why the rendered configuration sets it explicitly. A service whose
+    public bind is `0.0.0.0` -- which every containerised one is -- publishes its
+    admin surface to every container that can reach it, by doing nothing.
+    """
+    default = dump_postgrest_config(
+        tmp_path / "default", postgrest_image, f'server-host = "{POSTGREST_SERVICE_BIND}"\n'
+    )
+    assert default["admin-server-host"] == POSTGREST_SERVICE_BIND, (
+        "admin-server-host no longer follows server-host. If it now defaults to "
+        "loopback the explicit setting is redundant -- confirm that before removing it"
+    )
+
+    explicit = dump_postgrest_config(
+        tmp_path / "explicit",
+        postgrest_image,
+        f'server-host = "{POSTGREST_SERVICE_BIND}"\nadmin-server-host = "127.0.0.1"\n',
+    )
+    assert explicit["admin-server-host"] == "127.0.0.1"
+    assert explicit["server-host"] == POSTGREST_SERVICE_BIND, (
+        "setting admin-server-host moved the public bind too; the two are not separate"
+    )
+
+
+@requires_docker
+def test_the_admin_server_is_off_until_a_port_is_named(postgrest_dumped_config: dict) -> None:
+    """No port, no admin server -- which is also what makes `--ready` fail.
+
+    An empty string rather than a number, so the absence is representable. A
+    service that never sets the port has no admin surface at all, and a
+    healthcheck asking one for readiness gets *"Admin server is not running"*
+    from a process that is serving requests perfectly well.
+    """
+    assert postgrest_dumped_config["admin-server-port"] == ""
+
+
+@requires_docker
+def test_the_readiness_probe_needs_its_own_configuration(postgrest_image: str) -> None:
+    """`postgrest --ready` is a CLIENT, and it reads its own configuration.
+
+    Not the running process's. Measured against a healthy service answering 200
+    on its request path:
+
+    * `postgrest --ready` with no argument -> exit 1, *"Admin server is not
+      running"*, because this process has no `admin-server-port`;
+    * `postgrest --ready /path/to/postgrest.conf` -> exit 0;
+    * `PGRST_ADMIN_SERVER_PORT` alone -> exit 1, *"the --ready flag cannot be
+      used when server-host is..."*, because the default host is a wildcard and
+      it will not probe one;
+    * both `PGRST_ADMIN_SERVER_HOST` and `PGRST_ADMIN_SERVER_PORT` -> exit 0.
+
+    So the obvious Compose healthcheck -- `CMD ["postgrest", "--ready"]`, which
+    is how the runbook's §11.6 reads -- **fails on a perfectly healthy
+    container**. This asserts the shape of the failure rather than the message,
+    so the healthcheck cannot be written the obvious way and pass here.
+
+    There is no database in this test and none is needed: the refusal happens
+    before anything is probed.
+    """
+    bare = run_postgrest("--ready", image=postgrest_image)
+    assert bare.returncode != 0, (
+        "`postgrest --ready` now succeeds with no configuration. If it has learned to "
+        "find the running process's config, the healthcheck can be simplified -- with "
+        "a measurement, not with this test deleted"
+    )
+    assert "admin-server-port" in (bare.stdout + bare.stderr).lower().replace("_", "-")

@@ -74,12 +74,53 @@ def test_session_two_declares_exactly_the_sentinel(contract: dict[str, Any]) -> 
     assert [s["name"] for s in active] == ["session2_sentinel"]
 
 
-def test_every_consumer_declares_non_root_numeric_ownership(contract: dict[str, Any]) -> None:
+def test_every_compose_consumer_declares_non_root_numeric_ownership(
+    contract: dict[str, Any],
+) -> None:
     for secret in contract["secrets"]:
-        for consumer in secret["consumers"]:
+        for consumer in secrets_contract.compose_consumers(secret):
             assert isinstance(consumer["uid"], int) and consumer["uid"] > 0
             assert isinstance(consumer["gid"], int) and consumer["gid"] > 0
             assert consumer["mode"] == "0400"
+
+
+def test_every_root_plane_consumer_is_owned_by_root_and_names_no_service(
+    contract: dict[str, Any],
+) -> None:
+    """The rule that is the exact opposite of the one above (ADR 0054).
+
+    On the compose plane root ownership is refused, because a container that
+    drops privileges could not read the file. On this plane it is required, for
+    the reason the plane exists: a file any other uid can read is a file that a
+    value no container may hold must not be.
+    """
+    root_plane = [
+        consumer
+        for secret in contract["secrets"]
+        for consumer in secret["consumers"]
+        if secrets_contract.is_root_plane(consumer)
+    ]
+    assert root_plane, "no root-plane consumer is declared; this test asserts nothing"
+    for consumer in root_plane:
+        assert (consumer["uid"], consumer["gid"]) == (0, 0)
+        assert consumer["mode"] == "0400"
+        assert "service" not in consumer
+
+
+def test_every_secret_declares_what_kind_of_value_it_is(contract: dict[str, Any]) -> None:
+    """ADR 0055. A default here is how the wrong generator runs.
+
+    The set is asserted against the schema's enum rather than a list written
+    here, so a new kind added to one and not the other fails rather than passing
+    on the copy that happens to be read.
+    """
+    schema = config.load_schema("secret-contract.schema.json")
+    kinds = set(schema["$defs"]["secret"]["properties"]["value_kind"]["enum"])
+    for secret in contract["secrets"]:
+        assert secret["value_kind"] in kinds, secret["name"]
+    assert {s["value_kind"] for s in contract["secrets"]} == kinds, (
+        "a declared kind that nothing uses is a generator branch nothing exercises"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +255,158 @@ def test_root_owned_secret_files_are_rejected(
 
 
 # ---------------------------------------------------------------------------
+# The root plane (ADR 0054)
+# ---------------------------------------------------------------------------
+
+
+def root_consumer(**overrides: Any) -> dict[str, Any]:
+    return {
+        "plane": "root",
+        "target_file": "held_by_root_only",
+        "uid": 0,
+        "gid": 0,
+        "mode": "0400",
+        **overrides,
+    }
+
+
+def test_a_root_plane_file_lands_in_a_directory_no_service_can_name(
+    contract: dict[str, Any],
+) -> None:
+    """`_root` is unreachable by construction, not by convention.
+
+    The Compose service pattern admits no underscore, so no service can be
+    called `_root` and no service's directory can collide with this one. The
+    assertion is on the pattern as well as on the path, because the path is only
+    safe for as long as that pattern is.
+    """
+    consumer = root_consumer()
+    path = secrets_contract.secret_source_path("alpha-dev", "gen-0001", consumer)
+    assert path.endswith("/generations/gen-0001/_root/held_by_root_only")
+
+    schema = config.load_schema("secret-contract.schema.json")
+    pattern = schema["$defs"]["composeConsumer"]["properties"]["service"]["pattern"]
+    import re
+
+    assert not re.match(pattern, secrets_contract.ROOT_PLANE_DIRECTORY)
+
+
+def test_a_root_plane_consumer_is_no_service_grant(contract: dict[str, Any]) -> None:
+    """It is invisible to every function that answers "what does a container get"."""
+    signing = next(s for s in contract["secrets"] if s["name"] == "bootstrap_jwt_signing_key")
+    assert secrets_contract.compose_consumers(signing) == []
+    assert "bootstrap_jwt_signing_key" not in {
+        grant["secret"]["name"]
+        for service in secrets_contract.granted_services(contract, 5)
+        for grant in secrets_contract.consumers_of(contract, service, 5)
+    }
+
+
+def test_a_root_plane_consumer_reaches_no_compose_override(contract: dict[str, Any]) -> None:
+    """The absence, asserted rather than trusted.
+
+    A root-plane consumer produces no `secrets:` entry, no service grant and no
+    mount. It gets them by not being iterated, so the thing worth checking is
+    that its target filename appears nowhere in the rendered override.
+    """
+    from agentic_postgres import secret_override
+
+    document = secret_override.build_secret_override(
+        project_key="alpha-dev", generation_id="gen0001x", contract=contract, session=5
+    )
+    rendered = yaml.safe_dump(document)
+    assert "bootstrap_jwt_signing_key" not in rendered
+    assert "docs_basic_auth_password" not in rendered
+    assert "_root" not in rendered
+
+
+@pytest.mark.parametrize(("field", "value"), [("uid", 65532), ("gid", 65532)])
+def test_a_root_plane_consumer_owned_by_anyone_else_is_refused(
+    tmp_path: Path, raw: dict[str, Any], field: str, value: int
+) -> None:
+    def mutate(document: dict[str, Any]) -> None:
+        secret = next(s for s in document["secrets"] if s["name"] == "bootstrap_jwt_signing_key")
+        secret["consumers"][0][field] = value
+
+    with pytest.raises(ManifestError):
+        load_mutated(tmp_path, raw, mutate)
+
+
+def test_a_root_plane_consumer_may_not_name_a_service(tmp_path: Path, raw: dict[str, Any]) -> None:
+    """The two planes are separate definitions, not one loosened definition.
+
+    A consumer that named a service *and* claimed the root plane would be a
+    grant with two readings, and the reading a renderer picked would decide
+    whether a private key got mounted.
+    """
+
+    def mutate(document: dict[str, Any]) -> None:
+        secret = next(s for s in document["secrets"] if s["name"] == "bootstrap_jwt_signing_key")
+        secret["consumers"][0]["service"] = "postgrest"
+
+    with pytest.raises(ManifestError):
+        load_mutated(tmp_path, raw, mutate)
+
+
+def test_a_consumer_with_no_plane_is_refused(tmp_path: Path, raw: dict[str, Any]) -> None:
+    """Required on every consumer, including the ones that predate the field."""
+
+    def mutate(document: dict[str, Any]) -> None:
+        del document["secrets"][0]["consumers"][0]["plane"]
+
+    with pytest.raises(ManifestError):
+        load_mutated(tmp_path, raw, mutate)
+
+
+def test_a_secret_with_no_value_kind_is_refused(tmp_path: Path, raw: dict[str, Any]) -> None:
+    """ADR 0055: a default is how a hex string ends up stored under a key's name."""
+
+    def mutate(document: dict[str, Any]) -> None:
+        del document["secrets"][0]["value_kind"]
+
+    with pytest.raises(ManifestError):
+        load_mutated(tmp_path, raw, mutate)
+
+
+def test_an_unknown_value_kind_is_refused(tmp_path: Path, raw: dict[str, Any]) -> None:
+    def mutate(document: dict[str, Any]) -> None:
+        document["secrets"][0]["value_kind"] = "ed25519_private_pem"
+
+    with pytest.raises(ManifestError):
+        load_mutated(tmp_path, raw, mutate)
+
+
+def test_the_signing_key_is_declared_as_a_key_and_not_as_a_password(
+    contract: dict[str, Any],
+) -> None:
+    """The declaration ADR 0055 exists to make possible.
+
+    Without `value_kind` the generator would write 32 bytes of hex here, the
+    contract would validate, the file would be materialized at 0400 root, the
+    manifest would record it, and the failure would arrive several runs later as
+    a JWKS derived from something that is not a key.
+    """
+    signing = next(s for s in contract["secrets"] if s["name"] == "bootstrap_jwt_signing_key")
+    assert signing["value_kind"] == "rsa_private_pem"
+    assert signing["consumers"][0]["plane"] == "root"
+    assert signing["provider_path"] == "/auth"
+
+
+def test_the_documentation_credential_reaches_no_container(contract: dict[str, Any]) -> None:
+    """D140's answer, asserted where it can be.
+
+    The container that serves the documentation must never hold the cleartext --
+    that is the entire point of stripping the header before the request reaches
+    it -- and the edge that checks it is not a project Compose service. So the
+    credential is on the root plane, and no service name appears anywhere near
+    it.
+    """
+    credential = next(s for s in contract["secrets"] if s["name"] == "docs_basic_auth_password")
+    assert secrets_contract.compose_consumers(credential) == []
+    assert credential["consumers"][0]["plane"] == "root"
+
+
+# ---------------------------------------------------------------------------
 # The session filter
 # ---------------------------------------------------------------------------
 
@@ -279,7 +472,7 @@ def test_every_consumer_names_a_real_compose_service(
     """A grant to a service that does not exist is a grant nobody can audit."""
     services = set(compose_model["services"])
     for secret in contract["secrets"]:
-        for consumer in secret["consumers"]:
+        for consumer in secrets_contract.compose_consumers(secret):
             assert consumer["service"] in services, (
                 f"secret {secret['name']!r} is granted to {consumer['service']!r}, "
                 f"which is not a service in compose.yaml"
@@ -297,7 +490,7 @@ def test_consumer_ownership_matches_the_service_runtime_user(
     gets a file it cannot read, and the usual fix is to widen the mode from 0400.
     """
     for secret in contract["secrets"]:
-        for consumer in secret["consumers"]:
+        for consumer in secrets_contract.compose_consumers(secret):
             service = compose_model["services"][consumer["service"]]
             expected = f"{consumer['uid']}:{consumer['gid']}"
             assert service.get("user") == expected, (

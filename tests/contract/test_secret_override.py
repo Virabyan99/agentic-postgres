@@ -117,8 +117,8 @@ def test_two_services_receiving_the_same_basename_do_not_collide() -> None:
                 "name": "shared",
                 "introduced_in_session": 3,
                 "consumers": [
-                    {"service": "alpha", "target_file": "credential"},
-                    {"service": "beta", "target_file": "credential"},
+                    {"plane": "compose", "service": "alpha", "target_file": "credential"},
+                    {"plane": "compose", "service": "beta", "target_file": "credential"},
                 ],
             }
         ]

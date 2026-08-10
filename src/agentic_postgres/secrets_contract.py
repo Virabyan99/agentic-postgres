@@ -40,6 +40,18 @@ SECRET_ROOT = "/var/lib/agentic-postgres/secrets"  # noqa: S105
 #: Where Compose exposes a granted file inside a container.
 CONTAINER_SECRET_DIR = "/run/secrets"  # noqa: S105
 
+#: The generation subdirectory holding root-plane files (ADR 0054).
+#:
+#: An underscore, and that is the whole design: the Compose service pattern is
+#: ``^[a-z][a-z0-9-]{1,30}$``, which admits no underscore, so no service can ever
+#: name this directory. A root-plane file and a service's directory cannot
+#: collide by construction rather than by anybody remembering not to.
+ROOT_PLANE_DIRECTORY = "_root"
+
+#: The two planes a consumer can be on. `compose` is a container that mounts the
+#: file; `root` is a value no container may hold at all.
+PLANES = ("compose", "root")
+
 
 def load_secret_contract(path: Path) -> dict[str, Any]:
     """Parse, schema-validate and semantically validate the requirements file."""
@@ -55,6 +67,22 @@ def active_secrets(contract: dict[str, Any], session: int) -> list[dict[str, Any
     return [s for s in contract["secrets"] if s["introduced_in_session"] <= session]
 
 
+def is_root_plane(consumer: dict[str, Any]) -> bool:
+    """Whether this consumer is a value no container may hold (ADR 0054).
+
+    Read from the declared ``plane`` and never inferred from the absence of a
+    service. Inferring would make a consumer that lost its service key by
+    accident indistinguishable from one that was deliberately put out of every
+    container's reach.
+    """
+    return consumer["plane"] == "root"
+
+
+def compose_consumers(secret: dict[str, Any]) -> list[dict[str, Any]]:
+    """The consumers that are Compose services. Everything mounted, nothing else."""
+    return [consumer for consumer in secret["consumers"] if not is_root_plane(consumer)]
+
+
 def consumers_of(contract: dict[str, Any], service: str, session: int) -> list[dict[str, Any]]:
     """Every ``(secret, consumer)`` grant this service holds through ``session``.
 
@@ -62,10 +90,14 @@ def consumers_of(contract: dict[str, Any], service: str, session: int) -> list[d
     the one the Compose renderer and the isolation tests both use, so that the
     rendered model and the assertion about the rendered model cannot be derived
     from two different readings of the file.
+
+    A root-plane consumer is never returned, whatever ``service`` is asked for.
+    It is not a container's grant and there is no service name that would reach
+    it.
     """
     grants: list[dict[str, Any]] = []
     for secret in active_secrets(contract, session):
-        for consumer in secret["consumers"]:
+        for consumer in compose_consumers(secret):
             if consumer["service"] == service:
                 grants.append({"secret": secret, "consumer": consumer})
     return grants
@@ -75,13 +107,24 @@ def granted_services(contract: dict[str, Any], session: int) -> set[str]:
     return {
         consumer["service"]
         for secret in active_secrets(contract, session)
-        for consumer in secret["consumers"]
+        for consumer in compose_consumers(secret)
     }
 
 
 def generation_directory(project_key: str, generation_id: str) -> str:
     """Absolute path of one immutable generation. Derived, never supplied."""
     return f"{SECRET_ROOT}/{project_key}/generations/{generation_id}"
+
+
+def consumer_directory(consumer: dict[str, Any]) -> str:
+    """The generation subdirectory this consumer's file lands in.
+
+    The service name for a Compose consumer, and :data:`ROOT_PLANE_DIRECTORY`
+    for a root-plane one. One function, because two call sites deciding this
+    separately is how a root-plane file ends up in a directory some container
+    mounts.
+    """
+    return ROOT_PLANE_DIRECTORY if is_root_plane(consumer) else consumer["service"]
 
 
 def secret_source_path(project_key: str, generation_id: str, consumer: dict[str, Any]) -> str:
@@ -92,7 +135,7 @@ def secret_source_path(project_key: str, generation_id: str, consumer: dict[str,
     rather than a convention.
     """
     root = generation_directory(project_key, generation_id)
-    return f"{root}/{consumer['service']}/{consumer['target_file']}"
+    return f"{root}/{consumer_directory(consumer)}/{consumer['target_file']}"
 
 
 def container_secret_path(consumer: dict[str, Any]) -> str:
@@ -127,10 +170,11 @@ def _validate_consumers(secret: dict[str, Any]) -> None:
     name = secret["name"]
     consumers = secret["consumers"]
 
-    # Uniqueness is per (service, target_file), not per target_file: two
+    # Uniqueness is per (directory, target_file), not per target_file: two
     # services legitimately receive the same basename, because each gets its
-    # own directory and each sees it at the same /run/secrets path.
-    pairs = [(c["service"], c["target_file"]) for c in consumers]
+    # own directory and each sees it at the same /run/secrets path. The root
+    # plane is one more directory under the same rule.
+    pairs = [(consumer_directory(c), c["target_file"]) for c in consumers]
     _reject_duplicates(
         pairs,
         f"consumer of secret {name!r}",
@@ -139,19 +183,31 @@ def _validate_consumers(secret: dict[str, Any]) -> None:
 
     for consumer in consumers:
         target = consumer["target_file"]
+        where = consumer_directory(consumer)
         # The schema pattern already excludes '/' and a leading dot, so this is
         # belt and braces -- but path escape is the failure this contract exists
         # to prevent, and a defence that lives only in a regex is one edit from
         # being gone.
         if "/" in target or ".." in target or Path(target).name != target:
             raise ManifestError(
-                f"secret {name!r} consumer {consumer['service']!r} declares target_file "
+                f"secret {name!r} consumer {where!r} declares target_file "
                 f"{target!r}, which is not a simple basename; a target filename must not "
                 "be able to leave its generation directory"
             )
-        if consumer["uid"] == 0 or consumer["gid"] == 0:
+        # Root ownership: refused on the compose plane, required on the root
+        # plane. The schema states both with a const and this states the reason,
+        # because the two rules are opposites and a reader who found only one of
+        # them would take it for the whole rule.
+        if is_root_plane(consumer):
+            if consumer["uid"] != 0 or consumer["gid"] != 0:
+                raise ManifestError(
+                    f"secret {name!r} declares a root-plane consumer owned "
+                    f"{consumer['uid']}:{consumer['gid']}; a value no container may hold "
+                    "must not be readable by a uid some container runs as"
+                )
+        elif consumer["uid"] == 0 or consumer["gid"] == 0:
             raise ManifestError(
-                f"secret {name!r} consumer {consumer['service']!r} declares root ownership; "
+                f"secret {name!r} consumer {where!r} declares root ownership; "
                 "a root-owned secret file is unreadable by a container that drops privileges"
             )
 
@@ -169,12 +225,17 @@ def _reject_duplicates(values: list[Any], what: str, why: str) -> None:
 
 __all__ = [
     "CONTAINER_SECRET_DIR",
+    "PLANES",
+    "ROOT_PLANE_DIRECTORY",
     "SECRET_ROOT",
     "active_secrets",
+    "compose_consumers",
+    "consumer_directory",
     "consumers_of",
     "container_secret_path",
     "generation_directory",
     "granted_services",
+    "is_root_plane",
     "load_secret_contract",
     "secret_source_path",
 ]

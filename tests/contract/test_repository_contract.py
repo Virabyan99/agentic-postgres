@@ -187,6 +187,7 @@ REQUIRED_PATHS = (
     "src/agentic_postgres/config.py",
     "src/agentic_postgres/evidence.py",
     "src/agentic_postgres/host_config.py",
+    "src/agentic_postgres/jwt_keys.py",
     "src/agentic_postgres/naming.py",
     "src/agentic_postgres/output_migrations.py",
     "src/agentic_postgres/rendering.py",

@@ -212,7 +212,10 @@ def test_every_profile_maps_to_a_secret_that_is_actually_declared() -> None:
     """
     contract = yaml.safe_load((REPO_ROOT / "secrets.required.yaml").read_text(encoding="utf-8"))
     declared = {
-        secret["name"]: {consumer["service"] for consumer in secret["consumers"]}
+        # `.get`, because a root-plane consumer names no service (ADR 0054). The
+        # broker reads a service's copy, so a root-plane entry is correctly
+        # absent from this mapping rather than defaulted into it.
+        secret["name"]: {c["service"] for c in secret["consumers"] if c.get("service")}
         for secret in contract["secrets"]
     }
 

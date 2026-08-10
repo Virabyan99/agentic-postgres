@@ -33,7 +33,7 @@ import pytest
 import yaml
 
 from agentic_postgres import REPO_ROOT, rendering
-from agentic_postgres.secrets_contract import load_secret_contract
+from agentic_postgres.secrets_contract import compose_consumers, load_secret_contract
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -91,7 +91,7 @@ def test_the_contract_grants_the_pooler_files_it_can_read(contract: dict[str, An
     granted = [
         consumer
         for secret in contract["secrets"]
-        for consumer in secret["consumers"]
+        for consumer in compose_consumers(secret)
         if consumer["service"] == "pgbouncer"
     ]
     assert {consumer["target_file"] for consumer in granted} == set(POOLER_SECRETS)

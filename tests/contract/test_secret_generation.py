@@ -34,6 +34,7 @@ CONTRACT_ENTRIES = [
         "provider_path": "/runtime",
         "consumers": [
             {
+                "plane": "compose",
                 "service": "secret-check",
                 "target_file": "session2_sentinel",
                 "uid": 65532,
@@ -114,6 +115,7 @@ def test_a_content_field_on_a_contract_entry_never_reaches_the_manifest(field: s
             "name": "session2_sentinel",
             "consumers": [
                 {
+                    "plane": "compose",
                     "service": "secret-check",
                     "target_file": "session2_sentinel",
                     "uid": 65532,
@@ -154,6 +156,7 @@ def test_a_target_file_may_not_escape_the_generation_directory() -> None:
             "name": "session2_sentinel",
             "consumers": [
                 {
+                    "plane": "compose",
                     "service": "secret-check",
                     "target_file": "../../../etc/cron.d/payload",
                     "uid": 0,

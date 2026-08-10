@@ -36,6 +36,7 @@ from agentic_postgres.secret_generation import build_manifest, write_manifest
 from agentic_postgres.secrets_contract import (
     SECRET_ROOT,
     active_secrets,
+    consumer_directory,
     load_secret_contract,
     secret_source_path,
 )
@@ -135,14 +136,20 @@ def plan(key: str, contract: dict[str, Any], session: int) -> int:
     print(f"secret root    {SECRET_ROOT}/{key}")
     print(f"generation     {generation}")
     print()
+    files = 0
     for secret in active_secrets(contract, session=session):
         for consumer in secret["consumers"]:
             destination = secret_source_path(key, generation, consumer)
             print(
-                f"  {secret['name']:<24} -> {destination}  "
+                f"  {secret['name']:<34} -> {destination}  "
                 f"({consumer['mode']} {consumer['uid']}:{consumer['gid']})"
             )
+            files += 1
     print()
+    # The number a rotation has to reach, printed rather than counted in prose
+    # (D108). The operator guide's rotation procedure is written against this
+    # figure; a number in a document is a number that was right once.
+    print(f"{files} files would be written for {len(active_secrets(contract, session))} secrets.")
     print("No provider was contacted and nothing was written.")
     return 0
 
@@ -207,7 +214,11 @@ def materialize(key: str, contract: dict[str, Any], session: int) -> int:
                 fail(EXIT_SECRET, f"could not read {secret['name']}: {exc}")
 
             for consumer in secret["consumers"]:
-                service_directory = staging / consumer["service"]
+                # `consumer_directory`, not `consumer["service"]`: a root-plane
+                # consumer has no service, and its file lands in `_root/` owned
+                # 0:0 -- a directory name no Compose service can have, so the
+                # two cannot collide (ADR 0054).
+                service_directory = staging / consumer_directory(consumer)
                 service_directory.mkdir(mode=0o700, exist_ok=True)
                 os.chown(service_directory, consumer["uid"], consumer["gid"])
 
