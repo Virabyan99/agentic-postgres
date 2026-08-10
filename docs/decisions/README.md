@@ -110,3 +110,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0044](0044-there-is-no-publication.md) | There is no publication | 4 | Accepted |
 | [0045](0045-a-claim-is-shaped-by-where-it-can-be-measured.md) | A claim is shaped by where it can be measured | 4 | Accepted |
 | [0046](0046-a-nologin-stub-is-a-fact-with-an-expiry-date.md) | A NOLOGIN stub is a fact with an expiry date | 4 | Accepted |
+| [0047](0047-an-absence-proof-expires-when-a-later-session-supplies-the-thing.md) | An absence proof expires when a later session supplies the thing | 4 | Accepted |

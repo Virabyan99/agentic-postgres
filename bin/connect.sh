@@ -265,6 +265,21 @@ state_file() {
   printf '%s/tunnels/%s__%s.json' "$(state_root)" "$1" "$2"
 }
 
+# Where the backgrounded ssh's own output goes. It must not go to this command's
+# stdout or stderr: a child that inherits them holds them open for as long as it
+# runs, so `tunnel` returns while its pipes stay open, and any caller that
+# CAPTURES the output blocks until the tunnel is closed. `output=$(connect.sh
+# tunnel ...)` hangs, and so does every wrapper, CI step and test that does the
+# same -- which is how this was found, by the DX-DB-001 proof timing out 120
+# seconds after the tunnel had opened correctly (D126).
+#
+# A file rather than /dev/null, because ssh's stderr is where `bind: Address
+# already in use` and a refused host key appear, and the failure path below
+# names this path.
+tunnel_log() {
+  printf '%s/tunnels/%s__%s.log' "$(state_root)" "$1" "$2"
+}
+
 # A record whose process is gone, or is no longer the process that was recorded,
 # is moved aside rather than deleted. Deleted, the evidence that something died
 # unexpectedly goes with it; trusted, a recycled PID gets signalled.
@@ -398,10 +413,19 @@ command_tunnel() {
     quarantine "${file}" "a record was left behind by a tunnel that is no longer running"
   fi
 
+  local log
+  log="$(tunnel_log "${PROJECT_KEY}" "${PROFILE}")"
+  (umask 077 && : >"${log}")
+
+  # `</dev/null` and the two redirections are load-bearing rather than tidy: a
+  # backgrounded child inherits this command's stdin, stdout and stderr, and
+  # holds them open for as long as it lives. A caller capturing the output would
+  # then wait on the pipe until the tunnel closed -- the command returns, and the
+  # caller does not (D126).
   ssh "${SSH_BASE_OPTIONS[@]}" ${SSH_OPTIONS[@]+"${SSH_OPTIONS[@]}"} \
     -p "${SSH_PORT}" -N \
     -L "${LOCAL_BIND}:${local_port}:${remote_host}:${remote_port}" \
-    "${SSH_DESTINATION}" &
+    "${SSH_DESTINATION}" </dev/null >>"${log}" 2>&1 &
   local pid=$!
 
   # ExitOnForwardFailure makes a bind failure an exit rather than a warning, so
@@ -412,7 +436,9 @@ command_tunnel() {
   sleep 1
   if ! kill -0 "${pid}" 2>/dev/null; then
     wait "${pid}" 2>/dev/null || true
-    die 9 "the forward did not come up. ${LOCAL_BIND}:${local_port} may already be in use, or the host refused the forward."
+    warn "ssh said:"
+    cat "${log}" >&2
+    die 9 "the forward did not come up. ${LOCAL_BIND}:${local_port} may already be in use, or the host refused the forward. See ${log}."
   fi
 
   local started args

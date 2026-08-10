@@ -8,17 +8,26 @@ host can. Neither answer is about the public boundary.
 
 ``SEC-NET-001`` is proved here in its strongest form: the direct PostgreSQL
 endpoint is unreachable because nothing is listening, no route carries it, and
-the rendered documents still describe it as unavailable rather than as a URL
-nobody should use.
+every endpoint the deployed document reports is a **loopback** address rather
+than one the world could dial.
+
+That last clause used to read "the documents still describe it as unavailable".
+It was true for two sessions and Session 4 made it false, by design: a project
+now publishes `pooled` and `direct` endpoints in its deployed document, and they
+are the near end of a developer's SSH tunnel (ADR 0044). The absence was standing
+in for the property, and the property is that the address is not reachable
+(D125, ADR 0047).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import socket
 import ssl
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -102,18 +111,57 @@ def test_the_scan_can_detect_an_open_port(public_ipv4: str) -> None:
     )
 
 
-def test_the_deployed_document_still_reports_no_direct_endpoint(
-    project_a: dict[str, Any],
+@pytest.mark.parametrize("transport", ["direct", "pooled"])
+def test_every_reported_endpoint_is_loopback_or_absent(
+    project_a: dict[str, Any], transport: str
 ) -> None:
-    direct = project_a["database"]["direct"]
-    assert direct["status"] == "unavailable", direct
-    assert direct["url"] is None, direct
+    """The document may name an endpoint; it may not name a reachable one.
 
+    This asserted ``status == "unavailable"`` and ``url is None`` for two
+    sessions, which was true because no endpoint existed yet. Session 4 makes it
+    false on purpose: a project publishes both transports in its deployed
+    document, and they are the near end of a developer's SSH tunnel. The
+    assertion had encoded the absence rather than the property the absence was
+    standing in for (D125, ADR 0047).
 
-def test_the_pooled_endpoint_is_equally_absent(project_a: dict[str, Any]) -> None:
-    pooled = project_a["database"]["pooled"]
-    assert pooled["status"] == "unavailable", pooled
-    assert pooled["url"] is None, pooled
+    Both states are still checked, so this holds against a Session 2, 3 or 4
+    deployment without being told which:
+
+    *Absent* is still absent — a status of ``unavailable`` with a URL beside it
+    would be a document contradicting itself.
+
+    *Present* must be loopback, in the host field **and** in the URL, because
+    those are two places one address is written and the pair has drifted in this
+    repository before. A public or wildcard address here is a database on the
+    internet described as a developer convenience.
+
+    And no URL carries a credential. The schema's pattern already refuses one;
+    this is the same claim asserted against the bytes that were actually written,
+    which is the difference between a schema and a measurement.
+    """
+    endpoint = project_a["database"][transport]
+    status = endpoint["status"]
+    assert status in ("available", "unavailable"), endpoint
+
+    if status == "unavailable":
+        assert endpoint["url"] is None, endpoint
+        assert endpoint.get("host") is None, endpoint
+        return
+
+    host = endpoint["host"]
+    assert ipaddress.ip_address(host).is_loopback, (
+        f"the {transport} endpoint is published at {host}, which is not loopback"
+    )
+
+    parsed = urllib.parse.urlsplit(endpoint["url"])
+    assert parsed.hostname and ipaddress.ip_address(parsed.hostname).is_loopback, (
+        f"the {transport} URL points at {parsed.hostname}, which is not loopback"
+    )
+    assert parsed.password is None, f"the {transport} URL carries a credential"
+    assert parsed.port == endpoint["port"], (
+        f"the {transport} URL says port {parsed.port} and the endpoint says "
+        f"{endpoint['port']}; two records of one number have drifted"
+    )
 
 
 # ---------------------------------------------------------------------------
