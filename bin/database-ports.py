@@ -213,6 +213,17 @@ def command_allocate(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def _describe(endpoints: dict[str, tuple[str, int]]) -> str:
+    """Both endpoints, named separately.
+
+    The line this replaces interpolated the loop variable left over from the
+    connect loop, so it reported one address for two transports that had
+    answered on different containers. It read as a measurement and was a
+    leftover.
+    """
+    return ", ".join(f"{name} {host}:{port}" for name, (host, port) in endpoints.items())
+
+
 def _container_endpoints(project_key: str) -> dict[str, tuple[str, int]]:
     """Where each transport actually listens, from the deployed document.
 
@@ -285,7 +296,7 @@ def command_verify(arguments: argparse.Namespace) -> int:
             )
 
         if arguments.plan:
-            print(f"both transports answer on {address}; would mark active")
+            print(f"both transports answer ({_describe(endpoints)}); would mark active")
             return 0
 
         write_registry(
@@ -293,7 +304,7 @@ def command_verify(arguments: argparse.Namespace) -> int:
             port_allocations.activate(registry, instance_uuid=arguments.instance_uuid),
         )
 
-    print(f"both transports answer on {address}; allocation is active")
+    print(f"both transports answer ({_describe(endpoints)}); allocation is active")
     return 0
 
 
