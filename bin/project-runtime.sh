@@ -47,25 +47,41 @@ ACTION=""
 PROJECT_KEY=""
 HOST_MANIFEST=""
 THROUGH_SESSION=""
+DEFERRED=""
+HELD_BACK=""
 
 usage() {
   cat <<'USAGE'
 Usage: bin/project-runtime.sh --host FILE --project-key KEY \
-         --through-session N <up|down|status>
+         --through-session N [--defer SERVICE,...] <up|down|status|resume>
 
   up      Materialize secrets, start the project, then attach the edge.
+  resume  Start whatever `up --defer` held back, then attach. Materializes
+          nothing.
   down    Detach the edge, then stop the project. Volumes are preserved.
   status  Report container state. Changes nothing, needs no root.
 
   --host FILE           The host manifest.
   --project-key KEY     The project key. Validated before use as a path component.
   --through-session N   The session this project is deployed through. Required
-                        for up and down; it selects the secret set and the
-                        Compose profiles, which must be the same N.
+                        for up, resume and down; it selects the secret set and
+                        the Compose profiles, which must be the same N.
+  --defer SERVICE,...   Start everything except these, and do not attach the
+                        edge. `resume` completes it.
 
 Ordering is not configurable. Attach happens after the containers are healthy
 so a route never points at something that is not serving; detach happens before
 teardown so Compose can remove a network that still has no endpoint on it.
+
+`--defer` exists for one reason (ADR 0063): a service that authenticates as a
+project role cannot start until the bootstrap plane has activated that role, and
+the bootstrap plane needs the cluster the same command starts. The deploy runs
+`up --defer`, bootstraps, then `resume`.
+
+`resume` does NOT re-materialize, and that is the point of it being a separate
+action rather than a second `up`. `up` writes a new secret generation every time
+and repoints the project at it; a second `up` here would set a role's password
+from one generation and mount another into the container.
 USAGE
 }
 
@@ -117,7 +133,12 @@ parse_arguments() {
         THROUGH_SESSION="$2"
         shift 2
         ;;
-      up|down|status)
+      --defer)
+        [ "$#" -ge 2 ] || die 2 "--defer requires a comma-separated service list."
+        DEFERRED="$2"
+        shift 2
+        ;;
+      up|down|status|resume)
         [ -z "${ACTION}" ] || die 2 "only one action may be given."
         ACTION="$1"
         shift
@@ -145,6 +166,54 @@ parse_arguments() {
     [ "${THROUGH_SESSION}" -ge 2 ] \
       || die 2 "--through-session must be at least 2; sessions before that start nothing."
   fi
+
+  # `--defer` is meaningless on anything but `up`, and accepting it silently
+  # elsewhere would let a caller believe `resume --defer x` held something back.
+  if [ -n "${DEFERRED}" ] && [ "${ACTION}" != "up" ]; then
+    die 2 "--defer applies to up, not to ${ACTION}."
+  fi
+}
+
+# The services this deployment runs, minus the deferred ones, as one per line.
+#
+# Read out of the resolved model rather than listed here: the set changes with
+# the session and with the profiles, and a second list would be the one that
+# went stale.
+#
+# A deferred name this deployment does not run is skipped, not refused. The
+# caller passes the same list at every session, and `postgrest` is simply not
+# part of a session-4 deployment -- refusing it here would break every deploy
+# below the session that introduces the service. The typo that this permits is
+# caught where it always runs instead: `test_deferred_services_are_real_services`
+# asserts every name in `POST_BOOTSTRAP_SERVICES` is a service `compose.yaml`
+# defines, offline, in the gate.
+wanted_services() {
+  local rendered="$1"
+  shift
+  local -a profiles=("$@")
+  local -a all=() wanted=()
+  local service deferred matched
+
+  mapfile -t all < <("${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" \
+    config --services | sort)
+  [ "${#all[@]}" -gt 0 ] || die 9 "the resolved model names no services."
+
+  HELD_BACK=""
+  for service in "${all[@]}"; do
+    matched=0
+    for deferred in ${DEFERRED//,/ }; do
+      if [ "${service}" = "${deferred}" ]; then
+        matched=1
+        HELD_BACK="${HELD_BACK:+${HELD_BACK},}${service}"
+      fi
+    done
+    [ "${matched}" -eq 0 ] && wanted+=("${service}")
+  done
+
+  [ "${#wanted[@]}" -gt 0 ] \
+    || die 2 "--defer would hold back every service this deployment runs."
+
+  printf '%s\n' "${wanted[@]}"
 }
 
 # `printf` stays last on purpose. Under `set -e` a bare `[ -L x ] && die` as the
@@ -166,7 +235,7 @@ main() {
   # root reports the wrong problem: the operator fixes the state, re-runs, and
   # hits the refusal they could have been told about immediately.
   case "${ACTION}" in
-    up|down) [ "$(id -u)" -eq 0 ] || die 3 "${ACTION} requires root." ;;
+    up|down|resume) [ "$(id -u)" -eq 0 ] || die 3 "${ACTION} requires root." ;;
   esac
 
   local state rendered
@@ -212,10 +281,49 @@ main() {
       local -a profiles=()
       mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
 
-      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" up -d --build --wait \
+      local -a services=()
+      mapfile -t services < <(wanted_services "${rendered}" "${profiles[@]}")
+
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" \
+        up -d --build --wait "${services[@]}" \
         || die 9 "the project did not become healthy."
 
+      # Services actually held back mean the deployment is not finished, so the
+      # edge is not attached: a route pointing at a plane that has not started
+      # is worse than no route (ADR 0063, §4.1).
+      #
+      # `HELD_BACK` rather than `DEFERRED`, because they differ: the caller
+      # passes the same list at every session and a service the session does not
+      # run is held back from nothing. A session-4 deploy asked to defer
+      # `postgrest` has deferred nothing and should attach here, as it always
+      # did.
+      if [ -n "${HELD_BACK}" ]; then
+        printf 'project-runtime: %s is up without %s. Run resume to finish.\n' \
+          "${PROJECT_KEY}" "${HELD_BACK}"
+        exit 0
+      fi
+
       # Last, and only now that --wait has returned.
+      "${ROOT_DIR}/bin/edge-network.sh" attach --project-key "${PROJECT_KEY}" \
+        || die 9 "the project is running but has no ingress."
+
+      printf 'project-runtime: %s is up and attached.\n' "${PROJECT_KEY}"
+      ;;
+
+    resume)
+      rendered="$(resolved_directory "${PROJECT_RENDERED_ROOT}/${PROJECT_KEY}" "rendered output")"
+
+      # No materialization and no override render, deliberately. `up` writes a
+      # new generation and repoints the project at it; doing that again here
+      # would mount a generation the bootstrap plane did not set a password
+      # from, which is the failure this whole ordering exists to prevent
+      # (ADR 0063).
+      local -a profiles=()
+      mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
+
+      "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" up -d --build --wait \
+        || die 9 "the deferred services did not become healthy."
+
       "${ROOT_DIR}/bin/edge-network.sh" attach --project-key "${PROJECT_KEY}" \
         || die 9 "the project is running but has no ingress."
 

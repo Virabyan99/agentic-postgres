@@ -13,8 +13,12 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from agentic_postgres import runtime_override
+from agentic_postgres import REPO_ROOT, runtime_override
 from agentic_postgres.naming import HEALTH_ROUTE_PATH
+
+#: The Compose model, for the one test that checks a declared service name
+#: against the services that actually exist.
+MODEL = REPO_ROOT / "compose.yaml"
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -225,3 +229,64 @@ def test_a_relative_rendered_directory_is_refused() -> None:
         runtime_override.build_override(
             **NAMES, https_entrypoint="websecure", rendered_directory="rendered/alpha"
         )
+
+
+# ---------------------------------------------------------------------------
+# The deferred set is real, and the deploy defers exactly it (ADR 0063)
+# ---------------------------------------------------------------------------
+
+
+def test_deferred_services_are_real_services() -> None:
+    """Every name in `POST_BOOTSTRAP_SERVICES` is a service `compose.yaml` defines.
+
+    `project-runtime.sh` deliberately *skips* a deferred name it does not find,
+    because the deploy passes the same list at every session and `postgrest` is
+    simply not part of a session-4 deployment. Refusing there would break every
+    deploy below the session that introduces the service.
+
+    The cost of that permissiveness is that a typo defers nothing and silently
+    starts the very service the caller was holding back — which is the deadlock
+    ADR 0063 exists to prevent, arriving quietly. This is where that is caught:
+    offline, in the gate, on every run.
+
+    Goes red if: a service is renamed in `compose.yaml` and not here, or a name
+    is misspelled here.
+    """
+    model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    defined = set(model["services"])
+    unknown = sorted(set(runtime_override.POST_BOOTSTRAP_SERVICES) - defined)
+    assert not unknown, (
+        f"{unknown} are deferred by the deploy and are not services in compose.yaml. "
+        "project-runtime.sh skips a name it cannot find, so this would defer nothing"
+    )
+
+
+def test_the_deploy_defers_what_the_module_declares_and_resumes_after_bootstrapping() -> None:
+    """ADR 0063's ordering, asserted on the deploy's source.
+
+    Three properties, and the third is the one that matters: the `resume` must
+    come **after** the bootstrap, or the roles are still NOLOGIN when the API
+    plane starts and nothing has changed.
+
+    Asserted on source text because the alternative is a live deploy, and the
+    ordering is exactly what a live deploy cannot check cheaply — it either
+    works or hangs for the healthcheck's full retry budget.
+
+    Goes red if: the deploy grows its own list of deferred services rather than
+    reading the declared one; `resume` moves above the bootstrap; or the
+    deferral is dropped and step 5 goes back to starting everything.
+    """
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+
+    assert "runtime_override.POST_BOOTSTRAP_SERVICES" in source, (
+        "the deploy no longer reads the declared deferred set; a second list is "
+        "the one that goes stale when a service is added"
+    )
+
+    defer_at = source.index('"--defer"')
+    bootstrap_at = source.index("postgres-bootstrap.sh")
+    resume_at = source.index('"resume"')
+    assert defer_at < bootstrap_at < resume_at, (
+        "the deploy must defer, then bootstrap, then resume. Found the deferral at "
+        f"{defer_at}, the bootstrap at {bootstrap_at}, the resume at {resume_at}"
+    )

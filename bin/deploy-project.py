@@ -756,13 +756,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(f"  {rendered_directory}")
 
-    step("5. Start the project")
+    step("5. Start the data plane, holding back what the bootstrap must precede")
     # From the release, not the checkout. Compose records its project directory
     # on every container it starts, and starting from `REPO_ROOT` stamped
     # `/home/<operator>/agentic-postgres` onto them -- the working tree that a
     # `git checkout` can change under a running deployment. That is the same
     # rule the systemd launchers enforce, and the deploy was the one path
     # ignoring it.
+    #
+    # `--defer` is ADR 0063. A service that authenticates as a project role
+    # cannot start until step 6 has activated that role, and step 6 needs the
+    # cluster this step starts -- so neither ordering works alone and the start
+    # is split. The deferred set is declared in `runtime_override`, not here: a
+    # second list is the one that goes stale when a service is added.
+    #
+    # The edge is not attached while anything is deferred, which is also §4.1's
+    # rule that the route is added last.
+    deferred = ",".join(runtime_override.POST_BOOTSTRAP_SERVICES)
     started = run(
         str(release / "bin" / "project-runtime.sh"),
         "--host",
@@ -771,12 +781,13 @@ def main(argv: list[str] | None = None) -> int:
         key,
         "--through-session",
         str(arguments.through_session),
+        "--defer",
+        deferred,
         "up",
     )
     print(started.stdout, end="")
     if started.returncode != 0:
         fail(EXIT_VALIDATION, f"the project did not start:\n{started.stderr}")
-    edge["project_network_attached"] = True
 
     # Re-read, because starting the project changed it. `project-runtime.sh up`
     # runs `materialize-secrets.sh`, which writes a *new* immutable generation
@@ -836,6 +847,26 @@ def main(argv: list[str] | None = None) -> int:
             fail(EXIT_VALIDATION, f"migrations did not apply:\n{migrated.stderr}")
 
         database_observed = observe_database(rendered["database"])
+
+    step("6b. Start the deferred services and attach the edge")
+    # Now, and not in step 5: the roles those services authenticate as exist and
+    # can log in as of the bootstrap above (ADR 0063). `resume` materializes
+    # nothing -- a second materialization here would repoint the project at a
+    # generation whose password the bootstrap did not set.
+    resumed = run(
+        str(release / "bin" / "project-runtime.sh"),
+        "--host",
+        str(arguments.host),
+        "--project-key",
+        key,
+        "--through-session",
+        str(arguments.through_session),
+        "resume",
+    )
+    print(resumed.stdout, end="")
+    if resumed.returncode != 0:
+        fail(EXIT_VALIDATION, f"the deferred services did not start:\n{resumed.stderr}")
+    edge["project_network_attached"] = True
 
     step("7. Observe and publish")
     # Traefik's Docker provider polls, so the router for a container that has

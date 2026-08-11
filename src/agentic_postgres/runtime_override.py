@@ -42,6 +42,26 @@ ROUTED_SERVICE = "edge-probe"
 REST_SERVICE = "postgrest"
 REST_SERVICE_PORT = 3000
 
+#: Services that cannot start until the bootstrap plane has activated the role
+#: they authenticate as (ADR 0063).
+#:
+#: A property of the *service*, not of a session or a Compose profile. Eleven of
+#: the thirteen roles are created NOLOGIN with a null password verifier and stay
+#: that way until a session activates them (ADR 0046), and a service holding a
+#: correct credential for one of those is refused with `password authentication
+#: failed` -- the same message a wrong password gets, which is why the first
+#: occurrence took a `pg_roles` query to diagnose rather than a log line.
+#:
+#: PostgREST is the first long-running service held to a healthcheck that
+#: authenticates as a project role, which is why this constant did not exist
+#: before. `dbmate` runs on demand after the bootstrap; PgBouncer's healthcheck
+#: authenticates as its own admin user rather than as `app_runtime`.
+#:
+#: Deferring "the profile of the session being deployed" was the obvious
+#: alternative and is wrong: a greenfield deploy through a later session would
+#: bring this up in the first phase and deadlock exactly as before.
+POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE,)
+
 #: `services/edge-probe/probe.py` LISTEN_PORT. Traefik needs the container port;
 #: the probe publishes none, because only Traefik publishes a host port.
 ROUTED_SERVICE_PORT = 8080
@@ -60,6 +80,7 @@ __all__ = [
     "MIGRATION_SERVICE",
     "POOLER_SERVICE",
     "POOLER_SERVICE_PORT",
+    "POST_BOOTSTRAP_SERVICES",
     "REST_SERVICE",
     "REST_SERVICE_PORT",
     "ROUTED_SERVICE",

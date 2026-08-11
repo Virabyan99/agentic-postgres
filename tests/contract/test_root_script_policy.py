@@ -479,26 +479,63 @@ def test_the_project_runtime_attaches_after_starting_and_detaches_before_stoppin
     something that is not serving. Tearing down before detaching leaves an
     endpoint on the edge network, and Compose then cannot remove it -- reported
     as a network error rather than as the missing detach it is.
+
+    **Measured per action arm, which replaces an absolute-position check under
+    ADR 0063.** The old form anchored on the literal ``"${profiles[@]}" up`` and
+    said "that string appears once, in the arm that starts containers" -- and
+    ADR 0063 added a second arm that starts containers, so the anchor found
+    ``resume`` while the attach it was compared against was ``up``'s. The
+    property never stopped holding; the way of reading it did.
+
+    Per-arm is stricter than what it replaces: the old check could be satisfied
+    by one arm's start preceding a *different* arm's attach, which is a
+    statement about neither. This asserts the ordering **inside** each arm that
+    does both, so a new arm cannot be added with the two the wrong way round.
     """
     code = code_of("bin/project-runtime.sh")
 
-    # Compared by position in the whole script rather than by splitting on
-    # "up)", which also matches the `up|down|status)` arm of the argument
-    # parser and silently measures the wrong block.
-    def at(needle: str) -> int:
-        index = code.find(needle)
-        assert index >= 0, f"{needle!r} is absent from bin/project-runtime.sh"
+    def arm(name: str) -> str:
+        """One `case` arm's body, from its label to the end of that arm.
+
+        Split on the four-space label rather than on `up)`, which also matches
+        the argument parser's `up|down|status|resume)` at six spaces and would
+        silently measure the wrong block -- the hazard the previous version of
+        this test recorded and then fell to from a different direction.
+        """
+        opening = f"\n    {name})\n"
+        start = code.find(opening)
+        assert start >= 0, f"bin/project-runtime.sh has no {name} arm"
+        start += len(opening)
+        end = code.find("\n      ;;", start)
+        assert end >= 0, f"the {name} arm is not terminated"
+        return code[start:end]
+
+    def at(body: str, needle: str, label: str) -> int:
+        index = body.find(needle)
+        assert index >= 0, f"{needle!r} is absent from the {label} arm"
         return index
 
-    # The profile list stopped being a literal in Session 3 -- it is built from
-    # the session the project was deployed through -- so the ordering is
-    # measured against the two commands themselves. Anchoring on
-    # `"${profiles[@]}" up` keeps it precise: that string appears once, in the
-    # arm that starts containers.
-    assert at("materialize-secrets.sh") < at("render-secret-override.py")
-    assert at("render-secret-override.py") < at('"${profiles[@]}" up')
-    assert at('"${profiles[@]}" up') < at("attach --project-key")
-    assert at("detach --project-key") < at('"${profiles[@]}" down')
+    up = arm("up")
+    assert at(up, "materialize-secrets.sh", "up") < at(up, "render-secret-override.py", "up")
+    assert at(up, "render-secret-override.py", "up") < at(up, "up -d --build --wait", "up")
+    assert at(up, "up -d --build --wait", "up") < at(up, "attach --project-key", "up")
+
+    # ADR 0063's second arm. It starts what `up --defer` held back, so the same
+    # ordering holds here -- and it must NOT materialize: a new generation
+    # between the bootstrap and the API start would mount a credential the
+    # bootstrap plane did not set a password from.
+    resume = arm("resume")
+    assert at(resume, "up -d --build --wait", "resume") < at(
+        resume, "attach --project-key", "resume"
+    )
+    assert "materialize-secrets.sh" not in resume, (
+        "resume materializes secrets. `up` writes a new generation and repoints the "
+        "project at it, so doing that here mounts a credential the bootstrap plane "
+        "did not set a password from (ADR 0063)"
+    )
+
+    down = arm("down")
+    assert at(down, "detach --project-key", "down") < at(down, "/bin/compose.sh", "down")
 
 
 def test_teardown_never_removes_volumes() -> None:
