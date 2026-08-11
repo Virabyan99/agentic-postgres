@@ -36,6 +36,12 @@ DATABASE_SERVICE_PORT = 5432
 #: The service in `compose.yaml` that carries the public route.
 ROUTED_SERVICE = "edge-probe"
 
+#: Session 5's REST service, and the port it listens on inside its container.
+#: 3000 is PostgREST's default `server-port`, which Run 4's `--dump-config`
+#: printed; the Compose service does not override it.
+REST_SERVICE = "postgrest"
+REST_SERVICE_PORT = 3000
+
 #: `services/edge-probe/probe.py` LISTEN_PORT. Traefik needs the container port;
 #: the probe publishes none, because only Traefik publishes a host port.
 ROUTED_SERVICE_PORT = 8080
@@ -54,6 +60,8 @@ __all__ = [
     "MIGRATION_SERVICE",
     "POOLER_SERVICE",
     "POOLER_SERVICE_PORT",
+    "REST_SERVICE",
+    "REST_SERVICE_PORT",
     "ROUTED_SERVICE",
     "ROUTED_SERVICE_PORT",
     "build_override",
@@ -103,6 +111,8 @@ def build_override(
     router_name: str,
     https_entrypoint: str,
     rendered_directory: str,
+    rest_router_name: str,
+    buffering_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
@@ -127,6 +137,10 @@ def build_override(
     """
     if not router_name:
         raise ValueError("router_name is required")
+    if not rest_router_name:
+        raise ValueError("rest_router_name is required")
+    if not buffering_middleware_name:
+        raise ValueError("buffering_middleware_name is required")
     if not https_entrypoint:
         raise ValueError("https_entrypoint is required")
     if not rendered_directory or not rendered_directory.startswith("/"):
@@ -181,7 +195,65 @@ def build_override(
                     f"{service}.loadbalancer.server.port": str(ROUTED_SERVICE_PORT),
                 }
             },
+            REST_SERVICE: {
+                "labels": _rest_labels(
+                    https_entrypoint=https_entrypoint,
+                    rest_router_name=rest_router_name,
+                    buffering_middleware_name=buffering_middleware_name,
+                )
+            },
         }
+    }
+
+
+def _rest_labels(
+    *, https_entrypoint: str, rest_router_name: str, buffering_middleware_name: str
+) -> dict[str, str]:
+    """The REST router, its body-size middleware, and the boundary rule.
+
+    **The rule is two matchers, and that is the measurement.** `PathPrefix` is
+    not segment-aware: measured against the locked Traefik, a router ruled
+    ``PathPrefix(`/api/rest`)`` answers ``/api/restaurant`` and
+    ``/api/rest-extra`` with 200. A prefix boundary written the obvious way
+    captures every sibling path that happens to share a spelling, and the
+    symptom is a route serving a surface nobody attached it to.
+
+    ``Path(`/api/rest`) || PathPrefix(`/api/rest/`)`` is the pair that gives a
+    segment boundary: the exact path, and anything strictly beneath it.
+    Re-measured, ``/api/restaurant``, ``/api/rest-extra`` and ``/api/rest2`` all
+    return 404 while ``/api/rest``, ``/api/rest/`` and ``/api/rest/notes``
+    return 200.
+
+    The middleware's name is rendered into the label *key* and its two limits
+    are left as interpolation references, which is ADR 0013's rule doing exactly
+    what it is for. A name in a key is rendered because Compose 2.24 does not
+    interpolate inside a key and would produce a middleware literally called
+    `${API_BUFFERING_MIDDLEWARE_NAME}`; the numbers are values, so they come
+    from `compose.env` and stay out of this file.
+    """
+    router = f"traefik.http.routers.{rest_router_name}"
+    service = f"traefik.http.services.{rest_router_name}"
+    buffering = f"traefik.http.middlewares.{buffering_middleware_name}"
+    path = "${API_REST_PATH:?required}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.rule": (
+            f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
+        ),
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        # The baseline chain first, then the body-size limit. Order is the order
+        # a request traverses them, and the baseline is what puts
+        # `Cache-Control: no-store` on the 413 the buffering middleware itself
+        # generates -- measured, and the reason the response policy lives in the
+        # chain rather than beside the upstream.
+        f"{router}.middlewares": (
+            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},{buffering_middleware_name}"
+        ),
+        f"{router}.service": rest_router_name,
+        f"{service}.loadbalancer.server.port": str(REST_SERVICE_PORT),
+        f"{buffering}.buffering.maxrequestbodybytes": "${API_REQUEST_BODY_MAX_BYTES:?required}",
+        f"{buffering}.buffering.memrequestbodybytes": "${API_REQUEST_BODY_MEMORY_BYTES:?required}",
     }
 
 
@@ -190,6 +262,8 @@ def render_override(
     router_name: str,
     https_entrypoint: str,
     rendered_directory: str,
+    rest_router_name: str,
+    buffering_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
@@ -197,6 +271,8 @@ def render_override(
         router_name=router_name,
         https_entrypoint=https_entrypoint,
         rendered_directory=rendered_directory,
+        rest_router_name=rest_router_name,
+        buffering_middleware_name=buffering_middleware_name,
         publications=publications,
     )
     header = (

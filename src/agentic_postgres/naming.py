@@ -201,6 +201,38 @@ def health_router_name(key: str) -> str:
     return traefik_name(f"apg-{key}-health", context="traefik_router_health")
 
 
+def rest_router_name(key: str) -> str:
+    """The router and service name for one project's REST route.
+
+    Same construction as the health router and for the same reason: one name
+    per route, shared between `routers.<n>.service` and `services.<n>`.
+    """
+    return traefik_name(f"apg-{key}-rest", context="traefik_router_rest")
+
+
+def api_buffering_middleware_name(key: str) -> str:
+    """The per-project body-size middleware.
+
+    Per-project because the limits are: `api.rest.request_body_max_bytes` is a
+    manifest value, and a middleware in the shared baseline file could only
+    carry one number for every project on the host. The name is derived so two
+    projects cannot define the same middleware and have whichever loaded last
+    decide what both of them enforce.
+    """
+    return traefik_name(f"apg-{key}-api-buffering", context="traefik_middleware_buffering")
+
+
+def docs_credential_middleware_name(key: str) -> str:
+    """The per-project documentation credential middleware.
+
+    Derived even though a project has only one, because Traefik's middleware
+    namespace is host-wide: two projects whose middlewares collided would share
+    one credential file, and the symptom would be that one project's
+    documentation password opens the other's.
+    """
+    return traefik_name(f"apg-{key}-docs-auth", context="traefik_middleware_docs_auth")
+
+
 def r2_bucket(value: str, *, context: str = "r2_bucket") -> str:
     """Truncate and validate ``value`` as an R2/S3 bucket name."""
     result = truncate(value, limit=R2_BUCKET_MAX, context=context, separator="-")
@@ -298,6 +330,18 @@ class ProjectIdentity:
     #: middleware chain) do not, because `host.yaml` is not a digested render
     #: input (ADR 0009).
     health_router: str = ""
+    #: The REST surface's *path*, without the scheme and host. `route_rest` is
+    #: the URL a person is given; this is what a router rule matches on, and the
+    #: two are derived from one expression so a change to the base path cannot
+    #: move the published URL without moving the rule.
+    route_rest_path: str = ""
+    #: Traefik router and service name for the REST route, and the two
+    #: per-project middlewares. All three are project-derived and reach
+    #: `compose.env`; a middleware name is host-wide in Traefik, so deriving it
+    #: is what stops two projects from sharing one.
+    rest_router: str = ""
+    api_buffering_middleware: str = ""
+    docs_credential_middleware: str = ""
 
     jwt_issuer: str = ""
     jwt_audience: str = ""
@@ -353,11 +397,15 @@ def derive(
         ),
         roles=database_roles(key_sql),
         route_rest=f"https://{domain}{api_base_path}/rest",
+        route_rest_path=f"{api_base_path}/rest",
         route_app=f"https://{domain}{api_base_path}/app",
         route_mcp=f"https://{domain}{mcp_base_path}",
         route_docs=f"https://{domain}/docs",
         route_health=f"https://{domain}{HEALTH_ROUTE_PATH}",
         health_router=health_router_name(key),
+        rest_router=rest_router_name(key),
+        api_buffering_middleware=api_buffering_middleware_name(key),
+        docs_credential_middleware=docs_credential_middleware_name(key),
         jwt_issuer=f"https://{domain}{api_base_path}/app/auth",
         jwt_audience=f"urn:agentic-postgres:{slug}:{environment}",
         secrets_namespace=f"agentic-postgres/{key}",

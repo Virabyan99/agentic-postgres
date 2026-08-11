@@ -323,6 +323,8 @@ def test_an_override_without_an_allocation_publishes_nothing() -> None:
     """
     document = runtime_override.build_override(
         router_name="apg-alpha-dev-health",
+        rest_router_name="apg-alpha-dev-rest",
+        buffering_middleware_name="apg-alpha-dev-api-buffering",
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )
@@ -380,6 +382,8 @@ def test_the_override_carries_no_ports_entry_for_any_service() -> None:
     """
     payload = runtime_override.render_override(
         router_name="apg-alpha-dev-health",
+        rest_router_name="apg-alpha-dev-rest",
+        buffering_middleware_name="apg-alpha-dev-api-buffering",
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )

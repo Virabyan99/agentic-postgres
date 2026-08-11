@@ -122,3 +122,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0056](0056-a-consumer-declares-the-format-its-file-is-written-in.md) | A consumer declares the format its file is written in | 5 | Accepted |
 | [0057](0057-the-public-error-contract-is-a-sqlstate-the-function-chooses.md) | The public error contract is a SQLSTATE the function chooses | 5 | Accepted |
 | [0058](0058-a-bound-the-published-document-cannot-carry-is-not-a-bound.md) | A bound the published document cannot carry is not a bound | 5 | Accepted |
+| [0059](0059-a-route-boundary-is-a-segment-boundary.md) | A route boundary is a segment boundary, and the obvious spelling is not one | 5 | Accepted |

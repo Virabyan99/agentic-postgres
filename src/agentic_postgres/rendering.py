@@ -333,6 +333,23 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "POSTGREST_POOL_MAX_LIFETIME",
     "POSTGREST_CORS_ORIGINS",
     "JWT_AUDIENCE",
+    # Session 5 Run 6. The edge's half of the same configuration.
+    #
+    # PostgREST provides no general body-size control, so the limit is enforced
+    # one hop earlier by a Traefik buffering middleware -- which means these two
+    # numbers are read by a *label value* in the runtime override rather than by
+    # any container's environment. They are here for the same reason as the
+    # rest: they come from the project manifest. Interpolation is what keeps a
+    # middleware's name (a label *key*, and therefore rendered) apart from its
+    # limits (values, and therefore not).
+    "API_REQUEST_BODY_MAX_BYTES",
+    "API_REQUEST_BODY_MEMORY_BYTES",
+    # The path a router rule matches on, derived beside the URL it publishes so
+    # that moving the base path cannot move one without moving the other.
+    "API_REST_PATH",
+    "REST_ROUTER_NAME",
+    "API_BUFFERING_MIDDLEWARE_NAME",
+    "DOCS_CREDENTIAL_MIDDLEWARE_NAME",
 )
 
 #: The pooler's port on its own project network. 6432 is the PgBouncer
@@ -496,6 +513,17 @@ def build_compose_env(
         # to render.
         "POSTGREST_CORS_ORIGINS": ",".join(rest["allowed_cors_origins"]),
         "JWT_AUDIENCE": identity.jwt_audience,
+        "API_REQUEST_BODY_MAX_BYTES": str(rest["request_body_max_bytes"]),
+        # Equal to the maximum for P0, so nothing is ever written to disk on the
+        # way through. `memRequestBodyBytes` below the maximum makes Traefik
+        # spill the remainder to a temporary file, which puts a request body --
+        # the one place a caller's data is in the clear at the edge -- onto the
+        # filesystem of a container that has no business holding it.
+        "API_REQUEST_BODY_MEMORY_BYTES": str(rest["request_body_memory_bytes"]),
+        "API_REST_PATH": identity.route_rest_path,
+        "REST_ROUTER_NAME": identity.rest_router,
+        "API_BUFFERING_MIDDLEWARE_NAME": identity.api_buffering_middleware,
+        "DOCS_CREDENTIAL_MIDDLEWARE_NAME": identity.docs_credential_middleware,
     }
     lines = [
         "# Generated. Do not edit; do not shell-source.",

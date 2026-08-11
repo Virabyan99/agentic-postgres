@@ -286,9 +286,16 @@ def test_the_whole_edge_render_produces_files_traefik_can_load(
 
     assert set(dynamic["http"]["middlewares"]) == {
         "apg-security-headers",
+        "apg-response-policy",
         "apg-rate-limit",
         "apg-baseline",
     }
+    # And every one of them is in the chain. A middleware defined here and left
+    # out of `apg-baseline` is attached to nothing, and it reads in this file
+    # exactly like one that applies to every route.
+    assert set(dynamic["http"]["middlewares"]["apg-baseline"]["chain"]["middlewares"]) == (
+        set(dynamic["http"]["middlewares"]) - {"apg-baseline"}
+    )
 
     resolver = next(iter(static["certificatesResolvers"].values()))["acme"]
     expected = "production.json" if acme_environment == "production" else "staging.json"
@@ -329,6 +336,7 @@ def test_the_rendered_dynamic_config_parses_in_both_environments(acme_environmen
     )
     assert set(parsed["http"]["middlewares"]) == {
         "apg-security-headers",
+        "apg-response-policy",
         "apg-rate-limit",
         "apg-baseline",
     }, f"the {acme_environment} render lost a baseline middleware"
@@ -376,6 +384,7 @@ def test_the_baseline_chain_exists_and_is_referenced_by_name(
     middlewares = dynamic_config["http"]["middlewares"]
     assert middlewares["apg-baseline"]["chain"]["middlewares"] == [
         "apg-security-headers",
+        "apg-response-policy",
         "apg-rate-limit",
     ]
 

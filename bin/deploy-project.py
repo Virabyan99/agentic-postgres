@@ -622,10 +622,13 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
 
     step("2. Render the override (which publishes nothing -- ADR 0044)")
     rendered_directory = deployed_output.rendered_path(key)
+    compose_env = rendered_directory / "compose.env"
     payload = runtime_override.render_override(
-        router_name=_env_value(rendered_directory / "compose.env", "HEALTH_ROUTER_NAME"),
+        router_name=_env_value(compose_env, "HEALTH_ROUTER_NAME"),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
+        rest_router_name=_env_value(compose_env, "REST_ROUTER_NAME"),
+        buffering_middleware_name=_env_value(compose_env, "API_BUFFERING_MIDDLEWARE_NAME"),
     )
     _write_root_only(rendered_directory / "runtime-compose.override.yaml", payload)
     print(f"  {rendered_directory / 'runtime-compose.override.yaml'}")
@@ -738,6 +741,10 @@ def main(argv: list[str] | None = None) -> int:
 
     override_payload = runtime_override.render_override(
         router_name=_env_value(rendered_dir / "compose.env", "HEALTH_ROUTER_NAME"),
+        rest_router_name=_env_value(rendered_dir / "compose.env", "REST_ROUTER_NAME"),
+        buffering_middleware_name=_env_value(
+            rendered_dir / "compose.env", "API_BUFFERING_MIDDLEWARE_NAME"
+        ),
         https_entrypoint=host["edge"]["https_entrypoint"],
         # The installed path, not the checkout's. The override is written into
         # the staging copy of the very directory it names, and the name has to
