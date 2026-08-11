@@ -21,6 +21,21 @@ contract_id: notes-tasks-v1
 # boundary that has to be argued about on its own.
 exposed_schema: api
 
+# The four values ADR 0003 froze, given an executable form (ADR 0058).
+#
+# An enum rather than a CHECK constraint because only the enum reaches the
+# generated document: measured on the locked PostgREST against a table carrying
+# both, the enum column publishes its values and the checked text column
+# publishes `{"type":"string","format":"text"}`. And in `api` rather than `app`
+# because the published `format` string is the type's schema-qualified name, so
+# a type in `app` would print a forbidden schema's name in the served artifact.
+#
+# In `enumsortorder`. The comparison is order-sensitive: a reordering passes a
+# set comparison and changes what every generated client lists first.
+enums:
+  task_status:
+    values: [pending, in_progress, completed, cancelled]
+
 relations:
   # Both are security-invoker views over FORCE-RLS tables (migration 0004): the
   # caller's row policy applies, so `owner_id` discloses to a caller only the id

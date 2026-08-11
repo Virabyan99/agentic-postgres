@@ -120,3 +120,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0054](0054-a-secret-may-be-consumed-by-the-root-plane.md) | A secret may be consumed by the root plane, and says so | 5 | Accepted |
 | [0055](0055-the-contract-declares-what-kind-of-value-a-secret-is.md) | The contract declares what kind of value a secret is | 5 | Accepted |
 | [0056](0056-a-consumer-declares-the-format-its-file-is-written-in.md) | A consumer declares the format its file is written in | 5 | Accepted |
+| [0057](0057-the-public-error-contract-is-a-sqlstate-the-function-chooses.md) | The public error contract is a SQLSTATE the function chooses | 5 | Accepted |
+| [0058](0058-a-bound-the-published-document-cannot-carry-is-not-a-bound.md) | A bound the published document cannot carry is not a bound | 5 | Accepted |

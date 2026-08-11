@@ -475,6 +475,50 @@ def test_every_consumer_declares_a_format(contract: dict[str, Any]) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Reading a materialized file back (Session 5 Run 5)
+# ---------------------------------------------------------------------------
+
+
+def test_every_format_round_trips(contract: dict[str, Any]) -> None:
+    """The bootstrap plane needs the value, not the wrapper around it.
+
+    `ALTER ROLE … PASSWORD` takes a password, and the API's authenticator
+    credential is materialized as a pgpass line because the service that mounts
+    it has no shell to unwrap one. So the pair has to be exact, for every format
+    and not only the one that motivated it: a reader that quietly handed back
+    `*:*:*:*:hunter2` would set the role's password to a string containing the
+    password, and every subsequent connection would fail authentication with a
+    file on disk that looks correct.
+    """
+    value = "b8f0a3c1d2e4f5a6"
+    for secret in contract["secrets"]:
+        for consumer in secret["consumers"]:
+            rendered = secrets_contract.render_secret(value, consumer)
+            recovered = secrets_contract.recover_secret(rendered, consumer)
+            assert recovered == value, f"{secret['name']} / {consumer['format']}"
+
+
+def test_a_pgpass_file_written_by_something_else_is_refused() -> None:
+    """A file that does not begin with the template's prefix means the
+    materializer did not write it, and what the rest of it means is unknown."""
+    consumer = {"format": "pgpass"}
+    with pytest.raises(ManifestError, match="does not begin with"):
+        secrets_contract.recover_secret("localhost:5432:db:role:hunter2\n", consumer)
+
+
+def test_a_format_with_no_reader_is_refused() -> None:
+    """The realistic failure is a third format that only the writer learns about.
+
+    Both halves raise on an unknown name so the pair fails loudly, rather than
+    the reader passing a wrapper through as though it were a value.
+    """
+    with pytest.raises(ManifestError, match="no reader"):
+        secrets_contract.recover_secret("anything", {"format": "base64"})
+    with pytest.raises(ManifestError, match="no writer"):
+        secrets_contract.render_secret("anything", {"format": "base64"})
+
+
 def test_a_consumer_with_no_format_is_refused(tmp_path: Path, raw: dict[str, Any]) -> None:
     def mutate(document: dict[str, Any]) -> None:
         del document["secrets"][0]["consumers"][0]["format"]

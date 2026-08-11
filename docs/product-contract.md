@@ -131,8 +131,8 @@ Priorities:
 | `DEP-BOOT-001` | 3 | A project restarted by systemd, or restored after a reboot, comes back from the release its deployed document records, through the session that document records, with its cluster identity and applied migrations intact. |
 | `DEP-ISO-003` | 3 | Two deployed projects have isolated clusters, volumes, roles, credentials and identity sentinels, and neither project's credential authenticates against the other. |
 | `SEC-DB-001` | 3 | No runtime role holds SUPERUSER, CREATEDB, CREATEROLE, REPLICATION or BYPASSRLS. Read from the catalog, never inferred from how a role was created. |
-| `SEC-DB-002` | 3 | The public, app and app_private schema boundaries match the contract, and the API roles cannot address the private schemas at all. |
-| `SEC-DEFAULT-001` | 3 | Default EXECUTE on newly created functions is revoked from PUBLIC. |
+| `SEC-DB-002` | 3 | The public, app and app_private schema boundaries match the contract. No API role can address `app`. `app_private` is nameable by exactly the two roles PostgREST impersonates, which reach one function in it and no data at all (ADR 0052); every other role, including the ones no token can name, cannot address it. |
+| `SEC-DEFAULT-001` | 3 | Default EXECUTE on newly created functions is revoked from PUBLIC, for every function in `api` rather than for a named pair -- and the published document follows a PUBLIC grant, so a function that kept the default would be advertised to an anonymous caller. |
 | `SEC-FUNC-001` | 3 | An API role cannot execute a function it was not explicitly granted. |
 | `SEC-OWNER-001` | 3 | Objects are owned by a non-login role that no service connects as. |
 | `SEC-RLS-001` | 3 | A user can neither read nor mutate another user's rows. |

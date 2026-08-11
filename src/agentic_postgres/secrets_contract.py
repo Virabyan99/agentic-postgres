@@ -155,6 +155,43 @@ def render_secret(value: str, consumer: dict[str, Any]) -> str:
     raise ManifestError(f"no writer for secret format {fmt!r}")
 
 
+def recover_secret(rendered: str, consumer: dict[str, Any]) -> str:
+    """The provider's value, back out of the bytes :func:`render_secret` wrote.
+
+    The bootstrap plane needs the password itself -- `ALTER ROLE … PASSWORD`
+    takes a value, not a pgpass line -- and it reads it from the materialized
+    file rather than from the provider, because a second declared consumer would
+    materialize a second copy of one credential and give a rotation two files to
+    reach instead of one.
+
+    Written here, beside the writer, and asserted to round-trip. The realistic
+    failure is not that this is wrong today; it is that a third format arrives
+    and only one of the two functions learns about it. Both raise on an unknown
+    format for that reason, so the pair fails loudly rather than one of them
+    passing a wrapper through as though it were a value.
+
+    Trailing newlines only, matching :func:`render_secret`'s template and the
+    `$(cat …)` every container entrypoint uses. A `.strip()` would also take
+    leading whitespace and hand back a value no consumer presents.
+    """
+    fmt = consumer["format"]
+    if fmt == "raw":
+        return rendered.rstrip("\n")
+    if fmt == "pgpass":
+        line = rendered.rstrip("\n")
+        prefix = PGPASS_TEMPLATE.split("{value}")[0]
+        if not line.startswith(prefix):
+            # No value is echoed. The file holds a secret whatever shape it is
+            # in, and a message quoting the malformed line would put it in a log.
+            raise ManifestError(
+                f"a pgpass-format secret file does not begin with {prefix!r}. It was "
+                "not written by this contract's materializer, so what the remainder "
+                "means is unknown"
+            )
+        return line[len(prefix) :]
+    raise ManifestError(f"no reader for secret format {fmt!r}")
+
+
 def consumer_directory(consumer: dict[str, Any]) -> str:
     """The generation subdirectory this consumer's file lands in.
 
@@ -294,6 +331,7 @@ __all__ = [
     "granted_services",
     "is_root_plane",
     "load_secret_contract",
+    "recover_secret",
     "render_secret",
     "secret_source_path",
 ]

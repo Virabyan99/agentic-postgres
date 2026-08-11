@@ -74,6 +74,20 @@
       "template": "templates/0006-app-runtime-least-privilege.sql",
       "placeholders": ["object_owner", "app_runtime"],
       "description": "The application runtime role loses the direct reach into app and app_private that Session 3 granted it, default privileges included, and holds only what membership in authenticated carries. See SEC-DBX-002 and ADR 0041."
+    },
+    {
+      "version": "20260811120007",
+      "name": "api_surface_convergence",
+      "template": "templates/0007-api-surface-convergence.sql",
+      "placeholders": ["object_owner", "authenticated", "agent_reader", "agent_writer"],
+      "description": "ADR 0048: the catalog converges on the domain four documents froze. notes.body becomes content, tasks gains description and a bounded api.task_status derived from done, create_task is retired for update_task_status, and the api views and write RPCs are rebuilt over the result."
+    },
+    {
+      "version": "20260811120008",
+      "name": "http_request_plane",
+      "template": "templates/0008-http-request-plane.sql",
+      "placeholders": ["object_owner", "anon", "authenticated"],
+      "description": "app_private.postgrest_pre_request(), and the one private object an HTTP request role may reach: USAGE on app_private plus EXECUTE on that function, granted by name to anon and authenticated and to nothing else. See ADR 0052 and D138."
     }
   ]
 }

@@ -461,7 +461,12 @@
   target_session: 3
   test_nodeids:
     - tests/security/test_session3_authorization.py::test_public_cannot_execute_the_write_rpcs
-  description: Default EXECUTE on newly created functions is revoked from PUBLIC.
+    - tests/security/test_session3_authorization.py::test_the_retired_write_rpc_is_gone
+  description: >-
+    Default EXECUTE on newly created functions is revoked from PUBLIC, for every
+    function in `api` rather than for a named pair -- and the published document
+    follows a PUBLIC grant, so a function that kept the default would be
+    advertised to an anonymous caller.
 
 - id: SEC-OWNER-001
   priority: P0
@@ -485,12 +490,18 @@
   priority: P0
   target_session: 3
   test_nodeids:
-    - tests/security/test_session3_authorization.py::test_api_roles_cannot_address_the_private_schemas
+    - tests/security/test_session3_authorization.py::test_api_roles_cannot_address_the_app_schema
+    - tests/security/test_session3_authorization.py::test_a_role_that_makes_no_request_cannot_address_the_private_schema
+    - tests/security/test_session3_authorization.py::test_a_request_role_reaches_one_private_function_and_no_private_data
+    - tests/security/test_session3_authorization.py::test_the_runtime_role_inherits_the_private_schema_grant_and_nothing_in_it
     - tests/security/test_session3_authorization.py::test_a_direct_read_of_the_private_table_is_denied
     - tests/security/test_session3_authorization.py::test_the_four_schemas_exist
   description: >-
-    The public, app and app_private schema boundaries match the contract, and
-    the API roles cannot address the private schemas at all.
+    The public, app and app_private schema boundaries match the contract. No API
+    role can address `app`. `app_private` is nameable by exactly the two roles
+    PostgREST impersonates, which reach one function in it and no data at all
+    (ADR 0052); every other role, including the ones no token can name, cannot
+    address it.
 
 - id: DBX-PG-001
   priority: P0

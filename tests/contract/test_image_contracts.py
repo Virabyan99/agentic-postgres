@@ -805,6 +805,203 @@ def test_a_published_loopback_port_does_not_match_the_trust_line(
         assert fields[4] == "scram-sha-256", fields
 
 
+# ---------------------------------------------------------------------------
+# And which line a CONTAINER-TO-CONTAINER connection matches (Session 5 Run 5)
+#
+# Session 4 measured the published-port case above. PostgREST does not use it:
+# it reaches the cluster over the project's internal Docker network, which is a
+# different source address arriving from a different bridge. Inheriting the
+# earlier answer would be assuming two NAT paths behave alike, and the
+# consequence of being wrong is unauthenticated superuser access from inside the
+# project network -- available to anything that gets a foothold in any container
+# on it, and invisible to every credential test in this suite, because they all
+# authenticate correctly.
+# ---------------------------------------------------------------------------
+
+
+class PeerCluster:
+    """A throwaway cluster with no published port, reached over its network."""
+
+    def __init__(self, name: str, network: str, image: str, good: Path, bad: Path) -> None:
+        self.name = name
+        self.network = network
+        self.image = image
+        self.good = good
+        self.bad = bad
+
+    def from_a_peer_container(self, env_file: Path, statement: str):
+        """Connect the way the API service does: by service name, over the network."""
+        return subprocess.run(
+            [
+                "docker", "run", "--rm", "--network", self.network,
+                "--env-file", str(env_file), self.image,
+                "psql", "-h", "postgres", "-p", "5432",
+                "-U", "postgres", "-d", "postgres", "-w", "-X", "-qtA", "-c", statement,
+            ],
+            capture_output=True, text=True, check=False, timeout=120,
+        )  # fmt: skip
+
+    def through_the_containers_own_loopback(self, statement: str):
+        return subprocess.run(
+            [
+                "docker", "exec", "-e", "PGPASSWORD=not-the-password", self.name,
+                "psql", "-h", "127.0.0.1", "-p", "5432",
+                "-U", "postgres", "-d", "postgres", "-w", "-X", "-qtA", "-c", statement,
+            ],
+            capture_output=True, text=True, check=False, timeout=120,
+        )  # fmt: skip
+
+    def logs(self) -> str:
+        result = subprocess.run(
+            ["docker", "logs", self.name], capture_output=True, text=True, check=False, timeout=60
+        )
+        return result.stdout + result.stderr
+
+    def hba_line(self, number: int) -> str:
+        result = subprocess.run(
+            ["docker", "exec", self.name, "sh", "-c", f'sed -n "{number}p" "$PGDATA"/pg_hba.conf'],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+
+@pytest.fixture(scope="module")
+def peer_cluster(postgres_image: str, tmp_path_factory: pytest.TempPathFactory):
+    """No published port at all: the only route in is the project network.
+
+    `--network-alias postgres` so the peer resolves the cluster by the name the
+    Compose model uses, rather than by an address this test invented.
+    """
+    suffix = secrets.token_hex(4)
+    name = f"apg-peer-probe-{suffix}"
+    network = f"apg-peer-net-{suffix}"
+    work = tmp_path_factory.mktemp("peer-probe")
+    password = secrets.token_hex(24)
+
+    server_env = work / "server.env"
+    server_env.write_text(f"POSTGRES_PASSWORD={password}\n", encoding="utf-8")
+    good = work / "good.env"
+    good.write_text(f"PGPASSWORD={password}\n", encoding="utf-8")
+    bad = work / "bad.env"
+    bad.write_text("PGPASSWORD=not-the-password\n", encoding="utf-8")
+    for path in (server_env, good, bad):
+        path.chmod(0o600)
+
+    created = subprocess.run(
+        ["docker", "network", "create", network],
+        capture_output=True, text=True, check=False, timeout=120,
+    )  # fmt: skip
+    assert created.returncode == 0, created.stderr
+
+    started = subprocess.run(
+        [
+            "docker", "run", "-d", "--name", name,
+            "--network", network, "--network-alias", "postgres",
+            "--env-file", str(server_env),
+            postgres_image, "-c", "log_connections=on",
+        ],
+        capture_output=True, text=True, check=False, timeout=300,
+    )  # fmt: skip
+    assert started.returncode == 0, started.stderr
+
+    try:
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            ready = subprocess.run(
+                ["docker", "exec", name, "pg_isready", "-q", "-U", "postgres"],
+                capture_output=True,
+                check=False,
+                timeout=60,
+            )
+            if ready.returncode == 0:
+                break
+            time.sleep(1)
+        else:
+            pytest.fail("the throwaway cluster never became ready")
+
+        yield PeerCluster(name, network, postgres_image, good, bad)
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=120)
+        subprocess.run(
+            ["docker", "network", "rm", network], capture_output=True, check=False, timeout=120
+        )
+
+
+@requires_docker
+def test_the_peer_probe_can_tell_a_trusted_path_from_an_authenticated_one(
+    peer_cluster: PeerCluster,
+) -> None:
+    """The control, again, and for the same reason.
+
+    A run in which both paths rejected the wrong password would read as proof of
+    the property below and would only mean the probe was broken.
+    """
+    result = peer_cluster.through_the_containers_own_loopback("SELECT 'trusted'")
+    assert result.returncode == 0, (
+        "the container's own loopback rejected a wrong password, so this probe "
+        f"cannot distinguish trust from scram: {result.stderr}"
+    )
+    assert "trusted" in result.stdout
+
+
+@requires_docker
+def test_a_peer_container_arrives_from_the_project_network(peer_cluster: PeerCluster) -> None:
+    result = peer_cluster.from_a_peer_container(
+        peer_cluster.good, "SELECT coalesce(inet_client_addr()::text, 'local')"
+    )
+    assert result.returncode == 0, result.stderr
+    source = result.stdout.strip()
+    assert source not in ("local", ""), "the connection did not traverse the network"
+    assert not source.startswith("127."), (
+        f"the server saw {source}; a peer that presented as loopback would match "
+        "the trust line and reach superuser without a password"
+    )
+
+
+@requires_docker
+def test_a_peer_container_does_not_match_the_trust_line(peer_cluster: PeerCluster) -> None:
+    """What Session 5 rests on: the API's own connection is authenticated.
+
+    Same construction as the published-port measurement above -- the wrong
+    password is refused, *and* the server's own log names an HBA line whose
+    address column is `all`. Either alone can be satisfied by an accident.
+    """
+    refused = peer_cluster.from_a_peer_container(
+        peer_cluster.bad, "SELECT 'THE PROJECT NETWORK IS UNAUTHENTICATED'"
+    )
+    assert refused.returncode != 0, (
+        "a wrong password opened a session from a peer container: anything on the "
+        "project network holds unauthenticated superuser access to the cluster"
+    )
+    assert "password authentication failed" in refused.stderr, refused.stderr
+
+    log = peer_cluster.logs()
+    received = dict(re.findall(r"\[(\d+)\] LOG:  connection received: host=(\S+)", log))
+    authenticated = re.findall(
+        r"\[(\d+)\] LOG:  connection authenticated: .*method=(\S+) \(\S+:(\d+)\)", log
+    )
+    matched = [
+        (method, int(line))
+        for pid, method, line in authenticated
+        if not received.get(pid, "").startswith(("127.", "[local]", "::1"))
+    ]
+    assert matched, "no authenticated connection arrived from a peer container"
+
+    for method, line_number in matched:
+        assert method == "scram-sha-256", f"a peer container authenticated by {method}"
+        fields = peer_cluster.hba_line(line_number).split()
+        assert fields[:3] == ["host", "all", "all"], fields
+        assert fields[3] == "all", (
+            f"the peer connection matched {fields}; an address-scoped rule here "
+            "means the source address is not what this test measured"
+        )
+        assert fields[4] == "scram-sha-256", fields
+
+
 def test_the_model_puts_dbmate_flags_where_they_are_accepted() -> None:
     """Offline. The Compose command must obey what the measurements found."""
     import yaml

@@ -71,6 +71,31 @@
       "template": "templates/0006-app-runtime-least-privilege.sql",
       "template_sha256": "cfc912d4fc2890632bf006014462066672d172eb2a85d64300643289764de595",
       "version": "20260808120006"
+    },
+    {
+      "canonical_render_sha256": "7085f709f7984e4f19fd736ae219ba4611d2ce0b2157b5e5920911225d588931",
+      "name": "api_surface_convergence",
+      "placeholders": [
+        "agent_reader",
+        "agent_writer",
+        "authenticated",
+        "object_owner"
+      ],
+      "template": "templates/0007-api-surface-convergence.sql",
+      "template_sha256": "080f5518783ac0dc90eac5817f0db68dc333aea59aed0d1ffb2437cb623d8aee",
+      "version": "20260811120007"
+    },
+    {
+      "canonical_render_sha256": "a7d89dad3aef9996cd967c2d5077ee4e9635ae969a6aa89a4a01b0f89eade7d4",
+      "name": "http_request_plane",
+      "placeholders": [
+        "anon",
+        "authenticated",
+        "object_owner"
+      ],
+      "template": "templates/0008-http-request-plane.sql",
+      "template_sha256": "926af502fcd814f5573fb6272c2e84527e152cd5e21db92555af83c305ecdf98",
+      "version": "20260811120008"
     }
   ],
   "schema_version": 1

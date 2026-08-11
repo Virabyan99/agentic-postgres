@@ -65,6 +65,7 @@ __all__ = [
     "SurfaceError",
     "contract_digest",
     "declared_objects",
+    "declared_types",
     "load_surface",
     "validate_surface",
 ]
@@ -159,21 +160,29 @@ def validate_surface(document: dict[str, Any]) -> None:
 
 
 def _refuse_name_collisions(document: dict[str, Any]) -> None:
-    """A relation and an RPC may not share a name.
+    """No two declared objects may share a name, whatever their kinds.
 
     PostgREST serves relations at `/{name}` and functions at `/rpc/{name}`, so
-    the two do not collide on the wire -- but they do collide in every message,
-    every comparison and every review that says "the contract names `tasks`".
-    The catalog permits it; a document a human has to read against a catalog
-    should not.
+    those two do not collide on the wire -- but they do collide in every
+    message, every comparison and every review that says "the contract names
+    `tasks`". The catalog permits it; a document a human has to read against a
+    catalog should not.
+
+    An enum type is included because PostgreSQL puts types and relations in the
+    same namespace: `CREATE TYPE api.tasks` fails against the view of that name,
+    so a contract declaring both would describe a catalog that cannot exist.
     """
-    shared = set(document["relations"]) & set(document["rpcs"])
-    if shared:
-        raise SurfaceError(
-            f"{sorted(shared)} is declared as both a relation and an RPC. The two are "
-            "served at different paths and are indistinguishable in every sentence "
-            "written about them"
-        )
+    labels = {"relations": "a relation", "rpcs": "an RPC", "enums": "an enum type"}
+    seen: dict[str, str] = {}
+    for kind, label in labels.items():
+        for name in document[kind]:
+            if name in seen:
+                raise SurfaceError(
+                    f"{name!r} is declared as both {seen[name]} and {label}. Declared "
+                    "objects are indistinguishable in every sentence written about "
+                    "them, and a type may not share a name with a relation at all"
+                )
+            seen[name] = label
 
 
 def _strings(node: Any, pointer: str = "") -> list[tuple[str, str]]:
@@ -203,6 +212,19 @@ def declared_objects(document: dict[str, Any]) -> set[str]:
     """
     schema = document["exposed_schema"]
     return {f"{schema}.{name}" for name in (*document["relations"], *document["rpcs"])}
+
+
+def declared_types(document: dict[str, Any]) -> set[str]:
+    """Every enum type the contract permits, as `schema.name` strings.
+
+    Kept apart from :func:`declared_objects` rather than folded into it, because
+    the two are compared against different catalogs -- `pg_class` and `pg_proc`
+    on one side, `pg_type` on the other. A single set would make a difference
+    ambiguous: a missing `api.task_status` would be reported the same way
+    whether the type or a view of that name had gone.
+    """
+    schema = document["exposed_schema"]
+    return {f"{schema}.{name}" for name in document["enums"]}
 
 
 def contract_digest(path: Path = CONTRACT_PATH) -> str:

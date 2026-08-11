@@ -5,7 +5,7 @@
   "description": "The hand-written half of ADR 0050: every relation, column, function and method the `api` schema is allowed to expose, named exactly. It is compared against the PostgreSQL catalog and against the generated OpenAPI document in both directions, so an object present in the database and absent here is a release failure even when its grants keep it out of OpenAPI -- because the next grant change publishes it. It is deliberately NOT generated: a contract derived from the thing it constrains cannot refuse it. It is also project-neutral, because the example domain is (ADR 0003, amended by ADR 0048): one contract describes every project that serves it, and a per-project extension is a reviewed delta rather than a second file. additionalProperties is false at every level, and every string is either a bare identifier or a member of a closed enumeration -- which is how 'the contract contains no SQL' is a property of the schema rather than a rule somebody remembers.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "contract_id", "exposed_schema", "relations", "rpcs", "forbidden_schemas"],
+  "required": ["schema_version", "contract_id", "exposed_schema", "enums", "relations", "rpcs", "forbidden_schemas"],
   "properties": {
     "schema_version": { "type": "integer", "enum": [1] },
     "contract_id": {
@@ -16,6 +16,13 @@
     "exposed_schema": {
       "$ref": "#/$defs/identifier",
       "description": "The one schema PostgREST is configured to expose. One, not a list: `db-schemas` accepts several and every additional entry is a boundary that has to be reasoned about separately."
+    },
+    "enums": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/enum" },
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "description": "Enum types in the exposed schema, and their values in `enumsortorder`. Listed because they are published: PostgREST emits an enum column's values into the OpenAPI document while a CHECK constraint bounding the same column appears nowhere in it (ADR 0058). A type is an object in `api` like any other, so leaving it out would give `an unlisted object in api fails the gate` an exception."
     },
     "relations": {
       "type": "object",
@@ -43,6 +50,24 @@
       "pattern": "^[a-z_][a-z0-9_]*$",
       "maxLength": 63,
       "description": "A bare lowercase PostgreSQL identifier. The pattern is what forbids a wildcard, a quoted name, a schema qualification and a SQL fragment, all four at once: none of them can be spelled with these characters."
+    },
+    "enum": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "maxLength": 63
+          },
+          "description": "In `enumsortorder`, which is the order the generated document lists them in. Compared as a sequence rather than as a set: a reordering is invisible to a set comparison and changes what every generated client shows first."
+        }
+      }
     },
     "relation": {
       "type": "object",

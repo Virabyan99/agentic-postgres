@@ -32,7 +32,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from agentic_postgres import migrations
+from agentic_postgres import migrations, secrets_contract
 from agentic_postgres.secrets_contract import SECRET_ROOT
 
 EXIT_CONTRACT = 5
@@ -189,7 +189,8 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     )
     statements.append(
         f"GRANT CONNECT ON DATABASE {db} TO "
-        f"{q(roles['migration_user'])}, {q(roles['app_runtime'])};"
+        f"{q(roles['migration_user'])}, {q(roles['app_runtime'])}, "
+        f"{q(roles['postgrest_authenticator'])};"
     )
 
     # CONNECT only, for the application runtime role. CREATE and TEMPORARY are
@@ -213,6 +214,31 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
         f"GRANT {q(roles['authenticated'])} TO {q(roles['app_runtime'])} "
         f"WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;"
     )
+
+    # The API's request roles, and the exact inverse of the options above.
+    #
+    # This is the whole of SEC-ROLE-001's positive half: PostgREST impersonates a
+    # role by issuing `SET ROLE` as the authenticator, so the set of roles a
+    # token can name is the set granted here and nothing else. Measured against
+    # a real deploy: a token naming `agent_writer` -- deliberately absent from
+    # this list -- comes back **403 `permission denied to set role`**, and one
+    # naming a role that does not exist comes back 401.
+    #
+    #   INHERIT FALSE  the authenticator must not hold `authenticated`'s reach
+    #                  merely by connecting. It holds it only while it has
+    #                  deliberately become that role, for one request.
+    #   SET TRUE       which is the grant that makes impersonation work at all.
+    #   ADMIN FALSE    so a compromised authenticator cannot hand the membership
+    #                  to anything else.
+    #
+    # The two agent roles are Session 9's and are not granted. They exist,
+    # NOLOGIN and unreachable, which is what makes the refusal above a
+    # measurement rather than a statement about a role nothing declared.
+    for request_role in ("anon", "authenticated"):
+        statements.append(
+            f"GRANT {q(roles[request_role])} TO {q(roles['postgrest_authenticator'])} "
+            f"WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;"
+        )
 
     # Role-level settings, here rather than in the migration that revokes the
     # runtime role's direct reach. `ALTER ROLE ... SET` on *another* role needs
@@ -575,6 +601,49 @@ def app_runtime_password_available(project_key: str) -> bool:
     return path.is_file()
 
 
+#: Where the API's authenticator credential is materialized, and in what shape.
+#: The file is a pgpass line rather than a bare value because the service that
+#: mounts it is distroless and has no shell to wrap one (ADR 0056), so this
+#: plane reads it back through the contract's own reader.
+POSTGREST_CONSUMER = {
+    "plane": "compose",
+    "service": "postgrest",
+    "target_file": "postgrest_authenticator_pgpass",
+    "format": "pgpass",
+}
+
+
+def materialized_secret_path(project_key: str, consumer: dict[str, Any]) -> Path | None:
+    """The file this consumer's secret lands in, in the active generation.
+
+    Returns None when the project points at no generation or the generation has
+    no such file. Absence is a fact to report rather than an error to raise: a
+    project materialized through an earlier session genuinely has none, and
+    those are the projects the convergence path exists for.
+    """
+    pointer = Path(SECRET_ROOT) / project_key / "active-secret-generation.json"
+    if not pointer.is_file():
+        return None
+    generation = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
+    path = Path(secrets_contract.secret_source_path(project_key, generation, consumer))
+    return path if path.is_file() else None
+
+
+def read_postgrest_password(path: Path) -> str:
+    """The authenticator's password, out of the pgpass line that carries it.
+
+    Through `secrets_contract.recover_secret` rather than a `split(':')` here.
+    A second reader of that format would be a second opinion about what the file
+    means, and the one that lives beside the writer is the one a round-trip test
+    covers.
+    """
+    value = secrets_contract.recover_secret(path.read_text(encoding="utf-8"), POSTGREST_CONSUMER)
+    if not value:
+        print("postgres-bootstrap: the API authenticator credential is empty.", file=sys.stderr)
+        raise SystemExit(EXIT_CONTRACT)
+    return value
+
+
 def read_migration_password(project_key: str) -> str:
     """The materialized value, from the generation the project points at.
 
@@ -762,6 +831,33 @@ def main() -> int:
         print(f"    from the server: max_connections {maximum}, reserved {reserved}")
     else:
         print("  runtime credential absent from this generation; role left NOLOGIN")
+
+    # The API's authenticator. Same shape, same idempotence, same loud skip --
+    # and deliberately **no CONNECTION LIMIT**, which is a decision rather than
+    # an omission (D161).
+    #
+    # A limit for this role is only meaningful beside a reduced one for
+    # `app_runtime`: the two draw on one `max_connections`, and setting the
+    # API's ceiling without lowering the application's produces two limits that
+    # sum past what the server will give out. That is a budget that looks
+    # computed and is not, which is the failure this project keeps producing.
+    #
+    # The arithmetic also needs the declared pool size, and the rendered
+    # document carries no `api` block for this plane to read. Both halves land
+    # with the live re-computation of the connection budget (plan 3.2
+    # measurement 5), which queries the server rather than extrapolating -- the
+    # rule D94 set and the one the manifest-side check already follows.
+    authenticator_secret = materialized_secret_path(key, POSTGREST_CONSUMER)
+    if authenticator_secret is not None:
+        apply_credential(
+            container,
+            database,
+            roles["postgrest_authenticator"],
+            read_postgrest_password(authenticator_secret),
+        )
+        print("  API authenticator credential set, no CONNECTION LIMIT yet (D161)")
+    else:
+        print("  API authenticator credential absent from this generation; role left NOLOGIN")
 
     # Applied, then read back. The statements above returning 0 says psql
     # accepted them, which is not the same as the catalog holding what they

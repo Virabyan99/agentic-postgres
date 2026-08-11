@@ -259,9 +259,8 @@ def test_the_view_returns_the_callers_rows_not_the_owners(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("schema", ["app", "app_private"])
-def test_api_roles_cannot_address_the_private_schemas(
-    project_a: dict[str, Any], roles: dict[str, str], schema: str
+def test_api_roles_cannot_address_the_app_schema(
+    project_a: dict[str, Any], roles: dict[str, str]
 ) -> None:
     """Both halves are asserted separately (D58).
 
@@ -273,9 +272,116 @@ def test_api_roles_cannot_address_the_private_schemas(
     for role in ("authenticated", "agent_reader", "anon"):
         observed = sql(
             project_a,
-            f"SELECT has_schema_privilege('{roles[role]}', '{schema}', 'USAGE');",
+            f"SELECT has_schema_privilege('{roles[role]}', 'app', 'USAGE');",
         )
-        assert observed == "f", f"{role} holds USAGE on {schema}"
+        assert observed == "f", f"{role} holds USAGE on app"
+
+
+def test_a_role_that_makes_no_request_cannot_address_the_private_schema(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """Migration 0008 opened `app_private` to the roles PostgREST impersonates,
+    and to those only (ADR 0052).
+
+    The agent roles are Session 9's. They are not granted to the authenticator,
+    so no token can name them, and a USAGE grant to a role that can never make a
+    request would widen the private schema to buy nothing. This is the half of
+    the old assertion that is unchanged, and it is what keeps the grant bounded
+    rather than general.
+    """
+    for role in ("agent_reader", "agent_writer"):
+        observed = sql(
+            project_a,
+            f"SELECT has_schema_privilege('{roles[role]}', 'app_private', 'USAGE');",
+        )
+        assert observed == "f", f"{role} holds USAGE on app_private"
+
+
+def test_a_request_role_reaches_one_private_function_and_no_private_data(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """The catalog half of ADR 0052, and the reason the old assertion moved.
+
+    `anon` and `authenticated` now hold `USAGE ON SCHEMA app_private`, because
+    PostgREST runs `db-pre-request` **after** the role switch and `EXECUTE`
+    requires schema `USAGE`. The blanket assertion is therefore false by design,
+    and replacing it with nothing would leave the largest authorization change
+    in this session unchecked.
+
+    What replaces it is stricter rather than weaker: the schema is nameable, and
+    every object in it is enumerated and refused by name. `has_table_privilege`
+    is deliberately not the whole proof -- D103 measured it returning true for
+    objects a role cannot read -- so this asserts the ACLs and `SEC-PRIV-001`
+    attempts the reads.
+    """
+    for role in ("anon", "authenticated"):
+        usage = sql(
+            project_a,
+            f"SELECT has_schema_privilege('{roles[role]}', 'app_private', 'USAGE');",
+        )
+        assert usage == "t", f"{role} cannot resolve the pre-request hook"
+
+        hook = sql(
+            project_a,
+            f"SELECT has_function_privilege('{roles[role]}', "
+            "'app_private.postgrest_pre_request()', 'EXECUTE');",
+        )
+        assert hook == "t", f"{role} cannot execute the pre-request hook"
+
+        others = sql(
+            project_a,
+            "SELECT coalesce(string_agg(p.proname, ','), '') FROM pg_proc p "
+            "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app_private' "
+            "AND p.proname <> 'postgrest_pre_request' AND "
+            f"has_function_privilege('{roles[role]}', p.oid, 'EXECUTE');",
+        )
+        assert others == "", f"{role} can execute {others} in app_private"
+
+        tables = sql(
+            project_a,
+            "SELECT coalesce(string_agg(c.relname || ':' || m, ','), '') FROM pg_class c "
+            "JOIN pg_namespace n ON n.oid = c.relnamespace, "
+            "unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) AS m "
+            "WHERE n.nspname = 'app_private' AND c.relkind IN ('r','v','m') "
+            f"AND has_table_privilege('{roles[role]}', c.oid, m);",
+        )
+        assert tables == "", f"{role} holds {tables} in app_private"
+
+
+def test_the_runtime_role_inherits_the_private_schema_grant_and_nothing_in_it(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """A consequence nothing anticipated, measured rather than reasoned about.
+
+    `app_runtime` is a member of `authenticated` with `INHERIT TRUE`, so
+    migration 0008's grant reaches it -- and migration 0006 removed exactly that
+    `USAGE` one session ago. The reach is real and it is empty: `USAGE` alone
+    resolves names and confers nothing, and `app_runtime` holds no privilege on
+    any object in the schema.
+
+    Asserted rather than left implicit, because "empty today" is the whole risk.
+    A later migration granting a private table to `authenticated` would reach
+    the application runtime by a path nobody wrote down, and this is where that
+    shows up. See D159.
+    """
+    usage = sql(
+        project_a,
+        f"SELECT has_schema_privilege('{roles['app_runtime']}', 'app_private', 'USAGE');",
+    )
+    assert usage == "t", (
+        "the inheritance this test documents no longer happens; that is a change to "
+        "D159, not an assertion to delete"
+    )
+
+    tables = sql(
+        project_a,
+        "SELECT coalesce(string_agg(c.relname || ':' || m, ','), '') FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace, "
+        "unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) AS m "
+        "WHERE n.nspname = 'app_private' AND c.relkind IN ('r','v','m') "
+        f"AND has_table_privilege('{roles['app_runtime']}', c.oid, m);",
+    )
+    assert tables == "", f"the application runtime role holds {tables} in app_private"
 
 
 def test_a_direct_read_of_the_private_table_is_denied(
@@ -343,12 +449,48 @@ def test_public_cannot_execute_the_write_rpcs(project_a: dict[str, Any]) -> None
     `ALTER DEFAULT PRIVILEGES` to report success and store nothing on this
     image, so what carries this is the explicit REVOKE beside each CREATE
     FUNCTION -- and this asserts the outcome rather than the statement.
+
+    Run 5 measured a second consequence, which is why this test now enumerates
+    the catalog instead of naming two signatures. `openapi-mode =
+    follow-privileges` follows a PUBLIC grant too: a function left with
+    PostgreSQL's default EXECUTE is advertised in the document an anonymous
+    caller receives, whether or not anyone intended to publish it.
+
+    `api.create_task(text,uuid)` used to be named here and is gone (ADR 0048).
+    Reading the signatures out of `pg_proc` rather than listing them means the
+    next function is covered by existing, and a retired one cannot leave this
+    test asserting something about an object that no longer exists.
     """
-    for signature in ("api.create_note(text,text)", "api.create_task(text,uuid)"):
-        observed = sql(
-            project_a, f"SELECT has_function_privilege('public', '{signature}', 'EXECUTE');"
-        )
-        assert observed == "f", f"PUBLIC can execute {signature}"
+    signatures = sql(
+        project_a,
+        "SELECT coalesce(string_agg(p.oid::regprocedure::text, ','), '') FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'api';",
+    )
+    assert signatures, "no api functions found; this test would pass vacuously"
+
+    leaked = sql(
+        project_a,
+        "SELECT coalesce(string_agg(p.oid::regprocedure::text, ','), '') FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'api' "
+        "AND has_function_privilege('public', p.oid, 'EXECUTE');",
+    )
+    assert leaked == "", f"PUBLIC can execute {leaked}"
+
+
+def test_the_retired_write_rpc_is_gone(project_a: dict[str, Any]) -> None:
+    """ADR 0048's retirement, asserted as an absence.
+
+    ADR 0003 argued that operation 4 is a narrow status transition rather than a
+    second create, and Session 3 shipped a second create. The convergence
+    migration drops it, and this is the assertion that the drop happened rather
+    than the grant merely being revoked.
+    """
+    present = sql(
+        project_a,
+        "SELECT coalesce(string_agg(p.proname, ',' ORDER BY p.proname), '') FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'api';",
+    )
+    assert present == "create_note,update_task_status", present
 
 
 def test_the_write_rpc_derives_ownership_from_the_claim(

@@ -240,6 +240,81 @@ def test_a_name_declared_as_both_a_relation_and_an_rpc_is_refused(
         check(tmp_path, mutable)
 
 
+# ---------------------------------------------------------------------------
+# The enum section (ADR 0058)
+# ---------------------------------------------------------------------------
+
+
+def test_the_frozen_status_values_have_an_executable_form(surface: dict[str, Any]) -> None:
+    """ADR 0003's most-argued clause was the one with no way to check it.
+
+    Four values, frozen in Session 1 and restated in three documents, and until
+    now checkable only by reading two of them side by side -- which is exactly
+    how the domain drifted for two sessions.
+    """
+    assert surface["enums"] == {
+        "task_status": {"values": ["pending", "in_progress", "completed", "cancelled"]}
+    }
+
+
+def test_a_type_may_not_share_a_name_with_a_relation(tmp_path: Path, mutable: dict) -> None:
+    """PostgreSQL puts types and relations in one namespace.
+
+    `CREATE TYPE api.tasks` fails against the view of that name, so a contract
+    declaring both would describe a catalog that cannot exist -- and a
+    comparison against a real one would report a difference nobody could repair.
+    """
+    mutable["enums"]["tasks"] = {"values": ["a"]}
+    with pytest.raises(api_surface.SurfaceError, match="both a relation and an enum type"):
+        check(tmp_path, mutable)
+
+
+def test_the_declared_types_are_separate_from_the_declared_objects(
+    surface: dict[str, Any],
+) -> None:
+    """Two accessors, because they are compared against two catalogs.
+
+    Folded into one set, a missing `api.task_status` and a missing `api.tasks`
+    would be reported identically, and the repair for an ambiguous difference is
+    always to loosen the comparison.
+    """
+    assert api_surface.declared_types(surface) == {"api.task_status"}
+    assert api_surface.declared_objects(surface) == {
+        "api.notes",
+        "api.tasks",
+        "api.create_note",
+        "api.update_task_status",
+    }
+
+
+def test_a_contract_with_no_enums_is_refused(tmp_path: Path, mutable: dict) -> None:
+    """The section is required, not optional-and-usually-present.
+
+    An absent section would mean "this surface publishes no bounded values",
+    which is a claim about the catalog rather than a gap in the file -- and it
+    is a false one here.
+    """
+    mutable.pop("enums")
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, mutable)
+
+
+def test_a_duplicate_enum_value_is_refused(tmp_path: Path, mutable: dict) -> None:
+    mutable["enums"]["task_status"]["values"] = ["pending", "pending"]
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, mutable)
+
+
+def test_an_enum_value_that_is_not_a_bare_identifier_is_refused(
+    tmp_path: Path, mutable: dict
+) -> None:
+    """These values reach a published document and a `CREATE TYPE`. Anything
+    needing quotes in either is a value this contract cannot state exactly."""
+    mutable["enums"]["task_status"]["values"] = ["pending", "in progress'; DROP TABLE x --"]
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, mutable)
+
+
 def test_an_unknown_key_is_refused(tmp_path: Path, mutable: dict) -> None:
     mutable["relations"]["notes"]["writable"] = True
     with pytest.raises(config.ManifestError):
