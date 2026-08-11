@@ -567,7 +567,21 @@ services:
       PGRST_OPENAPI_SECURITY_ACTIVE: "true"
       PGRST_JWT_AUD: ${JWT_AUDIENCE:?required}
       PGRST_JWT_ROLE_CLAIM_KEY: .role
-      PGRST_SERVER_CORS_ALLOWED_ORIGINS: ${POSTGREST_CORS_ORIGINS:?required}
+      # `?` and NOT `:?`, and this is the only variable in this file spelled
+      # that way. Measured against Compose 29.5.2, both spellings against both
+      # inputs: `${VAR:?err}` fails on an **empty** value as well as an unset
+      # one; `${VAR?err}` fails only when the variable is absent. Every other
+      # required interpolation here names something never legally empty — an
+      # identifier, a port, a secret reference — so `:?` is right for those and
+      # wrong for exactly this one.
+      #
+      # An empty list is the correct rendering for a project that declares no
+      # REST service (D150), and `build_compose_env` emits it as an empty
+      # string. Under `:?` such a project could not render at all, which is what
+      # it did on the first live deploy (D178). Unset still fails, so a
+      # `compose.env` missing the key remains an error rather than a silently
+      # permissive default.
+      PGRST_SERVER_CORS_ALLOWED_ORIGINS: ${POSTGREST_CORS_ORIGINS?required}
       # 0.0.0.0 because the service answers its peers on the project network.
       # The admin surface would follow this bind if left alone -- measured in
       # Run 3, where /live and /ready answered a peer container -- so it is

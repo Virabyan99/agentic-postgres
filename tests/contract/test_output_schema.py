@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -17,8 +18,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from agentic_postgres import REPO_ROOT, config, naming, rendering, template_version
+
+#: The Compose model, read as text so an interpolation's *spelling* can be
+#: asserted. Parsing it resolves the interpolations away, which is the thing
+#: under test.
+MODEL = REPO_ROOT / "compose.yaml"
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -372,3 +379,123 @@ def test_all_thirteen_roles_are_present(alpha: dict[str, Any]) -> None:
     assert set(alpha["database"]["roles"]) == set(naming.ROLE_SUFFIXES)
     for name in alpha["database"]["roles"].values():
         assert len(name.encode("utf-8")) <= 63
+
+
+# ---------------------------------------------------------------------------
+# A required interpolation must not name a value that renders empty (D178)
+# ---------------------------------------------------------------------------
+
+#: `${VAR:?err}` in Compose fails when the variable is unset **or empty**;
+#: `${VAR?err}` fails only when it is unset. Measured against Compose 29.5.2
+#: with both spellings against both inputs, because the difference is one
+#: character and the failure it produces names neither.
+STRICT_INTERPOLATION = re.compile(r"\$\{([A-Z0-9_]+):\?")
+
+#: The lax half of the same pair. Matched with a negative lookbehind on the
+#: colon so `${VAR:?x}` is not counted twice.
+LAX_INTERPOLATION = re.compile(r"\$\{([A-Z0-9_]+)\?")
+
+
+def render_without_a_rest_service(tmp_path: Path) -> dict[str, str]:
+    """Render the case D150 says must work: a manifest with no `api.rest`.
+
+    Returns the parsed `compose.env`. Rendered through `render_project` rather
+    than by calling `build_compose_env` directly, so what is measured is the
+    file a deploy actually stages.
+
+    **The published directory is removed afterwards, and that is not tidiness.**
+    ``render_project`` publishes to ``.generated/<key>`` derived from the
+    manifest, not to wherever the manifest was written — so ``tmp_path``
+    isolates the input and nothing isolates the output. The Session 1 gate
+    compares every rendered project in ``.generated/`` pairwise for identity
+    collisions, and this fixture's project shares the example's storage bucket
+    and backup stanza. Left behind, it fails the gate for anyone who runs the
+    suite first, which is exactly what it did on the run that introduced it.
+    """
+    import shutil
+
+    from agentic_postgres import rendering
+
+    manifest = yaml.safe_load((REPO_ROOT / "project.example.yaml").read_text(encoding="utf-8"))
+    manifest["api"].pop("rest", None)
+    manifest["project"]["slug"] = "norest"
+    path = tmp_path / "project.norest.yaml"
+    path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+    # `validate_compose=False`: this test is about what the model *would* do
+    # with these values, and the validator needs a Docker daemon the offline
+    # gate does not have. The comparison below is what stands in for it, and it
+    # is stricter — it checks every variable rather than the one that happened
+    # to be reached first.
+    directory = rendering.render_project(
+        path, REPO_ROOT / "capabilities.example.yaml", validate_compose=False
+    )
+    try:
+        values: dict[str, str] = {}
+        for line in (directory / "compose.env").read_text(encoding="utf-8").splitlines():
+            name, _, value = line.partition("=")
+            if name.strip():
+                values[name.strip()] = value
+        return values
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def test_no_required_interpolation_names_a_value_that_renders_empty(
+    tmp_path: Path, code_only
+) -> None:
+    """D178, and the first defect the live path produced.
+
+    `project.alpha.yaml` declares no `api.rest`, so `allowed_cors_origins`
+    defaulted to `[]`, `",".join([])` rendered `""`, and
+    `${POSTGREST_CORS_ORIGINS:?required}` refused it — the deploy failed at step
+    1 having never touched the host. The renderer's own comment asserted the
+    opposite: that emitting an empty string satisfies a required interpolation.
+
+    Nothing caught it because every other test renders `project.example.yaml`,
+    which names an origin, so the empty case was never rendered.
+
+    Goes red if: a `:?` interpolation is added for a variable that can render
+    empty, or a variable that can render empty gains a `:?` reference. Both
+    directions matter — the second is how this returns, by someone tightening a
+    spelling that looks too lax.
+
+    Derived rather than listed: the empty set comes from an actual render and
+    the strict set from the model's own text, so neither side is a copy of the
+    other that could agree while both are wrong.
+    """
+    values = render_without_a_rest_service(tmp_path)
+    empty = {name for name, value in values.items() if value == ""}
+    assert empty, (
+        "no variable rendered empty for a project with no REST service, so this "
+        "test compared two empty sets and proved nothing"
+    )
+
+    # Comments stripped: the explanation of why one variable takes the lax
+    # spelling contains both spellings as examples, and scanning raw text counts
+    # them as references (`code_only`'s docstring records four prior instances).
+    text = code_only(MODEL.read_text(encoding="utf-8"))
+    strict = set(STRICT_INTERPOLATION.findall(text))
+    lax = set(LAX_INTERPOLATION.findall(text))
+    assert strict, "no `${VAR:?...}` interpolation found in the model; the regex is wrong"
+    assert not (strict & lax), "a variable is referenced both ways; the regexes overlap"
+
+    # A variable that can render empty must use the form that tolerates empty.
+    # This is the direction D178 failed in.
+    collisions = sorted(empty & strict)
+    assert not collisions, (
+        f"{collisions} render empty for a project with no REST service and are "
+        "referenced as `${VAR:?required}`, which Compose refuses for an empty "
+        "value as well as an unset one. Use `${VAR?required}` for these"
+    )
+
+    # And the converse, which the old spelling rule could not express: the lax
+    # form is only for variables that genuinely need it. Without this half, every
+    # reference could be relaxed to `?required` and this test would still pass —
+    # which would put `DEP-ISO-002`'s empty-resource-name hazard back.
+    unjustified = sorted(lax - empty)
+    assert not unjustified, (
+        f"{unjustified} are referenced as `${{VAR?required}}` but never render empty, "
+        "so nothing needs the lax form for them. `${VAR:?required}` is stricter and "
+        "is what a value that is never legitimately empty should carry (ADR 0062)"
+    )

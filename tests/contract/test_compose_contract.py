@@ -59,14 +59,44 @@ def outputs(project_dir: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_every_interpolation_is_required() -> None:
-    """`${VAR:?required}` fails loudly; a bare `${VAR}` renders empty.
+def test_every_interpolation_is_required(code_only) -> None:
+    """No interpolation may render silently. Two spellings are required (ADR 0062).
 
-    An empty resource name would collapse two projects onto one network.
+    This asserted `endswith(":?required}")` for every reference until Run 9.
+    **Replaced by a stricter pair under ADR 0062, not weakened.** The property
+    that mattered is unchanged and is still asserted here: a bare `${VAR}` and a
+    defaulted `${VAR:-x}` both render without complaint, and an empty resource
+    name would collapse two projects onto one network (`DEP-ISO-002`).
+
+    What the old spelling rule could not express is *which* required form a
+    variable should take. Compose's two differ: `${VAR:?err}` refuses an empty
+    value as well as an unset one, `${VAR?err}` refuses only unset. The old rule
+    therefore permitted `:?` on a variable whose empty value is meaningful — the
+    defect D178 records, which passed for the life of the file and stopped the
+    first live deploy at step 1.
+
+    That half is now measured rather than spelled, in
+    `test_output_schema.py::test_no_required_interpolation_names_a_value_that_renders_empty`:
+    the set of variables that render empty and the set spelled `?required` must
+    be the same set, both derived. It lives there because **this module skips
+    entirely without rendered fixtures**, and an assertion that does not run in a
+    clean checkout is how the gap survived.
+
+    Goes red if: any reference loses its `?`, or gains a `:-` default.
+
+    Comments are stripped first. The explanation of *why* one variable takes the
+    lax spelling necessarily contains both spellings as examples, and scanning
+    raw text counts them — the fifth time that shape has produced a false
+    failure here, and the reason `code_only` is a shared fixture.
     """
-    text = MODEL.read_text(encoding="utf-8")
+    text = code_only(MODEL.read_text(encoding="utf-8"))
     for reference in re.findall(r"\$\{[^}]+\}", text):
-        assert reference.endswith(":?required}"), f"{reference} is not a required interpolation"
+        assert reference.endswith((":?required}", "?required}")), (
+            f"{reference} is not a required interpolation"
+        )
+        assert ":-" not in reference and not re.search(r"[^:?]-", reference.split("}")[0][2:]), (
+            f"{reference} carries a default; a default is a value nobody chose"
+        )
 
 
 def test_model_hardcodes_no_identity() -> None:

@@ -533,9 +533,19 @@ def build_compose_env(
         "POSTGREST_POOL_MAX_LIFETIME": str(rest["pool_max_lifetime_seconds"]),
         # Comma-joined, which is what PostgREST parses. An empty list renders an
         # empty string -- no cross-origin browser request is permitted -- rather
-        # than being omitted, because an unset variable is a required
-        # interpolation that fails and a project with no REST service still has
-        # to render.
+        # than being omitted, because a project with no REST service still has
+        # to render (D150).
+        #
+        # Emitting it is necessary and was not sufficient, which is D178. This
+        # comment used to end "because an unset variable is a required
+        # interpolation that fails", and that is true and beside the point:
+        # Compose's `${VAR:?err}` refuses an **empty** value as well as an unset
+        # one, so the model refused this render too and the first live deploy
+        # failed at step 1. The model now spells this one `${VAR?err}`; the
+        # reason lives beside it in `compose.yaml`, and
+        # `test_no_required_interpolation_names_a_value_that_renders_empty`
+        # compares the variables that render empty against the ones the model
+        # marks strict.
         "POSTGREST_CORS_ORIGINS": ",".join(rest["allowed_cors_origins"]),
         "JWT_AUDIENCE": identity.jwt_audience,
         "API_REQUEST_BODY_MAX_BYTES": str(rest["request_body_max_bytes"]),
