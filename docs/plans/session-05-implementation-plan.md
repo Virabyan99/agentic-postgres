@@ -65,6 +65,9 @@ at **D126**.
 | **D163** | *(§5, Run 6)* "A `usersFile` cannot be a label at all, so the credential middleware is the **first per-project artifact this repository writes into the Traefik file provider**." | **The middleware can be a label; the file cannot.** Measured: a container carrying `traefik.http.middlewares.<n>.basicauth.usersfile=/etc/traefik/dynamic/<f>` produces a working middleware — 401 without a credential, 200 with it, and the `Authorization` header removed before the upstream sees it. What no label can do is *put the file there*. | **The conclusion stands and the reason changes**, which is worth the row because the reason is what the next reader reuses. The middleware is written into the file provider anyway, deliberately: defined there it exists independently of any container's lifecycle, so a documentation service being recreated cannot leave a router referencing a middleware that has momentarily stopped existing — which Traefik rejects route by route while the hostname keeps answering 404 behind a valid certificate. | A design justified by an impossibility that is not one is a design nobody can revisit: the next person to want a label finds a sentence saying it cannot be done, rather than a trade-off they can weigh. | no |
 | **D164** | *(§5, Run 6)* A response-header middleware sets `Cache-Control: no-store` and removes any upstream `Server` header on **every** response — "including the ones that never reach a database transaction". | **True for every response a project router produces, and not for a path no router matched.** Measured: attached to the router, the policy reaches the **413 the buffering middleware itself generates**, which is the case the clause is really about. It does not reach Traefik's bare 404 for an unrouted path, and configuring the chain at the **entry point** does not change that — a chain is a property of a router, and no router ran. | **The policy is a middleware in `apg-baseline`**, so every project route carries it and adding it touched no project. The unrouted 404 is recorded as the boundary it is. | The gap is real and small: that response belongs to no project, carries no body and discloses nothing. What matters is that "every response" now means *every response this deployment routes* rather than every packet the port answers, and the difference is written down instead of being discovered by someone who assumed the stronger reading. | no |
 | **D165** | *(§8.5, D140)* The documentation credential's bcrypt hash is generated "through the locked Python toolchain". | **The host cannot generate it.** `crypt` was removed from the standard library in Python 3.13 and the development host's interpreter is 3.14 — `import crypt` raises `ModuleNotFoundError`, so there is no in-process way to produce a hash on any current host. The locked runtime image is 3.12 and its glibc offers `METHOD_BLOWFISH`, which produces the `$2b$` form. And the format is not a preference: Traefik refuses a SHA-512 crypt hash — what `crypt.crypt` produces by default, and what a host `mkpasswd` hands you — with **401 on a correct password**, indistinguishable from the operator mistyping it. | **The hash is produced inside the locked runtime image**, and `edge_credentials.assert_bcrypt` refuses every other format before the file is written. The validation is pure and tested; the one impure step is a container invocation the caller owns. | "Through the locked toolchain" turned out to mean *in a container* rather than *by the deploy script*, and the reason it matters is the failure mode: a wrong-format hash produces a documentation route that refuses the right password, with nothing in any log naming the hash as the cause. Checking the format where it is written is the only place the mistake is visible. | no |
+| **D166** | *(ADR 0050, consequences)* "Normalization replaces host, base path, **title suffix** and **server metadata** with sentinels." | **Two of those four fields do not exist.** The document is **Swagger 2.0**, which has no `servers` block at all, and `info.title` is the constant `"PostgREST API"` — measured identical across two projects' worth of configuration. Restarting the same service with `openapi-server-proxy-uri` set changed exactly three top-level fields, `host`, `basePath` and `schemes`, and left `info`, `paths`, `definitions` and `parameters` byte-identical. The `Host` request header reaches none of them: without a proxy URI the document carries the container's own `0.0.0.0:3000`. | **Two fields are substituted and the third is asserted.** `host` and `basePath` become fixed sentinels; `schemes` is *compared* against `["https"]` rather than replaced, because a capture taken straight off the container carries `["http"]` and replacing it unread would write a snapshot claiming a transport the captured service never offered. `info.version` and `externalDocs.url` carry the PostgREST version and are deliberately kept, so a version bump reaches a reviewer through the snapshot diff. | ADR 0050's decision is untouched; only its list of fields was written before anything was measured. Recording it rather than quietly implementing the right list is what stops the next reader from looking for a title-suffix substitution and concluding the normalizer forgot one. The sentinel host is `project.invalid:443` because RFC 2606 reserves `.invalid`, so no deployment can ever serve it — a sentinel a real value could equal is a sentinel that can be satisfied by accident. | no |
+| **D167** | *(§5, Run 7)* "Normalization is deterministic and strict, with duplicate-key rejection, **sorted map keys**, and sentinel substitution." | **The order is already deterministic, and sorting is not what makes it so.** Measured: two clusters built with the objects created in opposite orders produced **identical** key order, and the same document fetched three times was byte-identical. The order is a hash artifact — `/tasks` precedes `/notes`, and an inserted `/extra` landed between them without moving either. So what sorting buys is a diff a reviewer can read, not a document that stops moving. | **Sorting stays, with the honest reason, and one rule beside it: map keys are sorted and array order is never touched.** `enum` arrays carry `enumsortorder` — which the surface contract calls order-sensitive, because a reordering passes a set comparison and changes what every generated client lists first — and `required` arrays carry argument order. `test_an_enum_keeps_its_declared_order` and `test_a_required_argument_list_keeps_its_order` both go red the moment `sort_maps` starts sorting arrays. | A rule kept for a reason that turns out to be false is a rule the next person deletes, and this one has a real reason underneath the wrong one. The dangerous half is the array: a comparator that sorted everything would normalize away exactly the differences it exists to notice, and it would do it silently. Nothing promises the hash order stays stable either, which is the second reason to sort and the one that would otherwise be mistaken for the first. | no |
+| **D168** | *(§6, and `contracts/postgrest-api-surface.yaml`)* The relations declare `methods: [GET, HEAD]`, and `API-CONTRACT-001` compares the committed snapshot against that contract. | **`follow-privileges` filters the path, not the methods on it.** Measured with the grant read back out of `information_schema.role_table_grants` rather than assumed: a role holding **`SELECT` and nothing else** on `api.notes` is served a document advertising `delete`, `get`, `patch` and `post` — and all three writes return **403 `42501 permission denied for view notes`**. `HEAD` is served with 200 and is **not** in the document. The published method list is a property of the relation being an updatable view, not of what the caller may do to it. | **ADR 0060.** The snapshot↔contract comparison is at the level of *objects*; `methods:` is enforced against the catalog by `API-RPC-001`, which attempts each refused method. The extra methods are not stripped during normalization, because a snapshot that differs from the served bytes stops being the document a client is generated from. | A method-for-method comparison could only ever have failed, and its repair is the dangerous one: widening `methods:` to the published set would make `api_surface`'s refusal of table-style writes unreachable, converting the reviewed read-only surface into a permissive one — in the one file whose entire function is to be narrower than the catalog. This is §6's defect with the green test on the wrong side of it. | **yes — ADR 0060** |
 
 ---
 
@@ -687,7 +690,54 @@ Access-log policy per D141, with the query-parameter clause struck and the
 sentinel proof asserting the outcome.
 
 ### Run 7 — The contract tooling
-*Offline.*
+*Offline.* **In progress — the contract half has landed; the operator commands
+and the documentation role have not.**
+
+> **Landed.** `src/agentic_postgres/openapi_normalize.py`, `bin/api-contract.sh`
+> and `bin/api-contract.py`, with the measurements they were written from and
+> three divergence rows.
+>
+> Everything about the served document was measured against the locked
+> PostgREST 14.16 before a line of the normalizer existed, and **three of the
+> claims that shaped it were wrong**:
+>
+> - **Two of ADR 0050's four substituted fields do not exist** (D166). The
+>   document is Swagger 2.0 — no `servers` block — and `info.title` is the
+>   constant `"PostgREST API"`. Exactly three top-level fields carry a project's
+>   identity, and only two of them are substituted: `schemes` is *asserted*
+>   against `["https"]`, because a capture taken off the container carries
+>   `["http"]` and replacing it unread would write a snapshot claiming a
+>   transport the captured service never offered.
+> - **Sorting is not what makes the document deterministic** (D167). Two
+>   clusters built in opposite orders produced identical key order, and three
+>   fetches were byte-identical. The order is a hash artifact — `/tasks`
+>   precedes `/notes` — so sorting buys a reviewable diff rather than a stable
+>   one. The rule that matters is the one beside it: **map keys are sorted and
+>   array order is never touched**, because `enum` carries `enumsortorder` and
+>   `required` carries argument order.
+> - **`follow-privileges` filters the path, not the methods on it** (D168,
+>   ADR 0060). A role holding `SELECT` and nothing else — read back out of
+>   `information_schema.role_table_grants` — is served a document advertising
+>   `delete`, `patch` and `post`, all three of which return **403**; and `HEAD`
+>   is served and not advertised. So the snapshot↔contract comparison is at the
+>   level of objects, and `methods:` is enforced against the catalog where it is
+>   true. A method-for-method comparison could only ever have failed, and its
+>   repair would have been to widen the reviewed read-only surface.
+>
+> Seven mutations of the normalizer were each confirmed to turn the suite red,
+> including the two that matter most: sorting arrays as well as maps, and
+> substituting without validating first.
+>
+> `contracts/postgrest-openapi.canonical.json` deliberately does not exist yet —
+> it is captured from a deployed release in Run 9 — so `--check` exits **5**
+> naming that run, and a test asserts both the absence and the exit code.
+>
+> **Not yet done, and still Run 7's:** `bin/api.sh`, `bin/dev-token.sh` and
+> `bin/docs.sh`; the documentation role (D158), its outputs schema **v6** with
+> `migrate_v5_to_v6` and a committed `outputs-v5.json` fixture, and the
+> pre-request rule that refuses it an identity. `--update`'s live path is
+> implemented and has not been exercised against a deployment; Run 9 is where it
+> first runs.
 
 `bin/api-contract.sh` with the `--update`/`--check` split ADR 0050 sets:
 privileged capture streams a secret-free candidate and accepts no arbitrary

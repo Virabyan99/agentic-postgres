@@ -123,3 +123,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0057](0057-the-public-error-contract-is-a-sqlstate-the-function-chooses.md) | The public error contract is a SQLSTATE the function chooses | 5 | Accepted |
 | [0058](0058-a-bound-the-published-document-cannot-carry-is-not-a-bound.md) | A bound the published document cannot carry is not a bound | 5 | Accepted |
 | [0059](0059-a-route-boundary-is-a-segment-boundary.md) | A route boundary is a segment boundary, and the obvious spelling is not one | 5 | Accepted |
+| [0060](0060-a-published-method-is-not-a-granted-one.md) | A published method is not a granted one, and the snapshot records what is served | 5 | Accepted |
