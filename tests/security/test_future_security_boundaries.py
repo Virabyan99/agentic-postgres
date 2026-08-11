@@ -50,45 +50,30 @@ def unimplemented(session: int, what: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session 5 — the REST surface cannot widen the authorization model
+# Session 5 — activated in Run 8
+#
+#   SEC-ANON-001, SEC-PRIV-001, SEC-ROLE-001, SEC-DOCS-001
+#       -> tests/deployment/test_session5_api_authorization.py
+#   SEC-BOOT-001
+#       -> tests/deployment/test_session5_bootstrap_identity.py
+#   SEC-API-001
+#       -> tests/external/test_session5_public_api.py
+#
+# The first five carry the `security` marker under tests/deployment/, which is
+# D111's shape one session on: the marker decides what runs and what the
+# evidence records, the directory decides which conftest is in scope, and the
+# fixtures that make them measurable -- minting a token, calling the published
+# route, reaching the cluster -- are there. A second copy of the one piece of
+# plumbing that handles a credential was not worth a directory convention.
+#
+# SEC-API-001 moved to tests/external/, which is what the comment that used to
+# sit here said would have to happen: it is measured from a network that is not
+# the deployment host, and a requirement whose proofs straddle two environments
+# breaks every claim containing it because `claim_mode` reads the union across a
+# claim's requirements (ADR 0045). Measured before the move, with both controls:
+# a claim over one requirement holding a host node ID and an external one is
+# refused, and the same construction with both on the host resolves.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.future(session=5, requirement="SEC-ANON-001")
-def test_anon_cannot_reach_protected_resources() -> None:
-    unimplemented(5, "the anonymous role reads nothing it is not granted")
-
-
-@pytest.mark.future(session=5, requirement="SEC-PRIV-001")
-def test_api_roles_cannot_reach_the_private_schema() -> None:
-    unimplemented(5, "app and app_private are unreachable through PostgREST")
-
-
-@pytest.mark.future(session=5, requirement="SEC-ROLE-001")
-def test_role_switching_cannot_exceed_granted_memberships() -> None:
-    unimplemented(5, "an unactivated, privileged or foreign-project role is refused")
-
-
-@pytest.mark.future(session=5, requirement="SEC-BOOT-001")
-def test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key() -> None:
-    unimplemented(5, "verifiers hold public material, and the document records the expiry")
-
-
-@pytest.mark.future(session=5, requirement="SEC-DOCS-001")
-def test_the_documentation_credential_reaches_no_service_and_no_browser() -> None:
-    unimplemented(5, "the header is removed upstream and the served bytes carry nothing")
-
-
-# Marked here, activated elsewhere. SEC-API-001 is measured from a network that
-# is not the deployment host, so its implementation belongs under
-# tests/external/ -- the move SEC-DBX-001's placeholder made in Session 4, and
-# the reason a placeholder's directory is not a commitment. When it lands, every
-# one of its node IDs must carry the `external` marker: a requirement whose
-# proofs straddle two environments breaks every claim that contains it, because
-# `claim_mode` reads the union across a claim's requirements (ADR 0045).
-@pytest.mark.future(session=5, requirement="SEC-API-001")
-def test_nothing_but_the_approved_surface_is_reachable_from_outside() -> None:
-    unimplemented(5, "the REST route answers, the docs route refuses, nothing else replies")
 
 
 # ---------------------------------------------------------------------------

@@ -58,24 +58,17 @@ def test_new_team_member_completes_the_documented_path() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session 5 — the API plane
+# Session 5 — activated in Run 8
 #
-# DEP-ISO-005 follows DEP-ISO-004's construction, and D70 is why it will need
-# node IDs of its own for the cross-project clause: "the routes differ" and
-# "one project's token is refused by the other" are different claims, and a
-# requirement whose description is broader than its node IDs is a claim the
-# evidence file reports as passed.
+#   DEP-ISO-005  -> tests/deployment/test_session5_api_isolation.py
+#   DX-API-001   -> tests/deployment/test_session5_api_tooling.py
+#
+# DEP-ISO-005's cross-project clause gained a node ID of its own, which is what
+# the comment that used to sit here said Run 8 would have to do. "The routes
+# differ" and "one project's token is refused by the other" are different
+# claims, and a requirement whose description is broader than its node IDs is a
+# claim the evidence file reports as passed (D70).
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.future(session=5, requirement="DEP-ISO-005")
-def test_two_projects_share_no_api_route_token_or_credential() -> None:
-    unimplemented(5, "A's token, key and authenticator credential are all refused by B")
-
-
-@pytest.mark.future(session=5, requirement="DX-API-001")
-def test_the_request_broker_leaks_no_token() -> None:
-    unimplemented(5, "an authorized call succeeds with the token in no argv, log or output")
 
 
 # ---------------------------------------------------------------------------

@@ -805,42 +805,43 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/integration/test_future_api.py::test_only_the_api_schema_is_exposed
+    - tests/deployment/test_session5_rest_surface.py::test_only_the_api_schema_is_reachable_over_http
+    - tests/deployment/test_session5_rest_surface.py::test_the_served_surface_is_exactly_the_reviewed_objects
   description: Only the api schema is exposed, matching a committed allowlist.
 
 - id: API-CACHE-001
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/integration/test_future_api.py::test_api_migration_reloads_the_schema_cache_and_updates_openapi
+    - tests/deployment/test_session5_api_contract.py::test_a_ddl_change_reaches_openapi_without_a_restart
   description: An API migration reloads the schema cache and updates OpenAPI.
 
 - id: API-LIMIT-001
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/integration/test_future_api.py::test_row_limits_and_timeouts_are_enforced_server_side
+    - tests/deployment/test_session5_rest_surface.py::test_row_and_time_limits_are_enforced_by_the_server
   description: Row limits and timeouts are enforced by the server, not the client.
 
 - id: SEC-ANON-001
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_anon_cannot_reach_protected_resources
+    - tests/deployment/test_session5_api_authorization.py::test_the_anonymous_role_reads_nothing_it_was_not_granted
   description: The anonymous role cannot reach protected resources.
 
 - id: SEC-PRIV-001
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_api_roles_cannot_reach_the_private_schema
+    - tests/deployment/test_session5_api_authorization.py::test_the_private_schemas_are_unreachable_through_postgrest
   description: No API role can address the app or app_private schemas.
 
 - id: API-REST-001
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/integration/test_future_api.py::test_http_reads_reproduce_the_database_row_level_result
+    - tests/deployment/test_session5_rest_surface.py::test_http_reads_reproduce_the_database_row_level_result
   description: >-
     HTTP reads reproduce the database's row-level result exactly: a caller sees
     its own rows and none of another's, and the same query run directly against
@@ -850,7 +851,7 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/integration/test_future_api.py::test_writes_are_exactly_the_named_rpcs
+    - tests/deployment/test_session5_rest_surface.py::test_the_write_surface_is_exactly_the_named_rpcs
   description: >-
     The write surface is exactly the named RPCs; generic table and view writes
     are refused, ownership is derived rather than accepted, and each call
@@ -860,7 +861,7 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/integration/test_future_api.py::test_the_public_error_contract_discloses_nothing_internal
+    - tests/deployment/test_session5_rest_surface.py::test_the_public_error_contract_discloses_nothing_internal
   description: >-
     The public error contract is stable and discloses no SQL, role name, schema
     path, internal hint, or another owner's row.
@@ -869,7 +870,8 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/integration/test_future_api.py::test_the_live_openapi_matches_the_reviewed_contract
+    - tests/deployment/test_session5_api_contract.py::test_the_live_openapi_matches_the_reviewed_snapshot
+    - tests/deployment/test_session5_api_contract.py::test_the_deployed_document_records_the_checksums_it_serves
   description: >-
     The live OpenAPI, normalized, equals the committed snapshot, and the
     snapshot equals the reviewed API-surface allowlist; an unlisted object in
@@ -879,7 +881,7 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_role_switching_cannot_exceed_granted_memberships
+    - tests/deployment/test_session5_api_authorization.py::test_role_switching_cannot_exceed_the_authenticators_memberships
   description: >-
     Role switching cannot exceed the authenticator's granted memberships: a
     token naming an unactivated, privileged, or foreign-project role is
@@ -889,7 +891,7 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key
+    - tests/deployment/test_session5_bootstrap_identity.py::test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key
   description: >-
     The temporary bootstrap issuer signs with a private key no service holds,
     verifiers hold public material only, and the deployed document records the
@@ -899,7 +901,7 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_the_documentation_credential_reaches_no_service_and_no_browser
+    - tests/deployment/test_session5_api_authorization.py::test_the_documentation_credential_reaches_no_service_and_no_served_byte
   description: >-
     The documentation credential never reaches the documentation service, the
     served bytes carry no credential, and no API token is served to a browser.
@@ -908,7 +910,7 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_nothing_but_the_approved_surface_is_reachable_from_outside
+    - tests/external/test_session5_public_api.py::test_only_the_approved_api_surface_answers_from_off_host
   description: >-
     From a network that is not the host: the REST route answers over HTTPS with
     the approved surface, the documentation route refuses without a credential,
@@ -918,7 +920,8 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_two_projects_share_no_api_route_token_or_credential
+    - tests/deployment/test_session5_api_isolation.py::test_two_projects_publish_distinct_routes_issuers_and_snapshots
+    - tests/deployment/test_session5_api_isolation.py::test_one_projects_token_and_credential_are_refused_by_the_other
   description: >-
     Two projects have distinct routes, authenticator credentials, issuers,
     audiences, keys, snapshots and documentation credentials, and neither's
@@ -928,7 +931,7 @@
   priority: P0
   target_session: 5
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_the_request_broker_leaks_no_token
+    - tests/deployment/test_session5_api_tooling.py::test_the_request_broker_performs_a_call_with_the_token_in_no_argv_or_output
   description: >-
     The request broker performs an authorized call without a token reaching
     argv, stdout, shell history, a log, or evidence.

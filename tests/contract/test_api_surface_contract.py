@@ -29,6 +29,7 @@ import pytest
 import yaml
 
 from agentic_postgres import REPO_ROOT, api_surface, config
+from agentic_postgres.rendering import ACCEPTANCE_PROBE_FUNCTION
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -376,3 +377,49 @@ def test_the_schema_is_referenced_by_the_module_and_exists() -> None:
     schema = config.load_schema(api_surface.SCHEMA_NAME)
     assert schema["properties"]["schema_version"]["enum"] == [1]
     assert schema["additionalProperties"] is False
+
+
+# ---------------------------------------------------------------------------
+# The transient acceptance object is never reviewed surface (plan §4.4)
+# ---------------------------------------------------------------------------
+
+
+def test_the_acceptance_probe_is_not_on_the_reviewed_surface() -> None:
+    """The one half of §4.4 that has a signal before a deployment exists.
+
+    The probe is created in ``api`` -- it has to be, because that is the only
+    schema PostgREST exposes -- so for as long as it lives it is a published
+    object. Three tests check it is gone afterwards: two on the host, against
+    the served document and the catalog, and this one, against the two committed
+    artifacts that say what may be served at all.
+
+    Here rather than only on the host because the host tests are deselected in
+    an offline gate, and a reviewed contract that had acquired the probe's name
+    would then be caught by nothing until Run 9.
+
+    Goes red if: somebody adds the probe to the reviewed contract to make a host
+    failure go away. That is the repair the failure invites, and it would widen
+    the approved surface permanently in order to fix a fixture that leaked.
+    """
+    surface = api_surface.load_surface()
+    # Qualified, because that is how `declared_objects` spells a name. The bare
+    # constant would be absent from that set for every possible contract, which
+    # is an assertion that cannot fail and therefore measures nothing.
+    qualified = f"{surface['exposed_schema']}.{ACCEPTANCE_PROBE_FUNCTION}"
+    assert qualified not in api_surface.declared_objects(surface), (
+        f"{qualified} is on the reviewed surface"
+    )
+    assert ACCEPTANCE_PROBE_FUNCTION not in api_surface.CONTRACT_PATH.read_text("utf-8"), (
+        f"the reviewed contract names {ACCEPTANCE_PROBE_FUNCTION} somewhere the object "
+        "list does not reach"
+    )
+
+    # Conditional because Run 9 is what commits the snapshot. The two assertions
+    # above are unconditional and are the ones carrying this test today; this is
+    # the clause that starts carrying it the moment there is a file to check.
+    snapshot = REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json"
+    if snapshot.is_file():
+        assert ACCEPTANCE_PROBE_FUNCTION not in snapshot.read_text("utf-8"), (
+            f"the approved snapshot names {ACCEPTANCE_PROBE_FUNCTION}; a capture was "
+            "taken while the probe existed, and was then approved"
+        )

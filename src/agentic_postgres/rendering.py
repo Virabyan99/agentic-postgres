@@ -417,6 +417,25 @@ FIXTURE_USER_B = "8b41d9e2-7c05-4a63-8f19-2d5e70a3b902"
 #: knows what created it.
 PRISMA_FIXTURE_SCHEMA = "apg_client_fixture"
 
+#: Session 5's transient acceptance object, in `api` (plan §4.4).
+#:
+#: The timeout and reload proofs need something the released schema does not
+#: have: a function slow enough to exceed a role's `statement_timeout`, and one
+#: DDL change PostgREST has not already cached. Both are the same object, created
+#: and dropped inside one fixture.
+#:
+#: In `api` because that is the only schema PostgREST exposes, so an object
+#: anywhere else could not be reached over HTTP and would prove nothing about
+#: the plane under test. Which is also what makes the name load-bearing: for as
+#: long as it exists it is on the published surface, and `API-SCHEMA-001` and
+#: `API-CONTRACT-001` both assert it is gone afterwards.
+#:
+#: A constant for D109's reason, restated one session on: a name chosen per run
+#: cannot be asserted absent by a test that does not know it. `apg_` prefixed and
+#: unmistakable, like the schema above, so an operator who finds one in a
+#: database knows what created it and that nothing released did.
+ACCEPTANCE_PROBE_FUNCTION = "apg_acceptance_probe"
+
 #: Where dbmate records applied versions. A constant rather than a manifest
 #: field: the ledger's location is part of the migration contract, and a
 #: project that could choose it could point two projects at one table.

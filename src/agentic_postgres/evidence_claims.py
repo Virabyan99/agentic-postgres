@@ -110,6 +110,37 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "transport_boundary": ("DBX-005", "SEC-DBX-001"),
     "connection_tooling": ("DX-DB-001", "DX-DB-002"),
     "transport_isolation": ("DEP-ISO-004",),
+    # Session 5 adds seven, and adds nothing to an existing claim.
+    #
+    # That is a decision rather than an oversight, and it is the paragraph above
+    # applied a second time. `claim_session` is the maximum of a claim's
+    # requirements' sessions, so giving `connection_tooling` a Session 5
+    # requirement would move the whole claim to Session 5 and **withdraw it from
+    # Session 4's evidence** -- and the jq expression
+    # `docs/session-04-operator-guide.md` documents would fail against freshly
+    # written Session 4 evidence with the product's behaviour unchanged. The
+    # same applies to `database_isolation` and `transport_boundary`. Extending a
+    # claim is right when the guarantee genuinely grew and wrong when a new
+    # requirement merely neighbours an old one (D119).
+    #
+    # `api_authorization` and `public_api_boundary` are split for the reason
+    # `direct_transport` and `transport_boundary` are. `SEC-DOCS-001` is proved
+    # on the host, by reading where the credential was materialized and what the
+    # containers hold; `SEC-API-001` is proved from off-host, by failing to
+    # reach anything. One claim over both could be measured by neither half.
+    "rest_surface": (
+        "API-SCHEMA-001",
+        "API-REST-001",
+        "API-RPC-001",
+        "API-ERR-001",
+        "API-LIMIT-001",
+    ),
+    "api_contract": ("API-CONTRACT-001", "API-CACHE-001"),
+    "api_authorization": ("SEC-ANON-001", "SEC-PRIV-001", "SEC-ROLE-001", "SEC-DOCS-001"),
+    "bootstrap_identity": ("SEC-BOOT-001",),
+    "api_isolation": ("DEP-ISO-005",),
+    "api_tooling": ("DX-API-001",),
+    "public_api_boundary": ("SEC-API-001",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().

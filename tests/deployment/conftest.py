@@ -14,6 +14,17 @@ import work.
 
 from __future__ import annotations
 
+# ruff: noqa: S608
+#
+# Every statement below interpolates values that came from a deployed outputs
+# document -- role names and a database name derived by `naming` and validated
+# by the outputs schema -- plus fixed UUID constants declared in this file. None
+# of it is operator input, and parameter binding is unavailable where an
+# identifier, a role name or a `SET` target goes, which is the same reason
+# `migrations.quote_identifier` exists. Suppressed per module rather than per
+# line, as `tests/security/test_session3_authorization.py` does, because a wall
+# of inline noqa comments is one nobody reads.
+import dataclasses
 import json
 import os
 import shutil
@@ -640,3 +651,390 @@ def run_client_fixture(
         return result.returncode, result.stdout, result.stderr
 
     return run
+
+
+# ---------------------------------------------------------------------------
+# Session 5 — the REST plane
+# ---------------------------------------------------------------------------
+#
+# Session 5's security-marked proofs live in this directory rather than under
+# tests/security/, which is D111's shape one session on: the marker decides what
+# runs and what the evidence records, the directory decides which conftest is in
+# scope, and everything below is what makes them measurable. The alternative was
+# a second copy of "mint a token" and "call the route" in another directory, and
+# a second copy of the one piece of plumbing that handles a credential is the
+# thing D111 declined to grow.
+
+
+@dataclasses.dataclass(frozen=True)
+class ApiResponse:
+    """One HTTP result, unjudged.
+
+    ``status`` is ``0`` when nothing answered at all. That is a distinct value
+    rather than an exception because the difference between "it refused" and
+    "it was not there" is the whole content of several proofs below, and an
+    assertion that only looks for the absence of a 200 cannot tell them apart
+    (``bin/docs.py`` makes the same distinction for the same reason).
+    """
+
+    status: int
+    headers: dict[str, str]
+    body: str
+    reason: str = ""
+
+
+def _load_command(name: str, alias: str) -> Any:
+    """Import one ``bin/*.py`` command as a module.
+
+    The commands are not a package and are not on the path, which is deliberate:
+    they are programs. Loading one here is how a test reuses the product's own
+    logic instead of growing a second copy that is always the permissive one.
+    """
+    import importlib.util
+
+    source = REPO_ROOT / "bin" / name
+    specification = importlib.util.spec_from_file_location(alias, source)
+    if specification is None or specification.loader is None:
+        pytest.fail(f"cannot load {source}")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture(scope="session")
+def api_contract() -> Any:
+    """``bin/api-contract.py``, loaded rather than reimplemented.
+
+    Three pieces of logic that must not be duplicated. ``published_address``
+    decides which host and base path a live document is normalized against, and
+    a second copy would be the half that never learned a project's port is
+    implicit when the URL names none. ``load_snapshot`` refuses non-canonical
+    bytes and a real host, so a test reading the file with ``json.load`` would
+    compare against a snapshot the command itself would reject. And
+    ``surface_objects`` is the **one** place that spells a reviewed object the
+    way a served path spells it -- ``notes`` and ``rpc/create_note``, not
+    ``api.notes``. The two spellings are the reason this is a fixture rather
+    than an import in one module: a comparison that mixed them would find every
+    object missing from the other side, and the repair for that is always to
+    loosen the comparison until it passes.
+    """
+    return _load_command("api-contract.py", "apg_api_contract_live")
+
+
+@pytest.fixture(scope="session")
+def dev_token() -> Any:
+    """``bin/dev-token.py``, loaded as a module rather than reimplemented.
+
+    The tests below need tokens the *command* refuses to mint -- one naming
+    ``object_owner``, one naming a role of another project -- because a boundary
+    is proved by attempting to cross it. What they must not do is grow a second
+    idea of how a token is built: an algorithm, a ``kid``, an issuer or an
+    audience assembled here would let every negative pass for the wrong reason,
+    since a malformed token is refused by a service that would have accepted a
+    well-formed one just as happily.
+
+    So the enumeration stays in the command, where an operator meets it, and the
+    construction comes from here, where it is the product's own.
+    """
+    return _load_command("dev-token.py", "apg_dev_token")
+
+
+@pytest.fixture(scope="session")
+def docs_command() -> Any:
+    """``bin/docs.py``, so ``check``'s definition of a refusal is not restated.
+
+    ``check`` returns 0 only on a 401 carrying a ``Basic`` challenge, and reports
+    an unreachable route as unreachable rather than as refusing. Reimplementing
+    that would produce a second definition, and the second one is always the
+    permissive one: "not a 200" is satisfied by a route that does not exist.
+    """
+    return _load_command("docs.py", "apg_docs_live")
+
+
+@pytest.fixture(scope="session")
+def mint_token(dev_token, as_root: None) -> Callable[..., str]:
+    """Sign a token for one project. The return value is a credential.
+
+    Root, because the signing key is 0400 owned by root -- which is the property
+    ``SEC-BOOT-001`` proves and this fixture depends on rather than works around.
+    The key is located through the *deployed document's* generation, not the
+    live pointer: D76: the pointer moves at the first restart, and signing with
+    a key the running service does not verify against would produce a 401 that
+    reads exactly like a boundary working.
+    """
+    del as_root
+
+    def sign(document: dict[str, Any], role_name: str, *, subject: str | None, ttl: int = 300):
+        key = dev_token.signing_key_path(document["project"]["key"], document)
+        return dev_token.mint(
+            key_path=key, role_name=role_name, subject=subject, ttl=ttl, document=document
+        )
+
+    return sign
+
+
+@pytest.fixture(scope="session")
+def request_subject(dev_token) -> Callable[[str], str]:
+    """The per-project development subject, derived the way the command derives it."""
+
+    def derive(project_key: str) -> str:
+        return dev_token.development_subject(project_key)
+
+    return derive
+
+
+@pytest.fixture(scope="session")
+def rest_base() -> Callable[[dict[str, Any]], str]:
+    """One project's published REST prefix, with no trailing slash.
+
+    From ``routes.rest`` and only when it says ``ready``. A project deployed
+    through any session before 5 records ``unavailable`` there, and a test that
+    fell back to composing a URL from the domain would send its requests to a
+    hostname with no REST router behind it -- where every negative assertion
+    would pass against a 404.
+    """
+
+    def base(document: dict[str, Any]) -> str:
+        route = ((document.get("routes") or {}).get("rest")) or {}
+        if route.get("status") != "ready" or not route.get("url"):
+            pytest.fail(
+                f"{document['project']['key']} publishes no ready REST route, so there "
+                "is no surface here to measure"
+            )
+        return str(route["url"]).rstrip("/")
+
+    return base
+
+
+@pytest.fixture(scope="session")
+def api_call() -> Callable[..., ApiResponse]:
+    """Make one HTTP request and report what came back. Never judges.
+
+    A raised exception on a 4xx would make every negative proof below a
+    ``pytest.raises``, and the interesting part of a refusal is its status, its
+    body and whether it named anything internal -- all of which an exception
+    would have to be unpacked for anyway.
+    """
+
+    def call(
+        url: str,
+        *,
+        method: str = "GET",
+        token: str | None = None,
+        body: Any = None,
+        headers: dict[str, str] | None = None,
+        timeout: int = 30,
+    ) -> ApiResponse:
+        payload = json.dumps(body).encode("utf-8") if body is not None else None
+        request = urllib.request.Request(url, data=payload, method=method)  # noqa: S310
+        request.add_header("Accept", "application/json")
+        if token is not None:
+            request.add_header("Authorization", f"Bearer {token}")
+        if payload is not None:
+            request.add_header("Content-Type", "application/json")
+        for name, value in (headers or {}).items():
+            request.add_header(name, value)
+
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310
+                return ApiResponse(
+                    status=response.status,
+                    headers=dict(response.headers.items()),
+                    body=response.read().decode("utf-8", "replace"),
+                )
+        except urllib.error.HTTPError as error:
+            return ApiResponse(
+                status=error.code,
+                headers=dict(error.headers.items()),
+                body=error.read().decode("utf-8", "replace"),
+            )
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            return ApiResponse(
+                status=0, headers={}, body="", reason=f"{type(error).__name__}: {error}"
+            )
+
+    return call
+
+
+@pytest.fixture(scope="session")
+def psql() -> Callable[..., tuple[int, str, str]]:
+    """Run one statement over the cluster's container socket. Returns, never judges.
+
+    ``docker exec -i``, and the ``-i`` matters: without it stdin is not
+    forwarded, psql reads nothing, and the command exits 0 having executed
+    nothing -- a silent success indistinguishable from a real one, and the trap
+    ``CLAUDE.md`` records having cost time twice.
+
+    ``role`` and ``claim`` are prepended rather than passed as parameters
+    because neither an identifier nor a ``SET`` target can be bound; it is the
+    same reason ``migrations.quote_identifier`` exists. Every value that reaches
+    them here comes from a deployed document the outputs schema validated.
+    """
+
+    def run(
+        document: dict[str, Any],
+        statement: str,
+        *,
+        role: str | None = None,
+        claim: str | None = None,
+        timeout: int = 180,
+    ) -> tuple[int, str, str]:
+        prelude = ""
+        if role is not None:
+            prelude += f'SET ROLE "{role}"; '
+        if claim is not None:
+            prelude += f"SET app.user_id = '{claim}'; "
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                "-i",
+                document["database"]["container"],
+                "psql",
+                "-U",
+                "postgres",
+                "-d",
+                document["database"]["name"],
+                "-X",
+                "-qtA",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                prelude + statement,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+        return result.returncode, result.stdout.strip(), result.stderr.strip()
+
+    return run
+
+
+#: The probe subject. A fixed UUID that is nobody's development subject, so the
+#: rows it owns are attributable and cannot be confused with a real caller's --
+#: and so that a teardown deleting by owner cannot delete anything else.
+PROBE_SUBJECT = "00000000-5e55-4100-8000-0000000f8b1e"
+
+
+@pytest.fixture(scope="module")
+def acceptance_probe(project_a: dict[str, Any], psql: Callable[..., tuple[int, str, str]]) -> Any:
+    """The transient acceptance object and its rows (plan §4.4).
+
+    Two things the released schema deliberately does not have: a function slow
+    enough to exceed a request role's ``statement_timeout``, and more rows than
+    ``api.max_rows`` under one owner. Both are needed to prove a limit is
+    *enforced* rather than merely configured, and neither may be left behind.
+
+    Owned by the object owner and executable only by ``authenticated``, so the
+    probe cannot widen what any other role can reach while it exists. Created
+    and dropped with a ``NOTIFY`` on each side, because PostgREST would
+    otherwise serve a cached schema that either lacks the function or still
+    advertises it.
+
+    **Inside the project's deployment lock**, which is what §4.4 asks for and
+    what ``rendering.project_lock`` already is. The lock is non-blocking: a
+    deploy in flight makes this fixture fail rather than let a probe object
+    exist in ``api`` while a snapshot is being captured from the same cluster.
+    That is the one interleaving that would put the probe in a *reviewed*
+    artifact rather than merely in a running one.
+
+    **A cleanup failure is a failure, not a warning.** The teardown asserts the
+    function is gone and the rows are gone, and an object left in ``api`` is on
+    the published surface -- which is why ``API-SCHEMA-001`` and
+    ``API-CONTRACT-001`` both check for this name independently, in a state
+    where this fixture is not running.
+    """
+    from agentic_postgres.rendering import ACCEPTANCE_PROBE_FUNCTION, project_lock
+
+    roles = project_a["database"]["roles"]
+    owner, caller = roles["object_owner"], roles["authenticated"]
+    max_rows = (project_a.get("api") or {}).get("max_rows")
+    if not isinstance(max_rows, int):
+        pytest.fail(
+            "the deployed document records no api.max_rows, so there is no ceiling "
+            "here to exceed and the row-limit proof would measure nothing"
+        )
+    surplus = max_rows + 1
+    qualified = f"api.{ACCEPTANCE_PROBE_FUNCTION}"
+
+    def must(statement: str, *, role: str | None = None, claim: str | None = None) -> str:
+        status, out, err = psql(project_a, statement, role=role, claim=claim)
+        if status != 0:
+            pytest.fail(f"`{statement.splitlines()[0]}` failed: {err}")
+        return out
+
+    # The lock is taken before the CREATE, not around the yield. A deploy that
+    # interleaved with the creation is the one that could capture a snapshot
+    # while the probe is in `api` -- which would put it in a *reviewed* artifact
+    # rather than merely in a running cluster.
+    with project_lock(project_a["project"]["key"]):
+        must(
+            f"CREATE FUNCTION {qualified}(p_seconds double precision) "
+            "RETURNS double precision LANGUAGE sql VOLATILE "
+            "SET search_path = pg_catalog, pg_temp "
+            "AS $probe$ SELECT p_seconds FROM pg_catalog.pg_sleep(p_seconds) $probe$; "
+            f"REVOKE ALL ON FUNCTION {qualified}(double precision) FROM PUBLIC; "
+            f'GRANT EXECUTE ON FUNCTION {qualified}(double precision) TO "{caller}";',
+            role=owner,
+        )
+        inserted = must(
+            "WITH added AS ("
+            "INSERT INTO app.notes (owner_id, title, content) "
+            f"SELECT '{PROBE_SUBJECT}'::uuid, 'apg-probe-' || g, '' "
+            f"FROM generate_series(1, {surplus}) g RETURNING 1) SELECT count(*) FROM added;",
+            role=owner,
+            claim=PROBE_SUBJECT,
+        )
+        # Asserted rather than assumed: an INSERT against a FORCE RLS table whose
+        # policy claim is absent matches nothing and reports success, which is the
+        # shape that made a migration's UPDATE silently do nothing (CLAUDE.md §6).
+        if inserted != str(surplus):
+            must(
+                f"DELETE FROM app.notes WHERE owner_id = '{PROBE_SUBJECT}';",
+                role=owner,
+                claim=PROBE_SUBJECT,
+            )
+            must(f"DROP FUNCTION IF EXISTS {qualified}(double precision);", role=owner)
+            pytest.fail(f"seeded {inserted} probe rows, expected {surplus}")
+
+        must("NOTIFY pgrst, 'reload schema';")
+
+        try:
+            yield {
+                "function": ACCEPTANCE_PROBE_FUNCTION,
+                "qualified": qualified,
+                "subject": PROBE_SUBJECT,
+                "max_rows": max_rows,
+                "seeded_rows": surplus,
+            }
+        finally:
+            _, dropped, drop_error = psql(
+                project_a, f"DROP FUNCTION IF EXISTS {qualified}(double precision);", role=owner
+            )
+            _, _, delete_error = psql(
+                project_a,
+                f"DELETE FROM app.notes WHERE owner_id = '{PROBE_SUBJECT}';",
+                role=owner,
+                claim=PROBE_SUBJECT,
+            )
+            psql(project_a, "NOTIFY pgrst, 'reload schema';")
+
+            _, remaining, _ = psql(
+                project_a,
+                "SELECT count(*) FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n "
+                "ON n.oid = p.pronamespace WHERE n.nspname = 'api' AND p.proname = "
+                f"'{ACCEPTANCE_PROBE_FUNCTION}';",
+            )
+            _, rows, _ = psql(
+                project_a,
+                f"SELECT count(*) FROM app.notes WHERE owner_id = '{PROBE_SUBJECT}';",
+                role=owner,
+                claim=PROBE_SUBJECT,
+            )
+            assert remaining == "0", (
+                f"{qualified} survived teardown ({dropped} {drop_error}); it is on the "
+                "published surface until somebody removes it by hand"
+            )
+            assert rows == "0", f"{rows} probe rows survived teardown ({delete_error})"
