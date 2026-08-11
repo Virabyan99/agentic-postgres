@@ -55,6 +55,29 @@ FINGERPRINT_LENGTH = 10
 #: cannot claim it and shadow the route the edge plane is verified through.
 HEALTH_ROUTE_PATH = "/__apg/healthz"
 
+#: The documentation root, reserved since Session 1 and published by nobody.
+#:
+#: `config.RESERVED_BASE_PATHS` keeps a manifest from claiming it, and Session 11
+#: is expected to own an index here. **No route names it** — that is ADR 0061:
+#: a published route names the page, and a status attached to a root nothing
+#: serves is a record that claims to exist and points at nothing.
+DOCS_ROOT_PATH = "/docs"
+
+#: Where the REST documentation page is served, under that root.
+#:
+#: The one derivation of this path (ADR 0002). Run 6 measured the edge's
+#: behaviour here against the locked Traefik -- 401 without a credential, 200
+#: with it, `Authorization` stripped before the upstream -- and `config` reads
+#: this rather than holding a second literal, which is what it did until ADR 0061.
+DOCS_PAGE_PATH = f"{DOCS_ROOT_PATH}/rest"
+
+#: Suffix appended to a project's `api.public_base_path` for the REST surface.
+#:
+#: Here for the same reason and by the same amendment: `config` held a copy
+#: described as "kept in step with `naming.derive`'s `route_rest`", which is the
+#: shape ADR 0061 is about with the failure not yet drawn.
+REST_PATH_SUFFIX = "/rest"
+
 # --------------------------------------------------------------------------
 # Output validators (runbook §3.7 rule 4: context-specific validator + maximum)
 # --------------------------------------------------------------------------
@@ -405,11 +428,12 @@ def derive(
             database_name if database_name else key_sql, context="postgres_database"
         ),
         roles=database_roles(key_sql),
-        route_rest=f"https://{domain}{api_base_path}/rest",
-        route_rest_path=f"{api_base_path}/rest",
+        route_rest=f"https://{domain}{api_base_path}{REST_PATH_SUFFIX}",
+        route_rest_path=f"{api_base_path}{REST_PATH_SUFFIX}",
         route_app=f"https://{domain}{api_base_path}/app",
         route_mcp=f"https://{domain}{mcp_base_path}",
-        route_docs=f"https://{domain}/docs",
+        # The page, not the root above it (ADR 0061).
+        route_docs=f"https://{domain}{DOCS_PAGE_PATH}",
         route_health=f"https://{domain}{HEALTH_ROUTE_PATH}",
         health_router=health_router_name(key),
         rest_router=rest_router_name(key),

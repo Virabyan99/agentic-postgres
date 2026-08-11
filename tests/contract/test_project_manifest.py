@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, config
+from agentic_postgres import REPO_ROOT, config, naming
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -446,6 +446,44 @@ def test_the_rest_prefix_and_the_docs_prefix_are_distinct(base: dict[str, Any]) 
     assert config.DOCS_REST_PATH == "/docs/rest"
     assert not config.paths_overlap(rest, config.DOCS_REST_PATH)
     assert not config.paths_overlap(rest, base["mcp"]["public_base_path"])
+
+
+def test_the_published_routes_and_the_compared_prefixes_are_one_derivation() -> None:
+    """ADR 0061. The bug this closes was two constants that never met.
+
+    `naming` derived `routes.docs` as the `/docs` root while `config` compared
+    `/docs/rest`, and nothing put the two in the same expression -- so the
+    document every consumer reads a route from pointed one segment above the
+    only path Run 6 measured, and no test could see it. `bin/docs.sh check`
+    would have reported 404 rather than 401, during Run 9's window.
+
+    Goes red if: either constant is restated as a literal in `config` rather
+    than read from `naming`; or a route is derived from something other than
+    these paths, which is the direction that would let them drift apart again
+    while both files still look right on their own.
+
+    Asserted through the derived *URL*, not just the constants, because two
+    constants agreeing is not the property -- the property is that the URL a
+    consumer requests is built from the path the validator compared.
+    """
+    assert config.DOCS_REST_PATH is naming.DOCS_PAGE_PATH
+    assert config.REST_PATH_SUFFIX is naming.REST_PATH_SUFFIX
+
+    identity = naming.derive(
+        slug="fixture-alpha",
+        environment="dev",
+        domain="fixture-alpha-dev.test",
+        api_base_path="/api",
+        mcp_base_path="/mcp",
+    )
+    assert identity.route_docs.endswith(config.DOCS_REST_PATH)
+    assert identity.route_rest.endswith(config.REST_PATH_SUFFIX)
+    assert identity.route_rest_path == f"/api{config.REST_PATH_SUFFIX}"
+
+    # The root stays reserved and stays unpublished. A route naming it would be
+    # a status attached to something this session serves nothing at.
+    assert naming.DOCS_ROOT_PATH in config.RESERVED_BASE_PATHS
+    assert not identity.route_docs.endswith(naming.DOCS_ROOT_PATH)
 
 
 def test_a_base_path_that_would_swallow_the_docs_prefix_is_refused(

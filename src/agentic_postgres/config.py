@@ -220,17 +220,25 @@ POSTGREST_RESERVED_CONNECTIONS = 3
 #: cannot get a connection is the one that would have fixed the problem.
 ADMINISTRATION_RESERVED_CONNECTIONS = 5
 
-#: The documentation prefix, relative to the reserved `/docs` root. `/docs` is
-#: already in RESERVED_BASE_PATHS and `routes.docs` is already derived
-#: unconditionally, so Session 5 claims nothing new -- it publishes one page
-#: underneath a root Session 11's index will own.
-DOCS_REST_PATH = "/docs/rest"
-
-#: Suffix appended to `api.public_base_path` for the REST surface. Kept in step
-#: with `naming.derive`'s `route_rest`, which is the single derivation of the
-#: URL; this is the path half of it, held here because the manifest layer has to
-#: compare prefixes and must not import a URL to do it.
-REST_PATH_SUFFIX = "/rest"
+#: The documentation page's prefix, and the REST surface's suffix.
+#:
+#: **Read from `naming`, not restated here** (ADR 0061). Both were literals in
+#: this file, the second one carrying a comment saying it was "kept in step
+#: with `naming.derive`" — and the first one was not: `naming` derived
+#: `routes.docs` as the `/docs` *root* while this said `/docs/rest`, so the
+#: document every consumer reads a route from pointed one segment above the only
+#: path Run 6 ever measured. `bin/docs.sh check` would have reported 404 rather
+#: than 401, in the middle of Run 9's maintenance window.
+#:
+#: The manifest layer still must not import a URL to compare prefixes, which is
+#: why these are paths and why the names stay. `naming` imports nothing from
+#: this module, so the import is one-way.
+from agentic_postgres.naming import (  # noqa: E402 — placed with the constants it defines
+    DOCS_PAGE_PATH as DOCS_REST_PATH,
+)
+from agentic_postgres.naming import (  # noqa: E402
+    REST_PATH_SUFFIX as REST_PATH_SUFFIX,
+)
 
 
 def postgrest_connection_budget(rest: dict[str, Any]) -> int:

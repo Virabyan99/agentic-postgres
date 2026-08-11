@@ -312,7 +312,11 @@ def test_derived_identity_matches_the_specified_table(alpha: naming.ProjectIdent
     assert alpha.route_rest == "https://fixture-alpha-dev.test/api/rest"
     assert alpha.route_app == "https://fixture-alpha-dev.test/api/app"
     assert alpha.route_mcp == "https://fixture-alpha-dev.test/mcp"
-    assert alpha.route_docs == "https://fixture-alpha-dev.test/docs"
+    # The page, not the `/docs` root above it (ADR 0061). This replaces
+    # `== ".../docs"` and is stricter rather than weaker: the old assertion was
+    # satisfied by a document whose documentation route pointed one segment
+    # above the only path anything had measured, which is what it was recording.
+    assert alpha.route_docs == "https://fixture-alpha-dev.test/docs/rest"
     assert alpha.jwt_issuer == "https://fixture-alpha-dev.test/api/app/auth"
     assert alpha.jwt_audience == "urn:agentic-postgres:fixture-alpha:dev"
     assert alpha.secrets_namespace == "agentic-postgres/fixture-alpha-dev"
