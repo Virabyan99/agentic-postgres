@@ -21,6 +21,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 SHELL_COMMANDS = (
     "deploy.sh",
+    "bin/api.sh",
     "bin/api-contract.sh",
     "bin/bootstrap-providers.sh",
     "bin/compose.sh",
@@ -35,6 +36,8 @@ SHELL_COMMANDS = (
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/db.sh",
+    "bin/dev-token.sh",
+    "bin/docs.sh",
     "bin/migrate.sh",
     "bin/postgres-bootstrap.sh",
     "bin/project-runtime.sh",
@@ -48,11 +51,14 @@ SHELL_COMMANDS = (
 )
 
 PYTHON_COMMANDS = (
+    "bin/api.py",
     "bin/api-contract.py",
     "bin/bootstrap-providers.py",
     "bin/database-access.py",
     "bin/database-ports.py",
     "bin/db-verify.py",
+    "bin/dev-token.py",
+    "bin/docs.py",
     "bin/materialize-secrets.py",
     "bin/postgres-bootstrap.py",
     "bin/render-acceptance-matrix.py",

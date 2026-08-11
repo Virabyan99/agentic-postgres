@@ -70,6 +70,8 @@ at **D126**.
 | **D168** | *(§6, and `contracts/postgrest-api-surface.yaml`)* The relations declare `methods: [GET, HEAD]`, and `API-CONTRACT-001` compares the committed snapshot against that contract. | **`follow-privileges` filters the path, not the methods on it.** Measured with the grant read back out of `information_schema.role_table_grants` rather than assumed: a role holding **`SELECT` and nothing else** on `api.notes` is served a document advertising `delete`, `get`, `patch` and `post` — and all three writes return **403 `42501 permission denied for view notes`**. `HEAD` is served with 200 and is **not** in the document. The published method list is a property of the relation being an updatable view, not of what the caller may do to it. | **ADR 0060.** The snapshot↔contract comparison is at the level of *objects*; `methods:` is enforced against the catalog by `API-RPC-001`, which attempts each refused method. The extra methods are not stripped during normalization, because a snapshot that differs from the served bytes stops being the document a client is generated from. | A method-for-method comparison could only ever have failed, and its repair is the dangerous one: widening `methods:` to the published set would make `api_surface`'s refusal of table-style writes unreachable, converting the reviewed read-only surface into a permissive one — in the one file whose entire function is to be narrower than the catalog. This is §6's defect with the green test on the wrong side of it. | **yes — ADR 0060** |
 | **D169** | *(§5, Run 7; D158)* "The hook refuses to establish an identity for the documentation role, so `EXECUTE` publishes the RPC and can never perform it." | **True, and the refusal has to be written in one specific way.** `current_user` is a SQL construct the parser rewrites, not a function to look up — the same class as the `nullif` that took the whole API down in migration 0008 — so `pg_catalog.current_user` is a hook that fails on every request while the service stays healthy. Measured both ways against the locked image: **`current_user::text = <literal>` works** inside a function pinned to `search_path = pg_catalog, pg_temp`. The rest of D158 measured out exactly as stated: a bare documentation token fetches the OpenAPI document (**200**) and sees `/rpc/create_note` in it; one carrying a subject is **401 `PT401`**; a bare one calling that RPC is **403 `new row violates row-level security policy`**; and the table held only the seed row and the control's own write afterwards. | **Migration 0009**, carrying the grants and the replaced hook together, and two placeholders — `api_documentation` (identifier) and `api_documentation_name` (literal) — resolved from **one** source key so they cannot name different roles. The refusal *raises* on a subject rather than ignoring it: the outcome is the same today and the difference is between a credential that cannot act and a request that was quietly reinterpreted. | The measurement that mattered was not whether the design works but whether the one line expressing it parses, because its failure mode is the one this repository has already paid for once: a hook that resolves at deploy time, reports a warm schema cache, and refuses every request. Writing it from the 0008 comment rather than measuring would have been reading the lesson and repeating the mistake. | no |
 | **D170** | *(implicit in every hook test)* `tests/contract/test_api_migrations.py` reads the pre-request function out of migration 0008 by name. | **Migration 0009 replaces that function, and every one of those tests stayed green describing a body no request executes.** `CREATE OR REPLACE` means the last migration to define the function is the only one whose body runs; seven tests — writes-nothing, pinned search path, the `nullif` qualification, the UUID refusal, transaction-locality, fail-closed — were all still asserting things about the superseded text, and all still passing. | **The constant is replaced by a derivation.** `effective_hook_template(manifest)` walks the migrations in applied order and returns the last one that defines the function; every hook test reads that. `test_the_effective_hook_is_the_last_migration_that_defines_it` asserts it currently resolves to 0009, so a future 0010 that replaces the hook again fails there rather than silently retiring seven assertions. | This is §6's defect found inside the machinery built to catch §6's defect, which is the reason it is worth a row of its own. The tests were not wrong when they were written and no edit made them wrong — a *new file* made them wrong, silently, and nothing in a diff of that file would show it. The repair is not to update a constant, it is to stop having one. | no |
+| **D171** | *(§5, Run 7)* "Tokens reach a child through an already-open descriptor or a tightly scoped environment, never through argv or stdout." | **The environment is reachable and the obvious spelling of it is not tight.** `env VAR=value command` puts the value in `env`'s *own* argument vector, where `ps` shows it to every user on the host — so the spelling that reads as "through the environment" is the one that publishes it. And there is no JWT dependency to sign with: `requirements-dev.txt` is hash-locked and covers the development environment, and the standard library has no RSA. Measured end to end against the locked PostgREST: a token signed with **`openssl dgst -sha256 -sign`** and verified against the JWKS derived from the same key answers **200**; one signed by a different key is **401 `PGRST301`** ("None of the keys was able to decode the JWT"); an expired one is **401 `PGRST303`**; and `PGRST_JWT_SECRET=@/path/jwks.json` loads a key set from a mounted file. | **`os.execvpe`**, so the token crosses into the child through the environment block of `execve` and never through an argument vector, and **openssl for the signature** — the only route that adds no unlocked input. `test_dev_token_passes_the_token_through_execve_and_not_through_argv` asserts the spelling on the source, because both spellings run the child with the variable set and only one of them is visible in `ps`. | ADR 0051 measured that PostgREST *accepts* RS256, which is not the same claim as "this is how to produce one" — two third parties agreeing about a signature format is exactly ADR 0019's class. The control is the load-bearing half: without the wrong-key probe, a service that ignored signatures entirely would have passed the positive test, and the tool would have shipped minting tokens nothing verified. | no |
+| **D172** | *(this file's own test, `test_dev_token_never_writes_the_token_to_a_stream`)* A source scan asserting no line containing `print(` also contains the token. | **A `print()` spread over four lines has the interpolation on a line carrying neither `print(` nor `file=`.** The mutation that plants `f"token={token}"` inside an existing multi-line call walked straight through the scan, which stayed **green while the command printed the credential**. Found by running the mutation, not by reading the test. | **The scan parses instead.** `ast.walk` finds every call to a writer and checks whether the `token` local appears anywhere in its arguments, however the call is formatted — and `test_the_token_writing_scan_would_catch_a_real_one` plants exactly the multi-line shape that defeated the first version. | This is the run's second instance of a green test measuring nothing, and the second one found only because the mutation step is not optional. The first (D170) was a test pointed at a superseded file; this one was pointed at the right file and looked at the wrong lines. Both would have read as thorough in review. | no |
 
 ---
 
@@ -692,8 +694,7 @@ Access-log policy per D141, with the query-parameter clause struck and the
 sentinel proof asserting the outcome.
 
 ### Run 7 — The contract tooling
-*Offline.* **In progress — the contract half has landed; the operator commands
-and the documentation role have not.**
+*Offline.* **Done.**
 
 > **Landed.** `src/agentic_postgres/openapi_normalize.py`, `bin/api-contract.sh`
 > and `bin/api-contract.py`, with the measurements they were written from and
@@ -754,11 +755,33 @@ and the documentation role have not.**
 > qualifying `current_user`, granting the role `INSERT` on a view, and pointing
 > the two placeholders at two sources.
 >
-> **Not yet done, and still Run 7's:** `bin/api.sh`, `bin/dev-token.sh` and
-> `bin/docs.sh`. `--update`'s live path is implemented and has not been
-> exercised against a deployment; Run 9 is where it first runs. Migration 0009
-> has been measured as SQL against a probe cluster but has **not** been applied
-> through `bin/migrate.sh` to a real one — that is Run 9 as well.
+> **The three operator commands landed third.** `bin/dev-token.sh` mints and
+> never emits; `bin/api.sh` enumerates five operations; `bin/docs.sh` two, and
+> neither of them authenticates. Two more findings:
+>
+> - **`env VAR=value command` is not "through the environment"** (D171). It puts
+>   the value in `env`'s own argument vector, where `ps` shows it to every user
+>   on the host. `os.execvpe` is the spelling that does what the plan sentence
+>   means, and the test asserts the spelling because both run the child with the
+>   variable set. Signing is `openssl dgst -sha256 -sign`, measured end to end:
+>   200 against the derived JWKS, **401 `PGRST301`** for a wrong key, **401
+>   `PGRST303`** for an expired token, and `PGRST_JWT_SECRET=@/path` loads a key
+>   set from a mounted file.
+> - **A source scan looking for `print(` on a line missed a `print()` spread
+>   over four** (D172). The mutation planting the token inside an existing
+>   multi-line call left the suite green while the command printed the
+>   credential. The scan now parses; a guard test plants the shape that defeated
+>   the first version.
+>
+> Eight more mutations confirmed red, one of which is D172 — it was the mutation
+> that found it.
+>
+> **What Run 7 has not proved, and Run 9 will.** `--update`'s live path,
+> `bin/api.sh` and `bin/docs.sh` against a real deployment, and migration 0009
+> applied through `bin/migrate.sh` rather than as SQL against a probe cluster.
+> Everything above is offline or measured against a throwaway rig, which is what
+> this run's scope is — but "measured against a rig" is not "ran in the product",
+> and no evidence claim should say otherwise before Run 9.
 
 `bin/api-contract.sh` with the `--update`/`--check` split ADR 0050 sets:
 privileged capture streams a secret-free candidate and accepts no arbitrary
