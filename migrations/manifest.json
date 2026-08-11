@@ -30,6 +30,16 @@
       "type": "identifier",
       "source": "database.roles.agent_writer",
       "description": "Agent identity permitted to call the write RPCs."
+    },
+    "api_documentation": {
+      "type": "identifier",
+      "source": "database.roles.api_documentation",
+      "description": "The role the OpenAPI capture and the documentation page read the published surface as. Holds view SELECT and EXECUTE on the write RPCs, which is what makes openapi-mode = follow-privileges publish the whole surface; the pre-request hook refuses it a request identity, so it can never perform what it advertises. Outputs schema v6, D158."
+    },
+    "api_documentation_name": {
+      "type": "literal",
+      "source": "database.roles.api_documentation",
+      "description": "The same role, as a string literal rather than a quoted identifier, for the hook's `current_user::text = ...` comparison. Two placeholders over ONE source: they resolve from the same key in the same document, so they cannot name different roles -- which a second source, or a name written out beside the grant, could."
     }
   },
   "migrations": [
@@ -88,6 +98,13 @@
       "template": "templates/0008-http-request-plane.sql",
       "placeholders": ["object_owner", "anon", "authenticated"],
       "description": "app_private.postgrest_pre_request(), and the one private object an HTTP request role may reach: USAGE on app_private plus EXECUTE on that function, granted by name to anon and authenticated and to nothing else. See ADR 0052 and D138."
+    },
+    {
+      "version": "20260811120009",
+      "name": "documentation_role",
+      "template": "templates/0009-documentation-role.sql",
+      "placeholders": ["object_owner", "api_documentation", "api_documentation_name"],
+      "description": "The documentation role's grants -- view SELECT plus EXECUTE on both write RPCs, which is what makes openapi-mode = follow-privileges publish the whole surface -- and the pre-request clause that refuses it a request identity, so the RPCs it advertises are ones it can never perform. See D158."
     }
   ]
 }

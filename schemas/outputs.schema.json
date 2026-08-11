@@ -29,7 +29,7 @@
         "template_version"
       ],
       "properties": {
-        "schema_version": { "type": "integer", "enum": [5] },
+        "schema_version": { "type": "integer", "enum": [6] },
         "document_kind": { "const": "rendered" },
         "inputs": {
           "type": "object",
@@ -201,7 +201,7 @@
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
-        "schema_version": { "type": "integer", "enum": [5] },
+        "schema_version": { "type": "integer", "enum": [6] },
         "document_kind": { "const": "deployed" },
         "source_commit": { "$ref": "#/$defs/commit" },
         "deployed_through_session": {
@@ -426,7 +426,8 @@
         "migration_user",
         "backup_user",
         "app_runtime",
-        "object_owner"
+        "object_owner",
+        "api_documentation"
       ],
       "properties": {
         "anon": { "$ref": "#/$defs/postgresIdentifier" },
@@ -441,7 +442,11 @@
         "migration_user": { "$ref": "#/$defs/postgresIdentifier" },
         "backup_user": { "$ref": "#/$defs/postgresIdentifier" },
         "app_runtime": { "$ref": "#/$defs/postgresIdentifier" },
-        "object_owner": { "$ref": "#/$defs/postgresIdentifier" }
+        "object_owner": { "$ref": "#/$defs/postgresIdentifier" },
+        "api_documentation": {
+          "$ref": "#/$defs/postgresIdentifier",
+          "description": "Version 6. The role the OpenAPI capture and the documentation page read the published surface as. It holds view SELECT and EXECUTE on the write RPCs -- which is what makes `openapi-mode = follow-privileges` publish the whole surface -- and the pre-request hook refuses to establish an identity for it, so the RPCs it advertises are ones it can never perform. NOLOGIN: it is reached by SET ROLE from the authenticator, like anon and authenticated, and holds no credential of its own."
+        }
       }
     },
 

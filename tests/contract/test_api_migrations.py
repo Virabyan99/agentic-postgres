@@ -1,4 +1,4 @@
-"""Migrations 0007 and 0008: the surface they leave, and the rules they follow.
+"""Migrations 0007, 0008 and 0009: the surface they leave, and the rules they follow.
 
 Offline, against the template text and against the reviewed contract. None of it
 needs a cluster, and that is the point: the drift ADR 0048 records survived two
@@ -26,9 +26,10 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.database]
 
 TEMPLATES = REPO_ROOT / "migrations" / "templates"
 
-#: The two Session 5 migrations, by template name.
+#: The three Session 5 migrations, by template name.
 CONVERGENCE = "templates/0007-api-surface-convergence.sql"
 REQUEST_PLANE = "templates/0008-http-request-plane.sql"
+DOCUMENTATION_ROLE = "templates/0009-documentation-role.sql"
 
 _CREATE_VIEW = re.compile(r"CREATE VIEW api\.(\w+)\b.*?AS\s+SELECT\s+(.*?)\s+FROM\b", re.DOTALL)
 _DROP_VIEW = re.compile(r"DROP VIEW api\.(\w+)")
@@ -55,6 +56,32 @@ def surface() -> dict[str, Any]:
 
 def template_text(name: str) -> str:
     return (REPO_ROOT / "migrations" / name).read_text(encoding="utf-8")
+
+
+#: The declaration every hook test has to be written against.
+HOOK_DEFINITION = "CREATE OR REPLACE FUNCTION app_private.postgrest_pre_request"
+
+
+def effective_hook_template(manifest: dict[str, Any]) -> str:
+    """The template whose body is the hook that actually runs.
+
+    Read out of the manifest in applied order rather than named as a constant,
+    because `CREATE OR REPLACE` means the *last* migration to define the
+    function is the only one whose body a request ever executes.
+
+    This exists because of what Run 7 nearly shipped. Migration 0009 replaces
+    the hook, and every test below was written against 0008 -- so they would all
+    have stayed green while describing a function no request runs. That is this
+    repository's signature defect with the green test on the wrong side of it,
+    and the repair is not to update a constant but to stop having one.
+    """
+    defining = [
+        entry["template"]
+        for entry in manifest["migrations"]
+        if HOOK_DEFINITION in sql_only(up_section(template_text(entry["template"])))
+    ]
+    assert defining, "no migration defines the pre-request hook"
+    return defining[-1]
 
 
 def up_section(text: str) -> str:
@@ -222,7 +249,7 @@ def raises_in(name: str) -> list[str]:
     return [match.strip() for match in _RAISE.findall(statements(name))]
 
 
-@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE])
+@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE])
 def test_no_caller_reachable_raise_publishes_a_hint_or_a_detail(template: str) -> None:
     """Measured: PostgREST publishes `HINT` and `DETAIL` to the caller verbatim.
 
@@ -242,7 +269,7 @@ def test_no_caller_reachable_raise_publishes_a_hint_or_a_detail(template: str) -
         assert "DETAIL" not in raise_statement, raise_statement
 
 
-@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE])
+@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE])
 def test_every_caller_reachable_raise_names_its_status(template: str) -> None:
     """A bare `RAISE EXCEPTION` leaves the SQLSTATE at `P0001`, which is 400.
 
@@ -358,7 +385,7 @@ def test_every_new_function_revokes_public_before_it_grants(
         assert revoke < grant, name
 
 
-@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE])
+@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE])
 def test_a_migration_that_touches_the_api_notifies_the_schema_cache(template: str) -> None:
     """The cache is a copy, and a stale one serves the previous surface.
 
@@ -376,27 +403,29 @@ def test_a_migration_that_touches_the_api_notifies_the_schema_cache(template: st
 # ---------------------------------------------------------------------------
 
 
-def test_the_hook_writes_nothing() -> None:
+def test_the_hook_writes_nothing(manifest: dict[str, Any]) -> None:
     """PostgREST runs it inside the request transaction, read-only on a GET.
 
     Measured: an early version kept an audit row, and every read of the API came
     back **405 "cannot execute INSERT in a read-only transaction"** -- a write
     hidden in a hook turning the whole read surface off.
     """
-    body = statements(REQUEST_PLANE)
-    function = body[body.index("CREATE OR REPLACE FUNCTION app_private.postgrest_pre_request") :]
+    body = statements(effective_hook_template(manifest))
+    function = body[body.index(HOOK_DEFINITION) :]
     function = function[: function.index("$fn$;")]
     for statement in ("INSERT", "UPDATE", "DELETE", "CREATE TABLE", "COPY"):
         assert statement not in function, f"the pre-request hook contains {statement}"
 
 
-def test_the_hook_pins_its_search_path_and_stays_invoker() -> None:
-    body = statements(REQUEST_PLANE)
+def test_the_hook_pins_its_search_path_and_stays_invoker(manifest: dict[str, Any]) -> None:
+    body = statements(effective_hook_template(manifest))
     assert "SECURITY INVOKER" in body
     assert "SET search_path = pg_catalog, pg_temp" in body
 
 
-def test_the_hook_does_not_qualify_the_one_name_that_cannot_be_qualified() -> None:
+def test_the_hook_does_not_qualify_the_one_name_that_cannot_be_qualified(
+    manifest: dict[str, Any],
+) -> None:
     """`nullif` is a SQL construct the parser rewrites into a CASE.
 
     Measured, and it took the whole API down: `pg_catalog.nullif(text, unknown)
@@ -404,7 +433,7 @@ def test_the_hook_does_not_qualify_the_one_name_that_cannot_be_qualified() -> No
     stayed healthy and the schema cache stayed warm. Being a construct is also
     why it needs no qualification -- nothing on a search_path can shadow it.
     """
-    body = statements(REQUEST_PLANE)
+    body = statements(effective_hook_template(manifest))
     assert "pg_catalog.nullif" not in body
     assert "nullif(" in body
     # The functions that *are* real lookups stay qualified.
@@ -412,17 +441,17 @@ def test_the_hook_does_not_qualify_the_one_name_that_cannot_be_qualified() -> No
     assert "pg_catalog.set_config" in body
 
 
-def test_the_hook_refuses_a_subject_that_is_not_a_uuid() -> None:
+def test_the_hook_refuses_a_subject_that_is_not_a_uuid(manifest: dict[str, Any]) -> None:
     """Measured: `"sub": "not-a-uuid"` reached the row policy and came back as
     **400 `invalid input syntax for type uuid`** -- a raw cast error, produced by
     a policy, on every request. Refused here it is one 401 from one place.
     """
-    body = statements(REQUEST_PLANE)
+    body = statements(effective_hook_template(manifest))
     assert "[0-9a-fA-F]{8}-" in body
     assert body.index("[0-9a-fA-F]{8}-") < body.index("set_config('app.user_id'")
 
 
-def test_the_claim_is_transaction_local() -> None:
+def test_the_claim_is_transaction_local(manifest: dict[str, Any]) -> None:
     """`set_config(..., true)` is `SET LOCAL`.
 
     Without the `true`, one request's asserted identity outlives it on a pooled
@@ -430,14 +459,14 @@ def test_the_claim_is_transaction_local() -> None:
     failure available in this design, and the one the pooler's
     `server_reset_query_always` exists to prevent from the other side.
     """
-    body = statements(REQUEST_PLANE)
+    body = statements(effective_hook_template(manifest))
     assert "set_config('app.user_id', subject, true)" in body
 
 
-def test_malformed_claims_fail_closed() -> None:
+def test_malformed_claims_fail_closed(manifest: dict[str, Any]) -> None:
     """ "Unreadable" and "absent" look identical one line later and mean
     opposite things about who is asking."""
-    body = statements(REQUEST_PLANE)
+    body = statements(effective_hook_template(manifest))
     handler = body[body.index("EXCEPTION WHEN others THEN") :]
     assert "RAISE EXCEPTION" in handler[:400]
     assert "PT401" in handler[:400]
@@ -469,3 +498,139 @@ def test_public_keeps_nothing_on_the_hook() -> None:
     assert body.index("REVOKE ALL ON FUNCTION app_private.postgrest_pre_request() FROM PUBLIC") < (
         body.index("GRANT USAGE ON SCHEMA app_private")
     )
+
+
+# ---------------------------------------------------------------------------
+# Migration 0009 -- the documentation role (D158)
+# ---------------------------------------------------------------------------
+
+
+def test_the_effective_hook_is_the_last_migration_that_defines_it(
+    manifest: dict[str, Any],
+) -> None:
+    """The control for every hook test, and the reason they were repointed.
+
+    Until Run 7 the hook tests read migration 0008 by name. 0009 replaces the
+    function, so every one of them would have stayed green while describing a
+    body no request executes -- a value that looked measured and was not.
+
+    Goes red the day a 0010 replaces the hook again without this being read,
+    which is exactly when somebody needs to notice.
+    """
+    assert effective_hook_template(manifest) == DOCUMENTATION_ROLE
+    assert HOOK_DEFINITION in statements(REQUEST_PLANE), "0008 still defines it, historically"
+    assert HOOK_DEFINITION in statements(DOCUMENTATION_ROLE)
+
+
+def test_the_documentation_role_is_refused_a_request_identity() -> None:
+    """The clause the whole role depends on (D158).
+
+    Measured on the locked PostgREST before this was written: a documentation
+    token carrying a subject, with no such clause, established an identity and
+    the role **wrote a row**. With the clause it is 401 `PT401`, and a bare
+    documentation token calling the same RPC is 403 `new row violates row-level
+    security policy` -- it publishes the write and cannot perform it.
+    """
+    body = statements(DOCUMENTATION_ROLE)
+    clause = body[body.index("IF current_user::text = {{api_documentation_name}}") :]
+    # The second `END IF;`, not the first: the inner one closes the
+    # subject-present branch and the outer one closes the role check. Slicing at
+    # the first would test half the clause and miss the `RETURN` that is the
+    # whole point -- the refusal to establish an identity at all.
+    inner = clause.index("END IF;") + len("END IF;")
+    clause = clause[: clause.index("END IF;", inner) + len("END IF;")]
+
+    assert "PT401" in clause, "a documentation token carrying a subject must be refused"
+    assert "RETURN;" in clause, "and one without a subject must proceed with no identity"
+    assert "set_config" not in clause, "the clause must never establish an identity"
+
+
+def test_the_hook_does_not_qualify_current_user_either(manifest: dict[str, Any]) -> None:
+    """Migration 0008's `nullif` lesson, in the one other place it applies.
+
+    `current_user` is a SQL construct the parser rewrites, not a function to look
+    up, so `pg_catalog.current_user` is a hook that fails on every request while
+    the service stays healthy. Measured both ways; the cast is what works.
+    """
+    body = statements(effective_hook_template(manifest))
+    assert "pg_catalog.current_user" not in body
+    assert "current_user::text" in body
+
+
+def test_the_documentation_role_holds_the_surface_and_the_hook_and_nothing_else() -> None:
+    """`follow-privileges` publishes only what the role can reach.
+
+    Measured: a role with view SELECT and no EXECUTE is served a complete
+    document with **no write RPC in it at all**, so the EXECUTE grants are what
+    make the published document describe the write surface. What makes granting
+    them safe is the clause above, not this list.
+    """
+    body = statements(DOCUMENTATION_ROLE)
+    granted = re.findall(r"GRANT ([A-Z ,]+?) ON (?:SCHEMA |FUNCTION )?(\S+)", body)
+    subjects = {target.rstrip("(,;") for _, target in granted}
+    assert "api.notes," in body and "api.tasks" in body
+    assert "api.create_note(text," in subjects or "api.create_note(text," in body
+    assert "api.update_task_status(uuid," in body
+    assert "app_private.postgrest_pre_request()" in body
+
+    # No write grant on a view, ever. The role is not meant to be able to write,
+    # and a grant it does not hold is one fewer thing depending on the hook.
+    for statement in re.findall(r"GRANT [^;]+;", body):
+        if "api.notes" in statement or "api.tasks" in statement:
+            assert "INSERT" not in statement, statement
+            assert "UPDATE" not in statement, statement
+            assert "DELETE" not in statement, statement
+
+
+def test_the_documentation_role_gets_the_private_schema_pair(
+    manifest: dict[str, Any],
+) -> None:
+    """ADR 0052's grant, extended by name to the third request role.
+
+    PostgREST runs `db-pre-request` after the role switch, so a role without
+    EXECUTE on the hook cannot make a request at all -- including the one that
+    fetches the document it exists to be shown.
+    """
+    entry = next(e for e in manifest["migrations"] if e["template"] == DOCUMENTATION_ROLE)
+    assert set(entry["placeholders"]) == {
+        "object_owner",
+        "api_documentation",
+        "api_documentation_name",
+    }
+
+    body = statements(DOCUMENTATION_ROLE)
+    grant = re.search(r"GRANT USAGE ON SCHEMA app_private TO ([^;]+);", body)
+    assert grant is not None
+    assert set(re.findall(r"\{\{(\w+)\}\}", grant.group(1))) == {"api_documentation"}
+
+
+def test_the_two_role_placeholders_read_one_source(manifest: dict[str, Any]) -> None:
+    """The identifier and the literal must name the same role.
+
+    They are two placeholders because a `GRANT` needs a quoted identifier and
+    `current_user::text = ...` needs a string literal. Resolving both from one
+    key in one document is what makes them incapable of disagreeing -- a role
+    name written out beside the grant could, and the hook would then refuse an
+    identity to a role nothing granted anything to, silently.
+    """
+    placeholders = manifest["placeholders"]
+    assert placeholders["api_documentation"]["type"] == "identifier"
+    assert placeholders["api_documentation_name"]["type"] == "literal"
+    assert (
+        placeholders["api_documentation"]["source"]
+        == placeholders["api_documentation_name"]["source"]
+        == "database.roles.api_documentation"
+    )
+
+
+def test_the_documentation_role_keeps_the_private_defaults_closed() -> None:
+    """0008 closed them for `anon` and `authenticated`; a role added afterwards
+    would otherwise inherit whatever a later `CREATE TABLE` in `app_private`
+    grants."""
+    body = statements(DOCUMENTATION_ROLE)
+    for kind in ("TABLES", "SEQUENCES"):
+        assert re.search(
+            r"ALTER DEFAULT PRIVILEGES FOR ROLE \{\{object_owner\}\} IN SCHEMA app_private\s+"
+            r"REVOKE ALL ON " + kind + r" FROM \{\{api_documentation\}\}",
+            body,
+        ), kind

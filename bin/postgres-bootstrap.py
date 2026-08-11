@@ -234,7 +234,17 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     # The two agent roles are Session 9's and are not granted. They exist,
     # NOLOGIN and unreachable, which is what makes the refusal above a
     # measurement rather than a statement about a role nothing declared.
-    for request_role in ("anon", "authenticated"):
+    #
+    # `api_documentation` joins them in Session 5 Run 7 (D158). It is a request
+    # role like the other two -- reached by SET ROLE, holding no credential of
+    # its own -- and it needs the membership for the same reason: without it the
+    # capture cannot fetch the document the role exists to be shown. What makes
+    # it safe to grant is not this list but migration 0009's hook clause, which
+    # refuses it a request identity, so every object it can name is guarded by a
+    # policy that denies. Measured: a bare documentation token calling
+    # `create_note` comes back 403 "new row violates row-level security policy",
+    # and one carrying a subject comes back 401 before it reaches anything.
+    for request_role in ("anon", "authenticated", "api_documentation"):
         statements.append(
             f"GRANT {q(roles[request_role])} TO {q(roles['postgrest_authenticator'])} "
             f"WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;"

@@ -168,13 +168,19 @@ def build_outputs(
     )
 
     return {
-        # Version 5 adds nothing to this branch (ADR 0053): `routes.rest`,
+        # Version 5 added nothing to this branch (ADR 0053): `routes.rest`,
         # `routes.docs`, `jwt.issuer` and `jwt.audience` have been here since
         # Session 1 and remain the single derivation of those values. What moved
-        # is the deployed branch, which now records a status and an observation
-        # against them. The version still advances here, because one document
-        # kind cannot be at a different schema version from the other.
-        "schema_version": 5,
+        # was the deployed branch, which now records a status and an observation
+        # against them.
+        #
+        # Version 6 does reach this branch, and needs no line here: it adds
+        # `database.roles.api_documentation` (D158), and `database.roles` is
+        # written from `naming.database_roles`, which derives every entry of
+        # `ROLE_SUFFIXES`. Appending the role there is the whole change, which is
+        # what single-authority derivation is for -- a second list here would be
+        # the place the two could disagree.
+        "schema_version": 6,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {

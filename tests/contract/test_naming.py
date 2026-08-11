@@ -94,7 +94,10 @@ def test_roles_are_derived_independently_not_from_a_shared_prefix() -> None:
     untruncated = {s: n for s, n in roles.items() if s not in truncated}
 
     assert set(untruncated) == {"anon"}, f"corpus assumption changed: {sorted(untruncated)}"
-    assert len(truncated) == 12
+    # A literal rather than `len(ROLE_SUFFIXES) - 1`, deliberately: derived from
+    # the tuple it is checking, this would agree with any future edit without
+    # anyone reading it. Thirteen since Session 5 Run 7 added `api_documentation`.
+    assert len(truncated) == 13
 
     # Every truncated role is exactly at the limit and carries its own
     # fingerprint. Shared fingerprints would mean one truncated prefix was

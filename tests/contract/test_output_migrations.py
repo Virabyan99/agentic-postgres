@@ -33,6 +33,14 @@ is therefore mostly what it still refuses — a deployed document, an incomplete
 one, one carrying fields no v4 rendered document has — because a step that
 changes one integer is exactly the one somebody would later be tempted to make a
 shortcut past the checks.
+
+The v6 step returns to the v3 shape and repeats its refusal for a fourth time.
+It adds `database.roles.api_documentation` (D158), which *is* derivable — it is
+``naming.database_role(sql_key, "api_documentation")`` — and is supplied by the
+caller anyway, because deriving it here would make this module a second
+authority on a derived identity. What it adds on top of the v3 pattern is a
+collision check: two role keys naming one role is a document in which a grant
+cannot be attributed to the role it was written for.
 """
 
 from __future__ import annotations
@@ -52,6 +60,13 @@ FIXTURE_V1 = REPO_ROOT / "tests" / "fixtures" / "outputs-v1.json"
 FIXTURE_V2 = REPO_ROOT / "tests" / "fixtures" / "outputs-v2.json"
 FIXTURE_V3 = REPO_ROOT / "tests" / "fixtures" / "outputs-v3.json"
 FIXTURE_V4 = REPO_ROOT / "tests" / "fixtures" / "outputs-v4.json"
+
+#: The Session 5 render, produced by `deploy.sh --render-only` at commit
+#: `8f2687d` -- Run 7 part one, the last commit that still rendered version 5.
+#: Rendered rather than hand-made from `outputs-v4.json`, for the reason every
+#: fixture here is: a document derived from the migrator is a document that
+#: agrees with the migrator by construction.
+FIXTURE_V5 = REPO_ROOT / "tests" / "fixtures" / "outputs-v5.json"
 
 CONTRACT_DIGEST = sha256((REPO_ROOT / "secrets.required.yaml").read_bytes()).hexdigest()
 
@@ -132,14 +147,42 @@ def v4(v3: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.fixture
-def v5(v1: dict[str, Any]) -> dict[str, Any]:
-    """The whole chain, v1 -> v2 -> v3 -> v4 -> v5, through the public entry point."""
+def v5_fixture() -> dict[str, Any]:
+    """The committed Session 5 render."""
+    return json.loads(FIXTURE_V5.read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def v5(v4: dict[str, Any]) -> dict[str, Any]:
+    """The v1 fixture advanced four steps, stopping at 5."""
+    return output_migrations.migrate_v4_to_v5(v4)
+
+
+def documentation_role_for(document: dict[str, Any]) -> str:
+    """What a caller supplies for the v6 step (D158).
+
+    Derived through `naming` from the document's *own* project key, not written
+    out, for the reason `profiles_for` is built the same way: a literal role name
+    would agree only with itself and would keep agreeing after `naming` changed.
+
+    This is also the argument's whole justification. The name is derivable, and
+    `output_migrations` deliberately does not derive it -- ADR 0002 allows one
+    derivation path per name, and a migrator that computed role names would be a
+    second one.
+    """
+    return naming.database_role(naming.sql_key(document["project"]["key"]), "api_documentation")
+
+
+@pytest.fixture
+def v6(v1: dict[str, Any]) -> dict[str, Any]:
+    """The whole chain, v1 -> ... -> v6, through the public entry point."""
     return output_migrations.migrate_rendered(
         v1,
         secrets_contract_sha256=CONTRACT_DIGEST,
         database_budget=BUDGET,
         database_container=CONTAINER,
         access_profiles=profiles_for(v1),
+        documentation_role=documentation_role_for(v1),
     )
 
 
@@ -227,6 +270,7 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         database_budget=BUDGET,
         database_container=CONTAINER,
         access_profiles=profiles_for(v1),
+        documentation_role=documentation_role_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
 
@@ -255,16 +299,23 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
     with pytest.raises(config.ManifestError):
         config.validate_against_schema(at_four, "outputs.schema.json")
 
-    migrated = output_migrations.migrate_v4_to_v5(at_four)
-    assert migrated["schema_version"] == 5
+    at_five = output_migrations.migrate_v4_to_v5(at_four)
+    assert at_five["schema_version"] == 5
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(at_five, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v5_to_v6(
+        at_five, documentation_role=documentation_role_for(at_five)
+    )
+    assert migrated["schema_version"] == 6
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
-def test_the_whole_chain_validates(v5: dict[str, Any]) -> None:
-    """v1 -> v2 -> v3 -> v4 -> v5 end to end, not only the newest link (ADR 0027)."""
-    assert v5["schema_version"] == 5
-    assert v5["document_kind"] == "rendered"
-    config.validate_against_schema(v5, "outputs.schema.json")
+def test_the_whole_chain_validates(v6: dict[str, Any]) -> None:
+    """v1 -> v2 -> v3 -> v4 -> v5 -> v6 end to end, not only the newest link (ADR 0027)."""
+    assert v6["schema_version"] == 6
+    assert v6["document_kind"] == "rendered"
+    config.validate_against_schema(v6, "outputs.schema.json")
 
 
 def test_v3_carries_the_supplied_budget_and_container(v3: dict[str, Any]) -> None:
@@ -330,6 +381,7 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             database_budget=BUDGET,
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
+            documentation_role=documentation_role_for(v1),
         )
 
 
@@ -392,7 +444,9 @@ def test_the_migrator_never_derives_a_container_name() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_a_current_version_document_is_not_migrated_again(v5: dict[str, Any]) -> None:
+def test_a_current_version_document_is_not_migrated_again(
+    v6: dict[str, Any], v5: dict[str, Any]
+) -> None:
     """Replaces the v2 form of this assertion, applied to the current version.
 
     ADR 0017's rule: a test may only be replaced by a stricter one. This is the
@@ -400,13 +454,14 @@ def test_a_current_version_document_is_not_migrated_again(v5: dict[str, Any]) ->
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 5"):
+    with pytest.raises(MigrationError, match="already version 6"):
         output_migrations.migrate_rendered(
-            v5,
+            v6,
             secrets_contract_sha256=CONTRACT_DIGEST,
             database_budget=BUDGET,
             database_container=CONTAINER,
-            access_profiles=profiles_for(v5),
+            access_profiles=profiles_for(v6),
+            documentation_role=documentation_role_for(v6),
         )
     with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_v4_to_v5(v5)
@@ -420,13 +475,14 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1, 2, 3 and 4"):
+    with pytest.raises(MigrationError, match="only versions 1, 2, 3, 4 and 5"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
             database_budget=BUDGET,
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
+            documentation_role=documentation_role_for(v1),
         )
 
 
@@ -439,6 +495,7 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             database_budget=BUDGET,
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
+            documentation_role=documentation_role_for(v1),
         )
 
 
@@ -460,6 +517,7 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             database_budget=BUDGET,
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
+            documentation_role=documentation_role_for(v1),
         )
 
 
@@ -554,8 +612,15 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
         v3_fixture, access_profiles=profiles_for(v3_fixture)
     )
     assert at_four["schema_version"] == 4
-    migrated = output_migrations.migrate_v4_to_v5(at_four)
-    assert migrated["schema_version"] == 5
+    at_five = output_migrations.migrate_v4_to_v5(at_four)
+    assert at_five["schema_version"] == 5
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(at_five, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v5_to_v6(
+        at_five, documentation_role=documentation_role_for(at_five)
+    )
+    assert migrated["schema_version"] == 6
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -702,8 +767,15 @@ def test_v4_fixture_is_version_four_and_no_longer_validates(v4_fixture: dict[str
 
 
 def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, Any]) -> None:
-    migrated = output_migrations.migrate_v4_to_v5(v4_fixture)
-    assert migrated["schema_version"] == 5
+    at_five = output_migrations.migrate_v4_to_v5(v4_fixture)
+    assert at_five["schema_version"] == 5
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(at_five, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v5_to_v6(
+        at_five, documentation_role=documentation_role_for(at_five)
+    )
+    assert migrated["schema_version"] == 6
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -776,3 +848,112 @@ def test_a_v4_document_is_still_refused_by_the_v3_step(v4_fixture: dict[str, Any
     """Each single step keeps its own narrow refusal as the chain grows."""
     with pytest.raises(MigrationError, match="already version 4"):
         output_migrations.migrate_v3_to_v4(v4_fixture, access_profiles=profiles_for(v4_fixture))
+
+
+# ---------------------------------------------------------------------------
+# v5 -> v6 (D158): the documentation role
+# ---------------------------------------------------------------------------
+
+
+def test_v5_fixture_is_version_five_and_no_longer_validates(v5_fixture: dict[str, Any]) -> None:
+    """The committed Session 5 render, and the claim that makes v6 a real bump.
+
+    A v5 document that still validated would mean the bump had changed a label
+    and nothing else. It does not: databaseRoles is required with
+    additionalProperties: false, so a document without the fourteenth role
+    is refused by the current schema.
+    """
+    assert output_migrations.detect_version(v5_fixture) == 5
+    assert v5_fixture["document_kind"] == "rendered"
+    assert "api_documentation" not in v5_fixture["database"]["roles"]
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(v5_fixture, "outputs.schema.json")
+
+
+def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, Any]) -> None:
+    migrated = output_migrations.migrate_v5_to_v6(
+        v5_fixture, documentation_role=documentation_role_for(v5_fixture)
+    )
+    assert migrated["schema_version"] == 6
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+
+def test_v6_changes_exactly_one_field(v5_fixture: dict[str, Any]) -> None:
+    """The whole content of the step, asserted as a difference rather than described.
+
+    Goes red if the step ever adds a second member -- which for a *rendered*
+    document would mean it had grown an observation, the boundary ADR 0012 draws.
+    """
+    role = documentation_role_for(v5_fixture)
+    migrated = output_migrations.migrate_v5_to_v6(v5_fixture, documentation_role=role)
+
+    assert migrated["database"]["roles"]["api_documentation"] == role
+    before = {k: v for k, v in v5_fixture.items() if k != "schema_version"}
+    after = {k: v for k, v in migrated.items() if k != "schema_version"}
+    after["database"] = dict(after["database"])
+    after["database"]["roles"] = {
+        k: v for k, v in after["database"]["roles"].items() if k != "api_documentation"
+    }
+    assert after == before
+
+
+def test_the_v6_step_does_not_mutate_its_input(v5_fixture: dict[str, Any]) -> None:
+    """An in-place migrator would leave the caller holding a document that is
+    neither the version it read nor the version it asked for."""
+    snapshot = json.loads(json.dumps(v5_fixture))
+    output_migrations.migrate_v5_to_v6(
+        v5_fixture, documentation_role=documentation_role_for(v5_fixture)
+    )
+    assert v5_fixture == snapshot
+
+
+def test_the_v6_step_refuses_a_deployed_document(v5_fixture: dict[str, Any]) -> None:
+    v5_fixture["document_kind"] = "deployed"
+    with pytest.raises(MigrationError, match="expected a 'rendered'"):
+        output_migrations.migrate_v5_to_v6(v5_fixture, documentation_role="apg_x_api_documentation")
+
+
+def test_the_v6_step_refuses_a_role_that_is_not_an_identifier(
+    v5_fixture: dict[str, Any],
+) -> None:
+    with pytest.raises(MigrationError, match="not a bare lowercase SQL identifier"):
+        output_migrations.migrate_v5_to_v6(v5_fixture, documentation_role="Apg-Docs Role")
+
+
+def test_the_v6_step_refuses_a_role_the_document_already_uses(
+    v5_fixture: dict[str, Any],
+) -> None:
+    """The refusal this step adds on top of the v3 pattern.
+
+    Two role keys naming one role is a document in which a grant written for the
+    documentation role reaches `app_runtime` instead -- and every check that
+    reads role names by key would agree with itself while doing it.
+    """
+    with pytest.raises(MigrationError, match="already this document's"):
+        output_migrations.migrate_v5_to_v6(
+            v5_fixture, documentation_role=v5_fixture["database"]["roles"]["app_runtime"]
+        )
+
+
+def test_the_v6_step_refuses_a_document_that_already_has_the_role(
+    v5_fixture: dict[str, Any],
+) -> None:
+    role = documentation_role_for(v5_fixture)
+    once = output_migrations.migrate_v5_to_v6(v5_fixture, documentation_role=role)
+    once["schema_version"] = 5
+    with pytest.raises(MigrationError, match="already names api_documentation"):
+        output_migrations.migrate_v5_to_v6(once, documentation_role=role)
+
+
+def test_the_role_pattern_agrees_with_the_schema() -> None:
+    """This module keeps its own copy because it depends on nothing.
+
+    Two copies of a fact with a test between them are one fact. Goes red if
+    either the schema's ``postgresIdentifier`` or the migrator's copy moves
+    without the other.
+    """
+    schema = json.loads((REPO_ROOT / "schemas" / "outputs.schema.json").read_text(encoding="utf-8"))
+    assert (
+        schema["$defs"]["postgresIdentifier"]["pattern"]
+        == output_migrations._POSTGRES_IDENTIFIER.pattern
+    )

@@ -392,16 +392,45 @@ def test_a_statement_timeout_on_a_role_that_does_not_exist_is_refused(
     """Checked against `naming.ROLE_SUFFIXES`, not against a list written here.
 
     A timeout set on a role nothing derives is applied to nothing and reports
-    nothing, and it reads in the manifest exactly like one that works. The
-    runbook names `api_documentation`; the platform derives no such role, and it
-    will be namable here on the day it does.
+    nothing, and it reads in the manifest exactly like one that works.
+
+    **This replaces a weaker version of itself, and D151 authorised the
+    replacement in advance.** Until Session 5 Run 7 the negative example was
+    `api_documentation` -- the role the runbook names and the platform did not
+    derive -- with the note that "it will be namable here on the day it does".
+    That day is now, so the example moved to a name nothing will ever derive,
+    and the assertion that the check is against the *derivation* rather than
+    against an enumeration is the same one, made against an input that cannot
+    quietly become valid.
     """
     from agentic_postgres import naming
 
-    assert "api_documentation" not in naming.ROLE_SUFFIXES
-    base["api"]["rest"]["statement_timeouts"]["api_documentation"] = "5s"
+    assert "api_documentation_v2" not in naming.ROLE_SUFFIXES
+    base["api"]["rest"]["statement_timeouts"]["api_documentation_v2"] = "5s"
     with pytest.raises(config.ManifestError, match="does not derive"):
         check(tmp_path, base)
+
+
+def test_the_documentation_role_became_namable_when_it_was_derived(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """The other half, and the reason the test above could be replaced.
+
+    D151: "The day the documentation role exists, it becomes namable here with
+    no schema change and no test change." Run 7 appended it to
+    `naming.ROLE_SUFFIXES` and nothing else moved -- no manifest schema change,
+    no second list beside the derivation. This asserts that, so the claim is
+    measured rather than remembered.
+
+    Goes red if the manifest check ever stops reading `ROLE_SUFFIXES` and starts
+    reading an enumeration written next to it, because then adding the fifteenth
+    role would need two edits and only one of them would be obvious.
+    """
+    from agentic_postgres import naming
+
+    assert "api_documentation" in naming.ROLE_SUFFIXES
+    base["api"]["rest"]["statement_timeouts"]["api_documentation"] = "5s"
+    check(tmp_path, base)
 
 
 def test_anonymous_access_is_a_frozen_enumeration(tmp_path: Path, base: dict[str, Any]) -> None:

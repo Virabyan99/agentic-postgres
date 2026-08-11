@@ -93,10 +93,15 @@ _V3_REQUIRED = _V2_REQUIRED
 #: a member inside `database`. Same aliasing, same reason.
 _V4_REQUIRED = _V3_REQUIRED
 
+#: A v5 rendered document, likewise. Version 5 added only deployed-branch fields
+#: and version 6 adds one member inside `database.roles`, so the outer shape has
+#: not moved since version 2.
+_V5_REQUIRED = _V4_REQUIRED
+
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 5
+CURRENT_VERSION = 6
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -132,6 +137,12 @@ BUDGET_MEMBERS = frozenset(
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _HOSTNAME = re.compile(r"^[a-z0-9][a-z0-9.-]*[a-z0-9]$")
 _COMPOSE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+#: The same shape ``naming`` validates a derived role against, and the same
+#: shape the output schema's ``postgresIdentifier`` states. Copied rather than
+#: imported for this module's standing reason -- it depends on nothing -- and
+#: ``test_the_role_pattern_agrees_with_the_schema`` asserts the two agree.
+_POSTGRES_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 #: Kept in step with ``naming.HEALTH_ROUTE_PATH``. Imported rather than copied
 #: would create an import cycle for no benefit; ``test_output_migrations.py``
@@ -190,8 +201,9 @@ def migrate_rendered(
     database_budget: dict[str, int],
     database_container: str,
     access_profiles: dict[str, dict[str, Any]],
+    documentation_role: str,
 ) -> dict[str, Any]:
-    """Migrate a version 1, 2, 3 or 4 ``rendered`` document to the current version.
+    """Migrate a version 1, 2, 3, 4 or 5 ``rendered`` document to the current version.
 
     Chains the single-step functions rather than jumping, so a v1 document
     still exercises the v1 -> v2 step that a direct v1 -> v5 path would have
@@ -210,8 +222,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4}:
-        raise MigrationError(f"only versions 1, 2, 3 and 4 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5}:
+        raise MigrationError(f"only versions 1, 2, 3, 4 and 5 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -223,8 +235,10 @@ def migrate_rendered(
         )
     if detect_version(document) == 3:
         document = migrate_v3_to_v4(document, access_profiles=access_profiles)
+    if detect_version(document) == 4:
+        document = migrate_v4_to_v5(document)
 
-    return migrate_v4_to_v5(document)
+    return migrate_v5_to_v6(document, documentation_role=documentation_role)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -481,6 +495,72 @@ def migrate_v4_to_v5(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def migrate_v5_to_v6(document: dict[str, Any], *, documentation_role: str) -> dict[str, Any]:
+    """Return a version 6 ``rendered`` document derived from a version 5 one.
+
+    Version 6 adds `database.roles.api_documentation` (D158). Unlike version 5,
+    which asked this module for nothing, this one changes the *rendered* branch:
+    `databaseRoles` is required with `additionalProperties: false` on both, so a
+    v5 document does not validate against version 6 and cannot be made to
+    without the name.
+
+    ``documentation_role`` is required rather than derived, and that is the same
+    call `database_container` got in v2 -> v3. The name *is* derivable — it is
+    ``naming.database_role(key_sql, "api_documentation")`` — and deriving it here
+    would make this module a second authority on a derived identity, which ADR
+    0002 allows exactly one of. So the caller derives it and this module
+    validates the shape: an empty string, or one already sitting in
+    `database.roles` under another key, is refused rather than accepted.
+    """
+    version = detect_version(document)
+    if version == 6:
+        raise MigrationError("document is already version 6; migration would be a no-op")
+    if version != 5:
+        raise MigrationError(f"only version 5 can be migrated to 6, got {version}")
+
+    require_kind(document, "rendered")
+
+    missing = _V5_REQUIRED - set(document)
+    if missing:
+        raise MigrationError(f"not a complete version 5 document; missing {sorted(missing)}")
+    unexpected = set(document) - _V5_REQUIRED
+    if unexpected:
+        raise MigrationError(
+            f"document carries fields no version 5 rendered document has: {sorted(unexpected)}"
+        )
+
+    roles = document.get("database", {}).get("roles")
+    if not isinstance(roles, dict) or "object_owner" not in roles:
+        raise MigrationError("database.roles is missing or incomplete; this is not a v5 document")
+    if "api_documentation" in roles:
+        raise MigrationError(
+            "database.roles already names api_documentation; this is not a version 5 document"
+        )
+
+    if not _POSTGRES_IDENTIFIER.match(documentation_role):
+        raise MigrationError(
+            f"documentation_role is not a bare lowercase SQL identifier: {documentation_role!r}"
+        )
+
+    # The refusal that matters. Every role in this document is distinct by
+    # construction -- `naming.database_roles` raises on a collision -- so a
+    # duplicate here means the caller passed the wrong role, and accepting it
+    # would produce a document in which two names claim one identity and every
+    # grant written from it reaches the wrong one.
+    collision = {name for name, value in roles.items() if value == documentation_role}
+    if collision:
+        raise MigrationError(
+            f"documentation_role {documentation_role!r} is already this document's "
+            f"{sorted(collision)}. Two role keys naming one role is a document in which "
+            "a grant cannot be attributed to the role it was written for"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["database"]["roles"]["api_documentation"] = documentation_role
+    migrated["schema_version"] = 6
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -503,5 +583,6 @@ __all__ = [
     "migrate_v2_to_v3",
     "migrate_v3_to_v4",
     "migrate_v4_to_v5",
+    "migrate_v5_to_v6",
     "require_kind",
 ]

@@ -87,6 +87,15 @@ ROLE_SUFFIXES: tuple[str, ...] = (
     "backup_user",
     "app_runtime",
     "object_owner",
+    # Session 5, Run 7. The role the OpenAPI capture and the documentation page
+    # read the published surface as -- the fourteenth entry D151 anticipated:
+    # "the day the documentation role exists, it becomes namable [in
+    # statement_timeouts] with no schema change and no test change."
+    #
+    # Appended rather than placed beside the other request roles because this
+    # tuple's order reaches rendered output, and inserting into the middle would
+    # move twelve names that nothing about this change touches.
+    "api_documentation",
 )
 
 
