@@ -180,6 +180,47 @@ def _restore_checkout_ownership(path: Path) -> None:
             continue
 
 
+def _restore_git_index_ownership() -> None:
+    """Give the operator back `.git/index` after a privileged `git` refreshed it.
+
+    Step 3 runs `installed_release.assert_clean`, which shells out to `git`. Git
+    rewrites `.git/index` whenever a stat check makes the cached one stale --
+    and under sudo the replacement lands `-rw------- root:root`. The operator's
+    very next `git fetch` then dies with
+
+        fatal: .git/index: index file open failed: Permission denied
+
+    which reads as a broken repository rather than as a permission this deploy
+    took. It is not hypothetical: a `sudo` pytest run touched enough mtimes to
+    force the rewrite, and the next transport failed (D194).
+
+    Separate from `_restore_checkout_ownership` because it runs *after* step 3
+    rather than after step 1, and because the git directory is not a by-product
+    of rendering -- it is the operator's own checkout, which nothing here owns.
+    Best-effort for the same reason: a deploy that succeeded must not fail
+    because it could not hand a file back.
+    """
+    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
+    if not (uid and gid):
+        return
+
+    git_dir = REPO_ROOT / ".git"
+    if not git_dir.is_dir():
+        return
+
+    # The index is the one git rewrites on a read-only command. The others are
+    # named because a `git status` may also touch them, and a root-owned one
+    # breaks the same transport in the same way.
+    for name in ("index", "index.lock", "FETCH_HEAD", "ORIG_HEAD"):
+        target = git_dir / name
+        if not target.exists():
+            continue
+        try:
+            os.chown(target, int(uid), int(gid))
+        except OSError:
+            continue
+
+
 def _install_file(source: Path, destination: Path) -> None:
     """Copy an operator input into the configuration root.
 
@@ -731,6 +772,10 @@ def main(argv: list[str] | None = None) -> int:
     step("3. Install the release and record it")
     installed_release.assert_clean(REPO_ROOT)
     commit = installed_release.resolve_commit(REPO_ROOT)
+    # Both git calls above can rewrite `.git/index` as root. Handed back here
+    # rather than at the end, so a later failure still leaves the operator able
+    # to run `git fetch` and try again (D194).
+    _restore_git_index_ownership()
     release = installed_release.install(REPO_ROOT, commit=commit)
     edge_state.write_state(
         edge_state.build_state(
