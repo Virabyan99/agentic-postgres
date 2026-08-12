@@ -158,6 +158,7 @@ def build_override(
     rendered_directory: str,
     rest_router_name: str,
     buffering_middleware_name: str,
+    stripprefix_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
@@ -186,6 +187,8 @@ def build_override(
         raise ValueError("rest_router_name is required")
     if not buffering_middleware_name:
         raise ValueError("buffering_middleware_name is required")
+    if not stripprefix_middleware_name:
+        raise ValueError("stripprefix_middleware_name is required")
     if not https_entrypoint:
         raise ValueError("https_entrypoint is required")
     if not rendered_directory or not rendered_directory.startswith("/"):
@@ -245,6 +248,7 @@ def build_override(
                     https_entrypoint=https_entrypoint,
                     rest_router_name=rest_router_name,
                     buffering_middleware_name=buffering_middleware_name,
+                    stripprefix_middleware_name=stripprefix_middleware_name,
                 ),
                 # The verification-only JWKS, derived from the bootstrap signing
                 # key by `bin/render-jwks.py` at deploy time (ADR 0051).
@@ -267,7 +271,11 @@ def build_override(
 
 
 def _rest_labels(
-    *, https_entrypoint: str, rest_router_name: str, buffering_middleware_name: str
+    *,
+    https_entrypoint: str,
+    rest_router_name: str,
+    buffering_middleware_name: str,
+    stripprefix_middleware_name: str,
 ) -> dict[str, str]:
     """The REST router, its body-size middleware, and the boundary rule.
 
@@ -294,6 +302,7 @@ def _rest_labels(
     router = f"traefik.http.routers.{rest_router_name}"
     service = f"traefik.http.services.{rest_router_name}"
     buffering = f"traefik.http.middlewares.{buffering_middleware_name}"
+    stripprefix = f"traefik.http.middlewares.{stripprefix_middleware_name}"
     path = "${API_REST_PATH:?required}"
     return {
         "traefik.enable": "true",
@@ -302,18 +311,29 @@ def _rest_labels(
         ),
         f"{router}.entrypoints": https_entrypoint,
         f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
-        # The baseline chain first, then the body-size limit. Order is the order
-        # a request traverses them, and the baseline is what puts
-        # `Cache-Control: no-store` on the 413 the buffering middleware itself
-        # generates -- measured, and the reason the response policy lives in the
-        # chain rather than beside the upstream.
+        # The baseline chain first, then the body-size limit, then the prefix
+        # strip. Order is the order a request traverses them: the baseline is
+        # what puts `Cache-Control: no-store` on the 413 the buffering middleware
+        # itself generates -- measured, and the reason the response policy lives
+        # in the chain rather than beside the upstream -- and the strip is last
+        # because everything above it matches on the published path.
         f"{router}.middlewares": (
-            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},{buffering_middleware_name}"
+            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},"
+            f"{buffering_middleware_name},{stripprefix_middleware_name}"
         ),
         f"{router}.service": rest_router_name,
         f"{service}.loadbalancer.server.port": str(REST_SERVICE_PORT),
         f"{buffering}.buffering.maxrequestbodybytes": "${API_REQUEST_BODY_MAX_BYTES:?required}",
         f"{buffering}.buffering.memrequestbodybytes": "${API_REQUEST_BODY_MEMORY_BYTES:?required}",
+        # Without this the router matches, forwards the published path unchanged,
+        # and PostgREST -- which serves its document at `/` and its objects at
+        # `/notes` -- answers 404 for a path it has never heard of. At the edge
+        # that reads as a missing route and is not one (D187).
+        #
+        # Measured against the locked Traefik v3.7, with a control: `/api/rest`
+        # arrives as `/` rather than as an empty path, `/api/rest/` as `/`, and
+        # `/api/rest/notes` as `/notes`.
+        f"{stripprefix}.stripprefix.prefixes": path,
     }
 
 
@@ -324,6 +344,7 @@ def render_override(
     rendered_directory: str,
     rest_router_name: str,
     buffering_middleware_name: str,
+    stripprefix_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
@@ -333,6 +354,7 @@ def render_override(
         rendered_directory=rendered_directory,
         rest_router_name=rest_router_name,
         buffering_middleware_name=buffering_middleware_name,
+        stripprefix_middleware_name=stripprefix_middleware_name,
         publications=publications,
     )
     header = (

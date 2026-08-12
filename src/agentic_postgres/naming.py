@@ -254,6 +254,26 @@ def api_buffering_middleware_name(key: str) -> str:
     return traefik_name(f"apg-{key}-api-buffering", context="traefik_middleware_buffering")
 
 
+def api_stripprefix_middleware_name(key: str) -> str:
+    """The per-project middleware that removes the published prefix.
+
+    The REST route is published at `{api.public_base_path}/rest` and PostgREST
+    serves its document at `/` and its objects at `/notes`, `/rpc/create_note`.
+    Without this the router matches, forwards the path unchanged, and PostgREST
+    answers 404 for a path it has never heard of -- which reads at the edge as a
+    missing route and is not one (D187).
+
+    Per-project for the same reason the buffering middleware is: the prefix is a
+    manifest value, so one middleware in the shared baseline could only carry one
+    project's path.
+
+    Measured against the locked Traefik v3.7 before this existed, with a control:
+    `/api/rest` arrives as **`/`** rather than as an empty path, `/api/rest/` as
+    `/`, and `/api/rest/notes` as `/notes`.
+    """
+    return traefik_name(f"apg-{key}-api-stripprefix", context="traefik_middleware_stripprefix")
+
+
 def docs_credential_middleware_name(key: str) -> str:
     """The per-project documentation credential middleware.
 
@@ -373,6 +393,7 @@ class ProjectIdentity:
     #: is what stops two projects from sharing one.
     rest_router: str = ""
     api_buffering_middleware: str = ""
+    api_stripprefix_middleware: str = ""
     docs_credential_middleware: str = ""
 
     jwt_issuer: str = ""
@@ -438,6 +459,7 @@ def derive(
         health_router=health_router_name(key),
         rest_router=rest_router_name(key),
         api_buffering_middleware=api_buffering_middleware_name(key),
+        api_stripprefix_middleware=api_stripprefix_middleware_name(key),
         docs_credential_middleware=docs_credential_middleware_name(key),
         jwt_issuer=f"https://{domain}{api_base_path}/app/auth",
         jwt_audience=f"urn:agentic-postgres:{slug}:{environment}",

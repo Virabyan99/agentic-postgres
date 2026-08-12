@@ -28,6 +28,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 ROUTER = "apg-alpha-dev-health"
 REST_ROUTER = "apg-alpha-dev-rest"
 BUFFERING = "apg-alpha-dev-api-buffering"
+STRIPPREFIX = "apg-alpha-dev-api-stripprefix"
 RENDERED = "/var/lib/agentic-postgres/rendered/alpha-dev"
 
 #: Every derived name the override renders into a label key. Collected here so a
@@ -37,6 +38,7 @@ NAMES = {
     "router_name": ROUTER,
     "rest_router_name": REST_ROUTER,
     "buffering_middleware_name": BUFFERING,
+    "stripprefix_middleware_name": STRIPPREFIX,
 }
 
 
@@ -103,6 +105,7 @@ def test_the_rendered_document_is_parseable_yaml() -> None:
         "router_name",
         "rest_router_name",
         "buffering_middleware_name",
+        "stripprefix_middleware_name",
         "https_entrypoint",
         "rendered_directory",
     ],
@@ -190,9 +193,42 @@ def test_the_rest_route_carries_the_baseline_chain_and_then_its_own_limit(
 
     The baseline is what puts `Cache-Control: no-store` on the 413 the buffering
     middleware itself generates.
+
+    The strip is **last**, and that is not arbitrary: everything above it matches
+    and reports on the *published* path, and the upstream is the only thing that
+    wants the path without its prefix.
     """
     attached = rest_labels[f"traefik.http.routers.{REST_ROUTER}.middlewares"]
-    assert attached == f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},{BUFFERING}"
+    assert attached == f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},{BUFFERING},{STRIPPREFIX}"
+
+
+def test_the_published_prefix_is_removed_before_the_upstream_sees_it(
+    rest_labels: dict[str, str],
+) -> None:
+    """D187, and the reason the route 404'd from a service that was serving.
+
+    The router publishes ``{api.public_base_path}/rest``; PostgREST serves its
+    document at ``/`` and its objects at ``/notes`` and ``/rpc/create_note``.
+    Without this middleware the router matches, forwards the published path
+    unchanged, and PostgREST answers 404 for a path it has never heard of --
+    which at the edge is indistinguishable from a missing route, and is not one.
+    Measured on the deployed service: ``/`` answered 200 with 2412 bytes and
+    ``/api/rest`` answered 404 with 96, matching Traefik's own logged
+    ``DownstreamContentSize`` for the failing request exactly.
+
+    The prefix stripped is the **same interpolation the rule matches on**, so a
+    project whose base path changes cannot end up with a router that matches one
+    path and strips another.
+
+    Goes red if: the middleware is dropped, or its prefix stops being the value
+    the rule uses.
+    """
+    prefixes = rest_labels[f"traefik.http.middlewares.{STRIPPREFIX}.stripprefix.prefixes"]
+    rule = rest_labels[f"traefik.http.routers.{REST_ROUTER}.rule"]
+    assert prefixes == "${API_REST_PATH:?required}"
+    assert f"Path(`{prefixes}`)" in rule, (
+        "the router matches one path and the middleware strips another"
+    )
 
 
 def test_the_body_limits_stay_interpolated(rest_labels: dict[str, str]) -> None:
@@ -399,6 +435,7 @@ def test_the_mount_and_the_model_name_the_same_file() -> None:
         rendered_directory="/var/lib/agentic-postgres/rendered/example-dev",
         rest_router_name="rest",
         buffering_middleware_name="buffer",
+        stripprefix_middleware_name="strip",
     )
     mounts = override["services"][runtime_override.REST_SERVICE]["volumes"]
     assert mounts == [
@@ -458,6 +495,7 @@ def test_every_routed_service_carries_the_label_the_edge_filters_on() -> None:
         rendered_directory="/var/lib/agentic-postgres/rendered/example-dev",
         rest_router_name="rest",
         buffering_middleware_name="buffer",
+        stripprefix_middleware_name="strip",
     )
     model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
 

@@ -355,6 +355,7 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "API_REST_PATH",
     "REST_ROUTER_NAME",
     "API_BUFFERING_MIDDLEWARE_NAME",
+    "API_STRIPPREFIX_MIDDLEWARE_NAME",
     "DOCS_CREDENTIAL_MIDDLEWARE_NAME",
 )
 
@@ -558,6 +559,7 @@ def build_compose_env(
         "API_REST_PATH": identity.route_rest_path,
         "REST_ROUTER_NAME": identity.rest_router,
         "API_BUFFERING_MIDDLEWARE_NAME": identity.api_buffering_middleware,
+        "API_STRIPPREFIX_MIDDLEWARE_NAME": identity.api_stripprefix_middleware,
         "DOCS_CREDENTIAL_MIDDLEWARE_NAME": identity.docs_credential_middleware,
     }
     lines = [
