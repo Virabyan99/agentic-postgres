@@ -917,9 +917,22 @@ def psql() -> Callable[..., tuple[int, str, str]]:
 #: and so that a teardown deleting by owner cannot delete anything else.
 PROBE_SUBJECT = "00000000-5e55-4100-8000-0000000f8b1e"
 
+#: How long PostgREST may take to act on `NOTIFY pgrst, 'reload schema'` before
+#: the fixture calls it a failure rather than a delay. Generous on purpose: the
+#: number is a ceiling on a notification round trip, and every observed reload
+#: on this host has completed well inside a second. A fixture that waited
+#: forever would turn a dead channel into a hung suite.
+PROBE_RELOAD_TIMEOUT_SECONDS = 30.0
+
 
 @pytest.fixture(scope="module")
-def acceptance_probe(project_a: dict[str, Any], psql: Callable[..., tuple[int, str, str]]) -> Any:
+def acceptance_probe(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    rest_base: Callable[[dict[str, Any]], str],
+    api_call: Callable[..., Any],
+    mint_token: Callable[..., str],
+) -> Any:
     """The transient acceptance object and its rows (plan §4.4).
 
     Two things the released schema deliberately does not have: a function slow
@@ -1000,6 +1013,54 @@ def acceptance_probe(project_a: dict[str, Any], psql: Callable[..., tuple[int, s
             pytest.fail(f"seeded {inserted} probe rows, expected {surplus}")
 
         must("NOTIFY pgrst, 'reload schema';")
+
+        # NOTIFY is asynchronous, and the fixture used to yield straight after
+        # it. Every consumer then called the probe RPC before PostgREST had
+        # rebuilt its cache and got `404 Could not find the function
+        # api.apg_acceptance_probe(p_seconds) in the schema cache` -- a race, not
+        # a boundary, and one that reads exactly like an RPC that was never
+        # created (D193).
+        #
+        # **Polled through the REST plane, not the catalog.** The catalog has the
+        # function the instant the CREATE commits, so a `pg_proc` query would
+        # succeed immediately and wait for nothing; the thing that lags is
+        # PostgREST's schema cache, and the only place that is visible is a
+        # request. Waiting here rather than in each consumer also turns the
+        # reload into an assertion: if the function never becomes callable, the
+        # notification channel is not delivering, which is a finding about
+        # `db-channel-enabled` rather than a slow fixture.
+        probe_base = rest_base(project_a)
+        probe_token = mint_token(project_a, caller, subject=PROBE_SUBJECT)
+        deadline = time.monotonic() + PROBE_RELOAD_TIMEOUT_SECONDS
+        last = None
+        while time.monotonic() < deadline:
+            answer = api_call(
+                f"{probe_base}/rpc/{ACCEPTANCE_PROBE_FUNCTION}",
+                method="POST",
+                token=probe_token,
+                body={"p_seconds": 0},
+            )
+            last = answer
+            if answer.status != 404:
+                break
+            time.sleep(0.5)
+        else:
+            # Same cleanup the seed-count failure above performs. A fixture that
+            # fails without removing what it created leaves an object in `api`,
+            # which is on the published surface.
+            psql(
+                project_a,
+                f"DELETE FROM app.notes WHERE owner_id = '{PROBE_SUBJECT}';",
+                role=owner,
+                claim=PROBE_SUBJECT,
+            )
+            psql(project_a, f"DROP FUNCTION IF EXISTS {qualified}(double precision);", role=owner)
+            psql(project_a, "NOTIFY pgrst, 'reload schema';")
+            pytest.fail(
+                f"{qualified} was still 404 after {PROBE_RELOAD_TIMEOUT_SECONDS}s "
+                f"(last body: {(last.body if last else '')[:200]!r}). The schema cache "
+                "never picked up the CREATE, so `db-channel-enabled` is not delivering"
+            )
 
         try:
             yield {

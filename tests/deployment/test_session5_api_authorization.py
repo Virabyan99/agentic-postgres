@@ -283,16 +283,31 @@ def test_role_switching_cannot_exceed_the_authenticators_memberships(
         "this assertion with it rather than leave the refusals below measuring nothing"
     )
 
-    status, attributes, error = psql(
-        project_a,
-        "SELECT rolsuper::text || ',' || rolbypassrls::text || ',' || rolcreaterole::text "
-        f"FROM pg_catalog.pg_roles WHERE rolname = '{authenticator}';",
-        role=None,
-    )
-    assert status == 0 and attributes == "f,f,f", (
-        f"{authenticator} holds superuser, bypassrls or createrole ({attributes}); "
-        "nothing below constrains a role that can become anything"
-    )
+    # One row per attribute, named. The first version concatenated all three and
+    # compared the result to "f,f,f" -- psql's *display* form for a boolean,
+    # which is not what `::text` produces. The cast yields "false", so the
+    # assertion compared 'false,false,false' to 'f,f,f' and failed on a role
+    # that held none of the three. Its message then read "holds superuser,
+    # bypassrls or createrole (false,false,false)", which says the opposite of
+    # what it found. Named attributes make both mistakes hard to repeat (D193).
+    for attribute in ("rolsuper", "rolbypassrls", "rolcreaterole"):
+        status, value, error = psql(
+            project_a,
+            f"SELECT {attribute}::text FROM pg_catalog.pg_roles WHERE rolname = '{authenticator}';",
+            role=None,
+        )
+        assert status == 0, f"could not read {attribute}: {error}"
+        # The control on the reading itself: an empty result would compare
+        # unequal to "true" and pass this as though the attribute were absent,
+        # when it means the role was not found at all.
+        assert value in ("true", "false"), (
+            f"reading {attribute} for {authenticator} returned {value!r}, which is "
+            "neither true nor false -- the role was not found, or the query changed"
+        )
+        assert value == "false", (
+            f"{authenticator} holds {attribute}; nothing below constrains a role "
+            "that can become anything"
+        )
 
     for role in sorted(memberships):
         allowed = api_call(

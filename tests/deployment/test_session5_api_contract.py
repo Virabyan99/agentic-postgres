@@ -237,7 +237,15 @@ def test_a_ddl_change_reaches_openapi_without_a_restart(
         f"expected exactly one PostgREST container for {project_a['project']['key']}, "
         f"found {[c.get('Names') for c in service]}"
     )
-    container_id = service[0]["ID"]
+    # Resolved to the full 64-character Id, and resolved once. `docker ps` hands
+    # back a 12-character prefix, and two things went wrong with using it
+    # directly: `docker inspect` on the prefix failed outright with "no such
+    # object" when the container had been replaced between the listing and the
+    # lookup, and the later re-inspection compared that prefix to
+    # `container["Id"]` -- the full form -- which can never be equal, so the
+    # restart check was a tautology in the failing direction (D193).
+    container_id = json.loads(sh("docker", "inspect", service[0]["ID"]))[0]["Id"]
+    assert len(container_id) == 64, f"expected a full container Id, got {container_id!r}"
     started_before = sh("docker", "inspect", "--format", "{{.State.StartedAt}}", container_id)
 
     before = openapi_normalize.declared_objects(
@@ -295,6 +303,10 @@ def test_a_ddl_change_reaches_openapi_without_a_restart(
         for container in json.loads(sh("docker", "inspect", container_id))
         if container["Id"] == container_id
     ]
+    # This comparison is only meaningful because `container_id` was resolved to
+    # the full Id above. Against `docker ps`'s 12-character prefix it matched
+    # nothing, and the assertion below reported a container that had vanished
+    # when in fact the two strings were simply different lengths.
     assert after, "the PostgREST container disappeared during the reload"
     assert after[0]["State"]["StartedAt"] == started_before.strip(), (
         "PostgREST restarted during this test, so the change reaching OpenAPI says "
