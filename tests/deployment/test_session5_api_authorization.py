@@ -334,15 +334,27 @@ def test_role_switching_cannot_exceed_the_authenticators_memberships(
     )
 
     for role in sorted(memberships):
+        # The documentation role is minted **without** a subject, because
+        # migration 0009's hook refuses a documentation token that carries one --
+        # `AP401: the documentation role has no request identity`. `dev-token.sh`
+        # says so in its own help text. Minting all three the same way asked the
+        # product for a credential it is designed to reject, and read as a
+        # role-switch failure (D196).
+        carries_subject = None if role == roles["api_documentation"] else subject
         allowed = api_call(
-            f"{base}/notes?limit=1", token=mint_token(project_a, role, subject=subject)
+            f"{base}/notes?limit=1",
+            token=mint_token(project_a, role, subject=carries_subject),
         )
         if allowed.status in (200, 206):
             continue
-        assert "42501" in allowed.body, (
+        # Either a grant refusal or the request plane's own refusal proves the
+        # switch happened: both are raised *by the database*, after the
+        # authenticator has become the role. A JWT-layer rejection never gets
+        # that far, and that is the failure this loop exists to rule out.
+        assert "42501" in allowed.body or "AP401" in allowed.body, (
             f"a token naming the granted role {role} returned {allowed.status} with "
-            f"{allowed.body[:120]!r}. A granted role is either served or refused by a "
-            "grant; anything else means the authenticator did not switch to it"
+            f"{allowed.body[:140]!r}. A granted role is served, refused by a grant, or "
+            "refused by the request plane; anything else means no switch happened"
         )
 
     # Every other role the project derives, plus a name from no project at all.
