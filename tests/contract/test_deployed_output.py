@@ -22,8 +22,17 @@ import threading
 from pathlib import Path
 
 import pytest
+import yaml
 
-from agentic_postgres import REPO_ROOT, config, deployed_output, jwt_keys, openapi_normalize
+from agentic_postgres import (
+    REPO_ROOT,
+    config,
+    deployed_output,
+    edge_credentials,
+    jwt_keys,
+    openapi_normalize,
+    secrets_contract,
+)
 from agentic_postgres.config import ManifestError
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
@@ -918,3 +927,199 @@ def test_the_publisher_writes_both_halves_and_neither_is_readable() -> None:
     )
     assert "htpasswd_line" in body, "the hash is written without passing the bcrypt check"
     assert body.count("_write_root_only") == 2, "both files must be written root-only"
+
+
+def _docker_reachable() -> bool:
+    import subprocess
+
+    try:
+        return (
+            subprocess.run(
+                ["docker", "version", "--format", "{{.Server.Version}}"],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            ).returncode
+            == 0
+        )
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(
+    not _docker_reachable(), reason="the Docker daemon is unreachable, so no hash can be produced"
+)
+def test_the_publisher_produces_a_credential_the_edge_can_use(tmp_path, monkeypatch) -> None:
+    """The publisher, **run**, not described.
+
+    Every other test of this function asserts the shape of the call it makes:
+    the secret goes on stdin, `-i` is present, no element of the argument vector
+    is built from the credential. All three were true while the program handed
+    to `python -c` did not parse, and both deploys died on the host after two
+    images had been built (D205).
+
+    **One primitive is substituted and no more.** `_write_root_only` chowns to
+    `root:root` and cannot run unprivileged; it is replaced by a plain write, and
+    the two paths it is called with are recorded so the substitution cannot hide
+    a file written under the wrong name. Everything else is real: the secret is
+    read from a generation directory laid out the way the materializer lays one
+    out, the hash is produced by the locked image, and the bcrypt check that
+    would refuse a `$6$` is the product's own.
+
+    Goes red if: the embedded program stops parsing, the image stops offering
+    BLOWFISH, the hash stops satisfying the format Traefik accepts, or the
+    middleware document stops naming the file the publisher writes.
+    """
+    module = deploy_module()
+
+    password = "a1b2c3d4e5f60718293a4b5c6d7e8f90"  # noqa: S105
+    generation = "0f4bfa6681b95217"
+    project_key = "rehearsal-dev"
+
+    root_plane = (
+        tmp_path
+        / "secrets"
+        / project_key
+        / "generations"
+        / generation
+        / secrets_contract.ROOT_PLANE_DIRECTORY
+    )
+    root_plane.mkdir(parents=True)
+    # Trailing newline, because that is what the materializer writes and the
+    # publisher has to strip it before hashing -- a hash of "password\n" is a
+    # credential no operator can type.
+    (root_plane / "docs_basic_auth_password").write_text(password + "\n", encoding="utf-8")
+
+    dynamic = tmp_path / "dynamic"
+    written: dict[Path, bytes] = {}
+
+    def record(path: Path, payload: bytes) -> None:
+        written[path] = payload
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    monkeypatch.setattr(module, "SECRET_ROOT", tmp_path / "secrets")
+    monkeypatch.setattr(module, "EDGE_DYNAMIC_DIR", dynamic)
+    monkeypatch.setattr(module, "_write_root_only", record)
+
+    versions = (REPO_ROOT / "versions.env").read_text(encoding="utf-8")
+    image = next(
+        line.split("=", 1)[1]
+        for line in versions.splitlines()
+        if line.startswith("PYTHON_RUNTIME_IMAGE=")
+    )
+
+    module.publish_docs_credential(
+        project_key=project_key,
+        generation_id=generation,
+        middleware_name="apg-rehearsal-dev-docs-auth",
+        runtime_image=image,
+    )
+
+    users = dynamic / edge_credentials.users_file_name(project_key)
+    middleware = dynamic / edge_credentials.middleware_file_name(project_key)
+    assert set(written) == {users, middleware}, (
+        f"the publisher wrote {sorted(p.name for p in written)}, not the two files the "
+        "middleware and the edge expect"
+    )
+
+    user, _, hashed = users.read_text(encoding="utf-8").strip().partition(":")
+    assert user == edge_credentials.DOCS_USER
+    # The product's own check, so this cannot pass on a format Traefik answers
+    # 401 to in a way indistinguishable from a wrong password (D165).
+    edge_credentials.assert_bcrypt(hashed)
+
+    document = yaml.safe_load(middleware.read_text(encoding="utf-8"))
+    basic = document["http"]["middlewares"]["apg-rehearsal-dev-docs-auth"]["basicAuth"]
+    assert basic["usersFile"].endswith(edge_credentials.users_file_name(project_key)), (
+        "the middleware names a users file the publisher did not write"
+    )
+    assert basic["removeHeader"] is True
+
+
+@pytest.mark.skipif(
+    not _docker_reachable(), reason="the Docker daemon is unreachable, so no hash can be verified"
+)
+def test_the_published_hash_verifies_against_its_own_password_and_no_other(
+    tmp_path, monkeypatch
+) -> None:
+    """The control the test above needs.
+
+    A publisher that wrote a well-formed hash of the *wrong bytes* -- the
+    password with its trailing newline still attached, say -- satisfies every
+    format assertion and refuses the operator at the door.
+    """
+    import subprocess
+
+    module = deploy_module()
+    password = "9f8e7d6c5b4a39281706f5e4d3c2b1a0"  # noqa: S105
+    generation = "gen"
+    project_key = "rehearsal-two-dev"
+
+    root_plane = (
+        tmp_path
+        / "secrets"
+        / project_key
+        / "generations"
+        / generation
+        / secrets_contract.ROOT_PLANE_DIRECTORY
+    )
+    root_plane.mkdir(parents=True)
+    (root_plane / "docs_basic_auth_password").write_text(password + "\n", encoding="utf-8")
+
+    dynamic = tmp_path / "dynamic"
+
+    def record(path: Path, payload: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    monkeypatch.setattr(module, "SECRET_ROOT", tmp_path / "secrets")
+    monkeypatch.setattr(module, "EDGE_DYNAMIC_DIR", dynamic)
+    monkeypatch.setattr(module, "_write_root_only", record)
+
+    versions = (REPO_ROOT / "versions.env").read_text(encoding="utf-8")
+    image = next(
+        line.split("=", 1)[1]
+        for line in versions.splitlines()
+        if line.startswith("PYTHON_RUNTIME_IMAGE=")
+    )
+    module.publish_docs_credential(
+        project_key=project_key,
+        generation_id=generation,
+        middleware_name="m",
+        runtime_image=image,
+    )
+
+    hashed = (
+        (dynamic / edge_credentials.users_file_name(project_key))
+        .read_text(encoding="utf-8")
+        .strip()
+        .partition(":")[2]
+    )
+
+    def verifies(candidate: str) -> bool:
+        finished = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-i",
+                "-e",
+                f"APG_CANDIDATE={candidate}",
+                image,
+                "python",
+                "-c",
+                "import crypt,os,sys;h=sys.stdin.read().strip();"
+                'print(crypt.crypt(os.environ["APG_CANDIDATE"], h) == h)',
+            ],
+            input=hashed,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=120,
+        )
+        return finished.stdout.strip() == "True"
+
+    assert verifies(password), "the operator's own password does not open the page"
+    assert not verifies(password + "\n"), "the trailing newline was hashed into the credential"
+    assert not verifies("not-the-password")
