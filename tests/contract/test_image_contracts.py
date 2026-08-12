@@ -697,10 +697,31 @@ def published_cluster(postgres_image: str, tmp_path_factory: pytest.TempPathFact
     assert started.returncode == 0, started.stderr
 
     try:
+        # Over TCP, and that is the whole fix. `pg_isready` connects on the
+        # unix socket, and during initdb's bootstrap phase PostgreSQL runs with
+        # `listen_addresses = ''` -- so the socket answers while a TCP
+        # connection is refused, and every test using these fixtures connects
+        # over TCP. Waiting on the socket reported ready and then handed out a
+        # cluster that refused the *positive control*, which reads as a broken
+        # instrument rather than as a race.
+        #
+        # `-h 127.0.0.1` explicitly: psql prefers the socket when given no host,
+        # which would make this poll the same wrong thing more slowly.
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             ready = subprocess.run(
-                ["docker", "exec", name, "pg_isready", "-q", "-U", "postgres"],
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "psql",
+                    "-h",
+                    "127.0.0.1",
+                    "-U",
+                    "postgres",
+                    "-tAc",
+                    "SELECT 1",
+                ],
                 capture_output=True,
                 check=False,
                 timeout=60,
@@ -709,7 +730,7 @@ def published_cluster(postgres_image: str, tmp_path_factory: pytest.TempPathFact
                 break
             time.sleep(1)
         else:
-            pytest.fail("the throwaway cluster never became ready")
+            pytest.fail("the throwaway cluster never accepted a TCP connection on its own loopback")
 
         mapping = subprocess.run(
             ["docker", "port", name, "5432"],
@@ -909,10 +930,31 @@ def peer_cluster(postgres_image: str, tmp_path_factory: pytest.TempPathFactory):
     assert started.returncode == 0, started.stderr
 
     try:
+        # Over TCP, and that is the whole fix. `pg_isready` connects on the
+        # unix socket, and during initdb's bootstrap phase PostgreSQL runs with
+        # `listen_addresses = ''` -- so the socket answers while a TCP
+        # connection is refused, and every test using these fixtures connects
+        # over TCP. Waiting on the socket reported ready and then handed out a
+        # cluster that refused the *positive control*, which reads as a broken
+        # instrument rather than as a race.
+        #
+        # `-h 127.0.0.1` explicitly: psql prefers the socket when given no host,
+        # which would make this poll the same wrong thing more slowly.
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
             ready = subprocess.run(
-                ["docker", "exec", name, "pg_isready", "-q", "-U", "postgres"],
+                [
+                    "docker",
+                    "exec",
+                    name,
+                    "psql",
+                    "-h",
+                    "127.0.0.1",
+                    "-U",
+                    "postgres",
+                    "-tAc",
+                    "SELECT 1",
+                ],
                 capture_output=True,
                 check=False,
                 timeout=60,
@@ -921,7 +963,7 @@ def peer_cluster(postgres_image: str, tmp_path_factory: pytest.TempPathFactory):
                 break
             time.sleep(1)
         else:
-            pytest.fail("the throwaway cluster never became ready")
+            pytest.fail("the throwaway cluster never accepted a TCP connection on its own loopback")
 
         yield PeerCluster(name, network, postgres_image, good, bad)
     finally:

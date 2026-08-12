@@ -29,8 +29,18 @@ MODEL = REPO_ROOT / "compose.yaml"
 ALPHA = REPO_ROOT / ".generated" / "fixture-alpha-dev"
 ALPINE = REPO_ROOT / ".generated" / "fixture-alpine-dev"
 
-pytestmark.append(
-    pytest.mark.skipif(not ALPHA.is_dir(), reason="render the fixtures first: ./deploy.sh")
+#: The twenty tests below resolve a Compose model or read an outputs document,
+#: which needs `./deploy.sh --render-only` to have run. The other thirty-three
+#: read committed source -- `compose.yaml`, `bin/compose.sh`, the Dockerfiles,
+#: the edge model -- and need nothing.
+#:
+#: This was a **module-level** skip until Run 10, so in a clean checkout and in
+#: the offline gate none of the 53 ran. That is how D178 reached a live deploy:
+#: the assertion that would have caught a one-character interpolation error is
+#: in this file, and it was not running. A skip wider than its dependency is a
+#: coverage hole shaped like a precaution.
+needs_rendered_fixtures = pytest.mark.skipif(
+    not ALPHA.is_dir(), reason="render the fixtures first: ./deploy.sh --render-only"
 )
 
 
@@ -277,6 +287,7 @@ def test_the_migration_service_is_also_project_internal() -> None:
     assert not [key for key in labels if "traefik" in str(key).lower()]
 
 
+@needs_rendered_fixtures
 def test_no_database_credential_appears_in_the_model_or_the_env() -> None:
     """The credential reaches dbmate by value only inside the container.
 
@@ -322,6 +333,7 @@ def test_no_database_credential_appears_in_the_model_or_the_env() -> None:
             assert marker not in env, f"{directory.name}/compose.env contains {marker}"
 
 
+@needs_rendered_fixtures
 def test_the_postgres_memory_limit_exceeds_the_declared_budget() -> None:
     """The measured failure, asserted on the rendered pair rather than the rule.
 
@@ -386,11 +398,13 @@ def test_internal_network_is_internal() -> None:
 
 
 @pytest.mark.parametrize("project_dir", [ALPHA, ALPINE], ids=lambda p: p.name)
+@needs_rendered_fixtures
 def test_model_renders(project_dir: Path) -> None:
     assert rendered(project_dir)["name"]
 
 
 @pytest.mark.parametrize("project_dir", [ALPHA, ALPINE], ids=lambda p: p.name)
+@needs_rendered_fixtures
 def test_rendered_resource_names_match_outputs(project_dir: Path) -> None:
     """Runbook §12: the names Docker would create must equal the ones we published."""
     model = rendered(project_dir)
@@ -402,6 +416,7 @@ def test_rendered_resource_names_match_outputs(project_dir: Path) -> None:
     assert model["volumes"]["postgres-data"]["name"] == declared["volumes"]["postgres"]
 
 
+@needs_rendered_fixtures
 def test_rendered_image_carries_the_locked_digest() -> None:
     image = rendered(ALPHA)["services"]["contract-probe"]["image"]
     assert "@sha256:" in image
@@ -413,6 +428,7 @@ def test_rendered_image_carries_the_locked_digest() -> None:
     assert image == locked
 
 
+@needs_rendered_fixtures
 def test_two_projects_render_disjoint_resource_names() -> None:
     alpha, alpine = rendered(ALPHA), rendered(ALPINE)
     assert alpha["name"] != alpine["name"]
@@ -426,6 +442,7 @@ def test_two_projects_render_disjoint_resource_names() -> None:
 # ---------------------------------------------------------------------------
 
 
+@needs_rendered_fixtures
 def test_inherited_project_name_cannot_override_the_generated_one() -> None:
     result = compose(
         ALPHA, "--profile", "contract", "config", env={"COMPOSE_PROJECT_NAME": "hijacked"}
@@ -435,6 +452,7 @@ def test_inherited_project_name_cannot_override_the_generated_one() -> None:
     assert yaml.safe_load(result.stdout)["name"] == outputs(ALPHA)["compose"]["project_name"]
 
 
+@needs_rendered_fixtures
 def test_inherited_image_cannot_override_the_locked_digest() -> None:
     result = compose(
         ALPHA,
@@ -448,6 +466,7 @@ def test_inherited_image_cannot_override_the_locked_digest() -> None:
     assert "@sha256:" in yaml.safe_load(result.stdout)["services"]["contract-probe"]["image"]
 
 
+@needs_rendered_fixtures
 def test_inherited_network_name_cannot_override() -> None:
     result = compose(
         ALPHA, "--profile", "contract", "config", env={"EDGE_NETWORK_NAME": "hijacked-edge"}
@@ -489,6 +508,7 @@ def test_wrapper_never_shell_sources_an_env_file() -> None:
     "subcommand",
     ["up", "run", "start", "create", "restart", "exec", "attach", "cp", "watch", "scale"],
 )
+@needs_rendered_fixtures
 def test_container_starting_subcommands_are_refused(subcommand: str) -> None:
     """Still exit 10 by default. Session 2 added a way through, not a hole.
 
@@ -506,6 +526,7 @@ def test_container_starting_subcommands_are_refused(subcommand: str) -> None:
 
 
 @pytest.mark.parametrize("subcommand", ["up", "restart", "exec"])
+@needs_rendered_fixtures
 def test_runtime_mode_requires_root(subcommand: str) -> None:
     """Docker access is root-equivalent, so --runtime is not a flag you just add.
 
@@ -539,6 +560,7 @@ def _first_subcommand(*args: str, tmp_path: Path) -> str:
     return result.stdout
 
 
+@needs_rendered_fixtures
 def test_a_flag_with_a_value_cannot_smuggle_a_container_start() -> None:
     """A value-taking flag ahead of the subcommand must not defeat FORBIDDEN.
 
@@ -555,6 +577,7 @@ def test_a_flag_with_a_value_cannot_smuggle_a_container_start() -> None:
 
 
 @pytest.mark.parametrize("subcommand", ["up", "restart"])
+@needs_rendered_fixtures
 def test_runtime_call_with_a_flag_value_still_reaches_the_privilege_gate(
     subcommand: str,
 ) -> None:
@@ -624,6 +647,7 @@ def test_the_runtime_allowlist_excludes_container_entry_verbs() -> None:
     [("--entrypoint", "sh"), ("-e", "APG_X=1"), ("--env", "APG_X=1"), ("-v", "/etc:/etc")],
     ids=["entrypoint", "short-env", "long-env", "volume"],
 )
+@needs_rendered_fixtures
 def test_run_refuses_the_flags_that_would_replace_the_reviewed_model(flag: tuple[str, ...]) -> None:
     """Declared and enforced are different things.
 
@@ -640,6 +664,7 @@ def test_run_refuses_the_flags_that_would_replace_the_reviewed_model(flag: tuple
     assert flag[0] in result.stderr
 
 
+@needs_rendered_fixtures
 def test_run_with_an_equals_form_flag_is_refused_too() -> None:
     """`--entrypoint=sh` is the same request as `--entrypoint sh`."""
     result = compose(ALPHA, "--profile", "migration", "run", "--entrypoint=sh", "dbmate")
@@ -745,6 +770,7 @@ def _runtime_allowed_result(tmp_path: Path, subcommand: str) -> subprocess.Compl
 
 
 @pytest.mark.parametrize("subcommand", ["watch", "scale"])
+@needs_rendered_fixtures
 def test_watch_and_scale_are_refused_with_runtime_even_as_root(
     subcommand: str, tmp_path: Path
 ) -> None:
@@ -874,6 +900,7 @@ DAEMON_UNREACHABLE = "the Docker daemon is unreachable"
 
 
 @pytest.mark.parametrize("project_dir", [ALPHA, ALPINE], ids=lambda p: p.name)
+@needs_rendered_fixtures
 def test_no_container_is_running(project_dir: Path) -> None:
     """ADR 0018: failing to reach the daemon is not the same answer as "none".
 
@@ -932,6 +959,7 @@ def test_config_does_not_require_the_daemon() -> None:
 # ---------------------------------------------------------------------------
 
 
+@needs_rendered_fixtures
 def test_env_files_are_disjoint() -> None:
     def keys(path: Path) -> set[str]:
         return {
@@ -944,11 +972,13 @@ def test_env_files_are_disjoint() -> None:
     assert not overlap, f"overlapping variables: {sorted(overlap)}"
 
 
+@needs_rendered_fixtures
 def test_missing_project_directory_is_rejected(tmp_path: Path) -> None:
     result = compose(tmp_path / "absent")
     assert result.returncode == 2
 
 
+@needs_rendered_fixtures
 def test_directory_without_compose_env_is_rejected(tmp_path: Path) -> None:
     result = compose(tmp_path)
     assert result.returncode == 2
@@ -961,3 +991,101 @@ def test_help_is_available() -> None:
     )
     assert result.returncode == 0
     assert "generated-project-dir" in result.stdout
+
+
+# ---------------------------------------------------------------------------
+# The skip itself (Run 10)
+# ---------------------------------------------------------------------------
+
+
+def test_no_skip_applies_to_this_whole_module() -> None:
+    """A module-level skip here is a coverage hole shaped like a precaution.
+
+    This file skipped **entirely** unless `.generated/fixture-alpha-dev`
+    existed, so in a clean checkout and in the offline gate none of its tests
+    ran -- which is how D178, a one-character interpolation error, reached a
+    live deploy with the assertion that would have caught it sitting in this
+    file.
+    """
+    import ast
+
+    # Parsed, not grepped. The first version scanned the raw text for the
+    # attribute call below -- and this test's own failure message names it, so
+    # it failed against a file that was correct. The same hazard `code_only`
+    # exists for, inside a test written to close a coverage hole.
+    tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+    module_level = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr == "append"
+        and isinstance(node.value.func.value, ast.Name)
+        and node.value.func.value.id == "pytestmark"
+    ]
+    assert not module_level, (
+        "a module-level marker is back; a skip that applies to the whole file "
+        "hides every assertion in it, including the ones that need nothing"
+    )
+
+
+def test_the_render_dependent_skip_stays_on_the_tests_that_need_it() -> None:
+    """Every test that reaches a rendered fixture carries the marker -- including
+    the ones that reach it through a helper.
+
+    Followed transitively, and that is not thoroughness for its own sake: the
+    first pass at narrowing this skip read each test's own body, so
+    `test_watch_and_scale_are_refused_with_runtime_even_as_root` -- which
+    resolves `ALPHA` inside `_runtime_allowed_result` -- looked pure and failed
+    with `not a directory` the moment the fixtures were hidden. D191's lesson,
+    one file over: a scan that stops at the function boundary misses what is one
+    call away.
+
+    Goes red if: a test gains a dependency on a render without the marker, or
+    carries the marker without needing it -- the second direction matters too,
+    because a marker nobody needs is a test that stops running in a clean
+    checkout for no reason.
+    """
+    import ast
+
+    source = Path(__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    markers = {"ALPHA", "ALPINE", "rendered", "outputs", "compose"}
+
+    def reaches(name: str, seen: set[str]) -> bool:
+        if name in seen or name not in functions:
+            return False
+        seen.add(name)
+        for child in ast.walk(functions[name]):
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+                if child.id in markers or reaches(child.id, seen):
+                    return True
+        return False
+
+    decorated = {
+        name
+        for name, node in functions.items()
+        if any(
+            isinstance(decorator, ast.Name) and decorator.id == "needs_rendered_fixtures"
+            for decorator in node.decorator_list
+        )
+    }
+    needed = {
+        name
+        for name in functions
+        if name.startswith("test_")
+        and name != "test_the_render_dependent_skip_stays_on_the_tests_that_need_it"
+        and reaches(name, set())
+    }
+
+    assert needed, "nothing was found to need a render; this compared nothing"
+    assert not (needed - decorated), (
+        f"{sorted(needed - decorated)} reach a rendered fixture without the marker, so "
+        "they fail rather than skip in a clean checkout"
+    )
+    assert not (decorated - needed), (
+        f"{sorted(decorated - needed)} carry the marker and need no render, so they stop "
+        "running in a clean checkout for no reason"
+    )

@@ -46,7 +46,16 @@ readonly ROOT_DIR
 cd "${ROOT_DIR}"
 
 readonly EVIDENCE_DIR="${ROOT_DIR}/evidence"
+
 readonly SESSION=5
+# Derived from SESSION rather than written out, and defined AFTER it, and that is not tidiness. Every
+# other `session-04` in this file was renamed when it was copied; these were
+# built by concatenating a literal prefix onto a variable, so the rename did not
+# match them and the gate would have written the previous session's filenames
+# while its own --help named files it never writes. A number that appears once
+# cannot be left behind.
+EVIDENCE_PREFIX="$(printf 'session-%02d' "${SESSION}")"
+readonly EVIDENCE_PREFIX
 
 MODE=""
 HOST_MANIFEST=""
@@ -166,6 +175,20 @@ python_bin() {
 }
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
+
+# Host mode runs under sudo, so everything written below lands root:root -- and
+# the operator who has to read the verdict and commit the evidence cannot. That
+# is D194's remainder: the deploy learned to hand its checkout back, and the
+# gate never learned to hand its evidence back.
+#
+# A no-op without SUDO_UID, because outside sudo there is no operator to hand
+# anything to and guessing an owner is worse than doing nothing. Failures are
+# ignored deliberately: this runs after the verdict, and a chown that cannot
+# proceed must not turn a passing gate into a failing one.
+restore_evidence_ownership() {
+  [ -n "${SUDO_UID:-}" ] && [ -n "${SUDO_GID:-}" ] || return 0
+  chown -R "${SUDO_UID}:${SUDO_GID}" "${EVIDENCE_DIR}" 2>/dev/null || true
+}
 
 parse_arguments() {
   while [ "$#" -gt 0 ]; do
@@ -338,14 +361,14 @@ run_claim_proofs() {
 # deployments.
 write_evidence() {
   local mode="$1"
-  local suite_junit="${EVIDENCE_DIR}/session-04-${mode}-tests.xml"
-  local claims_junit="${EVIDENCE_DIR}/session-04-${mode}-claims.xml"
+  local suite_junit="${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-${mode}-tests.xml"
+  local claims_junit="${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-${mode}-claims.xml"
 
   local -a arguments=(
     --session "${SESSION}" --mode "${mode}"
     --project-a-outputs "${PROJECT_A_OUTPUTS}"
     --junit "${suite_junit}"
-    --output "${EVIDENCE_DIR}/session-04-${mode}.json"
+    --output "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-${mode}.json"
   )
   [ -f "${claims_junit}" ] && arguments+=(--junit "${claims_junit}")
   [ -n "${PROJECT_B_OUTPUTS}" ] && arguments+=(--project-b-outputs "${PROJECT_B_OUTPUTS}")
@@ -429,6 +452,11 @@ mode_host() {
 
   step "2. Host-local acceptance suite, over two projects"
   mkdir -p "${EVIDENCE_DIR}"
+  # On EXIT, not after the last step: the evidence is written whether or not
+  # the suite passed, and a failing gate is the run whose output an operator
+  # most needs to read. Registered after the directory exists so the handback
+  # never runs against a path this invocation did not create.
+  trap restore_evidence_ownership EXIT
   export APG_LIVE_HOST=1
   export APG_EDGE_DEPLOYED=1
   export APG_PROJECT_A_OUTPUTS="${PROJECT_A_OUTPUTS}"
@@ -445,7 +473,7 @@ mode_host() {
   [ -n "${ROTATED_JWT_FROM_FILE}" ] && export APG_ROTATED_JWT_FROM_FILE="${ROTATED_JWT_FROM_FILE}"
   [ "${AFTER_REBOOT}" -eq 1 ] && export APG_AFTER_REBOOT=1
 
-  run_suite "live_host" "${EVIDENCE_DIR}/session-04-host-tests.xml"
+  run_suite "live_host" "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-host-tests.xml"
 
   if ! evidence_is_supportable; then
     announce_no_evidence
@@ -454,7 +482,7 @@ mode_host() {
   fi
 
   step "3. Static proofs of the claims this run records"
-  run_claim_proofs host "${EVIDENCE_DIR}/session-04-host-claims.xml"
+  run_claim_proofs host "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-host-claims.xml"
 
   step "4. Host evidence"
   write_evidence host
@@ -492,12 +520,17 @@ mode_external() {
 
   step "1. Public-path and helper acceptance suite"
   mkdir -p "${EVIDENCE_DIR}"
+  # On EXIT, not after the last step: the evidence is written whether or not
+  # the suite passed, and a failing gate is the run whose output an operator
+  # most needs to read. Registered after the directory exists so the handback
+  # never runs against a path this invocation did not create.
+  trap restore_evidence_ownership EXIT
   export APG_PUBLIC_IPV4="${PUBLIC_IPV4}"
   export APG_PROJECT_A_OUTPUTS="${PROJECT_A_OUTPUTS}"
   export APG_SSH_DESTINATION="${SSH_DESTINATION}"
   [ -n "${PUBLIC_IPV6}" ] && export APG_PUBLIC_IPV6="${PUBLIC_IPV6}"
 
-  run_suite "external" "${EVIDENCE_DIR}/session-04-external-tests.xml"
+  run_suite "external" "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-external-tests.xml"
 
   if ! evidence_is_supportable; then
     announce_no_evidence
@@ -506,7 +539,7 @@ mode_external() {
   fi
 
   step "2. Static proofs of the claims this run records"
-  run_claim_proofs external "${EVIDENCE_DIR}/session-04-external-claims.xml"
+  run_claim_proofs external "${EVIDENCE_DIR}/${EVIDENCE_PREFIX}-external-claims.xml"
 
   step "3. External evidence"
   write_evidence external
