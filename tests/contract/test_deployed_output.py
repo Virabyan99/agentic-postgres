@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, config, deployed_output
+from agentic_postgres import REPO_ROOT, config, deployed_output, jwt_keys, openapi_normalize
 from agentic_postgres.config import ManifestError
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
@@ -533,4 +533,144 @@ def test_the_recorded_paths_match_the_schema_patterns(rendered: dict) -> None:
     assert document["runtime"]["state_directory"].endswith(KEY)
     assert str(deployed_output.deployed_path(KEY)) == (
         f"/etc/agentic-postgres/projects/{KEY}/outputs.json"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The API plane is observed, not asserted (Run 9)
+# ---------------------------------------------------------------------------
+
+
+def deploy_module():
+    """`bin/deploy-project.py`, imported for its pure observers.
+
+    Importing it runs no deploy: everything at module scope is constants and
+    function definitions, and `main()` is behind the usual guard.
+    """
+    import importlib.util
+
+    source = REPO_ROOT / "bin" / "deploy-project.py"
+    specification = importlib.util.spec_from_file_location("apg_deploy_under_test", source)
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_the_api_block_refuses_for_each_reason_separately(tmp_path) -> None:
+    """Two refusals, and until now only one of them was reachable.
+
+    `api.status: ready` requires all three checksums -- the schema's own `else`
+    branch -- so the block is `unavailable` when the reviewed snapshot is absent
+    **and** when nothing answered on the route. Those are different facts and an
+    operator needs to know which one happened.
+
+    The first deploy of a project necessarily hits the first: the canonical
+    snapshot is captured *from* a running deployment, reviewed by a human and
+    committed, so it does not exist when the deploy that produces it runs. The
+    redeploy at the approved commit is what publishes -- D112's two-deploy shape,
+    arriving here for a second reason.
+
+    **The snapshot path is a parameter for this test's sake, and that is a
+    finding rather than a convenience.** It was read from a constant inside the
+    function, so with no snapshot committed the first branch always fired, the
+    second was dead code, and a mutation that deleted the served-document refusal
+    stayed green. Both are reachable now and both are mutated.
+
+    Goes red if: either refusal is dropped, or `ready` is claimed without all
+    three checksums -- which the schema would reject on write, after the deploy
+    has already published a service it cannot describe.
+    """
+    module = deploy_module()
+
+    absent = tmp_path / "no-such-snapshot.json"
+    assert module.observe_api(tmp_path, "0" * 64, absent) == deployed_output.API_NOT_PUBLISHED
+
+    # A real snapshot, so the snapshot branch cannot be what refuses below.
+    snapshot = tmp_path / "postgrest-openapi.canonical.json"
+    snapshot.write_bytes(
+        openapi_normalize.canonical_bytes(
+            openapi_normalize.sort_maps(
+                {
+                    "swagger": "2.0",
+                    "info": {"title": "x", "version": "1"},
+                    "host": openapi_normalize.SENTINEL_HOST,
+                    "basePath": openapi_normalize.SENTINEL_BASE_PATH,
+                    "schemes": ["https"],
+                    "paths": {"/": {}},
+                }
+            )
+        )
+    )
+    assert module.observe_api(tmp_path, None, snapshot) == deployed_output.API_NOT_PUBLISHED
+
+
+def test_the_jwt_block_carries_identifiers_and_never_key_material(tmp_path) -> None:
+    """SEC-BOOT-001's shape, asserted on the observer rather than on a host.
+
+    Every member is something a verifier may hold: an issuer, an audience, an
+    algorithm, key *identifiers* and a digest of the public set. A private JWK
+    parameter reaching this block would be signing material in a document that
+    is copied off the host to run the external gate.
+
+    The `kid` is read out of the rendered key set rather than recomputed, because
+    that file is what PostgREST verifies against — a document naming a different
+    one would describe a key set nothing is using.
+
+    Goes red if: the block starts carrying a private parameter; `temporary`
+    stops being true while the bootstrap issuer is still in use; or the active
+    kid stops coming from the file.
+    """
+    module = deploy_module()
+
+    assert module.observe_jwt({}, tmp_path / "absent.json") == deployed_output.JWT_NOT_PUBLISHED
+
+    jwk = jwt_keys.public_jwk(modulus_hex="00" + "AB" * 256, exponent=65537)
+    jwks = tmp_path / "jwks.json"
+    jwks.write_text(json.dumps(jwt_keys.build_jwks([jwk]), indent=2), encoding="utf-8")
+
+    rendered = {"jwt": {"issuer": "https://example.test/api/app/auth", "audience": "urn:a:b"}}
+    block = module.observe_jwt(rendered, jwks)
+
+    assert block["status"] == "ready"
+    assert block["algorithm"] == jwt_keys.ALGORITHM
+    assert block["active_kid"] == jwk["kid"]
+    assert block["verification_kids"] == [jwk["kid"]]
+    assert block["temporary"] is True
+    assert block["retire_after"] is None
+    assert len(block["public_jwks_sha256"]) == 64
+
+    serialized = json.dumps(block)
+    for private in jwt_keys.PRIVATE_JWK_PARAMETERS:
+        assert f'"{private}"' not in serialized, private
+    assert "BEGIN" not in serialized
+
+
+def test_the_deploy_and_the_contract_command_name_one_snapshot() -> None:
+    """Two files hold this path and only this compares them.
+
+    `bin/deploy-project.py` records the reviewed snapshot's digest into
+    `api.canonical_openapi_sha256`; `bin/api-contract.py --check` compares the
+    live document against the snapshot. A deploy recording the digest of one file
+    while the check command reads another is a disagreement that shows up as
+    "the gate passes and the document is wrong", which is the least useful shape
+    a failure can have.
+
+    Goes red if: either path is edited alone. That is the same hazard D177
+    recorded for the documentation route -- two derivations of one fact, in files
+    that cannot see each other -- and the reason it is checked here rather than
+    assumed.
+    """
+    import importlib.util
+
+    def constant(name: str, alias: str) -> object:
+        source = REPO_ROOT / "bin" / name
+        specification = importlib.util.spec_from_file_location(alias, source)
+        assert specification is not None and specification.loader is not None
+        module = importlib.util.module_from_spec(specification)
+        specification.loader.exec_module(module)
+        return module.SNAPSHOT_PATH
+
+    assert constant("deploy-project.py", "apg_deploy_snapshot") == constant(
+        "api-contract.py", "apg_contract_snapshot"
     )

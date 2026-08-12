@@ -51,11 +51,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from agentic_postgres import (
     CURRENT_SESSION,
+    api_surface,
+    config,
     database_observation,
     deployed_output,
     edge_state,
     installed_release,
+    jwt_keys,
     observation,
+    openapi_normalize,
     port_allocations,
     rendering,
     runtime_override,
@@ -79,6 +83,14 @@ EXIT_VALIDATION = 5
 #: nothing to derive a JWKS from, so the deploy says so rather than deriving
 #: from an absence.
 REST_PLANE_SESSION = 5
+
+#: The reviewed OpenAPI snapshot, mirroring `bin/api-contract.py`'s own
+#: constant. `test_the_deploy_and_the_contract_command_name_one_snapshot`
+#: asserts the two agree -- a deploy recording the digest of one file while
+#: the check command compares another is a disagreement nothing else sees.
+SNAPSHOT_PATH = (
+    Path(__file__).resolve().parent.parent / "contracts" / "postgrest-openapi.canonical.json"
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SECRET_ROOT = Path("/var/lib/agentic-postgres/secrets")
@@ -906,6 +918,36 @@ def main(argv: list[str] | None = None) -> int:
         fail(EXIT_VALIDATION, f"the deferred services did not start:\n{resumed.stderr}")
     edge["project_network_attached"] = True
 
+    # The API plane, observed rather than asserted. Until Run 9 these four were
+    # hard-coded `unavailable` with a comment saying "Session 5's runs replace
+    # these with observations of a running PostgREST" -- which was the honest
+    # record while nothing observed them, and is this run's work.
+    rest_status = "unavailable"
+    jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
+    api_block = dict(deployed_output.API_NOT_PUBLISHED)
+
+    if arguments.through_session >= REST_PLANE_SESSION:
+        jwt_block = observe_jwt(
+            rendered, deployed_output.rendered_path(key) / runtime_override.JWKS_FILENAME
+        )
+        rest_url = rendered["routes"]["rest"]
+        # A route is `ready` when something answers on it, which the served
+        # document below is the evidence of. Claiming `ready` because a container
+        # is healthy would be a record about a process rather than about a route
+        # -- and D145 measured `--ready` returning 0 while every request 404'd.
+        served = observe_served_document(
+            rest_url,
+            jwt_block,
+            {
+                "project": {"key": key},
+                "secrets": secrets,
+                "database": {"roles": rendered["database"]["roles"]},
+            },
+        )
+        if served is not None:
+            rest_status = "ready"
+        api_block = observe_api(deployed_output.rendered_path(key), served)
+
     step("7. Observe and publish")
     # Traefik's Docker provider polls, so the router for a container that has
     # only just started is not wired at the instant `compose up --wait` returns.
@@ -967,10 +1009,14 @@ def main(argv: list[str] | None = None) -> int:
         # wrote anything else would be claiming a surface it did not start.
         # There is deliberately no default for any of them: a default is how a
         # session-4 deployment would come to describe a session-5 shape.
-        rest_status="unavailable",
+        rest_status=rest_status,
+        # No documentation service exists yet: services/docs/ holds a
+        # .gitkeep and the model declares no such service, so nothing serves
+        # this route and `unavailable` is the only honest record. D128's
+        # choice between an upstream image and a first-party build is open.
         docs_status="unavailable",
-        api=deployed_output.API_NOT_PUBLISHED,
-        jwt=deployed_output.JWT_NOT_PUBLISHED,
+        api=api_block,
+        jwt=jwt_block,
         # Measured above when this deploy started a cluster, and `NOT_OBSERVED`
         # when it did not. A session-2 deployment interrogates nothing, and the
         # honest record of that is four nulls rather than an empty object a
@@ -1022,3 +1068,163 @@ def _model_digest(release: Path, rendered_dir: Path) -> str:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# ---------------------------------------------------------------------------
+# The API plane, observed (Run 9)
+# ---------------------------------------------------------------------------
+
+
+def _load_command(name: str, alias: str) -> Any:
+    """Import one `bin/*.py` command from the installed release.
+
+    Used where the deploy needs logic a command already owns -- minting a token,
+    fetching the served document -- rather than growing a second copy. A second
+    copy of "how a token is built" would let every observation below be wrong in
+    a way that still looked like a working deployment.
+    """
+    import importlib.util
+
+    source = Path(__file__).resolve().parent / name
+    specification = importlib.util.spec_from_file_location(alias, source)
+    if specification is None or specification.loader is None:
+        raise RuntimeError(f"cannot load {source}")
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def observe_jwt(rendered: dict[str, Any], jwks_path: Path) -> dict[str, Any]:
+    """The issuer's public metadata, from the key set this deploy just wrote.
+
+    Every member is something a verifier is entitled to hold: an issuer, an
+    audience, an algorithm, key *identifiers* and a digest. No private JWK and no
+    reference to one, which is what `SEC-BOOT-001` asserts.
+
+    The kid is read out of the rendered file rather than recomputed here. The
+    file is what PostgREST verifies against, so a document naming a different kid
+    would be describing a key set nothing is using -- and recomputing from the
+    private key would be a second derivation of the value ADR 0051 says has one.
+    """
+    if not jwks_path.is_file():
+        return dict(deployed_output.JWT_NOT_PUBLISHED)
+
+    raw = jwks_path.read_bytes()
+    document = json.loads(raw)
+    kids = [key["kid"] for key in document["keys"]]
+
+    return {
+        "status": "ready",
+        "issuer": rendered["jwt"]["issuer"],
+        "audience": rendered["jwt"]["audience"],
+        "algorithm": jwt_keys.ALGORITHM,
+        "active_kid": kids[0],
+        "verification_kids": kids,
+        "public_jwks_sha256": hashlib.sha256(raw).hexdigest(),
+        # True until Session 6 replaces the issuer (ADR 0051). `SEC-BOOT-001`
+        # compares this against `deployed_through_session` and goes red on the
+        # deployment that should have retired it, which is what makes it a
+        # value rather than a sentence.
+        "temporary": True,
+        # Null: no rotation is in flight. A date here is a rotation with a
+        # deadline, and Run 10 is what sets one.
+        "retire_after": None,
+    }
+
+
+def observe_served_document(rest_url: str, jwt_block: dict[str, Any], document: dict[str, Any]):
+    """The digest of what the route is serving, or `None` with the reason printed.
+
+    Fetched as the **documentation role**, because `follow-privileges` means the
+    served document depends on the caller's grants and the one the snapshot is
+    reviewed against is that role's (ADR 0050).
+
+    `None` rather than an exception on any failure: a deploy that cannot read its
+    own document has published something it cannot describe, and the honest
+    record of that is `api.status: unavailable` rather than a failed deploy that
+    leaves the service running and the document absent.
+    """
+    dev_token = _load_command("dev-token.py", "apg_deploy_dev_token")
+    api_contract = _load_command("api-contract.py", "apg_deploy_api_contract")
+
+    try:
+        key_path = dev_token.signing_key_path(document["project"]["key"], document)
+        token = dev_token.mint(
+            key_path=key_path,
+            role_name=document["database"]["roles"]["api_documentation"],
+            # No subject. Migration 0009's hook refuses a documentation token
+            # that carries one, so minting a subject would produce a credential
+            # rejected by design.
+            subject=None,
+            ttl=120,
+            document={"jwt": jwt_block},
+        )
+    except Exception as error:
+        print(f"  no served document: could not mint a documentation token ({error})")
+        return None
+
+    previous = os.environ.get(api_contract.TOKEN_VARIABLE)
+    os.environ[api_contract.TOKEN_VARIABLE] = token
+    try:
+        raw = api_contract.fetch_live(rest_url)
+    except Exception as error:
+        print(f"  no served document: {error}")
+        return None
+    finally:
+        if previous is None:
+            os.environ.pop(api_contract.TOKEN_VARIABLE, None)
+        else:
+            os.environ[api_contract.TOKEN_VARIABLE] = previous
+
+    return openapi_normalize.fingerprint(
+        openapi_normalize.sort_maps(openapi_normalize.load_document(raw))
+    )
+
+
+def observe_api(
+    rendered_dir: Path, served_digest: str | None, snapshot: Path | None = None
+) -> dict[str, Any]:
+    """What the published surface actually serves, and the three checksums.
+
+    **`ready` requires all three**, which the schema enforces and which makes the
+    first deploy of a project necessarily `unavailable`: the canonical snapshot
+    is captured *from* a running deployment, reviewed by a human and committed,
+    so it does not exist until after the deploy that produces it. The redeploy at
+    the approved commit is what records `ready` -- the two-deploy shape D112
+    already established, arriving here for a second reason.
+
+    The settings come from the rendered `compose.env`, which is what the running
+    container was started from. Reading them from the manifest instead would
+    describe what was asked for.
+    """
+    # A parameter with a default rather than a constant read inside, so that
+    # both refusal branches below are reachable from a test. They were not:
+    # with no snapshot committed the first branch always fired, the second
+    # was dead, and a mutation that deleted it stayed green.
+    snapshot = SNAPSHOT_PATH if snapshot is None else snapshot
+    if not snapshot.is_file():
+        print(
+            "  api unavailable: no reviewed snapshot at contracts/"
+            "postgrest-openapi.canonical.json. Capture one with "
+            "`bin/api-contract.sh --update`, review it, commit it, and redeploy"
+        )
+        return dict(deployed_output.API_NOT_PUBLISHED)
+
+    if served_digest is None:
+        return dict(deployed_output.API_NOT_PUBLISHED)
+
+    environment = rendered_dir / "compose.env"
+    return {
+        "status": "ready",
+        "exposed_schema": _env_value(environment, "POSTGREST_EXPOSED_SCHEMA"),
+        "max_rows": int(_env_value(environment, "POSTGREST_MAX_ROWS")),
+        "request_body_max_bytes": int(_env_value(environment, "API_REQUEST_BODY_MAX_BYTES")),
+        "pool_size": int(_env_value(environment, "POSTGREST_POOL_SIZE")),
+        "connection_budget_reserved": int(_env_value(environment, "POSTGREST_POOL_SIZE"))
+        + config.POSTGREST_RESERVED_CONNECTIONS,
+        "api_surface_sha256": api_surface.contract_digest(),
+        "canonical_openapi_sha256": openapi_normalize.fingerprint(
+            openapi_normalize.load_document(snapshot.read_bytes())
+        ),
+        "project_openapi_sha256": served_digest,
+    }
