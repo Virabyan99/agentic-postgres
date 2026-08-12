@@ -62,6 +62,27 @@ REST_SERVICE_PORT = 3000
 #: bring this up in the first phase and deadlock exactly as before.
 POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE,)
 
+#: The rendered JWKS, and where PostgREST reads it.
+#:
+#: The host side is per-project and lives in this override; the container side is
+#: fixed, which is what lets `compose.yaml` carry `PGRST_JWT_SECRET` while
+#: staying project-neutral. `bin/render-jwks.py` writes the file (ADR 0051).
+JWKS_FILENAME = "jwks.json"
+JWKS_CONTAINER_PATH = "/etc/postgrest/jwks.json"
+
+#: Container paths a sensitive-named environment key may reference (ADR 0064).
+#:
+#: `PGRST_JWT_SECRET` is refused by ADR 0008's denylist -- it ends in `_secret`
+#: -- and the name is PostgREST's, not ours. Its value is `@` followed by a path,
+#: which is a *reference*, and the file it names is public verification material
+#: written 0444. So the exemption is not "this variable is fine": it is "this
+#: value is a reference, to a path declared here, and not to anything under
+#: /run/secrets".
+#:
+#: Declared beside the mount deliberately. The path a service reads and the path
+#: the security rule permits are then one string and cannot drift apart.
+PUBLIC_REFERENCE_PATHS: frozenset[str] = frozenset({JWKS_CONTAINER_PATH})
+
 #: `services/edge-probe/probe.py` LISTEN_PORT. Traefik needs the container port;
 #: the probe publishes none, because only Traefik publishes a host port.
 ROUTED_SERVICE_PORT = 8080
@@ -76,11 +97,14 @@ MIGRATIONS_MOUNT = "/migrations"
 __all__ = [
     "DATABASE_SERVICE",
     "DATABASE_SERVICE_PORT",
+    "JWKS_CONTAINER_PATH",
+    "JWKS_FILENAME",
     "MIGRATIONS_MOUNT",
     "MIGRATION_SERVICE",
     "POOLER_SERVICE",
     "POOLER_SERVICE_PORT",
     "POST_BOOTSTRAP_SERVICES",
+    "PUBLIC_REFERENCE_PATHS",
     "REST_SERVICE",
     "REST_SERVICE_PORT",
     "ROUTED_SERVICE",
@@ -221,7 +245,22 @@ def build_override(
                     https_entrypoint=https_entrypoint,
                     rest_router_name=rest_router_name,
                     buffering_middleware_name=buffering_middleware_name,
-                )
+                ),
+                # The verification-only JWKS, derived from the bootstrap signing
+                # key by `bin/render-jwks.py` at deploy time (ADR 0051).
+                #
+                # Here rather than in `compose.yaml` because the host side is a
+                # per-project absolute path, and the model must stay
+                # project-neutral: `bin/compose.sh` passes `--file` with no
+                # `--project-directory`, so a relative source in the model would
+                # resolve against the *release* and every project would mount one
+                # file. The container side is fixed, which is why
+                # `PGRST_JWT_SECRET` can live in the model.
+                #
+                # Read-only, and public: this is a modulus, an exponent, an
+                # algorithm and a thumbprint. Nothing here can sign, which is the
+                # property that lets a verifier hold it at all.
+                "volumes": [f"{rendered_directory}/{JWKS_FILENAME}:{JWKS_CONTAINER_PATH}:ro"],
             },
         }
     }

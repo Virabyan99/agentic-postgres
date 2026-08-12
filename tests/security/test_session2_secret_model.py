@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, runtime_override, secrets_contract
 from agentic_postgres.config import is_sensitive_key
 from agentic_postgres.secrets_contract import (
     SECRET_ROOT,
@@ -74,6 +74,21 @@ def test_no_service_takes_a_secret_through_the_environment(
     Checked against the declared secret names as well as the generic tokens,
     because a key called ``APG_SESSION2_SENTINEL`` carries none of the generic
     words and would otherwise pass.
+
+    **A sensitive-named key may name a file, under three conditions (ADR 0064).**
+    ``PGRST_JWT_SECRET`` is PostgREST's name rather than ours and ends in
+    ``_secret``; its value is ``@`` followed by a path, which is a reference and
+    not a value, and the file behind it is public verification material written
+    0444. ADR 0008 drew that distinction once already at the key level --
+    ``password_secret_ref`` is allowed because it is a reference -- and this is
+    the same distinction one level down.
+
+    The exemption is not by name. The value must *be* a reference, the path must
+    be one ``runtime_override`` declares, and it must not be under the secret
+    mount. That is stricter than what it replaces in two directions: the old rule
+    read only the key's spelling, so it could not have refused a permitted key
+    pointed at ``/run/secrets/anything``, and could not have refused a second
+    ``@`` reference to an undeclared path.
     """
     declared = {secret["name"].lower() for secret in active_secrets(contract, session=2)}
     declared |= {secret["provider_key"].lower() for secret in active_secrets(contract, session=2)}
@@ -84,10 +99,46 @@ def test_no_service_takes_a_secret_through_the_environment(
             lowered = key.lower()
             if any(name in f"{lowered} {value.lower()}" for name in declared):
                 offenders.append(f"{relative}:{service}:{key} (names a declared secret)")
-            elif is_sensitive_key(key):
+            elif is_sensitive_key(key) and not is_public_reference(value):
                 offenders.append(f"{relative}:{service}:{key} (secret-bearing key)")
 
     assert not offenders, f"secret material reaches a service through the environment: {offenders}"
+
+
+def is_public_reference(value: str) -> bool:
+    """ADR 0064's three conditions, all required.
+
+    A reference, to a declared path, outside the secret mount. A literal, an
+    undeclared path, or anything under ``/run/secrets`` is not a public
+    reference, and the caller treats it as an offender.
+    """
+    if not value.startswith("@"):
+        return False
+    referenced = value[1:]
+    if referenced.startswith(f"{secrets_contract.CONTAINER_SECRET_DIR}/"):
+        return False
+    return referenced in runtime_override.PUBLIC_REFERENCE_PATHS
+
+
+def test_the_public_reference_rule_refuses_everything_but_the_declared_path() -> None:
+    """Guard the guard. ADR 0064 is an exemption, so its edges are the test.
+
+    Goes red if: the rule starts accepting a literal, a path under the secret
+    mount, or any path that is not declared -- each of which is a way for this
+    exemption to become "a key called *_secret is fine".
+    """
+    declared = next(iter(runtime_override.PUBLIC_REFERENCE_PATHS))
+    assert is_public_reference(f"@{declared}")
+
+    for refused in (
+        declared,  # a path, but not a reference
+        f"@{secrets_contract.CONTAINER_SECRET_DIR}/postgrest_authenticator_pgpass",
+        "@/etc/postgrest/anything-else.json",
+        "@/run/secrets/../etc/postgrest/jwks.json",
+        "hunter2",
+        "",
+    ):
+        assert not is_public_reference(refused), refused
 
 
 def test_the_key_scan_would_actually_reject_something() -> None:

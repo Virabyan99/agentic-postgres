@@ -74,6 +74,12 @@ EXIT_PREREQUISITE = 3
 EXIT_PRECONDITION = 4
 EXIT_VALIDATION = 5
 
+#: The session that introduces the REST plane, and with it the first service
+#: that verifies a token. Below it there is no signing key materialized and
+#: nothing to derive a JWKS from, so the deploy says so rather than deriving
+#: from an absence.
+REST_PLANE_SESSION = 5
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SECRET_ROOT = Path("/var/lib/agentic-postgres/secrets")
 
@@ -800,6 +806,38 @@ def main(argv: list[str] | None = None) -> int:
     # document records what is true when it is written, not what was true when
     # the run began.
     secrets = require_secret_generation(key)
+
+    # The verification JWKS, derived from the bootstrap signing key (ADR 0051).
+    #
+    # **After the re-read, not in step 4.** Step 5 materializes a new generation
+    # and repoints the project at it, so a JWKS derived from the generation that
+    # was active before this deploy would be read from a directory the deploy has
+    # already superseded -- D76's trap, one artifact along. The values are stable
+    # across generations, so it would usually be right, which is what would keep
+    # it from being noticed.
+    #
+    # Before the bootstrap and therefore before `resume`, which is when PostgREST
+    # first starts and mounts it. A bind mount whose source does not exist is
+    # created by Docker as a *directory*, and the symptom of that is a service
+    # reading a key set it cannot parse.
+    #
+    # A project deployed through an earlier session runs nothing that verifies a
+    # token and materializes no signing key, so there is nothing to derive.
+    if arguments.through_session >= REST_PLANE_SESSION:
+        jwks = run(
+            str(release / "bin" / "render-jwks.py"),
+            "--project-key",
+            key,
+            "--generation",
+            secrets["generation_id"],
+            "--rendered-dir",
+            str(deployed_output.rendered_path(key)),
+        )
+        print(jwks.stdout, end="")
+        if jwks.returncode != 0:
+            fail(EXIT_VALIDATION, f"the verification JWKS could not be derived:\n{jwks.stderr}")
+    else:
+        print("  no JWKS: this session runs no service that verifies a token")
 
     # The two cluster planes, in the only order they work in: roles, the
     # identity sentinel and pgvector exist before a migration can reference

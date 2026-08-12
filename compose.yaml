@@ -593,14 +593,22 @@ services:
       PGRST_LOG_LEVEL: error
       # Off. It logs the query, and a query carries its parameters.
       PGRST_LOG_QUERY: disabled
-      # `PGRST_JWT_SECRET` IS DELIBERATELY ABSENT AT THIS RUN, and its absence
-      # is asserted rather than left to be noticed. It names the verification
-      # JWKS, which is derived from the bootstrap signing key by root tooling at
-      # deploy time -- and a service configured to read a file that no deploy has
-      # written yet does not start. Until it is set, every request is `anon`:
-      # a token is not rejected, it is not considered at all. That is the honest
-      # state for a session in which no role has been activated, and the run
-      # that renders the JWKS is the run that adds the key here.
+      # The verification-only JWKS, added by the run that renders it (Run 9), as
+      # the note that stood here said it would be. `@` is PostgREST's spelling
+      # for "read this from a file"; the container path is fixed and therefore
+      # project-neutral, while the host side of the mount is per-project and
+      # lives in the runtime override -- `bin/compose.sh` passes `--file` with no
+      # `--project-directory`, so a relative source here would resolve against
+      # the release and every project would mount one key set.
+      #
+      # `bin/render-jwks.py` derives it from the bootstrap signing key at deploy
+      # time and writes it before the service starts. Nothing in it can sign: a
+      # modulus, an exponent, an algorithm and an RFC 7638 thumbprint (ADR 0051).
+      #
+      # Until this existed every request was `anon` -- a token was not rejected,
+      # it was not considered at all -- which was the honest state for a session
+      # with no activated role and is not a state to return to.
+      PGRST_JWT_SECRET: "@/etc/postgrest/jwks.json"
     # `postgrest --ready` is a CLIENT that reads its own configuration, not the
     # running process's (D153) -- bare, it exits 1 with "Admin server is not
     # running" against a service answering 200. It works here for a reason

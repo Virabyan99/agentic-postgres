@@ -37,7 +37,7 @@ from typing import Any
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, rendering
+from agentic_postgres import REPO_ROOT, rendering, runtime_override, secrets_contract
 from agentic_postgres.secrets_contract import load_secret_contract
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
@@ -187,19 +187,33 @@ def test_query_logging_is_off(environment: dict[str, str]) -> None:
     assert environment["PGRST_LOG_QUERY"] == "disabled"
 
 
-def test_no_verification_key_is_configured_yet(environment: dict[str, str]) -> None:
-    """The absence is asserted, because it is a state and not an omission.
+def test_the_verification_key_references_the_rendered_jwks(
+    environment: dict[str, str],
+) -> None:
+    """Run 9 added the key, which the previous version of this test asked for.
 
-    `jwt-secret` names the verification JWKS, which root tooling derives from
-    the bootstrap signing key at deploy time. A service pointed at a file no
-    deploy has written does not start. Until it is set every request is `anon` --
-    a token is not rejected, it is not considered -- and that is the honest state
-    for a session in which no request role has been activated.
+    It asserted ``"PGRST_JWT_SECRET" not in environment`` and said so plainly:
+    "This test goes red on the day the key is added, which is the day the run
+    that renders the JWKS has to say so." That day is this run, and the
+    replacement is stronger rather than weaker — an absence is satisfied by a
+    typo in the variable's name, and an assertion about the value is not.
 
-    This test goes red on the day the key is added, which is the day the run
-    that renders the JWKS has to say so.
+    Three properties. The value is a **reference** (``@`` and a path) rather than
+    key material; the path is the one the runtime override mounts; and it is not
+    under the secret mount. ``SEC-SECRET-001``'s test enforces the same three
+    from the other side, across every service (ADR 0064).
+
+    Goes red if: the key is dropped, so the service verifies nothing and every
+    request is anonymous; the value becomes a literal rather than a file
+    reference, which would put verification material in ``docker inspect``
+    forever; or the path drifts from the mount — which Docker answers by creating
+    a *directory* where the file should be, so the symptom is a key set that will
+    not parse.
     """
-    assert "PGRST_JWT_SECRET" not in environment
+    reference = environment["PGRST_JWT_SECRET"]
+    assert reference.startswith("@"), f"PGRST_JWT_SECRET is {reference!r}, not a file reference"
+    assert reference[1:] == runtime_override.JWKS_CONTAINER_PATH
+    assert not reference[1:].startswith(f"{secrets_contract.CONTAINER_SECRET_DIR}/")
     assert environment["PGRST_JWT_AUD"] == "${JWT_AUDIENCE:?required}"
 
 

@@ -10,6 +10,8 @@ change which resolver issues its certificate or drop the middleware chain.
 
 from __future__ import annotations
 
+import ast
+
 import pytest
 import yaml
 
@@ -290,3 +292,125 @@ def test_the_deploy_defers_what_the_module_declares_and_resumes_after_bootstrapp
         "the deploy must defer, then bootstrap, then resume. Found the deferral at "
         f"{defer_at}, the bootstrap at {bootstrap_at}, the resume at {resume_at}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The verification JWKS (ADR 0051, Run 9)
+# ---------------------------------------------------------------------------
+
+RENDER_JWKS = REPO_ROOT / "bin" / "render-jwks.py"
+
+
+def test_the_derivation_never_reads_private_material() -> None:
+    """`-noout` does not mean "public only", and this is where that is held.
+
+    Measured against OpenSSL 3.5.5, with a control confirming the search finds
+    private parameters when they are present: `openssl rsa -in <private> -noout
+    -text` prints `privateExponent`, `prime1`, `prime2` and the coefficient.
+    `-noout` suppresses the re-encoded key, not the dump. So the obvious way to
+    read a modulus and an exponent pulls the whole private key into a captured
+    stdout, where a traceback or a log can carry it.
+
+    The spelling is asserted, not the intention: the command that reads key
+    *description* must be `-pubin`, and the only invocation given the private
+    key's path must be the `-pubout` that derives the public half.
+
+    Goes red if: a `-text` or `-modulus` invocation is pointed back at the
+    private key path, which is the change that would make this file leak.
+    """
+    source = RENDER_JWKS.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    invocations: list[list[str]] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.List):
+            continue
+        literals = [
+            element.value
+            for element in node.elts
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
+        ]
+        if literals[:1] == ["openssl"]:
+            invocations.append(literals)
+
+    assert invocations, "no openssl invocation found; this test is reading the wrong shape"
+
+    for command in invocations:
+        reads_key_file = any(part == "-in" for part in command)
+        describes = any(part in ("-text", "-modulus") for part in command)
+        if describes:
+            assert "-pubin" in command, (
+                f"{command} reads a key description without -pubin. Against a private "
+                "key, -text prints privateExponent and the primes"
+            )
+            assert not reads_key_file, (
+                f"{command} names a key file and describes it; the public half must "
+                "arrive on stdin so no private parameter is ever in this process"
+            )
+        elif reads_key_file:
+            assert "-pubout" in command, (
+                f"{command} opens the private key for something other than deriving its public half"
+            )
+
+
+def test_the_jwks_is_public_material_and_stored_as_such() -> None:
+    """0444, and the reason is not convenience.
+
+    A 0400 file would imply a confidentiality this content does not have -- a
+    modulus, an exponent, an algorithm and a thumbprint -- and the next reader
+    would have to work out whether the mode meant something. The private key it
+    is derived from stays 0400 root, which is the property `SEC-BOOT-001`
+    asserts.
+
+    Goes red if: the mode is tightened, which would be a claim, or loosened to
+    writable, which would let a container's own uid replace the key set it
+    verifies against.
+    """
+    module = _load_render_jwks()
+    assert module.JWKS_MODE == 0o444
+
+
+def test_the_mount_and_the_model_name_the_same_file() -> None:
+    """Two halves of one path, in two files that cannot see each other.
+
+    The host side is per-project and lives in the runtime override; the
+    container side is fixed and lives in `compose.yaml`, which is what lets the
+    model stay project-neutral. Nothing but this test compares them, and a
+    mismatch is a service reading a path nothing wrote -- which Docker answers
+    by creating a *directory* at the mount source, so the symptom is a key set
+    that will not parse rather than a missing file.
+
+    Goes red if: either side is renamed alone.
+    """
+    module = _load_render_jwks()
+    assert module.JWKS_FILENAME == runtime_override.JWKS_FILENAME
+
+    model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    secret = model["services"][runtime_override.REST_SERVICE]["environment"]["PGRST_JWT_SECRET"]
+    assert secret == f"@{runtime_override.JWKS_CONTAINER_PATH}", (
+        f"compose.yaml reads {secret!r} and the override mounts at "
+        f"{runtime_override.JWKS_CONTAINER_PATH!r}"
+    )
+
+    override = runtime_override.build_override(
+        router_name="r",
+        https_entrypoint="websecure",
+        rendered_directory="/var/lib/agentic-postgres/rendered/example-dev",
+        rest_router_name="rest",
+        buffering_middleware_name="buffer",
+    )
+    mounts = override["services"][runtime_override.REST_SERVICE]["volumes"]
+    assert mounts == [
+        f"/var/lib/agentic-postgres/rendered/example-dev/{runtime_override.JWKS_FILENAME}"
+        f":{runtime_override.JWKS_CONTAINER_PATH}:ro"
+    ], mounts
+
+
+def _load_render_jwks():
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location("apg_render_jwks", RENDER_JWKS)
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
