@@ -6,17 +6,27 @@ by not exercising the path that would: the command's own source is scanned for a
 writer, the check is run against a repository whose snapshot is deliberately
 wrong, and the file is confirmed unchanged afterwards.
 
-`contracts/postgrest-openapi.canonical.json` does not exist yet -- it is
-captured from a deployed release in Run 9 -- so the tests below build snapshots
-in a temporary directory and point the module at them. That the *committed*
-snapshot is absent is itself asserted, with the exit code it produces, so the
-day Run 9 commits one this file says what changed.
+`contracts/postgrest-openapi.canonical.json` was captured in Run 9 from the
+deployed release at `alpha-db`, reviewed, and committed. Before that it did not
+exist, and two tests here were written around its absence; both have been
+replaced by stricter ones under ADR 0050 rather than deleted, and each says so
+in its own docstring. The tests that need a *wrong* snapshot still build one in
+a temporary directory and point the module at it, because the committed file is
+never a test's to edit.
+
+What the review found, recorded here because it is the reason the snapshot is
+trusted: the captured document is **identical** to the normalized fixture, which
+was re-captured independently from `.generated/fixture-alpha-dev/migrations/` on
+a throwaway cluster. Two different clusters, one built by the deploy and one by
+the rig, produced the same document from the same nine migrations.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -82,28 +92,90 @@ def approved_snapshot() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_there_is_no_approved_snapshot_yet_and_check_says_so() -> None:
-    """Exit 5, naming the run that produces one.
+def test_the_approved_snapshot_exists_and_check_compares_it() -> None:
+    """The replacement its predecessor asked for, under ADR 0050.
 
-    Goes red the day Run 9 commits a snapshot -- which is the correct moment for
-    this test to be replaced by one that asserts the snapshot matches, because
-    until then a green `--check` would mean the comparison found nothing to
-    compare.
+    Until Run 9 this asserted the snapshot was *absent* and `--check` exited 5
+    naming the run that would produce one, because a green `--check` with
+    nothing to compare is a gate measuring nothing. Run 9 captured one from the
+    deployed release at `alpha-db`, so the assertion inverts rather than
+    disappears: the file exists, it is the generated artifact, and `--check`
+    reaches a real comparison and passes it.
+
+    Goes red if the snapshot is deleted, hand-edited into non-canonical form, or
+    stops matching the reviewed surface -- each of which is the state the
+    predecessor existed to keep out.
     """
     snapshot = REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json"
-    assert not snapshot.exists(), (
-        "a snapshot now exists; replace this test with one that checks it, rather "
-        "than deleting the assertion that there is something to check"
-    )
+    assert snapshot.exists(), "the approved snapshot is missing; re-capture it, do not skip"
+
+    approved = json.loads(snapshot.read_bytes())
+    assert approved["host"] == openapi_normalize.SENTINEL_HOST
+    assert approved["basePath"] == openapi_normalize.SENTINEL_BASE_PATH
+    assert snapshot.read_bytes() == openapi_normalize.canonical_bytes(approved)
+
     result = run("--check")
-    assert result.returncode == 5, result.stderr
-    assert "no approved snapshot" in result.stderr
-    assert "Run 9" in result.stderr
+    assert result.returncode == 0, result.stderr
+    # The count is the comparison's own evidence that it had something to do.
+    assert "4 objects" in result.stdout + result.stderr
 
 
 # ---------------------------------------------------------------------------
 # ADR 0050 -- the gate cannot approve its own subject
 # ---------------------------------------------------------------------------
+
+
+#: Each is a regex, not a substring, because the scan now covers a call graph
+#: rather than one function body and the looser spelling collides. `open(`
+#: matched `urlopen(` inside `fetch_live`, which reads the live document and
+#: writes nothing -- a false positive that would have been "fixed" by dropping
+#: the token, quietly removing the only check on the plainest writer there is.
+WRITERS = (
+    r"\bwrite_text\s*\(",
+    r"\bwrite_bytes\s*\(",
+    r"\bos\.replace\s*\(",
+    r"\bmkstemp\s*\(",
+    r"(?<![\w.])open\s*\(",
+)
+
+
+def _reachable_from(source: str, entry: str) -> dict[str, str]:
+    """Every module-level function `entry` can reach, mapped to its source.
+
+    Text slicing cannot answer this: it sees one function body and stops at the
+    next `def`. A repair path one call away is invisible to it, which was
+    measured rather than supposed -- a helper that writes the snapshot and is
+    called from `command_check`'s first line left the old assertion green
+    (D191).
+    """
+    tree = ast.parse(source)
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+    }
+    seen: dict[str, str] = {}
+    pending = [entry]
+    while pending:
+        name = pending.pop()
+        node = functions.get(name)
+        if node is None or name in seen:
+            continue
+        seen[name] = ast.get_source_segment(source, node) or ""
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            func = call.func
+            called = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr
+                if isinstance(func, ast.Attribute)
+                else None
+            )
+            if called in functions and called not in seen:
+                pending.append(called)
+    return seen
 
 
 def test_the_check_path_contains_no_writer() -> None:
@@ -112,12 +184,30 @@ def test_the_check_path_contains_no_writer() -> None:
     `command_update` is the only writer, and it writes to a stream rather than a
     path. Goes red if `--check` ever grows a repair mode, which is the change
     that would turn the gate into something that can approve its own subject.
+
+    The whole reachable call graph is scanned, not `command_check`'s own body.
+    The body-only version passed a reachable `SNAPSHOT_PATH.write_bytes(...)`
+    sitting one call away, and the behavioural half below did not catch it
+    either, so the property had a hole exactly the width of one function call
+    (D191).
     """
     source = MODULE.read_text(encoding="utf-8")
-    body = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
-    check_body = body.split("def command_check(")[1].split("\ndef ")[0]
-    for writer in ("write_text", "write_bytes", "os.replace", "mkstemp", "open("):
-        assert writer not in check_body, f"command_check reaches a writer: {writer}"
+    reachable = _reachable_from(source, "command_check")
+
+    # The control: a graph walk that found nothing would pass this test forever.
+    assert "command_check" in reachable
+    assert {"load_snapshot", "fetch_live"} <= set(reachable), (
+        f"the walk reached only {sorted(reachable)}; it is not following calls"
+    )
+    assert "command_update" not in reachable, "the check path reaches the capture path"
+
+    for name, body in sorted(reachable.items()):
+        stripped = "\n".join(
+            line for line in body.splitlines() if not line.lstrip().startswith("#")
+        )
+        for writer in WRITERS:
+            found = re.search(writer, stripped)
+            assert not found, f"command_check reaches a writer: {name} uses {found.group(0)!r}"
 
 
 def test_update_names_no_output_path() -> None:
@@ -135,12 +225,53 @@ def test_update_names_no_output_path() -> None:
 
 
 def test_a_failing_check_leaves_both_contract_files_untouched(tmp_path: Path) -> None:
-    """The behavioural half. A check that repaired would pass this test's setup."""
+    """The behavioural half: a check that repaired would leave no trace of failing.
+
+    Until Run 9 the failure came for free -- there was no snapshot, so every
+    `--check` exited non-zero. Now that one is committed the check passes, and a
+    test whose failure is supplied by an absent file would be asserting nothing
+    about the writer. The failure is induced instead, by naming a deployed
+    document that does not exist, and the two committed contract files are
+    compared byte-for-byte across it.
+
+    Goes red if `--check` ever gains a repair path, and -- unlike its
+    predecessor -- it would still go red with the snapshot present, which is the
+    only state this repository will ever be in again.
+
+    **The failure has to land inside `command_check`.** Naming an absent
+    deployed document exits 2 and pointing at an unreachable one with no token
+    exits 3, both from the shell wrapper before Python runs -- so either would
+    assert nothing about a writer. This supplies a token so the wrapper's
+    prerequisites pass, and an address nothing answers on, which fails at
+    `fetch_live` after `load_snapshot` and the surface comparison have already
+    run. That ordering is the point: a repair path at the top of the function
+    would have executed by then (D191).
+    """
+    outputs = tmp_path / "outputs.json"
+    outputs.write_text(
+        json.dumps(
+            {"routes": {"rest": {"url": "https://127.0.0.1:9/api/rest", "status": "ready"}}}
+        ),
+        encoding="utf-8",
+    )
+
     surface_before = api_surface.CONTRACT_PATH.read_bytes()
-    result = run("--check")
-    assert result.returncode != 0
+    snapshot_path = REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json"
+    snapshot_before = snapshot_path.read_bytes()
+
+    result = run(
+        "--check",
+        "--project-outputs",
+        str(outputs),
+        env={"APG_DOCS_TOKEN": "not-a-real-token"},
+    )
+    assert result.returncode != 0, "the check was supposed to fail; it did not"
+    # The control on *where* it failed. Exit 2 or 3 from the wrapper would mean
+    # command_check never ran and this test measured nothing.
+    assert "cannot reach the REST service" in result.stderr, result.stderr
+
     assert api_surface.CONTRACT_PATH.read_bytes() == surface_before
-    assert not (REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json").exists()
+    assert snapshot_path.read_bytes() == snapshot_before
 
 
 # ---------------------------------------------------------------------------
