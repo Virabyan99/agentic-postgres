@@ -169,6 +169,18 @@ def statement_timeouts_for(document: dict[str, Any]) -> dict[str, str]:
     return {document["database"]["roles"]["app_runtime"]: "30s"}
 
 
+def api_budget_for(document: dict[str, Any]) -> int:
+    """What version 8 requires, from `config` rather than written out.
+
+    `config.postgrest_connection_budget` is the one place that figure is
+    computed, and the manifest-side budget check reasons about the same call. A
+    literal here would agree with it today and diverge on the day one of them
+    moved -- which is the only day it would matter.
+    """
+    del document
+    return config.postgrest_connection_budget({})
+
+
 def documentation_role_for(document: dict[str, Any]) -> str:
     """What a caller supplies for the v6 step (D158).
 
@@ -213,6 +225,7 @@ def chained(v1: dict[str, Any]) -> dict[str, Any]:
         access_profiles=profiles_for(v1),
         documentation_role=documentation_role_for(v1),
         statement_timeouts=statement_timeouts_for(v1),
+        api_connection_budget=api_budget_for(v1),
     )
 
 
@@ -302,6 +315,7 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         access_profiles=profiles_for(v1),
         documentation_role=documentation_role_for(v1),
         statement_timeouts=statement_timeouts_for(v1),
+        api_connection_budget=api_budget_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
 
@@ -343,6 +357,10 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
         migrated, statement_timeouts=statement_timeouts_for(migrated)
     )
     assert migrated["schema_version"] == 7
+    migrated = output_migrations.migrate_v7_to_v8(
+        migrated, api_connection_budget=api_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 8
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -418,6 +436,7 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
             statement_timeouts=statement_timeouts_for(v1),
+            api_connection_budget=api_budget_for(v1),
         )
 
 
@@ -490,7 +509,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 7"):
+    with pytest.raises(MigrationError, match="already version 8"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -499,6 +518,7 @@ def test_a_current_version_document_is_not_migrated_again(
             access_profiles=profiles_for(chained),
             documentation_role=documentation_role_for(chained),
             statement_timeouts=statement_timeouts_for(chained),
+            api_connection_budget=api_budget_for(chained),
         )
     with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_v4_to_v5(v5)
@@ -512,7 +532,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1, 2, 3, 4, 5 and 6"):
+    with pytest.raises(MigrationError, match="only versions 1, 2, 3, 4, 5, 6 and 7"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -521,6 +541,7 @@ def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
             statement_timeouts=statement_timeouts_for(v1),
+            api_connection_budget=api_budget_for(v1),
         )
 
 
@@ -535,6 +556,7 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
             statement_timeouts=statement_timeouts_for(v1),
+            api_connection_budget=api_budget_for(v1),
         )
 
 
@@ -558,6 +580,7 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
             statement_timeouts=statement_timeouts_for(v1),
+            api_connection_budget=api_budget_for(v1),
         )
 
 
@@ -665,6 +688,10 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
         migrated, statement_timeouts=statement_timeouts_for(migrated)
     )
     assert migrated["schema_version"] == 7
+    migrated = output_migrations.migrate_v7_to_v8(
+        migrated, api_connection_budget=api_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 8
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -824,6 +851,10 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
         migrated, statement_timeouts=statement_timeouts_for(migrated)
     )
     assert migrated["schema_version"] == 7
+    migrated = output_migrations.migrate_v7_to_v8(
+        migrated, api_connection_budget=api_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 8
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -927,6 +958,10 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
         migrated, statement_timeouts=statement_timeouts_for(migrated)
     )
     assert migrated["schema_version"] == 7
+    migrated = output_migrations.migrate_v7_to_v8(
+        migrated, api_connection_budget=api_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 8
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1041,6 +1076,10 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
         v6_document, statement_timeouts=timeouts_for(v6_document)
     )
     assert migrated["schema_version"] == 7
+    migrated = output_migrations.migrate_v7_to_v8(
+        migrated, api_connection_budget=api_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 8
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1203,3 +1242,90 @@ def test_the_duration_pattern_agrees_with_the_schema() -> None:
         published[output_migrations._POSTGRES_IDENTIFIER.pattern]["pattern"]
         == output_migrations._STATEMENT_TIMEOUT.pattern
     )
+
+
+# ---------------------------------------------------------------------------
+# v7 -> v8 (D161, ADR 0070): the API's connection commitment
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def v7_document(v6_document: dict[str, Any]) -> dict[str, Any]:
+    """The committed Session 5 render advanced to 7 -- the v8 step's input."""
+    return output_migrations.migrate_v6_to_v7(
+        v6_document, statement_timeouts=timeouts_for(v6_document)
+    )
+
+
+def test_a_v7_document_no_longer_validates(v7_document: dict[str, Any]) -> None:
+    """`api_connection_budget` is required on both branches, so 8 is a real bump."""
+    assert output_migrations.detect_version(v7_document) == 7
+    assert "api_connection_budget" not in v7_document["database"]
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(v7_document, "outputs.schema.json")
+
+
+def test_v8_changes_exactly_one_field(v7_document: dict[str, Any]) -> None:
+    budget = api_budget_for(v7_document)
+    migrated = output_migrations.migrate_v7_to_v8(v7_document, api_connection_budget=budget)
+
+    assert migrated["database"]["api_connection_budget"] == budget
+    before = {k: v for k, v in v7_document.items() if k != "schema_version"}
+    after = {k: v for k, v in migrated.items() if k != "schema_version"}
+    after["database"] = {k: v for k, v in after["database"].items() if k != "api_connection_budget"}
+    assert after == before
+
+
+def test_the_v8_step_does_not_mutate_its_input(v7_document: dict[str, Any]) -> None:
+    snapshot = json.loads(json.dumps(v7_document))
+    output_migrations.migrate_v7_to_v8(
+        v7_document, api_connection_budget=api_budget_for(v7_document)
+    )
+    assert v7_document == snapshot
+
+
+def test_the_v8_step_refuses_a_deployed_document(v7_document: dict[str, Any]) -> None:
+    v7_document["document_kind"] = "deployed"
+    with pytest.raises(MigrationError, match="expected a 'rendered'"):
+        output_migrations.migrate_v7_to_v8(v7_document, api_connection_budget=13)
+
+
+@pytest.mark.parametrize("budget", [0, -1, -13])
+def test_a_commitment_of_nothing_is_refused(v7_document: dict[str, Any], budget: int) -> None:
+    """0 is how PostgreSQL spells 'reject every login', not 'unlimited'."""
+    with pytest.raises(MigrationError, match=r"cannot serve a request|must be an integer"):
+        output_migrations.migrate_v7_to_v8(v7_document, api_connection_budget=budget)
+
+
+@pytest.mark.parametrize("budget", ["13", 13.0, None, True])
+def test_a_commitment_that_is_not_an_integer_is_refused(
+    v7_document: dict[str, Any], budget: Any
+) -> None:
+    """`True` is in this list deliberately: it is an `int` in Python and a
+    nonsense connection limit everywhere else."""
+    with pytest.raises(MigrationError, match="must be an integer"):
+        output_migrations.migrate_v7_to_v8(v7_document, api_connection_budget=budget)
+
+
+def test_a_commitment_that_leaves_nothing_for_anyone_else_is_refused(
+    v7_document: dict[str, Any],
+) -> None:
+    """The document already carries `max_connections`, so a commitment that was
+    never going to fit can be refused here rather than on a host."""
+    maximum = v7_document["database"]["budget"]["max_connections"]
+    with pytest.raises(MigrationError, match="leaves nothing"):
+        output_migrations.migrate_v7_to_v8(v7_document, api_connection_budget=maximum)
+
+
+def test_the_v8_step_refuses_a_document_that_already_carries_the_field(
+    v7_document: dict[str, Any],
+) -> None:
+    once = output_migrations.migrate_v7_to_v8(v7_document, api_connection_budget=13)
+    once["schema_version"] = 7
+    with pytest.raises(MigrationError, match="already carries api_connection_budget"):
+        output_migrations.migrate_v7_to_v8(once, api_connection_budget=13)
+
+
+def test_a_v6_document_is_refused_by_the_v8_step(v6_document: dict[str, Any]) -> None:
+    with pytest.raises(MigrationError, match="only version 7 can be migrated to 8"):
+        output_migrations.migrate_v7_to_v8(v6_document, api_connection_budget=13)

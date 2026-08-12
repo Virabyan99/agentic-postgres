@@ -632,3 +632,55 @@ def test_a_timeout_for_a_suffix_the_platform_does_not_derive_fails_the_render() 
             {"api": {"rest": {"statement_timeouts": {"no_such_role": "5s"}}}},
             {"app_runtime": "apg_x_app_runtime"},
         )
+
+
+# ---------------------------------------------------------------------------
+# The API's connection commitment (ADR 0070, D161)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_published_budget_is_the_one_the_manifest_was_checked_against(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """One answer, from `config`, not a second sum written in the renderer.
+
+    The manifest-side budget check reasons about
+    `config.postgrest_connection_budget`, and the bootstrap plane divides the
+    live budget using whatever this publishes. A renderer that computed its own
+    sum would agree today and diverge on the day one of them moved -- which is
+    the only day it would matter. ADR 0002's rule applied to a number.
+    """
+    document = yaml.safe_load((REPO_ROOT / manifest).read_text(encoding="utf-8"))
+    rest = (document.get("api") or {}).get("rest") or {}
+    expected = config.postgrest_connection_budget(rest)
+
+    published = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    assert published["database"]["api_connection_budget"] == expected
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_published_budget_leaves_room_for_the_application(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """The document that publishes a commitment also publishes the ceiling it fits in.
+
+    A commitment at or above `max_connections` is one the bootstrap plane could
+    never divide, and refusing it here is cheaper than discovering it on a host.
+    """
+    published = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    budget = published["database"]["api_connection_budget"]
+    maximum = published["database"]["budget"]["max_connections"]
+    assert 0 < budget < maximum
+
+
+def test_a_project_with_no_rest_service_still_publishes_a_commitment() -> None:
+    """The reservations are what a service *would* take.
+
+    A value that depended on whether a service happened to be enabled would make
+    the bootstrap's division of the budget depend on it too -- and a project that
+    enables REST later would silently change every other role's ceiling.
+    """
+    assert rendering.resolve_api_connection_budget({}) == config.postgrest_connection_budget({})
+    assert rendering.resolve_api_connection_budget({"api": None}) > 0
+    assert rendering.resolve_api_connection_budget({"api": {"rest": None}}) > 0

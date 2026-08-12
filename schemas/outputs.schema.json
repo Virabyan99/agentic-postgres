@@ -5,10 +5,13 @@
   "description": "The automation contract, version 5. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. Version 4 added `database.access_profiles`, three ways to reach the two transports (ADR 0041), and closed the endpoint conditional so that an `available` endpoint must actually carry a host, a port, a password-free URL and a secret reference. Version 5 is entirely on the deployed branch (ADR 0053): `routes` gains `rest` and `docs` as status-carrying objects beside `health`, a new `api` block records what the published surface actually serves, `jwt` appears for the first time carrying public metadata only, and `database.observed` gains the `instance_uuid` the port registry is keyed by. See docs/decisions/0012-output-document-kinds.md, docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md, docs/decisions/0041-two-transports-three-access-profiles.md, docs/decisions/0051-the-bootstrap-issuer-is-temporary-and-carries-its-own-expiry.md and docs/decisions/0053-outputs-version-5.md.",
   "type": "object",
   "oneOf": [
-    { "$ref": "#/$defs/renderedDocument" },
-    { "$ref": "#/$defs/deployedDocument" }
+    {
+      "$ref": "#/$defs/renderedDocument"
+    },
+    {
+      "$ref": "#/$defs/deployedDocument"
+    }
   ],
-
   "$defs": {
     "renderedDocument": {
       "type": "object",
@@ -29,8 +32,15 @@
         "template_version"
       ],
       "properties": {
-        "schema_version": { "type": "integer", "enum": [7] },
-        "document_kind": { "const": "rendered" },
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            8
+          ]
+        },
+        "document_kind": {
+          "const": "rendered"
+        },
         "inputs": {
           "type": "object",
           "additionalProperties": false,
@@ -43,22 +53,49 @@
           ],
           "description": "Every file that determines this render. The same block appears in each generated file, so an incomplete set is detectable. secrets_contract_sha256 joined the set in Session 2 when secrets.required_names started reaching rendered output: a value derived from a file that is not digested here would make the render depend on an untracked input.",
           "properties": {
-            "project_sha256": { "$ref": "#/$defs/sha256" },
-            "capabilities_sha256": { "$ref": "#/$defs/sha256" },
-            "secrets_contract_sha256": { "$ref": "#/$defs/sha256" },
-            "versions_lock_sha256": { "$ref": "#/$defs/sha256" },
-            "source_specification_sha256": { "$ref": "#/$defs/sha256" }
+            "project_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "capabilities_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "secrets_contract_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "versions_lock_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "source_specification_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
           }
         },
         "project": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["slug", "environment", "key", "domain", "generated_directory"],
+          "required": [
+            "slug",
+            "environment",
+            "key",
+            "domain",
+            "generated_directory"
+          ],
           "properties": {
-            "slug": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,30}$" },
-            "environment": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$" },
-            "key": { "$ref": "#/$defs/projectKey" },
-            "domain": { "type": "string", "format": "hostname" },
+            "slug": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{2,30}$"
+            },
+            "environment": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,15}$"
+            },
+            "key": {
+              "$ref": "#/$defs/projectKey"
+            },
+            "domain": {
+              "type": "string",
+              "format": "hostname"
+            },
             "generated_directory": {
               "type": "string",
               "pattern": "^\\.generated/[a-z0-9-]+$",
@@ -69,44 +106,86 @@
         "compose": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["project_name", "networks", "volumes"],
+          "required": [
+            "project_name",
+            "networks",
+            "volumes"
+          ],
           "properties": {
-            "project_name": { "$ref": "#/$defs/composeName" },
+            "project_name": {
+              "$ref": "#/$defs/composeName"
+            },
             "networks": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["edge", "internal"],
+              "required": [
+                "edge",
+                "internal"
+              ],
               "properties": {
-                "edge": { "$ref": "#/$defs/composeName" },
-                "internal": { "$ref": "#/$defs/composeName" }
+                "edge": {
+                  "$ref": "#/$defs/composeName"
+                },
+                "internal": {
+                  "$ref": "#/$defs/composeName"
+                }
               }
             },
             "volumes": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["postgres"],
-              "properties": { "postgres": { "$ref": "#/$defs/composeName" } }
+              "required": [
+                "postgres"
+              ],
+              "properties": {
+                "postgres": {
+                  "$ref": "#/$defs/composeName"
+                }
+              }
             }
           }
         },
-        "database": { "$ref": "#/$defs/renderedDatabase" },
+        "database": {
+          "$ref": "#/$defs/renderedDatabase"
+        },
         "routes": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["rest", "app", "mcp", "docs", "health"],
+          "required": [
+            "rest",
+            "app",
+            "mcp",
+            "docs",
+            "health"
+          ],
           "properties": {
-            "rest": { "$ref": "#/$defs/httpsUrl" },
-            "app": { "$ref": "#/$defs/httpsUrl" },
-            "mcp": { "$ref": "#/$defs/httpsUrl" },
-            "docs": { "$ref": "#/$defs/httpsUrl" },
+            "rest": {
+              "$ref": "#/$defs/httpsUrl"
+            },
+            "app": {
+              "$ref": "#/$defs/httpsUrl"
+            },
+            "mcp": {
+              "$ref": "#/$defs/httpsUrl"
+            },
+            "docs": {
+              "$ref": "#/$defs/httpsUrl"
+            },
             "health": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["status", "url"],
+              "required": [
+                "status",
+                "url"
+              ],
               "description": "An object rather than a bare URL so the rendered and deployed branches stay structurally parallel: the deployed document has to carry a readiness claim, and a claim needs somewhere to live.",
               "properties": {
-                "status": { "const": "planned" },
-                "url": { "$ref": "#/$defs/httpsUrl" }
+                "status": {
+                  "const": "planned"
+                },
+                "url": {
+                  "$ref": "#/$defs/httpsUrl"
+                }
               }
             }
           }
@@ -114,9 +193,14 @@
         "jwt": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["issuer", "audience"],
+          "required": [
+            "issuer",
+            "audience"
+          ],
           "properties": {
-            "issuer": { "$ref": "#/$defs/httpsUrl" },
+            "issuer": {
+              "$ref": "#/$defs/httpsUrl"
+            },
             "audience": {
               "type": "string",
               "pattern": "^urn:agentic-postgres:[a-z0-9-]+:[a-z0-9-]+$"
@@ -126,57 +210,110 @@
         "secrets": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["namespace", "status", "required_names"],
+          "required": [
+            "namespace",
+            "status",
+            "required_names"
+          ],
           "description": "Names only. No value, no reference to a materialized path, no generation identifier -- a rendered document describes a plan, and nothing has been materialized when it is written.",
           "properties": {
-            "namespace": { "type": "string", "pattern": "^agentic-postgres/[a-z0-9-]+$" },
-            "status": { "const": "planned" },
+            "namespace": {
+              "type": "string",
+              "pattern": "^agentic-postgres/[a-z0-9-]+$"
+            },
+            "status": {
+              "const": "planned"
+            },
             "required_names": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,47}$" }
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{2,47}$"
+              }
             }
           }
         },
         "storage": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["enabled", "bucket", "prefix"],
+          "required": [
+            "enabled",
+            "bucket",
+            "prefix"
+          ],
           "properties": {
-            "enabled": { "type": "boolean" },
+            "enabled": {
+              "type": "boolean"
+            },
             "bucket": {
-              "type": ["string", "null"],
+              "type": [
+                "string",
+                "null"
+              ],
               "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
             },
-            "prefix": { "type": ["string", "null"], "pattern": "^[^/].*/$" }
+            "prefix": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[^/].*/$"
+            }
           }
         },
         "backup": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["enabled", "stanza", "repository_prefix"],
+          "required": [
+            "enabled",
+            "stanza",
+            "repository_prefix"
+          ],
           "properties": {
-            "enabled": { "type": "boolean" },
-            "stanza": { "type": ["string", "null"], "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$" },
-            "repository_prefix": { "type": ["string", "null"], "pattern": "^[^/].*/$" }
+            "enabled": {
+              "type": "boolean"
+            },
+            "stanza": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+            },
+            "repository_prefix": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[^/].*/$"
+            }
           }
         },
         "capabilities": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["enabled"],
+          "required": [
+            "enabled"
+          ],
           "properties": {
             "enabled": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,47}$" }
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{2,47}$"
+              }
             }
           }
         },
-        "template_version": { "type": "string", "minLength": 1, "maxLength": 64 }
+        "template_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
       }
     },
-
     "deployedDocument": {
       "type": "object",
       "additionalProperties": false,
@@ -201,9 +338,18 @@
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
-        "schema_version": { "type": "integer", "enum": [7] },
-        "document_kind": { "const": "deployed" },
-        "source_commit": { "$ref": "#/$defs/commit" },
+        "schema_version": {
+          "type": "integer",
+          "enum": [
+            8
+          ]
+        },
+        "document_kind": {
+          "const": "deployed"
+        },
+        "source_commit": {
+          "$ref": "#/$defs/commit"
+        },
         "deployed_through_session": {
           "type": "integer",
           "minimum": 2,
@@ -212,23 +358,65 @@
         "project": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["slug", "environment", "key", "domain"],
+          "required": [
+            "slug",
+            "environment",
+            "key",
+            "domain"
+          ],
           "properties": {
-            "slug": { "type": "string", "pattern": "^[a-z][a-z0-9-]{2,30}$" },
-            "environment": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,15}$" },
-            "key": { "$ref": "#/$defs/projectKey" },
-            "domain": { "type": "string", "format": "hostname" }
+            "slug": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{2,30}$"
+            },
+            "environment": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,15}$"
+            },
+            "key": {
+              "$ref": "#/$defs/projectKey"
+            },
+            "domain": {
+              "type": "string",
+              "format": "hostname"
+            }
           }
         },
         "host": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["id", "os_release", "public_ipv4", "public_ipv6"],
+          "required": [
+            "id",
+            "os_release",
+            "public_ipv4",
+            "public_ipv6"
+          ],
           "properties": {
-            "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$" },
-            "os_release": { "type": "string", "enum": ["26.04", "24.04"] },
-            "public_ipv4": { "type": ["string", "null"], "format": "ipv4" },
-            "public_ipv6": { "type": ["string", "null"], "format": "ipv6" }
+            "id": {
+              "type": "string",
+              "pattern": "^[a-z0-9][a-z0-9-]{1,30}[a-z0-9]$"
+            },
+            "os_release": {
+              "type": "string",
+              "enum": [
+                "26.04",
+                "24.04"
+              ]
+            },
+            "public_ipv4": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "ipv4"
+            },
+            "public_ipv6": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "ipv6"
+            }
           }
         },
         "edge": {
@@ -243,36 +431,71 @@
             "project_network_attached"
           ],
           "properties": {
-            "stack_name": { "$ref": "#/$defs/composeName" },
-            "control_network": { "$ref": "#/$defs/composeName" },
-            "egress_network": { "$ref": "#/$defs/composeName" },
-            "project_edge_network": { "$ref": "#/$defs/composeName" },
-            "project_internal_network": { "$ref": "#/$defs/composeName" },
-            "project_network_attached": { "type": "boolean" }
+            "stack_name": {
+              "$ref": "#/$defs/composeName"
+            },
+            "control_network": {
+              "$ref": "#/$defs/composeName"
+            },
+            "egress_network": {
+              "$ref": "#/$defs/composeName"
+            },
+            "project_edge_network": {
+              "$ref": "#/$defs/composeName"
+            },
+            "project_internal_network": {
+              "$ref": "#/$defs/composeName"
+            },
+            "project_network_attached": {
+              "type": "boolean"
+            }
           }
         },
         "routes": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["health", "rest", "docs"],
+          "required": [
+            "health",
+            "rest",
+            "docs"
+          ],
           "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them.",
           "properties": {
             "health": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["status", "url"],
+              "required": [
+                "status",
+                "url"
+              ],
               "description": "The URL is present whatever the status, and deliberately so: the platform health path is the same string for every project whether or not it answers, and a null there would delete the address an operator needs in order to go and look. `rest` and `docs` are the other case -- see `publishedRoute`.",
               "properties": {
-                "status": { "type": "string", "enum": ["ready", "unavailable"] },
-                "url": { "$ref": "#/$defs/httpsUrl" }
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ready",
+                    "unavailable"
+                  ]
+                },
+                "url": {
+                  "$ref": "#/$defs/httpsUrl"
+                }
               }
             },
-            "rest": { "$ref": "#/$defs/publishedRoute" },
-            "docs": { "$ref": "#/$defs/publishedRoute" }
+            "rest": {
+              "$ref": "#/$defs/publishedRoute"
+            },
+            "docs": {
+              "$ref": "#/$defs/publishedRoute"
+            }
           }
         },
-        "api": { "$ref": "#/$defs/deployedApi" },
-        "jwt": { "$ref": "#/$defs/deployedJwt" },
+        "api": {
+          "$ref": "#/$defs/deployedApi"
+        },
+        "jwt": {
+          "$ref": "#/$defs/deployedJwt"
+        },
         "tls": {
           "type": "object",
           "additionalProperties": false,
@@ -285,15 +508,41 @@
             "not_after"
           ],
           "properties": {
-            "status": { "type": "string", "enum": ["issued", "unavailable"] },
-            "acme_environment": { "type": "string", "enum": ["staging", "production"] },
-            "resolver": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,30}$" },
+            "status": {
+              "type": "string",
+              "enum": [
+                "issued",
+                "unavailable"
+              ]
+            },
+            "acme_environment": {
+              "type": "string",
+              "enum": [
+                "staging",
+                "production"
+              ]
+            },
+            "resolver": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{1,30}$"
+            },
             "certificate_sha256": {
-              "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/sha256"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "description": "A fingerprint of a public certificate. Public material, so recording it leaks nothing; it is what lets the external suite prove it reached the same certificate the host issued."
             },
-            "not_before": { "$ref": "#/$defs/nullableTimestamp" },
-            "not_after": { "$ref": "#/$defs/nullableTimestamp" }
+            "not_before": {
+              "$ref": "#/$defs/nullableTimestamp"
+            },
+            "not_after": {
+              "$ref": "#/$defs/nullableTimestamp"
+            }
           }
         },
         "bootstrap": {
@@ -306,13 +555,23 @@
             "runtime_identity_id"
           ],
           "properties": {
-            "status": { "type": "string", "enum": ["complete", "unavailable"] },
+            "status": {
+              "type": "string",
+              "enum": [
+                "complete",
+                "unavailable"
+              ]
+            },
             "state_path": {
               "type": "string",
               "pattern": "^/etc/agentic-postgres/projects/[a-z0-9-]+/bootstrap-state\\.json$"
             },
-            "infisical_project_id": { "$ref": "#/$defs/providerId" },
-            "runtime_identity_id": { "$ref": "#/$defs/providerId" }
+            "infisical_project_id": {
+              "$ref": "#/$defs/providerId"
+            },
+            "runtime_identity_id": {
+              "$ref": "#/$defs/providerId"
+            }
           }
         },
         "secrets": {
@@ -327,8 +586,16 @@
             "materialized_at"
           ],
           "properties": {
-            "status": { "type": "string", "enum": ["ready", "unavailable"] },
-            "generation_id": { "$ref": "#/$defs/generationId" },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ready",
+                "unavailable"
+              ]
+            },
+            "generation_id": {
+              "$ref": "#/$defs/generationId"
+            },
             "generation_manifest": {
               "type": "string",
               "pattern": "^/var/lib/agentic-postgres/secrets/[a-z0-9-]+/generations/[a-z0-9-]+/manifest\\.json$"
@@ -336,19 +603,28 @@
             "required_names": {
               "type": "array",
               "uniqueItems": true,
-              "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{2,47}$" }
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{2,47}$"
+              }
             },
             "fresh": {
               "type": "boolean",
               "description": "False records a bounded last-known-good start. Recorded rather than hidden: a host that has been running on a stale generation is a fact an operator needs."
             },
-            "materialized_at": { "$ref": "#/$defs/nullableTimestamp" }
+            "materialized_at": {
+              "$ref": "#/$defs/nullableTimestamp"
+            }
           }
         },
         "runtime": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["release_path", "state_directory", "compose_model_sha256"],
+          "required": [
+            "release_path",
+            "state_directory",
+            "compose_model_sha256"
+          ],
           "description": "Absolute host paths, anchored. This is where Session 2's filesystem layout is represented, so project.generated_directory never has to stop being repository-relative.",
           "properties": {
             "release_path": {
@@ -359,15 +635,24 @@
               "type": "string",
               "pattern": "^/etc/agentic-postgres/projects/[a-z0-9-]+$"
             },
-            "compose_model_sha256": { "$ref": "#/$defs/sha256" }
+            "compose_model_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
           }
         },
-        "database": { "$ref": "#/$defs/deployedDatabase" },
-        "template_version": { "type": "string", "minLength": 1, "maxLength": 64 },
-        "observed_at": { "$ref": "#/$defs/timestamp" }
+        "database": {
+          "$ref": "#/$defs/deployedDatabase"
+        },
+        "template_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        }
       }
     },
-
     "renderedDatabase": {
       "type": "object",
       "additionalProperties": false,
@@ -379,21 +664,40 @@
         "pooled",
         "direct",
         "access_profiles",
-        "statement_timeouts"
+        "statement_timeouts",
+        "api_connection_budget"
       ],
-      "description": "Version 7. The rendered branch carries no `observed` block at all -- not an empty one, not a nulled one. ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be unrepresentable here rather than merely constrained. That is why the two branches have separate definitions instead of one shared one. Version 4 added `access_profiles` (ADR 0041). Version 7 added `statement_timeouts` (ADR 0067).",
+      "description": "Version 7. The rendered branch carries no `observed` block at all -- not an empty one, not a nulled one. ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be unrepresentable here rather than merely constrained. That is why the two branches have separate definitions instead of one shared one. Version 4 added `access_profiles` (ADR 0041). Version 7 added `statement_timeouts` (ADR 0067). Version 8 added `api_connection_budget` (ADR 0070).",
       "properties": {
-        "name": { "$ref": "#/$defs/postgresIdentifier" },
-        "container": { "$ref": "#/$defs/composeName" },
-        "roles": { "$ref": "#/$defs/databaseRoles" },
-        "budget": { "$ref": "#/$defs/databaseBudget" },
-        "pooled": { "$ref": "#/$defs/endpoint" },
-        "direct": { "$ref": "#/$defs/endpoint" },
-        "access_profiles": { "$ref": "#/$defs/accessProfiles" },
-        "statement_timeouts": { "$ref": "#/$defs/statementTimeouts" }
+        "name": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "container": {
+          "$ref": "#/$defs/composeName"
+        },
+        "roles": {
+          "$ref": "#/$defs/databaseRoles"
+        },
+        "budget": {
+          "$ref": "#/$defs/databaseBudget"
+        },
+        "pooled": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "direct": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "access_profiles": {
+          "$ref": "#/$defs/accessProfiles"
+        },
+        "statement_timeouts": {
+          "$ref": "#/$defs/statementTimeouts"
+        },
+        "api_connection_budget": {
+          "$ref": "#/$defs/apiConnectionBudget"
+        }
       }
     },
-
     "deployedDatabase": {
       "type": "object",
       "additionalProperties": false,
@@ -406,27 +710,50 @@
         "direct",
         "access_profiles",
         "statement_timeouts",
-        "observed"
+        "observed",
+        "api_connection_budget"
       ],
-      "description": "Version 7. Identical to the rendered branch plus `observed`, which is the only block here that is a measurement rather than a derivation.",
+      "description": "Version 7. Identical to the rendered branch plus `observed`, which is the only block here that is a measurement rather than a derivation. Version 8 added `api_connection_budget` (ADR 0070).",
       "properties": {
-        "name": { "$ref": "#/$defs/postgresIdentifier" },
-        "container": { "$ref": "#/$defs/composeName" },
-        "roles": { "$ref": "#/$defs/databaseRoles" },
-        "budget": { "$ref": "#/$defs/databaseBudget" },
-        "pooled": { "$ref": "#/$defs/endpoint" },
-        "direct": { "$ref": "#/$defs/endpoint" },
-        "access_profiles": { "$ref": "#/$defs/accessProfiles" },
-        "statement_timeouts": { "$ref": "#/$defs/statementTimeouts" },
-        "observed": { "$ref": "#/$defs/databaseObserved" }
+        "name": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "container": {
+          "$ref": "#/$defs/composeName"
+        },
+        "roles": {
+          "$ref": "#/$defs/databaseRoles"
+        },
+        "budget": {
+          "$ref": "#/$defs/databaseBudget"
+        },
+        "pooled": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "direct": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "access_profiles": {
+          "$ref": "#/$defs/accessProfiles"
+        },
+        "statement_timeouts": {
+          "$ref": "#/$defs/statementTimeouts"
+        },
+        "observed": {
+          "$ref": "#/$defs/databaseObserved"
+        },
+        "api_connection_budget": {
+          "$ref": "#/$defs/apiConnectionBudget"
+        }
       }
     },
-
     "statementTimeouts": {
       "type": "object",
       "additionalProperties": false,
       "description": "Per-role `statement_timeout`, keyed by the **derived role name** rather than by the manifest's role suffix. The manifest keys `api.rest.statement_timeouts` by suffix; rendering resolves each suffix through `database.roles` and writes the result here, so the bootstrap plane applies a name it was given instead of deriving one (ADR 0002). A role named here that is absent from `database.roles` is unrepresentable by construction, because the only writer resolves through that map. Version 7, ADR 0067: before it, the manifest's timeouts were validated and then dropped at this boundary, so no request role ever received one.",
-      "propertyNames": { "$ref": "#/$defs/postgresIdentifier" },
+      "propertyNames": {
+        "$ref": "#/$defs/postgresIdentifier"
+      },
       "patternProperties": {
         "^[a-z_][a-z0-9_]*$": {
           "type": "string",
@@ -435,7 +762,6 @@
         }
       }
     },
-
     "databaseRoles": {
       "type": "object",
       "additionalProperties": false,
@@ -456,26 +782,51 @@
         "api_documentation"
       ],
       "properties": {
-        "anon": { "$ref": "#/$defs/postgresIdentifier" },
-        "authenticated": { "$ref": "#/$defs/postgresIdentifier" },
-        "agent_reader": { "$ref": "#/$defs/postgresIdentifier" },
-        "agent_writer": { "$ref": "#/$defs/postgresIdentifier" },
-        "project_admin": { "$ref": "#/$defs/postgresIdentifier" },
-        "postgrest_authenticator": { "$ref": "#/$defs/postgresIdentifier" },
-        "auth_service": { "$ref": "#/$defs/postgresIdentifier" },
-        "mcp_audit_service": { "$ref": "#/$defs/postgresIdentifier" },
-        "storage_service": { "$ref": "#/$defs/postgresIdentifier" },
-        "migration_user": { "$ref": "#/$defs/postgresIdentifier" },
-        "backup_user": { "$ref": "#/$defs/postgresIdentifier" },
-        "app_runtime": { "$ref": "#/$defs/postgresIdentifier" },
-        "object_owner": { "$ref": "#/$defs/postgresIdentifier" },
+        "anon": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "authenticated": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "agent_reader": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "agent_writer": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "project_admin": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "postgrest_authenticator": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "auth_service": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "mcp_audit_service": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "storage_service": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "migration_user": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "backup_user": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "app_runtime": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "object_owner": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
         "api_documentation": {
           "$ref": "#/$defs/postgresIdentifier",
           "description": "Version 6. The role the OpenAPI capture and the documentation page read the published surface as. It holds view SELECT and EXECUTE on the write RPCs -- which is what makes `openapi-mode = follow-privileges` publish the whole surface -- and the pre-request hook refuses to establish an identity for it, so the RPCs it advertises are ones it can never perform. NOLOGIN: it is reached by SET ROLE from the authenticator, like anon and authenticated, and holds no credential of its own."
         }
       }
     },
-
     "databaseBudget": {
       "type": "object",
       "additionalProperties": false,
@@ -490,36 +841,93 @@
       ],
       "description": "Derived from the manifest, so it belongs on the rendered branch. `unreclaimable_mb` is the only computed member: it is what the host must actually find, because on a box with no swap page cache is reclaimable and shared memory is not. It is deliberately NOT equal to memory_limit_mb -- see the Session 3 plan 3.3 for the measurement that separated them.",
       "properties": {
-        "shared_buffers_mb": { "type": "integer", "minimum": 16, "maximum": 1024 },
-        "max_connections": { "type": "integer", "minimum": 10, "maximum": 200 },
-        "work_mem_mb": { "type": "integer", "minimum": 1, "maximum": 64 },
-        "maintenance_work_mem_mb": { "type": "integer", "minimum": 16, "maximum": 512 },
-        "memory_limit_mb": { "type": "integer", "minimum": 128, "maximum": 4096 },
-        "shm_size_mb": { "type": "integer", "minimum": 64, "maximum": 1024 },
-        "unreclaimable_mb": { "type": "integer", "minimum": 1, "maximum": 4096 }
+        "shared_buffers_mb": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 1024
+        },
+        "max_connections": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 200
+        },
+        "work_mem_mb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 64
+        },
+        "maintenance_work_mem_mb": {
+          "type": "integer",
+          "minimum": 16,
+          "maximum": 512
+        },
+        "memory_limit_mb": {
+          "type": "integer",
+          "minimum": 128,
+          "maximum": 4096
+        },
+        "shm_size_mb": {
+          "type": "integer",
+          "minimum": 64,
+          "maximum": 1024
+        },
+        "unreclaimable_mb": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4096
+        }
       }
     },
-
     "databaseObserved": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "server_version", "extensions", "memory", "instance_uuid"],
+      "required": [
+        "status",
+        "server_version",
+        "extensions",
+        "memory",
+        "instance_uuid"
+      ],
       "description": "Measured against a running cluster, never derived. `not_observed` with five nulls is the honest state for a deployment that has not yet been read -- the same discipline `endpoint` uses, for the same reason: a zero or an empty object would be indistinguishable from a real measurement that happened to be empty. Version 5 added `instance_uuid`, which is a measurement in the strictest sense available here: it is a property of the data rather than of the configuration that produced it, and it is read out of the cluster by the same query the port allocator uses (ADR 0053, D106).",
       "properties": {
-        "status": { "type": "string", "enum": ["observed", "not_observed"] },
+        "status": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "not_observed"
+          ]
+        },
         "instance_uuid": {
-          "oneOf": [{ "$ref": "#/$defs/instanceUuid" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/instanceUuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "`app_private.project_identity.instance_uuid`. The port-allocation registry is keyed by it and records the project key only for humans; until version 5 the deployed document carried no copy, so the access broker searched live allocations by key and refused ambiguity rather than resolving it. Present here so the broker can match on the identity the registry actually uses."
         },
         "server_version": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^[0-9]+(\\.[0-9]+)*",
           "maxLength": 64
         },
         "extensions": {
-          "type": ["object", "null"],
-          "additionalProperties": { "type": "string", "maxLength": 32 },
-          "propertyNames": { "$ref": "#/$defs/postgresIdentifier" },
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string",
+            "maxLength": 32
+          },
+          "propertyNames": {
+            "$ref": "#/$defs/postgresIdentifier"
+          },
           "description": "Installed extension name to installed version, read from pg_extension. Not pg_available_extensions: what is available is not what is installed, and the distinction is the whole content of DBX-PG-001."
         },
         "memory": {
@@ -527,55 +935,112 @@
             {
               "type": "object",
               "additionalProperties": false,
-              "required": ["anon_mb", "shmem_mb", "file_mb"],
+              "required": [
+                "anon_mb",
+                "shmem_mb",
+                "file_mb"
+              ],
               "description": "The three kept separate on purpose. A single `memory_mb` would average a reclaimable number together with an unreclaimable one and report something that is true of neither.",
               "properties": {
-                "anon_mb": { "type": "integer", "minimum": 0 },
-                "shmem_mb": { "type": "integer", "minimum": 0 },
-                "file_mb": { "type": "integer", "minimum": 0 }
+                "anon_mb": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "shmem_mb": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "file_mb": {
+                  "type": "integer",
+                  "minimum": 0
+                }
               }
             },
-            { "type": "null" }
+            {
+              "type": "null"
+            }
           ]
         }
       },
       "if": {
-        "properties": { "status": { "const": "not_observed" } },
-        "required": ["status"]
+        "properties": {
+          "status": {
+            "const": "not_observed"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "then": {
         "properties": {
-          "server_version": { "type": "null" },
-          "extensions": { "type": "null" },
-          "memory": { "type": "null" },
-          "instance_uuid": { "type": "null" }
+          "server_version": {
+            "type": "null"
+          },
+          "extensions": {
+            "type": "null"
+          },
+          "memory": {
+            "type": "null"
+          },
+          "instance_uuid": {
+            "type": "null"
+          }
         }
       }
     },
-
     "publishedRoute": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "url"],
+      "required": [
+        "status",
+        "url"
+      ],
       "description": "A route this session publishes, and the honest way to say it was not published. `unavailable` forces a null URL -- unlike `health`, whose address exists for every project at every session. A deployment through session 4 serves no REST and no documentation, and naming a URL for a surface nothing is listening on would be exactly the failure `endpoint` was tightened in version 4 to prevent: a record that claims to exist and points at nothing.",
       "properties": {
-        "status": { "type": "string", "enum": ["ready", "unavailable"] },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "unavailable"
+          ]
+        },
         "url": {
-          "oneOf": [{ "$ref": "#/$defs/httpsUrl" }, { "type": "null" }]
+          "oneOf": [
+            {
+              "$ref": "#/$defs/httpsUrl"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "if": {
-        "properties": { "status": { "const": "unavailable" } },
-        "required": ["status"]
+        "properties": {
+          "status": {
+            "const": "unavailable"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "then": {
-        "properties": { "url": { "type": "null" } }
+        "properties": {
+          "url": {
+            "type": "null"
+          }
+        }
       },
       "else": {
-        "properties": { "url": { "$ref": "#/$defs/httpsUrl" } }
+        "properties": {
+          "url": {
+            "$ref": "#/$defs/httpsUrl"
+          }
+        }
       }
     },
-
     "deployedApi": {
       "type": "object",
       "additionalProperties": false,
@@ -594,65 +1059,158 @@
       "properties": {
         "status": {
           "type": "string",
-          "enum": ["ready", "unavailable"],
+          "enum": [
+            "ready",
+            "unavailable"
+          ],
           "description": "`unavailable` is the state of every project deployed through a session before 5, and of a session-5 project whose REST surface did not come up. It forces every other member null, so a partially-filled block cannot be published as an observation."
         },
         "exposed_schema": {
-          "oneOf": [{ "$ref": "#/$defs/postgresIdentifier" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/postgresIdentifier"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "The one schema PostgREST is configured to expose. Recorded because `db-schemas` is the boundary that decides what a request can name at all, and a reader should not have to open a rendered configuration file to learn it."
         },
-        "max_rows": { "type": ["integer", "null"], "minimum": 1, "maximum": 10000 },
-        "request_body_max_bytes": { "type": ["integer", "null"], "minimum": 1024 },
-        "pool_size": { "type": ["integer", "null"], "minimum": 1, "maximum": 1000 },
+        "max_rows": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 10000
+        },
+        "request_body_max_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1024
+        },
+        "pool_size": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 1000
+        },
         "connection_budget_reserved": {
-          "type": ["integer", "null"],
+          "type": [
+            "integer",
+            "null"
+          ],
           "minimum": 1,
           "description": "What this service takes out of the cluster's connection budget: the pool, plus the LISTEN/NOTIFY connection the schema cache needs, plus startup and recovery headroom. Recorded rather than recomputed by a reader, because the number a reader would recompute is the one nobody checked against `max_connections`."
         },
         "api_surface_sha256": {
-          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "contracts/postgrest-api-surface.yaml -- the hand-written reviewed intent."
         },
         "canonical_openapi_sha256": {
-          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "contracts/postgrest-openapi.canonical.json -- the generated, project-neutral snapshot two projects share (ADR 0050)."
         },
         "project_openapi_sha256": {
-          "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "The document this project actually publishes, carrying its own host and title. Distinct from the canonical checksum by construction, and recorded so that 'the snapshot matches' can be a comparison rather than an assertion."
         }
       },
       "if": {
-        "properties": { "status": { "const": "unavailable" } },
-        "required": ["status"]
+        "properties": {
+          "status": {
+            "const": "unavailable"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "then": {
         "properties": {
-          "exposed_schema": { "type": "null" },
-          "max_rows": { "type": "null" },
-          "request_body_max_bytes": { "type": "null" },
-          "pool_size": { "type": "null" },
-          "connection_budget_reserved": { "type": "null" },
-          "api_surface_sha256": { "type": "null" },
-          "canonical_openapi_sha256": { "type": "null" },
-          "project_openapi_sha256": { "type": "null" }
+          "exposed_schema": {
+            "type": "null"
+          },
+          "max_rows": {
+            "type": "null"
+          },
+          "request_body_max_bytes": {
+            "type": "null"
+          },
+          "pool_size": {
+            "type": "null"
+          },
+          "connection_budget_reserved": {
+            "type": "null"
+          },
+          "api_surface_sha256": {
+            "type": "null"
+          },
+          "canonical_openapi_sha256": {
+            "type": "null"
+          },
+          "project_openapi_sha256": {
+            "type": "null"
+          }
         }
       },
       "else": {
-        "required": ["exposed_schema"],
+        "required": [
+          "exposed_schema"
+        ],
         "properties": {
-          "exposed_schema": { "$ref": "#/$defs/postgresIdentifier" },
-          "max_rows": { "type": "integer" },
-          "request_body_max_bytes": { "type": "integer" },
-          "pool_size": { "type": "integer" },
-          "connection_budget_reserved": { "type": "integer" },
-          "api_surface_sha256": { "$ref": "#/$defs/sha256" },
-          "canonical_openapi_sha256": { "$ref": "#/$defs/sha256" },
-          "project_openapi_sha256": { "$ref": "#/$defs/sha256" }
+          "exposed_schema": {
+            "$ref": "#/$defs/postgresIdentifier"
+          },
+          "max_rows": {
+            "type": "integer"
+          },
+          "request_body_max_bytes": {
+            "type": "integer"
+          },
+          "pool_size": {
+            "type": "integer"
+          },
+          "connection_budget_reserved": {
+            "type": "integer"
+          },
+          "api_surface_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "canonical_openapi_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "project_openapi_sha256": {
+            "$ref": "#/$defs/sha256"
+          }
         }
       }
     },
-
     "deployedJwt": {
       "type": "object",
       "additionalProperties": false,
@@ -669,21 +1227,52 @@
       ],
       "description": "Public token metadata, version 5 (ADR 0051, ADR 0053). Every member here is something a verifier is entitled to hold: an issuer, an audience, an algorithm, key identifiers and a digest of the public JWKS. No private JWK, no signing key reference and no token appears -- not as a redacted field, not as a reference, not at all. `temporary` is state a later gate reads rather than prose nobody executes: SEC-BOOT-001 compares it against `deployed_through_session` and goes red on the deployment that should have replaced the bootstrap issuer.",
       "properties": {
-        "status": { "type": "string", "enum": ["ready", "unavailable"] },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "unavailable"
+          ]
+        },
         "issuer": {
-          "oneOf": [{ "$ref": "#/$defs/httpsUrl" }, { "type": "null" }],
+          "oneOf": [
+            {
+              "$ref": "#/$defs/httpsUrl"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "The same string the rendered branch derives. It does not have to be dereferenceable in session 5; it has to be stable, because session 6 issues against it."
         },
         "audience": {
-          "type": ["string", "null"],
+          "type": [
+            "string",
+            "null"
+          ],
           "pattern": "^urn:agentic-postgres:[a-z0-9-]+:[a-z0-9-]+$"
         },
         "algorithm": {
-          "type": ["string", "null"],
-          "enum": ["RS256", null],
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "RS256",
+            null
+          ],
           "description": "Asymmetric, so the verifier holds no material that can sign. A symmetric algorithm would make every verifier an issuer, which is the property ADR 0051 refuses."
         },
-        "active_kid": { "oneOf": [{ "$ref": "#/$defs/jwkThumbprint" }, { "type": "null" }] },
+        "active_kid": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/jwkThumbprint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "verification_kids": {
           "oneOf": [
             {
@@ -691,54 +1280,111 @@
               "minItems": 1,
               "maxItems": 2,
               "uniqueItems": true,
-              "items": { "$ref": "#/$defs/jwkThumbprint" },
+              "items": {
+                "$ref": "#/$defs/jwkThumbprint"
+              },
               "description": "The active key, and during a documented rotation overlap the one retiring key. Two is the ceiling on purpose: an unbounded set is a set nobody retires from."
             },
-            { "type": "null" }
+            {
+              "type": "null"
+            }
           ]
         },
-        "public_jwks_sha256": { "oneOf": [{ "$ref": "#/$defs/sha256" }, { "type": "null" }] },
-        "temporary": { "type": ["boolean", "null"] },
+        "public_jwks_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "temporary": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "retire_after": {
           "$ref": "#/$defs/nullableTimestamp",
           "description": "The deadline the temporary issuer carries with it. Null when no rotation is in flight; a date when one is, so that 'the overlap window' is a value rather than an intention."
         }
       },
       "if": {
-        "properties": { "status": { "const": "unavailable" } },
-        "required": ["status"]
+        "properties": {
+          "status": {
+            "const": "unavailable"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "then": {
         "properties": {
-          "issuer": { "type": "null" },
-          "audience": { "type": "null" },
-          "algorithm": { "type": "null" },
-          "active_kid": { "type": "null" },
-          "verification_kids": { "type": "null" },
-          "public_jwks_sha256": { "type": "null" },
-          "temporary": { "type": "null" },
-          "retire_after": { "type": "null" }
+          "issuer": {
+            "type": "null"
+          },
+          "audience": {
+            "type": "null"
+          },
+          "algorithm": {
+            "type": "null"
+          },
+          "active_kid": {
+            "type": "null"
+          },
+          "verification_kids": {
+            "type": "null"
+          },
+          "public_jwks_sha256": {
+            "type": "null"
+          },
+          "temporary": {
+            "type": "null"
+          },
+          "retire_after": {
+            "type": "null"
+          }
         }
       },
       "else": {
         "properties": {
-          "issuer": { "$ref": "#/$defs/httpsUrl" },
-          "audience": { "type": "string" },
-          "algorithm": { "type": "string" },
-          "active_kid": { "$ref": "#/$defs/jwkThumbprint" },
-          "verification_kids": { "type": "array", "minItems": 1 },
-          "public_jwks_sha256": { "$ref": "#/$defs/sha256" },
-          "temporary": { "type": "boolean" }
+          "issuer": {
+            "$ref": "#/$defs/httpsUrl"
+          },
+          "audience": {
+            "type": "string"
+          },
+          "algorithm": {
+            "type": "string"
+          },
+          "active_kid": {
+            "$ref": "#/$defs/jwkThumbprint"
+          },
+          "verification_kids": {
+            "type": "array",
+            "minItems": 1
+          },
+          "public_jwks_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "temporary": {
+            "type": "boolean"
+          }
         }
       }
     },
-
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$",
       "description": "Lowercase hexadecimal. Documentation placeholders are not accepted."
     },
-    "commit": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
     "instanceUuid": {
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -749,8 +1395,14 @@
       "pattern": "^[A-Za-z0-9_-]{43}$",
       "description": "An RFC 7638 JWK thumbprint: the base64url SHA-256 of the canonical public key, so the identifier is a function of the key rather than a name somebody chose. 43 characters is the unpadded length; padding is not accepted, because a kid that compares unequal to itself across two encoders is a rotation that silently never completes."
     },
-    "projectKey": { "type": "string", "pattern": "^[a-z][a-z0-9-]{4,47}$" },
-    "generationId": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "projectKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{4,47}$"
+    },
+    "generationId": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,63}$"
+    },
     "providerId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._~-]{1,127}$",
@@ -762,7 +1414,14 @@
       "description": "RFC 3339 UTC. Present only on the deployed branch: the rendered branch is byte-identical across renders and a timestamp would destroy that (plan decision U, extended by ADR 0012)."
     },
     "nullableTimestamp": {
-      "oneOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }]
+      "oneOf": [
+        {
+          "$ref": "#/$defs/timestamp"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "postgresIdentifier": {
       "type": "string",
@@ -792,91 +1451,223 @@
       ],
       "description": "Version 4 made the available case as constrained as the unavailable one. Through version 3 the conditional bound only `unavailable`, so a document could claim `available` with every field still null and validate -- an endpoint that says it exists and tells you nothing. Angle-bracket placeholders that resemble connection strings are not permitted, and the URL may not carry a password: `postgresql://role@host:port/db` is the shape, and a `role:secret@` userinfo fails the pattern rather than being redacted later by something that might forget.",
       "properties": {
-        "status": { "type": "string", "enum": ["unavailable", "available"] },
-        "available_from_session": { "type": "integer", "minimum": 1, "maximum": 12 },
-        "host": { "type": ["string", "null"] },
-        "port": { "type": ["integer", "null"], "minimum": 1, "maximum": 65535 },
-        "url": { "type": ["string", "null"] },
-        "password_secret_ref": { "type": ["string", "null"] }
+        "status": {
+          "type": "string",
+          "enum": [
+            "unavailable",
+            "available"
+          ]
+        },
+        "available_from_session": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        },
+        "host": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password_secret_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "if": {
-        "properties": { "status": { "const": "unavailable" } },
-        "required": ["status"]
+        "properties": {
+          "status": {
+            "const": "unavailable"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "then": {
         "properties": {
-          "host": { "type": "null" },
-          "port": { "type": "null" },
-          "url": { "type": "null" },
-          "password_secret_ref": { "type": "null" }
+          "host": {
+            "type": "null"
+          },
+          "port": {
+            "type": "null"
+          },
+          "url": {
+            "type": "null"
+          },
+          "password_secret_ref": {
+            "type": "null"
+          }
         }
       },
       "else": {
         "properties": {
-          "host": { "type": "string", "minLength": 1 },
-          "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-          "url": { "$ref": "#/$defs/postgresUrl" },
-          "password_secret_ref": { "type": "string", "minLength": 1 }
+          "host": {
+            "type": "string",
+            "minLength": 1
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "url": {
+            "$ref": "#/$defs/postgresUrl"
+          },
+          "password_secret_ref": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       }
     },
-
     "postgresUrl": {
       "type": "string",
       "pattern": "^postgresql://[a-z_][a-z0-9_]*@[a-z0-9.-]+:[0-9]{1,5}/[a-z_][a-z0-9_]*(\\?[A-Za-z0-9._~=&%-]+)?$",
       "maxLength": 512,
       "description": "A role and a host, never a password. The userinfo component admits one identifier and no colon, so `postgresql://role:secret@host/db` cannot validate. This is the same rule `httpsUrl` states for the public surfaces, applied where it matters most."
     },
-
     "accessProfiles": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["runtime_pooled", "runtime_direct", "migration_direct"],
+      "required": [
+        "runtime_pooled",
+        "runtime_direct",
+        "migration_direct"
+      ],
       "description": "Version 4, ADR 0041. Three ways to reach two transports. The endpoints say *where*; these say *as whom*, so a reader can answer 'what may this credential do' without consulting the code. Each profile's transport is fixed by a const here rather than merely typed, because a profile named `runtime_pooled` that pointed at the direct transport would be a document that validates and lies.",
       "properties": {
         "runtime_pooled": {
           "allOf": [
-            { "$ref": "#/$defs/accessProfile" },
-            { "properties": { "transport": { "const": "pooled" } } }
+            {
+              "$ref": "#/$defs/accessProfile"
+            },
+            {
+              "properties": {
+                "transport": {
+                  "const": "pooled"
+                }
+              }
+            }
           ]
         },
         "runtime_direct": {
           "allOf": [
-            { "$ref": "#/$defs/accessProfile" },
-            { "properties": { "transport": { "const": "direct" } } }
+            {
+              "$ref": "#/$defs/accessProfile"
+            },
+            {
+              "properties": {
+                "transport": {
+                  "const": "direct"
+                }
+              }
+            }
           ]
         },
         "migration_direct": {
           "allOf": [
-            { "$ref": "#/$defs/accessProfile" },
-            { "properties": { "transport": { "const": "direct" } } }
+            {
+              "$ref": "#/$defs/accessProfile"
+            },
+            {
+              "properties": {
+                "transport": {
+                  "const": "direct"
+                }
+              }
+            }
           ]
         }
       }
     },
-
     "accessProfile": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "available_from_session", "transport", "role", "password_secret_ref"],
+      "required": [
+        "status",
+        "available_from_session",
+        "transport",
+        "role",
+        "password_secret_ref"
+      ],
       "description": "`transport` and `role` are derivations and are present from the first render: the transport is fixed by the profile's name and the role comes from `naming`, so nulling them while unavailable would hide a fact the document already knows. `password_secret_ref` is the one member that waits, because a secret reference names something that must have been declared.",
       "properties": {
-        "status": { "type": "string", "enum": ["unavailable", "available"] },
-        "available_from_session": { "type": "integer", "minimum": 1, "maximum": 12 },
-        "transport": { "type": "string", "enum": ["pooled", "direct"] },
-        "role": { "$ref": "#/$defs/postgresIdentifier" },
-        "password_secret_ref": { "type": ["string", "null"] }
+        "status": {
+          "type": "string",
+          "enum": [
+            "unavailable",
+            "available"
+          ]
+        },
+        "available_from_session": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        },
+        "transport": {
+          "type": "string",
+          "enum": [
+            "pooled",
+            "direct"
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/postgresIdentifier"
+        },
+        "password_secret_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       },
       "if": {
-        "properties": { "status": { "const": "unavailable" } },
-        "required": ["status"]
+        "properties": {
+          "status": {
+            "const": "unavailable"
+          }
+        },
+        "required": [
+          "status"
+        ]
       },
       "then": {
-        "properties": { "password_secret_ref": { "type": "null" } }
+        "properties": {
+          "password_secret_ref": {
+            "type": "null"
+          }
+        }
       },
       "else": {
-        "properties": { "password_secret_ref": { "type": "string", "minLength": 1 } }
+        "properties": {
+          "password_secret_ref": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
       }
+    },
+    "apiConnectionBudget": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many cluster connections the REST service commits to: its declared `api.rest.pool_size` plus the reservations `config.postgrest_connection_budget` adds. Published because the bootstrap plane reads only this document and cannot otherwise see a manifest figure, which is the half of D161's arithmetic that had nowhere to come from. The *application's* limit is deliberately absent: it is what the live server has left after this and the administration reserve, and a rendered document naming it would be publishing a guess about a server nobody has queried (D94). Version 8, ADR 0070."
     }
   }
 }

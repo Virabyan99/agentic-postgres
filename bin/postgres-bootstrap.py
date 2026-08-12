@@ -629,23 +629,41 @@ def connection_budget(container: str, database: str) -> tuple[int, int]:
     return maximum, reserved
 
 
-def app_runtime_connection_limit(maximum: int, reserved: int) -> int:
-    """What one application may hold, leaving the rest reachable.
+def connection_limits(maximum: int, reserved: int, api_budget: int) -> tuple[int, int]:
+    """The application's ceiling and the API's, computed together (D161, ADR 0070).
+
+    Together is the whole point. `app_runtime` used to be given
+    `maximum - reserved - headroom` -- everything -- and the authenticator was
+    given nothing, because a ceiling for the API on top of *everything* is two
+    limits that sum past what the server will hand out. A budget that looks
+    computed and is not.
+
+    So the division is: the API takes the commitment the manifest was checked
+    against, the operational headroom is held back, and **the application gets
+    what is left**. That last part is deliberate rather than a leftover. The
+    application role serves both the pooler's server-side pool and the direct
+    access profile, so a ceiling of `database.pool_size` would refuse a
+    developer's direct session whenever the pooler was busy -- and any allowance
+    added on top would be a number nobody measured.
 
     Returned rather than applied so the arithmetic is testable without a
-    cluster: the interesting cases are a tiny `max_connections` and a large
-    reservation, and both produce a limit this function must refuse to make
-    absurd rather than a negative number PostgreSQL would take as "unlimited".
+    cluster. The interesting cases are a small `max_connections` and a large
+    reservation, and both must raise rather than produce a value PostgreSQL
+    reads as something else: a negative limit is "unlimited" and 0 is "refuse
+    every login", so an error here is the only honest failure.
     """
-    available = maximum - reserved - OPERATIONAL_CONNECTION_HEADROOM
-    if available < 1:
+    available = maximum - reserved
+    application = available - api_budget - OPERATIONAL_CONNECTION_HEADROOM
+    if application < 1:
         raise ValueError(
-            f"max_connections={maximum} with {reserved} reserved leaves nothing for an "
-            f"application after {OPERATIONAL_CONNECTION_HEADROOM} operational sessions. "
-            "Raise database.max_connections, or lower the reservation; do not remove "
-            "the headroom, because it is what leaves a psql available when this is wrong"
+            f"max_connections={maximum} with {reserved} reserved leaves {available} usable; "
+            f"the API commits {api_budget} and {OPERATIONAL_CONNECTION_HEADROOM} are held "
+            "for operations, so the application would be left with "
+            f"{application}. Raise database.max_connections or lower api.rest.pool_size; "
+            "do not remove the headroom, because it is what leaves a psql available when "
+            "this is wrong"
         )
-    return available
+    return application, api_budget
 
 
 def app_runtime_password_available(project_key: str) -> bool:
@@ -888,9 +906,12 @@ def main() -> int:
     # through an earlier session has no such secret, and refusing outright would
     # make this program unusable on the very projects the convergence path
     # exists for.
+    maximum, reserved = connection_budget(container, database)
+    api_budget = int(document["database"]["api_connection_budget"])
+    runtime_limit, api_limit = connection_limits(maximum, reserved, api_budget)
+
     if app_runtime_password_available(key):
-        maximum, reserved = connection_budget(container, database)
-        limit = app_runtime_connection_limit(maximum, reserved)
+        limit = runtime_limit
         apply_credential(
             container,
             database,
@@ -903,21 +924,12 @@ def main() -> int:
     else:
         print("  runtime credential absent from this generation; role left NOLOGIN")
 
-    # The API's authenticator. Same shape, same idempotence, same loud skip --
-    # and deliberately **no CONNECTION LIMIT**, which is a decision rather than
-    # an omission (D161).
-    #
-    # A limit for this role is only meaningful beside a reduced one for
-    # `app_runtime`: the two draw on one `max_connections`, and setting the
-    # API's ceiling without lowering the application's produces two limits that
-    # sum past what the server will give out. That is a budget that looks
-    # computed and is not, which is the failure this project keeps producing.
-    #
-    # The arithmetic also needs the declared pool size, and the rendered
-    # document carries no `api` block for this plane to read. Both halves land
-    # with the live re-computation of the connection budget (plan 3.2
-    # measurement 5), which queries the server rather than extrapolating -- the
-    # rule D94 set and the one the manifest-side check already follows.
+    # The API's authenticator, with the ceiling that used to have nowhere to
+    # come from (D161 closed, ADR 0070). Its figure is the document's, which is
+    # the figure `config.postgrest_connection_budget` computed and the manifest
+    # was checked against; the application's is what the live server has left
+    # after it. Both were computed above, from one query, so neither can be set
+    # without the other having been.
     authenticator_secret = materialized_secret_path(key, POSTGREST_CONSUMER)
     if authenticator_secret is not None:
         apply_credential(
@@ -925,8 +937,9 @@ def main() -> int:
             database,
             roles["postgrest_authenticator"],
             read_postgrest_password(authenticator_secret),
+            connection_limit=api_limit,
         )
-        print("  API authenticator credential set, no CONNECTION LIMIT yet (D161)")
+        print(f"  API authenticator credential set, CONNECTION LIMIT {api_limit}")
     else:
         print("  API authenticator credential absent from this generation; role left NOLOGIN")
 

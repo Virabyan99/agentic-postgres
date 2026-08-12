@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 7
+CURRENT_VERSION = 8
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -211,6 +211,7 @@ def migrate_rendered(
     access_profiles: dict[str, dict[str, Any]],
     documentation_role: str,
     statement_timeouts: dict[str, str],
+    api_connection_budget: int,
 ) -> dict[str, Any]:
     """Migrate a version 1, 2, 3, 4, 5 or 6 ``rendered`` document to the current version.
 
@@ -231,8 +232,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6}:
-        raise MigrationError(f"only versions 1, 2, 3, 4, 5 and 6 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7}:
+        raise MigrationError(f"only versions 1, 2, 3, 4, 5, 6 and 7 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -250,7 +251,10 @@ def migrate_rendered(
     if detect_version(document) == 5:
         document = migrate_v5_to_v6(document, documentation_role=documentation_role)
 
-    return migrate_v6_to_v7(document, statement_timeouts=statement_timeouts)
+    if detect_version(document) == 6:
+        document = migrate_v6_to_v7(document, statement_timeouts=statement_timeouts)
+
+    return migrate_v7_to_v8(document, api_connection_budget=api_connection_budget)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -633,6 +637,62 @@ def migrate_v6_to_v7(
     return migrated
 
 
+def migrate_v7_to_v8(document: dict[str, Any], *, api_connection_budget: int) -> dict[str, Any]:
+    """Return a version 8 ``rendered`` document derived from a version 7 one.
+
+    Version 8 adds ``database.api_connection_budget``: how many cluster
+    connections the REST service commits to. Before it, the bootstrap plane --
+    which reads only this document -- could not see the declared pool at all, so
+    it gave the application role everything the server had and left the API
+    unbounded, because bounding one without the other produces two limits that
+    sum past what the server will hand out (D161, ADR 0070).
+
+    Required rather than derived, for the reason every argument here is: the
+    figure comes from a manifest this document does not carry, and
+    ``config.postgrest_connection_budget`` is its one authority. This validates
+    what it is handed -- a positive integer, and one that leaves room for the
+    administration reserve beside it -- and computes nothing.
+    """
+    version = detect_version(document)
+    if version == 8:
+        raise MigrationError("document is already version 8; migration would be a no-op")
+    if version != 7:
+        raise MigrationError(f"only version 7 can be migrated to 8, got {version}")
+
+    require_kind(document, "rendered")
+
+    if "api_connection_budget" in document.get("database", {}):
+        raise MigrationError(
+            "database already carries api_connection_budget; this is not a version 7 document"
+        )
+
+    if isinstance(api_connection_budget, bool) or not isinstance(api_connection_budget, int):
+        raise MigrationError(
+            f"api_connection_budget must be an integer, got {api_connection_budget!r}"
+        )
+    if api_connection_budget < 1:
+        raise MigrationError(
+            f"api_connection_budget is {api_connection_budget}; a service that commits no "
+            "connection cannot serve a request, and 0 is how PostgreSQL spells "
+            "'reject every login' rather than 'unlimited'"
+        )
+
+    # The budget the document already carries is what the manifest asked the
+    # server for. A commitment that does not fit inside it was never going to
+    # be applicable, and refusing here is cheaper than discovering it on a host.
+    maximum = int(document["database"]["budget"]["max_connections"])
+    if api_connection_budget >= maximum:
+        raise MigrationError(
+            f"api_connection_budget ({api_connection_budget}) leaves nothing of "
+            f"max_connections ({maximum}) for the application or for administration"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["database"]["api_connection_budget"] = api_connection_budget
+    migrated["schema_version"] = 8
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -657,5 +717,6 @@ __all__ = [
     "migrate_v4_to_v5",
     "migrate_v5_to_v6",
     "migrate_v6_to_v7",
+    "migrate_v7_to_v8",
     "require_kind",
 ]

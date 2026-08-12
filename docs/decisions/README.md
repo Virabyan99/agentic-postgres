@@ -133,3 +133,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0067](0067-a-validated-value-must-reach-the-plane-that-applies-it.md) | A validated value must reach the plane that applies it | 5 | Accepted |
 | [0068](0068-the-pre-request-hook-carries-the-roles-statement-timeout.md) | The pre-request hook carries the role's statement timeout | 5 | Accepted |
 | [0069](0069-the-documentation-page-is-a-first-party-build-under-our-own-csp.md) | The documentation page is a first-party build under our own CSP | 5 | Accepted |
+| [0070](0070-the-connection-budget-is-divided-not-granted-twice.md) | The connection budget is divided, not granted twice | 5 | Accepted |

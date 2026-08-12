@@ -300,3 +300,86 @@ def test_a_document_naming_no_timeouts_asks_the_catalog_nothing(
     monkeypatch.setattr(bootstrap, "query", recording)
     assert bootstrap.check_violations("c", "d", document) == []
     assert not any("rolconfig" in sql for sql in asked)
+
+
+# ---------------------------------------------------------------------------
+# The connection budget, divided (D161, ADR 0070)
+# ---------------------------------------------------------------------------
+
+
+def test_the_two_limits_and_the_reserve_fit_what_the_server_will_give(bootstrap: Any) -> None:
+    """The property the old code could not have: the parts add up.
+
+    `app_runtime` used to be given `maximum - reserved - headroom` -- everything
+    -- and the authenticator nothing, because a ceiling for the API on top of
+    everything is two limits that sum past what the server hands out. That is a
+    budget that looks computed and is not.
+    """
+    maximum, reserved, api_budget = 50, 3, 13
+    application, api = bootstrap.connection_limits(maximum, reserved, api_budget)
+
+    assert api == api_budget, "the API's ceiling is not the figure the document published"
+    assert application > 0
+    assert application + api + bootstrap.OPERATIONAL_CONNECTION_HEADROOM == maximum - reserved, (
+        "the two limits and the operational headroom do not account for exactly what the "
+        "server will hand out; one of them is being computed independently of the other"
+    )
+
+
+def test_the_application_gets_what_is_left_rather_than_a_chosen_number(bootstrap: Any) -> None:
+    """Raising the API's commitment lowers the application's, one for one.
+
+    Written as a difference rather than against a literal: a division that
+    ignored the API's figure would return the same number for both calls and
+    pass any single-value assertion.
+    """
+    small, _ = bootstrap.connection_limits(50, 3, 10)
+    large, _ = bootstrap.connection_limits(50, 3, 20)
+    assert small - large == 10, (
+        "the application's ceiling did not move with the API's; the two are not being "
+        "divided out of one budget"
+    )
+
+
+def test_the_headroom_is_held_back_from_both(bootstrap: Any) -> None:
+    """It is what leaves a psql available when this arithmetic is wrong."""
+    application, api = bootstrap.connection_limits(50, 3, 13)
+    assert (50 - 3) - application - api == bootstrap.OPERATIONAL_CONNECTION_HEADROOM
+
+
+@pytest.mark.parametrize(
+    ("maximum", "reserved", "api_budget"),
+    [
+        (10, 3, 13),  # the API alone exceeds what is available
+        (10, 3, 2),  # nothing left after the headroom
+        (8, 3, 1),  # a tiny cluster
+        (5, 5, 1),  # the reservation takes everything
+    ],
+)
+def test_a_budget_that_does_not_fit_raises_rather_than_returning_a_number(
+    bootstrap: Any, maximum: int, reserved: int, api_budget: int
+) -> None:
+    """A negative limit is 'unlimited' to PostgreSQL and 0 is 'refuse every login'.
+
+    Both are values it would accept and neither is what the arithmetic meant, so
+    an error is the only honest failure. Written as literals rather than derived
+    from the constant, so emptying the constant cannot empty the parameter set
+    (D190).
+    """
+    with pytest.raises(ValueError, match=r"would be left with|leaves"):
+        bootstrap.connection_limits(maximum, reserved, api_budget)
+
+
+def test_the_authenticator_is_activated_with_its_ceiling(bootstrap: Any) -> None:
+    """D161 is closed, and the comment that recorded it is gone.
+
+    The role was activated with LOGIN and a password and deliberately no
+    CONNECTION LIMIT, because half the arithmetic had nowhere to come from. The
+    document now carries that half.
+    """
+    source = (REPO_ROOT / "bin" / "postgres-bootstrap.py").read_text(encoding="utf-8")
+    assert "no CONNECTION LIMIT yet" not in source, "the D161 placeholder is still in the code"
+    assert "connection_limit=api_limit" in source, "the authenticator is activated without a limit"
+    assert 'api_budget = int(document["database"]["api_connection_budget"])' in source, (
+        "the API's ceiling is computed here rather than read from the document"
+    )

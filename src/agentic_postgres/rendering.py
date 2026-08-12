@@ -130,6 +130,23 @@ def input_digests(project_path: Path, capabilities_path: Path) -> dict[str, str]
 DEFAULT_APP_RUNTIME_STATEMENT_TIMEOUT = "30s"
 
 
+def resolve_api_connection_budget(project: dict[str, Any]) -> int:
+    """What the REST service commits to, from `config` rather than from arithmetic here.
+
+    One answer, computed in one place (ADR 0002 applied to a number). The
+    manifest-side budget check reasons about this same figure, so a second sum
+    written here would agree today and diverge on the day one of them changed --
+    which is the only day it would matter.
+
+    A project with no REST service still publishes one: the reservations are
+    what a service *would* take, and a document whose value depended on whether
+    a service happened to be enabled would make the bootstrap's division of the
+    budget depend on it too.
+    """
+    rest = ((project.get("api") or {}).get("rest")) or {}
+    return config.postgrest_connection_budget(rest)
+
+
 def resolve_statement_timeouts(project: dict[str, Any], roles: dict[str, str]) -> dict[str, str]:
     """Resolve the manifest's suffix-keyed timeouts to derived role names.
 
@@ -238,7 +255,7 @@ def build_outputs(
         # `ROLE_SUFFIXES`. Appending the role there is the whole change, which is
         # what single-authority derivation is for -- a second list here would be
         # the place the two could disagree.
-        "schema_version": 7,
+        "schema_version": 8,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
@@ -272,6 +289,7 @@ def build_outputs(
             # plane -- the only plane that may ALTER ROLE (D102) -- applies a
             # name it was given rather than deriving one (ADR 0067).
             "statement_timeouts": resolve_statement_timeouts(project, dict(identity.roles)),
+            "api_connection_budget": resolve_api_connection_budget(project),
         },
         "routes": {
             "rest": identity.route_rest,
