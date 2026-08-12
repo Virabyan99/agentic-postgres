@@ -903,7 +903,7 @@ registry records as an activation obligation rather than leaving to memory.
 
 ### Run 9 — The host sequence
 *Host, and off-host for the negative proof. The first run that changes what is
-reachable.* **In progress.**
+reachable.* **Done.**
 
 > **The first live deploy failed at step 1 and never touched the host** (D178,
 > ADR 0062). `${POSTGREST_CORS_ORIGINS:?required}` refuses an empty value as
@@ -1028,6 +1028,81 @@ Run 6 measured — `Path(/docs/rest) || PathPrefix(/docs/rest/)`, never a bare
 document rather than from a constant this run chooses. Run 8 found the two
 disagreeing and closed it; if a router here is built from anything but
 `routes.rest.url` and `routes.docs.url`, that is the same defect returning.
+
+> **Done.** Both projects are deployed through session 5 at `c64bd33`, ten
+> migrations applied through `bin/migrate.sh`, and the live suite stands at
+> **103 passed, 2 failed** — both failures the documentation service, which does
+> not exist. The progression across the run's five host suites was 8 → 5 → 4 →
+> 3 → 2 failures, and no earlier session ever regressed.
+>
+> **Four product defects, five harness faults, and the four defects are two
+> defects at four boundaries.** D188 (a constant measured against a rig that did
+> not set `openapi-security-active`) and D192 (`PGRST_DB_PRE_REQUEST` set by the
+> behaviour rig and never by the product) are one shape: *a rig is a second
+> configuration of the product* — ADR 0065, ADR 0066. D197 (the manifest's
+> `statement_timeouts` validated and dropped at the rendering boundary) and D198
+> (the same values applied to the roles and read by no request, because
+> PostgreSQL processes a role's settings only at login and `SET LOCAL ROLE` is
+> not one) are the other: *a validated value must reach the plane that applies
+> it*, and **the far side of one plane is the near side of the next** — ADR 0067,
+> ADR 0068.
+>
+> **What the run measured, arm by arm, that a plan could not have asserted.**
+> `--dump-config` reports the full hoist default for an *empty* value exactly as
+> for an absent one, so `PGRST_DB_HOISTED_TX_SETTINGS: ""` never disabled
+> anything (D199). `db-config` — not the hoist list — is what carries a role
+> setting into a request, so the one-variable fix was the one that reverses a
+> reviewed decision. A setting on the *authenticator* binds, because that role
+> logs in, and gives one timeout to every request role. And `SECURITY DEFINER`
+> makes `current_user` the function's owner, so the first carrier looked up the
+> owner's timeout, found none, set nothing, and read exactly like a hook that had
+> run and found nothing to do.
+>
+> **The batteries found what review did not.** Twenty-three mutations across
+> three batteries, and three came back green: a fake catalog that answered for a
+> role it had been told was absent; a `HOOK_DEFINITION` prefix that a renamed
+> function still matched; and a fix-forward check satisfied by `RAISE NOTICE`
+> (D199, D200). **The tests that most need a battery are the ones written as
+> controls for other tests**, because nothing else is watching them.
+>
+> **What Run 9 did not do.** `SEC-DOCS-001` and `DEP-ISO-005` fail on
+> `routes.docs` being `null`, which is Run 9a. The host gate's `--junitxml` is
+> still written root-owned by a `sudo` pytest (D194's remainder),
+> `test_compose_contract.py` still skips its module by default, and
+> `test_the_probe_can_tell_a_trusted_path_from_an_authenticated_one` has a
+> readiness race in its fixture — a flake in a test whose whole job is being a
+> control. All four are Run 10's.
+
+### Run 9a — The documentation service
+*Offline for the decision, then host.* **Next.**
+
+**The service does not exist.** `services/docs/` is a `.gitkeep`, `compose.yaml`
+declares no such service, and `routes.docs` publishes `null` — which is what
+both remaining live failures land on. D128's choice between an upstream Scalar
+image and a first-party build is recorded in this plan as settled in Run 1, and
+**it is not**: no ADR records a decision and nothing implements one. That is a
+divergence between this document and the repository, and it is resolved by
+measuring rather than by reading the row again.
+
+Measure before choosing. An upstream image is a fourth pinned image with its own
+digest, its own release cadence and its own opinion about where it fetches a
+document from — and D127's standing lesson is that a version claim is a
+documentation claim. A first-party build is a Dockerfile this repository owns,
+which is what `services/clients/` already is. Whichever it is, the page is served
+behind the same edge, at the path `routes.docs.url` names and no other (ADR 0061,
+D177), with the segment-safe rule (ADR 0059, D162), and it reads the reviewed
+snapshot at `contracts/postgrest-openapi.canonical.json` rather than fetching
+live from PostgREST — the snapshot is the reviewed artefact and the live document
+is not.
+
+Two things the run must not lose. The documentation credential is a `docs`
+consumer in `secrets.required.yaml` with its own generation, and
+`SEC-DOCS-001` asserts it reaches no service and no served byte — so the page
+must not carry it into anything a browser can read. And the published document
+advertises `DELETE`, `PATCH` and `POST` on both views while all three return
+**403** (ADR 0060); no setting filters methods by grant, so **the page's own text
+has to say so**, or the documentation is the first thing that lies about the
+surface.
 
 ### Run 10 — Restart, rotation, documentation, and the gate
 *Host, one maintenance window, then all three environments.*
