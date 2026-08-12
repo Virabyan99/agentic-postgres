@@ -4,6 +4,17 @@ For whoever (or whatever) picks this up next. Onboarding is in
 [new-team-member.md](new-team-member.md); this file covers only the things
 about *this machine* that are not obvious from the repository.
 
+
+## Session 5's documents
+
+- [The API surface](api-surface.md) — what is published, the four
+  authorities in order, and the three verbs the document advertises and the
+  surface refuses.
+- [API operations](api-operations.md) — the divided connection budget, the
+  restart matrix, and rotating each of the three credentials.
+- [Session 5 operator guide](session-05-operator-guide.md) — deploying,
+  capturing the snapshot, the gate's three modes, and the evidence merge.
+
 ## Where the project lives
 
 ```

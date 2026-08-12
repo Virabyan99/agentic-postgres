@@ -17,6 +17,7 @@ host's own bridge. See
 [What is intentionally unavailable](#what-is-intentionally-unavailable).
 
 - [Session 4 operator guide](docs/session-04-operator-guide.md) — **start here to give a project its transports**
+- [Session 5 operator guide](docs/session-05-operator-guide.md) — **start here to give a project its transports**
 - [Database connections](docs/database-connections.md) · [Client compatibility](docs/client-compatibility.md) · [Pool operations](docs/pool-operations.md)
 - [Session 3 operator guide](docs/session-03-operator-guide.md) — deploying a project with its database
 - [The database](docs/database.md) · [Migrations](docs/migrations.md) · [Database security](docs/database-security.md)
