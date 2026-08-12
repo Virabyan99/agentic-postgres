@@ -423,3 +423,122 @@ def test_the_pool_numbers_are_the_manifests() -> None:
     assert env["POSTGREST_POOL_SIZE"] == str(manifest["pool_size"])
     assert env["POSTGREST_POOL_MAX_IDLE"] == str(manifest["pool_max_idle_seconds"])
     assert env["POSTGREST_POOL_MAX_LIFETIME"] == str(manifest["pool_max_lifetime_seconds"])
+
+
+# ---------------------------------------------------------------------------
+# ADR 0066 -- the rig and the product are one configuration, not two
+# ---------------------------------------------------------------------------
+
+#: The behaviour rig. It builds a real PostgREST from the locked image and is a
+#: maintained statement of what one needs in order to work, which is why the
+#: product is tied to it rather than to a second hand-written list that would
+#: drift from both.
+BEHAVIOUR_RIG = REPO_ROOT / "tests" / "contract" / "test_api_behaviour.py"
+
+#: Settings the rig legitimately has and the product must not copy. Each would
+#: carry its reason, because an exemption is a decision a reviewer sees where an
+#: absence is not.
+#:
+#: **It is empty, and that is the finding.** The first draft of this table
+#: exempted seven names on the assumption that a rig's throwaway cluster, its
+#: constant signing key and its wildcard bind were rig-only. Every one of them
+#: is set by the product too -- with an interpolation rather than a literal,
+#: which is a difference in *value* and not in *presence*. The rule is about
+#: presence. Once `PGRST_DB_PRE_REQUEST` is set, the rig configures nothing the
+#: product does not, and the honest exemption list is no entries at all.
+RIG_ONLY: dict[str, str] = {}
+
+
+def _rig_settings() -> set[str]:
+    """Every `PGRST_*` name the behaviour rig passes to `docker run`.
+
+    Read out of the rig's source rather than by importing it, because importing
+    would run a module that starts containers.
+    """
+    source = BEHAVIOUR_RIG.read_text(encoding="utf-8")
+    return set(re.findall(r"PGRST_[A-Z0-9_]+", source))
+
+
+def test_every_setting_the_behaviour_rig_configures_is_configured_by_the_product(
+    environment: dict[str, str],
+) -> None:
+    """ADR 0066. A rig is a second configuration, and nothing compared them.
+
+    `PGRST_DB_PRE_REQUEST` was set by the rig at `test_api_behaviour.py` and by
+    nothing else. Migration 0008 created the hook, migration 0009 replaced it,
+    both granted EXECUTE on it by name, and 0008 ended with a schema reload
+    under a comment beginning "db-pre-request names a function" -- while the
+    product never told PostgREST to call it. The identity plane was built,
+    granted, commented, reloaded, and never wired. Four of Run 9's eight live
+    failures had that one cause (D192).
+
+    Goes red if a `PGRST_*` is added to the rig and neither set by the model nor
+    exempted. It does **not** assert the reverse: the rig legitimately omits
+    routing, CORS and pool settings that have no bearing on behaviour, and
+    requiring symmetry would produce an exemption list nobody reads.
+    """
+    rig = _rig_settings()
+
+    # The control. A regex that matched nothing would pass this test forever,
+    # and these two are the rig's whole reason for existing.
+    assert {"PGRST_DB_PRE_REQUEST", "PGRST_OPENAPI_MODE"} <= rig, (
+        f"the rig scan found {sorted(rig)}; it is not reading the rig's settings"
+    )
+
+    missing = sorted(name for name in rig if name not in environment and name not in RIG_ONLY)
+    assert not missing, (
+        f"the behaviour rig configures {missing}, which compose.yaml does not set. "
+        "Either set it on the product, or add it to RIG_ONLY with the reason it is "
+        "rig-only. A setting only the rig has is a behaviour only the rig has."
+    )
+
+
+def test_nothing_is_exempted_today() -> None:
+    """The emptiness of `RIG_ONLY` is asserted, not left to be noticed.
+
+    A loop over an empty table passes by iterating nothing, which is how a rule
+    stops enforcing without anyone seeing it go (D190). So the count is a test:
+    adding an exemption fails here as well as satisfying the check above, and
+    that second edit is the reviewer's chance to ask whether the setting is
+    really rig-only or the product is simply missing it. That question, unasked,
+    is what ADR 0066 exists about.
+    """
+    assert RIG_ONLY == {}, (
+        f"exemptions were added: {sorted(RIG_ONLY)}. Each is a claim that the product "
+        "does not need a setting the rig does. Confirm that, then update this test."
+    )
+
+
+def test_the_exemptions_name_settings_the_rig_actually_uses(
+    environment: dict[str, str],
+) -> None:
+    """An exemption for a setting nobody sets is a rule quietly losing coverage.
+
+    Vacuous while `RIG_ONLY` is empty, which the test above is what makes
+    visible. It guards the entries the day there are any: an exemption left
+    behind after its setting leaves the rig, and an exemption written for
+    something the product *does* set -- which reads as "rig-only" about a shared
+    setting, and is the mistake this table's first draft made in all seven of
+    its entries.
+    """
+    rig = _rig_settings()
+    for name, reason in sorted(RIG_ONLY.items()):
+        assert name in rig, f"{name} is exempted but the rig does not set it; delete the exemption"
+        assert name not in environment, (
+            f"{name} is exempted as rig-only but compose.yaml sets it; delete the exemption"
+        )
+        assert reason.strip(), f"{name} is exempted with no reason"
+
+
+def test_the_pre_request_hook_is_schema_qualified(environment: dict[str, str]) -> None:
+    """ADR 0052: `app_private` is on no request role's search_path.
+
+    Goes red if the hook is ever named bare. Measured in Run 4's rig: an
+    unresolvable hook does not stop the service and does not skip the hook -- it
+    starts, reports a warm schema cache, and answers every request with a 404
+    (D145). An unqualified name is exactly that failure, and it looks healthy.
+    """
+    hook = environment["PGRST_DB_PRE_REQUEST"]
+    schema, _, function = hook.partition(".")
+    assert schema == "app_private", f"the hook is in app_private, not {schema!r}"
+    assert function == "postgrest_pre_request", f"unexpected hook function {function!r}"

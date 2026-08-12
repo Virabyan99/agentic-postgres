@@ -561,6 +561,22 @@ services:
       PGRST_DB_CONFIG: "false"
       PGRST_DB_EXTRA_SEARCH_PATH: ""
       PGRST_DB_HOISTED_TX_SETTINGS: ""
+      # The identity plane. Migration 0008 creates this function and migration
+      # 0009 replaces it; without this line PostgREST never calls it, and the
+      # function sits in the database doing nothing. `db-config` is false above,
+      # so an `ALTER ROLE ... SET pgrst.db_pre_request` cannot supply it either:
+      # the environment is the only path, and this is it.
+      #
+      # Not schema-qualified by accident -- `app_private` is not on any request
+      # role's search_path (ADR 0052), so the qualification is load-bearing.
+      #
+      # Measured on the locked image with a control, both arms carrying the same
+      # nine migrations and the same token: with this set, `POST /rpc/create_note`
+      # returns 200 and the row's `owner_id` is the token's `sub`; with it unset,
+      # the same request returns `401 AP401: no request identity for this
+      # transaction` and `GET /notes` returns `[]`. The unset arm reproduced the
+      # deployed failure exactly (ADR 0066, D192).
+      PGRST_DB_PRE_REQUEST: app_private.postgrest_pre_request
       # The schema cache reload channel. This is what makes a migration's
       # NOTIFY reach a running service instead of requiring a restart.
       PGRST_DB_CHANNEL_ENABLED: "true"
