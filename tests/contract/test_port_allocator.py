@@ -326,6 +326,9 @@ def test_an_override_without_an_allocation_publishes_nothing() -> None:
         rest_router_name="apg-alpha-dev-rest",
         buffering_middleware_name="apg-alpha-dev-api-buffering",
         stripprefix_middleware_name="apg-alpha-dev-api-stripprefix",
+        docs_router_name="apg-alpha-dev-docs",
+        docs_auth_middleware_name="apg-alpha-dev-docs-auth",
+        docs_stripprefix_middleware_name="apg-alpha-dev-docs-strip",
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )
@@ -386,6 +389,9 @@ def test_the_override_carries_no_ports_entry_for_any_service() -> None:
         rest_router_name="apg-alpha-dev-rest",
         buffering_middleware_name="apg-alpha-dev-api-buffering",
         stripprefix_middleware_name="apg-alpha-dev-api-stripprefix",
+        docs_router_name="apg-alpha-dev-docs",
+        docs_auth_middleware_name="apg-alpha-dev-docs-auth",
+        docs_stripprefix_middleware_name="apg-alpha-dev-docs-strip",
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )

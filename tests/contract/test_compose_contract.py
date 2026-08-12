@@ -135,10 +135,17 @@ def test_model_references_only_locked_image_variables() -> None:
             )
             continue
 
-        base = service["build"]["args"]["BASE_IMAGE"]
-        assert base.startswith("${") and base.endswith(":?required}"), (
-            f"service {name} builds from an unlocked base image: {base}"
-        )
+        # Every build argument whose name ends in BASE_IMAGE, not the one
+        # spelled `BASE_IMAGE`. `services/docs/` is multi-stage and takes two
+        # (ADR 0069); a rule that read one key would have checked the first
+        # stage and ignored the second, which is the stage that ships.
+        arguments = service["build"]["args"]
+        bases = {key: value for key, value in arguments.items() if key.endswith("BASE_IMAGE")}
+        assert bases, f"service {name} builds from no *BASE_IMAGE argument at all"
+        for key, base in bases.items():
+            assert base.startswith("${") and base.endswith(":?required}"), (
+                f"service {name} builds from an unlocked base image via {key}: {base}"
+            )
 
 
 def test_no_dockerfile_names_its_own_base_image() -> None:

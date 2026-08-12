@@ -689,6 +689,11 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
         rest_router_name=_env_value(compose_env, "REST_ROUTER_NAME"),
         buffering_middleware_name=_env_value(compose_env, "API_BUFFERING_MIDDLEWARE_NAME"),
         stripprefix_middleware_name=_env_value(compose_env, "API_STRIPPREFIX_MIDDLEWARE_NAME"),
+        docs_router_name=_env_value(compose_env, "DOCS_ROUTER_NAME"),
+        docs_auth_middleware_name=_env_value(compose_env, "DOCS_CREDENTIAL_MIDDLEWARE_NAME"),
+        docs_stripprefix_middleware_name=_env_value(
+            compose_env, "DOCS_STRIPPREFIX_MIDDLEWARE_NAME"
+        ),
     )
     _write_root_only(rendered_directory / "runtime-compose.override.yaml", payload)
     print(f"  {rendered_directory / 'runtime-compose.override.yaml'}")
@@ -811,6 +816,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
         stripprefix_middleware_name=_env_value(
             rendered_dir / "compose.env", "API_STRIPPREFIX_MIDDLEWARE_NAME"
+        ),
+        docs_router_name=_env_value(rendered_dir / "compose.env", "DOCS_ROUTER_NAME"),
+        docs_auth_middleware_name=_env_value(
+            rendered_dir / "compose.env", "DOCS_CREDENTIAL_MIDDLEWARE_NAME"
+        ),
+        docs_stripprefix_middleware_name=_env_value(
+            rendered_dir / "compose.env", "DOCS_STRIPPREFIX_MIDDLEWARE_NAME"
         ),
         https_entrypoint=host["edge"]["https_entrypoint"],
         # The installed path, not the checkout's. The override is written into

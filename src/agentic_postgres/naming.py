@@ -274,6 +274,27 @@ def api_stripprefix_middleware_name(key: str) -> str:
     return traefik_name(f"apg-{key}-api-stripprefix", context="traefik_middleware_stripprefix")
 
 
+def docs_stripprefix_middleware_name(key: str) -> str:
+    """The documentation route's strip-prefix middleware.
+
+    Its own, not the REST route's: a middleware name is host-wide in Traefik, so
+    two routes sharing one would strip the same prefix from both -- and the two
+    prefixes differ. The REST middleware strips `/api/rest`; this strips
+    `/docs/rest`.
+    """
+    return traefik_name(f"apg-{key}-docs-strip", context="traefik_middleware_docs_strip")
+
+
+def docs_router_name(key: str) -> str:
+    """The router and service name for one project's documentation page.
+
+    Same construction as the health and REST routers, and for the same reason:
+    one name per route, shared between `routers.<n>.service` and `services.<n>`
+    so the two cannot be mismatched.
+    """
+    return traefik_name(f"apg-{key}-docs", context="traefik_router_docs")
+
+
 def docs_credential_middleware_name(key: str) -> str:
     """The per-project documentation credential middleware.
 
@@ -392,6 +413,13 @@ class ProjectIdentity:
     #: `compose.env`; a middleware name is host-wide in Traefik, so deriving it
     #: is what stops two projects from sharing one.
     rest_router: str = ""
+    #: The documentation page's *path*, and its router. Split from `route_docs`
+    #: for the reason `route_rest_path` is split from `route_rest`: one is the
+    #: URL a person is given and the other is what a rule matches on, and D177
+    #: is what happens when the two are derived twice and drift.
+    route_docs_path: str = ""
+    docs_router: str = ""
+    docs_stripprefix_middleware: str = ""
     api_buffering_middleware: str = ""
     api_stripprefix_middleware: str = ""
     docs_credential_middleware: str = ""
@@ -455,9 +483,12 @@ def derive(
         route_mcp=f"https://{domain}{mcp_base_path}",
         # The page, not the root above it (ADR 0061).
         route_docs=f"https://{domain}{DOCS_PAGE_PATH}",
+        route_docs_path=DOCS_PAGE_PATH,
         route_health=f"https://{domain}{HEALTH_ROUTE_PATH}",
         health_router=health_router_name(key),
         rest_router=rest_router_name(key),
+        docs_router=docs_router_name(key),
+        docs_stripprefix_middleware=docs_stripprefix_middleware_name(key),
         api_buffering_middleware=api_buffering_middleware_name(key),
         api_stripprefix_middleware=api_stripprefix_middleware_name(key),
         docs_credential_middleware=docs_credential_middleware_name(key),

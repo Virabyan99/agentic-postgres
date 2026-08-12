@@ -62,6 +62,24 @@ REST_SERVICE_PORT = 3000
 #: bring this up in the first phase and deadlock exactly as before.
 POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE,)
 
+#: Session 5's documentation service, the port `serve.py` binds, and the
+#: reviewed snapshot it serves.
+#:
+#: The host side of the mount is per-project and therefore lives here; the
+#: container path is fixed, which is what lets `compose.yaml` name it in
+#: `APG_DOCS_SNAPSHOT` while staying project-neutral.
+DOCS_SERVICE = "docs"
+DOCS_SERVICE_PORT = 8080
+SNAPSHOT_FILENAME = "openapi.json"
+SNAPSHOT_CONTAINER_PATH = "/app/snapshot/openapi.json"
+
+#: The Compose key that carries the container path into `serve.py`. Named
+#: here so the model and this module agree through one constant rather than
+#: two spellings -- and so a test comparing them need not write the literal,
+#: which `test_environment_gates.py` would read as an environment variable
+#: the test consumes.
+SNAPSHOT_ENV_KEY = "APG_DOCS_SNAPSHOT"
+
 #: The rendered JWKS, and where PostgREST reads it.
 #:
 #: The host side is per-project and lives in this override; the container side is
@@ -159,6 +177,9 @@ def build_override(
     rest_router_name: str,
     buffering_middleware_name: str,
     stripprefix_middleware_name: str,
+    docs_router_name: str,
+    docs_auth_middleware_name: str,
+    docs_stripprefix_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
@@ -189,6 +210,12 @@ def build_override(
         raise ValueError("buffering_middleware_name is required")
     if not stripprefix_middleware_name:
         raise ValueError("stripprefix_middleware_name is required")
+    if not docs_router_name:
+        raise ValueError("docs_router_name is required")
+    if not docs_auth_middleware_name:
+        raise ValueError("docs_auth_middleware_name is required")
+    if not docs_stripprefix_middleware_name:
+        raise ValueError("docs_stripprefix_middleware_name is required")
     if not https_entrypoint:
         raise ValueError("https_entrypoint is required")
     if not rendered_directory or not rendered_directory.startswith("/"):
@@ -266,7 +293,78 @@ def build_override(
                 # property that lets a verifier hold it at all.
                 "volumes": [f"{rendered_directory}/{JWKS_FILENAME}:{JWKS_CONTAINER_PATH}:ro"],
             },
+            DOCS_SERVICE: {
+                "labels": _docs_labels(
+                    https_entrypoint=https_entrypoint,
+                    docs_router_name=docs_router_name,
+                    docs_auth_middleware_name=docs_auth_middleware_name,
+                    docs_stripprefix_middleware_name=docs_stripprefix_middleware_name,
+                ),
+                # The reviewed snapshot, read-only. The page serves these bytes
+                # and nothing else; `contracts/postgrest-openapi.canonical.json`
+                # is what a human approved and the render copies it here.
+                "volumes": [
+                    f"{rendered_directory}/{SNAPSHOT_FILENAME}:{SNAPSHOT_CONTAINER_PATH}:ro"
+                ],
+            },
         }
+    }
+
+
+def _docs_labels(
+    *,
+    https_entrypoint: str,
+    docs_router_name: str,
+    docs_auth_middleware_name: str,
+    docs_stripprefix_middleware_name: str,
+) -> dict[str, str]:
+    """The documentation router: the same three lessons the REST router carries.
+
+    **The rule is two matchers** (ADR 0059, D162). `PathPrefix` is not
+    segment-aware, so a router ruled ``PathPrefix(`/docs/rest`)`` answers
+    ``/docs/restaurant``. The pair gives a segment boundary: the exact path, and
+    anything strictly beneath it.
+
+    **The path comes from the document** (ADR 0061, D177). ``DOCS_PAGE_PATH`` is
+    written into `compose.env` from ``identity.route_docs_path``, which is the
+    same expression ``route_docs`` is built from -- so the published URL and the
+    rule this matches on cannot drift. They did once, `/docs` against
+    `/docs/rest`, and the copy carrying a comment saying it was kept in step was
+    the one that had not drifted.
+
+    **The prefix is stripped** (D187). `serve.py` serves `/`, `/standalone.js`
+    and `/openapi.json`; without the strip it receives `/docs/rest/standalone.js`
+    and answers 404 -- which at the edge reads as a missing route and is not one.
+
+    The credential middleware is referenced ``@file`` because it is defined by
+    Traefik's *file* provider, not by these labels: a `usersFile` names a path
+    inside the Traefik container and a label cannot carry one
+    (`edge_credentials.py`). A cross-provider reference without the suffix
+    resolves to nothing, and a router whose middleware does not resolve serves
+    the page **without asking for the password**.
+    """
+    router = f"traefik.http.routers.{docs_router_name}"
+    service = f"traefik.http.services.{docs_router_name}"
+    stripprefix = f"traefik.http.middlewares.{docs_stripprefix_middleware_name}"
+    path = "${DOCS_PAGE_PATH:?required}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.rule": (
+            f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
+        ),
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        # Baseline, then the credential, then the strip. The credential is
+        # before the strip because a refusal must not depend on the rewrite
+        # having happened, and after the baseline so a 401 carries the same
+        # response policy every other answer does.
+        f"{router}.middlewares": (
+            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},"
+            f"{docs_auth_middleware_name}@file,{docs_stripprefix_middleware_name}"
+        ),
+        f"{router}.service": docs_router_name,
+        f"{service}.loadbalancer.server.port": str(DOCS_SERVICE_PORT),
+        f"{stripprefix}.stripprefix.prefixes": path,
     }
 
 
@@ -345,6 +443,9 @@ def render_override(
     rest_router_name: str,
     buffering_middleware_name: str,
     stripprefix_middleware_name: str,
+    docs_router_name: str,
+    docs_auth_middleware_name: str,
+    docs_stripprefix_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
@@ -355,6 +456,9 @@ def render_override(
         rest_router_name=rest_router_name,
         buffering_middleware_name=buffering_middleware_name,
         stripprefix_middleware_name=stripprefix_middleware_name,
+        docs_router_name=docs_router_name,
+        docs_auth_middleware_name=docs_auth_middleware_name,
+        docs_stripprefix_middleware_name=docs_stripprefix_middleware_name,
         publications=publications,
     )
     header = (

@@ -90,12 +90,53 @@ def test_the_modes_are_the_ones_a_non_root_container_can_read() -> None:
         assert path.stat().st_mode & 0o777 == rendering.MIGRATION_FILE_MODE, path.name
 
 
+#: The two things in a rendered directory that are not `0600`, and why.
+#:
+#: `migrations` is a directory the installer widens so dbmate can read it.
+#: `openapi.json` is the reviewed OpenAPI snapshot the documentation page
+#: serves: it is a **published document** rather than a description of a
+#: deployment, it is a committed artefact a human approved, and the container
+#: that reads it runs as 65532 rather than as the owner of this directory
+#: (ADR 0069). A `0600` copy would reach the mount unreadable, which `serve.py`
+#: reports as 503 -- correctly, and permanently.
+RENDERED_EXEMPTIONS = {"migrations", rendering.SNAPSHOT_FILENAME}
+
+
 def test_everything_else_in_the_rendered_directory_stays_owner_only() -> None:
     """The exemption is narrow, and this is what keeps it narrow."""
     for path in ALPHA.iterdir():
-        if path.name == "migrations":
+        if path.name in RENDERED_EXEMPTIONS:
             continue
         assert path.stat().st_mode & 0o777 == rendering.FILE_MODE, path.name
+
+
+def test_the_published_snapshot_is_the_only_world_readable_file() -> None:
+    """The exemption list is closed, asserted from the directory rather than from
+    the list.
+
+    Written this way round on purpose: the test above skips what the list names,
+    so a third entry added to the list would silence it. This one goes red for
+    any world-readable file the list does not name, which is the direction that
+    matters.
+    """
+    readable = sorted(
+        path.name for path in ALPHA.iterdir() if path.is_file() and path.stat().st_mode & 0o004
+    )
+    assert readable == [rendering.SNAPSHOT_FILENAME], (
+        f"{readable} are world-readable in the rendered directory. Only the published "
+        "snapshot may be, and only because it is served to the public"
+    )
+
+
+def test_the_published_snapshot_is_the_reviewed_one() -> None:
+    """Copied verbatim, not generated.
+
+    A render that produced its own document would be a second authority on what
+    the API looks like, and the whole point of the reviewed snapshot is that a
+    human approved these exact bytes.
+    """
+    served = (ALPHA / rendering.SNAPSHOT_FILENAME).read_bytes()
+    assert served == rendering.CANONICAL_OPENAPI.read_bytes()
 
 
 def test_the_install_exemption_is_the_migrations_directory_and_nothing_deeper() -> None:

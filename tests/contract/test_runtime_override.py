@@ -29,6 +29,9 @@ ROUTER = "apg-alpha-dev-health"
 REST_ROUTER = "apg-alpha-dev-rest"
 BUFFERING = "apg-alpha-dev-api-buffering"
 STRIPPREFIX = "apg-alpha-dev-api-stripprefix"
+DOCS_ROUTER = "apg-alpha-dev-docs"
+DOCS_AUTH = "apg-alpha-dev-docs-auth"
+DOCS_STRIPPREFIX = "apg-alpha-dev-docs-strip"
 RENDERED = "/var/lib/agentic-postgres/rendered/alpha-dev"
 
 #: Every derived name the override renders into a label key. Collected here so a
@@ -39,6 +42,9 @@ NAMES = {
     "rest_router_name": REST_ROUTER,
     "buffering_middleware_name": BUFFERING,
     "stripprefix_middleware_name": STRIPPREFIX,
+    "docs_router_name": DOCS_ROUTER,
+    "docs_auth_middleware_name": DOCS_AUTH,
+    "docs_stripprefix_middleware_name": DOCS_STRIPPREFIX,
 }
 
 
@@ -106,6 +112,9 @@ def test_the_rendered_document_is_parseable_yaml() -> None:
         "rest_router_name",
         "buffering_middleware_name",
         "stripprefix_middleware_name",
+        "docs_router_name",
+        "docs_auth_middleware_name",
+        "docs_stripprefix_middleware_name",
         "https_entrypoint",
         "rendered_directory",
     ],
@@ -436,6 +445,9 @@ def test_the_mount_and_the_model_name_the_same_file() -> None:
         rest_router_name="rest",
         buffering_middleware_name="buffer",
         stripprefix_middleware_name="strip",
+        docs_router_name="docs",
+        docs_auth_middleware_name="docs-auth",
+        docs_stripprefix_middleware_name="docs-strip",
     )
     mounts = override["services"][runtime_override.REST_SERVICE]["volumes"]
     assert mounts == [
@@ -496,6 +508,9 @@ def test_every_routed_service_carries_the_label_the_edge_filters_on() -> None:
         rest_router_name="rest",
         buffering_middleware_name="buffer",
         stripprefix_middleware_name="strip",
+        docs_router_name="docs",
+        docs_auth_middleware_name="docs-auth",
+        docs_stripprefix_middleware_name="docs-strip",
     )
     model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
 
@@ -557,3 +572,137 @@ def test_the_published_document_describes_the_published_address() -> None:
         mcp_base_path="/mcp",
     )
     assert f"https://{identity.domain}{identity.route_rest_path}" == identity.route_rest
+
+
+# ---------------------------------------------------------------------------
+# The documentation router (ADR 0069, ADR 0061, ADR 0059, D162, D177, D187)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def docs_labels() -> dict[str, str]:
+    document = runtime_override.build_override(
+        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
+    return document["services"][runtime_override.DOCS_SERVICE]["labels"]
+
+
+def test_the_docs_boundary_is_an_exact_path_or_a_child_of_it(docs_labels: dict[str, str]) -> None:
+    """`PathPrefix` alone is not segment-aware (D162).
+
+    Measured against the locked Traefik on the REST route, and the same matcher
+    behaves the same way here: ``PathPrefix(`/docs/rest`)`` answers
+    ``/docs/restaurant``. The pair is the exact path, and anything strictly
+    beneath it.
+    """
+    rule = docs_labels[f"traefik.http.routers.{DOCS_ROUTER}.rule"]
+    path = "${DOCS_PAGE_PATH:?required}"
+    assert f"Path(`{path}`) || PathPrefix(`{path}/`)" in rule
+    assert f"PathPrefix(`{path}`)" not in rule.replace(f"PathPrefix(`{path}/`)", "")
+
+
+def test_the_docs_rule_takes_its_path_from_the_document(docs_labels: dict[str, str]) -> None:
+    """ADR 0061, and the defect it settled.
+
+    The page's path was derived twice and the two disagreed -- `/docs` in
+    `outputs.json`, `/docs/rest` everywhere it was measured -- so a check would
+    have answered 404 rather than 401 (D177). A literal here would be that
+    second derivation, back again.
+    """
+    rule = docs_labels[f"traefik.http.routers.{DOCS_ROUTER}.rule"]
+    assert "${DOCS_PAGE_PATH:?required}" in rule
+    assert "/docs" not in rule, "the rule carries a literal path rather than the derived one"
+
+
+def test_the_docs_credential_middleware_is_referenced_across_providers(
+    docs_labels: dict[str, str],
+) -> None:
+    """`@file`, because the middleware is defined by Traefik's file provider.
+
+    A `usersFile` names a path inside the Traefik container and a label cannot
+    carry one, so `edge_credentials.py` writes the middleware into the dynamic
+    directory instead. A cross-provider reference without the suffix resolves to
+    nothing -- and **a router whose middleware does not resolve serves the page
+    without asking for the password**, which is the failure that looks like
+    success.
+    """
+    chain = docs_labels[f"traefik.http.routers.{DOCS_ROUTER}.middlewares"]
+    assert f"{DOCS_AUTH}@file" in chain, f"the credential middleware is not resolvable: {chain}"
+
+
+def test_the_credential_is_demanded_before_the_prefix_is_stripped(
+    docs_labels: dict[str, str],
+) -> None:
+    """Order is the order a request traverses them.
+
+    The refusal must not depend on the rewrite having happened, and it must come
+    after the baseline so a 401 carries the same response policy every other
+    answer does.
+    """
+    chain = docs_labels[f"traefik.http.routers.{DOCS_ROUTER}.middlewares"]
+    parts = chain.split(",")
+    assert parts[0] == "${BASELINE_MIDDLEWARE_CHAIN:?required}"
+    assert parts.index(f"{DOCS_AUTH}@file") < parts.index(DOCS_STRIPPREFIX)
+
+
+def test_the_docs_prefix_is_stripped(docs_labels: dict[str, str]) -> None:
+    """`serve.py` serves `/`, `/standalone.js` and `/openapi.json` (D187).
+
+    Without the strip it receives `/docs/rest/standalone.js` and answers 404 --
+    which at the edge reads as a missing route and is not one. The prefix
+    stripped is the same expression the rule matches on, so the two cannot
+    disagree.
+    """
+    rule = docs_labels[f"traefik.http.routers.{DOCS_ROUTER}.rule"]
+    stripped = docs_labels[f"traefik.http.middlewares.{DOCS_STRIPPREFIX}.stripprefix.prefixes"]
+    assert stripped == "${DOCS_PAGE_PATH:?required}"
+    assert stripped in rule
+
+
+def test_the_docs_router_and_service_names_agree(docs_labels: dict[str, str]) -> None:
+    assert docs_labels[f"traefik.http.routers.{DOCS_ROUTER}.service"] == DOCS_ROUTER
+    assert docs_labels[f"traefik.http.services.{DOCS_ROUTER}.loadbalancer.server.port"] == str(
+        runtime_override.DOCS_SERVICE_PORT
+    )
+
+
+def test_no_docs_label_key_contains_an_interpolation(docs_labels: dict[str, str]) -> None:
+    """ADR 0013: Compose cannot interpolate inside a label key."""
+    offenders = [key for key in docs_labels if "$" in key]
+    assert not offenders, f"label keys must be fully rendered: {offenders}"
+
+
+def test_the_snapshot_mount_and_the_model_name_the_same_file() -> None:
+    """Two halves of one path, in two files that cannot see each other.
+
+    The host side is per-project and lives in this override; the container side
+    is what `compose.yaml` puts in `APG_DOCS_SNAPSHOT`. A mismatch is a service
+    reading a path nothing wrote -- and Docker answers that by creating a
+    *directory* at the mount source, so the symptom is a document that will not
+    parse rather than a missing file.
+    """
+    document = runtime_override.build_override(
+        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
+    mounts = document["services"][runtime_override.DOCS_SERVICE]["volumes"]
+    assert mounts == [
+        f"{RENDERED}/{runtime_override.SNAPSHOT_FILENAME}:"
+        f"{runtime_override.SNAPSHOT_CONTAINER_PATH}:ro"
+    ]
+
+    model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    environment = model["services"][runtime_override.DOCS_SERVICE]["environment"]
+    declared = environment[runtime_override.SNAPSHOT_ENV_KEY]
+    assert declared == runtime_override.SNAPSHOT_CONTAINER_PATH, (
+        f"compose.yaml reads {declared!r} and the override mounts at "
+        f"{runtime_override.SNAPSHOT_CONTAINER_PATH!r}"
+    )
+
+
+def test_the_snapshot_mount_is_read_only() -> None:
+    """The page serves a reviewed document; it has no business rewriting one."""
+    document = runtime_override.build_override(
+        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
+    for mount in document["services"][runtime_override.DOCS_SERVICE]["volumes"]:
+        assert mount.endswith(":ro"), mount

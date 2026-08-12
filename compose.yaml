@@ -692,6 +692,68 @@ services:
       - edge
       - internal
 
+  # Session 5's documentation page (ADR 0069, D128).
+  #
+  # A first-party build, and the reason is the Content-Security-Policy: the
+  # Scalar bundle is not self-contained at any published version -- measured,
+  # `dist/browser/standalone.js` names `fonts.scalar.com` fourteen times and
+  # `proxy.scalar.com` beside it, with `withDefaultFonts` defaulting to true
+  # (D202). `index.html` turns those off, which is a promise about a third
+  # party's code honouring its own flag; the header `serve.py` sends is a rule
+  # the visitor's browser enforces. Only a build we own can send it, which is
+  # what ruled out the upstream image -- that, and its publishing `latest` only,
+  # so the lock would have recorded a digest with no version identity.
+  docs:
+    build:
+      context: ./services/docs
+      args:
+        NODE_BASE_IMAGE: ${NODE_RUNTIME_IMAGE:?required}
+        PYTHON_BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+    profiles: [session5]
+    restart: "on-failure:5"
+    # The same two labels the REST service carries, for the same two reasons.
+    # `apg.traefik.scope` because `infra/edge/traefik.yaml` constrains on it and
+    # a container without it is invisible to the edge -- a correct router
+    # attached to nothing, answering 404 (D186). `traefik.docker.network`
+    # because this service is on two networks and Traefik cannot choose.
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+    user: "65532:65532"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 5s
+    # No environment beyond the two the server reads for its own paths, and
+    # neither is a secret. This service holds no credential of any kind: the
+    # documentation password is a Traefik concern (a `usersFile` the edge
+    # reads), and `secrets.required.yaml` declares it with a **root-plane
+    # consumer only**, which is what SEC-DOCS-001 asserts. A compose consumer
+    # here would be a container holding the password to its own front door.
+    environment:
+      APG_DOCS_PORT: "8080"
+      APG_DOCS_SNAPSHOT: /app/snapshot/openapi.json
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/__apg/healthz', timeout=2).status==200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # `edge` only. The page reads a file and serves it; it has no reason to
+    # reach the cluster, and the isolation proofs are cheaper to make true than
+    # to argue about. It is the first routed service that is NOT on `internal`.
+    networks:
+      - edge
+
   # Session 4's client compatibility fixtures (DBX-001..005).
   #
   # `session4-verify`, not `session4`, and the distinction is the same one

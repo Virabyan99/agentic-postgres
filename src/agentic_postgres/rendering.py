@@ -46,6 +46,23 @@ SECRET_CONTRACT_PATH = REPO_ROOT / "secrets.required.yaml"
 FILE_MODE = 0o600
 DIRECTORY_MODE = 0o700
 
+#: The reviewed OpenAPI snapshot, and the name it is published under.
+#:
+#: Copied into the rendered directory rather than mounted from the release, so
+#: that what a deployment serves is pinned to what it rendered rather than to
+#: whatever the current release happens to hold.
+CANONICAL_OPENAPI = REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json"
+SNAPSHOT_FILENAME = "openapi.json"
+
+#: World-readable, and the only rendered file that is. Every other file here is
+#: `0600` because it describes a deployment; this one is a **published
+#: document** -- it is served to anyone who can reach the page, it is a
+#: committed artefact a human reviewed, and the container that reads it runs as
+#: 65532 rather than as the owner of the rendered directory. A `0600` copy would
+#: reach the mount and be unreadable, which `serve.py` reports as 503: correct,
+#: and permanently.
+SNAPSHOT_MODE = 0o444
+
 GENERATED_ROOT = REPO_ROOT / ".generated"
 STAGING_ROOT = GENERATED_ROOT / ".staging"
 LOCK_ROOT = GENERATED_ROOT / ".locks"
@@ -398,6 +415,9 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # The path a router rule matches on, derived beside the URL it publishes so
     # that moving the base path cannot move one without moving the other.
     "API_REST_PATH",
+    "DOCS_PAGE_PATH",
+    "DOCS_ROUTER_NAME",
+    "DOCS_STRIPPREFIX_MIDDLEWARE_NAME",
     "REST_ROUTER_NAME",
     "API_BUFFERING_MIDDLEWARE_NAME",
     "API_STRIPPREFIX_MIDDLEWARE_NAME",
@@ -602,6 +622,9 @@ def build_compose_env(
         # filesystem of a container that has no business holding it.
         "API_REQUEST_BODY_MEMORY_BYTES": str(rest["request_body_memory_bytes"]),
         "API_REST_PATH": identity.route_rest_path,
+        "DOCS_PAGE_PATH": identity.route_docs_path,
+        "DOCS_ROUTER_NAME": identity.docs_router,
+        "DOCS_STRIPPREFIX_MIDDLEWARE_NAME": identity.docs_stripprefix_middleware,
         "REST_ROUTER_NAME": identity.rest_router,
         "API_BUFFERING_MIDDLEWARE_NAME": identity.api_buffering_middleware,
         "API_STRIPPREFIX_MIDDLEWARE_NAME": identity.api_stripprefix_middleware,
@@ -911,6 +934,16 @@ def render_project(
             # SQL and the Compose model cannot be derived from two different
             # readings of the same manifest (ADR 0002, ADR 0028).
             write_rendered_migrations(staging, document)
+
+            # The reviewed surface, copied verbatim. Not generated, not
+            # normalized here, not re-derived: `bin/api-contract.py` captures and
+            # a human approves, and this is a copy of that approval (ADR 0069).
+            # A render that produced its own document would be a second
+            # authority on what the API looks like.
+            snapshot = staging / SNAPSHOT_FILENAME
+            snapshot.write_bytes(CANONICAL_OPENAPI.read_bytes())
+            os.chmod(snapshot, SNAPSHOT_MODE)
+            refuse_symlink(snapshot)
 
             if validate_compose:
                 _validate_staged_compose(staging)

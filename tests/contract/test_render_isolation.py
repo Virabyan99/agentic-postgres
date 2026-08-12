@@ -23,6 +23,28 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 
 @pytest.fixture(scope="module")
+def compose_environments() -> tuple[dict[str, str], dict[str, str]]:
+    """Both projects' `compose.env`, parsed.
+
+    A second document beside `outputs.json`, and until Run 9a nothing compared
+    it. Every Traefik router and middleware name lives here and nowhere else,
+    which is how a shared one could exist without any isolation test seeing it.
+    """
+    parsed = []
+    for manifest in ("project.example.yaml", "project.second.example.yaml"):
+        directory = rendering.render_project(
+            REPO_ROOT / manifest, REPO_ROOT / "capabilities.example.yaml"
+        )
+        values = {}
+        for line in (directory / "compose.env").read_text(encoding="utf-8").splitlines():
+            if line and not line.startswith("#") and "=" in line:
+                key, _, value = line.partition("=")
+                values[key] = value
+        parsed.append(values)
+    return parsed[0], parsed[1]
+
+
+@pytest.fixture(scope="module")
 def documents() -> tuple[dict[str, Any], dict[str, Any]]:
     rendered = []
     for manifest in ("project.example.yaml", "project.second.example.yaml"):
@@ -176,3 +198,54 @@ def test_similar_prefixes_actually_exercise_the_comparison() -> None:
         common += 1
 
     assert common >= 10, f"fixtures share only {common} characters; collision risk untested"
+
+
+def test_no_traefik_name_is_shared_between_two_projects(
+    compose_environments: tuple[dict[str, str], dict[str, str]],
+) -> None:
+    """A router or middleware name is **host-wide** in Traefik.
+
+    Two projects sharing one middleware name do not get one middleware each;
+    they get whichever definition the proxy loaded last, applied to both. For
+    the documentation route that means one project's Basic Auth guarding the
+    other project's page -- or neither, which is the direction that serves a
+    protected page to anyone.
+
+    Derived from the environment rather than from a list written here, so a
+    router added in a later session is covered the day it is rendered rather
+    than the day somebody remembers to extend a constant.
+
+    Found by a mutation expected to go red that came out green (D203). Nothing
+    compared these two files, so *no* route's names had ever been asserted
+    project-scoped -- not the documentation route's, and not the REST route's
+    either.
+    """
+    first, second = compose_environments
+    names = sorted(
+        key
+        for key in set(first) & set(second)
+        if key.endswith(("_ROUTER_NAME", "_MIDDLEWARE_NAME"))
+    )
+    assert names, "no Traefik names found in compose.env; this compared nothing"
+
+    shared = sorted(key for key in names if first[key] == second[key])
+    assert not shared, (
+        f"{shared} are identical in both projects. A Traefik name is host-wide, so a "
+        "shared one is two projects using one router or one middleware"
+    )
+
+
+def test_every_route_contributes_a_name_to_that_comparison(
+    compose_environments: tuple[dict[str, str], dict[str, str]],
+) -> None:
+    """The control for the test above.
+
+    A derivation that stopped writing router names to `compose.env` would leave
+    the comparison with nothing to disagree about, and an empty set of shared
+    names reads exactly like a clean one.
+    """
+    first, _ = compose_environments
+    routers = {key for key in first if key.endswith("_ROUTER_NAME")}
+    assert routers >= {"HEALTH_ROUTER_NAME", "REST_ROUTER_NAME", "DOCS_ROUTER_NAME"}, (
+        f"a published route stopped naming its router in compose.env: {sorted(routers)}"
+    )
