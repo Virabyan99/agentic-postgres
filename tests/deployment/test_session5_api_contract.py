@@ -227,9 +227,23 @@ def test_a_ddl_change_reaches_openapi_without_a_restart(
     qualified = f"api.{ACCEPTANCE_PROBE_FUNCTION}"
     signature = f"{qualified}(double precision)"
 
+    # Listed **now**, not from the session-scoped `running_containers` fixture.
+    #
+    # That fixture runs one `docker ps` at the start of the session, and Session
+    # 4's convergence tests restart the project unit -- which replaces the
+    # container. By the time this test ran, the cached ID named an object that no
+    # longer existed and `docker inspect` failed with `no such object`, twice,
+    # for two different IDs. Resolving the ID correctly did not help, because the
+    # *listing* was stale rather than the ID format (D195).
+    del running_containers
+    listed = [
+        json.loads(line)
+        for line in sh("docker", "ps", "--format", "{{json .}}").splitlines()
+        if line.strip()
+    ]
     service = [
         container
-        for container in running_containers
+        for container in listed
         if container.get("Names", "").endswith("-postgrest-1")
         and project_a["project"]["key"] in container.get("Names", "")
     ]

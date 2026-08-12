@@ -309,13 +309,40 @@ def test_role_switching_cannot_exceed_the_authenticators_memberships(
             "that can become anything"
         )
 
+    # The positive control is `authenticated`, and only `authenticated`.
+    #
+    # This loop used to require 200 or 206 from *every* membership, which is a
+    # claim that contradicts SEC-ANON-001 in the same file: `anonymous_access` is
+    # `deny_data`, so `anon` reading `/notes` must be refused. Both tests
+    # described the same request and asserted opposite outcomes, and the live run
+    # settled it -- `anon` returned `401 {"code":"42501","message":"permission
+    # denied for view notes"}`, a PostgreSQL *grant* refusal, which is the
+    # boundary SEC-ANON-001 exists to prove (D195).
+    #
+    # What this test needs from the granted roles is narrower than "can read":
+    # it needs the switch to have *happened*, so that the refusals below are
+    # about membership rather than about a service that switches to nothing. A
+    # PostgreSQL SQLSTATE in the body is that evidence -- the request reached the
+    # database as some role -- where a JWT-layer rejection never gets that far.
+    reader = api_call(
+        f"{base}/notes?limit=1",
+        token=mint_token(project_a, roles["authenticated"], subject=subject),
+    )
+    assert reader.status in (200, 206) and json.loads(reader.body), (
+        f"the authenticated role read nothing ({reader.status}); every refusal below "
+        "would then be about a service that switches to nothing"
+    )
+
     for role in sorted(memberships):
         allowed = api_call(
             f"{base}/notes?limit=1", token=mint_token(project_a, role, subject=subject)
         )
-        assert allowed.status in (200, 206), (
-            f"a token naming the granted role {role} returned {allowed.status}; every "
-            "refusal below would then be about a service that switches to nothing"
+        if allowed.status in (200, 206):
+            continue
+        assert "42501" in allowed.body, (
+            f"a token naming the granted role {role} returned {allowed.status} with "
+            f"{allowed.body[:120]!r}. A granted role is either served or refused by a "
+            "grant; anything else means the authenticator did not switch to it"
         )
 
     # Every other role the project derives, plus a name from no project at all.
