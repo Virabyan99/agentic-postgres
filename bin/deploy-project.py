@@ -1075,10 +1075,6 @@ def _model_digest(release: Path, rendered_dir: Path) -> str:
     return hashlib.sha256(result.stdout.encode("utf-8")).hexdigest()
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
-
-
 # ---------------------------------------------------------------------------
 # The API plane, observed (Run 9)
 # ---------------------------------------------------------------------------
@@ -1237,3 +1233,7 @@ def observe_api(
         ),
         "project_openapi_sha256": served_digest,
     }
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

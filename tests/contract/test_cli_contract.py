@@ -9,6 +9,7 @@ reasons unrelated to whether the repository is correct.
 
 from __future__ import annotations
 
+import ast
 import os
 import subprocess
 from pathlib import Path
@@ -329,3 +330,54 @@ def test_the_secret_argument_scan_would_catch_a_real_one() -> None:
     assert forbidden.search("--api-key VALUE")
     assert not forbidden.search("--secrets-namespace REF")
     assert not forbidden.search("--token-ttl-seconds 900")
+
+
+def test_no_command_defines_anything_after_its_entry_point() -> None:
+    """A `def` below `if __name__ == "__main__":` does not exist when main runs.
+
+    Python executes a module top to bottom. The guard is a statement like any
+    other, so `main()` is called at the line it appears on — and a function
+    defined *after* that line has not been bound yet. The failure is a
+    `NameError` at runtime, from a file that imports cleanly and passes every
+    test that imports it.
+
+    That is exactly how it got here. Four observers were appended to
+    `bin/deploy-project.py`, landing below the guard. Every test importing the
+    module passed, because `importlib` runs it with `__name__ != "__main__"` so
+    the guard never fires and all four definitions execute. The deploy ran it as
+    a *script*, reached the guard first, and died with
+    `NameError: name 'observe_jwt' is not defined` — after the data plane had
+    started, the cluster had been bootstrapped and the migrations had applied.
+
+    So the rule is about execution mode, which no import-based test can see.
+
+    Goes red if: anything is appended to a command below its entry point, which
+    is what `cat >>` does by default.
+    """
+    offenders: list[str] = []
+    for path in sorted((REPO_ROOT / "bin").glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+        guard_line = None
+        for node in tree.body:
+            if (
+                isinstance(node, ast.If)
+                and isinstance(node.test, ast.Compare)
+                and isinstance(node.test.left, ast.Name)
+                and node.test.left.id == "__name__"
+            ):
+                guard_line = node.lineno
+        if guard_line is None:
+            continue
+
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+                if node.lineno > guard_line:
+                    offenders.append(
+                        f"{path.name}:{node.lineno} {node.name} is defined after the "
+                        f"entry point at line {guard_line}"
+                    )
+
+    assert not offenders, (
+        f"these are not bound when main() runs, and only a script invocation notices: {offenders}"
+    )
