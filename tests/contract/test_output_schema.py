@@ -499,3 +499,136 @@ def test_no_required_interpolation_names_a_value_that_renders_empty(
         "so nothing needs the lax form for them. `${VAR:?required}` is stricter and "
         "is what a value that is never legitimately empty should carry (ADR 0062)"
     )
+
+
+# ---------------------------------------------------------------------------
+# Statement timeouts (ADR 0067, D197)
+# ---------------------------------------------------------------------------
+
+
+def declared_timeouts(manifest: str) -> dict[str, str]:
+    """What the manifest asks for, read from the manifest rather than written here."""
+    document = yaml.safe_load((REPO_ROOT / manifest).read_text(encoding="utf-8"))
+    return dict(document["api"]["rest"]["statement_timeouts"])
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_every_timeout_the_manifest_declares_reaches_the_document(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """The assertion D197 needed and nobody had written.
+
+    `api.rest.statement_timeouts` has existed since Run 1. `project.schema.json`
+    declared it, `config._validate_statement_timeouts` refused a bad one, and
+    the render dropped every value on the floor -- so the bootstrap plane, which
+    reads only this document, set one hard-coded timeout on one role and none of
+    the manifest's ever applied. Validation proves a manifest is well formed. It
+    never proves anything consumes it.
+
+    Read from the manifest, not from a list here: a copy of the manifest's
+    values in this file would agree with itself after the manifest changed.
+    """
+    document = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    roles = document["database"]["roles"]
+    applied = document["database"]["statement_timeouts"]
+
+    declared = declared_timeouts(manifest)
+    assert declared, f"{manifest} declares no statement_timeouts; this test proved nothing"
+    for suffix, timeout in declared.items():
+        assert roles[suffix] in applied, (
+            f"{manifest} declares statement_timeouts.{suffix} = {timeout} and the rendered "
+            f"document names no timeout for {roles[suffix]}. A declared timeout that reaches "
+            "no document reaches no role (D197)"
+        )
+        assert applied[roles[suffix]] == timeout
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_timeouts_are_keyed_by_derived_role_name(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """Suffix or name is the whole difference between one authority and two.
+
+    A document keyed by suffix would make the bootstrap plane derive the role
+    name, which ADR 0002 allows exactly one place to do. It would also read
+    almost identically in a diff.
+    """
+    document = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    roles = document["database"]["roles"]
+    applied = document["database"]["statement_timeouts"]
+
+    assert applied, "the document names no statement timeouts at all"
+    unknown = sorted(set(applied) - set(roles.values()))
+    assert not unknown, f"statement_timeouts names {unknown}, which database.roles does not"
+    suffixes = sorted(set(applied) & set(roles))
+    assert not suffixes, (
+        f"statement_timeouts is keyed by role suffix {suffixes} rather than by the derived "
+        "role name, so a consumer would have to derive the name a second time"
+    )
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_runtime_role_is_bounded_even_though_no_manifest_names_it(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """The platform's own floor, and the reason it travels as data.
+
+    Neither example manifest names `app_runtime`, and it must still be bounded:
+    an application holding a server connection in a long statement holds it out
+    of the pool, which under transaction pooling is the whole pool's problem.
+    Before ADR 0067 this was a literal in `bin/postgres-bootstrap.py`, invisible
+    to anyone reading the document it was supposed to describe.
+    """
+    document = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    runtime = document["database"]["roles"]["app_runtime"]
+    assert "app_runtime" not in declared_timeouts(manifest), (
+        f"{manifest} now names app_runtime itself, so this no longer tests the default"
+    )
+    assert (
+        document["database"]["statement_timeouts"][runtime]
+        == rendering.DEFAULT_APP_RUNTIME_STATEMENT_TIMEOUT
+    )
+
+
+def test_a_manifest_entry_overrides_the_platform_default() -> None:
+    """The default is a floor for silence, not a second answer to the question.
+
+    Called directly rather than through a render: no committed manifest names
+    `app_runtime`, and adding one to an example manifest to test this would
+    change what every other test in this file renders.
+    """
+    roles = {"app_runtime": "apg_x_app_runtime", "anon": "apg_x_anon"}
+    resolved = rendering.resolve_statement_timeouts(
+        {"api": {"rest": {"statement_timeouts": {"app_runtime": "10s"}}}}, roles
+    )
+    assert resolved == {"apg_x_app_runtime": "10s"}
+
+
+def test_a_project_with_no_rest_service_still_bounds_the_runtime_role() -> None:
+    """Three ways a manifest can be silent, and none of them may drop the floor.
+
+    `api` absent, `api.rest` absent, and `statement_timeouts` absent are three
+    distinct paths through the resolver, and the second is the one D178 showed
+    is real: a project with no REST service renders, and it still has an
+    application holding connections.
+    """
+    roles = {"app_runtime": "apg_x_app_runtime"}
+    floor = {"apg_x_app_runtime": rendering.DEFAULT_APP_RUNTIME_STATEMENT_TIMEOUT}
+    assert rendering.resolve_statement_timeouts({}, roles) == floor
+    assert rendering.resolve_statement_timeouts({"api": None}, roles) == floor
+    assert rendering.resolve_statement_timeouts({"api": {"rest": None}}, roles) == floor
+    assert rendering.resolve_statement_timeouts({"api": {"rest": {}}}, roles) == floor
+
+
+def test_a_timeout_for_a_suffix_the_platform_does_not_derive_fails_the_render() -> None:
+    """`config` refuses this first; the resolver must not paper over it if it ever stops.
+
+    A `KeyError` here is the right failure. Silently skipping an unrecognised
+    suffix would put back exactly the silence ADR 0067 exists to remove -- a
+    timeout declared, accepted, and applied to nothing.
+    """
+    with pytest.raises(KeyError):
+        rendering.resolve_statement_timeouts(
+            {"api": {"rest": {"statement_timeouts": {"no_such_role": "5s"}}}},
+            {"app_runtime": "apg_x_app_runtime"},
+        )

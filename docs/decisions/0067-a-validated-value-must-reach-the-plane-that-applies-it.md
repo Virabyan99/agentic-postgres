@@ -10,7 +10,7 @@ Affects: API-LIMIT-001
 
 `api.rest.statement_timeouts` has existed since Run 1. `project.schema.json`
 declares it with a bounded duration grammar. `config._validate_statement_timeouts`
-refuses a role the platform does not derive and a value outside 100 ms – 30 s.
+refuses a role the platform does not derive and a value outside 100 ms – 60 s.
 Its own schema description reads:
 
 > a timeout set on a role nothing created is a setting that never applies and
@@ -61,6 +61,18 @@ Three properties make it a single authority rather than a second one:
    refuses a role the document does not already name and a value outside the
    strict duration grammar.
 
+**And `--check` reads the far side.** `check_violations` now queries
+`pg_roles.rolconfig` and compares what is set against what the document says,
+reporting a role whose timeout is absent or stale. This is the half that was
+missing and the half this ADR is actually about: the near side — issuing the
+right SQL — was equally untested, and a plane that issues correct statements
+against a cluster nobody inspects is the same silence one step later. The
+comparison is against the catalog rather than against the statement list this
+program would have built, which would only prove the program agrees with itself.
+It is guarded on the role existing, for the reason the `CREATE` check beside it
+is: a fresh cluster must describe itself as fresh rather than bury thirteen
+missing roles under fourteen missing timeouts.
+
 ## Alternatives
 
 **Pass the manifest to `bin/postgres-bootstrap.py`.** The wrapper already has
@@ -83,6 +95,15 @@ in code would be invisible to anyone reading the document.
   redeployed — anticipated by ADR 0053, and the same cost v6 imposed.
 - `API-LIMIT-001`'s time half becomes measurable for the first time. Its row
   half already passed.
+- **`--check` goes red against every cluster deployed before version 7**, and
+  that is the intended reading: the timeouts are genuinely absent there. It is
+  the first thing on the host that can say so.
+- Three things this work has tests for that had none: `resolve_statement_timeouts`,
+  `migrate_v6_to_v7`'s refusals, and `build_statements` — the whole bootstrap
+  statement list had never been asserted on offline. Fourteen mutations red with
+  paired controls green, one of which was green on the first pass because the
+  fake catalog answered for a role it had been told did not exist (ADR 0065's
+  rule, inside a test harness).
 - **The general rule this run keeps re-learning**: a value that is declared and
   validated reads exactly like a value that is applied. Validation proves a
   manifest is *well-formed*, never that anything consumes it. Where a setting

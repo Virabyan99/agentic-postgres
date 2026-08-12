@@ -163,8 +163,8 @@ def statement_timeouts_for(document: dict[str, Any]) -> dict[str, str]:
 
     Keyed by derived role name, as the schema requires. Only `app_runtime` is
     named, because that is the platform default `rendering` always writes; a
-    manifest's own entries are exercised in `test_rendering.py`, which has a
-    manifest to read them from.
+    manifest's own entries are exercised in `test_output_schema.py`, which
+    renders a manifest and can read them back out of the document.
     """
     return {document["database"]["roles"]["app_runtime"]: "30s"}
 
@@ -185,8 +185,26 @@ def documentation_role_for(document: dict[str, Any]) -> str:
 
 
 @pytest.fixture
-def v6(v1: dict[str, Any]) -> dict[str, Any]:
-    """The whole chain, v1 -> ... -> v6, through the public entry point."""
+def v6_document(v5_fixture: dict[str, Any]) -> dict[str, Any]:
+    """The committed Session 5 render advanced to 6 -- the v7 step's input.
+
+    Built from the fixture rather than from the chain so that a fault in an
+    earlier step surfaces in that step's tests instead of here.
+    """
+    return output_migrations.migrate_v5_to_v6(
+        v5_fixture, documentation_role=documentation_role_for(v5_fixture)
+    )
+
+
+@pytest.fixture
+def chained(v1: dict[str, Any]) -> dict[str, Any]:
+    """The whole chain, v1 -> ... -> the current version, through the public entry point.
+
+    Named for what it is rather than for a version. It was called `v6` until
+    version 7 arrived, at which point the name said 6 and the document said 7 --
+    a fixture that reads as measured and is not, which is the defect this
+    project keeps producing.
+    """
     return output_migrations.migrate_rendered(
         v1,
         secrets_contract_sha256=CONTRACT_DIGEST,
@@ -328,11 +346,11 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
-def test_the_whole_chain_validates(v6: dict[str, Any]) -> None:
-    """v1 -> v2 -> v3 -> v4 -> v5 -> v6 end to end, not only the newest link (ADR 0027)."""
-    assert v6["schema_version"] == 7
-    assert v6["document_kind"] == "rendered"
-    config.validate_against_schema(v6, "outputs.schema.json")
+def test_the_whole_chain_validates(chained: dict[str, Any]) -> None:
+    """v1 -> v2 -> v3 -> v4 -> v5 -> v6 -> v7 end to end, not only the newest link (ADR 0027)."""
+    assert chained["schema_version"] == output_migrations.CURRENT_VERSION
+    assert chained["document_kind"] == "rendered"
+    config.validate_against_schema(chained, "outputs.schema.json")
 
 
 def test_v3_carries_the_supplied_budget_and_container(v3: dict[str, Any]) -> None:
@@ -463,7 +481,7 @@ def test_the_migrator_never_derives_a_container_name() -> None:
 
 
 def test_a_current_version_document_is_not_migrated_again(
-    v6: dict[str, Any], v5: dict[str, Any]
+    chained: dict[str, Any], v5: dict[str, Any]
 ) -> None:
     """Replaces the v2 form of this assertion, applied to the current version.
 
@@ -474,13 +492,13 @@ def test_a_current_version_document_is_not_migrated_again(
     """
     with pytest.raises(MigrationError, match="already version 7"):
         output_migrations.migrate_rendered(
-            v6,
+            chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
             database_budget=BUDGET,
             database_container=CONTAINER,
-            access_profiles=profiles_for(v6),
-            documentation_role=documentation_role_for(v6),
-            statement_timeouts=statement_timeouts_for(v6),
+            access_profiles=profiles_for(chained),
+            documentation_role=documentation_role_for(chained),
+            statement_timeouts=statement_timeouts_for(chained),
         )
     with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_v4_to_v5(v5)
@@ -990,4 +1008,198 @@ def test_the_role_pattern_agrees_with_the_schema() -> None:
     assert (
         schema["$defs"]["postgresIdentifier"]["pattern"]
         == output_migrations._POSTGRES_IDENTIFIER.pattern
+    )
+
+
+# ---------------------------------------------------------------------------
+# v6 -> v7 (D197, ADR 0067): the statement timeouts
+# ---------------------------------------------------------------------------
+
+
+def timeouts_for(document: dict[str, Any]) -> dict[str, str]:
+    """A valid argument for the v7 step, read from the document under test."""
+    roles = document["database"]["roles"]
+    return {roles["app_runtime"]: "30s", roles["anon"]: "2s", roles["authenticated"]: "5s"}
+
+
+def test_a_v6_document_no_longer_validates(v6_document: dict[str, Any]) -> None:
+    """The claim that makes 7 a real bump rather than a relabelling.
+
+    `statement_timeouts` is required on both branches with
+    additionalProperties: false, so a document without it is refused by the
+    current schema. If this ever passes, the version moved and the contract
+    did not.
+    """
+    assert output_migrations.detect_version(v6_document) == 6
+    assert "statement_timeouts" not in v6_document["database"]
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(v6_document, "outputs.schema.json")
+
+
+def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, Any]) -> None:
+    migrated = output_migrations.migrate_v6_to_v7(
+        v6_document, statement_timeouts=timeouts_for(v6_document)
+    )
+    assert migrated["schema_version"] == 7
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+
+def test_v7_changes_exactly_one_field(v6_document: dict[str, Any]) -> None:
+    """The whole content of the step, asserted as a difference rather than described."""
+    timeouts = timeouts_for(v6_document)
+    migrated = output_migrations.migrate_v6_to_v7(v6_document, statement_timeouts=timeouts)
+
+    assert migrated["database"]["statement_timeouts"] == timeouts
+    before = {k: v for k, v in v6_document.items() if k != "schema_version"}
+    after = {k: v for k, v in migrated.items() if k != "schema_version"}
+    after["database"] = {k: v for k, v in after["database"].items() if k != "statement_timeouts"}
+    assert after == before
+
+
+def test_the_timeouts_are_written_sorted(v6_document: dict[str, Any]) -> None:
+    """The bootstrap plane issues these in the document's order.
+
+    An unsorted map means two renders of one project can produce two statement
+    lists that differ only in order -- which is a diff an operator has to read
+    and dismiss, every time.
+    """
+    roles = v6_document["database"]["roles"]
+    unsorted = {roles["authenticated"]: "5s", roles["anon"]: "2s", roles["app_runtime"]: "30s"}
+    migrated = output_migrations.migrate_v6_to_v7(v6_document, statement_timeouts=unsorted)
+    written = list(migrated["database"]["statement_timeouts"])
+    assert written == sorted(written)
+
+
+def test_the_v7_step_does_not_mutate_its_input(v6_document: dict[str, Any]) -> None:
+    snapshot = json.loads(json.dumps(v6_document))
+    output_migrations.migrate_v6_to_v7(v6_document, statement_timeouts=timeouts_for(v6_document))
+    assert v6_document == snapshot
+
+
+def test_the_v7_step_refuses_a_deployed_document(v6_document: dict[str, Any]) -> None:
+    timeouts = timeouts_for(v6_document)
+    v6_document["document_kind"] = "deployed"
+    with pytest.raises(MigrationError, match="expected a 'rendered'"):
+        output_migrations.migrate_v6_to_v7(v6_document, statement_timeouts=timeouts)
+
+
+def test_the_v7_step_refuses_a_timeout_on_a_role_the_document_does_not_name(
+    v6_document: dict[str, Any],
+) -> None:
+    """The refusal this step exists for, and the shape of the defect it answers.
+
+    A timeout written for a role nothing created is applied to nothing and
+    reports nothing -- which is exactly how the manifest's timeouts spent five
+    runs validated and unapplied (D197). Accepting one here would put that
+    silence back, one layer down.
+    """
+    timeouts = timeouts_for(v6_document)
+    timeouts["apg_some_other_project_anon"] = "2s"
+    with pytest.raises(MigrationError, match=r"which this document's database\.roles"):
+        output_migrations.migrate_v6_to_v7(v6_document, statement_timeouts=timeouts)
+
+
+@pytest.mark.parametrize(
+    "duration",
+    [
+        "0",  # PostgreSQL reads this as *disabled*
+        "0s",
+        "0ms",
+        "30",  # a bare integer is milliseconds, not seconds
+        "30 s",
+        "30S",
+        "1m",
+        "1min",
+        "1h",
+        "030s",
+        "100000s",  # six digits, one past the grammar
+        "",
+        "5s;",
+        "5s DROP",
+    ],
+)
+def test_the_v7_step_refuses_a_duration_outside_the_grammar(
+    v6_document: dict[str, Any], duration: str
+) -> None:
+    """Written as literals rather than derived from the pattern.
+
+    A parametrization computed from the constant under test collapses to an
+    empty parameter set the moment the constant is emptied, and pytest reports
+    an empty set as a pass (D190). These fourteen strings do not move when the
+    pattern does.
+    """
+    roles = v6_document["database"]["roles"]
+    with pytest.raises(MigrationError, match="not a strict"):
+        output_migrations.migrate_v6_to_v7(
+            v6_document, statement_timeouts={roles["anon"]: duration}
+        )
+
+
+@pytest.mark.parametrize("duration", ["100ms", "1s", "2s", "5s", "30s", "99999s", "1ms"])
+def test_the_v7_step_accepts_the_grammar_the_schema_admits(
+    v6_document: dict[str, Any], duration: str
+) -> None:
+    """The control for the refusals above.
+
+    Without it, a pattern that rejected everything would pass fourteen tests
+    and look thorough.
+    """
+    roles = v6_document["database"]["roles"]
+    migrated = output_migrations.migrate_v6_to_v7(
+        v6_document, statement_timeouts={roles["anon"]: duration}
+    )
+    assert migrated["database"]["statement_timeouts"][roles["anon"]] == duration
+
+
+def test_the_v7_step_refuses_a_document_that_already_carries_the_field(
+    v6_document: dict[str, Any],
+) -> None:
+    timeouts = timeouts_for(v6_document)
+    once = output_migrations.migrate_v6_to_v7(v6_document, statement_timeouts=timeouts)
+    once["schema_version"] = 6
+    with pytest.raises(MigrationError, match="already carries statement_timeouts"):
+        output_migrations.migrate_v6_to_v7(once, statement_timeouts=timeouts)
+
+
+def test_the_v7_step_refuses_a_document_that_is_already_version_seven(
+    v6_document: dict[str, Any],
+) -> None:
+    timeouts = timeouts_for(v6_document)
+    once = output_migrations.migrate_v6_to_v7(v6_document, statement_timeouts=timeouts)
+    with pytest.raises(MigrationError, match="already version 7"):
+        output_migrations.migrate_v6_to_v7(once, statement_timeouts=timeouts)
+
+
+def test_a_v5_document_is_refused_by_the_v7_step(v5_fixture: dict[str, Any]) -> None:
+    """The cheap step is not a way past the expensive one's checks."""
+    roles = v5_fixture["database"]["roles"]
+    with pytest.raises(MigrationError, match="only version 6 can be migrated to 7"):
+        output_migrations.migrate_v6_to_v7(
+            v5_fixture, statement_timeouts={roles["app_runtime"]: "30s"}
+        )
+
+
+def test_a_v6_document_missing_its_roles_is_refused(v6_document: dict[str, Any]) -> None:
+    timeouts = timeouts_for(v6_document)
+    del v6_document["database"]["roles"]["app_runtime"]
+    with pytest.raises(MigrationError, match="not a v6 document"):
+        output_migrations.migrate_v6_to_v7(v6_document, statement_timeouts=timeouts)
+
+
+def test_the_duration_pattern_agrees_with_the_schema() -> None:
+    """The test the module's own comment claimed and did not have.
+
+    ``output_migrations`` keeps its own copy of the duration grammar because it
+    depends on nothing, and the comment beside that copy said a test asserted
+    the two agree. None did, for a day. Two copies of a fact with no test
+    between them are two facts.
+    """
+    schema = json.loads((REPO_ROOT / "schemas" / "outputs.schema.json").read_text(encoding="utf-8"))
+    published = schema["$defs"]["statementTimeouts"]["patternProperties"]
+    assert list(published) == [output_migrations._POSTGRES_IDENTIFIER.pattern], (
+        "the schema keys statementTimeouts by something other than a role identifier"
+    )
+    assert (
+        published[output_migrations._POSTGRES_IDENTIFIER.pattern]["pattern"]
+        == output_migrations._STATEMENT_TIMEOUT.pattern
     )

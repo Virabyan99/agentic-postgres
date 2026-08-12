@@ -273,8 +273,11 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     # so this plane applies what it was given rather than holding an opinion of
     # its own.
     #
-    # Sorted, because the applied set is compared against this list and a dict's
-    # iteration order is not a contract. The duration is written through
+    # Sorted so that two renders of one document produce one statement list; a
+    # dict's iteration order is not a contract. What was applied is checked by
+    # `check_violations` reading `pg_roles.rolconfig` -- not against this list,
+    # which would only prove this program agrees with itself. The duration is
+    # written through
     # `quote_literal` rather than interpolated bare: the schema's pattern is why
     # it cannot carry a quote, which is a reason to write it safely rather than a
     # reason not to bother.
@@ -495,6 +498,47 @@ def check_violations(container: str, database: str, document: dict[str, Any]) ->
         )
         if owner_create != "true":
             violations.append(f"{roles['object_owner']} does not hold CREATE on the database")
+
+    # The far side of ADR 0067's plane boundary, and the reason this block is
+    # here rather than left implied. Before version 7 the manifest declared
+    # these, `config` validated them, and the render dropped them -- so the
+    # setting was declared, validated and applied to nothing, and every check in
+    # this file agreed with the cluster while it happened (D197).
+    #
+    # Read from `pg_roles.rolconfig`, which is what `ALTER ROLE ... SET` writes,
+    # rather than from the statement list this program would have issued. The
+    # latter would only prove the program agrees with itself, which is the
+    # standing rule for this whole function.
+    #
+    # Guarded by `present` for the reason the CREATE check above is: a query
+    # against a role that does not exist returns nothing, and reporting "the
+    # timeout is absent" on a cluster whose roles are all missing buries the
+    # thirteen violations that actually matter under fourteen that repeat them.
+    wanted = {
+        role: timeout
+        for role, timeout in database_block.get("statement_timeouts", {}).items()
+        if role in present
+    }
+    if wanted:
+        applied = dict(
+            line.split(" ", 1)
+            for line in query(
+                container,
+                database,
+                "SELECT r.rolname || ' ' || coalesce("  # noqa: S608
+                "(SELECT split_part(c, '=', 2) FROM unnest(r.rolconfig) AS c "
+                "WHERE c LIKE 'statement_timeout=%'), 'absent') "
+                "FROM pg_roles r WHERE r.rolname IN "
+                f"({', '.join(literal(name) for name in sorted(wanted))});",
+            ).splitlines()
+            if line
+        )
+        for role, timeout in sorted(wanted.items()):
+            observed = applied.get(role, "absent")
+            if observed != timeout:
+                violations.append(
+                    f"{role} has statement_timeout '{observed}', the document says '{timeout}'"
+                )
 
     return violations
 
