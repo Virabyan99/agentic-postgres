@@ -850,3 +850,71 @@ def test_the_observer_delegates_to_the_operators_own_command() -> None:
     assert "401" not in body.split('"""')[2], (
         "the observer restates the success condition instead of delegating it"
     )
+
+
+def test_the_documentation_password_never_reaches_a_command_line() -> None:
+    """One of the four places a secret must not be.
+
+    The hash has to be produced in the locked runtime image -- `crypt` left the
+    standard library in 3.13 and the host's interpreter is past that -- so a
+    container is invoked, and the obvious way to invoke it puts the password in
+    `argv` where `ps` and `docker inspect` can read it.
+
+    Asserted structurally: the `subprocess.run` inside the publisher must pass
+    the secret through `input=`, and no element of its argument list may
+    mention the source file's contents. A `-i` flag is required for that to work
+    at all; without it stdin is never attached and the container exits 0 having
+    produced nothing.
+    """
+    import ast
+
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "publish_docs_credential"
+    )
+    calls = [
+        node
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "run"
+    ]
+    assert len(calls) == 1, f"expected one subprocess.run, found {len(calls)}"
+
+    keywords = {keyword.arg for keyword in calls[0].keywords}
+    assert "input" in keywords, "the password is not passed on stdin"
+
+    argv = calls[0].args[0]
+    assert isinstance(argv, ast.List)
+    literals = [element.value for element in argv.elts if isinstance(element, ast.Constant)]
+    assert "-i" in literals, "docker was not given -i, so stdin is never attached"
+    assert not any("read_text" in ast.dump(element) for element in argv.elts), (
+        "the credential is built into the argument vector"
+    )
+
+
+def test_the_publisher_writes_both_halves_and_neither_is_readable() -> None:
+    """A middleware naming a users file that does not exist is a router Traefik
+    drops -- which is the 404 this whole step exists to stop producing.
+
+    Both names come from `edge_credentials`, so the file the middleware points
+    at and the file the publisher writes cannot be given different names.
+    """
+    import ast
+
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "publish_docs_credential"
+    )
+    body = ast.dump(function)
+    assert "users_file_name" in body and "middleware_file_name" in body, (
+        "the publisher names one of the two files itself instead of asking edge_credentials"
+    )
+    assert "htpasswd_line" in body, "the hash is written without passing the bcrypt check"
+    assert body.count("_write_root_only") == 2, "both files must be written root-only"

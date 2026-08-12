@@ -55,6 +55,7 @@ from agentic_postgres import (
     config,
     database_observation,
     deployed_output,
+    edge_credentials,
     edge_state,
     installed_release,
     jwt_keys,
@@ -63,6 +64,7 @@ from agentic_postgres import (
     port_allocations,
     rendering,
     runtime_override,
+    secrets_contract,
 )
 from agentic_postgres.bootstrap_state import load_state, state_path
 from agentic_postgres.config import ManifestError, load_project_manifest
@@ -94,6 +96,11 @@ SNAPSHOT_PATH = (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SECRET_ROOT = Path("/var/lib/agentic-postgres/secrets")
+
+#: Traefik's file provider, host side. `bin/edge.sh` creates and mounts it
+#: read-only; a project writes exactly two files here and owns neither the
+#: directory nor the edge.
+EDGE_DYNAMIC_DIR = Path("/var/lib/agentic-postgres/edge/dynamic")
 
 
 def fail(code: int, message: str) -> None:
@@ -463,6 +470,92 @@ def observe_health(url: str) -> str:
     """
     result = run("curl", "-ksS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url)
     return "ready" if result.stdout.strip() == "200" else "unavailable"
+
+
+def publish_docs_credential(
+    *, project_key: str, generation_id: str, middleware_name: str, runtime_image: str
+) -> None:
+    """Write the documentation credential and the middleware that checks it.
+
+    **The first caller `edge_credentials` has ever had.** The module was
+    complete, tested and referenced by nothing, so the middleware every
+    documentation router names did not exist -- and Traefik does not create a
+    router whose middleware is undefined. The route answered the edge's own 404,
+    which is indistinguishable from an unrouted host from outside (D186, D204).
+
+    The hash is produced **inside the locked runtime image**, not here. `crypt`
+    was removed from the standard library in 3.13 and the host's interpreter is
+    past that, so the deploy cannot hash anything itself. Measured on the locked
+    digest before this was written: `crypt.methods` offers `BLOWFISH`,
+    `mksalt(METHOD_BLOWFISH)` yields a 60-character `$2b$12$` hash that
+    `assert_bcrypt` accepts and that verifies against its own password -- with a
+    `$6$` control refused, which is the format Traefik answers 401 to in a way
+    indistinguishable from a wrong password (D165).
+
+    **The password reaches the container on stdin.** Not in `argv`, which is one
+    of the four places a secret must not be, and `-i` is required or stdin is
+    never attached and the container exits 0 having produced nothing.
+
+    Rewritten on every deploy. bcrypt salts randomly, so the hash differs each
+    time while the password does not; the file changes, Traefik reloads it, and
+    the credential an operator holds keeps working. A conditional write would be
+    an optimisation bought with a branch that is wrong when the generation moved.
+    """
+    source = (
+        SECRET_ROOT
+        / project_key
+        / "generations"
+        / generation_id
+        / secrets_contract.ROOT_PLANE_DIRECTORY
+        / "docs_basic_auth_password"
+    )
+    if not source.is_file():
+        fail(
+            EXIT_PRECONDITION,
+            f"no documentation credential at {source}. It is declared in "
+            "secrets.required.yaml with a root-plane consumer; re-run "
+            "bin/materialize-secrets.sh.",
+        )
+
+    hashed = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            runtime_image,
+            "python",
+            "-c",
+            "import crypt,sys;"
+            'print(crypt.crypt(sys.stdin.read().rstrip("\n"), '
+            "crypt.mksalt(crypt.METHOD_BLOWFISH)))",
+        ],
+        input=source.read_text(encoding="utf-8").rstrip("\n"),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if hashed.returncode != 0:
+        # stderr, never stdout: the hash is on stdout and a failure message
+        # quoting it would put a password hash in the deploy log.
+        fail(EXIT_PRECONDITION, f"could not hash the documentation credential: {hashed.stderr}")
+
+    line = edge_credentials.htpasswd_line(hashed.stdout.strip())
+
+    EDGE_DYNAMIC_DIR.mkdir(parents=True, exist_ok=True)
+    users = EDGE_DYNAMIC_DIR / edge_credentials.users_file_name(project_key)
+    _write_root_only(users, line.encode("utf-8"))
+    middleware = EDGE_DYNAMIC_DIR / edge_credentials.middleware_file_name(project_key)
+    _write_root_only(
+        middleware,
+        edge_credentials.render_middleware(
+            middleware_name=middleware_name, project_key=project_key
+        ),
+    )
+    # The paths, never the contents.
+    print(f"  {middleware}")
+    print(f"  {users} (0600, bcrypt)")
 
 
 def observe_docs(url: str) -> str:
@@ -914,6 +1007,25 @@ def main(argv: list[str] | None = None) -> int:
     # document records what is true when it is written, not what was true when
     # the run began.
     secrets = require_secret_generation(key)
+
+    # The documentation credential and its middleware, into the edge's file
+    # provider. **After the re-read**, for the reason the JWKS below gives: step
+    # 5 materialized a new generation, and hashing the superseded one would
+    # publish a credential the operator's own copy no longer matches.
+    #
+    # Before the edge is attached in 6b, so the middleware exists by the time
+    # Traefik first sees a router that names it. Out of order it still converges
+    # -- the provider watches the directory -- but the window is a route that
+    # 404s for a reason nobody can distinguish from a missing service.
+    if arguments.through_session >= REST_PLANE_SESSION:
+        publish_docs_credential(
+            project_key=key,
+            generation_id=secrets["generation_id"],
+            middleware_name=_env_value(
+                rendered_directory / "compose.env", "DOCS_CREDENTIAL_MIDDLEWARE_NAME"
+            ),
+            runtime_image=_env_value(release / "versions.env", "PYTHON_RUNTIME_IMAGE"),
+        )
 
     # The verification JWKS, derived from the bootstrap signing key (ADR 0051).
     #

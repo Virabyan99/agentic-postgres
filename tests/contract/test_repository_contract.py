@@ -8,6 +8,7 @@ because it produces meaningless false positives.
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -389,7 +390,6 @@ def test_version_file_is_a_single_stripped_line() -> None:
 
 
 def test_python_version_is_pinned_to_a_patch_release() -> None:
-    import re
 
     pinned = (REPO_ROOT / ".python-version").read_text(encoding="utf-8").strip()
     assert re.fullmatch(r"3\.\d+\.\d+", pinned), f"{pinned!r} is not a patch-level pin"
@@ -404,3 +404,90 @@ def test_dependency_lock_uses_hashes() -> None:
         if line.startswith("#"):
             continue
         assert "==" in line, f"unpinned dependency: {line}"
+
+
+def test_no_module_is_imported_only_by_its_own_tests() -> None:
+    """A module nothing calls is a feature that does not exist (D204).
+
+    `edge_credentials` was written in Run 7, tested thoroughly, and imported by
+    **nothing outside its own test module** -- so the middleware every
+    documentation router names was never written, Traefik declined to create a
+    router referencing an undefined middleware, and the route answered the
+    edge's own 404. The only reference to the module anywhere in the product was
+    a *comment* saying it defines the middleware.
+
+    That is this repository's signature defect in its purest form: the tests
+    passed, the code was correct, and nothing connected it to the product. Same
+    shape as D192 (a hook built, granted and never wired) and D197 (a value
+    validated and dropped at a boundary), and the cheapest of the three to
+    detect -- an import graph is a fact about the source.
+
+    **Parsed, not grepped**, and that is not a style preference. A text scan
+    cannot detect the case this rule exists for, because the one mention of
+    `edge_credentials` in the product was a comment; a scan that reads comments
+    would have called it imported. The first draft also excluded a preceding
+    `.`, to avoid matching attribute access, and thereby missed
+    `from agentic_postgres.x import y` -- the dominant form -- reporting two
+    modules as orphans that six files import.
+
+    Goes red if: a module is added with no caller, or the last caller of an
+    existing one is removed.
+    """
+    import ast
+
+    package = REPO_ROOT / "src" / "agentic_postgres"
+    modules = {
+        path.stem for path in package.glob("*.py") if path.stem not in {"__init__", "__main__"}
+    }
+    assert modules, "no modules found; this compared nothing"
+
+    imported: set[str] = set()
+    for source in [*(REPO_ROOT / "bin").glob("*.py"), *package.glob("*.py")]:
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                # `from agentic_postgres import x, y`
+                if node.module == "agentic_postgres":
+                    imported.update(alias.name for alias in node.names if alias.name != source.stem)
+                # `from agentic_postgres.x import y`
+                elif node.module.startswith("agentic_postgres."):
+                    name = node.module.split(".", 1)[1].split(".")[0]
+                    if name != source.stem:
+                        imported.add(name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("agentic_postgres."):
+                        name = alias.name.split(".", 1)[1].split(".")[0]
+                        if name != source.stem:
+                            imported.add(name)
+
+    # Python embedded in a shell script is still a caller.
+    # `bin/provision-host.sh` imports `listeners` from a heredoc, and this
+    # repository has `test_embedded_python.py` because that is a deliberate
+    # pattern here rather than an accident.
+    #
+    # Anchored on the import *statement*. Three lines above that import a
+    # comment reads "Classification lives in agentic_postgres.listeners, not in
+    # awk" -- and a rule that counted the mention would call `edge_credentials`
+    # imported for exactly the same reason it was not.
+    statement = re.compile(
+        r"^\s*(?:from\s+agentic_postgres\.(\w+)\s+import|"
+        r"from\s+agentic_postgres\s+import\s+([\w,\s]+)|"
+        r"import\s+agentic_postgres\.(\w+))",
+        re.MULTILINE,
+    )
+    for script in (REPO_ROOT / "bin").glob("*.sh"):
+        for dotted, names, plain in statement.findall(script.read_text(encoding="utf-8")):
+            if dotted:
+                imported.add(dotted)
+            if plain:
+                imported.add(plain)
+            if names:
+                imported.update(name.strip() for name in names.split(",") if name.strip())
+
+    assert imported, "no imports of the package found at all; this compared nothing"
+    orphans = sorted(modules - imported)
+    assert not orphans, (
+        f"{orphans} are imported by nothing outside their own tests. A module with no "
+        "caller is a feature that does not exist, however well it is tested (D204)"
+    )
