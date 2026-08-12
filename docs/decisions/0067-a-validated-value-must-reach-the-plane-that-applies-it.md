@@ -94,7 +94,14 @@ in code would be invisible to anyone reading the document.
 - Deployed documents at version 6 stop validating until each project is
   redeployed — anticipated by ADR 0053, and the same cost v6 imposed.
 - `API-LIMIT-001`'s time half becomes measurable for the first time. Its row
-  half already passed.
+  half already passed. **It was measured, and it is false — see D198.** The
+  timeout now reaches `pg_roles.rolconfig`, and a REST request never reads it:
+  PostgreSQL processes a role's settings only at login, and PostgREST reaches
+  its request role with `SET LOCAL ROLE`, which is not one. Measured with
+  controls on both arms. This ADR is correct about its own boundary and stops
+  one boundary short of the goal, which is the same defect it was written to
+  record: **the far side of one plane is the near side of the next.** The
+  decision about the carrier is D198's and belongs to its own ADR.
 - **`--check` goes red against every cluster deployed before version 7**, and
   that is the intended reading: the timeouts are genuinely absent there. It is
   the first thing on the host that can say so.
