@@ -526,9 +526,13 @@ def publish_docs_credential(
             runtime_image,
             "python",
             "-c",
+            # No strip in here, and no escape. The caller sends exactly the
+            # password, and a `\\n` written into a `-c` program from Python
+            # source is a newline character rather than an escape -- which
+            # split this program across two lines and killed it with
+            # `unterminated string literal` on its first deploy (D205).
             "import crypt,sys;"
-            'print(crypt.crypt(sys.stdin.read().rstrip("\n"), '
-            "crypt.mksalt(crypt.METHOD_BLOWFISH)))",
+            "print(crypt.crypt(sys.stdin.read(), crypt.mksalt(crypt.METHOD_BLOWFISH)))",
         ],
         input=source.read_text(encoding="utf-8").rstrip("\n"),
         capture_output=True,

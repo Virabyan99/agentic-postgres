@@ -91,3 +91,85 @@ def test_the_scan_does_not_flag_the_correct_form() -> None:
     )
     for line in heredoc_invocations(fixed):
         assert "|" not in line.split("<<'PYTHON'", 1)[0]
+
+
+def test_every_embedded_python_program_compiles() -> None:
+    """A program built by string concatenation is a program nobody has parsed.
+
+    This file has compiled Python embedded in *shell* scripts since Session 2.
+    Python embedded in **Python** had no such rule, and the first one shipped
+    broken: `.rstrip("\\n")` written into a `-c` argument from Python source is
+    a newline *character*, so the program arrived split across two lines and
+    died with `unterminated string literal` -- on a host, in step 5, after two
+    images had been built (D205).
+
+    Nothing offline could have seen it. The tests written beside it assert the
+    call's *shape*: the secret goes on stdin, `-i` is present, no element of the
+    argument vector is built from the credential. Every one of those was true.
+    A shape is not a program.
+
+    Scoped to `python -c` in `bin/*.py`, found through the syntax tree rather
+    than by matching text, so a program assembled from several adjacent string
+    literals -- which is exactly how the broken one was written -- is compiled
+    as the single string Python actually builds.
+    """
+    import ast
+
+    programs: list[tuple[str, str]] = []
+    for source in sorted((REPO_ROOT / "bin").glob("*.py")):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.List):
+                continue
+            values = [
+                element.value
+                for element in node.elts
+                if isinstance(element, ast.Constant) and isinstance(element.value, str)
+            ]
+            for index, value in enumerate(values):
+                # `-c` alone is not enough: psql takes one too, and the first
+                # version of this scan compiled `psql -c "SELECT ..."` as Python
+                # and reported the SQL as a syntax error. The interpreter has to
+                # be named immediately before the flag.
+                if (
+                    value == "-c"
+                    and index >= 1
+                    and values[index - 1] in {"python", "python3"}
+                    and index + 1 < len(values)
+                ):
+                    programs.append((source.name, values[index + 1]))
+
+    assert programs, "no `python -c` program found in bin/; this compiled nothing"
+
+    for name, program in programs:
+        try:
+            compile(program, f"<{name}>", "exec")
+        except SyntaxError as error:
+            raise AssertionError(
+                f"{name} builds a `python -c` program that does not parse: {error}. "
+                f"The program was: {program!r}"
+            ) from error
+
+
+def test_the_compile_scan_would_catch_a_real_instance() -> None:
+    """The control for the scan above.
+
+    A scan that found nothing, or that compiled the wrong string, would pass
+    every time. This is the exact defect D205 shipped: a literal newline where
+    a two-character escape belonged.
+    """
+    import ast
+
+    source = 'subprocess.run(["python", "-c", "print(\'a\\nb\')"])'
+    tree = ast.parse(source)
+    found = [
+        element.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.List)
+        for element in node.elts
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    ]
+    assert "-c" in found
+    broken = found[found.index("-c") + 1]
+    with pytest.raises(SyntaxError):
+        compile(broken, "<control>", "exec")
