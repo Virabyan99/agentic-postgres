@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 6
+CURRENT_VERSION = 7
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -143,6 +143,14 @@ _COMPOSE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 #: imported for this module's standing reason -- it depends on nothing -- and
 #: ``test_the_role_pattern_agrees_with_the_schema`` asserts the two agree.
 _POSTGRES_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
+
+#: The strict duration grammar, restated here for the same reason the identifier
+#: pattern is: this module depends on nothing, and a test asserts it agrees with
+#: the schema's `statementTimeouts` pattern. Digits and a unit, no space, no
+#: compound, no leading zero -- PostgreSQL reads a bare integer as milliseconds
+#: and `0` as *disabled*, so a looser grammar admits a document that turns a
+#: timeout off while looking like it set one.
+_STATEMENT_TIMEOUT = re.compile(r"^[1-9][0-9]{0,4}(ms|s)$")
 
 #: Kept in step with ``naming.HEALTH_ROUTE_PATH``. Imported rather than copied
 #: would create an import cycle for no benefit; ``test_output_migrations.py``
@@ -202,11 +210,12 @@ def migrate_rendered(
     database_container: str,
     access_profiles: dict[str, dict[str, Any]],
     documentation_role: str,
+    statement_timeouts: dict[str, str],
 ) -> dict[str, Any]:
-    """Migrate a version 1, 2, 3, 4 or 5 ``rendered`` document to the current version.
+    """Migrate a version 1, 2, 3, 4, 5 or 6 ``rendered`` document to the current version.
 
     Chains the single-step functions rather than jumping, so a v1 document
-    still exercises the v1 -> v2 step that a direct v1 -> v5 path would have
+    still exercises the v1 -> v2 step that a direct v1 -> v6 path would have
     quietly retired.
 
     Every argument is required for the same reason: each is a value the input
@@ -222,8 +231,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5}:
-        raise MigrationError(f"only versions 1, 2, 3, 4 and 5 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6}:
+        raise MigrationError(f"only versions 1, 2, 3, 4, 5 and 6 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -238,7 +247,10 @@ def migrate_rendered(
     if detect_version(document) == 4:
         document = migrate_v4_to_v5(document)
 
-    return migrate_v5_to_v6(document, documentation_role=documentation_role)
+    if detect_version(document) == 5:
+        document = migrate_v5_to_v6(document, documentation_role=documentation_role)
+
+    return migrate_v6_to_v7(document, statement_timeouts=statement_timeouts)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -561,6 +573,66 @@ def migrate_v5_to_v6(document: dict[str, Any], *, documentation_role: str) -> di
     return migrated
 
 
+def migrate_v6_to_v7(
+    document: dict[str, Any], *, statement_timeouts: dict[str, str]
+) -> dict[str, Any]:
+    """Return a version 7 ``rendered`` document derived from a version 6 one.
+
+    Version 7 adds ``database.statement_timeouts``: the manifest's per-role
+    ``statement_timeout``, resolved from role *suffix* to derived role *name*.
+    Before it, the manifest declared these, `config` validated them, and the
+    render dropped them -- so the bootstrap plane, which reads only this
+    document, never saw one and no request role was ever bounded (ADR 0067,
+    D197).
+
+    ``statement_timeouts`` is required rather than derived, for the reason
+    ``documentation_role`` was in v5 -> v6: the *values* come from a manifest
+    this document does not carry, and the *names* come from
+    ``naming.database_roles``, of which ADR 0002 allows exactly one authority.
+    So the caller resolves and this validates -- that every key is a role the
+    document already names, and that every value is the strict duration grammar
+    the schema admits. A timeout on a role this document does not know is
+    refused rather than written, because that is precisely the setting that
+    applies to nothing and says so nowhere.
+    """
+    version = detect_version(document)
+    if version == 7:
+        raise MigrationError("document is already version 7; migration would be a no-op")
+    if version != 6:
+        raise MigrationError(f"only version 6 can be migrated to 7, got {version}")
+
+    require_kind(document, "rendered")
+
+    roles = document.get("database", {}).get("roles")
+    if not isinstance(roles, dict) or "app_runtime" not in roles:
+        raise MigrationError("database.roles is missing or incomplete; this is not a v6 document")
+    if "statement_timeouts" in document.get("database", {}):
+        raise MigrationError(
+            "database already carries statement_timeouts; this is not a version 6 document"
+        )
+
+    known = set(roles.values())
+    for role, value in statement_timeouts.items():
+        if role not in known:
+            raise MigrationError(
+                f"statement_timeouts names {role!r}, which this document's database.roles "
+                "does not. A timeout on a role the document does not know is applied to "
+                "nothing and reports nothing"
+            )
+        if not _STATEMENT_TIMEOUT.match(value):
+            raise MigrationError(
+                f"statement_timeouts[{role!r}] is {value!r}, which is not a strict "
+                "duration. PostgreSQL reads a bare integer as milliseconds and 0 as "
+                "disabled, so a looser grammar would let a document disable a timeout "
+                "while looking like it set one"
+            )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["database"]["statement_timeouts"] = dict(sorted(statement_timeouts.items()))
+    migrated["schema_version"] = 7
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -584,5 +656,6 @@ __all__ = [
     "migrate_v3_to_v4",
     "migrate_v4_to_v5",
     "migrate_v5_to_v6",
+    "migrate_v6_to_v7",
     "require_kind",
 ]

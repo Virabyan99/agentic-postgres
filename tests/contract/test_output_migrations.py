@@ -158,6 +158,17 @@ def v5(v4: dict[str, Any]) -> dict[str, Any]:
     return output_migrations.migrate_v4_to_v5(v4)
 
 
+def statement_timeouts_for(document: dict[str, Any]) -> dict[str, str]:
+    """What version 7 requires, derived from the document under test.
+
+    Keyed by derived role name, as the schema requires. Only `app_runtime` is
+    named, because that is the platform default `rendering` always writes; a
+    manifest's own entries are exercised in `test_rendering.py`, which has a
+    manifest to read them from.
+    """
+    return {document["database"]["roles"]["app_runtime"]: "30s"}
+
+
 def documentation_role_for(document: dict[str, Any]) -> str:
     """What a caller supplies for the v6 step (D158).
 
@@ -183,6 +194,7 @@ def v6(v1: dict[str, Any]) -> dict[str, Any]:
         database_container=CONTAINER,
         access_profiles=profiles_for(v1),
         documentation_role=documentation_role_for(v1),
+        statement_timeouts=statement_timeouts_for(v1),
     )
 
 
@@ -271,6 +283,7 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         database_container=CONTAINER,
         access_profiles=profiles_for(v1),
         documentation_role=documentation_role_for(v1),
+        statement_timeouts=statement_timeouts_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
 
@@ -308,12 +321,16 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
         at_five, documentation_role=documentation_role_for(at_five)
     )
     assert migrated["schema_version"] == 6
+    migrated = output_migrations.migrate_v6_to_v7(
+        migrated, statement_timeouts=statement_timeouts_for(migrated)
+    )
+    assert migrated["schema_version"] == 7
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
 def test_the_whole_chain_validates(v6: dict[str, Any]) -> None:
     """v1 -> v2 -> v3 -> v4 -> v5 -> v6 end to end, not only the newest link (ADR 0027)."""
-    assert v6["schema_version"] == 6
+    assert v6["schema_version"] == 7
     assert v6["document_kind"] == "rendered"
     config.validate_against_schema(v6, "outputs.schema.json")
 
@@ -382,6 +399,7 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
+            statement_timeouts=statement_timeouts_for(v1),
         )
 
 
@@ -454,7 +472,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 6"):
+    with pytest.raises(MigrationError, match="already version 7"):
         output_migrations.migrate_rendered(
             v6,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -462,6 +480,7 @@ def test_a_current_version_document_is_not_migrated_again(
             database_container=CONTAINER,
             access_profiles=profiles_for(v6),
             documentation_role=documentation_role_for(v6),
+            statement_timeouts=statement_timeouts_for(v6),
         )
     with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_v4_to_v5(v5)
@@ -475,7 +494,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1, 2, 3, 4 and 5"):
+    with pytest.raises(MigrationError, match="only versions 1, 2, 3, 4, 5 and 6"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -483,6 +502,7 @@ def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
+            statement_timeouts=statement_timeouts_for(v1),
         )
 
 
@@ -496,6 +516,7 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
+            statement_timeouts=statement_timeouts_for(v1),
         )
 
 
@@ -518,6 +539,7 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             database_container=CONTAINER,
             access_profiles=profiles_for(v1),
             documentation_role=documentation_role_for(v1),
+            statement_timeouts=statement_timeouts_for(v1),
         )
 
 
@@ -621,6 +643,10 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
         at_five, documentation_role=documentation_role_for(at_five)
     )
     assert migrated["schema_version"] == 6
+    migrated = output_migrations.migrate_v6_to_v7(
+        migrated, statement_timeouts=statement_timeouts_for(migrated)
+    )
+    assert migrated["schema_version"] == 7
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -776,6 +802,10 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
         at_five, documentation_role=documentation_role_for(at_five)
     )
     assert migrated["schema_version"] == 6
+    migrated = output_migrations.migrate_v6_to_v7(
+        migrated, statement_timeouts=statement_timeouts_for(migrated)
+    )
+    assert migrated["schema_version"] == 7
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -875,6 +905,10 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
         v5_fixture, documentation_role=documentation_role_for(v5_fixture)
     )
     assert migrated["schema_version"] == 6
+    migrated = output_migrations.migrate_v6_to_v7(
+        migrated, statement_timeouts=statement_timeouts_for(migrated)
+    )
+    assert migrated["schema_version"] == 7
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 

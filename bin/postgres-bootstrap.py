@@ -261,11 +261,28 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     # error into a confusing one. `pg_temp` is last on purpose -- first, it lets
     # a temporary object shadow a real one.
     statements.append(f"ALTER ROLE {q(roles['app_runtime'])} SET search_path = api, pg_temp;")
-    # Conservative, and bounded rather than absent. An application that holds a
-    # server connection open in an idle transaction holds it out of the pool for
-    # as long as it lasts, and in transaction pooling that is the whole pool's
-    # problem rather than its own.
-    statements.append(f"ALTER ROLE {q(roles['app_runtime'])} SET statement_timeout = '30s';")
+    # Every declared statement_timeout, from the document, keyed by the derived
+    # role name (ADR 0067).
+    #
+    # This used to be one hard-coded `'30s'` on `app_runtime` and nothing else,
+    # so the manifest's `api.rest.statement_timeouts` -- which `config`
+    # validates -- reached no role at all, and a 30-second request ran to
+    # completion under a manifest that said 5s (D197). The platform's default
+    # for `app_runtime` still exists; it now lives in
+    # `rendering.DEFAULT_APP_RUNTIME_STATEMENT_TIMEOUT` and arrives here as data,
+    # so this plane applies what it was given rather than holding an opinion of
+    # its own.
+    #
+    # Sorted, because the applied set is compared against this list and a dict's
+    # iteration order is not a contract. The duration is written through
+    # `quote_literal` rather than interpolated bare: the schema's pattern is why
+    # it cannot carry a quote, which is a reason to write it safely rather than a
+    # reason not to bother.
+    for role_name, timeout in sorted(document["database"]["statement_timeouts"].items()):
+        statements.append(
+            f"ALTER ROLE {q(role_name)} SET statement_timeout = "
+            f"{migrations.quote_literal(timeout)};"
+        )
     statements.append(
         f"ALTER ROLE {q(roles['app_runtime'])} SET idle_in_transaction_session_timeout = '60s';"
     )

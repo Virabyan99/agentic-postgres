@@ -163,7 +163,7 @@ def published(rendered: dict, **overrides):
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 6
+    assert document["schema_version"] == 7
     assert document["project"]["key"] == KEY
 
 

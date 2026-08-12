@@ -130,3 +130,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0064](0064-a-sensitive-key-may-name-a-file-when-the-file-is-public.md) | A sensitive-looking key may name a file, when the file is public and the path is declared | 5 | Accepted |
 | [0065](0065-a-version-is-not-a-configuration.md) | A version is not a configuration, and a measured set records both | 5 | Accepted |
 | [0066](0066-a-rig-is-a-second-configuration-of-the-product.md) | A rig is a second configuration of the product, and the two must be tied together | 5 | Accepted |
+| [0067](0067-a-validated-value-must-reach-the-plane-that-applies-it.md) | A validated value must reach the plane that applies it | 5 | Accepted |

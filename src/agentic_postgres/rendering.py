@@ -102,6 +102,47 @@ def input_digests(project_path: Path, capabilities_path: Path) -> dict[str, str]
 # ---------------------------------------------------------------------------
 
 
+#: The `statement_timeout` the platform insists on for the runtime role when the
+#: manifest does not name one. It is not a second answer to the manifest's
+#: question: the manifest says what a *project* wants, and this says what the
+#: platform will not go without -- an application holding a server connection in
+#: a long statement holds it out of the pool, which under transaction pooling is
+#: the whole pool's problem rather than its own. A manifest entry for
+#: `app_runtime` overrides it, and `bin/postgres-bootstrap.py` no longer carries
+#: the literal it used to (ADR 0067).
+DEFAULT_APP_RUNTIME_STATEMENT_TIMEOUT = "30s"
+
+
+def resolve_statement_timeouts(project: dict[str, Any], roles: dict[str, str]) -> dict[str, str]:
+    """Resolve the manifest's suffix-keyed timeouts to derived role names.
+
+    The manifest keys `api.rest.statement_timeouts` by role *suffix* -- `anon`,
+    `authenticated` -- because that is what an operator can reasonably write.
+    Every consumer needs the derived name, and there is exactly one authority
+    for that mapping (ADR 0002), so it is resolved here and written into the
+    document. The bootstrap plane then applies a name it was handed rather than
+    deriving one, which is the difference between one authority and two.
+
+    Before version 7 this function did not exist and neither did the field: the
+    manifest's timeouts were validated by `config._validate_statement_timeouts`
+    and then dropped, so no request role ever received one and a 30-second
+    statement ran to completion under a manifest that said 5s (D197).
+    """
+    declared = ((project.get("api") or {}).get("rest") or {}).get("statement_timeouts") or {}
+
+    resolved = {
+        roles["app_runtime"]: DEFAULT_APP_RUNTIME_STATEMENT_TIMEOUT,
+    }
+    for suffix, value in declared.items():
+        # `config._validate_statement_timeouts` has already refused any suffix
+        # the platform does not derive, so this lookup cannot fail on a valid
+        # manifest -- and if it ever could, failing here is right: a timeout
+        # written for a role nothing created is the thing that schema's own
+        # description warns about.
+        resolved[roles[suffix]] = value
+    return dict(sorted(resolved.items()))
+
+
 def build_outputs(
     project: dict[str, Any],
     capabilities: dict[str, Any],
@@ -180,7 +221,7 @@ def build_outputs(
         # `ROLE_SUFFIXES`. Appending the role there is the whole change, which is
         # what single-authority derivation is for -- a second list here would be
         # the place the two could disagree.
-        "schema_version": 6,
+        "schema_version": 7,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
@@ -210,6 +251,10 @@ def build_outputs(
             "pooled": dict(unavailable_endpoint),
             "direct": dict(unavailable_endpoint),
             "access_profiles": {name: dict(profile) for name, profile in access_profiles.items()},
+            # Version 7. Resolved to derived role names here so the bootstrap
+            # plane -- the only plane that may ALTER ROLE (D102) -- applies a
+            # name it was given rather than deriving one (ADR 0067).
+            "statement_timeouts": resolve_statement_timeouts(project, dict(identity.roles)),
         },
         "routes": {
             "rest": identity.route_rest,

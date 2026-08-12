@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
