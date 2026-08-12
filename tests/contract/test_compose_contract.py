@@ -147,18 +147,62 @@ def test_no_dockerfile_names_its_own_base_image() -> None:
     A `FROM python:3.12-slim` would build successfully, pass every Compose
     assertion, and quietly reintroduce a floating tag into a public-facing
     image.
+
+    **Replaced, stricter, under ADR 0069.** This required the literal
+    `FROM ${BASE_IMAGE}`, which `services/docs/` cannot satisfy: it is the first
+    multi-stage first-party build, and its two stages need two different bases.
+    Matching a form rather than the property let the form become the rule. What
+    is checked now is the property, in three parts rather than one:
+
+    * every `FROM` names a variable reference and nothing else, so no tag, no
+      digest and no bare image name can appear;
+    * the variable it names is declared as an `ARG` **in that file**, so a
+      reference to a variable nobody passes -- which resolves to empty and fails
+      obscurely at build time -- is caught here instead;
+    * the name ends in `BASE_IMAGE`, so the wiring in `compose.yaml` stays
+      greppable.
+
+    A later stage may name an earlier one by its `AS` alias; that is not a base
+    image, it is this file's own output.
     """
+    from_line = re.compile(r"^FROM\s+(\S+)(?:\s+AS\s+(\S+))?$", re.IGNORECASE)
+    argument_reference = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
+
     for dockerfile in sorted((REPO_ROOT / "services").rglob("Dockerfile")):
+        text = dockerfile.read_text(encoding="utf-8")
+        name = dockerfile.relative_to(REPO_ROOT)
+        declared = set(re.findall(r"^ARG\s+([A-Z][A-Z0-9_]*)", text, re.MULTILINE))
         froms = [
-            line.strip()
-            for line in dockerfile.read_text(encoding="utf-8").splitlines()
-            if line.strip().upper().startswith("FROM ")
+            line.strip() for line in text.splitlines() if line.strip().upper().startswith("FROM ")
         ]
-        assert froms, f"{dockerfile} has no FROM line"
+        assert froms, f"{name} has no FROM line"
+
+        stages: set[str] = set()
         for line in froms:
-            assert line == "FROM ${BASE_IMAGE}", (
-                f"{dockerfile.relative_to(REPO_ROOT)} names its own base image: {line}"
+            matched = from_line.match(line)
+            assert matched, f"{name}: unparsable FROM line: {line}"
+            reference, alias = matched.group(1), matched.group(2)
+
+            if reference in stages:
+                if alias:
+                    stages.add(alias)
+                continue
+
+            variable = argument_reference.match(reference)
+            assert variable, f"{name} names its own base image: {line}"
+            assert variable.group(1) in declared, (
+                f"{name}: {line} references {variable.group(1)}, which no ARG in this "
+                "file declares. Docker resolves an undeclared build argument to the "
+                "empty string, so this fails as `invalid reference format` rather than "
+                "as the missing declaration it is"
             )
+            assert variable.group(1).endswith("BASE_IMAGE"), (
+                f"{name}: {line} takes its base from {variable.group(1)}, which does not "
+                "end in BASE_IMAGE. The suffix is what makes the wiring in compose.yaml "
+                "findable from the Dockerfile and back"
+            )
+            if alias:
+                stages.add(alias)
 
 
 def test_no_project_service_publishes_a_host_port() -> None:

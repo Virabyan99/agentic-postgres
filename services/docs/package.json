@@ -1,0 +1,10 @@
+{
+  "name": "apg-docs",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The documentation page's build. Produces a vendored Scalar bundle; ships no server.",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@scalar/api-reference": "1.64.1"
+  }
+}

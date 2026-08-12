@@ -128,4 +128,19 @@ packages:
   # with no measured need. The acceptance report names the configuration model
   # it tested, and a fixture may not straddle both.
   PRISMA_VERSION: "6.19.1"
-  SCALAR_VERSION: "1.36.4"
+  # Re-pinned in Session 5 Run 9a, because the previous value named a release
+  # that does not exist (D201). `@scalar/api-reference` published 1.36.2 and
+  # then 1.37.0; there has never been a 1.36.4, and no Scalar image carries the
+  # tag either. It sat here for four sessions because nothing built from it and
+  # because `bin/verify-versions.sh` resolves `images:` against a registry while
+  # a `packages:` entry is a string nothing dereferences.
+  #
+  # 1.64.1 is `latest` at the time of measurement, chosen over 1.36.2 -- the
+  # nearest real release to the old string -- because there is no intent to
+  # honour: the old number was not a decision anybody made. Both were measured
+  # and behave identically for the property that matters (D202): neither ships a
+  # self-contained bundle, both name `fonts.scalar.com` and `proxy.scalar.com`
+  # in `dist/browser/standalone.js`, and `withDefaultFonts` defaults to true in
+  # both. The configuration and the CSP are what make the page self-contained
+  # (ADR 0069), not the version.
+  SCALAR_VERSION: "1.64.1"

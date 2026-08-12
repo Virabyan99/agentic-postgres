@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>API reference</title>
+  </head>
+  <body>
+    <!--
+      The page's own text about what the document advertises and what the
+      surface actually does. It is served before the reference renders, and it
+      is not a footnote.
+
+      ADR 0060: `openapi-mode = follow-privileges` publishes DELETE, PATCH and
+      POST on both views because the documentation role holds EXECUTE on the
+      write RPCs, and all three return 403. No PostgREST setting filters methods
+      by grant, so this cannot be fixed in the document; it is recorded instead.
+      A reference that showed those verbs without saying so would be the first
+      thing in this deployment to lie about the surface.
+    -->
+    <noscript>
+      <p>This reference renders with JavaScript. The document it renders is
+      served at <code>openapi.json</code> on this same path.</p>
+    </noscript>
+
+    <aside id="apg-surface-note">
+      <h2>Before you read the verbs</h2>
+      <p>
+        This document is generated from database privileges. It advertises
+        <code>DELETE</code>, <code>PATCH</code> and <code>POST</code> on both
+        views, and <strong>all three return 403</strong>. Writes go through the
+        RPCs under <code>/rpc/</code>; the views are readable and nothing more.
+      </p>
+      <p>
+        The document is a reviewed snapshot, not a live capture. It is what a
+        human approved for this release.
+      </p>
+    </aside>
+
+    <div id="app"></div>
+
+    <!--
+      Self-hosted, from this origin. The bundle is vendored at build time
+      (ADR 0069) and the Content-Security-Policy this server sends is
+      `default-src 'none'` with `script-src 'self'`, so a script from anywhere
+      else is refused by the browser rather than trusted not to be requested.
+    -->
+    <script src="standalone.js"></script>
+    <script>
+      // `withDefaultFonts: false` is the switch that stops the bundle fetching
+      // from fonts.scalar.com -- measured as `default: true` at 1.36.2 and
+      // 1.64.1 alike (D202). It is set here AND refused by `font-src 'self'`
+      // in the CSP, deliberately: this is a promise about a third party's code
+      // honouring its own flag, and the header is the part a browser enforces.
+      //
+      // No `proxyUrl`. Scalar's default points at proxy.scalar.com, which would
+      // route a reader's "try it" request through a third party. `connect-src
+      // 'self'` refuses that too.
+      Scalar.createApiReference('#app', {
+        url: 'openapi.json',
+        withDefaultFonts: false,
+        hideClientButton: true,
+        // The document is a snapshot of one deployment's surface; a server
+        // picker implies alternatives that are not published here.
+        hideModels: false,
+        persistAuth: false,
+        // No plugins, no integrations, nothing that would widen what this page
+        // is allowed to reach.
+        plugins: [],
+      });
+    </script>
+  </body>
+</html>
