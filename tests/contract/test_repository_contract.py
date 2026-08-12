@@ -110,6 +110,7 @@ REQUIRED_PATHS = (
     "bin/provision-host.sh",
     "bin/session-02-check.sh",
     "bin/session-04-check.sh",
+    "bin/session-05-check.sh",
     "src/agentic_postgres/infisical_client.py",
     "src/agentic_postgres/installed_release.py",
     "infra/edge/compose.yaml",

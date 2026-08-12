@@ -163,8 +163,8 @@ Priorities:
 | `DX-API-001` | 5 | The request broker performs an authorized call without a token reaching argv, stdout, shell history, a log, or evidence. |
 | `SEC-ANON-001` | 5 | The anonymous role cannot reach protected resources. |
 | `SEC-API-001` | 5 | From a network that is not the host: the REST route answers over HTTPS with the approved surface, the documentation route refuses without a credential, and nothing else of the API plane is reachable. |
-| `SEC-BOOT-001` | 5 | The temporary bootstrap issuer signs with a private key no service holds, verifiers hold public material only, and the deployed document records the issuer as temporary against the session it was deployed through. |
-| `SEC-DOCS-001` | 5 | The documentation credential never reaches the documentation service, the served bytes carry no credential, and no API token is served to a browser. |
+| `SEC-BOOT-001` | 5 | The temporary bootstrap issuer signs with a private key no service holds, verifiers hold public material only, and the deployed document records the issuer as temporary against the session it was deployed through. A retired signing key is accepted by nothing once its second rotation phase completes, and a rotated authenticator password opens the cluster for the running service and no longer opens it for the value it replaced. |
+| `SEC-DOCS-001` | 5 | The documentation credential never reaches the documentation service, the served bytes carry no credential, and no API token is served to a browser. A rotated credential opens the page and the value it replaced does not. |
 | `SEC-PRIV-001` | 5 | No API role can address the app or app_private schemas. |
 | `SEC-ROLE-001` | 5 | Role switching cannot exceed the authenticator's granted memberships: a token naming an unactivated, privileged, or foreign-project role is refused. |
 | `API-ADMIN-001` | 6 | Admin endpoints require an explicit admin scope, not a role name. |

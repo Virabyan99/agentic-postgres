@@ -112,6 +112,17 @@ ENVIRONMENT_VARIABLES = (
     # credential it was handed is not the one that is active.
     "APG_AFTER_REBOOT",
     "APG_ROTATED_FROM_FILE",
+    # Session 5 Run 10. Three more of the same kind, one per credential the
+    # API plane depends on: the role PostgREST logs in as, the Basic Auth
+    # credential in front of the documentation page, and the signing key whose
+    # retirement is the second phase of a key rotation.
+    #
+    # Separate variables rather than one `APG_ROTATED`, because a window
+    # rotates one of them at a time and a single flag would admit all three
+    # proofs on the strength of whichever was actually rotated.
+    "APG_ROTATED_AUTHENTICATOR_FROM_FILE",
+    "APG_ROTATED_DOCS_FROM_FILE",
+    "APG_ROTATED_JWT_FROM_FILE",
 )
 
 

@@ -872,6 +872,11 @@
   test_nodeids:
     - tests/deployment/test_session5_api_contract.py::test_the_live_openapi_matches_the_reviewed_snapshot
     - tests/deployment/test_session5_api_contract.py::test_the_deployed_document_records_the_checksums_it_serves
+    - tests/deployment/test_session5_convergence.py::test_restarting_the_rest_service_restores_the_surface
+    - tests/deployment/test_session5_convergence.py::test_restarting_the_documentation_service_restores_its_refusal
+    - tests/deployment/test_session5_convergence.py::test_restarting_the_cluster_under_a_configured_rest_plane
+    - tests/deployment/test_session5_convergence.py::test_restarting_the_project_unit_restores_both_routes
+    - tests/deployment/test_session5_convergence.py::test_the_reload_channel_still_delivers_after_a_cluster_restart
   description: >-
     The live OpenAPI, normalized, equals the committed snapshot, and the
     snapshot equals the reviewed API-surface allowlist; an unlisted object in
@@ -892,19 +897,26 @@
   target_session: 5
   test_nodeids:
     - tests/deployment/test_session5_bootstrap_identity.py::test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key
+    - tests/deployment/test_session5_convergence.py::test_a_rotated_signing_key_is_the_only_one_the_plane_accepts
+    - tests/deployment/test_session5_convergence.py::test_a_rotated_authenticator_serves_the_plane_and_the_old_password_does_not
   description: >-
     The temporary bootstrap issuer signs with a private key no service holds,
     verifiers hold public material only, and the deployed document records the
-    issuer as temporary against the session it was deployed through.
+    issuer as temporary against the session it was deployed through. A retired
+    signing key is accepted by nothing once its second rotation phase completes,
+    and a rotated authenticator password opens the cluster for the running
+    service and no longer opens it for the value it replaced.
 
 - id: SEC-DOCS-001
   priority: P0
   target_session: 5
   test_nodeids:
     - tests/deployment/test_session5_api_authorization.py::test_the_documentation_credential_reaches_no_service_and_no_served_byte
+    - tests/deployment/test_session5_convergence.py::test_a_rotated_documentation_credential_opens_the_page_and_the_old_one_does_not
   description: >-
     The documentation credential never reaches the documentation service, the
     served bytes carry no credential, and no API token is served to a browser.
+    A rotated credential opens the page and the value it replaced does not.
 
 - id: SEC-API-001
   priority: P0
