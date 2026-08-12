@@ -837,6 +837,15 @@ def main(argv: list[str] | None = None) -> int:
     # token and materializes no signing key, so there is nothing to derive.
     if arguments.through_session >= REST_PLANE_SESSION:
         jwks = run(
+            # `sys.executable`, not the shebang. Ubuntu ships no bare `python`,
+            # and a `#!/usr/bin/env python` line fails with `env: 'python': No
+            # such file or directory` -- which is what the first live run of this
+            # step did. Every other Python this deploy invokes goes through a
+            # `.sh` wrapper with a `python_bin()` resolver; this one is called
+            # directly, so it takes the interpreter already running the deploy.
+            # That is also stricter than a resolver: it cannot pick a different
+            # Python from the one whose imports were validated at startup.
+            sys.executable,
             str(release / "bin" / "render-jwks.py"),
             "--project-key",
             key,

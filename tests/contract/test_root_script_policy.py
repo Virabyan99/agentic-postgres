@@ -604,3 +604,108 @@ def test_the_session_two_gate_does_not_replace_the_session_one_gate() -> None:
 def test_every_mode_of_the_gate_is_reachable() -> None:
     for mode in ("offline", "host", "external"):
         assert f"mode_{mode}" in code_of("bin/session-02-check.sh")
+
+
+def test_no_function_consumed_in_a_subshell_assigns_a_global() -> None:
+    """A global set inside `mapfile < <(fn)` is set in a child and lost.
+
+    Measured with a control: a variable assigned inside a function called
+    through process substitution does not survive into the parent, while the
+    same function called normally sets it.
+
+    `project-runtime.sh` had exactly this. The filtering that decides which
+    services are held back set `HELD_BACK` and was consumed as
+    `mapfile -t services < <(wanted_services ...)`, so the caller always saw an
+    empty string. **It did not crash and it did not start the wrong services** --
+    the right ones started, and the edge attached one step early, which is the
+    single ordering property ADR 0063 exists to deliver. A source-ordering test
+    could not see it, because the order in the source was still correct.
+
+    So the rule is structural: a function whose output is consumed through
+    process substitution may not assign to a capitalised global.
+
+    Goes red if: a function called as `<(name ...)` gains an assignment to an
+    upper-case name -- which is the shape that returns a value invisibly and
+    then does not.
+    """
+    for relative in ROOT_COMMANDS:
+        source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+
+        consumed = set(re.findall(r"<\(\s*([a-z_][a-z0-9_]*)\b", source))
+        if not consumed:
+            continue
+
+        for name in sorted(consumed):
+            body = _function_body(source, name)
+            if body is None:
+                # Not a function defined in this file -- a command, so there is
+                # no global for it to lose.
+                continue
+            assigned = sorted(set(re.findall(r"^\s*([A-Z][A-Z0-9_]*)=", body, re.MULTILINE)))
+            assert not assigned, (
+                f"{relative}: {name}() is consumed through process substitution and "
+                f"assigns {assigned}. That runs in a subshell, so the caller never "
+                "sees it -- and the failure is silent"
+            )
+
+
+def _function_body(source: str, name: str) -> str | None:
+    """The text of `name() { ... }`, or None if this file does not define it.
+
+    Brace-counted rather than regex-matched to the first `}`: these functions
+    contain `${...}` and nested blocks, and a lazy match would read a fraction
+    of the body and find no assignment in it.
+    """
+    opening = f"\n{name}() {{\n"
+    start = source.find(opening)
+    if start < 0:
+        return None
+    index = start + len(opening)
+    depth = 1
+    while index < len(source) and depth:
+        if source.startswith("${", index):
+            # Skip the *whole* expansion, not the two opening characters. The
+            # first version advanced by 2, so the `}` of `${ROOT_DIR}` closed
+            # the function and the scan read one line of a body -- which is the
+            # shape that finds no assignment in a function full of them. The
+            # guard test below is what caught it.
+            nested = 1
+            index += 2
+            while index < len(source) and nested:
+                if source[index] == "{":
+                    nested += 1
+                elif source[index] == "}":
+                    nested -= 1
+                index += 1
+            continue
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+        index += 1
+    return source[start:index]
+
+
+def test_the_subshell_scan_would_catch_a_real_one() -> None:
+    """Guard the guard, with the exact shape that got through.
+
+    A scan for this that read only the first line of a function, or matched to
+    the first `}`, would find nothing in a body full of `${...}` -- which is
+    every function in these scripts.
+    """
+    planted = (
+        "\nemit() {\n"
+        '  local x="${ROOT_DIR}/thing"\n'
+        '  if [ -n "${x}" ]; then\n'
+        '    HELD_BACK="something"\n'
+        "  fi\n"
+        "  printf '%s\\n' one\n"
+        "}\n"
+        'mapfile -t items < <(emit "a")\n'
+    )
+    body = _function_body(planted, "emit")
+    assert body is not None
+    assert re.search(r"^\s*([A-Z][A-Z0-9_]*)=", body, re.MULTILINE), (
+        "the body scan did not find an assignment it must find"
+    )
+    assert "emit" in set(re.findall(r"<\(\s*([a-z_][a-z0-9_]*)\b", planted))

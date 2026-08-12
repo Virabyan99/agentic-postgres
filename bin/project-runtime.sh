@@ -174,46 +174,24 @@ parse_arguments() {
   fi
 }
 
-# The services this deployment runs, minus the deferred ones, as one per line.
+# Every service this deployment runs, one per line, from the resolved model.
 #
-# Read out of the resolved model rather than listed here: the set changes with
-# the session and with the profiles, and a second list would be the one that
-# went stale.
+# Read out of the model rather than listed here: the set changes with the session
+# and with the profiles, and a second list would be the one that went stale.
 #
-# A deferred name this deployment does not run is skipped, not refused. The
-# caller passes the same list at every session, and `postgrest` is simply not
-# part of a session-4 deployment -- refusing it here would break every deploy
-# below the session that introduces the service. The typo that this permits is
-# caught where it always runs instead: `test_deferred_services_are_real_services`
-# asserts every name in `POST_BOOTSTRAP_SERVICES` is a service `compose.yaml`
-# defines, offline, in the gate.
-wanted_services() {
+# **This function only reads.** The filtering that used to live here set a global
+# and was called as `mapfile < <(...)`, which runs it in a **subshell** -- so the
+# global was set in a child and lost, and the caller could not tell that anything
+# had been held back. Measured, with a control: a variable assigned inside a
+# function called through process substitution does not survive into the parent.
+# The consequence was not a crash: the right services started, and the edge
+# attached one step early, which is exactly the ordering ADR 0063 exists to
+# deliver. So the filtering is in the caller now, where its results are in scope.
+model_services() {
   local rendered="$1"
   shift
   local -a profiles=("$@")
-  local -a all=() wanted=()
-  local service deferred matched
-
-  mapfile -t all < <("${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" \
-    config --services | sort)
-  [ "${#all[@]}" -gt 0 ] || die 9 "the resolved model names no services."
-
-  HELD_BACK=""
-  for service in "${all[@]}"; do
-    matched=0
-    for deferred in ${DEFERRED//,/ }; do
-      if [ "${service}" = "${deferred}" ]; then
-        matched=1
-        HELD_BACK="${HELD_BACK:+${HELD_BACK},}${service}"
-      fi
-    done
-    [ "${matched}" -eq 0 ] && wanted+=("${service}")
-  done
-
-  [ "${#wanted[@]}" -gt 0 ] \
-    || die 2 "--defer would hold back every service this deployment runs."
-
-  printf '%s\n' "${wanted[@]}"
+  "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" config --services | sort
 }
 
 # `printf` stays last on purpose. Under `set -e` a bare `[ -L x ] && die` as the
@@ -281,8 +259,27 @@ main() {
       local -a profiles=()
       mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
 
-      local -a services=()
-      mapfile -t services < <(wanted_services "${rendered}" "${profiles[@]}")
+      # Filtered here, in the parent, so HELD_BACK is in scope below. See
+      # model_services for what putting it in the function cost.
+      local -a all=() services=()
+      local service deferred matched
+      mapfile -t all < <(model_services "${rendered}" "${profiles[@]}")
+      [ "${#all[@]}" -gt 0 ] || die 9 "the resolved model names no services."
+
+      HELD_BACK=""
+      for service in "${all[@]}"; do
+        matched=0
+        for deferred in ${DEFERRED//,/ }; do
+          if [ "${service}" = "${deferred}" ]; then
+            matched=1
+            HELD_BACK="${HELD_BACK:+${HELD_BACK},}${service}"
+          fi
+        done
+        [ "${matched}" -eq 0 ] && services+=("${service}")
+      done
+
+      [ "${#services[@]}" -gt 0 ] \
+        || die 2 "--defer would hold back every service this deployment runs."
 
       "${ROOT_DIR}/bin/compose.sh" "${rendered}" --runtime "${profiles[@]}" \
         up -d --build --wait "${services[@]}" \

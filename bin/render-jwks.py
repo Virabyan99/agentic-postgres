@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Derive the verification-only JWKS from the bootstrap signing key.
 
 ADR 0051 says PostgREST receives a JWKS **derived** from the private key rather
