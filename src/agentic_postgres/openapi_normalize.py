@@ -56,11 +56,18 @@ from typing import Any
 
 from agentic_postgres.config import ManifestError
 
-#: Every top-level key the locked PostgREST emits, measured. The set is exact
-#: rather than a floor: a key this does not name is a document this normalizer
-#: has never seen, and normalizing an unknown field into a snapshot is how a
-#: change ships without a reviewer. A PostgREST upgrade is *expected* to fail
-#: here, and the repair is to re-measure and re-approve, not to widen the set.
+#: Every top-level key the locked PostgREST emits *under this product's
+#: configuration*, measured. The set is exact rather than a floor: a key this
+#: does not name is a document this normalizer has never seen, and normalizing
+#: an unknown field into a snapshot is how a change ships without a reviewer.
+#:
+#: Both a PostgREST upgrade and a configuration change to the same version are
+#: *expected* to fail here, and the repair is to re-measure and re-approve
+#: rather than to widen the set. The second half of that sentence was learned:
+#: `security` and `securityDefinitions` were missing from this set for three
+#: runs because it was measured against a rig that did not set
+#: `openapi-security-active`, while the product has set it since Run 4 (ADR
+#: 0065, D188).
 KNOWN_TOP_LEVEL: frozenset[str] = frozenset(
     {
         "swagger",
@@ -74,11 +81,27 @@ KNOWN_TOP_LEVEL: frozenset[str] = frozenset(
         "definitions",
         "parameters",
         "externalDocs",
+        "security",
+        "securityDefinitions",
     }
 )
 
 #: Present or the document is not describable at all.
 REQUIRED_TOP_LEVEL: frozenset[str] = frozenset({"swagger", "info", "paths"})
+
+#: Present or the capture came from a deployment with `openapi-security-active`
+#: off, whose document announces no authentication at all. Absence is a refusal
+#: for the reason `REQUIRED_SCHEMES` exists: a misconfigured capture normalizes
+#: cleanly, and the resulting snapshot describes an API this product does not
+#: serve (ADR 0065).
+REQUIRED_SECURITY_TOP_LEVEL: frozenset[str] = frozenset({"security", "securityDefinitions"})
+
+#: Asserted, not carried. This is the *requirement* — every operation is behind
+#: the `JWT` scheme — and a document that drops it or names another scheme is a
+#: different security posture. `securityDefinitions` is deliberately not
+#: asserted: it is the *description* of how to send the credential, and
+#: description belongs in the snapshot where a reviewer sees it as a diff.
+REQUIRED_SECURITY: tuple[dict[str, list[str]], ...] = ({"JWT": []},)
 
 #: The three fields that differ between two deployments of this repository.
 PROJECT_SPECIFIC: frozenset[str] = frozenset({"host", "basePath", "schemes"})
@@ -111,6 +134,8 @@ __all__ = [
     "MAX_DOCUMENT_BYTES",
     "PROJECT_SPECIFIC",
     "REQUIRED_SCHEMES",
+    "REQUIRED_SECURITY",
+    "REQUIRED_SECURITY_TOP_LEVEL",
     "REQUIRED_TOP_LEVEL",
     "SENTINEL_BASE_PATH",
     "SENTINEL_HOST",
@@ -259,6 +284,28 @@ def _validate_shape(document: dict[str, Any]) -> None:
                 "sentinel written into an absent field would make every project's "
                 "document agree about a value none of them published"
             )
+
+    _validate_security(document)
+
+
+def _validate_security(document: dict[str, Any]) -> None:
+    """ADR 0065: the announced authentication is asserted, not carried."""
+    absent = REQUIRED_SECURITY_TOP_LEVEL - set(document)
+    if absent:
+        raise NormalizationError(
+            f"the document has no {sorted(absent)}, so it announces no authentication. "
+            "PostgREST emits both only with `openapi-security-active` on, which this "
+            "product sets; a capture taken without it describes an API served behind a "
+            "bearer token as though it needed none"
+        )
+
+    announced = document["security"]
+    if tuple(announced) != REQUIRED_SECURITY:
+        raise NormalizationError(
+            f"the document requires {announced!r}, not {list(REQUIRED_SECURITY)!r}. The "
+            "security requirement is asserted rather than snapshotted, because a "
+            "changed one is a changed posture rather than a diff to approve"
+        )
 
 
 def _validate_project_fields(

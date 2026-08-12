@@ -1,11 +1,33 @@
 """Normalizing a served OpenAPI document into the form two projects can share.
 
 The fixture is not hand-written. `tests/fixtures/postgrest-openapi.captured.json`
-is the document the locked PostgREST actually served, captured in Run 7 from a
-cluster carrying the surface `contracts/postgrest-api-surface.yaml` describes,
-with `openapi-server-proxy-uri` set the way a deployment sets it. Writing the
-fixture by hand would have tested the normalizer against the document its author
-imagined, which is the failure ADR 0019 exists for.
+is the document the locked PostgREST actually served. Writing it by hand would
+have tested the normalizer against the document its author imagined, which is
+the failure ADR 0019 exists for.
+
+It was **re-captured in Run 9**, and what the re-capture found is why the
+provenance is now recorded in full. Run 7's capture came from a rig, and a rig
+records its own configuration and its own schema:
+
+- it did not set `openapi-security-active`, so the document carried neither
+  `security` nor `securityDefinitions` and `KNOWN_TOP_LEVEL` was measured
+  without them (ADR 0065, D188);
+- its cluster was built from the same DDL **minus every `COMMENT ON`**, so
+  fifteen descriptions and summaries were absent or different from the ones the
+  repository's own migrations produce. `"Notes visible to the caller."` appears
+  nowhere in `migrations/` (D189).
+
+The re-capture applies `.generated/fixture-alpha-dev/migrations/`, all nine, in
+order to the locked pgvector image, then serves them through the locked
+PostgREST under the product's `PGRST_*` settings with Run 7's
+`openapi-server-proxy-uri` so `host` and `basePath` are unchanged. The control
+on the re-capture was the diff: every one of the sixteen differences is a
+`COMMENT ON` surfacing as a description, or one of the two security keys. No
+path, definition, property, format or `required` array moved.
+
+The rig is `/tmp` work, not committed, and that is the remaining gap: nothing
+compares this fixture against what the migrations produce, so it can drift again
+the same way. See D189.
 
 Each test below states what would have to break for it to go red, because
 several of them assert a *substitution*, and a substitution is satisfied by any
@@ -152,6 +174,91 @@ def test_normalizing_without_the_expected_values_is_refused(served: dict[str, An
         normalize(served, expected_host="", expected_base_path=CAPTURED_BASE_PATH)
 
 
+# ---------------------------------------------------------------------------
+# The announced authentication (ADR 0065)
+# ---------------------------------------------------------------------------
+
+
+def test_the_captured_document_announces_the_bearer_scheme(served: dict[str, Any]) -> None:
+    """The control for the three refusals below.
+
+    Goes red if the fixture is ever replaced by one captured without
+    `openapi-security-active` again -- at which point the refusals below would
+    all pass for the wrong reason, because their input already lacked the keys
+    they are supposed to be deleting.
+    """
+    assert served["security"] == [{"JWT": []}]
+    assert served["securityDefinitions"]["JWT"]["type"] == "apiKey"
+    assert served["securityDefinitions"]["JWT"]["in"] == "header"
+    assert served["securityDefinitions"]["JWT"]["name"] == "Authorization"
+
+
+def test_the_required_security_fields_are_the_two_measured_ones() -> None:
+    """Named here as literals, because the refusals below must not read them.
+
+    A refusal parametrized over `REQUIRED_SECURITY_TOP_LEVEL` is a test that
+    *disappears* when the constant is emptied -- pytest skips an empty parameter
+    set and reports success -- rather than one that fails. That was written,
+    mutated, and caught by the mutation staying green (D190). The constant is
+    checked once, here; the refusals below spell their fields out.
+    """
+    assert openapi_normalize.REQUIRED_SECURITY_TOP_LEVEL == frozenset(
+        {"security", "securityDefinitions"}
+    )
+
+
+@pytest.mark.parametrize("field", ["security", "securityDefinitions"])
+def test_a_document_announcing_no_authentication_is_refused(
+    served: dict[str, Any], field: str
+) -> None:
+    """The `openapi-security-active`-is-off capture, which is what would happen.
+
+    Measured on the locked image with a control and a negative control: `true`
+    emits both keys, `false` and unset emit neither and are byte-identical. A
+    deployment that lost the setting would otherwise normalize cleanly into a
+    snapshot describing an API served behind a bearer token as needing none.
+    """
+    del served[field]
+    with pytest.raises(NormalizationError, match="announces no authentication"):
+        normalized(served)
+
+
+def test_a_document_requiring_a_different_scheme_is_refused(served: dict[str, Any]) -> None:
+    """`security` is asserted, not snapshotted, and this is the difference.
+
+    A changed requirement is a changed posture. Carried into the snapshot it
+    would arrive as a diff a reviewer approves at a glance; asserted here it
+    stops the capture.
+    """
+    served["security"] = [{"BasicAuth": []}]
+    with pytest.raises(NormalizationError, match="requires"):
+        normalized(served)
+
+
+def test_a_document_requiring_nothing_at_all_is_refused(served: dict[str, Any]) -> None:
+    """The empty list is present-but-meaningless, and a presence check misses it.
+
+    Goes red if the rule is ever weakened from "equals the requirement" to
+    "carries the key", which is the shape that would let `security: []` --
+    every operation open -- through.
+    """
+    served["security"] = []
+    with pytest.raises(NormalizationError, match="requires"):
+        normalized(served)
+
+
+def test_the_security_definitions_are_carried_into_the_snapshot(served: dict[str, Any]) -> None:
+    """The other half of ADR 0065: description is snapshotted, not asserted.
+
+    Goes red if `securityDefinitions` starts being validated against a constant
+    in source, at which point an upstream rewording becomes a refusal with no
+    artifact for a reviewer to read.
+    """
+    served["securityDefinitions"]["JWT"]["description"] = "Reworded upstream."
+    result = normalized(served)
+    assert result["securityDefinitions"]["JWT"]["description"] == "Reworded upstream."
+
+
 def test_a_project_value_surviving_elsewhere_is_refused(served: dict[str, Any]) -> None:
     """The guard on the substitution.
 
@@ -280,12 +387,19 @@ def test_a_document_in_another_format_is_refused(served: dict[str, Any]) -> None
 
 
 def test_an_unknown_top_level_key_is_refused(served: dict[str, Any]) -> None:
-    """A PostgREST upgrade is expected to fail here, and that is the point.
+    """An upgrade -- or a configuration change -- is expected to fail here.
 
-    Goes red if `KNOWN_TOP_LEVEL` is widened to make an upgrade pass instead of
-    re-measuring what the new version emits.
+    Goes red if `KNOWN_TOP_LEVEL` is widened to make either pass instead of
+    re-measuring what the new version emits under this product's settings.
+
+    The example was `security` until Run 9, when a capture from a real
+    deployment proved that key is emitted and the set had been measured against
+    a rig configured differently (ADR 0065). `securitySchemes` replaces it
+    deliberately: it is the OpenAPI 3 spelling of a key this Swagger 2.0
+    document does carry under another name, so the example stays a plausible
+    near-miss rather than an obvious one.
     """
-    served["security"] = []
+    served["securitySchemes"] = {}
     with pytest.raises(NormalizationError, match="never seen"):
         normalized(served)
 

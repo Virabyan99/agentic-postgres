@@ -128,3 +128,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0062](0062-a-required-interpolation-has-two-spellings.md) | A required interpolation has two spellings, and which one is not a style choice | 5 | Accepted |
 | [0063](0063-a-service-that-authenticates-as-a-project-role-starts-after-the-bootstrap-plane.md) | A service that authenticates as a project role starts after the bootstrap plane | 5 | Accepted |
 | [0064](0064-a-sensitive-key-may-name-a-file-when-the-file-is-public.md) | A sensitive-looking key may name a file, when the file is public and the path is declared | 5 | Accepted |
+| [0065](0065-a-version-is-not-a-configuration.md) | A version is not a configuration, and a measured set records both | 5 | Accepted |
