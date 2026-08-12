@@ -11,11 +11,12 @@ change which resolver issues its certificate or drop the middleware chain.
 from __future__ import annotations
 
 import ast
+import re
 
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, runtime_override
+from agentic_postgres import REPO_ROOT, naming, runtime_override
 from agentic_postgres.naming import HEALTH_ROUTE_PATH
 
 #: The Compose model, for the one test that checks a declared service name
@@ -414,3 +415,107 @@ def _load_render_jwks():
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
     return module
+
+
+# ---------------------------------------------------------------------------
+# A router on an invisible container is not a route (D186)
+# ---------------------------------------------------------------------------
+
+EDGE_STATIC = REPO_ROOT / "infra" / "edge" / "traefik.yaml"
+
+
+def test_every_routed_service_carries_the_label_the_edge_filters_on() -> None:
+    """Router labels on a container Traefik ignores create no route.
+
+    `infra/edge/traefik.yaml` sets a provider constraint, so a container without
+    the matching label is not merely unrouted — it is **invisible**. The router
+    labels this module writes are then attached to something the proxy never
+    looks at, no router is created, and the edge answers 404 for the published
+    URL. That is what the first live capture got, from a PostgREST that was
+    serving the document correctly to its own network the whole time.
+
+    The two halves live in different files and neither can see the other: the
+    router labels are rendered here, the identity labels are in `compose.yaml`,
+    and the constraint is in the edge's static configuration. This is the only
+    place all three meet.
+
+    **The label and its value are read from the constraint**, not written here.
+    A test carrying its own copy of `managed` would keep passing after the edge
+    started filtering on something else.
+
+    Goes red if: a service gains a router in the override without the scope
+    label; or the constraint changes and the labels do not follow.
+    """
+    constraint = yaml.safe_load(EDGE_STATIC.read_text(encoding="utf-8"))
+    expression = constraint["providers"]["docker"]["constraints"]
+    matched = re.fullmatch(r"Label\(`([^`]+)`,\s*`([^`]+)`\)", expression.strip())
+    assert matched, f"the edge constraint is not a simple Label() match: {expression!r}"
+    label, value = matched.group(1), matched.group(2)
+
+    override = runtime_override.build_override(
+        router_name="health",
+        https_entrypoint="websecure",
+        rendered_directory="/var/lib/agentic-postgres/rendered/example-dev",
+        rest_router_name="rest",
+        buffering_middleware_name="buffer",
+    )
+    model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+
+    routed = [
+        name
+        for name, definition in override["services"].items()
+        if any(key.startswith("traefik.http.routers.") for key in definition.get("labels", {}))
+    ]
+    assert routed, "no service in the override carries a router; this test found nothing"
+
+    for name in routed:
+        labels = model["services"][name].get("labels") or {}
+        assert labels.get(label) == value, (
+            f"{name} is given a router by the override and does not carry "
+            f"{label}={value} in compose.yaml. The edge filters on that label, so the "
+            "router is attached to a container it never sees"
+        )
+        # One network needs no hint; two leave Traefik no way to choose, and the
+        # one it must not choose is the internal network the proxy cannot reach.
+        if len(model["services"][name].get("networks") or []) > 1:
+            assert "traefik.docker.network" in labels, (
+                f"{name} is on multiple networks and names none of them for Traefik"
+            )
+
+
+def test_the_published_document_describes_the_published_address() -> None:
+    """`openapi-server-proxy-uri`, or the document names the container's own bind.
+
+    Measured on the deployed service before this was set: the generated document
+    carried `"host": "0.0.0.0:3000"` and `"basePath": "/"` — a private address,
+    published to every consumer of the API.
+
+    `openapi_normalize` compares both fields against the published address and
+    refuses a document that disagrees, so the snapshot capture fails rather than
+    approving one that names the wrong host. Run 7's committed fixture was
+    captured *with* this set, against a configuration the product did not yet
+    produce, which is why nothing offline noticed.
+
+    Goes red if: the proxy URI is dropped, or stops being built from the same
+    two values `naming.derive` builds `route_rest` from.
+    """
+    model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+    environment = model["services"][runtime_override.REST_SERVICE]["environment"]
+
+    proxy = environment.get("PGRST_OPENAPI_SERVER_PROXY_URI")
+    assert proxy, (
+        "PGRST_OPENAPI_SERVER_PROXY_URI is unset, so the document describes "
+        "0.0.0.0:3000 and the capture refuses it"
+    )
+    assert proxy == "https://${PROJECT_DOMAIN:?required}${API_REST_PATH:?required}", proxy
+
+    # And the two interpolations compose to the route the identity derives, so
+    # the document's address and the router's address are one derivation.
+    identity = naming.derive(
+        slug="fixture-alpha",
+        environment="dev",
+        domain="fixture-alpha-dev.test",
+        api_base_path="/api",
+        mcp_base_path="/mcp",
+    )
+    assert f"https://{identity.domain}{identity.route_rest_path}" == identity.route_rest

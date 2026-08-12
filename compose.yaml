@@ -514,6 +514,24 @@ services:
     platform: ${TARGET_PLATFORM:?required}
     profiles: [session5]
     restart: "on-failure:5"
+    # The identity labels, and the two that make this container routable at all.
+    #
+    # `apg.traefik.scope` is not decoration: `infra/edge/traefik.yaml` sets
+    # `constraints: Label(apg.traefik.scope, managed)`, so a container without it
+    # is **invisible to the edge**. The router labels the runtime override writes
+    # are then attached to something Traefik never looks at, no router is
+    # created, and the edge answers 404 for the published URL -- which is what
+    # the first live capture got, from a service that was serving the document
+    # correctly to its own network the whole time (D186).
+    #
+    # `traefik.docker.network` because this service is on **two** networks. With
+    # one, Traefik infers it; with two it has no way to choose, and the one it
+    # must not choose is `internal`, which the proxy is not attached to.
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
     # Declared, not inherited. The image sets no USER, so "whatever the base
     # image defaults to" is not even a well-defined answer here; 65532 is
     # cross-checked against secrets.required.yaml by test_secret_contract.py.
@@ -565,6 +583,18 @@ services:
       # (ADR 0050).
       PGRST_OPENAPI_MODE: follow-privileges
       PGRST_OPENAPI_SECURITY_ACTIVE: "true"
+      # The address the document describes, which is not the address it is
+      # served from. Without this the generated document carries
+      # `"host": "0.0.0.0:3000"` and `"basePath": "/"` -- the container's own
+      # bind, published to every consumer of the API. Measured on the deployed
+      # service before this was set.
+      #
+      # `openapi_normalize` compares both fields against the published address
+      # and refuses a document that disagrees, so the snapshot capture fails
+      # rather than approving a document naming a private address. Run 7's
+      # committed fixture was captured *with* this set, against a configuration
+      # the product did not yet produce (D186).
+      PGRST_OPENAPI_SERVER_PROXY_URI: https://${PROJECT_DOMAIN:?required}${API_REST_PATH:?required}
       PGRST_JWT_AUD: ${JWT_AUDIENCE:?required}
       PGRST_JWT_ROLE_CLAIM_KEY: .role
       # `?` and NOT `:?`, and this is the only variable in this file spelled

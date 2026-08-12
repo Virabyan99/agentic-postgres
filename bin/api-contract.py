@@ -155,11 +155,24 @@ def fetch_live(url: str) -> bytes:
                 raise ContractError(6, f"the service answered {response.status}, not 200")
             return response.read()
     except urllib.error.HTTPError as error:
+        # The status and the URL, and no diagnosis. This said "a 404 here is the
+        # unresolvable-pre-request-hook shape (D145)" until Run 9, when a live
+        # 404 turned out to be the edge: the container carried none of the
+        # identity labels Traefik's provider constraint filters on, so no router
+        # existed, while PostgREST answered 200 with a complete document to any
+        # peer on its own network (D186).
+        #
+        # A message naming a divergence number reads as a finding. This one was
+        # confident, specific and wrong, and it would have sent a reader to the
+        # pre-request hook. What a caller needs is what happened; what it costs
+        # them to be told what it *means*, wrongly, is an hour.
         raise ContractError(
             6,
-            f"the service answered {error.code} for the OpenAPI document. A 404 here is "
-            "the unresolvable-pre-request-hook shape (D145): the service is up, --ready "
-            "returns 0, and every request fails.",
+            f"the service answered {error.code} for the OpenAPI document at {url}. "
+            "That is the status the edge returned; whether the request reached "
+            "PostgREST at all is not visible from here. Compare against the "
+            "service directly from a peer on its network before concluding "
+            "anything about the service.",
         ) from error
     except urllib.error.URLError as error:
         raise ContractError(3, f"cannot reach the REST service: {error.reason}") from error
