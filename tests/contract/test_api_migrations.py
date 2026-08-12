@@ -30,6 +30,7 @@ TEMPLATES = REPO_ROOT / "migrations" / "templates"
 CONVERGENCE = "templates/0007-api-surface-convergence.sql"
 REQUEST_PLANE = "templates/0008-http-request-plane.sql"
 DOCUMENTATION_ROLE = "templates/0009-documentation-role.sql"
+STATEMENT_TIMEOUT = "templates/0010-request-statement-timeout.sql"
 
 _CREATE_VIEW = re.compile(r"CREATE VIEW api\.(\w+)\b.*?AS\s+SELECT\s+(.*?)\s+FROM\b", re.DOTALL)
 _DROP_VIEW = re.compile(r"DROP VIEW api\.(\w+)")
@@ -59,7 +60,13 @@ def template_text(name: str) -> str:
 
 
 #: The declaration every hook test has to be written against.
-HOOK_DEFINITION = "CREATE OR REPLACE FUNCTION app_private.postgrest_pre_request"
+#:
+#: The `()` is load-bearing and was added after a mutation stayed green: without
+#: it this is a *prefix*, so renaming the function to `postgrest_pre_request_v2`
+#: still matched and the migration that no longer defines the hook still counted
+#: as defining it. D162's shape -- a prefix standing in for an exact match --
+#: one file over (D200).
+HOOK_DEFINITION = "CREATE OR REPLACE FUNCTION app_private.postgrest_pre_request()"
 
 
 def effective_hook_template(manifest: dict[str, Any]) -> str:
@@ -249,7 +256,9 @@ def raises_in(name: str) -> list[str]:
     return [match.strip() for match in _RAISE.findall(statements(name))]
 
 
-@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE])
+@pytest.mark.parametrize(
+    "template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE, STATEMENT_TIMEOUT]
+)
 def test_no_caller_reachable_raise_publishes_a_hint_or_a_detail(template: str) -> None:
     """Measured: PostgREST publishes `HINT` and `DETAIL` to the caller verbatim.
 
@@ -269,7 +278,9 @@ def test_no_caller_reachable_raise_publishes_a_hint_or_a_detail(template: str) -
         assert "DETAIL" not in raise_statement, raise_statement
 
 
-@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE])
+@pytest.mark.parametrize(
+    "template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE, STATEMENT_TIMEOUT]
+)
 def test_every_caller_reachable_raise_names_its_status(template: str) -> None:
     """A bare `RAISE EXCEPTION` leaves the SQLSTATE at `P0001`, which is 400.
 
@@ -385,7 +396,9 @@ def test_every_new_function_revokes_public_before_it_grants(
         assert revoke < grant, name
 
 
-@pytest.mark.parametrize("template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE])
+@pytest.mark.parametrize(
+    "template", [CONVERGENCE, REQUEST_PLANE, DOCUMENTATION_ROLE, STATEMENT_TIMEOUT]
+)
 def test_a_migration_that_touches_the_api_notifies_the_schema_cache(template: str) -> None:
     """The cache is a copy, and a stale one serves the previous surface.
 
@@ -514,15 +527,23 @@ def test_the_effective_hook_is_the_last_migration_that_defines_it(
     function, so every one of them would have stayed green while describing a
     body no request executes -- a value that looked measured and was not.
 
-    Goes red the day a 0010 replaces the hook again without this being read,
-    which is exactly when somebody needs to notice.
+    It went red the day 0010 replaced the hook, which is exactly what it is
+    for, and it is repointed rather than relaxed (ADR 0068). Every migration
+    that has ever defined the function is listed, in applied order, and the
+    effective one is read from the manifest -- so an 0011 fails here too.
     """
-    assert effective_hook_template(manifest) == DOCUMENTATION_ROLE
-    assert HOOK_DEFINITION in statements(REQUEST_PLANE), "0008 still defines it, historically"
-    assert HOOK_DEFINITION in statements(DOCUMENTATION_ROLE)
+    defining = [
+        entry["template"]
+        for entry in manifest["migrations"]
+        if HOOK_DEFINITION in statements(entry["template"])
+    ]
+    assert defining == [REQUEST_PLANE, DOCUMENTATION_ROLE, STATEMENT_TIMEOUT]
+    assert effective_hook_template(manifest) == STATEMENT_TIMEOUT
 
 
-def test_the_documentation_role_is_refused_a_request_identity() -> None:
+def test_the_documentation_role_is_refused_a_request_identity(
+    manifest: dict[str, Any],
+) -> None:
     """The clause the whole role depends on (D158).
 
     Measured on the locked PostgREST before this was written: a documentation
@@ -530,8 +551,12 @@ def test_the_documentation_role_is_refused_a_request_identity() -> None:
     the role **wrote a row**. With the clause it is 401 `PT401`, and a bare
     documentation token calling the same RPC is 403 `new row violates row-level
     security policy` -- it publishes the write and cannot perform it.
+
+    Read from the *effective* hook rather than from 0009, which is where this
+    clause was introduced. Migration 0010 restates the function in full, so
+    reading 0009 would assert this clause of a body no request executes.
     """
-    body = statements(DOCUMENTATION_ROLE)
+    body = statements(effective_hook_template(manifest))
     clause = body[body.index("IF current_user::text = {{api_documentation_name}}") :]
     # The second `END IF;`, not the first: the inner one closes the
     # subject-present branch and the outer one closes the role check. Slicing at
@@ -634,3 +659,80 @@ def test_the_documentation_role_keeps_the_private_defaults_closed() -> None:
             r"REVOKE ALL ON " + kind + r" FROM \{\{api_documentation\}\}",
             body,
         ), kind
+
+
+# ---------------------------------------------------------------------------
+# Migration 0010 -- the request's statement timeout (D198, ADR 0068)
+# ---------------------------------------------------------------------------
+
+
+def test_the_hook_carries_the_roles_statement_timeout(manifest: dict[str, Any]) -> None:
+    """The whole of ADR 0068, asserted on the body that runs.
+
+    PostgreSQL processes a role's settings only at login and PostgREST reaches
+    its request role with `SET LOCAL ROLE`, so a timeout on the role bounded
+    nothing until something carried it. Measured before this was written: with
+    the hook, a 5-second statement is cancelled at 2.0s; without it, it returns
+    200 after 5.0s.
+    """
+    body = statements(effective_hook_template(manifest))
+    assert "pg_db_role_setting" in body, "the hook no longer reads the role's own setting"
+    assert "set_config('statement_timeout'" in body
+
+
+def test_the_carried_timeout_is_transaction_local(manifest: dict[str, Any]) -> None:
+    """A session-level set would outlive the request on a pooled connection.
+
+    The same reason `app.user_id` is transaction-local: PgBouncer hands the same
+    server connection to the next caller, and a bound left behind is a bound
+    applied to whoever is next -- or, worse, a bound *removed* for them.
+    """
+    body = statements(effective_hook_template(manifest))
+    call = body[body.index("set_config('statement_timeout'") :]
+    call = call[: call.index(";") + 1]
+    assert "true" in call, f"the timeout is not set transaction-locally: {call}"
+
+
+def test_the_timeout_is_carried_before_every_early_return(manifest: dict[str, Any]) -> None:
+    """The documentation role and an anonymous caller return early, and both hold
+    a connection while they do.
+
+    A bound applied after those returns would be a bound on exactly the callers
+    who authenticated -- which is the half of the surface least in need of it.
+    """
+    body = statements(effective_hook_template(manifest))
+    carried = body.index("set_config('statement_timeout'")
+    assert carried < body.index("IF current_user::text = {{api_documentation_name}}")
+    assert carried < body.index("IF raw IS NULL THEN")
+
+
+def test_the_hook_is_not_security_definer(manifest: dict[str, Any]) -> None:
+    """Measured: a plain role reads `pg_db_role_setting` directly.
+
+    So a definer function would be a privilege boundary bought for nothing --
+    and the first draft of this carrier *was* one, which is why it is worth a
+    test rather than a comment. `SECURITY DEFINER` makes `current_user` the
+    function's owner, so the lookup asked for the owner's timeout, found none,
+    set nothing, and looked exactly like a hook that ran and found nothing to
+    do. It measured green as "no bound configured".
+    """
+    body = statements(effective_hook_template(manifest))
+    assert "SECURITY INVOKER" in body
+    assert "SECURITY DEFINER" not in body
+
+
+def test_the_timeout_lookup_matches_the_role_the_request_became(
+    manifest: dict[str, Any],
+) -> None:
+    """`current_user` after the role switch, not `session_user`.
+
+    `session_user` is the authenticator, which every request shares -- so a
+    lookup keyed on it would apply one project-wide bound and would be
+    indistinguishable from a correct one on any cluster where the authenticator
+    happens to carry a setting.
+    """
+    body = statements(effective_hook_template(manifest))
+    lookup = body[body.index("pg_db_role_setting") :]
+    lookup = lookup[: lookup.index("LIMIT 1")]
+    assert "current_user::text" in lookup
+    assert "session_user" not in lookup

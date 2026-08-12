@@ -553,11 +553,21 @@ services:
       PGRST_DB_URI: postgres://${POSTGREST_AUTHENTICATOR_ROLE:?required}@${POSTGRES_SERVICE_HOST:?required}:5432/${POSTGRES_DATABASE_NAME:?required}?passfile=/run/secrets/postgrest_authenticator_pgpass
       PGRST_DB_SCHEMAS: ${POSTGREST_EXPOSED_SCHEMA:?required}
       PGRST_DB_ANON_ROLE: ${ANON_ROLE_NAME:?required}
-      # The three dangerous defaults, all set explicitly (Run 1). `db-config`
-      # true would let the database override this reviewed configuration;
-      # `db-extra-search-path` defaults to `public`, which is the whole of what
-      # ADR 0052 is about; and the hoisted transaction settings default to
-      # three rather than none.
+      # Two dangerous defaults set explicitly, and one that cannot be (Run 1,
+      # corrected in Run 9). `db-config` true would let the database override
+      # this reviewed configuration; `db-extra-search-path` defaults to
+      # `public`, which is the whole of what ADR 0052 is about.
+      #
+      # `db-hoisted-tx-settings` was believed to be the third. It is not:
+      # measured on the locked image, `--dump-config` reports the full default
+      # `statement_timeout,plan_filter.statement_cost_limit,default_transaction_isolation`
+      # for an **empty** value exactly as it does for an unset one, so this line
+      # does not disable hoisting and never did (D199). It is inert regardless,
+      # because hoisting reads nothing with `db-config` false -- measured: with
+      # `db-config` false a request role's `statement_timeout` stays `0` whether
+      # the hoist list names it or not. The line stays as a declaration of
+      # intent, and ADR 0068 is why intent is enough: the pre-request hook
+      # carries the timeout, so nothing here needs `db-config` turned on.
       PGRST_DB_CONFIG: "false"
       PGRST_DB_EXTRA_SEARCH_PATH: ""
       PGRST_DB_HOISTED_TX_SETTINGS: ""

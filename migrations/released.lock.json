@@ -108,6 +108,17 @@
       "template": "templates/0009-documentation-role.sql",
       "template_sha256": "30a808d8f4fe21b337d1d2d385b7f64d92c60da7629a9699fe51d8cd477ad244",
       "version": "20260811120009"
+    },
+    {
+      "canonical_render_sha256": "1a222d1aad0ffe086471bddb875ad5015c944462bc34318c835b5183cd473c6f",
+      "name": "request_statement_timeout",
+      "placeholders": [
+        "api_documentation_name",
+        "object_owner"
+      ],
+      "template": "templates/0010-request-statement-timeout.sql",
+      "template_sha256": "8221e09cbc90e3a854690f90f9b8520a12a05784cbc25ed73625662d33e6dcf8",
+      "version": "20260812120010"
     }
   ],
   "schema_version": 1

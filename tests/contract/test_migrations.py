@@ -122,11 +122,24 @@ def test_no_migration_permits_a_non_transactional_apply(manifest: dict[str, Any]
 
 
 def test_every_down_block_refuses(manifest: dict[str, Any]) -> None:
-    """Released platform migrations are fix-forward only (ADR 0028)."""
+    """Released platform migrations are fix-forward only (ADR 0028).
+
+    The `RAISE EXCEPTION` half was added after a mutation battery found the
+    hole: this asserted that the string `AP900` appeared in the down block, and
+    a block reading `RAISE NOTICE 'AP900: ...'` satisfies that while *succeeding*
+    -- dbmate would stamp the migration as rolled back, having rolled nothing
+    back. A code checked as a string is not a refusal; the level is what refuses
+    (D200).
+    """
     for entry in manifest["migrations"]:
         text = (migrations.MIGRATIONS_ROOT / entry["template"]).read_text(encoding="utf-8")
         down = text.split("-- migrate:down", 1)[1]
         assert "AP900" in down, f"{entry['version']}: down block does not raise AP900"
+        assert "RAISE EXCEPTION" in down, (
+            f"{entry['version']}: the down block names AP900 without raising. A block that "
+            "reports rather than raises succeeds, and dbmate stamps a rollback that did "
+            "not happen"
+        )
         assert "DROP" not in down.upper(), f"{entry['version']}: down block drops something"
 
 

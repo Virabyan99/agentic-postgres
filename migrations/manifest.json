@@ -47,64 +47,111 @@
       "version": "20260807120001",
       "name": "schemas_and_default_privileges",
       "template": "templates/0001-schemas-and-default-privileges.sql",
-      "placeholders": ["object_owner", "anon", "authenticated", "agent_reader", "agent_writer", "app_runtime"],
+      "placeholders": [
+        "object_owner",
+        "anon",
+        "authenticated",
+        "agent_reader",
+        "agent_writer",
+        "app_runtime"
+      ],
       "description": "The four schemas, pgvector in extensions rather than public, and a default-deny posture for function execution."
     },
     {
       "version": "20260807120002",
       "name": "project_identity_and_ledger",
       "template": "templates/0002-project-identity-and-ledger.sql",
-      "placeholders": ["object_owner"],
+      "placeholders": [
+        "object_owner"
+      ],
       "description": "The single-row identity sentinel that binds this volume to one project, and the ledger recording which bytes each version applied."
     },
     {
       "version": "20260807120003",
       "name": "owner_scoped_tables_and_forced_rls",
       "template": "templates/0003-owner-scoped-tables-and-forced-rls.sql",
-      "placeholders": ["object_owner", "app_runtime"],
+      "placeholders": [
+        "object_owner",
+        "app_runtime"
+      ],
       "description": "notes and tasks under FORCE row-level security, keyed on a transaction-local identity claim that denies when absent."
     },
     {
       "version": "20260807120004",
       "name": "security_invoker_api_views",
       "template": "templates/0004-security-invoker-api-views.sql",
-      "placeholders": ["object_owner", "authenticated", "agent_reader", "agent_writer"],
+      "placeholders": [
+        "object_owner",
+        "authenticated",
+        "agent_reader",
+        "agent_writer"
+      ],
       "description": "Read-only api views that run with the caller's authority, so the underlying row policy still applies."
     },
     {
       "version": "20260807120005",
       "name": "write_rpcs",
       "template": "templates/0005-write-rpcs.sql",
-      "placeholders": ["object_owner", "authenticated", "agent_writer"],
+      "placeholders": [
+        "object_owner",
+        "authenticated",
+        "agent_writer"
+      ],
       "description": "Two write functions that derive ownership from the request identity and take no owner parameter."
     },
     {
       "version": "20260808120006",
       "name": "app_runtime_least_privilege",
       "template": "templates/0006-app-runtime-least-privilege.sql",
-      "placeholders": ["object_owner", "app_runtime"],
+      "placeholders": [
+        "object_owner",
+        "app_runtime"
+      ],
       "description": "The application runtime role loses the direct reach into app and app_private that Session 3 granted it, default privileges included, and holds only what membership in authenticated carries. See SEC-DBX-002 and ADR 0041."
     },
     {
       "version": "20260811120007",
       "name": "api_surface_convergence",
       "template": "templates/0007-api-surface-convergence.sql",
-      "placeholders": ["object_owner", "authenticated", "agent_reader", "agent_writer"],
+      "placeholders": [
+        "object_owner",
+        "authenticated",
+        "agent_reader",
+        "agent_writer"
+      ],
       "description": "ADR 0048: the catalog converges on the domain four documents froze. notes.body becomes content, tasks gains description and a bounded api.task_status derived from done, create_task is retired for update_task_status, and the api views and write RPCs are rebuilt over the result."
     },
     {
       "version": "20260811120008",
       "name": "http_request_plane",
       "template": "templates/0008-http-request-plane.sql",
-      "placeholders": ["object_owner", "anon", "authenticated"],
+      "placeholders": [
+        "object_owner",
+        "anon",
+        "authenticated"
+      ],
       "description": "app_private.postgrest_pre_request(), and the one private object an HTTP request role may reach: USAGE on app_private plus EXECUTE on that function, granted by name to anon and authenticated and to nothing else. See ADR 0052 and D138."
     },
     {
       "version": "20260811120009",
       "name": "documentation_role",
       "template": "templates/0009-documentation-role.sql",
-      "placeholders": ["object_owner", "api_documentation", "api_documentation_name"],
+      "placeholders": [
+        "object_owner",
+        "api_documentation",
+        "api_documentation_name"
+      ],
       "description": "The documentation role's grants -- view SELECT plus EXECUTE on both write RPCs, which is what makes openapi-mode = follow-privileges publish the whole surface -- and the pre-request clause that refuses it a request identity, so the RPCs it advertises are ones it can never perform. See D158."
+    },
+    {
+      "version": "20260812120010",
+      "name": "request_statement_timeout",
+      "template": "templates/0010-request-statement-timeout.sql",
+      "placeholders": [
+        "object_owner",
+        "api_documentation_name"
+      ],
+      "description": "The pre-request hook carries the request role's statement_timeout into the request transaction. PostgreSQL processes a role's settings only at login, and PostgREST reaches its request role with SET LOCAL ROLE -- so the timeouts ADR 0067 put on the roles bounded nothing. The value is still the document's; this reads what the bootstrap plane wrote and applies it for one transaction. See D198, ADR 0068."
     }
   ]
 }
