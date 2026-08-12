@@ -465,6 +465,41 @@ def observe_health(url: str) -> str:
     return "ready" if result.stdout.strip() == "200" else "unavailable"
 
 
+def observe_docs(url: str) -> str:
+    """`ready` when the documentation route **refuses** without a credential.
+
+    The success condition is a 401 carrying a Basic challenge, and it is
+    delegated to `bin/docs.py::check` rather than restated here -- that command
+    is the operator's way of asking the same question, and two readings of
+    "is this route published" is exactly the shape D177 produced for the path.
+
+    Three things are not `ready`, and each has to be distinguishable from the
+    others by the message `check` prints:
+
+    * **200 without a credential.** The page is being served to anyone who asks,
+      which is worse than an unpublished route and must never record `ready`.
+    * **A status that is neither.** Traefik's own 404 for an unrouted host looks
+      identical from outside to a routed 404 (D186), so the honest record is
+      `unavailable` and the log line says what came back.
+    * **401 with no challenge.** A refusal a browser cannot act on, and what a
+      middleware chain that half-resolved produces.
+
+    `unavailable` rather than an exception on any failure, for the reason
+    `observe_served_document` gives: a deploy that cannot describe its own route
+    has still deployed, and the honest record of that is a status rather than a
+    traceback that leaves the service running and the document unwritten.
+    """
+    docs = _load_command("docs.py", "apg_deploy_docs")
+    try:
+        return "ready" if docs.check(url) == 0 else "unavailable"
+    except Exception as error:
+        # `check` handles an HTTP response; a connection that never became one
+        # -- DNS, TLS, refused -- arrives here. That is the state a project is
+        # in between `compose up` and Traefik noticing the container.
+        print(f"  no documentation route: {type(error).__name__}: {error}")
+        return "unavailable"
+
+
 def observe_tls(host: dict[str, Any], domain: str) -> dict[str, Any]:
     """Read the certificate the edge is actually serving for this hostname."""
     unavailable = {
@@ -993,6 +1028,7 @@ def main(argv: list[str] | None = None) -> int:
     # these with observations of a running PostgREST" -- which was the honest
     # record while nothing observed them, and is this run's work.
     rest_status = "unavailable"
+    docs_status = "unavailable"
     jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
     api_block = dict(deployed_output.API_NOT_PUBLISHED)
 
@@ -1033,6 +1069,17 @@ def main(argv: list[str] | None = None) -> int:
         lambda: observe_health(rendered["routes"]["health"]["url"]),
         lambda observed: observed == "ready",
     )
+
+    # After the health route, and bounded the same way. Traefik's Docker
+    # provider polls, so a router for a container that has only just started is
+    # not wired at the instant `compose up --wait` returns -- observing once
+    # recorded `unavailable` for a route that answered seconds later, which is
+    # the note above this block and applies to every router equally.
+    if arguments.through_session >= REST_PLANE_SESSION:
+        docs_status = observation.await_observation(
+            lambda: observe_docs(rendered["routes"]["docs"]),
+            lambda observed: observed == "ready",
+        )
 
     # The transports, read out of the host's own allocation registry rather than
     # assumed from the fact that a pooler is running. `active` and nothing less
@@ -1080,11 +1127,12 @@ def main(argv: list[str] | None = None) -> int:
         # There is deliberately no default for any of them: a default is how a
         # session-4 deployment would come to describe a session-5 shape.
         rest_status=rest_status,
-        # No documentation service exists yet: services/docs/ holds a
-        # .gitkeep and the model declares no such service, so nothing serves
-        # this route and `unavailable` is the only honest record. D128's
-        # choice between an upstream image and a first-party build is open.
-        docs_status="unavailable",
+        # Observed, since Run 9a built the service D128 left open (ADR 0069).
+        # `ready` means the route answered 401 with a Basic challenge -- a
+        # refusal, not a page -- because a documentation route that serves
+        # without a credential is the one outcome that must never be recorded
+        # as published.
+        docs_status=docs_status,
         api=api_block,
         jwt=jwt_block,
         # Measured above when this deploy started a cluster, and `NOT_OBSERVED`
@@ -1101,6 +1149,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {destination}")
     print(f"  tls          {document['tls']['status']} ({document['tls']['acme_environment']})")
     print(f"  health       {document['routes']['health']['status']}")
+    print(f"  docs         {document['routes']['docs']['status']}")
     print(f"  database     {document['database']['observed']['status']}")
     print(f"\n\033[1mdeploy: {key} deployed through session {arguments.through_session}\033[0m")
     return 0

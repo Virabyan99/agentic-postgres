@@ -15,7 +15,10 @@ measurement are different facts wearing one field name.
 
 from __future__ import annotations
 
+import contextlib
+import http.server
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -673,4 +676,177 @@ def test_the_deploy_and_the_contract_command_name_one_snapshot() -> None:
 
     assert constant("deploy-project.py", "apg_deploy_snapshot") == constant(
         "api-contract.py", "apg_contract_snapshot"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The documentation route is observed, not asserted (Run 9a, ADR 0069)
+# ---------------------------------------------------------------------------
+
+
+class _Answer(http.server.BaseHTTPRequestHandler):
+    """A server that answers however the test told it to.
+
+    A real socket rather than a mock, for the reason every observer here is
+    tested against one: the thing under test is what `urllib` does with a
+    *response*, and a mock proves what the mock was written to prove. This is
+    the same choice `test_edge_behaviour.py` makes one layer out.
+    """
+
+    status = 401
+    challenge = 'Basic realm="docs"'
+
+    def do_GET(self) -> None:
+        body = b"nope\n"
+        self.send_response(type(self).status)
+        if type(self).challenge is not None:
+            self.send_header("WWW-Authenticate", type(self).challenge)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args: object) -> None:
+        return
+
+
+@contextlib.contextmanager
+def answering(status: int, challenge: str | None):
+    _Answer.status = status
+    _Answer.challenge = challenge
+    server = http.server.HTTPServer(("127.0.0.1", 0), _Answer)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/docs/rest"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_a_refusal_with_a_challenge_is_the_only_ready(tmp_path) -> None:
+    """The positive control, and it has to come first.
+
+    Without it, an observer that returned `unavailable` for everything would
+    pass every refusal below and record an unpublished route for a route that
+    works.
+    """
+    module = deploy_module()
+    with answering(401, 'Basic realm="docs"') as url:
+        assert module.observe_docs(url) == "ready"
+
+
+def test_a_page_served_without_a_credential_is_never_ready(tmp_path) -> None:
+    """The outcome that must never be recorded as published.
+
+    200 here is worse than an unpublished route: the documentation is being
+    served to anyone who asks, and `ready` would put that in a document
+    automation reads as the boundary holding.
+    """
+    module = deploy_module()
+    with answering(200, None) as url:
+        assert module.observe_docs(url) == "unavailable"
+
+
+@pytest.mark.parametrize(
+    ("status", "challenge"),
+    [
+        (403, None),
+        (404, None),
+        (500, None),
+        (502, None),
+        # A non-401 that *does* offer a Basic challenge, and the reason this
+        # case exists: with only the four above, the status check and the
+        # challenge check are indistinguishable -- every one of them was
+        # refused by the missing challenge, so deleting the status check
+        # changed no outcome and a mutation walked through it. Only a response
+        # that satisfies one check and not the other can tell them apart.
+        (403, 'Basic realm="docs"'),
+        (200, 'Basic realm="docs"'),
+    ],
+)
+def test_a_status_that_is_neither_is_unavailable(
+    status: int, challenge: str | None, tmp_path
+) -> None:
+    """404 in particular. Traefik's own 404 for an unrouted host is
+    indistinguishable from a routed one from outside (D186), so the honest
+    record is `unavailable` and the printed line says what came back."""
+    module = deploy_module()
+    with answering(status, challenge) as url:
+        assert module.observe_docs(url) == "unavailable"
+
+
+def test_a_refusal_with_no_challenge_is_unavailable(tmp_path) -> None:
+    """A 401 a browser cannot act on, and what a half-resolved middleware chain
+    produces -- which is the failure mode `@file` exists to prevent."""
+    module = deploy_module()
+    with answering(401, None) as url:
+        assert module.observe_docs(url) == "unavailable"
+
+
+def test_a_route_nothing_answers_on_is_unavailable_rather_than_an_exception() -> None:
+    """A deploy that cannot describe its own route has still deployed.
+
+    `check` handles an HTTP response; a connection that never became one -- DNS,
+    TLS, refused -- would otherwise propagate out of step 7 and abort a deploy
+    whose services are already running.
+    """
+    module = deploy_module()
+    # Port 1 on loopback: nothing listens, and the refusal is immediate.
+    assert module.observe_docs("http://127.0.0.1:1/docs/rest") == "unavailable"
+
+
+def test_every_observation_reaches_the_published_document() -> None:
+    """The boundary this project keeps dropping values at.
+
+    `observe_docs` can be entirely correct and the deploy still hand
+    `build_deployed_document` a literal -- which is what it did until Run 9a,
+    honestly, because no service existed. D197 is the same shape (a manifest's
+    timeouts validated and dropped at the rendering boundary) and so is D192 (a
+    hook built, granted and never wired). Both were found on a host, months
+    after the code was written.
+
+    Asserted structurally rather than by grep: the call is parsed, and each
+    status keyword must be a **name** -- something computed above -- rather than
+    a constant. A literal here is exactly how a route that was observed `ready`
+    gets published `unavailable`, and nothing else in the suite would notice.
+
+    Goes red if: any of the three statuses is pinned to a literal at the call
+    site, whatever the observer above it does.
+    """
+    import ast
+
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "build_deployed_document"
+    ]
+    assert len(calls) == 1, f"expected one call to build_deployed_document, found {len(calls)}"
+
+    supplied = {keyword.arg: keyword.value for keyword in calls[0].keywords}
+    for name in ("rest_status", "docs_status", "health_status"):
+        assert name in supplied, f"{name} is not passed to the deployed document"
+        assert isinstance(supplied[name], ast.Name), (
+            f"{name} is passed as a literal, so whatever was observed above is discarded"
+        )
+
+
+def test_the_observer_delegates_to_the_operators_own_command() -> None:
+    """One reading of "is this route published", not two.
+
+    `bin/docs.py::check` is what an operator runs to ask the same question, and
+    the deploy answering it differently is the shape D177 produced for the
+    path -- two derivations, one comment claiming they were kept in step, and
+    the one carrying the comment was the one that had not drifted.
+    """
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    body = source[source.index("def observe_docs") :]
+    body = body[: body.index("def observe_tls")]
+    assert '_load_command("docs.py"' in body, "the deploy no longer asks bin/docs.py"
+    assert "401" not in body.split('"""')[2], (
+        "the observer restates the success condition instead of delegating it"
     )
