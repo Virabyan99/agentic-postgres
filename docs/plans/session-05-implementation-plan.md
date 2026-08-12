@@ -1079,7 +1079,7 @@ disagreeing and closed it; if a router here is built from anything but
 > control. All four are Run 10's.
 
 ### Run 9a — The documentation service
-*Offline for the decision, then host.* **Next.**
+*Offline for the decision, then host.* **Done.**
 
 **The service does not exist.** `services/docs/` is a `.gitkeep`, `compose.yaml`
 declares no such service, and `routes.docs` publishes `null` — which is what
@@ -1108,6 +1108,51 @@ advertises `DELETE`, `PATCH` and `POST` on both views while all three return
 **403** (ADR 0060); no setting filters methods by grant, so **the page's own text
 has to say so**, or the documentation is the first thing that lies about the
 surface.
+
+> **Done.** Both projects publish `routes.docs` as `ready`, and the live suite is
+> **105 passed, 0 failed** — Session 5's first green host run. Across nine host
+> runs the failures went 8 → 5 → 4 → 3 → 2 → 0.
+>
+> **D128 was settled by measuring, and the measurement decided nothing it was
+> expected to.** No published Scalar version ships a self-contained bundle:
+> `standalone.js` names `fonts.scalar.com` fourteen times and `proxy.scalar.com`
+> beside it at 1.36.2 and 1.64.1 alike, with `withDefaultFonts` defaulting to
+> true (D202). So self-containment could not separate an upstream image from a
+> first-party build — it is a configuration both must set. What decides it is
+> **who owns the response** (ADR 0069): `withDefaultFonts: false` is a promise
+> about a third party's code honouring its own flag, and a
+> Content-Security-Policy served with the page is a rule the browser enforces
+> against whatever the bundle attempts. Only a build we own can send one. And
+> the pinned version did not exist (D201): `@scalar/api-reference` went 1.36.2 →
+> 1.37.0, and `SCALAR_VERSION: "1.36.4"` survived four sessions because
+> `bin/verify-versions.sh` resolves `images:` against a registry while a
+> `packages:` entry is a string nothing dereferences. **A lock verifies what it
+> can dereference.**
+>
+> **Three defects reached the host, and each is the same shape at a different
+> depth.** D204: `edge_credentials` was written in Run 7, tested against the
+> locked Traefik, and **called by nothing** — the only reference to it in the
+> product was a comment saying it defines the middleware, so the middleware did
+> not exist, Traefik declined to create a router naming it, and the route
+> answered the edge's own 404. D205: the fix's embedded `python -c` program
+> **did not parse**, because `\n` written into a `-c` argument from Python
+> source is a newline character; three tests beside it asserted the call's
+> *shape* and all three passed. And D203: no Traefik name had ever been
+> compared across projects, because the isolation tests read `outputs.json` and
+> every router and middleware name lives in `compose.env`.
+>
+> **The rules that came out of it are worth more than the service.** A module
+> with no caller is a feature that does not exist, and the import graph is a
+> fact about the source — `test_no_module_is_imported_only_by_its_own_tests`.
+> A program built by concatenation is a program nobody has parsed —
+> `test_every_embedded_python_program_compiles`, which this repository has had
+> for Python embedded in *shell* since Session 2 and never had for Python
+> embedded in Python. And the publisher now **runs** offline against temporary
+> directories, substituting one privileged primitive and naming the
+> substitution, rather than being described by three assertions about its shape.
+>
+> **A test proves a module works. A caller proves it runs. Only executing it
+> proves it parses.**
 
 ### Run 10 — Restart, rotation, documentation, and the gate
 *Host, one maintenance window, then all three environments.*
