@@ -92,18 +92,52 @@ declared as "previous" is *not* the one now active, before it asserts anything i
 refused. Without that, a window in which nothing was rotated passes every
 refusal — the old credential is refused because it *is* the new credential.
 
+**Read this first. The first real rotation window, on 2026-08-13, found two
+defects that no test could reach** (D252, D253, D254). Both are live; neither has
+a code fix yet.
+
+> **A rotated credential does not reach a running process on its own.**
+>
+> * A credential **Traefik** holds needs `bin/edge.sh --host host.yaml restart`.
+>   The middleware names a `usersFile` path, so the parsed configuration does not
+>   change and Traefik never rebuilds the middleware — which is the only moment
+>   it re-reads that file. Without the restart the deploy reports success, the
+>   page keeps working **with the old password**, and the new one is refused.
+> * A credential a **container mounts** needs
+>   `bin/project-runtime.sh … down` before the deploy. `resume` runs
+>   `compose up` without `--force-recreate`, so the container keeps the
+>   generation it started with while the bootstrap plane moves the cluster's
+>   password underneath it. Without the `down`, PostgREST crash-loops and the
+>   REST route answers 502.
+>
+> Neither was visible before, because every deploy until then materialized a new
+> generation carrying **identical values** — a stale mount and a fresh one are
+> the same thing when the bytes match. Five green host runs could not have
+> caught either.
+
+**No command in this repository sets a value at the provider** (D249).
+`bootstrap-providers.sh --apply` creates secrets that are missing and leaves
+existing ones alone, deliberately. Step 2 below is done by hand in Infisical.
+
 **The shape is the same for all three**, and only the first and last steps
 differ:
 
 1. Capture the pre-rotation value to a root-only file. You cannot recover it
    afterwards, and a proof you cannot admit is a proof that skips.
-2. Replace the value at the provider, under the `provider_path` and
-   `provider_key` `secrets.required.yaml` declares for it.
-3. Materialize — a new immutable generation, made active by an atomic rename.
-4. Redeploy through session 5. This is what re-applies the credential: the
-   bootstrap plane sets the role's verifier, `publish_docs_credential` rewrites
-   the htpasswd file and the middleware, and `render-jwks.py` rewrites the JWKS.
-5. Admit the proof with the matching `--rotated-*-from-file` flag.
+2. Replace the value at the provider by hand, under the `provider_path` and
+   `provider_key` `secrets.required.yaml` declares for it. **Confirm it saved**
+   before going on — a rotation that did not happen produces a deploy that looks
+   identical to one that did, and the proof's own control is what catches it.
+3. **Stop the project** if the credential is one a container mounts:
+   `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
+   --through-session 5 down`. Volumes are preserved.
+4. Redeploy through session 5. This materializes a new generation and re-applies
+   the credential: the bootstrap plane sets the role's verifier,
+   `publish_docs_credential` rewrites the htpasswd file and the middleware, and
+   `render-jwks.py` rewrites the JWKS.
+5. **Restart the edge** if the credential is one Traefik holds:
+   `sudo bin/edge.sh --host host.yaml restart`.
+6. Admit the proof with the matching `--rotated-*-from-file` flag.
 
 Steps 3 and 4 are the same commands every time:
 
@@ -156,10 +190,24 @@ sudo bin/session-05-check.sh --mode host --host host.yaml \
   --rotated-authenticator-from-file /root/rotated-auth
 ```
 
+**Stop the project before the deploy** (D253):
+
+```bash
+sudo bin/project-runtime.sh --host host.yaml --project-key alpha-dev \
+  --through-session 5 down
+```
+
+Without it the deploy leaves PostgREST running on the generation it started
+with, the bootstrap plane moves the cluster's password, and the service
+crash-loops with `password authentication failed` while the route answers 502.
+Measured: a container survived two deploys holding a generation two rotations
+stale.
+
 The split-brain to rule out is PostgreSQL holding one password while the running
 service holds another: the plane keeps serving from connections opened before the
 rotation and fails on the next reconnect, hours later. So both sides are asserted
 in one run — the route serves, **and** the cluster refuses the old password.
+**That split-brain is not hypothetical; the deploy path produces it.**
 
 ### The documentation credential
 
@@ -170,8 +218,19 @@ sudo cp "$(gen alpha-dev)/_root/docs_basic_auth_password" /root/rotated-docs
 ```
 
 `publish_docs_credential` rewrites both the htpasswd file and the middleware on
-every deploy, so the redeploy in step 4 *is* the rotation. Admit it with
-`--rotated-docs-from-file /root/rotated-docs`.
+every deploy — and **that is not enough** (D252). Traefik holds the users file it
+read when it last built the middleware, and rewriting the file it points at does
+not rebuild anything. Restart the edge:
+
+```bash
+sudo bin/edge.sh --host host.yaml restart
+```
+
+Then admit it with `--rotated-docs-from-file /root/rotated-docs`.
+
+Measured on the host: without the restart the new password is refused with 401
+and **the old password still returns 200**, with the correct hash sitting on
+disk the whole time.
 
 The proof asserts the **new** password opens the page as well as that the old one
 does not. A rotation Traefik never reloaded refuses both, which passes a test
