@@ -498,3 +498,92 @@ def test_no_module_is_imported_only_by_its_own_tests() -> None:
         f"{orphans} are imported by nothing outside their own tests. A module with no "
         "caller is a feature that does not exist, however well it is tested (D204)"
     )
+
+
+def test_every_bin_call_supplies_the_required_keyword_only_arguments() -> None:
+    """A required keyword-only argument added in `src/` reaches its caller in `bin/`.
+
+    Found the hard way. Run 4 added `app_status` and `app_docs_status` to
+    `deployed_output.build_deployed_document` as required keyword-only
+    parameters, updated the test helper that calls it, and did not update the one
+    production caller -- `bin/deploy-project.py`. The offline suite passed, the
+    gate passed, and the deploy raised `TypeError` on a live host at step 7,
+    **after** it had restarted both projects' services and applied a migration.
+
+    Nothing could have caught it. The tests call `build_deployed_document`
+    through their own helper, and the caller lives inside `main()` of a script
+    that needs root, a cluster and an edge -- so no offline test executes that
+    line. An import graph is a fact about the source (D204's rule); so is a call
+    signature.
+
+    Parsed, not grepped, for D204's reason: a call spread over twenty lines with
+    comments between the arguments is not something a regex reads correctly, and
+    this one is exactly that shape.
+
+    **Bounded deliberately.** It resolves only calls written as
+    `<module>.<function>(...)` where `<module>` is imported from
+    `agentic_postgres`, and it checks only *required keyword-only* parameters --
+    the ones whose absence is a `TypeError` at call time rather than a wrong
+    value. Positional arity and defaults are somebody else's rule.
+    """
+    import ast
+    import importlib
+    import inspect
+
+    problems: list[str] = []
+    checked = 0
+
+    for source in sorted((REPO_ROOT / "bin").glob("*.py")):
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+
+        # `from agentic_postgres import x, y` and `from agentic_postgres.x import y`
+        modules: dict[str, str] = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "agentic_postgres":
+                for alias in node.names:
+                    modules[alias.asname or alias.name] = f"agentic_postgres.{alias.name}"
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
+                continue
+            module_name = modules.get(func.value.id)
+            if module_name is None:
+                continue
+
+            try:
+                module = importlib.import_module(module_name)
+                target = getattr(module, func.attr)
+                signature = inspect.signature(target)
+            except (ImportError, AttributeError, TypeError, ValueError):
+                continue
+
+            required = {
+                name
+                for name, parameter in signature.parameters.items()
+                if parameter.kind is inspect.Parameter.KEYWORD_ONLY
+                and parameter.default is inspect.Parameter.empty
+            }
+            if not required:
+                continue
+
+            checked += 1
+            supplied = {keyword.arg for keyword in node.keywords if keyword.arg is not None}
+            # `**kwargs` at the call site means the caller is forwarding; this
+            # rule cannot see through that and does not pretend to.
+            if any(keyword.arg is None for keyword in node.keywords):
+                continue
+
+            missing = required - supplied
+            if missing:
+                problems.append(
+                    f"{source.name}:{node.lineno}: {module_name}.{func.attr} requires "
+                    f"{sorted(missing)}"
+                )
+
+    assert checked, "no keyword-only call sites were resolved; this compared nothing"
+    assert not problems, "calls in bin/ missing required keyword-only arguments:\n  " + "\n  ".join(
+        problems
+    )

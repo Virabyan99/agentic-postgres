@@ -1249,6 +1249,26 @@ def main(argv: list[str] | None = None) -> int:
         # without a credential is the one outcome that must never be recorded
         # as published.
         docs_status=docs_status,
+        # Version 9's two, and both are `unavailable` for reasons that are facts
+        # about this deployment rather than placeholders.
+        #
+        # `app` is the application API route. D230: it stays `unavailable` until
+        # an active project administrator exists, because the first request to
+        # reach a published route with no administrator is the request that
+        # decides who the administrator is. Run 8 builds the local bootstrap that
+        # creates one; until then there is nothing to observe, and a query whose
+        # answer cannot yet be anything else is not an observation.
+        #
+        # `app_docs` is the second documentation surface (D226). Run 10 publishes
+        # it. `publishedRoute` forces a null URL for both, so neither names an
+        # address nothing is listening on.
+        #
+        # Literal, exactly as `rest_status` and `docs_status` were literal until
+        # the sessions that started those surfaces replaced them with
+        # observations. A deploy that wrote anything else here would be claiming
+        # a surface it did not start.
+        app_status="unavailable",
+        app_docs_status="unavailable",
         api=api_block,
         jwt=jwt_block,
         # Measured above when this deploy started a cluster, and `NOT_OBSERVED`
