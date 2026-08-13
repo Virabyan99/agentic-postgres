@@ -132,17 +132,36 @@ def assert_api_converged(
     # wrong while nothing is happening to it is a failure, and wrapping that in
     # a retry would turn a broken deployment into a slow green.
     reader = mint_token(document, roles["authenticated"], subject=None)
+    url = docs_command.docs_url(document)
     deadline = time.monotonic() + RESTART_RETURN_TIMEOUT_SECONDS
     last = "no attempt was made"
+
+    # **Both routes**, and the second one is why this is a loop rather than two.
+    # A route's availability is coupled to its own backend's lifecycle: the
+    # strip-prefix middleware is a docker-provider middleware defined by a label
+    # on the container it points at, so while that container is restarting the
+    # router references a middleware that does not exist and Traefik drops the
+    # router -- which answers 404, indistinguishable from an unrouted host
+    # (D186, D208). It recovers by itself; the measurement afterwards was 401.
+    #
+    # Polling only the REST read hid this: restarting `postgrest` leaves the
+    # docs route alone, so the REST poll spent the window and the docs check
+    # that followed was never inside one. The test that passed did so for a
+    # reason that was not the property under test.
     while time.monotonic() < deadline:
         read = api_call(f"{base}/notes?select=id&limit=1", token=reader)
-        if read.status == 200:
+        if read.status != 200:
+            last = f"the REST read answered {read.status} {read.body[:100]}"
+            time.sleep(2)
+            continue
+        refusal = docs_command.check(url)
+        if refusal == 0:
             break
-        last = f"{read.status} {read.body[:120]}"
+        last = f"the REST read answered 200; the documentation route did not refuse ({refusal})"
         time.sleep(2)
     else:
         pytest.fail(
-            f"{key(document)} did not serve an authenticated read within "
+            f"{key(document)} did not bring both routes back within "
             f"{RESTART_RETURN_TIMEOUT_SECONDS}s of the restart; last: {last}"
         )
 
@@ -155,7 +174,8 @@ def assert_api_converged(
         "the surface served after the restart is not the one this deployment published"
     )
 
-    url = docs_command.docs_url(document)
+    # Re-asserted after the steady-state checks above, immediately and without a
+    # retry. The loop proved it came back; this proves it stayed.
     assert docs_command.check(url) == 0, (
         f"{url} stopped refusing without a credential after the restart"
     )
