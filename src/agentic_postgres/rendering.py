@@ -255,7 +255,7 @@ def build_outputs(
         # `ROLE_SUFFIXES`. Appending the role there is the whole change, which is
         # what single-authority derivation is for -- a second list here would be
         # the place the two could disagree.
-        "schema_version": 8,
+        "schema_version": 9,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
@@ -296,6 +296,7 @@ def build_outputs(
             "app": identity.route_app,
             "mcp": identity.route_mcp,
             "docs": identity.route_docs,
+            "app_docs": identity.route_app_docs,
             # `planned`, unconditionally. A rendered document describes what a
             # deployment would create; nothing has been observed when it is
             # written, and a readiness claim in a planning document is a lie

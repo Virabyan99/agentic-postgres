@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 8
+CURRENT_VERSION = 9
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -212,8 +212,9 @@ def migrate_rendered(
     documentation_role: str,
     statement_timeouts: dict[str, str],
     api_connection_budget: int,
+    app_docs_url: str,
 ) -> dict[str, Any]:
-    """Migrate a version 1, 2, 3, 4, 5 or 6 ``rendered`` document to the current version.
+    """Migrate a ``rendered`` document of any earlier version to the current one.
 
     Chains the single-step functions rather than jumping, so a v1 document
     still exercises the v1 -> v2 step that a direct v1 -> v6 path would have
@@ -232,8 +233,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7}:
-        raise MigrationError(f"only versions 1, 2, 3, 4, 5, 6 and 7 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8}:
+        raise MigrationError(f"only versions 1 through 8 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -254,7 +255,10 @@ def migrate_rendered(
     if detect_version(document) == 6:
         document = migrate_v6_to_v7(document, statement_timeouts=statement_timeouts)
 
-    return migrate_v7_to_v8(document, api_connection_budget=api_connection_budget)
+    if detect_version(document) == 7:
+        document = migrate_v7_to_v8(document, api_connection_budget=api_connection_budget)
+
+    return migrate_v8_to_v9(document, app_docs_url=app_docs_url)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -693,6 +697,62 @@ def migrate_v7_to_v8(document: dict[str, Any], *, api_connection_budget: int) ->
     return migrated
 
 
+def migrate_v8_to_v9(document: dict[str, Any], *, app_docs_url: str) -> dict[str, Any]:
+    """Return a version 9 ``rendered`` document derived from a version 8 one.
+
+    Version 9 adds ``routes.app_docs``: the URL of the application API's
+    documentation page, a second surface of the same documentation service
+    (D226, ADR 0069) rather than a second service.
+
+    Everything else version 9 adds is on the **deployed** branch -- ``routes.app``
+    and ``routes.app_docs`` as status-carrying routes, and
+    ``jwt.verifier_acknowledgements`` -- so it is not this function's business.
+    That is the same division the v5 step drew, and the reason this step looks
+    small: a rendered document describes what would be created, and a status is
+    an observation.
+
+    ``app_docs_url`` is supplied rather than derived, for the reason every
+    argument in this module is supplied: ``naming.derive`` is the one authority
+    for a route (ADR 0002, ADR 0061), and a migrator that computed the URL would
+    be a second one -- which is exactly the pair D177 watched drift, where the
+    copy carrying a comment saying it was kept in step was the copy that had.
+
+    Not added here: ``routes.app``. The rendered branch has carried it since
+    Session 1, which is measured rather than assumed -- ``naming.derive`` builds
+    ``route_app`` and ``jwt_issuer`` from it. A step that added it would be
+    refusing every document it was given.
+    """
+    version = detect_version(document)
+    if version == 9:
+        raise MigrationError("document is already version 9; migration would be a no-op")
+    if version != 8:
+        raise MigrationError(f"only version 8 can be migrated to 9, got {version}")
+
+    require_kind(document, "rendered")
+
+    routes = document.get("routes", {})
+    if "app_docs" in routes:
+        raise MigrationError("routes already carries app_docs; this is not a version 8 document")
+    if "app" not in routes:
+        raise MigrationError(
+            "routes carries no app; the rendered branch has derived it since Session 1, so "
+            "this document was not written by this project's renderer"
+        )
+
+    if not isinstance(app_docs_url, str) or not app_docs_url.startswith("https://"):
+        raise MigrationError(f"app_docs_url must be an https URL, got {app_docs_url!r}")
+    if app_docs_url in (routes.get("docs"), routes.get("app")):
+        raise MigrationError(
+            f"app_docs_url {app_docs_url!r} is the URL of another route. Two routes at one "
+            "address is a router that answers for whichever was attached last"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["routes"]["app_docs"] = app_docs_url
+    migrated["schema_version"] = 9
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -718,5 +778,6 @@ __all__ = [
     "migrate_v5_to_v6",
     "migrate_v6_to_v7",
     "migrate_v7_to_v8",
+    "migrate_v8_to_v9",
     "require_kind",
 ]

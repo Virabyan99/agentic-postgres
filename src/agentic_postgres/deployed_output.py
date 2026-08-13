@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -103,6 +103,7 @@ JWT_NOT_PUBLISHED: dict[str, Any] = {
     "public_jwks_sha256": None,
     "temporary": None,
     "retire_after": None,
+    "verifier_acknowledgements": None,
 }
 
 #: A route that this deployment does not publish. `health` is deliberately not
@@ -242,6 +243,8 @@ def build_deployed_document(
     health_status: str,
     rest_status: str,
     docs_status: str,
+    app_status: str,
+    app_docs_status: str,
     api: dict[str, Any],
     jwt: dict[str, Any],
     database_observed: dict[str, Any],
@@ -325,6 +328,13 @@ def build_deployed_document(
             # later index.
             "rest": published_route(rendered["routes"]["rest"], rest_status),
             "docs": published_route(rendered["routes"]["docs"], docs_status),
+            # Version 9. Both URLs come from the render, which is their one
+            # derivation. `app` is `unavailable` until an active project
+            # administrator exists (D230) -- a status field rather than the
+            # deployment state D135 refused -- and `app_docs` until the second
+            # documentation surface is published.
+            "app": published_route(rendered["routes"]["app"], app_status),
+            "app_docs": published_route(rendered["routes"]["app_docs"], app_docs_status),
         },
         "api": dict(api),
         "jwt": dict(jwt),

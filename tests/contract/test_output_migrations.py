@@ -169,6 +169,17 @@ def statement_timeouts_for(document: dict[str, Any]) -> dict[str, str]:
     return {document["database"]["roles"]["app_runtime"]: "30s"}
 
 
+def app_docs_url_for(document: dict[str, Any]) -> str:
+    """What version 9 requires, derived through `naming` from the document.
+
+    Written out nowhere. `naming.DOCS_APP_PAGE_PATH` is the one authority for
+    the path (ADR 0061) and the domain comes from the document under test, so
+    a change to either fails here rather than producing a fixture that agrees
+    only with itself.
+    """
+    return f"https://{document['project']['domain']}{naming.DOCS_APP_PAGE_PATH}"
+
+
 def api_budget_for(document: dict[str, Any]) -> int:
     """What version 8 requires, from `config` rather than written out.
 
@@ -226,6 +237,7 @@ def chained(v1: dict[str, Any]) -> dict[str, Any]:
         documentation_role=documentation_role_for(v1),
         statement_timeouts=statement_timeouts_for(v1),
         api_connection_budget=api_budget_for(v1),
+        app_docs_url=app_docs_url_for(v1),
     )
 
 
@@ -316,6 +328,7 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         documentation_role=documentation_role_for(v1),
         statement_timeouts=statement_timeouts_for(v1),
         api_connection_budget=api_budget_for(v1),
+        app_docs_url=app_docs_url_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
 
@@ -361,6 +374,11 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
         migrated, api_connection_budget=api_budget_for(migrated)
     )
     assert migrated["schema_version"] == 8
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
+    assert migrated["schema_version"] == 9
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -437,6 +455,7 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             documentation_role=documentation_role_for(v1),
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
+            app_docs_url=app_docs_url_for(v1),
         )
 
 
@@ -509,7 +528,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 8"):
+    with pytest.raises(MigrationError, match="already version 9"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -519,6 +538,7 @@ def test_a_current_version_document_is_not_migrated_again(
             documentation_role=documentation_role_for(chained),
             statement_timeouts=statement_timeouts_for(chained),
             api_connection_budget=api_budget_for(chained),
+            app_docs_url=app_docs_url_for(chained),
         )
     with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_v4_to_v5(v5)
@@ -532,7 +552,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1, 2, 3, 4, 5, 6 and 7"):
+    with pytest.raises(MigrationError, match="only versions 1 through 8"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -542,6 +562,7 @@ def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
             documentation_role=documentation_role_for(v1),
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
+            app_docs_url=app_docs_url_for(v1),
         )
 
 
@@ -557,6 +578,7 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             documentation_role=documentation_role_for(v1),
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
+            app_docs_url=app_docs_url_for(v1),
         )
 
 
@@ -581,6 +603,7 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             documentation_role=documentation_role_for(v1),
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
+            app_docs_url=app_docs_url_for(v1),
         )
 
 
@@ -692,6 +715,11 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
         migrated, api_connection_budget=api_budget_for(migrated)
     )
     assert migrated["schema_version"] == 8
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
+    assert migrated["schema_version"] == 9
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -855,6 +883,11 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
         migrated, api_connection_budget=api_budget_for(migrated)
     )
     assert migrated["schema_version"] == 8
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
+    assert migrated["schema_version"] == 9
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -962,6 +995,11 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
         migrated, api_connection_budget=api_budget_for(migrated)
     )
     assert migrated["schema_version"] == 8
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
+    assert migrated["schema_version"] == 9
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1080,6 +1118,11 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
         migrated, api_connection_budget=api_budget_for(migrated)
     )
     assert migrated["schema_version"] == 8
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
+    assert migrated["schema_version"] == 9
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1386,9 +1429,24 @@ def v8_fixture() -> dict[str, Any]:
 
 
 def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]) -> None:
+    """A genuine version 8 render, and now a superseded one.
+
+    It validated against the schema on the day it was captured and does not
+    today, which is the version bump working rather than a defect -- the same
+    thing every fixture above says about itself. What is asserted instead is
+    what makes it a fixture: the version it claims, the kind it is, and that it
+    reaches the current version through the chain.
+    """
     assert v8_fixture["schema_version"] == 8
     assert v8_fixture["document_kind"] == "rendered"
-    config.validate_against_schema(v8_fixture, "outputs.schema.json")
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(v8_fixture, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v8_to_v9(
+        v8_fixture, app_docs_url=app_docs_url_for(v8_fixture)
+    )
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
+    config.validate_against_schema(migrated, "outputs.schema.json")
 
 
 def test_the_migrated_v8_has_the_same_shape_as_a_rendered_one(
@@ -1428,3 +1486,138 @@ def test_the_migrated_v8_has_the_same_shape_as_a_rendered_one(
         f"the migration chain produces keys no render writes: {sorted(invented)}. "
         "A migrator that invents a field is a second authority on that field"
     )
+
+
+# ---------------------------------------------------------------------------
+# The version 9 step
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def v8_document(v8_fixture: dict[str, Any]) -> dict[str, Any]:
+    """A real v8 render -- the v9 step's input, from the fixture rather than the chain."""
+    return v8_fixture
+
+
+def test_v9_adds_the_application_documentation_url(v8_document: dict[str, Any]) -> None:
+    url = app_docs_url_for(v8_document)
+    migrated = output_migrations.migrate_v8_to_v9(v8_document, app_docs_url=url)
+
+    assert migrated["schema_version"] == 9
+    assert migrated["routes"]["app_docs"] == url
+    # The page under the documentation root, not the root (ADR 0061).
+    assert migrated["routes"]["app_docs"].endswith(naming.DOCS_APP_PAGE_PATH)
+
+
+def test_v9_does_not_touch_routes_app(v8_document: dict[str, Any]) -> None:
+    """The rendered branch has carried `app` since Session 1, measured not assumed.
+
+    A step that added it would be refusing every document it was given, and a
+    step that overwrote it would be a second derivation of a URL `naming.derive`
+    already owns -- which is what `jwt_issuer` is built from.
+    """
+    before = v8_document["routes"]["app"]
+    migrated = output_migrations.migrate_v8_to_v9(
+        v8_document, app_docs_url=app_docs_url_for(v8_document)
+    )
+    assert migrated["routes"]["app"] == before
+
+
+def test_v9_refuses_a_document_that_already_carries_app_docs(
+    v8_document: dict[str, Any],
+) -> None:
+    once = output_migrations.migrate_v8_to_v9(
+        v8_document, app_docs_url=app_docs_url_for(v8_document)
+    )
+    once["schema_version"] = 8
+    with pytest.raises(MigrationError, match="already carries app_docs"):
+        output_migrations.migrate_v8_to_v9(once, app_docs_url=app_docs_url_for(once))
+
+
+def test_v9_refuses_a_document_with_no_app_route(v8_document: dict[str, Any]) -> None:
+    """Not a hypothetical: it is how a hand-built fixture would arrive."""
+    broken = {
+        **v8_document,
+        "routes": {k: v for k, v in v8_document["routes"].items() if k != "app"},
+    }
+    with pytest.raises(MigrationError, match="carries no app"):
+        output_migrations.migrate_v8_to_v9(broken, app_docs_url=app_docs_url_for(broken))
+
+
+def test_v9_refuses_a_url_that_is_not_https(v8_document: dict[str, Any]) -> None:
+    for url in ("http://example.test/docs/app", "/docs/app", "", None, 7):
+        with pytest.raises(MigrationError, match="must be an https URL"):
+            output_migrations.migrate_v8_to_v9(v8_document, app_docs_url=url)
+
+
+def test_v9_refuses_a_url_another_route_already_claims(v8_document: dict[str, Any]) -> None:
+    """Two routes at one address is a router answering for whichever attached last."""
+    for existing in ("docs", "app"):
+        with pytest.raises(MigrationError, match="URL of another route"):
+            output_migrations.migrate_v8_to_v9(
+                v8_document, app_docs_url=v8_document["routes"][existing]
+            )
+
+
+def test_v9_refuses_a_deployed_document(v8_document: dict[str, Any]) -> None:
+    """The refusal every step in this module repeats, for the seventh time."""
+    deployed = {**v8_document, "document_kind": "deployed"}
+    with pytest.raises(MigrationError):
+        output_migrations.migrate_v8_to_v9(deployed, app_docs_url=app_docs_url_for(deployed))
+
+
+def test_v9_does_not_mutate_its_input(v8_document: dict[str, Any]) -> None:
+    before = json.dumps(v8_document, sort_keys=True)
+    output_migrations.migrate_v8_to_v9(v8_document, app_docs_url=app_docs_url_for(v8_document))
+    assert json.dumps(v8_document, sort_keys=True) == before
+
+
+def test_the_renderer_and_the_migrator_agree_on_the_documentation_url(
+    v8_document: dict[str, Any],
+) -> None:
+    """One authority for the path (ADR 0061), read from both sides.
+
+    `naming.DOCS_APP_PAGE_PATH` is where the renderer gets it. The migrator is
+    handed it. If the two ever disagreed, a project migrated onto a host would
+    publish a documentation page at an address nothing routes -- and both halves
+    would look right in isolation, which is D177 exactly.
+    """
+    domain = v8_document["project"]["domain"]
+    identity = naming.derive(
+        slug=v8_document["project"]["slug"],
+        environment=v8_document["project"]["environment"],
+        domain=domain,
+        api_base_path="/api",
+        mcp_base_path="/mcp",
+    )
+    assert identity.route_app_docs == app_docs_url_for(v8_document)
+    assert identity.route_app_docs_path == naming.DOCS_APP_PAGE_PATH
+
+
+def test_a_version_9_document_without_the_documentation_route_is_refused(
+    v8_document: dict[str, Any],
+) -> None:
+    """`app_docs` is required, and nothing else was asserting that.
+
+    Found by mutation: removing `app_docs` from the schema's `required` list left
+    every test green, because the document the refusal tests use is a **version 8**
+    one and the version enum refuses it on its own. So the required-ness was
+    riding on a check that would have refused the document anyway -- a guard
+    proved by a test that does not need it, which is this repository's own
+    defect in miniature.
+    """
+    migrated = output_migrations.migrate_v8_to_v9(
+        v8_document, app_docs_url=app_docs_url_for(v8_document)
+    )
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+    without = {
+        **migrated,
+        "routes": {k: v for k, v in migrated["routes"].items() if k != "app_docs"},
+    }
+    # No message match: the schema is a top-level oneOf, so jsonschema reports
+    # "not valid under any of the given schemas" and names no field. The control
+    # is the pair -- the same document WITH the route validates two lines above,
+    # so the refusal is about the one key that was removed.
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(without, "outputs.schema.json")

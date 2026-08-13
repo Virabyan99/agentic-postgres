@@ -35,7 +35,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            8
+            9
           ]
         },
         "document_kind": {
@@ -156,7 +156,8 @@
             "app",
             "mcp",
             "docs",
-            "health"
+            "health",
+            "app_docs"
           ],
           "properties": {
             "rest": {
@@ -187,6 +188,9 @@
                   "$ref": "#/$defs/httpsUrl"
                 }
               }
+            },
+            "app_docs": {
+              "$ref": "#/$defs/httpsUrl"
             }
           }
         },
@@ -341,7 +345,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            8
+            9
           ]
         },
         "document_kind": {
@@ -457,7 +461,9 @@
           "required": [
             "health",
             "rest",
-            "docs"
+            "docs",
+            "app",
+            "app_docs"
           ],
           "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them.",
           "properties": {
@@ -487,6 +493,14 @@
             },
             "docs": {
               "$ref": "#/$defs/publishedRoute"
+            },
+            "app": {
+              "$ref": "#/$defs/publishedRoute",
+              "description": "Version 9. The application API route, whose status is how a project says it is awaiting its first administrator (D230): `unavailable` with a null URL until one exists, exactly as `rest` was for a project deployed through session 4. A deployment state was considered and refused -- `publishedRoute` already expresses this and every reader already understands it."
+            },
+            "app_docs": {
+              "$ref": "#/$defs/publishedRoute",
+              "description": "Version 9. The application API's documentation page: a second surface of the same documentation service (D226, ADR 0069), not a second service. `unavailable` until the surface is published."
             }
           }
         },
@@ -1223,7 +1237,8 @@
         "verification_kids",
         "public_jwks_sha256",
         "temporary",
-        "retire_after"
+        "retire_after",
+        "verifier_acknowledgements"
       ],
       "description": "Public token metadata, version 5 (ADR 0051, ADR 0053). Every member here is something a verifier is entitled to hold: an issuer, an audience, an algorithm, key identifiers and a digest of the public JWKS. No private JWK, no signing key reference and no token appears -- not as a redacted field, not as a reference, not at all. `temporary` is state a later gate reads rather than prose nobody executes: SEC-BOOT-001 compares it against `deployed_through_session` and goes red on the deployment that should have replaced the bootstrap issuer.",
       "properties": {
@@ -1309,6 +1324,24 @@
         "retire_after": {
           "$ref": "#/$defs/nullableTimestamp",
           "description": "The deadline the temporary issuer carries with it. Null when no rotation is in flight; a date when one is, so that 'the overlap window' is a value rather than an intention."
+        },
+        "verifier_acknowledgements": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/sha256"
+              },
+              "propertyNames": {
+                "pattern": "^[a-z][a-z0-9_-]{0,63}$"
+              },
+              "description": "Consumer name to the sha256 of the public JWKS that consumer has actually loaded. Keyed by consumer because propagation is per consumer: a rotation that promoted on the strength of one verifier having reloaded would be promoting on an assumption about the others."
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Version 9. What makes promotion safe rather than hopeful (plan section 4): a prepared key is promoted only once every verifier has acknowledged the same digest. Recorded rather than inferred -- `public_jwks_sha256` says what the issuer published, and this says what was picked up, and the whole point is that the two can differ for a while."
         }
       },
       "if": {
@@ -1345,6 +1378,9 @@
             "type": "null"
           },
           "retire_after": {
+            "type": "null"
+          },
+          "verifier_acknowledgements": {
             "type": "null"
           }
         }

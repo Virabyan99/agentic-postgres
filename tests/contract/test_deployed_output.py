@@ -132,6 +132,11 @@ PUBLISHED_JWT = {
     "public_jwks_sha256": "4" * 64,
     "temporary": True,
     "retire_after": None,
+    # Version 9. Null rather than an empty object: no verifier has
+    # acknowledged anything, which is what a deployment before its first
+    # rotation looks like. An empty object would say every verifier had been
+    # asked and none had answered.
+    "verifier_acknowledgements": None,
 }
 
 
@@ -146,6 +151,12 @@ def build(rendered: dict, **overrides):
         # tests that pass it explicitly.
         "rest_status": "unavailable",
         "docs_status": "unavailable",
+        # Version 9. Unpublished by default like the two above: a session-3
+        # deployment serves no application route and no second documentation
+        # surface, and D230 makes `unavailable` the honest state for a project
+        # that has no administrator yet.
+        "app_status": "unavailable",
+        "app_docs_status": "unavailable",
         "api": deployed_output.API_NOT_PUBLISHED,
         "jwt": deployed_output.JWT_NOT_PUBLISHED,
         # Required with no default in the builder, for the reason
@@ -175,7 +186,7 @@ def published(rendered: dict, **overrides):
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 8
+    assert document["schema_version"] == 9
     assert document["project"]["key"] == KEY
 
 
@@ -451,6 +462,13 @@ def test_the_jwt_block_carries_no_private_material(rendered: dict) -> None:
         "public_jwks_sha256",
         "temporary",
         "retire_after",
+        # Version 9, and looked at rather than waved through -- which is what
+        # this test's key-set form exists to force. It carries a consumer name
+        # and a sha256 of the public JWKS that consumer has loaded: an
+        # identifier and a digest of public material, which is the same class of
+        # thing as `public_jwks_sha256` beside it. No private JWK, no reference
+        # to one, and nothing a verifier is not already entitled to hold.
+        "verifier_acknowledgements",
     }
     deployed_output.validate_deployed_document(document)
 

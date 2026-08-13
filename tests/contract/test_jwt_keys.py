@@ -461,7 +461,17 @@ def test_the_state_members_are_the_ones_the_deployed_schema_names(
     # What the schema has and this does not is the identity half -- status,
     # issuer, audience and the JWKS digest -- which comes from the render and
     # from the file, not from the key.
-    assert accepted - produced == {"status", "issuer", "audience", "public_jwks_sha256"}
+    assert accepted - produced == {
+        "status",
+        "issuer",
+        "audience",
+        "public_jwks_sha256",
+        # Version 9, and on the identity side of the line for the same reason
+        # the others are: it records what each verifier has actually loaded,
+        # which is an observation of a deployment rather than a property of
+        # the key. `begin_rotation` could not compute it if it tried.
+        "verifier_acknowledgements",
+    }
 
 
 def test_the_module_holds_no_private_key_and_signs_nothing() -> None:

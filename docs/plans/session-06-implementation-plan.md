@@ -103,6 +103,8 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D243** | (ADR 0049, accepted in Session 5 Run 1.) "Session 5 issues bootstrap tokens carrying a `scope` claim, and the pre-request function validates it", with the permitted names reaching the hook "as non-secret `app.settings.*` values rendered from the schema's enum". | **Neither half was ever built.** `bin/dev-token.py::mint` signs `role`, `iat`, `exp`, `iss`, `aud` and an optional `sub` -- no `scope`. No `app.settings.scope_*` is rendered anywhere in `src/` or `bin/`. The pre-request function reads `sub` and nothing else. | **Recorded, not fixed here.** Issuance is Run 7's, with the service; the hook's half is migration 0012's. ADR 0079 says so in its consequences so the next reader is not the third person to assume it works. | **An accepted ADR whose subject does not exist**, and the third instance this session after D235's uncalled rotation plane and D204's rule catching `jwt_claims`. ADR 0049 is not wrong -- its decision is the one this session is still following -- it was simply never implemented, and nothing in the repository could tell the difference. | no |
 | **D244** | (D220, in this plan's own table.) New scopes "are added to the capabilities schema's enum, which is what ADR 0006 exists to force". | **Following that literally would have widened the agent capability surface.** `$defs/scope` is referenced by exactly one place -- `capability.required_scopes.items` -- so the approved vocabulary and *what a tool manifest may request* are the same list. Adding `admin_users:write` to it makes it requestable by an agent capability, which is the `admin:everything` drift ADR 0006 names in its own rejected-alternatives section. | **One authority, two closed classes** (ADR 0079). `$defs/scope` is the union; `$defs/agent_scope` is the data class and `required_scopes` binds to *it*; the administrative class is derived as the complement so the four names are written once. `scope_registry` maps role → ceiling and validates every name against the schema on the way out. | D220 was right about the authority and wrong about the mechanism, and the difference is one `$ref` nobody had needed to read before -- the enum had only ever had one job, so nothing distinguished its two. **The mutation that matters is that one word**: repointing it restores the old behaviour while every other assertion about the vocabulary stays true. | **yes** |
 | **D245** | (D215, in this plan's own table.) The version bump "pays D40's full price: a `migrate_v8_to_v9` function, a committed `tests/fixtures/outputs-v8.json`, and the standing rule that migration never produces a *deployed* document" -- written as though the fixture-per-version discipline were being continued. | **It had lapsed three versions ago.** `tests/fixtures/` holds `outputs-v1` through `outputs-v5` and stops. `migrate_v5_to_v6`, `v6_to_v7` and `v7_to_v8` are exercised **only by chaining from the v5 fixture**, which is the condition `test_output_migrations.py`'s own docstring names: "a document derived from the migrator is a document that agrees with the migrator by construction". Nothing noticed, because a chained document validates against the schema exactly as a rendered one does. | **A real v8 render is captured and the comparison it enables is written**, before the schema moves -- after the bump, `--render-only` emits v9 and a genuine v8 cannot be produced from this tree again. The comparison is *structural*: the two fixtures describe different projects, so equality is not the question; a key the migrator never adds and a key only it invents are. | **Measured result: the chained v8 and a real v8 render have identical shape.** No defect -- which is the honest outcome and not a reason the check should not exist. The value is that the question is now answerable, and it was answerable for v1→v5 and silently was not for v5→v8. The first draft of the comparison reported two false differences, because `statement_timeouts` is keyed by *role name* and comparing its members compares manifests: a rig one level away from its claim, in the module about exactly that. | no |
+| **D246** | (§5 Run 4 of this plan.) "Session 6's four secrets appended to `secrets.required.yaml` with their planes and value kinds (D227)" -- in Run 4, four runs before the service exists. | **The contract forbids it, and says so in its own text.** `test_every_consumer_names_a_real_compose_service` requires a compose-plane consumer to name a service that exists, and `secrets.required.yaml` records why beside `postgrest_authenticator_password`: "It arrives in the same commit as its consumer... a grant to a service that does not [exist] is a grant nobody can audit." Three of the four name `auth`, which is Run 7's. | **The four move to Run 7**, with the service. The value-kind enum widening they need (`rsa_private_jwk`, `public_jwks` -- ADR 0055's rule that the kind says what the value *is*) moves with them, since nothing else needs it. | Attempted and reverted rather than argued: the contract test went red on the first run, which is the rule working. **Landing the entries early would have been this session's own recurring defect** -- a declaration with nothing wired to it, after D235's uncalled rotation plane, D243's unbuilt ADR 0049 and D204's rule catching `jwt_claims` in the same week. | no |
+| **D247** | (Implicit throughout.) A schema field's required-ness is proved by the tests that exercise documents lacking it. | **Measured by mutation: removing `app_docs` from the schema's `required` list left every test green.** The documents those refusal tests use are **version 8**, and the version enum refuses them on its own -- so the required-ness was riding on a check that would have refused the document anyway. | **A test that migrates to v9 first and then removes the key**, with the migrated document validating two lines above as its control. | A guard proved by a test that does not need it. The same shape as every finding this session has produced, one layer down: the assertion was green, the code was correct, and nothing connected them. Found only because the mutation was expected to go red and did not. | no |
 
 ---
 
@@ -312,7 +314,7 @@ Session 5 issues tokens carrying `scope` and renders the permitted names into th
 hook; neither exists. Recorded rather than fixed — issuance is Run 7's, the hook
 is migration 0012's.
 
-### Run 4 — Outputs v9 and the secret contract  ·  **In progress.**
+### Run 4 — Outputs v9  ·  **Done.**  (the secret contract moves to Run 7)
 
 **Done: the v8 fixture and the comparison it makes possible** (**D245**). The
 fixture-per-version discipline had lapsed after v5 without anyone noticing, so
@@ -337,13 +339,28 @@ requires to agree — one key with no deadline is steady, two with one is overla
 Adding it would be a third record of one fact, which is what ADR 0002 forbids and
 what D177 punished. It is not in v9.
 
-**Outstanding:** `migrate_v8_to_v9` itself, the deployed-branch `routes.app`, the
-per-verifier acknowledgements the promotion gate needs, and Session 6's four
-secrets appended to `secrets.required.yaml` with their planes and value kinds
-(D227).
+**Version 9, shipped.** `migrate_v8_to_v9` adds the rendered
+`routes.app_docs`; the deployed branch gains `routes.app` and `routes.app_docs`
+as `publishedRoute`s and `jwt.verifier_acknowledgements`. Six files, one bump,
+five mutations red with controls green.
+
+`app_docs` is in *this* bump rather than Run 10's deliberately: every version
+bump costs a redeploy of every project (ADR 0053), so discovering in Run 10 that
+a tenth version was needed would mean redeploying every project twice in one
+session. The router and `serve.py`'s route table stay Run 10's; only the derived
+URL lands here.
+
+`verifier_acknowledgements` is the one genuinely new state — a consumer name to
+the sha256 of the JWKS that consumer has *loaded*. Keyed per consumer because
+propagation is per consumer: promoting on the strength of one verifier having
+reloaded is promoting on an assumption about the others. Nothing else records it,
+which is why it is not derivable and `rotation_phase` was.
+
+**The four secrets move to Run 7** (**D246**): the contract refuses a grant to a
+service that does not exist, and `auth` is Run 7's. Attempted, reverted, recorded.
 
 **The materialization proof now stats every consumer** (D213), so a wrong `uid`
-or `mode` here fails on the next gate rather than in Session 9.
+or `mode` there fails on the next gate rather than in Session 9.
 
 ### Run 5 — Migration 0011: the identity registry
 
@@ -364,6 +381,12 @@ and the HBA rule — all in `bin/postgres-bootstrap.py`, none in a migration
 subtraction (ADR 0070).
 
 ### Run 7 — The service core, before any route
+
+**Carried in from Run 4 (D246):** the four secrets, appended to
+`secrets.required.yaml` in the same commit as the `auth` compose service they
+name, and the `value_kind` enum widened to admit `rsa_private_jwk` and
+`public_jwks` — because ADR 0055 exists so that the kind says what the value
+*is*, and declaring a JWK as a PEM would be that ADR's own defect one level in.
 
 Hashing (the frozen Argon2id profile, NFC normalization, the offline blocklist,
 dummy verification, the bounded executor whose semaphore is held until the worker

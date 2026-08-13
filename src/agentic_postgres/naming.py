@@ -71,6 +71,17 @@ DOCS_ROOT_PATH = "/docs"
 #: this rather than holding a second literal, which is what it did until ADR 0061.
 DOCS_PAGE_PATH = f"{DOCS_ROOT_PATH}/rest"
 
+#: Where the application API's documentation page is served, under the same
+#: root (D226).
+#:
+#: A second *surface* of `services/docs/`, not a second service: one image,
+#: one CSP, one credential, one mounted snapshot directory holding a second
+#: file (ADR 0069). Derived here for the reason `DOCS_PAGE_PATH` is -- ADR
+#: 0061 made this module the one authority for a documentation path after
+#: `config` held a copy described as kept in step with it, and the copy was
+#: the one that had drifted (D177).
+DOCS_APP_PAGE_PATH = f"{DOCS_ROOT_PATH}/app"
+
 #: Suffix appended to a project's `api.public_base_path` for the REST surface.
 #:
 #: Here for the same reason and by the same amendment: `config` held a copy
@@ -418,6 +429,12 @@ class ProjectIdentity:
     #: URL a person is given and the other is what a rule matches on, and D177
     #: is what happens when the two are derived twice and drift.
     route_docs_path: str = ""
+    #: The application documentation page's URL and path. Separate members
+    #: from `route_docs`/`route_docs_path` rather than a computed suffix,
+    #: because a caller that built one from the other would be the second
+    #: derivation ADR 0061 exists to prevent.
+    route_app_docs: str = ""
+    route_app_docs_path: str = ""
     docs_router: str = ""
     docs_stripprefix_middleware: str = ""
     api_buffering_middleware: str = ""
@@ -484,6 +501,8 @@ def derive(
         # The page, not the root above it (ADR 0061).
         route_docs=f"https://{domain}{DOCS_PAGE_PATH}",
         route_docs_path=DOCS_PAGE_PATH,
+        route_app_docs=f"https://{domain}{DOCS_APP_PAGE_PATH}",
+        route_app_docs_path=DOCS_APP_PAGE_PATH,
         route_health=f"https://{domain}{HEALTH_ROUTE_PATH}",
         health_router=health_router_name(key),
         rest_router=rest_router_name(key),
