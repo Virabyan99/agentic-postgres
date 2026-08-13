@@ -1329,3 +1329,102 @@ def test_the_v8_step_refuses_a_document_that_already_carries_the_field(
 def test_a_v6_document_is_refused_by_the_v8_step(v6_document: dict[str, Any]) -> None:
     with pytest.raises(MigrationError, match="only version 7 can be migrated to 8"):
         output_migrations.migrate_v7_to_v8(v6_document, api_connection_budget=13)
+
+
+# ---------------------------------------------------------------------------
+# The v8 fixture, and the comparison it makes possible (D245)
+# ---------------------------------------------------------------------------
+
+#: A real Session 6 render at version 8, captured with `deploy.sh --render-only`
+#: at commit `dfdbddc` -- the last commit that still rendered version 8.
+#:
+#: **v6, v7 and v8 had no fixture.** Every assertion about `migrate_v6_to_v7` and
+#: `migrate_v7_to_v8` was made against a document the earlier steps produced,
+#: which is the condition this module's own docstring names: "a document derived
+#: from the migrator is a document that agrees with the migrator by
+#: construction". The discipline lapsed after v5 and nothing noticed, because a
+#: chained document validates against the schema exactly as a rendered one does.
+FIXTURE_V8 = REPO_ROOT / "tests" / "fixtures" / "outputs-v8.json"
+
+
+#: Objects whose **keys are data**, not schema. `statement_timeouts` is keyed by
+#: derived role name and holds whatever a manifest declared, so its members
+#: differ between any two projects; comparing them compares manifests.
+#:
+#: Named explicitly rather than inferred. The first draft of the comparison below
+#: did not exclude it and reported two "missing" keys that were two roles this
+#: fixture's manifest happens to bound -- a rig measuring one level away from its
+#: claim, which is the failure this whole module is about.
+DATA_KEYED_OBJECTS = ("database.statement_timeouts",)
+
+
+def document_shape(node: Any, path: str = "") -> set[str]:
+    """Every key path in a document, ignoring values.
+
+    Shape rather than equality, because the fixtures describe different projects
+    and always will. A key the migrated document lacks is a field the migrator
+    never adds; a key only it has is a field the migrator invents. Both are
+    silent today: the schema admits either.
+    """
+    found: set[str] = set()
+    if isinstance(node, dict):
+        for key, value in node.items():
+            here = f"{path}.{key}" if path else key
+            found.add(here)
+            if here in DATA_KEYED_OBJECTS:
+                continue
+            found |= document_shape(value, here)
+    elif isinstance(node, list):
+        for item in node:
+            found |= document_shape(item, f"{path}[]")
+    return found
+
+
+@pytest.fixture
+def v8_fixture() -> dict[str, Any]:
+    return json.loads(FIXTURE_V8.read_text(encoding="utf-8"))
+
+
+def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]) -> None:
+    assert v8_fixture["schema_version"] == 8
+    assert v8_fixture["document_kind"] == "rendered"
+    config.validate_against_schema(v8_fixture, "outputs.schema.json")
+
+
+def test_the_migrated_v8_has_the_same_shape_as_a_rendered_one(
+    v5_fixture: dict[str, Any], v8_fixture: dict[str, Any]
+) -> None:
+    """The check the missing fixtures made impossible.
+
+    Both documents validate against the same schema, so this is not about
+    validity -- a field the renderer writes and the migrator omits is admitted by
+    the schema in both directions, and would surface only on a host running a
+    migrated document that some later code reads a missing key from.
+
+    Not asserted: field values. The two fixtures describe different projects, and
+    a comparison that required otherwise would be a comparison nobody could keep.
+    """
+    migrated = output_migrations.migrate_v5_to_v6(
+        v5_fixture, documentation_role=documentation_role_for(v5_fixture)
+    )
+    migrated = output_migrations.migrate_v6_to_v7(
+        migrated, statement_timeouts=statement_timeouts_for(migrated)
+    )
+    migrated = output_migrations.migrate_v7_to_v8(
+        migrated, api_connection_budget=api_budget_for(migrated)
+    )
+
+    rendered_shape = document_shape(v8_fixture)
+    migrated_shape = document_shape(migrated)
+
+    never_added = rendered_shape - migrated_shape
+    assert not never_added, (
+        f"the renderer writes keys the migration chain never adds: {sorted(never_added)}. "
+        "A document migrated onto a host would be missing them, and the schema admits that"
+    )
+
+    invented = migrated_shape - rendered_shape
+    assert not invented, (
+        f"the migration chain produces keys no render writes: {sorted(invented)}. "
+        "A migrator that invents a field is a second authority on that field"
+    )

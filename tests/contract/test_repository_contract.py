@@ -206,6 +206,8 @@ REQUIRED_PATHS = (
     "tests/fixtures/outputs-v2.json",
     "tests/fixtures/outputs-v3.json",
     "tests/fixtures/outputs-v4.json",
+    "tests/fixtures/outputs-v5.json",
+    "tests/fixtures/outputs-v8.json",
     "tests/acceptance-registry.yaml",
     "tests/conftest.py",
     # The three Session 2 execution environments. Listed because the registry

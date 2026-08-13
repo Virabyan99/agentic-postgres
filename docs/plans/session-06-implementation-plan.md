@@ -102,6 +102,7 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D242** | PostgREST is the second verifier: the negative matrix is asserted "by the service *and* by PostgREST, which are two verifiers and must agree" (§2, `SEC-JWT-001`). | **Measured, configured from `compose.yaml` rather than from a rig's own idea of the settings.** PostgREST enforces the signature (refusing another key, `alg: none` and HS256), `exp` and `nbf` within the 30s leeway, `aud` **when present**, `kid` when present and unmatched, and role membership at `SET ROLE`. It **does not check `iss` at all** -- there is no issuer setting -- **serves a token carrying no `aud`**, and ignores `typ`, `token_use` and `scope` entirely. | **The two verifiers do not overlap the way the requirement assumed, and the split is recorded as data** in `POSTGREST_ENFORCES` / `VERIFIED_ELSEWHERE` rather than as prose. `SEC-JWT-001`'s matrix has a measured expectation per row **including the rows where the correct expectation is *served*** -- a proof asserting PostgREST refuses a bad `iss` would assert something false. | The first pass of this measurement left `PGRST_JWT_AUD` unset and reported that a wrong audience is served. That is a fact about a rig nobody deploys -- **ADR 0065 arriving for the fourth time** -- and it was caught only by reading the product's own compose file before writing the result down. | **yes** |
 | **D243** | (ADR 0049, accepted in Session 5 Run 1.) "Session 5 issues bootstrap tokens carrying a `scope` claim, and the pre-request function validates it", with the permitted names reaching the hook "as non-secret `app.settings.*` values rendered from the schema's enum". | **Neither half was ever built.** `bin/dev-token.py::mint` signs `role`, `iat`, `exp`, `iss`, `aud` and an optional `sub` -- no `scope`. No `app.settings.scope_*` is rendered anywhere in `src/` or `bin/`. The pre-request function reads `sub` and nothing else. | **Recorded, not fixed here.** Issuance is Run 7's, with the service; the hook's half is migration 0012's. ADR 0079 says so in its consequences so the next reader is not the third person to assume it works. | **An accepted ADR whose subject does not exist**, and the third instance this session after D235's uncalled rotation plane and D204's rule catching `jwt_claims`. ADR 0049 is not wrong -- its decision is the one this session is still following -- it was simply never implemented, and nothing in the repository could tell the difference. | no |
 | **D244** | (D220, in this plan's own table.) New scopes "are added to the capabilities schema's enum, which is what ADR 0006 exists to force". | **Following that literally would have widened the agent capability surface.** `$defs/scope` is referenced by exactly one place -- `capability.required_scopes.items` -- so the approved vocabulary and *what a tool manifest may request* are the same list. Adding `admin_users:write` to it makes it requestable by an agent capability, which is the `admin:everything` drift ADR 0006 names in its own rejected-alternatives section. | **One authority, two closed classes** (ADR 0079). `$defs/scope` is the union; `$defs/agent_scope` is the data class and `required_scopes` binds to *it*; the administrative class is derived as the complement so the four names are written once. `scope_registry` maps role → ceiling and validates every name against the schema on the way out. | D220 was right about the authority and wrong about the mechanism, and the difference is one `$ref` nobody had needed to read before -- the enum had only ever had one job, so nothing distinguished its two. **The mutation that matters is that one word**: repointing it restores the old behaviour while every other assertion about the vocabulary stays true. | **yes** |
+| **D245** | (D215, in this plan's own table.) The version bump "pays D40's full price: a `migrate_v8_to_v9` function, a committed `tests/fixtures/outputs-v8.json`, and the standing rule that migration never produces a *deployed* document" -- written as though the fixture-per-version discipline were being continued. | **It had lapsed three versions ago.** `tests/fixtures/` holds `outputs-v1` through `outputs-v5` and stops. `migrate_v5_to_v6`, `v6_to_v7` and `v7_to_v8` are exercised **only by chaining from the v5 fixture**, which is the condition `test_output_migrations.py`'s own docstring names: "a document derived from the migrator is a document that agrees with the migrator by construction". Nothing noticed, because a chained document validates against the schema exactly as a rendered one does. | **A real v8 render is captured and the comparison it enables is written**, before the schema moves -- after the bump, `--render-only` emits v9 and a genuine v8 cannot be produced from this tree again. The comparison is *structural*: the two fixtures describe different projects, so equality is not the question; a key the migrator never adds and a key only it invents are. | **Measured result: the chained v8 and a real v8 render have identical shape.** No defect -- which is the honest outcome and not a reason the check should not exist. The value is that the question is now answerable, and it was answerable for v1→v5 and silently was not for v5→v8. The first draft of the comparison reported two false differences, because `statement_timeouts` is keyed by *role name* and comparing its members compares manifests: a rig one level away from its claim, in the module about exactly that. | no |
 
 ---
 
@@ -311,11 +312,35 @@ Session 5 issues tokens carrying `scope` and renders the permitted names into th
 hook; neither exists. Recorded rather than fixed — issuance is Run 7's, the hook
 is migration 0012's.
 
-### Run 4 — Outputs v9 and the secret contract
+### Run 4 — Outputs v9 and the secret contract  ·  **In progress.**
 
-`migrate_v8_to_v9`, `tests/fixtures/outputs-v8.json`, `routes.app`, the `jwt`
-block's rotation fields (D216). Session 6's four secrets appended to
-`secrets.required.yaml` with their planes and value kinds (D227).
+**Done: the v8 fixture and the comparison it makes possible** (**D245**). The
+fixture-per-version discipline had lapsed after v5 without anyone noticing, so
+three migration steps were proved only against their own output. A real v8 render
+is now committed — captured *before* the bump, because afterwards one cannot be
+produced from this tree — and the chained v8 is compared against it structurally.
+Result: identical shape. Three mutations, each red, controls green.
+
+**Measured, and it corrects D216** — which this session wrote. The rendered
+branch already carries **`routes.app`** as a derived URL (`naming.derive` has
+`route_app`, and `jwt_issuer` is built from it), and on that branch `rest`, `app`,
+`mcp` and `docs` are plain strings: only `health` is a status-carrying object.
+Status lives on the **deployed** branch, where `routes` holds exactly `health`,
+`rest` and `docs`. So v9's routes work is *deployed-branch only*, and D230's
+`routes.app.status` needs no new machinery — `$defs/publishedRoute` already
+forces a null URL when a route is `unavailable`, which is precisely the shape.
+
+**Also measured, and it removes a field from the plan:** D216 proposed
+`jwt.rotation_phase` (`steady`|`prepared`|`overlap`). That is **derivable** from
+`verification_kids` and `retire_after`, which `validate_key_state` already
+requires to agree — one key with no deadline is steady, two with one is overlap.
+Adding it would be a third record of one fact, which is what ADR 0002 forbids and
+what D177 punished. It is not in v9.
+
+**Outstanding:** `migrate_v8_to_v9` itself, the deployed-branch `routes.app`, the
+per-verifier acknowledgements the promotion gate needs, and Session 6's four
+secrets appended to `secrets.required.yaml` with their planes and value kinds
+(D227).
 
 **The materialization proof now stats every consumer** (D213), so a wrong `uid`
 or `mode` here fails on the next gate rather than in Session 9.
