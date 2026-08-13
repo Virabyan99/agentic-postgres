@@ -50,8 +50,14 @@ This makes both proofs **stricter**, not weaker:
   per-consumer materialization.
 - `active_secrets` — the mode, uid, gid and non-emptiness of every secret the
   deployment actually carries are now checked, including the two `root`-plane
-  consumers ADR 0054 introduced. Under the literal, five of eleven consumers
-  were checked and the assertion `checked > 0` reported success.
+  consumers ADR 0054 introduced. Under the literal this checked **one consumer
+  of thirteen** — session 2 declares exactly one secret, the sentinel — and
+  `assert checked` reported success on that one. Measured, not estimated: the
+  contract yields 1 secret / 1 consumer at session 2 and 8 / 13 at session 5.
+  Twelve consumers' modes and owners, across three sessions, were proved by
+  nothing. **The count in the first draft of this ADR was five of eleven, which
+  was written rather than measured** — the same defect the ADR is about, one
+  level up.
 
 ## Alternatives
 

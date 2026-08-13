@@ -241,11 +241,11 @@ def test_materialized_files_are_read_only_and_owned_by_the_declared_consumer(
 ) -> None:
     """Every consumer the deployment carries, not the five Session 2 declared.
 
-    **Stricter under ADR 0074, not weakened.** This read `session=2`, so five of
-    eleven consumers were checked and `assert checked` reported success on the
-    strength of the subset. The mode, uid, gid and non-emptiness of the Session 3
-    to Session 5 consumers -- including the two root-plane ones ADR 0054
-    introduced -- were measured by nothing.
+    **Stricter under ADR 0074, not weakened.** This read `session=2`, and session 2
+    declares exactly one secret with one consumer -- the sentinel. So it checked
+    **1 of 13** and `assert checked` reported success on that one. The mode, uid,
+    gid and non-emptiness of twelve consumers across three sessions, including the
+    two root-plane ones ADR 0054 introduced, were measured by nothing.
     """
     key = project_a["project"]["key"]
     generation = project_a["secrets"]["generation_id"]
