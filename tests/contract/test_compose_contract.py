@@ -19,8 +19,13 @@ from typing import Any
 
 import pytest
 import yaml
+from rendered_fixtures import (  # type: ignore[import-not-found]
+    DETAIL,
+    STATE,
+    needs_rendered_fixtures,
+)
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, output_migrations
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -39,9 +44,11 @@ ALPINE = REPO_ROOT / ".generated" / "fixture-alpine-dev"
 #: the assertion that would have caught a one-character interpolation error is
 #: in this file, and it was not running. A skip wider than its dependency is a
 #: coverage hole shaped like a precaution.
-needs_rendered_fixtures = pytest.mark.skipif(
-    not ALPHA.is_dir(), reason="render the fixtures first: ./deploy.sh --render-only"
-)
+#:
+#: It then asked `ALPHA.is_dir()` for one more run, which is an existence check
+#: standing in for a currency check, and the Session 5 host gate ran this module
+#: against a fixture rendered four schema versions earlier (D212, ADR 0073). The
+#: guard is now the shared one: absent skips, **stale fails**.
 
 
 def compose(project_dir: Path, *args: str, env: dict[str, str] | None = None):
@@ -426,6 +433,48 @@ def test_rendered_image_carries_the_locked_digest() -> None:
         if line.startswith("PYTHON_RUNTIME_IMAGE=")
     )
     assert image == locked
+
+
+def test_the_rendered_fixtures_are_not_stale() -> None:
+    """A fixture older than the model is a wrong answer, not a missing one.
+
+    New in Run 10 under ADR 0073. The Session 5 host gate resolved this module's
+    Compose model against `.generated/fixture-alpha-dev` rendered on 2026-08-10
+    at `schema_version: 4` -- before PostgREST existed -- and got eleven
+    "missing a value" interpolation errors, which read as a defect in
+    `compose.yaml`. The model was fine (D212).
+
+    Absent is a skip: a clean checkout has rendered nothing and has done nothing
+    wrong. **Stale is this failure**, and it is the only one, because the tests
+    that depend on the fixture skip citing staleness rather than each producing
+    its own symptom for the same cause.
+
+    `schema_version` is a proxy, and `rendered_fixtures` says what it does not
+    catch. It catches the drift that happened.
+    """
+    assert STATE != "stale", (
+        f"the rendered fixtures are stale: {DETAIL}. "
+        f"Every test that reads them is skipping, so this run measures the model "
+        f"and not the render."
+    )
+    assert STATE in {"absent", "current"}, f"unknown fixture state {STATE!r}: {DETAIL}"
+
+
+def test_the_fixture_currency_check_names_the_version_the_code_renders() -> None:
+    """The guard's authority is the code's, not a number typed beside it.
+
+    A currency check with its own copy of the current version is the tautology
+    this repository keeps producing -- it would agree with itself while both
+    drifted away from `output_migrations`. Asserting the wiring rather than the
+    value, so a bump to `CURRENT_VERSION` needs no edit here.
+    """
+    import rendered_fixtures  # type: ignore[import-not-found]
+
+    source = (REPO_ROOT / "tests" / "contract" / "rendered_fixtures.py").read_text(encoding="utf-8")
+    assert "output_migrations.CURRENT_VERSION" in source, (
+        "the currency check must read the version from output_migrations"
+    )
+    assert rendered_fixtures.output_migrations.CURRENT_VERSION == output_migrations.CURRENT_VERSION
 
 
 @needs_rendered_fixtures

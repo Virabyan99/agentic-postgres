@@ -18,15 +18,19 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from rendered_fixtures import (  # type: ignore[import-not-found]
+    needs_rendered_fixtures,
+)
 
 from agentic_postgres import REPO_ROOT, deployed_output
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 FIXTURE_COMPOSE_ENV = REPO_ROOT / ".generated" / "fixture-alpha-dev" / "compose.env"
-requires_rendered_fixture = pytest.mark.skipif(
-    not FIXTURE_COMPOSE_ENV.is_file(), reason="render the fixtures first: ./deploy.sh"
-)
+#: One authority for whether a render may be trusted (ADR 0073). This asked
+#: `is_file()` until Run 10, which cannot tell a current fixture from one four
+#: schema versions old.
+requires_rendered_fixture = needs_rendered_fixtures
 
 
 def _sourced_definitions(script: Path) -> str:

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import rendered_fixtures  # type: ignore[import-not-found]
 
 from agentic_postgres import REPO_ROOT, config, migrations
 from agentic_postgres.migrations import MigrationError
@@ -37,8 +38,10 @@ def manifest() -> dict[str, Any]:
 
 @pytest.fixture(scope="module")
 def outputs() -> dict[str, Any]:
-    if not FIXTURE_OUTPUTS.exists():
-        pytest.skip("fixtures are not rendered in this working tree")
+    # Existence is not currency (ADR 0073): this skipped on absence and ran
+    # happily against a render four schema versions old until Run 10.
+    if rendered_fixtures.STATE != "current":
+        pytest.skip(f"rendered fixtures {rendered_fixtures.STATE}: {rendered_fixtures.DETAIL}")
     return json.loads(FIXTURE_OUTPUTS.read_text(encoding="utf-8"))
 
 

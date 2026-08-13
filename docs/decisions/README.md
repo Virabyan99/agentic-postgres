@@ -136,3 +136,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0070](0070-the-connection-budget-is-divided-not-granted-twice.md) | The connection budget is divided, not granted twice | 5 | Accepted |
 | [0071](0071-a-read-only-diagnostic-surface-for-an-unprivileged-agent.md) | A read-only diagnostic surface for an unprivileged agent | 5 | Accepted |
 | [0072](0072-a-service-identity-that-can-log-in-is-published.md) | A service identity that can log in is published | 5 | Accepted |
+| [0073](0073-a-rendered-fixture-is-current-or-it-is-absent.md) | A rendered fixture is current, or it is absent | 5 | Accepted |
