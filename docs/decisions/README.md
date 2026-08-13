@@ -141,3 +141,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0075](0075-a-proof-names-a-secret-not-the-file-it-lands-in.md) | A proof names a secret, not the file it lands in | 6 | Accepted |
 | [0076](0076-the-bootstrap-signing-key-rotates-by-cutover.md) | The bootstrap signing key rotates by cutover, and the overlap is unbuilt | 6 | Accepted |
 | [0077](0077-a-package-entry-is-dereferenced-like-an-image.md) | A package entry is dereferenced like an image | 6 | Accepted |
+| [0078](0078-the-claim-contract-and-its-two-verifiers.md) | The claim contract, and what each of its two verifiers enforces | 6 | Accepted |

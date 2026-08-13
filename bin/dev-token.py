@@ -50,7 +50,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import secrets_contract
+from agentic_postgres import jwt_claims, secrets_contract
 from agentic_postgres.secret_generation import SECRET_ROOT
 
 #: The three roles a token may name, and the key each resolves through in the
@@ -80,8 +80,15 @@ TOKEN_VARIABLES: dict[str, str] = {
 
 #: The bound on a token's life. Fifteen minutes is long enough for a capture and
 #: short enough that a leaked one is a smaller problem than the leak.
+#:
+#: Read from `jwt_claims` rather than restated (ADR 0078). It was written here
+#: and there as the same literal, which is the D177 shape -- and the number is
+#: no longer only a policy: a token is actually live for
+#: `MAX_TTL_SECONDS + CLOCK_SKEW_SECONDS`, because the locked PostgREST was
+#: measured to accept a token 30 seconds past its expiry (D241). Anything
+#: reasoning about how long a token can be used reads the sum.
 DEFAULT_TTL_SECONDS = 300
-MAX_TTL_SECONDS = 900
+MAX_TTL_SECONDS = jwt_claims.MAX_TTL_SECONDS
 
 #: The root-plane file the signing key is materialized into (ADR 0054, 0055).
 SIGNING_KEY_FILE = "bootstrap_jwt_signing_key.pem"

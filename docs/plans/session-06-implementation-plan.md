@@ -98,6 +98,8 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D238** | (Implicit in D225's "resolved against its registry, in Run 2".) Locking a measured package version is an additive act. | **`--update` regenerates `versions.env` wholesale**, so writing one package pin also re-resolves all ten images -- and four are pinned by tags that move: `pgvector:pg18`, `traefik:v3.7`, `node:22-alpine`, `python:3.12-slim`. Measured immediately before Run 2's update, per image, against the recorded digest: **zero drift**, because the lock was one day old. | **Run 2 proceeded, with the image digests as the control**: every `_IMAGE` line came back byte-identical, and that identity is what makes this change a package change. Carried as an open item (§10) rather than fixed, because separating the two resolutions is a change to `--update`'s contract and Run 2 is not the place to make one. | The measurement's result was 'safe', and the finding is that **it was safe today**. On any day when a tag has moved, locking a dependency silently changes what the deployment runs -- a coupling nobody would choose, discovered only because the control was written before the command was run. | no |
 | **D239** | FastAPI `0.141.1`, as one of the nine. | **`FASTAPI_VERSION: "0.121.2"` has been in `versions.in.yaml` since Session 1**, and nothing has ever built from it. Both versions were resolved against PyPI in Run 2 and both exist. | **Kept at 0.121.2.** D37's rule is that a session uses what is already pinned; nothing measured requires the newer one, and the place to decide is Run 7, where the service exists and can be *run* against a version rather than assigned one. | The counter-argument is real and is recorded rather than dismissed: twenty minor releases of a web framework, and a pin nothing has ever installed carries no compatibility evidence in either direction. That is an argument for measuring in Run 7, not for taking a number from a document now. | no |
 | **D240** | CPython `3.13.x` as the locked interpreter. | **Measured at each pinned version, not at `latest`:** every package in the set declares `requires_python >= 3.10` or looser -- fastapi 0.141.1, pydantic-settings 2.14.2, psycopg 3.3.4, pwdlib 0.3.0 and uvicorn 0.50.2 at `>=3.10`; pyjwt and pydantic at `>=3.9`; argon2-cffi at `>=3.8`. Nothing forces 3.13. Also measured: no build toolchain is needed on `linux/amd64` -- and that answer required asking the **transitive** distributions, because argon2-cffi and psycopg are pure-Python wrappers whose C code lives in argon2-cffi-bindings and psycopg-binary. `cffi`, `cryptography`, `argon2-cffi-bindings` and `psycopg-binary` all publish cp312/abi3 manylinux x86_64 wheels. | **The interpreter stays at the repository's locked 3.12.13**, and `test_the_interpreter_is_not_moved_by_this_dependency_set` makes that an executable statement, so a later bump gets its own decision instead of arriving inside an unrelated commit. | The first pass of this measurement reported "everything is pure Python", which was true of the eight named distributions and false about the question. **A rig whose subject is one level away from the claim** -- caught only because the answer was too convenient for a set containing Argon2. | no |
+| **D241** | Tokens are short-lived, and a TTL is what bounds a token's life; §4's rotation safety and the non-resurrection property are both stated in terms of the TTL. | **The locked PostgREST accepts a token up to 30 seconds past `exp`, and 30 seconds before `nbf`.** Bisected against the locked digest: 30s is served, 31s is refused, symmetrically. Nothing in the repository records this, and `jwt_keys.begin_rotation` takes `clock_skew_seconds` as a caller-supplied number with no measured value behind it. | **`CLOCK_SKEW_SECONDS = 30` is a product input** in `jwt_claims`, and anything reasoning about token lifetime reads `MAX_TTL_SECONDS + CLOCK_SKEW_SECONDS`. The service verifies with the *same* leeway: a verifier stricter than the one downstream refuses tokens the deployment still honours, and reports it as an auth failure, which sends the reader to the wrong system. | **A token is live for 930 seconds, not 900**, and every sentence in this plan about revocation latency and rotation windows was written against the smaller number. A key retired on a 900-second window would refuse tokens still inside their own lifetime -- which is the failure `complete_rotation`'s refuse-early rule exists to prevent, arriving through the input rather than the logic. | **yes** |
+| **D242** | PostgREST is the second verifier: the negative matrix is asserted "by the service *and* by PostgREST, which are two verifiers and must agree" (§2, `SEC-JWT-001`). | **Measured, configured from `compose.yaml` rather than from a rig's own idea of the settings.** PostgREST enforces the signature (refusing another key, `alg: none` and HS256), `exp` and `nbf` within the 30s leeway, `aud` **when present**, `kid` when present and unmatched, and role membership at `SET ROLE`. It **does not check `iss` at all** -- there is no issuer setting -- **serves a token carrying no `aud`**, and ignores `typ`, `token_use` and `scope` entirely. | **The two verifiers do not overlap the way the requirement assumed, and the split is recorded as data** in `POSTGREST_ENFORCES` / `VERIFIED_ELSEWHERE` rather than as prose. `SEC-JWT-001`'s matrix has a measured expectation per row **including the rows where the correct expectation is *served*** -- a proof asserting PostgREST refuses a bad `iss` would assert something false. | The first pass of this measurement left `PGRST_JWT_AUD` unset and reported that a wrong audience is served. That is a fact about a rig nobody deploys -- **ADR 0065 arriving for the fourth time** -- and it was caught only by reading the product's own compose file before writing the result down. | **yes** |
 
 ---
 
@@ -271,15 +273,29 @@ Found on the way: `bin/verify-versions.sh` has never existed (**D237**), and
 `--update` re-resolves every image when it locks one package (**D238**), which
 was safe on the day and is carried as an open item.
 
-### Run 3 — The claim contract
+### Run 3 — The claim contract  ·  **Contract done; vocabulary outstanding.**
 
-D219's ADR. The required claim set, `token_use`, `jti`, `nbf`, `credential_version`,
-`authz_version`, and **one authority for the shape** that both the service and the
-pre-request hook read. Measured against the locked PostgREST: does a `scope`
-array survive to `request.jwt.claims` intact?
+**Measured first, against both locked digests, with controls throughout.** Every
+claim survives to `request.jwt.claims` intact, `scope` as a real JSON array and
+the version claims as integers; the control confirms claims absent from the token
+are absent from the payload. So the shape the contract wants is deliverable.
 
-The scope vocabulary is extended in `schemas/capabilities.schema.json` (D220), and
-the role→scope registry is built on names that schema already admits.
+What the measurement changed is the *division of labour* (**D242**). PostgREST
+does not check `iss` at all, and serves a token carrying no `aud`. It also
+applies a **30-second leeway** on `exp` and `nbf` (**D241**), bisected — 30s
+served, 31s refused — which nothing in the repository had recorded and which
+`begin_rotation` takes as a caller-supplied number.
+
+**Done:** ADR 0078 and `src/agentic_postgres/jwt_claims.py` — twelve required
+claims, `verify_claims` as a pure function, `sql_required_claims()` so the hook's
+half is rendered rather than restated, and the enforcement split as *data*.
+Eight mutations, each red, each with a control in the same invocation.
+
+**Outstanding:** the scope vocabulary. D220 puts new scope *names* in
+`schemas/capabilities.schema.json`, which ADR 0006 makes the sole authority and
+ADR 0003 governs — a second decision touching two earlier ones, so it gets its
+own record rather than riding along inside ADR 0078. The role→scope registry
+follows it.
 
 ### Run 4 — Outputs v9 and the secret contract
 
