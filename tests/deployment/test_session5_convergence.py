@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +47,12 @@ from agentic_postgres import openapi_normalize
 
 pytestmark = [pytest.mark.live_host, pytest.mark.p0]
 
+#: How long a plane may take to come back before that is a failure rather than
+#: a restart. Generous, because the cluster restart invalidates every server
+#: connection at once and PostgREST rebuilds its schema cache afterwards;
+#: bounded, because "eventually" is not a property this suite can assert.
+RESTART_RETURN_TIMEOUT_SECONDS = 120
+
 REST_SERVICE_SUFFIX = "postgrest"
 DOCS_SERVICE_SUFFIX = "docs"
 
@@ -55,20 +62,33 @@ def key(document: dict[str, Any]) -> str:
 
 
 def service_container(document: dict[str, Any], suffix: str, sh) -> str:
-    """One project's container for a service, by its Compose name.
+    """One project's container for a service, found by the labels it carries.
 
-    **`docker ps` is run here rather than through the `running_containers`
+    **By label, not by name.** The first version built a prefix from
+    `document["compose"]["project_name"]` -- which exists only in a *rendered*
+    document, and every fixture here is a deployed one, so it raised
+    `KeyError: 'compose'` on its first host run. The labels are better than a
+    corrected name would have been: `apg.project.key` is set by this
+    repository's own Compose model and `com.docker.compose.service` by Compose
+    itself, so neither is a name this test derives.
+
+    **`docker ps` runs here rather than through the `running_containers`
     fixture**, which is session-scoped. These tests restart containers, which
     replaces them, so a listing taken at the start of the run is stale by the
-    second test -- which is precisely the defect D195 records for
-    `API-CACHE-001`, and it would fail here in the same way: `no such object`
-    against an ID that was correct when the run began.
+    second test -- precisely the defect D195 records for `API-CACHE-001`.
     """
-    prefix = document["compose"]["project_name"]
-    names = [line for line in sh("docker", "ps", "--format", "{{.Names}}").splitlines() if line]
-    matches = [name for name in names if name.startswith(f"{prefix}-{suffix}-")]
-    assert len(matches) == 1, f"expected one {suffix} container for {key(document)}, got {matches}"
-    return matches[0]
+    names = [
+        line
+        for line in sh(
+            "docker", "ps",
+            "--filter", f"label=apg.project.key={key(document)}",
+            "--filter", f"label=com.docker.compose.service={suffix}",
+            "--format", "{{.Names}}",
+        ).splitlines()
+        if line
+    ]  # fmt: skip
+    assert len(names) == 1, f"expected one {suffix} container for {key(document)}, got {names}"
+    return names[0]
 
 
 # ---------------------------------------------------------------------------
@@ -101,11 +121,30 @@ def assert_api_converged(
     base = rest_base(document)
     roles = document["database"]["roles"]
 
+    # Polled, not asked once. A restart returns as soon as the container is
+    # replaced, and the plane behind it still has to reconnect its pool and
+    # rebuild its schema cache; the cluster restart produced
+    # `503 57P01 terminating connection due to administrator command`, which is
+    # PostgREST correctly reporting a connection the restart killed.
+    #
+    # Only the *first* assertion polls. Once the plane serves a read, everything
+    # below it is a steady-state fact and must be immediate -- a route that is
+    # wrong while nothing is happening to it is a failure, and wrapping that in
+    # a retry would turn a broken deployment into a slow green.
     reader = mint_token(document, roles["authenticated"], subject=None)
-    read = api_call(f"{base}/notes?select=id&limit=1", token=reader)
-    assert read.status == 200, (
-        f"{key(document)} did not serve an authenticated read after the restart: {read.status}"
-    )
+    deadline = time.monotonic() + RESTART_RETURN_TIMEOUT_SECONDS
+    last = "no attempt was made"
+    while time.monotonic() < deadline:
+        read = api_call(f"{base}/notes?select=id&limit=1", token=reader)
+        if read.status == 200:
+            break
+        last = f"{read.status} {read.body[:120]}"
+        time.sleep(2)
+    else:
+        pytest.fail(
+            f"{key(document)} did not serve an authenticated read within "
+            f"{RESTART_RETURN_TIMEOUT_SECONDS}s of the restart; last: {last}"
+        )
 
     served = api_call(base, token=mint_token(document, roles["api_documentation"], subject=None))
     assert served.status == 200, f"the document was not served after the restart: {served.status}"
@@ -278,7 +317,11 @@ def test_restarting_the_project_unit_restores_both_routes(
     del as_root
     project_key = key(project_a)
     sh_status("systemctl", "restart", f"agentic-postgres@{project_key}.service")
-    await_health(project_key, project_a["routes"]["health"]["url"])
+    # `(hostname, project_key)`, in that order. Called with `(project_key, url)`
+    # the first time, so it polled `https://alpha-dev/__apg/healthz` looking for
+    # a URL where a key belongs -- and failed on name resolution, which reads as
+    # a DNS problem rather than as a swapped argument.
+    await_health(project_a["project"]["domain"], project_key)
 
     assert_api_converged(
         project_a,
