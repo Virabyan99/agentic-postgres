@@ -1,0 +1,58 @@
+# Installed at /etc/sudoers.d/apg-agent, mode 0440, root:root.
+#
+# Validate before installing, and never edit it in place:
+#
+#   sudo install -m 0755 -o root -g root bin/apg-diag.sh /usr/local/bin/apg-diag
+#   sudo install -m 0440 -o root -g root \
+#        infra/host/apg-agent.sudoers /etc/sudoers.d/apg-agent
+#   sudo visudo -c
+#
+# A syntax error in a sudoers file can lock every user out of sudo on this host,
+# which on a machine reached only by SSH is unrecoverable without console
+# access. `visudo -c` checks the whole set, so run it after installing rather
+# than trusting this file in isolation.
+#
+# ---------------------------------------------------------------------------
+# What this grants, and what it deliberately does not
+# ---------------------------------------------------------------------------
+#
+# One command, by absolute path, with no arguments constrained here -- the
+# argument allowlist lives inside the script, where it can be reviewed as code
+# and tested (ADR 0071). Constraining arguments in sudoers looks stronger and is
+# weaker: the syntax has no way to express "a project that exists" or "one of
+# these four queries", so a rule that tried would either be a glob or a list
+# nobody keeps current.
+#
+# The script is root-owned and not writable by the agent. That is load-bearing:
+# a NOPASSWD rule pointing at a file its beneficiary can edit is a root shell
+# with extra steps.
+#
+# NOT granted, and each for its own reason:
+#
+#   docker            the daemon socket can mount the host filesystem, so
+#                     docker access is root access with no middle setting
+#   ./deploy.sh       can destroy a volume and rotate a credential nobody can
+#                     recover
+#   bin/db.sh         reaches the cluster as the superuser
+#   materialize-*     writes credential generations
+#   systemctl         can stop the thing being measured
+#
+# Those stay with a human at a terminal. Not because a human catches more
+# mistakes -- what catches them is running the thing -- but because the blast
+# radius of an error is a deleted volume rather than a bad commit, and because
+# an account that can deploy can read every materialized secret.
+
+Defaults:apg-agent    !requiretty
+Defaults:apg-agent    env_reset
+Defaults:apg-agent    log_output
+Defaults:apg-agent    logfile="/var/log/apg-agent-sudo.log"
+
+# The path is fixed and outside any release. `installed_release` refuses a
+# symlink anywhere in a release, so there is no `current` to point at -- and a
+# rule naming a release sha would stop working on the next deploy, in the
+# direction that fails closed but silently.
+#
+# Re-install the copy when bin/apg-diag.sh changes. It imports nothing from the
+# repository, so the copy keeps working when the checkout does not, which is
+# exactly when somebody needs it.
+apg-agent ALL=(root) NOPASSWD: /usr/local/bin/apg-diag
