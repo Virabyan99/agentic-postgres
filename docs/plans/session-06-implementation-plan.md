@@ -1,0 +1,453 @@
+# Session 6 implementation plan — the auth service and a real claim contract
+
+> **Source runbook:** `session-06-auth-service-asymmetric-jwts-runbook-audited.md`.
+> **This document is not that document.** The runbook was written against a
+> repository where Sessions 1–5 had been implemented exactly as *their* runbooks
+> described. They were not. Sessions 1–5 produced 74 ADRs and 214 recorded
+> divergences, and roughly half of the runbook's claims about "what Session 6
+> inherits" are claims about a system that does not exist here.
+>
+> §1 is the point of this document. Everything else is downstream of it.
+
+**What Session 6 does, in one sentence:** replace the root-only bootstrap token
+issuer with a FastAPI service that owns the only private signing key, stores only
+Argon2id hashes, derives every role and scope from server-side records, and makes
+a human's current state authoritative for a PostgREST request.
+
+**What it must not do:** reinterpret an inherited contract silently. That is
+CLAUDE.md §5's rule and it is the reason this file exists.
+
+---
+
+## 0. Where Session 6 actually starts
+
+Not from a green Session 5. From a Session 5 that is **green except its rotation
+window**, and that difference is the first thing to plan around.
+
+```
+HEAD               7a8c68d, clean, in sync with origin/main
+gate               offline PASSED · host PASSED (168/0/6) · external PASSED (20/0/8)
+claims             16 of 18 proved
+unproved           api_authorization, bootstrap_identity  — three rotation node
+                   IDs and one reboot node ID have never run
+outputs schema     v8
+migrations         10 released
+ADRs               74 · divergences D1…D214
+Session 6 owns     ADR 0075 onward, D215 onward, migrations 0011 onward,
+                   outputs v9
+```
+
+**Session 6's Run 1 is Session 5's rotation window.** The runbook opens with
+"run the complete Session 5 gate once and record its immutable evidence
+checksum". Two things are wrong with that here. Evidence is **gitignored by
+design** (runbook §6.1 of Session 1; `evidence/*` is generated, never committed),
+so there is no immutable checksum to record — the artifact is reproduced, not
+retained. And the Session 5 gate does not currently come back fully proved: two
+claims are `failed` because their proofs have never executed.
+
+Running the rotation window first is not tidiness. Session 6 **replaces the
+signing key's owner**, and the prepare/promote/retire machinery it inherits has
+never been exercised once. Cutting over to a new issuer on top of a rotation path
+nobody has run is the exact shape of Run 9's four defects: a plane built,
+granted, wired, and never executed.
+
+---
+
+## 1. Runbook divergences
+
+Six columns, as every session since Session 2. A row is here because the runbook
+and the repository disagree and the disagreement was **measured**, not assumed.
+
+| # | Runbook says | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D215** | Session 6 adds decision records `0017-auth-service-direct-database.md` through `0022-agent-token-preactivation.md`, and outputs schema **version 6** migrated from version 5. | `docs/decisions/` holds **74 ADRs**, `0001`…`0074`, all indexed in that directory's `README.md`; ADRs 0017–0022 were written in Session 2 and say entirely different things. The deployed documents on the host are **`schema_version: 8`**; `output_migrations.CURRENT_VERSION` is 8, reached through a chained `v4→v5→v6→v7→v8` module. | **Session 6 owns ADR 0075 onward and outputs v9.** Every ADR is numbered sequentially at the moment it is written and indexed in the same commit. The version bump pays D40's full price: a `migrate_v8_to_v9` function, a committed `tests/fixtures/outputs-v8.json`, and the standing rule that migration never produces a *deployed* document. | Mechanical, and it is here because it is the cheapest possible instance of the session's standing defect: a number that looks measured and is not. A plan that opens by asserting six ADR numbers it does not own is a plan that has not read the directory. | no |
+| **D216** | Outputs v6 adds a top-level `http_api` block with `rest`, `application`, `token_issuer` and `documentation` sub-objects, replacing `bootstrap_issuer`. | **D137 refused exactly this shape one session ago**, and the refusal is why the current document already carries what Session 6 needs. The deployed branch has a top-level **`jwt`** object — `issuer`, `audience`, `algorithm`, `active_kid`, `verification_kids`, `public_jwks_sha256`, `retire_after`, `status`, and an explicit **`temporary: true`** — plus `routes.{rest,docs,health}` as status-carrying objects. There is no `bootstrap_issuer` key to replace. The issuer is *already* `https://<domain>/api/app/auth`. | **v9 extends what exists.** `jwt.temporary` flips to `false`; `jwt` gains `rotation_phase` (`steady`\|`prepared`\|`overlap`) and per-consumer applied-generation acknowledgements; `routes` gains **`app`** as a fourth status-carrying object shaped like the other three. No parallel block. `routes.app.url` is the one authority for the application base URL, exactly as ADR 0061 made `routes.docs.url` the one authority for the documentation router. | D137's reasoning holds verbatim: "a parallel `http_api` block would give `routes.rest` and `http_api.rest.public_url` as two records of one URL, and this repository has watched such a pair drift." It watched it again in D177, where the documentation route was derived twice and the copy carrying a comment saying it was kept in step was the one that had drifted. | **yes** |
+| **D217** | Migrations `0009_auth_service.sql.tmpl`, `0010_auth_request_status.sql.tmpl`, `0011_auth_documentation.sql.tmpl`. | **Ten migrations are released and immutable.** `0009` is the documentation role; `0010` makes the pre-request hook carry the role's statement timeout (ADR 0068). `migrations/released.lock.json` is frozen by `bin/migrate.sh freeze-lock` and verified by the gate. | **Session 6's migrations are `0011`, `0012`, `0013`**, applied through the canonical dbmate wrapper, in order, with the lock re-frozen in the same commit. Named for what they do rather than for the session: `0011-identity-registry.sql`, `0012-request-authorization.sql`, `0013-auth-surface-comments.sql`. | Released migrations are fix-forward and the numbering is a filesystem fact, not a preference. A plan that names `0009` for new work is a plan that would have collided with a released file on its first `dbmate up`. | no |
+| **D218** | Migration 0009 "extends `app_private.users`" with `role_name`, `scopes`, `last_login_at`, preserving "existing IDs, username rules, display-name rules, status values, and timestamps", and §17.2 requires a nullable-add → backfill → validate → `NOT NULL` sequence for "inherited rows". | **`app_private.users` does not exist.** The four schemas hold exactly `app_private.project_identity`, `app_private.migration_ledger`, `app_private.postgrest_pre_request()`, `app.notes` and `app.tasks`. There are no users, no usernames, no statuses and no inherited rows. `app.notes.owner_id` and `app.tasks.owner_id` hold whatever UUID the `app.user_id` claim carried — **trusted, not authenticated**, which is ADR 0029 stating the boundary in its title. | **Session 6 creates the identity registry from nothing.** The entire nullable-add/backfill/validate/`NOT NULL` sequence and every "preserve inherited" clause is struck: there is nothing to preserve and a backfill of zero rows proves nothing. Columns are `NOT NULL` from creation. **No foreign key from `app.notes.owner_id` to `app_private.users(id)`** — see D219's second half. | The runbook's migration is the more dangerous of the two shapes and it is the one that does not apply. A backfill test that runs against an empty table passes for a reason that is not correctness, which is D213's defect exactly: `assert checked` reporting success on a subset of one. Writing the simpler migration is not the win here; *noticing* that the complicated one would have been green and meaningless is. | no |
+| **D219** | "A final-shaped JWT claim contract" is inherited from Session 5, with required claims `iss aud sub role scope token_use jti iat nbf exp`, and Session 6 merely adds `credential_version` and `authz_version` as "a documented versioned extension". | **Measured in `bin/dev-token.py::mint` and `migrations/templates/0010`.** A bootstrap token carries exactly `role`, `iat`, `exp`, `iss`, `aud`, and `sub` **only for non-documentation roles**. There is no `scope`, no `token_use`, no `jti`, no `nbf` anywhere in the system. The hook reads `sub`, shape-checks it as a UUID, and sets `app.user_id`; it reads nothing else. `scope` has never been signed, published, or verified. | **Session 6 does not extend a claim contract. It writes the first one**, and that is an ADR with alternatives rather than a footnote. The required set, the `token_use` discriminator, `jti`, `nbf`, and the two version claims all arrive together in one versioned contract, verified in two places — PyJWT in the service and the pre-request hook in the database — with **one authority for the shape** so the two cannot drift. | This is the largest single misreading in the runbook and it changes the size of the session. "Add two claims to a validated contract" is an afternoon; "write the claim contract, the verifier, the hook's half of it, and the negative matrix that proves each claim is actually load-bearing" is most of a session. It also explains D220: a scope vocabulary is being *invented*, not preserved. | **yes** |
+| **D220** | Preserve the inherited scopes `api:read`, `api:write`, `openapi:read` exactly — "changing them to a new prefix would be a versioned cross-session contract migration" — and add `admin:users`, `admin:agents`, `admin:docs`, `agent:read`, `agent:write` in a new `contracts/auth-scopes.yaml`. | **Those three scopes do not exist and never have.** D131 settled the question in Session 5: **ADR 0006 makes `schemas/capabilities.schema.json` the sole authority for the approved scope vocabulary**, in its own words — "the code carries no second copy" — and ADR 0049 is titled *One scope vocabulary*. The vocabulary is `notes:read`, `notes:write`, `tasks:read`, `tasks:write`, `meta:read`, and the schema says it "grows only when `docs/decisions/0003-example-domain.md` is superseded". | **No `contracts/auth-scopes.yaml`.** New scopes are added to the capabilities schema's enum, which is what ADR 0006 exists to force, and the admin capability set is named in that vocabulary's grammar (`admin:users` fits the pattern; `api:read` does not, because there is no `api` resource). The **role→scope registry** the runbook wants is real and needed — it just cannot be a second file that also defines scope *names*. It becomes a mapping keyed on names the capabilities schema already admits. | D131's reason, one session on and now load-bearing: Session 8 builds MCP tools whose `required_scopes` come from that enum. Two vocabularies for one operation means a mapping between them, and the mapping is where a scope quietly widens. The runbook's own instinct is right — a registry is the authority — it just names a file that would become the second authority ADR 0006 forbids. | **yes** |
+| **D221** | The gate is `bin/session-06-check.sh --project project.yaml --peer-project tests/fixtures/projects/project-b.yaml`, and §2.6 checks Session 5 with `bin/session-05-check.sh --project project.yaml`. | **D45 settled the gate shape in Session 2 and every session since has kept it**, D82 and D132 restating it against the same mistake: `--mode offline\|host\|external`, `--project-a-outputs`/`--project-b-outputs` naming **deployed documents** rather than manifests, `--sentinel-file`, `-k` (which writes no evidence), verify-only. `bin/session-04-check.sh` and `bin/session-05-check.sh` **refuse `--capabilities` and `--external-probe` by name**, pointing at the right flag. | **`bin/session-06-check.sh` is `bin/session-05-check.sh`'s shape with `readonly SESSION=6`**, three modes, the two refusals kept verbatim, and a third refusal added for `--peer-project`. Two Run 10 findings become part of the shape rather than operator lore: **`--sentinel-file` is written into the operator guide's command, not mentioned below it** (D213), and **the gate fails rather than skips on stale rendered fixtures** (ADR 0073). | A gate that takes manifests measures what was asked for. A gate that takes deployed documents measures what happened. Four sessions of runbooks have proposed the first and four gates have implemented the second; the refusals exist because an operator reading the runbook is asking a reasonable question and deserves an answer rather than a usage error. | no |
+| **D222** | `schemas/session-06-evidence.schema.json` plus a Session 6 evidence collector, with §20.3 listing ~25 hand-shaped evidence fields. | **D133 settled this and D49 and D91 settled it before that: a session adds claims, not a format.** ADR 0025 replaced suite-name evidence keys with claims resolved from `tests/acceptance-registry.yaml` and JUnit results; ADR 0039 derives a claim's session from its requirements; ADR 0045 splits a claim where its measurement lives. `bin/write-session-evidence.py` is session-agnostic and has been since Session 2. | **Session 6 adds entries to `evidence_claims.CLAIMS`** (§7 below). Counts come from catalogs and JUnit. Nothing is hand-entered, and a proof missing from the artifact is `not_run` rather than `passed`. | Every hand-shaped boolean is a place a `true` can be written by something that is not a test. Session 5 ended with two claims reading `failed` because four node IDs never ran — that is the model working, and it only works because no human can type the verdict. | no |
+| **D223** | A large implied set of new Session 6 requirement IDs scattered through §17's test plan; no IDs are named. | **Five Session 6 requirements already exist** in `tests/acceptance-registry.yaml`, each with a `future` placeholder carrying an exact node ID: `SEC-JWT-001`, `SEC-KEY-001`, `SEC-CRED-001` (in `tests/security/test_future_security_boundaries.py`) and `API-AUTH-001`, `API-ADMIN-001` (in `tests/integration/test_future_api.py`). `test_future_marker_policy.py` enforces registry↔marker agreement in both directions. The admitted prefixes already include `SEC-REV`, `SEC-BOOT`, `SEC-CRED`, `API-ADMIN`, `AGT-*` and `STO-*`. | **Activate the five that exist; add new IDs only where none covers the claim.** Final list in §2. The five carry **one node ID each today and will carry many**, which is deliberate and is the one place this session knowingly walks into a known blind spot — see D232. | Activating a requirement means removing its `future` marker and implementing the body; the placeholder already fails when executed, which is what makes it activatable. An unregistered prefix or a duplicate ID fails offline, so this is cheap to get right and expensive to discover late. | no |
+| **D224** | New test directories `tests/integration/`, `tests/isolation/`, `tests/browser/`, and `services/auth/tests/unit/`. | `tests/` holds `contract/`, `deployment/`, `external/`, `integration/`, `recovery/`, `security/` and `fixtures/`. There is **no `tests/isolation/` and no `tests/browser/`** — isolation is a *marker* concern (`deployment`) and **D142 refused a browser harness outright**, on the grounds that a proof whose subject is another project's runtime behaviour is a proof of the wrong thing. | **Session 6 adds no test directory.** Auth-service unit tests live under `tests/contract/` with the `contract` marker, because they test committed source with no service running, which is what that directory means here. Isolation tests are `tests/deployment/` with `live_host`. **D211 is now a rule of the plan, not a footnote: `-m live_host` is not "the host tests"** — `tests/security/` is a directory a path-scoped sweep never reaches, and the gate is the only thing that runs it. | Session 5 lost a run to that exact gap. A Session 6 test placed in a directory the sweep does not select is a test that will be green for three sessions and then fail on its first execution, which is how D211, D212, D213 and D214 all happened inside one run. | no |
+| **D225** | A locked baseline of CPython `3.13.x`, FastAPI `0.141.1`, PyJWT `2.13.0`, Pydantic `2.13.4`, Pydantic Settings `2.14.2`, Psycopg `3.3.4`, pwdlib `0.3.0`, argon2-cffi `25.1.0`, Uvicorn `0.50.2`. | The repository's virtualenv is **CPython 3.12.13**. More to the point: **D201 is four months of this project's most expensive lesson.** `SCALAR_VERSION: "1.36.4"` sat in `versions.in.yaml` for four sessions naming a release that **has never existed**, and it survived because `bin/verify-versions.sh` resolves `images:` entries to digests while a `packages:` entry is a string nothing dereferences. D37 and D85 add the standing rule: a session uses what is already pinned and adds to the lock only when a measurement requires it. | **Not one of those nine versions is written into `versions.in.yaml` until it has been resolved against its registry**, in Run 2, with a control that proves the rig can tell a real version from a fictional one. The interpreter is the repository's locked 3.12, not 3.13, unless a measured requirement forces the bump — in which case the bump is its own ADR. `cryptography` is recorded explicitly in the resolved lock even though `PyJWT[crypto]` introduces it transitively; that part of the runbook is right and is kept. | Nine version strings arriving from a document is nine instances of D201 waiting. The runbook's own §4.1 says "do not use floating constraints" and then supplies nine exact numbers with no provenance — which is the same failure one level up: a value that looks measured and is not. | no |
+| **D226** | Publish FastAPI documentation through a new `services/scalar-auth/` container with a `scalar.config.json.tmpl`, under `/docs/app`. | **`services/docs/` is a first-party build** — Node builder plus the locked Python runtime, `npm ci --ignore-scripts`, only `standalone.js` crossing the stage boundary, **Scalar 1.64.1**, served by a 200-line `serve.py` under its own CSP (`default-src 'none'`), with a four-path route table and `VOLUME ["/app/snapshot"]`. ADR 0069 decided it. The router is published from `routes.docs.url` (ADR 0061), and the credential middleware lives in Traefik's file provider. | **`/docs/app` is a second surface of the existing service, not a second service.** `serve.py`'s route table gains the application snapshot's paths; the mounted snapshot directory gains a second file; the router is published from **`routes.app_docs.url`**, derived like every other route. One container, one CSP, one credential. | A second Scalar container would double the image, the CSP, the credential, the middleware and the CVE surface to serve a second JSON file. It would also give the repository two answers to "how is a documentation page built", and ADR 0069 exists because the first answer was worth choosing deliberately. | **yes** |
+| **D227** | New secret keys `postgres.auth_service.password`, `jwt.active.private_jwk`, `jwt.public_jwks`, `jwt.prepared.private_jwk`, declared in `schemas/secrets-required.schema.json` and consumed through `secret_contract.py`. | `secrets.required.yaml` at the repository root is the contract; `src/agentic_postgres/secrets_contract.py` reads it. A secret declares `value_kind`, `introduced_in_session`, and consumers carrying **`plane: compose\|root`** (ADR 0054), `format: raw\|pgpass`, `uid`, `gid`, `mode`. Session 5 already declares `bootstrap_jwt_signing_key` and `docs_basic_auth_password` as **root-plane** consumers, and **ADR 0055** is titled *the contract declares what kind of value a secret is* — because a generator that wrote 32 bytes of hex under a signing key's name would have passed every check. | **Session 6 appends to `secrets.required.yaml`** with `introduced_in_session: 6`: `auth_service_password` (compose consumer `auth`, `format: pgpass`), `jwt_active_private_jwk` (compose consumer `auth`), `jwt_public_jwks` (compose consumers `auth` **and** `postgrest`), `jwt_prepared_private_jwk` (**root plane only**, never mounted into a running service before promotion). Each declares a `value_kind` that says what it *is*. | The consumer matrix the runbook wants is exactly what this file already computes, and D213 has just made it load-bearing: the materialization proof now stats every consumer the deployment carries, so a Session 6 secret with a wrong `uid` or `mode` fails on the next gate rather than in Session 9. | no |
+| **D228** | "Session 6 bootstrap convergence path" activates the `auth_service` role with `LOGIN`, a connection limit of **8**, SCRAM credentials, fixed `search_path` and timeouts; §9 puts role attributes, HBA and grants together in one phase. | **D102 splits them and the split is a contract.** The *migration plane* (dbmate, `SET LOCAL ROLE object_owner`, never a superuser) applies released migrations; the *bootstrap plane* (root on the host, over the container socket) owns roles, role settings and credentials — **anything `ALTER ROLE`**. A migration that touched a role attribute would be in the wrong plane. Separately, **ADR 0070 divides the connection budget**: `connection_limits(maximum, reserved, api_budget)` returns `(application, api)` and raises when the remainder falls below 1. `app_runtime` currently holds 29 and `postgrest_authenticator` 13. | **Role attributes, the connection limit, the SCRAM credential, the role's `statement_timeout` and the HBA rule are bootstrap-plane work in `bin/postgres-bootstrap.py`.** Migration 0011 creates *tables and functions* and grants `USAGE`/`EXECUTE` — nothing else. **`connection_limits` gains a third claimant and its arithmetic is re-derived, not extended by subtraction**; "8" is an output of that function, not an input to it. | ADR 0070 is titled *the connection budget is divided, not granted twice* because the previous shape granted the same headroom to two roles independently. Adding a third role by writing a number into a manifest is that defect returning, and it fails in production under load rather than in the gate. | **yes** |
+| **D229** | Four Traefik routers ordered by priority, `PathPrefix('/api/app')`-style boundaries, and rate-limit middlewares with exact token-bucket settings; "`/api/application`, duplicate-slash, and encoded-separator variants must not match". | The runbook has correctly identified a trap this repository already fell into: **D162 measured that `PathPrefix(/api/rest)` matches `/api/restaurant`** — it is a string prefix, not a path prefix. The rest is harder than written. Traefik v3.7 filters on the constraint **`Label(apg.traefik.scope, managed)`**, so a container without that label carries no route no matter how correct its router is (D186); a router label's **key** contains the router name and Compose cannot interpolate inside a key, so keys are rendered in `runtime_override.py` (ADR 0013); a service on two networks needs **`traefik.docker.network`**; and a middleware defined by container labels **vanishes with the container** (D202, D208, both `pending`). | **The boundary rule is adopted verbatim and proved by request, not by configuration.** Routers are rendered through `runtime_override.py` with keys built from `routes.app.url`, never a constant (ADR 0061). Middlewares go in **Traefik's file provider** — which closes D202/D208 rather than deferring them a third time. Every 404 during this work is diagnosed from the **access log** before anything is concluded: Traefik's own 404 carries no `RouterName` and a 19-byte body, and Run 9 produced three in a row with three different causes. | The runbook's list of what must not match is a good list and the repository has failed at exactly one of its items. What it is missing is that the failure mode is *silent*: a correct, measured router attached to a container Traefik cannot see answers 404 while the service serves 200 to its own network. | **yes** |
+| **D230** | Deployment stops at a `bootstrap_required` state: outputs are not published, `/api/app` is not routed, and `deploy.sh --through-session 6` is re-run after a local first-admin bootstrap to resume convergence. | **D135 refused inventing a deployment state one session ago**, in these words: the runbook's version "invents a *deployment state* — a project that is deployed but not ready and not public — which is a fifth thing `deployed_through_session` and the endpoint `status` fields would have to be read against, and a state nothing else in the system knows how to reason about." | **The two-stage convergence is kept; the new state is not.** It is expressed in the vocabulary that exists: `routes.app.status` is **`unavailable`** until an active project administrator exists, exactly as `routes.rest` is `unavailable` for a project that declares no REST service (ADR 0062). `deploy.sh --through-session 6` is re-runnable and idempotent, which it already is. The deploy prints the bootstrap command and exits 0 — a project awaiting its first administrator is not a failed deploy. | The runbook's underlying requirement is right and important: no public application route may be published before an administrator exists, or the first request to reach it decides who the administrator is. That requirement needs a *status field*, not a *state machine*, and there is already a status field on every route. | **yes** |
+| **D231** | Internal `/health/live` and `/health/ready` endpoints, excluded from every public router and from OpenAPI; "Session 6 publishes no public health route". | The project **already publishes a public health route**: `routes.health` is `https://<domain>/__apg/healthz`, `ready`, served by the `edge-probe` service, and `test_the_probe_can_tell_a_trusted_path_from_an_authenticated_one` is a Session 5 proof about it. So "publishes no public health route" is already false for this deployment, and an auth service that adds two more health paths adds a third and fourth answer to "is this project up". | **The auth service's readiness is container-local and is reported *through* the existing probe, not beside it.** `/health/live` and `/health/ready` bind the container interface, are excluded from the public router by an explicit deny rule proved by request, and are absent from the generated OpenAPI. What the public learns about auth's health is what `__apg/healthz` says, which is the surface that already has a proof. | Three health endpoints is three things to keep in step and one of them will drift. The edge probe exists and has a test that distinguishes a trusted path from an authenticated one; extending it is cheaper than publishing a parallel signal and then writing the test that proves the two agree. | no |
+| **D232** | §17 lists roughly 120 discrete test properties across twelve subsections; §21's exit checklist has 60 boxes. | **Five registry entries carry one node ID each.** D175 recorded, and did not fix, the fact that *nothing detects a requirement whose description outgrows its node IDs* — it is a review rule, because enforcing it would need a second authority beside the markers. Session 6 is the largest instance of that gap the project will have produced. | **Every property in §17 that this plan keeps is mapped to a named node ID in §2 before implementation starts**, and the five requirements are split where their measurements live (ADR 0045's rule) rather than accumulating forty node IDs each. Where a property has no node ID, it is not a requirement — it is prose, and it is deleted from the plan rather than left to look like coverage. | A requirement with one node ID and a paragraph of description reads, in `docs/acceptance-matrix.md`, exactly like a requirement with fifteen. That is the review rule's failure mode and it is invisible in every generated document. Doing the mapping first is the only defence this repository has. | no |
+| **D233** | §2.6: run `bin/session-05-check.sh` and record its "immutable evidence checksum"; §16 Phase 0 re-runs "the inherited non-destructive Session 5 subset" after Session 6 migrations change the claim shape. | Evidence is **gitignored** (`evidence/*`, with only `.gitkeep` tracked) so that the gate sees no untracked output. There is nothing immutable to checksum — the artifact is regenerated. And Session 5's own state is the sharper problem: **two claims are unproved** because the rotation window was deferred. | **Session 6 Run 1 is Session 5's rotation window**, run to completion, taking Session 5 to 18 of 18 before anything in this session touches a key. The "non-destructive inherited subset" is not enumerated by hand — it is what `-m live_host` collects from the whole tree, which is what the gate already runs. | Cutting an issuer over on top of a prepare/promote/retire path nobody has executed is Run 9's defect with a bigger blast radius: the machinery is built, granted, wired, and unexecuted. Session 5 also left the reboot proof unrun, and a reboot is the one event that tests whether key state survives without an operator present. | no |
+| **D234** | §4.10: bound Argon2 to "no more than two concurrent operations per container" and reserve "at least 128 MiB for two concurrent 64 MiB hashes"; §15.2 sets a 384 MiB memory limit. | The repository derives every memory bound from the manifest and checks it against a per-project guardrail: `database.memory_limit_mb` must exceed a *derived unreclaimable budget*, and that budget must not exceed the guardrail — both are `CROSS_FIELD_RELATIONS` entries in `config.py`, generated into the bounds documentation. A service limit typed into a Compose file is outside that arithmetic. | **The auth service's memory limit joins the derived budget** as a named claimant, the way ADR 0070 made the connection budget a division rather than a set of independent grants. `hash_concurrency` and the limit are related by a cross-field relation — `hash_concurrency × memory_cost_kib` plus process overhead must fit the declared limit — so a manifest that raises concurrency without raising the limit **fails validation** instead of being killed by the OOM killer at the first login burst. | The runbook's numbers are probably fine. The failure they leave open is the one this project keeps producing: two values in two files that must agree, with nothing computing the relation. `memory_cost = 65536 KiB` and `hash_concurrency = 2` and `384 MiB` are three numbers with one true relationship between them. | **yes** |
+
+---
+
+## 2. What Session 6 adds to the acceptance registry
+
+**The five existing entries are activated and split** (ADR 0045: a claim is split
+where its measurement lives). Each keeps its ID; each gains the node IDs its
+description already implies, and no entry is left with one node ID and a
+paragraph.
+
+| ID | Priority | Measured where | What it guarantees |
+|---|---|---|---|
+| `SEC-JWT-001` | P0 | contract + `live_host` | The negative matrix: wrong issuer, audience, algorithm, `typ`, `kid`, or expiry is rejected — by the service *and* by PostgREST, which are two verifiers and must agree. |
+| `SEC-KEY-001` | P0 | `live_host` | Verifying services hold public material only, in every rotation phase, and no retiring private key is retained after promotion. |
+| `SEC-CRED-001` | P0 | `security` | Raw passwords and agent secrets never reach storage, logs, evidence, process arguments, image layers or database error detail. |
+| `API-AUTH-001` | P0 | `live_host` | Login issues a short-lived token; `/auth/me` reflects current state and refuses a token whose subject has changed underneath it. |
+| `API-ADMIN-001` | P0 | `live_host` | Admin endpoints require an explicit scope, not a role name; a `project_admin` without the scope is refused. |
+
+**New IDs, added only where none of the five covers the claim.** Prefixes are
+already admitted by `ID_PATTERN`; none is invented.
+
+| ID | Priority | Measured where | What it guarantees |
+|---|---|---|---|
+| `SEC-REV-001` | P0 | `live_host` | **Non-resurrection.** Disable→re-enable, revoke→reactivate, and a role or scope change reverted cannot restore a previously issued token. This is the session's sharpest property and it gets its own ID because a passing `API-AUTH-001` would not imply it. |
+| `SEC-BOOT-001` | P0 | `live_host` | The first administrator is created only through the local protected path, exactly once, under a project advisory lock; no public bootstrap endpoint exists. |
+| `SEC-CRED-002` | P0 | contract | The Argon2id profile is the frozen one, read back **from the encoded hash** rather than from the constructor's arguments. |
+| `API-AUTH-002` | P0 | contract + `live_host` | Strict input: duplicate JSON members, unknown fields, non-object roots, oversized bearer tokens and unapproved JOSE headers are refused before any domain logic runs. |
+| `SEC-KEY-002` | P0 | `live_host` | Prepare → acknowledge → promote → retire converges with no signing gap, and promotion is blocked until every verifier has acknowledged the prepared public generation. |
+| `DEP-ISO-003` | P0 | `live_host` | Project A's tokens, agent secrets, admin session and JWKS are all refused by project B, and the two projects share no key, issuer, audience, lock or credential. |
+
+**Refused as a Session 6 requirement:** a browser-driven documentation proof.
+D142 settled it and the reasoning is unchanged — the page is a static local
+snapshot, so "no credential in the served bytes" is a byte scan of files this
+deployment wrote, which holds for every visitor rather than for the one that was
+driven.
+
+---
+
+## 3. Environment feasibility
+
+**What exists and is proved.** Two projects deployed through session 5 on
+`62.238.99.122`, both with `routes.rest` and `routes.docs` `ready`; a locked
+PostgREST 14.16 with `db-config=false` and a working `db-pre-request`; Traefik
+v3.7 with a file provider already mounted; a first-party documentation service; a
+root-owned immutable secret-generation tree; and a read-only diagnostic account
+(`apg-agent`, ADR 0071) that answers questions about a running deployment
+without an operator.
+
+**What is new and needs measuring before it is depended on.**
+
+1. **Every dependency version** (D225). Nine strings, resolved against their
+   registries, with a control that can tell a real version from a fictional one.
+   D201 is why this is Run 2 and not an assumption.
+2. **Argon2id's actual cost on this host.** A 4 GB VPS already running two
+   PostgreSQL clusters, two poolers, two PostgREST instances, two documentation
+   services and an edge. `memory_cost = 65536 KiB` × `hash_concurrency` is a
+   real claim on that budget and D234 makes it a derived one.
+3. **Whether PostgREST accepts the claim contract D219 creates**, specifically
+   whether a `scope` array and the two version claims survive to
+   `request.jwt.claims` intact. Measured against the locked digest, with a
+   control.
+4. **Traefik's rate-limit middleware against the locked digest.** ADR 0019 is the
+   standing lesson that a configuration key read from documentation is not a
+   fact; `accessLog.fields.queryParameters` did not exist and took the edge plane
+   down.
+
+**What the host cannot do.** No IPv6 from any operator machine so far, so the
+eight `APG_PUBLIC_IPV6` proofs stay unrun (carried from Session 5, measured, not
+a defect — the edge binds `0.0.0.0` and no hostname publishes an AAAA record).
+
+---
+
+## 4. Safety plan for irreversible operations
+
+Four operations in this session cannot be undone by re-running a deploy.
+
+**The signing-key cutover.** Ordered as prepare → acknowledge → promote →
+retire, with the property that makes it safe stated as a rule rather than a
+hope: **promotion is blocked until every verifier has applied the same JWKS
+checksum**, and that acknowledgement is a recorded per-consumer generation, not
+an assumption about propagation. Rollback *before* promotion removes the
+unpublished prepared material. Rollback *after* promotion completes forward —
+there is no path that silently resumes signing with the old key. The old public
+key is retired only after the longest token TTL, the clock-skew allowance and the
+published JWKS cache lifetime have all elapsed.
+
+**The first-administrator bootstrap.** One-time, local, TTY or protected FD,
+never an argument, refused once an active administrator exists, and holding a
+project-scoped advisory lock so two concurrent attempts cannot both win. If the
+output is lost, the recovery is to inspect administrator state through the
+protected CLI — **not** to re-run with a new password until the state is known.
+
+**One-time agent secrets.** Shown once. If the response is lost after the commit,
+the secret is unrecoverable and the documented recovery is to **rotate again**.
+No retrieval endpoint is added, and the absence is a tested property rather than
+an omission.
+
+**Retiring the bootstrap issuer.** Last, after auth-service issuance and
+PostgREST verification are both proved, and never before. The bounded emergency
+path stays available until final evidence is green and is then retired according
+to state.
+
+**The standing rule, unchanged:** anything privileged that *mutates* is a human
+at a TTY — deploys, the bootstrap plane, migrations, rotations, anything that
+reads a credential. Read-only diagnosis is not, and `apg-diag` is how it is
+reached.
+
+---
+
+## 5. Build order
+
+Eleven runs. Each ends with `ruff format && ruff check` → the full suite →
+`chmod 755 bin/*` → commit → **the gate on a clean tree** → push.
+
+### Run 1 — Finish Session 5
+
+Session 5's rotation window: the authenticator password, both bootstrap-key
+phases, the documentation credential. Then the reboot proof. Session 5 reaches
+**18 of 18 claims** and `api_authorization` and `bootstrap_identity` stop reading
+`failed`.
+
+Nothing in Session 6 starts until this is done. D233 is the reason: the
+prepare/promote/retire path Session 6 is about to depend on has never executed.
+
+### Run 2 — Measure every version, then lock
+
+Nine dependency versions resolved against their registries with a control
+(D225, D201). The interpreter stays at the repository's locked 3.12 unless a
+measurement forces otherwise. `cryptography` recorded explicitly.
+
+**Also in this run, because it is the same defect:** decide whether
+`bin/verify-versions.sh` can resolve `packages:` entries the way it resolves
+`images:`. It needs network in a check that deliberately has none. If it cannot,
+that stays an open item and is *written down as one* rather than left implied.
+
+### Run 3 — The claim contract
+
+D219's ADR. The required claim set, `token_use`, `jti`, `nbf`, `credential_version`,
+`authz_version`, and **one authority for the shape** that both the service and the
+pre-request hook read. Measured against the locked PostgREST: does a `scope`
+array survive to `request.jwt.claims` intact?
+
+The scope vocabulary is extended in `schemas/capabilities.schema.json` (D220), and
+the role→scope registry is built on names that schema already admits.
+
+### Run 4 — Outputs v9 and the secret contract
+
+`migrate_v8_to_v9`, `tests/fixtures/outputs-v8.json`, `routes.app`, the `jwt`
+block's rotation fields (D216). Session 6's four secrets appended to
+`secrets.required.yaml` with their planes and value kinds (D227).
+
+**The materialization proof now stats every consumer** (D213), so a wrong `uid`
+or `mode` here fails on the next gate rather than in Session 9.
+
+### Run 5 — Migration 0011: the identity registry
+
+`app_private.users`, `user_credentials`, `agents`, `agent_credentials`,
+`auth_contract_state`, and the named private function surface. Created from
+nothing — no backfill, `NOT NULL` from creation (D218). No foreign key from
+`app.notes.owner_id`.
+
+Catalog tests prove ownership, ACLs, safe `proconfig` search paths, no `PUBLIC`
+privileges, no direct table grants to `auth_service`, and **no function in the
+`api` schema**.
+
+### Run 6 — The bootstrap plane: `auth_service`
+
+Role attributes, connection limit, SCRAM credential, role `statement_timeout`
+and the HBA rule — all in `bin/postgres-bootstrap.py`, none in a migration
+(D228). **`connection_limits` re-derived for three claimants**, not extended by
+subtraction (ADR 0070).
+
+### Run 7 — The service core, before any route
+
+Hashing (the frozen Argon2id profile, NFC normalization, the offline blocklist,
+dummy verification, the bounded executor whose semaphore is held until the worker
+actually finishes), strict JSON, the bounded compact-JWT pre-parser, local-JWKS-only
+key resolution, and the psycopg pool with `open=False` and explicit lifespan.
+
+Every one of these is pure enough to test offline, which means **every one of them
+gets a mutation battery** — with `PYTHONDONTWRITEBYTECODE=1`, `__pycache__`
+cleared, snapshots to `/tmp` and `cp` restore, and a paired control in the same
+invocation.
+
+### Run 8 — Human endpoints and the local bootstrap
+
+`/auth/login`, `/auth/me`, `/auth/jwks.json`, the admin user lifecycle, and
+`bin/auth-admin.sh bootstrap` under the project advisory lock. Generic failures:
+unknown, wrong, disabled and locked all return the same code and the same work
+class.
+
+### Run 9 — Agents, and migration 0012
+
+Agent lifecycle and one-time secrets. Migration 0012 extends the pre-request hook
+to compare `credential_version`, `authz_version`, role and sorted scopes against
+current state, and adds `project_admin` to the authenticator's membership with
+exact `ADMIN FALSE, INHERIT FALSE, SET TRUE`.
+
+**Agent roles stay ungranted**, so an agent token fails at role switching before
+the hook runs — which is why no agent-specific pre-request error code is defined.
+
+### Run 10 — Cutover, routes, and the second documentation surface
+
+The signing cutover under Run 1's now-exercised machinery. Traefik routers built
+from `routes.app.url` with middlewares in the **file provider** (D229, closing
+D202/D208). `/docs/app` as a second surface of `services/docs/` (D226).
+`routes.app.status` gates publication on an administrator existing (D230).
+
+### Run 11 — The gate, evidence, and the session close
+
+`bin/session-06-check.sh` in `bin/session-05-check.sh`'s shape (D221), with
+`--sentinel-file` in the documented command and a hard failure on stale fixtures.
+Claims added to `evidence_claims.CLAIMS` (D222). Both evidence halves, merged.
+
+---
+
+## 6. The auth surface
+
+Endpoints, and what each one is allowed to decide:
+
+| Route | Decides | Never decides |
+|---|---|---|
+| `POST /auth/login` | Whether these credentials match, and what the server already says this subject's role and scopes are | The role or scopes themselves |
+| `POST /auth/agent-token` | Whether this credential is current | The agent's authority |
+| `GET /auth/me` | Whether the token still describes current state | Anything about another subject |
+| `GET /auth/jwks.json` | Nothing. It publishes validated public keys | — |
+| `POST /admin/users`, `PATCH /admin/users/{id}` | Role and scopes, from the registry | A scope outside the vocabulary |
+| `POST /admin/agents`, `PATCH`, `rotate-secret` | Agent status, role, scopes | Whether PostgREST honours them |
+
+**The one rule underneath all of it:** a client never submits a role or a scope.
+Both are read from server-side records, sorted and deduplicated before signing,
+and refused outright if the stored value is outside the committed vocabulary.
+
+**Agent tokens are issued before agent access is activated**, deliberately.
+PostgREST rejects agent roles during role switching because
+`postgrest_authenticator` holds no membership in them, and that rejection is a
+*tested property*, not a side effect. Session 9 activates them.
+
+---
+
+## 7. Evidence and claims
+
+Claims added to `evidence_claims.CLAIMS`, resolved from registry node IDs and
+JUnit results. Nothing hand-entered; a skip is not a pass.
+
+| Claim | Requirements | Mode |
+|---|---|---|
+| `token_contract` | `SEC-JWT-001`, `API-AUTH-002` | host |
+| `key_ownership` | `SEC-KEY-001`, `SEC-KEY-002` | host |
+| `credential_storage` | `SEC-CRED-001`, `SEC-CRED-002` | host |
+| `identity_endpoints` | `API-AUTH-001` | host |
+| `admin_authorization` | `API-ADMIN-001`, `SEC-BOOT-001` | host |
+| `token_non_resurrection` | `SEC-REV-001` | host |
+| `project_isolation` | `DEP-ISO-003` | host |
+
+`claim_mode` refuses a claim whose node IDs straddle two environments. D174
+recorded that it does **not** refuse a requirement relocated wholesale into the
+wrong environment — that stays a review rule, and Session 6 inherits the
+question because retiring the bootstrap issuer moves `SEC-BOOT-001`'s proofs.
+
+---
+
+## 8. Security invariant matrix
+
+| Invariant | Prevented by | Detected by |
+|---|---|---|
+| Only auth holds private signing material | Per-consumer secret materialization | Mount and image scan, every rotation phase |
+| PostgREST verifies with public material only | The secret contract's consumer list | JWKS inspection + the D213 materialization proof |
+| No raw credential is stored | Normalize → policy → Argon2 before any SQL | Canary scan across logs, images, evidence, process args |
+| A client cannot choose its own authority | Server-side registry; no role/scope in any request model | Strict-input negative matrix |
+| A disabled subject loses access immediately | Database-backed current-state check inside the request transaction | Same-token disable test |
+| A re-enabled subject cannot reuse an old token | Monotonic `authz_version` | Disable→re-enable, revoke→reactivate |
+| A password reset invalidates older tokens | Exact `credential_version` comparison | Same-token reset test |
+| Rotation cannot open a verification gap | Promotion blocked on per-consumer acknowledgement | Recorded generation checksums |
+| Agent access is not live early | No authenticator membership in agent roles | Role-switch rejection test |
+| Cross-project tokens fail | Distinct key, issuer and audience | Two-project matrix |
+| A proof that never ran is not a pass | Claims resolved from JUnit; skip ≠ pass | The gate, over the whole tree by marker |
+
+That last row is Session 5's Run 10 written as an invariant. It is here because
+four of that run's four findings were proofs that had never executed.
+
+---
+
+## 9. Risks and stop conditions
+
+**Stop and record a divergence rather than reconciling inline** if any of these
+appears:
+
+- PostgREST does not deliver the full claim set to `request.jwt.claims`. The
+  claim contract is then shaped by what the verifier can actually see, and D219's
+  ADR is rewritten before the service is built on top of it.
+- The Argon2id profile does not fit the derived memory budget. Reduce
+  concurrency, not the profile — D234's cross-field relation exists to make that
+  the only available move.
+- Traefik's rate-limit middleware behaves differently against the locked digest
+  than the documentation says. ADR 0019's lesson; measure before depending.
+- A rotation phase cannot be resumed after an interruption. That is a release
+  blocker, not a rough edge.
+
+**The largest risk is not technical.** It is that this session's surface is big
+enough for a proof to be written, registered, and never executed — and Session 5
+demonstrated four separate mechanisms for that inside one run. Every run in §5
+ends with the gate, over the whole tree by marker, because that is the only
+selection that has been shown to reach every directory.
+
+---
+
+## 10. Open items carried in
+
+Unchanged from Session 5 unless Session 6 touches them:
+
+- `requirements-dev.in` pins nothing — has produced a red gate twice. Session 6
+  adds a service dependency tree; this is the run to fix it or to say why not.
+- ADR 0019's CI job is unbuilt. The runbook assumes `.github/workflows/ci.yml`
+  exists and is commit-pinned. It does not exist.
+- **`SCALAR_VERSION` named a release that never existed for four sessions**
+  (D201) because a lock verifies what it can dereference. Run 2 decides whether
+  that is fixable.
+- The Infisical control-plane identity holds org admin.
+- Secret generations accumulate; nothing prunes them. Session 6 adds key
+  generations to that pile.
+- `bin/restore-test.sh` is the last `FUTURE_STUB`.
+- EdDSA is unmeasured; ADR 0051's "revisit if PostgREST accepts EdDSA" is open.
+- The published REST document advertises `DELETE`, `PATCH` and `POST` on both
+  views and all three return **403** (ADR 0060) — recorded, not fixed.
+- **Two registry properties are review rules, not tests** (D174, D175). D232
+  makes Session 6 the largest instance.
+- `tests/deployment/conftest.py` is ~1000 lines and is the next thing that will
+  be hard to read. Session 6 adds an auth plane to it.
+- **Nothing knows which proofs have never executed** (D211–D214). A run-age per
+  node ID would have caught all four of Run 10's findings, and no session has
+  built it.
+
+---
+
+## 11. Session 7 handoff
+
+Session 7 receives a permanent FastAPI auth service at `/api/app`, outputs
+schema v9, an RS256 issuer with an exercised prepare/promote/retire path, private
+signing material mounted only into auth, a least-privileged `auth_service`
+database role, a reviewed FastAPI OpenAPI contract on a second surface of the
+existing documentation service, and reusable request-ID, strict-parser, stable-error
+and pool components.
+
+Session 7 must reuse the validated bearer dependency and the current-subject
+check rather than writing a second one, require storage scopes from the committed
+vocabulary, keep object-storage credentials separate from signing material, and
+**not** activate agent PostgREST roles.
+
+The open question it inherits: `SEC-BOOT-001`'s proofs move when the bootstrap
+issuer retires, and `claim_mode` will not notice (D174).
+
+---
+
+## Appendix — what to consult, and what to measure instead
+
+| The runbook asserts | Consult | Measure instead |
+|---|---|---|
+| Nine dependency versions | nothing | each registry, with a control (D201) |
+| "Session 5 froze the claim contract" | `bin/dev-token.py::mint`, migration 0010 | what a token actually carries |
+| `api:read` / `api:write` / `openapi:read` | ADR 0006, ADR 0049 | `schemas/capabilities.schema.json` |
+| "extend `app_private.users`" | migrations 0001–0010 | the four schemas' actual contents |
+| outputs v5 → v6 | `output_migrations.py` | `schema_version` in a deployed document |
+| a `bootstrap_required` deployment state | D135 | `routes.*.status`, which already exists |
+| Traefik rate-limit keys | ADR 0019 | the locked digest |
+| PathPrefix boundaries | D162 | a request, not a config |
+| a browser proof of the docs page | D142 | the bytes this deployment serves |
+
+**And the standing question, from Session 5's last run:** when a test is green,
+ask what would have to break for it to go red — and then ask whether it has run
+at all, in this environment, since the thing it measures last changed.
