@@ -100,6 +100,8 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D240** | CPython `3.13.x` as the locked interpreter. | **Measured at each pinned version, not at `latest`:** every package in the set declares `requires_python >= 3.10` or looser -- fastapi 0.141.1, pydantic-settings 2.14.2, psycopg 3.3.4, pwdlib 0.3.0 and uvicorn 0.50.2 at `>=3.10`; pyjwt and pydantic at `>=3.9`; argon2-cffi at `>=3.8`. Nothing forces 3.13. Also measured: no build toolchain is needed on `linux/amd64` -- and that answer required asking the **transitive** distributions, because argon2-cffi and psycopg are pure-Python wrappers whose C code lives in argon2-cffi-bindings and psycopg-binary. `cffi`, `cryptography`, `argon2-cffi-bindings` and `psycopg-binary` all publish cp312/abi3 manylinux x86_64 wheels. | **The interpreter stays at the repository's locked 3.12.13**, and `test_the_interpreter_is_not_moved_by_this_dependency_set` makes that an executable statement, so a later bump gets its own decision instead of arriving inside an unrelated commit. | The first pass of this measurement reported "everything is pure Python", which was true of the eight named distributions and false about the question. **A rig whose subject is one level away from the claim** -- caught only because the answer was too convenient for a set containing Argon2. | no |
 | **D241** | Tokens are short-lived, and a TTL is what bounds a token's life; §4's rotation safety and the non-resurrection property are both stated in terms of the TTL. | **The locked PostgREST accepts a token up to 30 seconds past `exp`, and 30 seconds before `nbf`.** Bisected against the locked digest: 30s is served, 31s is refused, symmetrically. Nothing in the repository records this, and `jwt_keys.begin_rotation` takes `clock_skew_seconds` as a caller-supplied number with no measured value behind it. | **`CLOCK_SKEW_SECONDS = 30` is a product input** in `jwt_claims`, and anything reasoning about token lifetime reads `MAX_TTL_SECONDS + CLOCK_SKEW_SECONDS`. The service verifies with the *same* leeway: a verifier stricter than the one downstream refuses tokens the deployment still honours, and reports it as an auth failure, which sends the reader to the wrong system. | **A token is live for 930 seconds, not 900**, and every sentence in this plan about revocation latency and rotation windows was written against the smaller number. A key retired on a 900-second window would refuse tokens still inside their own lifetime -- which is the failure `complete_rotation`'s refuse-early rule exists to prevent, arriving through the input rather than the logic. | **yes** |
 | **D242** | PostgREST is the second verifier: the negative matrix is asserted "by the service *and* by PostgREST, which are two verifiers and must agree" (§2, `SEC-JWT-001`). | **Measured, configured from `compose.yaml` rather than from a rig's own idea of the settings.** PostgREST enforces the signature (refusing another key, `alg: none` and HS256), `exp` and `nbf` within the 30s leeway, `aud` **when present**, `kid` when present and unmatched, and role membership at `SET ROLE`. It **does not check `iss` at all** -- there is no issuer setting -- **serves a token carrying no `aud`**, and ignores `typ`, `token_use` and `scope` entirely. | **The two verifiers do not overlap the way the requirement assumed, and the split is recorded as data** in `POSTGREST_ENFORCES` / `VERIFIED_ELSEWHERE` rather than as prose. `SEC-JWT-001`'s matrix has a measured expectation per row **including the rows where the correct expectation is *served*** -- a proof asserting PostgREST refuses a bad `iss` would assert something false. | The first pass of this measurement left `PGRST_JWT_AUD` unset and reported that a wrong audience is served. That is a fact about a rig nobody deploys -- **ADR 0065 arriving for the fourth time** -- and it was caught only by reading the product's own compose file before writing the result down. | **yes** |
+| **D243** | (ADR 0049, accepted in Session 5 Run 1.) "Session 5 issues bootstrap tokens carrying a `scope` claim, and the pre-request function validates it", with the permitted names reaching the hook "as non-secret `app.settings.*` values rendered from the schema's enum". | **Neither half was ever built.** `bin/dev-token.py::mint` signs `role`, `iat`, `exp`, `iss`, `aud` and an optional `sub` -- no `scope`. No `app.settings.scope_*` is rendered anywhere in `src/` or `bin/`. The pre-request function reads `sub` and nothing else. | **Recorded, not fixed here.** Issuance is Run 7's, with the service; the hook's half is migration 0012's. ADR 0079 says so in its consequences so the next reader is not the third person to assume it works. | **An accepted ADR whose subject does not exist**, and the third instance this session after D235's uncalled rotation plane and D204's rule catching `jwt_claims`. ADR 0049 is not wrong -- its decision is the one this session is still following -- it was simply never implemented, and nothing in the repository could tell the difference. | no |
+| **D244** | (D220, in this plan's own table.) New scopes "are added to the capabilities schema's enum, which is what ADR 0006 exists to force". | **Following that literally would have widened the agent capability surface.** `$defs/scope` is referenced by exactly one place -- `capability.required_scopes.items` -- so the approved vocabulary and *what a tool manifest may request* are the same list. Adding `admin_users:write` to it makes it requestable by an agent capability, which is the `admin:everything` drift ADR 0006 names in its own rejected-alternatives section. | **One authority, two closed classes** (ADR 0079). `$defs/scope` is the union; `$defs/agent_scope` is the data class and `required_scopes` binds to *it*; the administrative class is derived as the complement so the four names are written once. `scope_registry` maps role → ceiling and validates every name against the schema on the way out. | D220 was right about the authority and wrong about the mechanism, and the difference is one `$ref` nobody had needed to read before -- the enum had only ever had one job, so nothing distinguished its two. **The mutation that matters is that one word**: repointing it restores the old behaviour while every other assertion about the vocabulary stays true. | **yes** |
 
 ---
 
@@ -273,7 +275,7 @@ Found on the way: `bin/verify-versions.sh` has never existed (**D237**), and
 `--update` re-resolves every image when it locks one package (**D238**), which
 was safe on the day and is carried as an open item.
 
-### Run 3 — The claim contract  ·  **Contract done; vocabulary outstanding.**
+### Run 3 — The claim contract  ·  **Done.**
 
 **Measured first, against both locked digests, with controls throughout.** Every
 claim survives to `request.jwt.claims` intact, `scope` as a real JSON array and
@@ -291,11 +293,23 @@ claims, `verify_claims` as a pure function, `sql_required_claims()` so the hook'
 half is rendered rather than restated, and the enforcement split as *data*.
 Eight mutations, each red, each with a control in the same invocation.
 
-**Outstanding:** the scope vocabulary. D220 puts new scope *names* in
-`schemas/capabilities.schema.json`, which ADR 0006 makes the sole authority and
-ADR 0003 governs — a second decision touching two earlier ones, so it gets its
-own record rather than riding along inside ADR 0078. The role→scope registry
-follows it.
+**The vocabulary, done, and not the way D220 said** (ADR 0079, **D244**).
+`$defs/scope` is referenced by exactly one place — what a *capability manifest*
+may request — so adding an administrative name to it would have widened the agent
+surface, which is the `admin:everything` drift ADR 0006 names. So: one authority,
+two closed classes. `$defs/agent_scope` is the data class and `required_scopes`
+binds to it; the administrative class is derived as the complement.
+
+Four names, `admin_users:{read,write}` and `admin_agents:{read,write}`, split by
+verb for ADR 0049's reason — a ceiling a token can hold half of is enumerable.
+`scope_registry.py` maps role → ceiling, validating every name against the schema
+on the way out, and refuses a role no token may name. Six mutations, each red,
+including the one-word `$ref` repoint that leaves every other assertion true.
+
+Found here: **ADR 0049 was accepted and never implemented** (**D243**). It says
+Session 5 issues tokens carrying `scope` and renders the permitted names into the
+hook; neither exists. Recorded rather than fixed — issuance is Run 7's, the hook
+is migration 0012's.
 
 ### Run 4 — Outputs v9 and the secret contract
 

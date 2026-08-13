@@ -23,9 +23,24 @@
         "notes:write",
         "tasks:read",
         "tasks:write",
+        "meta:read",
+        "admin_users:read",
+        "admin_users:write",
+        "admin_agents:read",
+        "admin_agents:write"
+      ],
+      "description": "Every approved scope name. Two closed classes, and the classes are the point (ADR 0079). DATA scopes are one per (frozen-domain resource, verb) plus meta:read for schema introspection, closed by docs/decisions/0003-example-domain.md and growing only when that is superseded. ADMINISTRATIVE scopes are one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. A capability manifest may request only the data class: see $defs/agent_scope."
+    },
+    "agent_scope": {
+      "type": "string",
+      "enum": [
+        "notes:read",
+        "notes:write",
+        "tasks:read",
+        "tasks:write",
         "meta:read"
       ],
-      "description": "Approved scope vocabulary: one scope per (frozen-domain resource, verb), plus meta:read for schema introspection. Grows only when docs/decisions/0003-example-domain.md is superseded."
+      "description": "The scopes a capability manifest may declare in required_scopes: the data class only. An administrative scope is issuable to a human administrator's token and is not requestable by a tool manifest. ADR 0006 rejected a pattern-validated vocabulary precisely because it would accept admin:everything, and one enum serving both purposes reintroduces that by another route."
     },
     "capability": {
       "type": "object",
@@ -50,7 +65,7 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/scope" }
+          "items": { "$ref": "#/$defs/agent_scope" }
         },
         "operation": {
           "type": "object",

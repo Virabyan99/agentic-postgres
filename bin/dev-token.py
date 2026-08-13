@@ -50,7 +50,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import jwt_claims, secrets_contract
+from agentic_postgres import jwt_claims, scope_registry, secrets_contract
 from agentic_postgres.secret_generation import SECRET_ROOT
 
 #: The three roles a token may name, and the key each resolves through in the
@@ -63,6 +63,13 @@ from agentic_postgres.secret_generation import SECRET_ROOT
 #: deliberately absent. The authenticator is not a member of any of them, so a
 #: token naming one is 403 -- and a command that offers the option invites
 #: somebody to find out.
+#:
+#: That last paragraph was a comment. `scope_registry.permitted_scopes` refuses
+#: a role no token may name, so it is now a check: a fourth entry here naming a
+#: service identity fails offline rather than at a 403 somebody has to diagnose
+#: (ADR 0079). The agent roles are the interesting case -- they ARE nameable by a
+#: token, and are absent from this map for the different reason that Session 9
+#: grants their memberships.
 ROLES: dict[str, str] = {
     "anon": "anon",
     "authenticated": "authenticated",
@@ -246,6 +253,12 @@ def main(argv: list[str] | None = None) -> int:
         project_key = document["project"]["key"]
         roles = (document.get("database") or {}).get("roles") or {}
         role_key = ROLES[arguments.role]
+        # Refuses a role no token may name (ADR 0079). Nothing is minted with the
+        # scopes yet -- the bootstrap issuer has no subject records to draw them
+        # from, and full issuance arrives with the auth service -- but the
+        # *nameability* half is checkable now, and it is the half whose failure
+        # mode is a 403 somebody has to attribute.
+        scope_registry.permitted_scopes(role_key)
         role_name = roles.get(role_key)
         if not role_name:
             raise TokenError(

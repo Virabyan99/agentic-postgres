@@ -190,14 +190,31 @@ def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
 
 
 def test_scope_vocabulary_lives_only_in_the_schema() -> None:
-    """Plan decision C: the schema is the sole authority; code holds no copy."""
+    """Plan decision C: the schema is the sole authority; code holds no copy.
+
+    **Replaced by a stricter assertion, authorised by ADR 0079.** This pinned
+    `$defs/scope` to five names. That enum is now the *union* of two closed
+    classes -- the data class ADR 0003 freezes, and the administrative class the
+    auth service's own surface closes -- so the equality is asserted over the
+    class that ADR 0003 governs, in `tests/contract/test_scope_registry.py`.
+
+    Stricter rather than weaker: the old assertion could not tell an added data
+    scope from an added administrative one, and the new pair can. What stays
+    here is the authority property, which is what this test is named for.
+    """
     schema = config.load_schema("capabilities.schema.json")
     vocabulary = set(schema["$defs"]["scope"]["enum"])
-    assert vocabulary == {
+    agent_requestable = set(schema["$defs"]["agent_scope"]["enum"])
+
+    assert agent_requestable == {
         "notes:read",
         "notes:write",
         "tasks:read",
         "tasks:write",
         "meta:read",
     }
+    assert agent_requestable < vocabulary, (
+        "the agent-requestable class must be a proper subset of the vocabulary; equal, "
+        "the split has been undone and an administrative scope is requestable again"
+    )
     assert not hasattr(config, "APPROVED_SCOPES")
