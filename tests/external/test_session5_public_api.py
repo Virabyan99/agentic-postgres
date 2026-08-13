@@ -73,7 +73,37 @@ def port_is_open(host: str, port: int) -> bool:
         return False
 
 
-def fetch(url: str, *, headers: dict[str, str] | None = None) -> tuple[int, dict[str, str], str]:
+class Headers(dict):
+    """A response's headers, looked up the way HTTP defines them (D214).
+
+    Field names are case-insensitive -- RFC 9110 §5.1 -- and `dict(msg.items())`
+    throws that away, because `http.client.HTTPMessage` is the object that knew
+    it. The first lookup to notice was `WWW-Authenticate`: Go canonicalises
+    header keys to `Www-Authenticate`, so Traefik's correct Basic challenge is on
+    the wire under a spelling the RFC's own capitalisation does not match, and
+    the proof read `None` from a header that was present and right.
+
+    Still a `dict`, so a failure's repr shows the wire spelling. That repr is
+    what made this diagnosable in one read -- the assertion printed `None`
+    beside the mapping containing the answer.
+    """
+
+    def __init__(self, items) -> None:
+        pairs = list(items)
+        super().__init__(pairs)
+        self._folded = {name.lower(): value for name, value in pairs}
+
+    def get(self, name, default=None):  # type: ignore[override]
+        return self._folded.get(name.lower(), default)
+
+    def __getitem__(self, name):
+        return self._folded[name.lower()]
+
+    def __contains__(self, name) -> bool:
+        return isinstance(name, str) and name.lower() in self._folded
+
+
+def fetch(url: str, *, headers: dict[str, str] | None = None) -> tuple[int, Headers, str]:
     """Request over HTTPS and report the result. ``0`` means nothing answered."""
     request = urllib.request.Request(url, method="GET")  # noqa: S310 — https asserted by the caller
     for name, value in (headers or {}).items():
@@ -83,13 +113,13 @@ def fetch(url: str, *, headers: dict[str, str] | None = None) -> tuple[int, dict
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT, context=context) as response:  # noqa: S310
             return (
                 response.status,
-                dict(response.headers.items()),
+                Headers(response.headers.items()),
                 response.read().decode("utf-8", "replace"),
             )
     except urllib.error.HTTPError as error:
-        return error.code, dict(error.headers.items()), error.read().decode("utf-8", "replace")
+        return error.code, Headers(error.headers.items()), error.read().decode("utf-8", "replace")
     except (urllib.error.URLError, TimeoutError, OSError):
-        return 0, {}, ""
+        return 0, Headers([]), ""
 
 
 def test_only_the_approved_api_surface_answers_from_off_host(
