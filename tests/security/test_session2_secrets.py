@@ -59,6 +59,27 @@ def contract() -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
+def deployed_session(project_a: dict[str, Any]) -> int:
+    """The session the deployment says it reached (ADR 0074, D213).
+
+    Two proofs below ask the contract which secrets are active and which
+    services are granted, and both passed the literal ``2`` until Run 10.
+    Session 2 was the only session that existed when they were written, so the
+    literal and the truth coincided -- and kept coinciding, because these
+    thirteen proofs need ``--sentinel-file`` and it was not passed once in
+    Session 5. Their first execution against a Session 5 deployment was the gate
+    run on 2026-08-13, where a correct mount of a Session 5 grant read as a
+    service helping itself.
+
+    ``CURRENT_SESSION`` would be the repository's answer to a question about the
+    *deployment*: a checkout at session 6 measuring a host still at session 5
+    would expect grants that were never made. The document is the authority on
+    what was deployed.
+    """
+    return int(project_a["deployed_through_session"])
+
+
+@pytest.fixture(scope="module")
 def project_a() -> dict[str, Any]:
     return json.loads(Path(os.environ["APG_PROJECT_A_OUTPUTS"]).read_text(encoding="utf-8"))
 
@@ -216,13 +237,21 @@ def test_the_sentinel_is_absent_from_evidence(sentinel: str) -> None:
 
 
 def test_materialized_files_are_read_only_and_owned_by_the_declared_consumer(
-    contract: dict[str, Any], project_a: dict[str, Any]
+    contract: dict[str, Any], project_a: dict[str, Any], deployed_session: int
 ) -> None:
+    """Every consumer the deployment carries, not the five Session 2 declared.
+
+    **Stricter under ADR 0074, not weakened.** This read `session=2`, so five of
+    eleven consumers were checked and `assert checked` reported success on the
+    strength of the subset. The mode, uid, gid and non-emptiness of the Session 3
+    to Session 5 consumers -- including the two root-plane ones ADR 0054
+    introduced -- were measured by nothing.
+    """
     key = project_a["project"]["key"]
     generation = project_a["secrets"]["generation_id"]
 
     checked = 0
-    for secret in active_secrets(contract, session=2):
+    for secret in active_secrets(contract, session=deployed_session):
         for consumer in secret["consumers"]:
             path = Path(secret_source_path(key, generation, consumer))
             assert path.is_file(), f"{path} was not materialized"
@@ -245,15 +274,24 @@ def test_materialized_files_are_read_only_and_owned_by_the_declared_consumer(
 
 
 def test_only_the_granted_service_mounts_a_secret(
-    contract: dict[str, Any], project_a: dict[str, Any]
+    contract: dict[str, Any], project_a: dict[str, Any], deployed_session: int
 ) -> None:
     """Proved by the mount list, never by comparing what each service read.
 
     A digest comparison would show two services hold different bytes. It would
     not show that the ungranted one could not have read the other's file, which
     is the claim.
+
+    **The session is the deployment's, under ADR 0074.** Reading `session=2`,
+    this failed the Session 5 gate on `postgrest` mounting
+    `postgrest_authenticator_pgpass` -- a grant the contract declares, for a
+    secret introduced in session 5, which a constant that stops at 2 cannot
+    reach. The proof is stricter this way and not weaker: a container mounting a
+    secret from a session *later* than the deployment still fails, and so does
+    one mounting another service's copy, because the consumer's service name is
+    a path component (D213).
     """
-    granted = granted_services(contract, session=2)
+    granted = granted_services(contract, session=deployed_session)
 
     for name in project_containers(project_a["project"]["key"]):
         mounts = json.loads(

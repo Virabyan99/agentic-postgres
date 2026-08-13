@@ -95,11 +95,36 @@ Traefik's own 404 and a routed one are identical from outside.
 
 ## 4. The gate, host mode
 
+**Render the fixtures first.** Two contract proofs resolve the Compose model
+against `.generated/fixture-*`, and a render left over from an earlier session is
+not a stale copy of the answer — it is a different answer. The gate now fails
+rather than skipping when it finds one (ADR 0073):
+
+```bash
+./deploy.sh --project project.example.yaml        --capabilities capabilities.example.yaml --render-only
+./deploy.sh --project project.second.example.yaml --capabilities capabilities.example.yaml --render-only
+```
+
 ```bash
 sudo bin/session-05-check.sh --mode host --host host.yaml \
   --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
-  --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json
+  --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
+  --sentinel-file "$(sudo python3 -c "
+import json
+from pathlib import Path
+root = Path('/var/lib/agentic-postgres/secrets/alpha-dev')
+gen = json.loads((root / 'active-secret-generation.json').read_text())['generation_id']
+print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
+")"
 ```
+
+**`--sentinel-file` is not optional in practice**, and Session 5 is why it is
+written into the command rather than mentioned below it. Thirteen secret proofs
+are gated on it; without it they skip, a skip is not a pass, and they skipped in
+every Session 5 run until 2026-08-13 — which is how a wrong constant survived
+three sessions (ADR 0074, D213). **Derive the path, never type it:** the
+generation directory changes on every start, and a hard-coded one silently names
+a superseded generation, planting a sentinel the scan then fails to find.
 
 It writes `evidence/session-05-host.json` and hands the evidence directory back
 to you — the gate runs under `sudo`, and root-owned evidence is evidence the
