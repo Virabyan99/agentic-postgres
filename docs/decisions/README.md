@@ -138,3 +138,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0072](0072-a-service-identity-that-can-log-in-is-published.md) | A service identity that can log in is published | 5 | Accepted |
 | [0073](0073-a-rendered-fixture-is-current-or-it-is-absent.md) | A rendered fixture is current, or it is absent | 5 | Accepted |
 | [0074](0074-a-session-scoped-proof-reads-the-session-from-the-deployment.md) | A session-scoped proof reads the session from the deployment | 5 | Accepted |
+| [0075](0075-a-proof-names-a-secret-not-the-file-it-lands-in.md) | A proof names a secret, not the file it lands in | 6 | Accepted |
+| [0076](0076-the-bootstrap-signing-key-rotates-by-cutover.md) | The bootstrap signing key rotates by cutover, and the overlap is unbuilt | 6 | Accepted |

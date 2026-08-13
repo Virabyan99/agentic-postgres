@@ -669,3 +669,102 @@ def test_the_publicly_routed_service_is_granted_nothing(
     """The one container reachable from the Internet holds no secret material."""
     assert "edge-probe" in compose_model["services"]
     assert "edge-probe" not in secrets_contract.granted_services(contract, 2)
+
+
+# ---------------------------------------------------------------------------
+# Naming a secret rather than a file (ADR 0075)
+# ---------------------------------------------------------------------------
+
+
+def test_a_consumer_is_resolved_by_secret_name_not_by_filename(
+    contract: dict[str, Any],
+) -> None:
+    """``consumer_named`` maps (secret, holder) to the file, so no caller spells one.
+
+    The authenticator is the case that made this a decision rather than a
+    convenience: the secret is ``postgrest_authenticator_password`` and the file
+    is ``postgrest_authenticator_pgpass``. A caller that knew only the pattern
+    "filename equals secret name" -- true for every other entry in this contract
+    -- names a path that does not exist.
+    """
+    secret, consumer = secrets_contract.consumer_named(
+        contract, "postgrest_authenticator_password", "postgrest"
+    )
+    assert secret["name"] == "postgrest_authenticator_password"
+    assert consumer["target_file"] == "postgrest_authenticator_pgpass"
+    assert consumer["format"] == "pgpass"
+
+    # The control: an entry where the two DO coincide still resolves, so the
+    # assertion above is about this consumer and not about the lookup failing.
+    _, raw = secrets_contract.consumer_named(contract, "app_runtime_password", "pgbouncer")
+    assert raw["target_file"] == "app_runtime_password"
+    assert raw["format"] == "raw"
+
+
+def test_a_root_plane_consumer_is_reached_by_its_directory(contract: dict[str, Any]) -> None:
+    """``_root`` is a holder like any other, and the only one no container names."""
+    _, consumer = secrets_contract.consumer_named(
+        contract, "docs_basic_auth_password", secrets_contract.ROOT_PLANE_DIRECTORY
+    )
+    assert secrets_contract.is_root_plane(consumer)
+    assert "service" not in consumer
+
+
+def test_an_undeclared_secret_or_holder_raises_rather_than_returning_nothing(
+    contract: dict[str, Any],
+) -> None:
+    """A soft miss would read as "this secret is not held here", which is a claim.
+
+    Both messages name identifiers only -- the secret's declared holders, and the
+    contract's declared names -- because this function is called from tests that
+    run as root beside real generation directories.
+    """
+    with pytest.raises(ManifestError, match="no secret named"):
+        secrets_contract.consumer_named(contract, "postgrest_authenticator_pgpass", "postgrest")
+
+    with pytest.raises(ManifestError, match="declares no consumer"):
+        secrets_contract.consumer_named(contract, "docs_basic_auth_password", "postgrest")
+
+
+def test_every_declared_consumer_round_trips_through_its_own_format(
+    contract: dict[str, Any],
+) -> None:
+    """What ``materialized_secret`` now relies on, for every consumer in the file.
+
+    The fixture reads a file and returns ``recover_secret(...)`` of it, so a
+    consumer whose format did not round-trip would hand a test a value that is
+    not the provider's -- and the test would then compare it against one that is.
+    """
+    value = "0123456789abcdef0123456789abcdef"
+    for secret in contract["secrets"]:
+        for consumer in secret["consumers"]:
+            rendered = secrets_contract.render_secret(value, consumer)
+            assert secrets_contract.recover_secret(rendered, consumer) == value, (
+                f"{secret['name']} for {secrets_contract.consumer_directory(consumer)} does not "
+                f"round-trip through format {consumer['format']!r}"
+            )
+            # As it lands on disk: the materializer writes a trailing newline and
+            # every reader strips one.
+            assert secrets_contract.recover_secret(rendered + "\n", consumer) == value
+
+
+def test_a_secret_with_many_holders_resolves_to_the_one_asked_for(
+    contract: dict[str, Any],
+) -> None:
+    """The discriminating case, and the reason the two above are not enough.
+
+    Every secret this contract declares with a `pgpass` format, and both
+    root-plane secrets, have exactly **one** consumer -- so a resolver that
+    ignored the holder entirely and returned the first would satisfy them.
+    ``app_runtime_password`` has five, and two of them differ in the number that
+    decides whether the file is readable at all: the pooler runs as 70 and every
+    client fixture as 65532.
+    """
+    _, pooler = secrets_contract.consumer_named(contract, "app_runtime_password", "pgbouncer")
+    _, client = secrets_contract.consumer_named(contract, "app_runtime_password", "client-psql")
+
+    assert pooler["service"] == "pgbouncer"
+    assert client["service"] == "client-psql"
+    assert (pooler["uid"], pooler["gid"]) == (70, 70)
+    assert (client["uid"], client["gid"]) == (65532, 65532)
+    assert pooler is not client

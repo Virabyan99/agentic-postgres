@@ -203,6 +203,43 @@ def consumer_directory(consumer: dict[str, Any]) -> str:
     return ROOT_PLANE_DIRECTORY if is_root_plane(consumer) else consumer["service"]
 
 
+def consumer_named(
+    contract: dict[str, Any], secret_name: str, consumer_key: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The declared secret and the one consumer whose directory is ``consumer_key``.
+
+    ``consumer_key`` is what :func:`consumer_directory` returns — a service name,
+    or :data:`ROOT_PLANE_DIRECTORY` for a value no container holds. So a caller
+    names *a secret and who holds it*, which is what it actually knows, and the
+    filename is derived here rather than spelled at the call site.
+
+    That distinction is the point (ADR 0075). ``postgrest_authenticator_password``
+    is materialized into a file called ``postgrest_authenticator_pgpass``, and a
+    caller that spells the filename has made a second derivation of something this
+    module already derives — one that goes stale the moment a consumer's
+    ``target_file`` or ``format`` changes, and whose failure is a missing file
+    rather than a wrong answer only because nothing had looked yet.
+
+    Raises rather than returning ``None``: every caller is asking about a grant it
+    believes exists, and a soft miss reads as "this secret is not held here",
+    which is a security claim nobody measured. The messages name identifiers
+    only.
+    """
+    for secret in contract["secrets"]:
+        if secret["name"] != secret_name:
+            continue
+        for consumer in secret["consumers"]:
+            if consumer_directory(consumer) == consumer_key:
+                return secret, consumer
+        held_by = sorted(consumer_directory(item) for item in secret["consumers"])
+        raise ManifestError(
+            f"secret {secret_name!r} declares no consumer {consumer_key!r}; it is held by {held_by}"
+        )
+
+    declared = sorted(secret["name"] for secret in contract["secrets"])
+    raise ManifestError(f"no secret named {secret_name!r} in the contract; it declares {declared}")
+
+
 def secret_source_path(project_key: str, generation_id: str, consumer: dict[str, Any]) -> str:
     """Absolute host path of one materialized secret file.
 
@@ -325,6 +362,7 @@ __all__ = [
     "active_secrets",
     "compose_consumers",
     "consumer_directory",
+    "consumer_named",
     "consumers_of",
     "container_secret_path",
     "generation_directory",

@@ -92,24 +92,67 @@ declared as "previous" is *not* the one now active, before it asserts anything i
 refused. Without that, a window in which nothing was rotated passes every
 refusal — the old credential is refused because it *is* the new credential.
 
-### The authenticator
+**The shape is the same for all three**, and only the first and last steps
+differ:
 
-The role PostgREST logs in as. Write the pre-rotation value to a file first; you
-cannot recover it afterwards.
+1. Capture the pre-rotation value to a root-only file. You cannot recover it
+   afterwards, and a proof you cannot admit is a proof that skips.
+2. Replace the value at the provider, under the `provider_path` and
+   `provider_key` `secrets.required.yaml` declares for it.
+3. Materialize — a new immutable generation, made active by an atomic rename.
+4. Redeploy through session 5. This is what re-applies the credential: the
+   bootstrap plane sets the role's verifier, `publish_docs_credential` rewrites
+   the htpasswd file and the middleware, and `render-jwks.py` rewrites the JWKS.
+5. Admit the proof with the matching `--rotated-*-from-file` flag.
+
+Steps 3 and 4 are the same commands every time:
 
 ```bash
-sudo cat /var/lib/agentic-postgres/secrets/<key>/generations/<gen>/postgrest/... > /root/rotated-auth
-sudo bin/materialize-secrets.sh --project <manifest> --session 5   # new generation
-sudo ./deploy.sh --host host.yaml --project <manifest> --capabilities capabilities.yaml \
-     --through-session 5
+sudo bin/materialize-secrets.sh --project project.alpha.yaml \
+  --requirements secrets.required.yaml --session 5
+
+sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
+  --capabilities capabilities.yaml --through-session 5
 ```
 
-Then admit the proof:
+**The generation directory is derived, never typed.** It changes on every
+materialization, and a hard-coded one silently names a superseded generation —
+which is how thirteen secret proofs read the wrong file for three sessions
+(D213). Every `sudo cat` below goes through this:
+
+```bash
+gen() {  # gen <project-key>
+  sudo python3 -c "
+import json, sys
+from pathlib import Path
+root = Path('/var/lib/agentic-postgres/secrets') / sys.argv[1]
+print(root / 'generations' /
+      json.loads((root / 'active-secret-generation.json').read_text())['generation_id'])
+" "$1"
+}
+```
+
+### The authenticator
+
+The role PostgREST logs in as.
+
+**Capture the password, not the file.** This consumer's copy is written in
+`pgpass` format (ADR 0056), so the file holds `*:*:*:*:<password>` and the proof
+compares your declaration against the *password*. Declaring the whole line would
+make the false-declaration control incapable of failing — which is ADR 0075, and
+is why the command below cuts the value out rather than copying the file:
+
+```bash
+sudo sh -c "cut -d: -f5- '$(gen alpha-dev)/postgrest/postgrest_authenticator_pgpass' \
+  > /root/rotated-auth" && sudo chmod 0400 /root/rotated-auth
+```
+
+Then steps 2–4, and admit it:
 
 ```bash
 sudo bin/session-05-check.sh --mode host --host host.yaml \
-  --project-a-outputs /etc/agentic-postgres/projects/<a>/outputs.json \
-  --project-b-outputs /etc/agentic-postgres/projects/<b>/outputs.json \
+  --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
+  --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
   --rotated-authenticator-from-file /root/rotated-auth
 ```
 
@@ -120,9 +163,15 @@ in one run — the route serves, **and** the cluster refuses the old password.
 
 ### The documentation credential
 
-Basic Auth, in front of the page. `publish_docs_credential` rewrites both the
-htpasswd file and the middleware on every deploy, so a redeploy after a new
-generation is the rotation.
+Basic Auth, in front of the page. Root plane, so it lands in `_root/`:
+
+```bash
+sudo cp "$(gen alpha-dev)/_root/docs_basic_auth_password" /root/rotated-docs
+```
+
+`publish_docs_credential` rewrites both the htpasswd file and the middleware on
+every deploy, so the redeploy in step 4 *is* the rotation. Admit it with
+`--rotated-docs-from-file /root/rotated-docs`.
 
 The proof asserts the **new** password opens the page as well as that the old one
 does not. A rotation Traefik never reloaded refuses both, which passes a test
@@ -130,13 +179,40 @@ that only checks the old one.
 
 ### The signing key
 
-Two phases: publish the new key beside the old, then retire the old. The proof is
-of the **second** phase only — the intermediate state accepts both by design, and
-a check run there would pass whether or not the retirement ever happened.
+**This is a cutover, not an overlap, and the documentation used to say
+otherwise.** `jwt_keys.begin_rotation` and `complete_rotation` implement a
+two-phase rotation — publish both, then retire the old after the deadline — and
+**nothing calls them**. `bin/render-jwks.py` derives the JWKS from the one
+materialized private key and publishes exactly one key; the deploy writes
+`retire_after: None` unconditionally. There is no operator path that publishes
+two verification keys. ADR 0076 measured this and records it.
 
-`--rotated-jwt-from-file` takes the retired key's public material as JSON. The
-deployed document's `jwt.verification_kids` is the independent check: a key still
-listed there is a key the plane still accepts, whatever one request proves.
+So: one window, one key out, one key in, and no interval in which both verify.
+Acceptable here because `bin/dev-token.py` caps a token at 900 seconds and
+defaults to 300, tokens are minted on demand, and nothing holds a long-lived one
+— but it means **every outstanding token is refused the moment the deploy
+finishes**, so do this when nobody is holding one.
+
+Capture the key **identifier**, not the key. `--rotated-jwt-from-file` takes the
+retired key's public material as JSON and reads `kid` out of it, so the
+identifier is all it needs — and the private key is 0400 root, mounted into no
+service, copied nowhere. Take it from the deployed document, which publishes it:
+
+```bash
+sudo python3 -c "
+import json
+from pathlib import Path
+d = json.loads(Path('/etc/agentic-postgres/projects/alpha-dev/outputs.json').read_text())
+print(json.dumps({'kid': d['jwt']['active_kid']}))
+" > /root/rotated-jwt
+```
+
+Then generate a new RSA private key, put **that** at the provider under
+`/auth` → `APG_BOOTSTRAP_JWT_SIGNING_KEY`, run steps 3–4, and admit it with
+`--rotated-jwt-from-file /root/rotated-jwt`.
+
+The deployed document's `jwt.verification_kids` is the independent check: a key
+still listed there is a key the plane still accepts, whatever one request proves.
 
 ## Traps
 

@@ -45,11 +45,23 @@ so there is no immutable checksum to record — the artifact is reproduced, not
 retained. And the Session 5 gate does not currently come back fully proved: two
 claims are `failed` because their proofs have never executed.
 
-Running the rotation window first is not tidiness. Session 6 **replaces the
-signing key's owner**, and the prepare/promote/retire machinery it inherits has
-never been exercised once. Cutting over to a new issuer on top of a rotation path
-nobody has run is the exact shape of Run 9's four defects: a plane built,
-granted, wired, and never executed.
+Running the rotation window first is not tidiness -- but the reason it was
+written with is wrong, and measuring it is what Run 1 did first. There is no
+prepare/promote/retire machinery to exercise: `begin_rotation` and
+`complete_rotation` have no callers, the JWKS renderer publishes exactly one key,
+and the deploy writes `retire_after: None` unconditionally (**D235**, ADR 0076).
+The bootstrap key rotates by **cutover**.
+
+What Run 1 rehearses is therefore everything a cutover shares with an overlap --
+capture, provider, materialize, redeploy, admit; the per-consumer generation
+layout; the bootstrap plane re-applying a credential; the edge reloading a
+rewritten middleware -- and **not** the two-phase logic Run 10 needs. Run 10
+builds that without a live rehearsal, and §9 carries it as a risk rather than a
+solved problem.
+
+Preparing the window also found that one of its three proofs could not execute
+(**D236**, ADR 0075), which is the fifth instance in two runs of a wrong answer
+sitting written down inside an unexecuted proof.
 
 ---
 
@@ -80,6 +92,8 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D232** | §17 lists roughly 120 discrete test properties across twelve subsections; §21's exit checklist has 60 boxes. | **Five registry entries carry one node ID each.** D175 recorded, and did not fix, the fact that *nothing detects a requirement whose description outgrows its node IDs* — it is a review rule, because enforcing it would need a second authority beside the markers. Session 6 is the largest instance of that gap the project will have produced. | **Every property in §17 that this plan keeps is mapped to a named node ID in §2 before implementation starts**, and the five requirements are split where their measurements live (ADR 0045's rule) rather than accumulating forty node IDs each. Where a property has no node ID, it is not a requirement — it is prose, and it is deleted from the plan rather than left to look like coverage. | A requirement with one node ID and a paragraph of description reads, in `docs/acceptance-matrix.md`, exactly like a requirement with fifteen. That is the review rule's failure mode and it is invisible in every generated document. Doing the mapping first is the only defence this repository has. | no |
 | **D233** | §2.6: run `bin/session-05-check.sh` and record its "immutable evidence checksum"; §16 Phase 0 re-runs "the inherited non-destructive Session 5 subset" after Session 6 migrations change the claim shape. | Evidence is **gitignored** (`evidence/*`, with only `.gitkeep` tracked) so that the gate sees no untracked output. There is nothing immutable to checksum — the artifact is regenerated. And Session 5's own state is the sharper problem: **two claims are unproved** because the rotation window was deferred. | **Session 6 Run 1 is Session 5's rotation window**, run to completion, taking Session 5 to 18 of 18 before anything in this session touches a key. The "non-destructive inherited subset" is not enumerated by hand — it is what `-m live_host` collects from the whole tree, which is what the gate already runs. | Cutting an issuer over on top of a prepare/promote/retire path nobody has executed is Run 9's defect with a bigger blast radius: the machinery is built, granted, wired, and unexecuted. Session 5 also left the reboot proof unrun, and a reboot is the one event that tests whether key state survives without an operator present. | no |
 | **D234** | §4.10: bound Argon2 to "no more than two concurrent operations per container" and reserve "at least 128 MiB for two concurrent 64 MiB hashes"; §15.2 sets a 384 MiB memory limit. | The repository derives every memory bound from the manifest and checks it against a per-project guardrail: `database.memory_limit_mb` must exceed a *derived unreclaimable budget*, and that budget must not exceed the guardrail — both are `CROSS_FIELD_RELATIONS` entries in `config.py`, generated into the bounds documentation. A service limit typed into a Compose file is outside that arithmetic. | **The auth service's memory limit joins the derived budget** as a named claimant, the way ADR 0070 made the connection budget a division rather than a set of independent grants. `hash_concurrency` and the limit are related by a cross-field relation — `hash_concurrency × memory_cost_kib` plus process overhead must fit the declared limit — so a manifest that raises concurrency without raising the limit **fails validation** instead of being killed by the OOM killer at the first login burst. | The runbook's numbers are probably fine. The failure they leave open is the one this project keeps producing: two values in two files that must agree, with nothing computing the relation. `memory_cost = 65536 KiB` and `hash_concurrency = 2` and `384 MiB` are three numbers with one true relationship between them. | **yes** |
+| **D235** | (Session 6's plan, §0 and Run 1.) Running Session 5's rotation window first "is not tidiness" -- it exercises the prepare/promote/retire machinery Session 6's signing-key cutover depends on, which "has never been exercised once". | **Measured: there is no machinery to exercise.** `jwt_keys.begin_rotation` and `complete_rotation` implement a two-phase overlap with a computed retirement deadline and a refuse-early rule, and **nothing outside `tests/contract/test_jwt_keys.py` calls either.** `bin/render-jwks.py::build` returns `build_jwks([jwk])` -- exactly one key -- under a comment reading "A rotation publishes two and is Run 10's"; `bin/deploy-project.py::observe_jwt` writes `retire_after: None` unconditionally under a comment reading "Run 10 is what sets one". Run 10 did neither. | **The bootstrap key rotates by cutover, and Run 1 executes a cutover** (ADR 0076). The proof is unchanged -- it was always written as an *end state*, which is agnostic about the path taken to it -- and only its docstring and `SEC-BOOT-001`'s description lose the phrase "second rotation phase". The overlap functions stay, uncalled and not presented as available. | **This is Run 9's `PGRST_DB_PRE_REQUEST` in a new place**: a plane built, validated, unit-tested, documented, and wired to nothing -- with a comment naming a future run as the tell in both cases. The consequence is the part that matters: **Run 1 does not de-risk Run 10, and the plan said it would.** Run 10 builds its overlap without a live rehearsal, and §9 now carries that. | **yes** |
+| **D236** | (Session 5's own proof, inherited as ready to admit.) Run 1 is a maintenance window that runs three rotation proofs which were written, reviewed and committed in Session 5. | **One of the three cannot run.** `test_a_rotated_authenticator_serves_the_plane_and_the_old_password_does_not` asks `materialized_secret` for `postgrest/postgrest_authenticator_password`; the materializer writes `postgrest/postgrest_authenticator_pgpass`, because that consumer declares `format: pgpass` (ADR 0056). It is the **only** entry in `secrets.required.yaml` whose `target_file` differs from its `name`, so the wrong rule held for twelve consumers of thirteen. Measured offline against the committed contract, with a control that resolves. | **A test names a secret and who holds it; the filename and the format are derived** (ADR 0075). `secrets_contract.consumer_named` resolves the pair, `materialized_secret` returns `recover_secret(...)` of the bytes, and no caller can spell a path. Fixed **before** the window, not during it. | Had the filename been right it would have been worse. `new` would have been the pgpass line, so `assert old != new` -- the control that refuses a false declaration -- could never have failed, and a window in which nothing was rotated would have reported *"the verifier was not replaced"*: a diagnosis of the bootstrap plane, for an operator error. **And the correct idiom was already in the repository**, in `test_session5_api_isolation.py`, one file away -- D173's two spellings of one object, with the spelling that had run being the right one. | **yes** |
 
 ---
 
@@ -196,13 +210,36 @@ Eleven runs. Each ends with `ruff format && ruff check` → the full suite →
 
 ### Run 1 — Finish Session 5
 
-Session 5's rotation window: the authenticator password, both bootstrap-key
-phases, the documentation credential. Then the reboot proof. Session 5 reaches
-**18 of 18 claims** and `api_authorization` and `bootstrap_identity` stop reading
-`failed`.
+Session 5's rotation window: the authenticator password, the signing key, the
+documentation credential — three windows, one credential each, because one flag
+per credential is what stops a single rotation admitting three proofs. Then the
+reboot proof. Session 5 reaches **18 of 18 claims** and `api_authorization` and
+`bootstrap_identity` stop reading `failed`.
 
-Nothing in Session 6 starts until this is done. D233 is the reason: the
-prepare/promote/retire path Session 6 is about to depend on has never executed.
+**Done offline, before the window opens** (this is the half that is complete):
+
+- **D236 / ADR 0075.** The authenticator proof named a file the materializer does
+  not write, and would have failed on its first execution — inside a window,
+  after a credential had been rotated and could no longer be recovered.
+  `secrets_contract.consumer_named` now resolves (secret, holder) → file, and
+  `materialized_secret` returns the *value*. Four mutations, each with a paired
+  control in the same invocation.
+- **D235 / ADR 0076.** The signing key rotates by cutover; the two-phase overlap
+  is unbuilt. `docs/api-operations.md` said otherwise and now does not.
+- `docs/api-operations.md`'s rotation section is rewritten with commands that
+  resolve: the generation directory derived rather than typed (D213), the
+  authenticator's password cut out of its pgpass line rather than copied whole,
+  and the retired `kid` taken from the deployed document rather than the key.
+
+**What is left is the window itself**, and it is a human at a TTY on the host:
+capture, replace at the provider, `materialize-secrets.sh`, redeploy through
+session 5, admit with the matching `--rotated-*-from-file`. The signing-key
+cutover refuses every outstanding token the moment the deploy finishes, so it is
+run when nobody holds one — bounded at 900 seconds by `dev-token.py`'s ceiling.
+
+Nothing in Session 6 starts until this is done. D233's reason still holds, in its
+corrected form: Session 6 replaces the signing key's owner, and the repository
+has never once replaced a signing key.
 
 ### Run 2 — Measure every version, then lock
 
@@ -283,7 +320,11 @@ the hook runs — which is why no agent-specific pre-request error code is defin
 
 ### Run 10 — Cutover, routes, and the second documentation surface
 
-The signing cutover under Run 1's now-exercised machinery. Traefik routers built
+The signing cutover. **Not under exercised machinery** — D235 measured that
+there is none, so this run writes the prepare → acknowledge → promote → retire
+path from nothing, including the acknowledgement `begin_rotation` has never had.
+Rehearsed against a rig, with ADR 0065's warning in force: a rig is a second
+configuration of the product. Traefik routers built
 from `routes.app.url` with middlewares in the **file provider** (D229, closing
 D202/D208). `/docs/app` as a second surface of `services/docs/` (D226).
 `routes.app.status` gates publication on an administrator existing (D230).
@@ -378,6 +419,11 @@ appears:
   than the documentation says. ADR 0019's lesson; measure before depending.
 - A rotation phase cannot be resumed after an interruption. That is a release
   blocker, not a rough edge.
+- **Run 10's key overlap has no live rehearsal** (D235). The two-phase functions
+  Session 6 inherits have never run outside a unit test, and the acknowledgement
+  step — the one that makes promotion safe — does not exist in them at all. This
+  is the session's largest unrehearsed operation and it is the one that cannot be
+  undone by re-running a deploy.
 
 **The largest risk is not technical.** It is that this session's surface is big
 enough for a proof to be written, registered, and never executed — and Session 5

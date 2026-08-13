@@ -39,7 +39,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, secrets_contract
 from agentic_postgres.naming import HEALTH_ROUTE_PATH
 
 #: Signature of the plain-output command runner returned by the ``sh`` fixture.
@@ -413,24 +413,44 @@ def allocation_for(port_allocations: dict[str, Any]) -> Callable[[str], dict[str
 
 @pytest.fixture(scope="session")
 def materialized_secret() -> Callable[[str, str, str], str]:
-    """One consumer's copy of one secret, from the generation the project points at.
+    """One consumer's copy of one secret, as the *value*, from the active generation.
 
-    Per-consumer, because that is how they are written: ``pgbouncer``,
-    ``dbmate`` and each client fixture hold *different files*. Reading the wrong
-    one would prove a credential works for a service that was never given it.
-    Through ``active-secret-generation.json`` rather than by listing
-    ``generations/``, for the reason ``migration_password`` records.
+    Called with a project key, a consumer -- a service name, or ``_root`` for a
+    value no container holds -- and the **secret's name in the contract**. Not a
+    filename: the two differ, and where they differ is where this went wrong.
+    ``postgrest_authenticator_password`` is materialized into
+    ``postgrest_authenticator_pgpass`` in ``pgpass`` format, so a caller spelling
+    the filename is deriving something ``secrets_contract`` already derives, and
+    is then holding a pgpass line while believing it holds a password (ADR 0075).
+
+    Per-consumer, because that is how they are written: ``pgbouncer``, ``dbmate``
+    and each client fixture hold *different files*. Reading the wrong one would
+    prove a credential works for a service that was never given it. Through
+    ``active-secret-generation.json`` rather than by listing ``generations/``,
+    for the reason ``migration_password`` records.
+
+    Returned through ``recover_secret``, which is ``render_secret``'s tested
+    inverse, so every caller receives the provider's value whatever shape the
+    file is in. For a ``raw`` consumer that is the file's bytes without their
+    trailing newline, which is what this fixture always returned.
     """
+    contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
 
-    def read(project_key: str, consumer: str, name: str) -> str:
+    def read(project_key: str, consumer_key: str, secret_name: str) -> str:
+        _, consumer = secrets_contract.consumer_named(contract, secret_name, consumer_key)
+
         pointer = SECRET_ROOT / project_key / "active-secret-generation.json"
         if not pointer.is_file():
             pytest.fail(f"{project_key} has no active secret generation at {pointer}")
         generation = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
-        path = SECRET_ROOT / project_key / "generations" / generation / consumer / name
+
+        path = Path(secrets_contract.secret_source_path(project_key, generation, consumer))
         if not path.is_file():
-            pytest.fail(f"generation {generation} of {project_key} has no {consumer}/{name}")
-        value = path.read_text(encoding="utf-8").rstrip("\n")
+            pytest.fail(
+                f"generation {generation} of {project_key} has no {consumer_key}/"
+                f"{consumer['target_file']}, which is where {secret_name} is declared to land"
+            )
+        value = secrets_contract.recover_secret(path.read_text(encoding="utf-8"), consumer)
         assert value, f"{path} is empty"
         return value
 

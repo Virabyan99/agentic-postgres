@@ -462,6 +462,11 @@ def test_a_rotated_authenticator_serves_the_plane_and_the_old_password_does_not(
     reported as a proof.
     """
     del as_root
+    # Both sides are the password. The declaration is what the operator captured
+    # before rotating, and `materialized_secret` names the secret rather than the
+    # file it lands in -- which for this consumer is a pgpass line, not a value
+    # (ADR 0075). Comparing a password against a pgpass line would make the
+    # refusal below pass on a window in which nothing was rotated.
     old = declared_previous("APG_ROTATED_AUTHENTICATOR_FROM_FILE")
     new = materialized_secret(key(project_a), "postgrest", "postgrest_authenticator_password")
     assert old != new, (
@@ -551,14 +556,19 @@ def test_a_rotated_signing_key_is_the_only_one_the_plane_accepts(
     rest_base,
     api_call,
 ) -> None:
-    """Both bootstrap-key phases, from the side that matters.
+    """The bootstrap signing key, replaced: the old key is accepted by nothing.
 
-    The rotation has two phases -- publish the new key alongside the old, then
-    retire the old -- and this asserts the state *after* the second: a token
-    signed by the retired key is refused, and one signed by the active key is
-    served. Asserted after retirement rather than between phases because the
-    intermediate state accepts both by design, and a test that ran there would
-    pass whether or not the retirement ever happened.
+    **This asserts an end state, and the path to it is a cutover** (ADR 0076).
+    `jwt_keys.begin_rotation` and `complete_rotation` implement a two-phase
+    overlap and nothing calls them: `bin/render-jwks.py` derives the JWKS from
+    the one materialized private key and publishes exactly one, and the deploy
+    writes `retire_after: None` unconditionally. So there is no operator path
+    that publishes two verification keys, and this test is the whole rotation
+    rather than the second half of one.
+
+    Written as an end state deliberately, and that part is unchanged by the
+    above: what matters is that a token signed by the replaced key is refused and
+    one signed by the active key is served, whatever sequence produced it.
 
     The retired key is declared as a file path, and the deployed document's
     `jwt.verification_kids` is the independent check: a key still listed there is

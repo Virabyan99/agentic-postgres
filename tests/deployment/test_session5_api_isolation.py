@@ -21,8 +21,6 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, secrets_contract
-
 pytestmark = [
     pytest.mark.p0,
     pytest.mark.deployment,
@@ -163,23 +161,13 @@ def test_one_projects_token_and_credential_are_refused_by_the_other(
     authenticator = target["database"]["roles"]["postgrest_authenticator"]
 
     # The authenticator's copy is written in `pgpass` format, so the file's
-    # contents are not the password. Recovered with the product's own inverse
-    # rather than by slicing the line here: `render_secret` and `recover_secret`
-    # have a round-trip test, and a second parser would be the one that broke
-    # silently the first time a password contained a colon.
-    consumer = next(
-        item
-        for secret in secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")[
-            "secrets"
-        ]
-        if secret["name"] == "postgrest_authenticator_password"
-        for item in secret["consumers"]
-    )
-    own_password = secrets_contract.recover_secret(
-        materialized_secret(key(target), "postgrest", "postgrest_authenticator_pgpass"), consumer
-    )
-    foreign_password = secrets_contract.recover_secret(
-        materialized_secret(key(other), "postgrest", "postgrest_authenticator_pgpass"), consumer
+    # contents are not the password. The recovery is the fixture's now, not this
+    # test's (ADR 0075): both call sites name the secret rather than the file,
+    # and `render_secret`/`recover_secret` -- which have a round-trip test --
+    # stay the one authority for the shape.
+    own_password = materialized_secret(key(target), "postgrest", "postgrest_authenticator_password")
+    foreign_password = materialized_secret(
+        key(other), "postgrest", "postgrest_authenticator_password"
     )
     assert own_password != foreign_password, (
         "both projects were issued the same authenticator credential; there is nothing "

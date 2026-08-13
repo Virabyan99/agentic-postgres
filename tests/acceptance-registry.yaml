@@ -902,10 +902,13 @@
   description: >-
     The temporary bootstrap issuer signs with a private key no service holds,
     verifiers hold public material only, and the deployed document records the
-    issuer as temporary against the session it was deployed through. A retired
-    signing key is accepted by nothing once its second rotation phase completes,
-    and a rotated authenticator password opens the cluster for the running
-    service and no longer opens it for the value it replaced.
+    issuer as temporary against the session it was deployed through. A replaced
+    signing key is accepted by nothing - by the plane and by the deployed
+    document's verification_kids, which are two readings - and a rotated
+    authenticator password opens the cluster for the running service and no
+    longer opens it for the value it replaced. The signing key is replaced by
+    cutover, not by a two-phase overlap: ADR 0076 measured that the overlap
+    functions exist and nothing calls them.
 
 - id: SEC-DOCS-001
   priority: P0
