@@ -1164,7 +1164,74 @@ surface.
 > proves it parses.**
 
 ### Run 10 — Restart, rotation, documentation, and the gate
-*Host, one maintenance window, then all three environments.*
+*Host, one maintenance window, then all three environments.* **Done, except the
+rotation window, which is deferred to Session 6 deliberately and not by
+omission.**
+
+> **Done.** The restart matrix passes on both projects. The gate runs in all
+> three modes: offline `PASSED`, host `PASSED` with **168 passed / 0 failed / 6
+> skipped**, external `PASSED` with **20 passed / 0 failed / 8 skipped**. Both
+> evidence halves are written and merged; **16 of 18 claims are proved**. D161
+> is closed (ADR 0070), D194's root-owned `--junitxml` remainder is closed,
+> `test_compose_contract.py`'s module-level skip is gone, and the readiness race
+> is fixed.
+>
+> **What it found is one sentence: everything Run 10 found, it found by
+> executing a proof that had never executed.** Four findings, four mechanisms of
+> not-running, and no two the same.
+>
+> - **D211** — `pytest tests/deployment -m live_host` had been *the* measurement
+>   of every host run since Run 9, reporting 105 then 110 passing. It selects by
+>   **path**. `tests/security/` is a directory it never reaches, so
+>   `test_only_the_activated_roles_may_log_in` had not run once against a
+>   Session 5 deployment. It failed correctly: `postgrest_authenticator` holds
+>   `LOGIN` and the deployed document recorded it nowhere, because
+>   `access_profiles` describes the transports a *developer or application*
+>   reaches the cluster through and a service's own identity is not one (ADR
+>   0072). The same round fixed a poll that broke on a **stale success** — one
+>   test whose stdout carried the success and whose stderr carried the 404.
+> - **D212** — Run 10 itself narrowed `test_compose_contract.py`'s module-level
+>   skip, which is how D178 reached a live deploy, and left a guard asking
+>   `ALPHA.is_dir()`. The host's fixtures were four schema versions old, so the
+>   gate resolved the Compose model against a render that predated PostgREST and
+>   reported eleven interpolation errors **as a defect in `compose.yaml`**. A
+>   skip that was too *wide* became a guard about the wrong *property*: silently
+>   absent became silently wrong (ADR 0073).
+> - **D213** — thirteen secret proofs are gated on `--sentinel-file`, and the
+>   flag was not passed once in Session 5. Their first execution failed on
+>   `postgrest` mounting a secret it "was not granted" — a grant the contract
+>   declares, `introduced_in_session: 5`, invisible to a proof asking
+>   `session=2`. The quieter half was worse: the materialization proof checked
+>   **one consumer of thirteen** and `assert checked` reported success on it
+>   (ADR 0074).
+> - **D214** — external mode had not run since Run 9a, so the documentation
+>   route's off-host refusal proof met a live 401 for the first time and read
+>   `WWW-Authenticate: None` **beside the mapping containing the answer**. HTTP
+>   field names are case-insensitive; a plain `dict` is not.
+>
+> **A skip, a path filter, an unpassed flag, and an environment nobody had
+> entered.** Each hid a wrong answer for between one run and three sessions, and
+> in every case the wrong answer was *already written down* — the value was
+> waiting, not missing.
+>
+> **The rotation window is not done.** Three rotations were specified,
+> implemented and tested offline; the two claims they prove — `api_authorization`
+> and `bootstrap_identity` — resolve **`failed`** in the merged evidence, which
+> is the evidence model reporting an unproved claim rather than a broken one.
+> Three of the five outstanding node IDs are `APG_ROTATED_*`-gated and one is
+> `APG_AFTER_REBOOT`. Deferred by the operator's decision at the end of a long
+> session, recorded here rather than absorbed: **a claim nobody proved must not
+> read as one nobody needed.** Session 6 opens with the window.
+>
+> **Measured and left open: the host publishes a global IPv6 address**
+> (`2a01:4f9:c015:1bb0::1`) and the eight `APG_PUBLIC_IPV6` proofs have never
+> run, because no operator machine so far has IPv6 and a scan from one that does
+> not would report every port closed — a fact about the scanner's network, which
+> is the exact false green this repository keeps producing. Read from inside
+> instead: only `[::]:22` listens on IPv6, the edge binds `0.0.0.0` for 80 and
+> 443, and neither hostname publishes an AAAA record. So the unmeasured surface
+> is sshd alone, and nothing is pointed at a service that would not answer. Not
+> a defect; an unmeasured boundary, written down as one.
 
 The restart matrix extends `API-CONTRACT-001` and `DBX-PORT-001`'s precedent
 (D120): PostgREST restart, documentation restart, cluster restart with PostgREST
