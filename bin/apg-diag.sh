@@ -129,13 +129,39 @@ allowlisted() {
   die 5 "'${needle}' is not an allowlisted ${what}. Allowed: ${haystack}"
 }
 
-# One container, found by the labels the Compose model and Compose itself set.
-# Not by name: a name is a string this script would have to build, and the
-# labels are facts the product already asserts.
+# The Compose project a deployment's containers belong to.
+#
+# Anchored on `database.container`, which the deployed document publishes, and
+# then read off that container's own Compose label. Not derived from the project
+# key: the container name and the Compose project name are both derived
+# identities, and re-deriving one here would make this script a second authority
+# on a name (ADR 0002).
+#
+# **Not `apg.project.key`.** That label is on three of thirteen services --
+# edge-probe, postgrest and docs, the three that carry Traefik labels -- so it
+# means "this container is routed", not "this container belongs to this
+# project". Filtering on it found half a deployment and no cluster at all
+# (D210).
+compose_project_for() {
+  local key="$1" container project
+  container="$(python3 -c '
+import json, sys
+print(json.load(open(sys.argv[1]))["database"]["container"])
+' "${PROJECT_ROOT}/${key}/outputs.json")"
+  project="$(docker inspect "${container}" \
+    --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null || true)"
+  [ -n "${project}" ] || die 4 "${key}'s cluster container (${container}) is not running."
+  printf '%s' "${project}"
+}
+
+# One container, found by two labels Compose sets on everything it creates.
+# Not by name: a name is a string this script would have to build, and a label
+# is a fact the daemon already holds.
 container_for() {
-  local key="$1" service="$2" names
+  local key="$1" service="$2" project names
+  project="$(compose_project_for "${key}")"
   names="$(docker ps -a \
-    --filter "label=apg.project.key=${key}" \
+    --filter "label=com.docker.compose.project=${project}" \
     --filter "label=com.docker.compose.service=${service}" \
     --format '{{.Names}}')"
   [ -n "${names}" ] || die 4 "no ${service} container for ${key}."
@@ -154,12 +180,27 @@ redact() {
 }
 
 verb_containers() {
-  printf '%-32s %-26s %s\n' NAME STATUS NETWORKS
-  docker ps -a --filter 'label=apg.project.key' \
-    --format '{{.Names}}\t{{.Status}}\t{{.Networks}}' \
-    | while IFS=$'\t' read -r name status networks; do
-        printf '%-32s %-26s %s\n' "${name}" "${status}" "${networks}"
-      done
+  local key project directory
+  printf '%-34s %-26s %s\n' NAME STATUS NETWORKS
+
+  # Per deployed project, so the listing is complete for each one rather than
+  # complete for whichever label happens to be universal. A project whose
+  # cluster is not running says so, which is more useful than omitting it.
+  for directory in "${PROJECT_ROOT}"/*/; do
+    [ -d "${directory}" ] || continue
+    key="$(basename "${directory}")"
+    printf '\n-- %s\n' "${key}"
+    project="$(compose_project_for "${key}" 2>/dev/null || true)"
+    if [ -z "${project}" ]; then
+      printf '   (no running cluster container; the project may be stopped)\n'
+      continue
+    fi
+    docker ps -a --filter "label=com.docker.compose.project=${project}" \
+      --format '{{.Names}}\t{{.Status}}\t{{.Networks}}' \
+      | while IFS=$'\t' read -r name status networks; do
+          printf '%-34s %-26s %s\n' "${name}" "${status}" "${networks}"
+        done
+  done
 }
 
 verb_labels() {
