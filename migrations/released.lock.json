@@ -119,6 +119,17 @@
       "template": "templates/0010-request-statement-timeout.sql",
       "template_sha256": "8221e09cbc90e3a854690f90f9b8520a12a05784cbc25ed73625662d33e6dcf8",
       "version": "20260812120010"
+    },
+    {
+      "canonical_render_sha256": "48fc37cd8ba3be47092a1d325bcaa652cfb6f2a78c1811ba0d8f6979249eafd3",
+      "name": "identity_registry",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0011-identity-registry.sql",
+      "template_sha256": "9768fd3b5a9a4cd1e784f470da5a4c8e0c7081bf00e3f2ea7adddb9dc5eebe3f",
+      "version": "20260813120011"
     }
   ],
   "schema_version": 1

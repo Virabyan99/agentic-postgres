@@ -143,3 +143,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0077](0077-a-package-entry-is-dereferenced-like-an-image.md) | A package entry is dereferenced like an image | 6 | Accepted |
 | [0078](0078-the-claim-contract-and-its-two-verifiers.md) | The claim contract, and what each of its two verifiers enforces | 6 | Accepted |
 | [0079](0079-the-scope-vocabulary-has-two-closed-classes.md) | The scope vocabulary has two closed classes, in one authority | 6 | Accepted |
+| [0080](0080-a-check-constraint-passes-when-its-expression-is-null.md) | A CHECK constraint passes when its expression is NULL | 6 | Accepted |
+| [0080](0080-a-check-constraint-passes-when-its-expression-is-null.md) | A CHECK constraint passes when its expression is NULL | 6 | Accepted |

@@ -40,6 +40,11 @@
       "type": "literal",
       "source": "database.roles.api_documentation",
       "description": "The same role, as a string literal rather than a quoted identifier, for the hook's `current_user::text = ...` comparison. Two placeholders over ONE source: they resolve from the same key in the same document, so they cannot name different roles -- which a second source, or a name written out beside the grant, could."
+    },
+    "auth_service": {
+      "type": "identifier",
+      "source": "database.roles.auth_service",
+      "description": "The auth service's database identity. Session 6. Migration 0011 grants it schema USAGE and nothing else -- its LOGIN attribute, connection limit, SCRAM credential and statement_timeout are bootstrap-plane work, because anything ALTER ROLE is (D102), and the functions it will call arrive with the code that calls them."
     }
   },
   "migrations": [
@@ -152,6 +157,16 @@
         "api_documentation_name"
       ],
       "description": "The pre-request hook carries the request role's statement_timeout into the request transaction. PostgreSQL processes a role's settings only at login, and PostgREST reaches its request role with SET LOCAL ROLE -- so the timeouts ADR 0067 put on the roles bounded nothing. The value is still the document's; this reads what the bootstrap plane wrote and applies it for one transaction. See D198, ADR 0068."
+    },
+    {
+      "version": "20260813120011",
+      "name": "identity_registry",
+      "template": "templates/0011-identity-registry.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "The identity registry: app_private.users, user_credentials, agents, agent_credentials and auth_contract_state, plus the is_scope_set helper the scope columns are checked against. Created from nothing -- the runbook's 'extend the existing users table' has no subject, so every column is NOT NULL from creation and the backfill is struck rather than written over zero rows (D218). No foreign key reaches app.notes.owner_id: that column holds a claim value and ADR 0029 states in its title that it is trusted, not authenticated. auth_service is granted schema USAGE and nothing else; the functions it will call arrive with the code that calls them. See ADR 0078, D218, D228."
     }
   ]
 }

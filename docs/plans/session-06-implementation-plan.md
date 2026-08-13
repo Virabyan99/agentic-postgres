@@ -105,6 +105,7 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D245** | (D215, in this plan's own table.) The version bump "pays D40's full price: a `migrate_v8_to_v9` function, a committed `tests/fixtures/outputs-v8.json`, and the standing rule that migration never produces a *deployed* document" -- written as though the fixture-per-version discipline were being continued. | **It had lapsed three versions ago.** `tests/fixtures/` holds `outputs-v1` through `outputs-v5` and stops. `migrate_v5_to_v6`, `v6_to_v7` and `v7_to_v8` are exercised **only by chaining from the v5 fixture**, which is the condition `test_output_migrations.py`'s own docstring names: "a document derived from the migrator is a document that agrees with the migrator by construction". Nothing noticed, because a chained document validates against the schema exactly as a rendered one does. | **A real v8 render is captured and the comparison it enables is written**, before the schema moves -- after the bump, `--render-only` emits v9 and a genuine v8 cannot be produced from this tree again. The comparison is *structural*: the two fixtures describe different projects, so equality is not the question; a key the migrator never adds and a key only it invents are. | **Measured result: the chained v8 and a real v8 render have identical shape.** No defect -- which is the honest outcome and not a reason the check should not exist. The value is that the question is now answerable, and it was answerable for v1→v5 and silently was not for v5→v8. The first draft of the comparison reported two false differences, because `statement_timeouts` is keyed by *role name* and comparing its members compares manifests: a rig one level away from its claim, in the module about exactly that. | no |
 | **D246** | (§5 Run 4 of this plan.) "Session 6's four secrets appended to `secrets.required.yaml` with their planes and value kinds (D227)" -- in Run 4, four runs before the service exists. | **The contract forbids it, and says so in its own text.** `test_every_consumer_names_a_real_compose_service` requires a compose-plane consumer to name a service that exists, and `secrets.required.yaml` records why beside `postgrest_authenticator_password`: "It arrives in the same commit as its consumer... a grant to a service that does not [exist] is a grant nobody can audit." Three of the four name `auth`, which is Run 7's. | **The four move to Run 7**, with the service. The value-kind enum widening they need (`rsa_private_jwk`, `public_jwks` -- ADR 0055's rule that the kind says what the value *is*) moves with them, since nothing else needs it. | Attempted and reverted rather than argued: the contract test went red on the first run, which is the rule working. **Landing the entries early would have been this session's own recurring defect** -- a declaration with nothing wired to it, after D235's uncalled rotation plane, D243's unbuilt ADR 0049 and D204's rule catching `jwt_claims` in the same week. | no |
 | **D247** | (Implicit throughout.) A schema field's required-ness is proved by the tests that exercise documents lacking it. | **Measured by mutation: removing `app_docs` from the schema's `required` list left every test green.** The documents those refusal tests use are **version 8**, and the version enum refuses them on its own -- so the required-ness was riding on a check that would have refused the document anyway. | **A test that migrates to v9 first and then removes the key**, with the migrated document validating two lines above as its control. | A guard proved by a test that does not need it. The same shape as every finding this session has produced, one layer down: the assertion was green, the code was correct, and nothing connected them. Found only because the mutation was expected to go red and did not. | no |
+| **D248** | (§17.2 of the runbook, and D218's decision to strike it.) The registry is created rather than extended, so the migration is the simpler of the two shapes and needs no special care. | **Simpler, and it has a hole the complicated one does not.** ADR 0078 requires `scope` to be a sorted, deduplicated array of non-null strings; the database should hold the same line. `CHECK (scopes = ARRAY(SELECT DISTINCT unnest(scopes) ORDER BY 1))` is refused outright -- "cannot use subquery in check constraint" -- and the function-backed version that replaces it **accepted `ARRAY['a', NULL]`**. Array comparison with a NULL element is NULL, and **a CHECK constraint is satisfied when its expression is NULL**. Measured on the locked image, with a control: the same function refused the unsorted array in the same run. | **ADR 0080.** A CHECK may not be able to evaluate to NULL: every function used in one returns `coalesce(<predicate>, false)`, a predicate over a collection tests for NULL members explicitly, and `NOT NULL` sits beside every emptiness check as a tested rule rather than a convention. | The scalar case is the same: `CHECK (v <> '')` accepts NULL. So every emptiness check in this repository has always depended on a `NOT NULL` beside it to mean anything -- **verified across all thirty CHECK lines in `migrations/templates/` rather than assumed**, and all thirty have one. D218's 'NOT NULL from creation' was doing more work than it looked. | **yes** |
 
 ---
 
@@ -362,16 +363,41 @@ service that does not exist, and `auth` is Run 7's. Attempted, reverted, recorde
 **The materialization proof now stats every consumer** (D213), so a wrong `uid`
 or `mode` there fails on the next gate rather than in Session 9.
 
-### Run 5 — Migration 0011: the identity registry
+### Run 5 — Migration 0011: the identity registry  ·  **Done.**
 
-`app_private.users`, `user_credentials`, `agents`, `agent_credentials`,
-`auth_contract_state`, and the named private function surface. Created from
-nothing — no backfill, `NOT NULL` from creation (D218). No foreign key from
-`app.notes.owner_id`.
+Five tables, one helper function, one placeholder. Created from nothing — no
+backfill, `NOT NULL` from creation (D218) — and no `REFERENCES app.` anywhere,
+because `app.notes.owner_id` holds a claim value that ADR 0029 calls trusted, not
+authenticated.
 
-Catalog tests prove ownership, ACLs, safe `proconfig` search paths, no `PUBLIC`
-privileges, no direct table grants to `auth_service`, and **no function in the
-`api` schema**.
+**Every SQL construct was measured against the locked image before it was
+written**, each with a control: `gen_random_uuid()` without an extension;
+`normalize` and `lower` both `IMMUTABLE` (read out of `pg_proc.provolatile`) and
+therefore indexable, with `Ada`/`ADA` and composed/decomposed `josé` both
+colliding on the unique index; a `text[]` CHECK with `<@`; a partial unique index
+for "one active X"; and `SET search_path` recorded in `proconfig`.
+
+**Two of those measurements changed the file, and one became ADR 0080**: a CHECK
+constraint passes when its expression is NULL, so the scope-shape function had to
+stop being able to return one. See D248 — it is the sharper finding of the run
+and it applies backwards across every migration in the repository.
+
+**Then all eleven were applied in order to a cluster built from the locked
+image**, and the catalog was read back: five tables owned by `object_owner`, two
+functions in `app_private` with pinned search paths and neither `SECURITY
+DEFINER`, no `PUBLIC` privilege, no function added to `api`, and `auth_service`
+holding schema `USAGE` with `SELECT` and `INSERT` on `app_private.users` both
+false. Thirteen behaviour checks, each refusing what it exists to refuse with a
+control beside it.
+
+The auth service's *functions* are not here. It has schema `USAGE` and nothing
+else, and the definer functions it will call arrive in the same commit as the
+code that calls them — D246's lesson from Run 4, applied one run later.
+
+`auth_contract_state` seeds the required claim set, tied to
+`jwt_claims.REQUIRED_CLAIMS` by a contract test rather than by a manifest
+placeholder: the claim list is not a per-project value and does not belong in the
+deployed document.
 
 ### Run 6 — The bootstrap plane: `auth_service`
 
