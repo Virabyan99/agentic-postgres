@@ -42,10 +42,24 @@
 # radius of an error is a deleted volume rather than a bad commit, and because
 # an account that can deploy can read every materialized secret.
 
-Defaults:apg-agent    !requiretty
+# `env_reset` only, and that is a measurement rather than a preference.
+#
+# This host runs **sudo-rs**, the Rust implementation Ubuntu ships as the
+# default `sudo`, and it does not implement `requiretty`, `log_output` or
+# `logfile` -- `visudo -c` rejects all three as unknown settings while accepting
+# `env_reset` on the line between them (D209). The file still *worked* with them
+# present, which is the dangerous part: an invalid file that behaves correctly
+# today is one an upgrade can stop honouring, in the direction that drops a
+# boundary rather than a convenience.
+#
+# What is lost with `log_output`: sudo-rs records each invocation through syslog,
+# so *what was run* is attributable, but the command's output is not captured.
+# For a surface that mutates nothing and prints no secret, the invocation record
+# is the part that matters.
+#
+# Validate after any change to this file. `visudo -c` checks the whole set, and
+# a file that parses in isolation can still conflict.
 Defaults:apg-agent    env_reset
-Defaults:apg-agent    log_output
-Defaults:apg-agent    logfile="/var/log/apg-agent-sudo.log"
 
 # The path is fixed and outside any release. `installed_release` refuses a
 # symlink anywhere in a release, so there is no `current` to point at -- and a

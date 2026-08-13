@@ -308,3 +308,57 @@ def test_the_script_carries_no_repository_import(source: str) -> None:
     what makes it useful when the checkout is the broken thing."""
     for dependency in ("agentic_postgres", "ROOT_DIR", "src/", ".venv"):
         assert dependency not in source, f"the diagnostic surface depends on {dependency!r}"
+
+
+#: Settings `sudo(8)` implements and **sudo-rs** does not. Measured on the host
+#: with `visudo -c`, which rejected all three as unknown while accepting
+#: `env_reset` on the line between them (D209).
+#:
+#: Ubuntu ships sudo-rs as the default `sudo`, so a sudoers file written from
+#: sudo(8)'s manual is a file written for a different program -- ADR 0019's rule
+#: about configuration keys read from documentation, in a place nobody expected
+#: it to apply.
+UNSUPPORTED_BY_SUDO_RS = ("requiretty", "log_output", "logfile", "insults", "mailerpath")
+
+
+@pytest.mark.parametrize("setting", UNSUPPORTED_BY_SUDO_RS)
+def test_the_rule_uses_no_setting_this_host_rejects(setting: str) -> None:
+    """An invalid sudoers file that behaves correctly today is the dangerous kind.
+
+    The first version of this file carried three of these. sudo-rs parsed the
+    grant and enforced it -- both refusals fired, the allowlist worked -- while
+    `visudo -c` reported the whole file invalid. A file that works and does not
+    validate is one an upgrade can stop honouring, in the direction that drops a
+    boundary rather than a convenience.
+
+    Goes red if a setting from sudo(8)'s manual is added without checking it
+    against the sudo this host actually runs.
+    """
+    rule = "\n".join(
+        line
+        for line in SUDOERS.read_text(encoding="utf-8").splitlines()
+        if not line.lstrip().startswith("#")
+    )
+    assert setting not in rule, (
+        f"{setting!r} is a sudo(8) setting that sudo-rs rejects; `visudo -c` would "
+        "report this file invalid"
+    )
+
+
+def test_the_rule_is_two_effective_lines() -> None:
+    """Everything else is comment, and that is deliberate.
+
+    A sudoers file is the one artefact here with no test harness of its own on
+    the host, so the smaller its effective content, the more of it a human can
+    check by reading. Two lines: what the agent's environment is, and what it
+    may run.
+    """
+    effective = [
+        line.strip()
+        for line in SUDOERS.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    assert effective == [
+        "Defaults:apg-agent    env_reset",
+        "apg-agent ALL=(root) NOPASSWD: /usr/local/bin/apg-diag",
+    ], effective
