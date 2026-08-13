@@ -1380,6 +1380,12 @@ def observe_jwt(rendered: dict[str, Any], jwks_path: Path) -> dict[str, Any]:
         # Null: no rotation is in flight. A date here is a rotation with a
         # deadline, and Run 10 is what sets one.
         "retire_after": None,
+        # Version 9. Null rather than an empty object, and the difference is the
+        # whole point: an empty object says every verifier was asked and none has
+        # answered, and null says nothing has been asked. Before the first
+        # rotation the second is true. Run 10 records a digest per consumer here
+        # and blocks promotion until they agree.
+        "verifier_acknowledgements": None,
     }
 
 

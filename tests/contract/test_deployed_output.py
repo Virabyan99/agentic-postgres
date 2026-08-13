@@ -1141,3 +1141,106 @@ def test_the_published_hash_verifies_against_its_own_password_and_no_other(
     assert verifies(password), "the operator's own password does not open the page"
     assert not verifies(password + "\n"), "the trailing newline was hashed into the credential"
     assert not verifies("not-the-password")
+
+
+# ---------------------------------------------------------------------------
+# A producer of a schema-constrained block supplies every key of it (D251)
+# ---------------------------------------------------------------------------
+
+
+def _load_deploy_command():
+    """`bin/deploy-project.py` is a script, not a module. Load it by path."""
+    import importlib.util
+
+    source = REPO_ROOT / "bin" / "deploy-project.py"
+    spec = importlib.util.spec_from_file_location("apg_deploy_project_under_test", source)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _schema_properties(name: str) -> set[str]:
+    import json
+
+    schema = json.loads((REPO_ROOT / "schemas" / "outputs.schema.json").read_text(encoding="utf-8"))
+    return set(schema["$defs"][name]["properties"])
+
+
+def test_the_not_published_constants_carry_every_key_of_their_schema_block() -> None:
+    """`additionalProperties: false` plus a full `required` list means equality."""
+    from agentic_postgres import deployed_output
+
+    for constant, definition in (
+        (deployed_output.JWT_NOT_PUBLISHED, "deployedJwt"),
+        (deployed_output.API_NOT_PUBLISHED, "deployedApi"),
+        (deployed_output.ROUTE_NOT_PUBLISHED, "publishedRoute"),
+    ):
+        assert set(constant) == _schema_properties(definition), definition
+
+
+def test_observe_jwt_produces_every_key_the_schema_requires(tmp_path: Path) -> None:
+    """The one that failed on a live host, twice in one window.
+
+    Version 9 added `jwt.verifier_acknowledgements`. `JWT_NOT_PUBLISHED` gained
+    it, the test fixture gained it, and **`observe_jwt` -- the function the deploy
+    actually calls when the issuer IS published -- did not**. The document
+    validated in every offline test, because every offline test built its jwt
+    block from the constant or the fixture, and failed schema validation on the
+    host at step 7.
+
+    So this calls the producer. Not a re-reading of the constant beside it: the
+    constant was right both times.
+    """
+    import json
+
+    deploy = _load_deploy_command()
+
+    jwks = tmp_path / "jwks.json"
+    jwks.write_text(
+        json.dumps({"keys": [{"kid": "a" * 43, "kty": "RSA", "alg": "RS256"}]}), encoding="utf-8"
+    )
+    rendered = {
+        "jwt": {
+            "issuer": "https://example.test/api/app/auth",
+            "audience": "urn:agentic-postgres:example:dev",
+        }
+    }
+
+    produced = deploy.observe_jwt(rendered, jwks)
+    assert set(produced) == _schema_properties("deployedJwt"), (
+        "observe_jwt does not produce the deployedJwt block the schema describes. A key "
+        "added to the schema and to JWT_NOT_PUBLISHED but not here fails only on a "
+        "deployment that actually publishes an issuer"
+    )
+    assert produced["status"] == "ready"
+
+
+def test_observe_jwt_and_the_absent_constant_agree_on_shape(tmp_path: Path) -> None:
+    """Two producers of one block. The pair is what the schema sees.
+
+    They differ in every value and must agree in every key: one describes an
+    issuer that is published and the other one that is not, and a reader of the
+    document cannot be asked to know which shape it is holding.
+    """
+    import json
+
+    from agentic_postgres import deployed_output
+
+    deploy = _load_deploy_command()
+    jwks = tmp_path / "jwks.json"
+    jwks.write_text(json.dumps({"keys": [{"kid": "b" * 43}]}), encoding="utf-8")
+
+    produced = deploy.observe_jwt(
+        {"jwt": {"issuer": "https://example.test/a", "audience": "urn:x:y:z"}}, jwks
+    )
+    assert set(produced) == set(deployed_output.JWT_NOT_PUBLISHED)
+
+
+def test_observe_jwt_reports_absence_when_there_is_no_key_set(tmp_path: Path) -> None:
+    """The other branch, and it returns the constant -- so it is covered above."""
+    from agentic_postgres import deployed_output
+
+    deploy = _load_deploy_command()
+    produced = deploy.observe_jwt({"jwt": {}}, tmp_path / "absent.json")
+    assert produced == deployed_output.JWT_NOT_PUBLISHED
