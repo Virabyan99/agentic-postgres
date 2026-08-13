@@ -140,3 +140,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0074](0074-a-session-scoped-proof-reads-the-session-from-the-deployment.md) | A session-scoped proof reads the session from the deployment | 5 | Accepted |
 | [0075](0075-a-proof-names-a-secret-not-the-file-it-lands-in.md) | A proof names a secret, not the file it lands in | 6 | Accepted |
 | [0076](0076-the-bootstrap-signing-key-rotates-by-cutover.md) | The bootstrap signing key rotates by cutover, and the overlap is unbuilt | 6 | Accepted |
+| [0077](0077-a-package-entry-is-dereferenced-like-an-image.md) | A package entry is dereferenced like an image | 6 | Accepted |

@@ -401,3 +401,114 @@ def test_cli_grammar() -> None:
     assert (
         subprocess.run([str(SCRIPT), "--bogus"], capture_output=True, check=False).returncode == 2
     )
+
+
+# ---------------------------------------------------------------------------
+# Packages are dereferenced, not copied through (ADR 0077, lock format 2)
+# ---------------------------------------------------------------------------
+
+PACKAGE_DIGEST = re.compile(r"^(sha256|sha512):[A-Za-z0-9+/=_\-]{32,}$")
+KNOWN_REGISTRIES = {"pypi", "npm"}
+
+
+def test_every_package_declares_a_registry_and_a_package_name(candidates: dict) -> None:
+    """Format 2's whole point: an entry the lock can look up.
+
+    Before this, a `packages:` entry was `NAME: "version"` -- a string with no
+    registry and no package name, so there was nothing to dereference even in
+    principle. `SCALAR_VERSION: "1.36.4"` named a release that has never existed
+    and survived four sessions of a green check (D201).
+    """
+    assert candidates["lock_format"] >= 2
+    for name, entry in candidates["packages"].items():
+        assert isinstance(entry, dict), f"{name} is a bare version string, not a format-2 entry"
+        assert set(entry) == {"registry", "package", "version"}, f"{name}: {sorted(entry)}"
+        assert entry["registry"] in KNOWN_REGISTRIES, f"{name} declares {entry['registry']!r}"
+        assert entry["package"], name
+        assert str(entry["version"]), name
+
+
+def test_every_package_carries_an_artifact_digest(lock: dict[str, str], candidates: dict) -> None:
+    """The digest is what a copied string could never have.
+
+    It is not proof the artifact exists *today* -- `--check` makes no network
+    call, deliberately, so that it cannot pass merely because a registry is up.
+    It is proof that whoever ran `--update` resolved the version to exactly one
+    published artifact: an sdist on PyPI, a tarball on npm.
+    """
+    for name in candidates["packages"]:
+        digest = lock.get(f"{name}_DIGEST")
+        assert digest is not None, f"{name} has no artifact digest; run --update"
+        assert PACKAGE_DIGEST.match(digest), f"{name}_DIGEST is malformed: {digest!r}"
+
+
+def test_no_orphan_digest_survives_a_removed_package(
+    lock: dict[str, str], candidates: dict
+) -> None:
+    """A stale `_DIGEST` would name an artifact for a package nobody declares."""
+    declared = {f"{name}_DIGEST" for name in candidates["packages"]}
+    orphans = {name for name in lock if name.endswith("_DIGEST")} - declared
+    assert not orphans, f"versions.env carries digests for undeclared packages: {sorted(orphans)}"
+
+
+def test_a_package_with_no_digest_is_detected(fake_repo: Path) -> None:
+    """The failure this exists to catch, injected: a version nothing resolved."""
+    lock_path = fake_repo / "versions.env"
+    lock_path.write_text(
+        "\n".join(
+            line
+            for line in lock_path.read_text(encoding="utf-8").splitlines()
+            if not line.startswith("PWDLIB_VERSION_DIGEST=")
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = run_check(fake_repo)
+    assert result.returncode == 5
+    assert "PWDLIB_VERSION_DIGEST" in result.stderr
+    assert "D201" in result.stderr, (
+        "the message should name the defect it prevents; an operator who sees this "
+        "is one `--update` away from the whole story"
+    )
+
+
+def test_a_malformed_digest_is_detected(fake_repo: Path) -> None:
+    lock_path = fake_repo / "versions.env"
+    lock_path.write_text(
+        lock_path.read_text(encoding="utf-8").replace(
+            "PWDLIB_VERSION_DIGEST=sha256:", "PWDLIB_VERSION_DIGEST=notanalgorithm:"
+        ),
+        encoding="utf-8",
+    )
+
+    result = run_check(fake_repo)
+    assert result.returncode == 5
+    assert "PWDLIB_VERSION_DIGEST" in result.stderr
+
+
+def test_a_bare_version_string_is_refused(fake_repo: Path) -> None:
+    """A format-1 entry in a format-2 file, which is what a bad merge produces."""
+    candidates_path = fake_repo / "versions.in.yaml"
+    document = yaml.safe_load(candidates_path.read_text(encoding="utf-8"))
+    document["packages"]["PWDLIB_VERSION"] = "0.3.0"
+    candidates_path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+    result = run_check(fake_repo)
+    assert result.returncode == 5
+    assert "bare version string" in result.stderr
+
+
+def test_the_interpreter_is_not_moved_by_this_dependency_set(candidates: dict) -> None:
+    """D240, kept as an executable statement rather than a comment.
+
+    The Session 6 runbook specified CPython 3.13. Measured in Run 2: every
+    package in this set declares `requires_python >= 3.10` or looser at the
+    pinned version, so nothing forces the bump. If a later session raises
+    `.python-version`, this fails and the bump gets the ADR it needs rather than
+    arriving inside an unrelated commit.
+    """
+    assert candidates["python"]["version"].startswith("3.12."), (
+        "the interpreter moved. Nothing in the Session 6 dependency set required "
+        "3.13 when it was measured; a bump is its own decision (D240)"
+    )

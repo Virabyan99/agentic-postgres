@@ -20,7 +20,7 @@ Two things were measured, and neither is what the row expected.
 **The pinned version does not exist** (D201). `SCALAR_VERSION: "1.36.4"` has been
 in `versions.in.yaml` since Session 1; `@scalar/api-reference` published 1.36.2
 and then 1.37.0, and no Scalar image carries the tag either. It survived four
-sessions because `bin/verify-versions.sh` resolves `images:` against a registry
+sessions because `bin/lock-versions.sh` resolves `images:` against a registry
 while a `packages:` entry is a string nothing dereferences.
 
 **Self-containment is not a discriminator** (D202). Measured on both real

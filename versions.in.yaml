@@ -10,7 +10,7 @@
 # property of this repository, so the same lock file could mean different
 # images on different machines.
 
-lock_format: 1
+lock_format: 2
 
 # Every image is resolved for exactly this platform. If a digest cannot be
 # resolved for it, the session is blocked; a floating tag is not a substitute.
@@ -114,11 +114,32 @@ feature_floors:
   # over the socket proxy and over the raw socket alike.
   TRAEFIK_MINIMUM_VERSION: "3.6"
 
-# Package versions, locked as version strings rather than digests because no
-# first-party image exists to digest yet.
+# Package versions. Each entry names its registry and the package as that
+# registry spells it, so `--update` can dereference it the way it dereferences
+# an image -- and record the digest of the artifact it found (ADR 0077).
+#
+# Before Session 6 this was `NAME: "version"`, a string nothing resolved. That
+# is how `SCALAR_VERSION: "1.36.4"` sat here for four sessions naming a release
+# that has never existed (D201): a lock verifies what it can dereference, and
+# everything else in it is a comment with a colon in it.
+#
+# `--check` stays offline. What it verifies is that every entry carries a digest
+# `--update` could only have obtained by finding a real artifact.
 packages:
-  FASTAPI_VERSION: "0.121.2"
-  FASTMCP_VERSION: "2.14.1"
+  # Session 1. Not yet built from; Session 6's auth service is the first thing
+  # that will install it. Kept at the pinned version rather than moved to the
+  # runbook's 0.141.1 (D239): both exist, nothing measured requires the newer,
+  # and D37's rule is that a session uses what is already pinned. The bump has a
+  # place to be decided -- Run 7, where the service is built and can be run
+  # against it -- rather than being taken from a document.
+  FASTAPI_VERSION:
+    registry: pypi
+    package: fastapi
+    version: "0.121.2"
+  FASTMCP_VERSION:
+    registry: pypi
+    package: fastmcp
+    version: "2.14.1"
   # Session 4 targets this major deliberately (D86). The runbook's fixture was
   # written for Prisma 7 -- prisma.config.ts, DIRECT_URL as the CLI datasource,
   # no `directUrl` datasource field -- which is a different configuration model,
@@ -127,13 +148,16 @@ packages:
   # through the direct endpoint. Bumping to 7 would be a fixture rewrite bought
   # with no measured need. The acceptance report names the configuration model
   # it tested, and a fixture may not straddle both.
-  PRISMA_VERSION: "6.19.1"
+  PRISMA_VERSION:
+    registry: npm
+    package: prisma
+    version: "6.19.1"
   # Re-pinned in Session 5 Run 9a, because the previous value named a release
   # that does not exist (D201). `@scalar/api-reference` published 1.36.2 and
   # then 1.37.0; there has never been a 1.36.4, and no Scalar image carries the
   # tag either. It sat here for four sessions because nothing built from it and
-  # because `bin/verify-versions.sh` resolves `images:` against a registry while
-  # a `packages:` entry is a string nothing dereferences.
+  # because the lock resolved `images:` against a registry while a `packages:`
+  # entry was a string nothing dereferenced. That is what ADR 0077 changes.
   #
   # 1.64.1 is `latest` at the time of measurement, chosen over 1.36.2 -- the
   # nearest real release to the old string -- because there is no intent to
@@ -143,4 +167,68 @@ packages:
   # in `dist/browser/standalone.js`, and `withDefaultFonts` defaults to true in
   # both. The configuration and the CSP are what make the page self-contained
   # (ADR 0069), not the version.
-  SCALAR_VERSION: "1.64.1"
+  SCALAR_VERSION:
+    registry: npm
+    package: "@scalar/api-reference"
+    version: "1.64.1"
+
+  # ---------------------------------------------------------------------------
+  # Session 6. The auth service's dependency set.
+  #
+  # Every version below was resolved against PyPI in Run 2 before it was written
+  # here, with a control that reports a fictional version as absent -- because
+  # the runbook supplied nine exact numbers with no provenance, which is D201's
+  # defect one level up. All of them turned out to exist; that is a measurement
+  # with an unremarkable result, not a reason to have skipped it.
+  #
+  # Measured at the same time, and the reason the interpreter does not move:
+  # every one of these declares `requires_python >= 3.10` or looser at the
+  # pinned version. Nothing in the set requires 3.13, so the repository's locked
+  # 3.12.13 stands and the runbook's interpreter bump is not taken (D240).
+  #
+  # Also measured: none of these needs a build toolchain in the runtime image on
+  # linux/amd64. The four named distributions are pure Python; their compiled
+  # dependencies -- argon2-cffi-bindings, cryptography, cffi, and psycopg-binary
+  # if the C speedups are wanted -- all publish cp312/abi3 manylinux x86_64
+  # wheels. That is a fact about the transitive set, not the named one, and the
+  # first pass of the measurement got it wrong by asking the named packages.
+  PYJWT_VERSION:
+    registry: pypi
+    package: pyjwt
+    version: "2.13.0"
+  # Recorded explicitly although `PyJWT[crypto]` introduces it transitively.
+  # This is the library that verifies a signature; a version this repository
+  # cannot name is a version it cannot reason about.
+  CRYPTOGRAPHY_VERSION:
+    registry: pypi
+    package: cryptography
+    version: "50.0.0"
+  PYDANTIC_VERSION:
+    registry: pypi
+    package: pydantic
+    version: "2.13.4"
+  PYDANTIC_SETTINGS_VERSION:
+    registry: pypi
+    package: pydantic-settings
+    version: "2.14.2"
+  PSYCOPG_VERSION:
+    registry: pypi
+    package: psycopg
+    version: "3.3.4"
+  # The password hashing wrapper, and the least established entry in this file:
+  # five releases in total. Its own metadata is what pins the backend --
+  # `argon2-cffi<26,>=23.1.0` under the `argon2` extra -- so the entry below is
+  # inside pwdlib's declared range rather than beside it. A wrapper and a backend
+  # pinned independently is two authorities for one choice.
+  PWDLIB_VERSION:
+    registry: pypi
+    package: pwdlib
+    version: "0.3.0"
+  ARGON2_CFFI_VERSION:
+    registry: pypi
+    package: argon2-cffi
+    version: "25.1.0"
+  UVICORN_VERSION:
+    registry: pypi
+    package: uvicorn
+    version: "0.50.2"

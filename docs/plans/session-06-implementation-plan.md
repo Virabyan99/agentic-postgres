@@ -94,6 +94,10 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D234** | §4.10: bound Argon2 to "no more than two concurrent operations per container" and reserve "at least 128 MiB for two concurrent 64 MiB hashes"; §15.2 sets a 384 MiB memory limit. | The repository derives every memory bound from the manifest and checks it against a per-project guardrail: `database.memory_limit_mb` must exceed a *derived unreclaimable budget*, and that budget must not exceed the guardrail — both are `CROSS_FIELD_RELATIONS` entries in `config.py`, generated into the bounds documentation. A service limit typed into a Compose file is outside that arithmetic. | **The auth service's memory limit joins the derived budget** as a named claimant, the way ADR 0070 made the connection budget a division rather than a set of independent grants. `hash_concurrency` and the limit are related by a cross-field relation — `hash_concurrency × memory_cost_kib` plus process overhead must fit the declared limit — so a manifest that raises concurrency without raising the limit **fails validation** instead of being killed by the OOM killer at the first login burst. | The runbook's numbers are probably fine. The failure they leave open is the one this project keeps producing: two values in two files that must agree, with nothing computing the relation. `memory_cost = 65536 KiB` and `hash_concurrency = 2` and `384 MiB` are three numbers with one true relationship between them. | **yes** |
 | **D235** | (Session 6's plan, §0 and Run 1.) Running Session 5's rotation window first "is not tidiness" -- it exercises the prepare/promote/retire machinery Session 6's signing-key cutover depends on, which "has never been exercised once". | **Measured: there is no machinery to exercise.** `jwt_keys.begin_rotation` and `complete_rotation` implement a two-phase overlap with a computed retirement deadline and a refuse-early rule, and **nothing outside `tests/contract/test_jwt_keys.py` calls either.** `bin/render-jwks.py::build` returns `build_jwks([jwk])` -- exactly one key -- under a comment reading "A rotation publishes two and is Run 10's"; `bin/deploy-project.py::observe_jwt` writes `retire_after: None` unconditionally under a comment reading "Run 10 is what sets one". Run 10 did neither. | **The bootstrap key rotates by cutover, and Run 1 executes a cutover** (ADR 0076). The proof is unchanged -- it was always written as an *end state*, which is agnostic about the path taken to it -- and only its docstring and `SEC-BOOT-001`'s description lose the phrase "second rotation phase". The overlap functions stay, uncalled and not presented as available. | **This is Run 9's `PGRST_DB_PRE_REQUEST` in a new place**: a plane built, validated, unit-tested, documented, and wired to nothing -- with a comment naming a future run as the tell in both cases. The consequence is the part that matters: **Run 1 does not de-risk Run 10, and the plan said it would.** Run 10 builds its overlap without a live rehearsal, and §9 now carries that. | **yes** |
 | **D236** | (Session 5's own proof, inherited as ready to admit.) Run 1 is a maintenance window that runs three rotation proofs which were written, reviewed and committed in Session 5. | **One of the three cannot run.** `test_a_rotated_authenticator_serves_the_plane_and_the_old_password_does_not` asks `materialized_secret` for `postgrest/postgrest_authenticator_password`; the materializer writes `postgrest/postgrest_authenticator_pgpass`, because that consumer declares `format: pgpass` (ADR 0056). It is the **only** entry in `secrets.required.yaml` whose `target_file` differs from its `name`, so the wrong rule held for twelve consumers of thirteen. Measured offline against the committed contract, with a control that resolves. | **A test names a secret and who holds it; the filename and the format are derived** (ADR 0075). `secrets_contract.consumer_named` resolves the pair, `materialized_secret` returns `recover_secret(...)` of the bytes, and no caller can spell a path. Fixed **before** the window, not during it. | Had the filename been right it would have been worse. `new` would have been the pgpass line, so `assert old != new` -- the control that refuses a false declaration -- could never have failed, and a window in which nothing was rotated would have reported *"the verifier was not replaced"*: a diagnosis of the bootstrap plane, for an operator error. **And the correct idiom was already in the repository**, in `test_session5_api_isolation.py`, one file away -- D173's two spellings of one object, with the spelling that had run being the right one. | **yes** |
+| **D237** | (D225 and §5 Run 2 of this plan, and D201 before them, and `versions.in.yaml`, and ADR 0069.) `bin/verify-versions.sh` resolves `images:` entries to digests while a `packages:` entry is a string nothing dereferences. | **`bin/verify-versions.sh` has never existed.** The script is `bin/lock-versions.sh`, with `--update` and `--check`, and `git log --diff-filter=AR -- 'bin/*version*'` returns exactly one commit and one path. Four documents name the wrong file, including this plan twice. | **The live references are corrected; the historical ones are not.** `versions.in.yaml` and ADR 0069 now name the real script. Session 5's divergence table keeps its wording, because a divergence row records what was believed at the time and editing one to be right destroys the record. This row is the correction. | The claim *about* the script was true -- packages really were copied through -- so the wrong name rode along inside a correct sentence, four times, for two sessions. It is the cheapest possible instance of this project's defect and it cost nothing until somebody was told to go and change that file. | no |
+| **D238** | (Implicit in D225's "resolved against its registry, in Run 2".) Locking a measured package version is an additive act. | **`--update` regenerates `versions.env` wholesale**, so writing one package pin also re-resolves all ten images -- and four are pinned by tags that move: `pgvector:pg18`, `traefik:v3.7`, `node:22-alpine`, `python:3.12-slim`. Measured immediately before Run 2's update, per image, against the recorded digest: **zero drift**, because the lock was one day old. | **Run 2 proceeded, with the image digests as the control**: every `_IMAGE` line came back byte-identical, and that identity is what makes this change a package change. Carried as an open item (§10) rather than fixed, because separating the two resolutions is a change to `--update`'s contract and Run 2 is not the place to make one. | The measurement's result was 'safe', and the finding is that **it was safe today**. On any day when a tag has moved, locking a dependency silently changes what the deployment runs -- a coupling nobody would choose, discovered only because the control was written before the command was run. | no |
+| **D239** | FastAPI `0.141.1`, as one of the nine. | **`FASTAPI_VERSION: "0.121.2"` has been in `versions.in.yaml` since Session 1**, and nothing has ever built from it. Both versions were resolved against PyPI in Run 2 and both exist. | **Kept at 0.121.2.** D37's rule is that a session uses what is already pinned; nothing measured requires the newer one, and the place to decide is Run 7, where the service exists and can be *run* against a version rather than assigned one. | The counter-argument is real and is recorded rather than dismissed: twenty minor releases of a web framework, and a pin nothing has ever installed carries no compatibility evidence in either direction. That is an argument for measuring in Run 7, not for taking a number from a document now. | no |
+| **D240** | CPython `3.13.x` as the locked interpreter. | **Measured at each pinned version, not at `latest`:** every package in the set declares `requires_python >= 3.10` or looser -- fastapi 0.141.1, pydantic-settings 2.14.2, psycopg 3.3.4, pwdlib 0.3.0 and uvicorn 0.50.2 at `>=3.10`; pyjwt and pydantic at `>=3.9`; argon2-cffi at `>=3.8`. Nothing forces 3.13. Also measured: no build toolchain is needed on `linux/amd64` -- and that answer required asking the **transitive** distributions, because argon2-cffi and psycopg are pure-Python wrappers whose C code lives in argon2-cffi-bindings and psycopg-binary. `cffi`, `cryptography`, `argon2-cffi-bindings` and `psycopg-binary` all publish cp312/abi3 manylinux x86_64 wheels. | **The interpreter stays at the repository's locked 3.12.13**, and `test_the_interpreter_is_not_moved_by_this_dependency_set` makes that an executable statement, so a later bump gets its own decision instead of arriving inside an unrelated commit. | The first pass of this measurement reported "everything is pure Python", which was true of the eight named distributions and false about the question. **A rig whose subject is one level away from the claim** -- caught only because the answer was too convenient for a set containing Argon2. | no |
 
 ---
 
@@ -241,16 +245,31 @@ Nothing in Session 6 starts until this is done. D233's reason still holds, in it
 corrected form: Session 6 replaces the signing key's owner, and the repository
 has never once replaced a signing key.
 
-### Run 2 — Measure every version, then lock
+### Run 2 — Measure every version, then lock  ·  **Done.**
 
-Nine dependency versions resolved against their registries with a control
-(D225, D201). The interpreter stays at the repository's locked 3.12 unless a
-measurement forces otherwise. `cryptography` recorded explicitly.
+All eight supplied versions resolved against PyPI, with a control that reports a
+fictional version as absent. **Every one exists** — an unremarkable result, and
+not a reason to have skipped the measurement. `cryptography` recorded explicitly.
+FastAPI stays at the already-pinned 0.121.2 (**D239**); the interpreter stays at
+3.12.13, measured per pinned version rather than assumed (**D240**).
 
-**Also in this run, because it is the same defect:** decide whether
-`bin/verify-versions.sh` can resolve `packages:` entries the way it resolves
-`images:`. It needs network in a check that deliberately has none. If it cannot,
-that stays an open item and is *written down as one* rather than left implied.
+**The other half turned out to be solvable, and was solved** (ADR 0077). Session
+5 left "resolve package versions against their registry" open on the grounds that
+it needs network in a check that deliberately has none — and that framing was the
+obstacle. Images do not work because `--check` can reach a registry; they work
+because **`--update` writes down something only a successful dereference could
+have produced, and `--check` verifies it offline.** So a `packages:` entry now
+declares its registry and package name, `--update` resolves it to one canonical
+artifact — the sdist on PyPI, the tarball on npm — and records the digest.
+`--check` stays entirely offline. Lock format 1 → 2.
+
+A version nobody published now **blocks** `--update`. Proved in a copied
+repository with `pwdlib==0.999.999`: exit 5, with the same rig at the real
+version exiting 0. **D201 is closed.**
+
+Found on the way: `bin/verify-versions.sh` has never existed (**D237**), and
+`--update` re-resolves every image when it locks one package (**D238**), which
+was safe on the day and is carried as an open item.
 
 ### Run 3 — The claim contract
 
@@ -441,9 +460,16 @@ Unchanged from Session 5 unless Session 6 touches them:
   adds a service dependency tree; this is the run to fix it or to say why not.
 - ADR 0019's CI job is unbuilt. The runbook assumes `.github/workflows/ci.yml`
   exists and is commit-pinned. It does not exist.
-- **`SCALAR_VERSION` named a release that never existed for four sessions**
-  (D201) because a lock verifies what it can dereference. Run 2 decides whether
-  that is fixable.
+- ~~`SCALAR_VERSION` named a release that never existed for four sessions
+  (D201).~~ **Closed in Run 2** (ADR 0077): a package entry names its registry and
+  resolves to an artifact digest, and a fictional version blocks `--update`.
+- **`--update` re-resolves every image when it locks one package** (D238). Four
+  image tags float, so on a day when one has moved, pinning a dependency would
+  silently change what the deployment runs. Separating the two resolutions is a
+  change to `--update`'s contract and has not been made.
+- **The lock proves a version exists; it does not prove an installed artifact is
+  that version.** ADR 0077's digest is recorded, not enforced at install time.
+  `requirements-dev.in` pinning nothing is the open item that belongs with it.
 - The Infisical control-plane identity holds org admin.
 - Secret generations accumulate; nothing prunes them. Session 6 adds key
   generations to that pile.

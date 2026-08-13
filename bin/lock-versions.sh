@@ -81,6 +81,8 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.request
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -130,8 +132,63 @@ for name, reference in sorted(spec["images"].items()):
     print(f"  resolved {name} -> {digest}", file=sys.stderr)
     lines.append(f"{name}={reference}@{digest}")
 
-for name, version in sorted(spec["packages"].items()):
-    lines.append(f"{name}={version}")
+# Packages, dereferenced (ADR 0077). A `packages:` entry used to be copied
+# through as a string, which is how a version that never existed survived four
+# sessions of a green lock check (D201). Each entry now names its registry and
+# its package, and resolves to the digest of exactly one published artifact: the
+# sdist on PyPI, the tarball on npm. A fictional version cannot be locked,
+# because there is no artifact to name.
+def resolve_package(name, entry):
+    registry, package, version = entry["registry"], entry["package"], entry["version"]
+
+    if registry == "pypi":
+        url = f"https://pypi.org/pypi/{package}/{version}/json"
+    elif registry == "npm":
+        url = f"https://registry.npmjs.org/{package.replace('/', '%2f')}/{version}"
+    else:
+        return None, f"{name}: unknown registry {registry!r}"
+
+    try:
+        with urllib.request.urlopen(url, timeout=60) as response:
+            document = json.loads(response.read())
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None, (
+                f"{name}: {registry} has no {package} {version}. The version does not "
+                "exist; this is D201's condition and it blocks"
+            )
+        return None, f"{name}: {registry} returned HTTP {error.code} for {package} {version}"
+    except OSError as error:
+        return None, f"{name}: cannot reach {registry} ({error})"
+
+    if registry == "pypi":
+        # The sdist: exactly one per release, and what every wheel is built
+        # from. Choosing among wheels would make the lock record a preference;
+        # the sdist makes it record a fact.
+        sdists = [f for f in document.get("urls", []) if f.get("packagetype") == "sdist"]
+        if len(sdists) != 1:
+            return None, (
+                f"{name}: {package} {version} publishes {len(sdists)} sdists; the lock "
+                "records one canonical artifact per version and cannot choose"
+            )
+        return f"sha256:{sdists[0]['digests']['sha256']}", None
+
+    dist = document.get("dist") or {}
+    integrity = dist.get("integrity")
+    if not integrity or "-" not in integrity:
+        return None, f"{name}: {package} {version} publishes no dist.integrity"
+    algorithm, value = integrity.split("-", 1)
+    return f"{algorithm}:{value}", None
+
+
+for name, entry in sorted(spec["packages"].items()):
+    digest, problem = resolve_package(name, entry)
+    if problem is not None:
+        blocked.append(problem)
+        continue
+    print(f"  resolved {name} -> {digest[:24]}...", file=sys.stderr)
+    lines.append(f"{name}={entry['version']}")
+    lines.append(f"{name}_DIGEST={digest}")
 
 # Feature floors, plus the resolved version each is compared against. The
 # resolved version comes from the *tag* rather than from a registry label,
@@ -151,8 +208,15 @@ for floor_name, minimum in sorted(spec.get("feature_floors", {}).items()):
     lines.append(f"{prefix}_VERSION={tag}")
 
 if blocked:
-    print("lock-versions: BLOCKED. Runbook §15: do not substitute a floating tag.",
+    # One message for two kinds of blockage, so it names the rule rather than
+    # one instance of it: an image that will not resolve must not be replaced by
+    # a floating tag, and a package version that will not resolve must not be
+    # written down anyway. The second half is D201.
+    print("lock-versions: BLOCKED. Nothing is written. A reference that cannot be",
           file=sys.stderr)
+    print("resolved is not locked by recording it: not a floating tag for an image,",
+          file=sys.stderr)
+    print("and not a bare version string for a package.", file=sys.stderr)
     for item in blocked:
         print(f"  {item}", file=sys.stderr)
     raise SystemExit(5)
@@ -263,9 +327,41 @@ for name, reference in sorted(spec["images"].items()):
     if "/" not in reference.split(":", 1)[0]:
         problems.append(f"{name} repository is not fully qualified: {reference!r}")
 
-for name, version in sorted(spec["packages"].items()):
-    if values.get(name) != str(version):
+# 4c. Packages, and the half of ADR 0077 that runs offline. `--check` cannot
+#     reach a registry -- deliberately, so it cannot pass merely because one is
+#     up -- so what it verifies is that a digest is *present and well formed*.
+#     That is not proof the artifact exists today; it is proof that whoever ran
+#     `--update` found one, which a copied version string could never be.
+DIGEST = re.compile(r"^(sha256|sha512):[A-Za-z0-9+/=_\-]{32,}$")
+REGISTRIES = ("pypi", "npm")
+
+for name, entry in sorted(spec["packages"].items()):
+    if not isinstance(entry, dict):
+        problems.append(
+            f"{name} is a bare version string. Since lock format 2 a package declares "
+            "its registry and package name so the lock can dereference it (ADR 0077)"
+        )
+        continue
+
+    missing = {"registry", "package", "version"} - set(entry)
+    if missing:
+        problems.append(f"{name} is missing {sorted(missing)} in versions.in.yaml")
+        continue
+    if entry["registry"] not in REGISTRIES:
+        problems.append(f"{name} declares registry {entry['registry']!r}, not one of {REGISTRIES}")
+
+    if values.get(name) != str(entry["version"]):
         problems.append(f"{name} does not match versions.in.yaml")
+
+    digest_name = f"{name}_DIGEST"
+    digest = values.get(digest_name)
+    if digest is None:
+        problems.append(
+            f"{digest_name} is absent from versions.env. A package version with no artifact "
+            "digest is a string nothing dereferenced, which is D201; run --update"
+        )
+    elif not DIGEST.match(digest):
+        problems.append(f"{digest_name} is not <algorithm>:<value>: {digest!r}")
 
 
 def as_version(text):
@@ -310,6 +406,7 @@ for floor_name, minimum in sorted(spec.get("feature_floors", {}).items()):
 # 5. No image variable may exist in the lock that the candidate file does not
 #    declare -- otherwise a stale entry survives a deliberate removal.
 declared = set(spec["images"]) | set(spec["packages"])
+declared |= {f"{name}_DIGEST" for name in spec["packages"]}
 declared |= set(spec.get("feature_floors", {}))
 declared |= {
     f"{name[: -len('_MINIMUM_VERSION')]}_VERSION" for name in spec.get("feature_floors", {})
