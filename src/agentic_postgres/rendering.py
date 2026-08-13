@@ -147,6 +147,18 @@ def resolve_api_connection_budget(project: dict[str, Any]) -> int:
     return config.postgrest_connection_budget(rest)
 
 
+def resolve_auth_connection_budget(project: dict[str, Any]) -> int:
+    """What the auth service commits to, from `config` rather than arithmetic here.
+
+    The same shape as :func:`resolve_api_connection_budget` and for the same
+    reasons: one answer computed in one place, and published whether or not the
+    service is enabled so that the bootstrap plane's division of the budget does
+    not depend on a flag it does not read.
+    """
+    app = ((project.get("api") or {}).get("app")) or {}
+    return config.auth_connection_budget(app)
+
+
 def resolve_statement_timeouts(project: dict[str, Any], roles: dict[str, str]) -> dict[str, str]:
     """Resolve the manifest's suffix-keyed timeouts to derived role names.
 
@@ -255,7 +267,7 @@ def build_outputs(
         # `ROLE_SUFFIXES`. Appending the role there is the whole change, which is
         # what single-authority derivation is for -- a second list here would be
         # the place the two could disagree.
-        "schema_version": 9,
+        "schema_version": 10,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
@@ -290,6 +302,9 @@ def build_outputs(
             # name it was given rather than deriving one (ADR 0067).
             "statement_timeouts": resolve_statement_timeouts(project, dict(identity.roles)),
             "api_connection_budget": resolve_api_connection_budget(project),
+            # Version 10. The auth service's own commitment, charged whether or
+            # not the service is enabled, for the reason the line above is.
+            "auth_connection_budget": resolve_auth_connection_budget(project),
         },
         "routes": {
             "rest": identity.route_rest,

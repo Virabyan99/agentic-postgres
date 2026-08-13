@@ -315,14 +315,17 @@ def test_the_two_limits_and_the_reserve_fit_what_the_server_will_give(bootstrap:
     everything is two limits that sum past what the server hands out. That is a
     budget that looks computed and is not.
     """
-    maximum, reserved, api_budget = 50, 3, 13
-    application, api = bootstrap.connection_limits(maximum, reserved, api_budget)
+    maximum, reserved, api_budget, auth_budget = 50, 3, 13, 6
+    application, api, auth = bootstrap.connection_limits(maximum, reserved, api_budget, auth_budget)
 
     assert api == api_budget, "the API's ceiling is not the figure the document published"
+    assert auth == auth_budget, "the auth service's ceiling is not the document's figure"
     assert application > 0
-    assert application + api + bootstrap.OPERATIONAL_CONNECTION_HEADROOM == maximum - reserved, (
-        "the two limits and the operational headroom do not account for exactly what the "
-        "server will hand out; one of them is being computed independently of the other"
+    assert (
+        application + api + auth + bootstrap.OPERATIONAL_CONNECTION_HEADROOM == maximum - reserved
+    ), (
+        "the three limits and the operational headroom do not account for exactly what the "
+        "server will hand out; one of them is being computed independently of the others"
     )
 
 
@@ -333,8 +336,8 @@ def test_the_application_gets_what_is_left_rather_than_a_chosen_number(bootstrap
     ignored the API's figure would return the same number for both calls and
     pass any single-value assertion.
     """
-    small, _ = bootstrap.connection_limits(50, 3, 10)
-    large, _ = bootstrap.connection_limits(50, 3, 20)
+    small, _, _ = bootstrap.connection_limits(50, 3, 10, 6)
+    large, _, _ = bootstrap.connection_limits(50, 3, 20, 6)
     assert small - large == 10, (
         "the application's ceiling did not move with the API's; the two are not being "
         "divided out of one budget"
@@ -343,21 +346,25 @@ def test_the_application_gets_what_is_left_rather_than_a_chosen_number(bootstrap
 
 def test_the_headroom_is_held_back_from_both(bootstrap: Any) -> None:
     """It is what leaves a psql available when this arithmetic is wrong."""
-    application, api = bootstrap.connection_limits(50, 3, 13)
-    assert (50 - 3) - application - api == bootstrap.OPERATIONAL_CONNECTION_HEADROOM
+    application, api, auth = bootstrap.connection_limits(50, 3, 13, 6)
+    assert (50 - 3) - application - api - auth == bootstrap.OPERATIONAL_CONNECTION_HEADROOM
 
 
 @pytest.mark.parametrize(
-    ("maximum", "reserved", "api_budget"),
+    ("maximum", "reserved", "api_budget", "auth_budget"),
     [
-        (10, 3, 13),  # the API alone exceeds what is available
-        (10, 3, 2),  # nothing left after the headroom
-        (8, 3, 1),  # a tiny cluster
-        (5, 5, 1),  # the reservation takes everything
+        (10, 3, 13, 6),  # the API alone exceeds what is available
+        (10, 3, 2, 6),  # nothing left after the headroom
+        (8, 3, 1, 6),  # a tiny cluster
+        (5, 5, 1, 6),  # the reservation takes everything
+        # The third claimant's own case: everything else fits and the auth
+        # service is what tips it over. Without this the parameter set would
+        # exercise the new argument only as a passenger.
+        (30, 3, 13, 20),
     ],
 )
 def test_a_budget_that_does_not_fit_raises_rather_than_returning_a_number(
-    bootstrap: Any, maximum: int, reserved: int, api_budget: int
+    bootstrap: Any, maximum: int, reserved: int, api_budget: int, auth_budget: int
 ) -> None:
     """A negative limit is 'unlimited' to PostgreSQL and 0 is 'refuse every login'.
 
@@ -367,7 +374,7 @@ def test_a_budget_that_does_not_fit_raises_rather_than_returning_a_number(
     (D190).
     """
     with pytest.raises(ValueError, match=r"would be left with|leaves"):
-        bootstrap.connection_limits(maximum, reserved, api_budget)
+        bootstrap.connection_limits(maximum, reserved, api_budget, auth_budget)
 
 
 def test_the_authenticator_is_activated_with_its_ceiling(bootstrap: Any) -> None:

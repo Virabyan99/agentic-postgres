@@ -124,8 +124,9 @@ CROSS_FIELD_RELATIONS: tuple[str, ...] = (
     "The derived unreclaimable budget must not exceed the per-project memory guardrail",
     "`api.rest.request_body_max_bytes` must equal `api.rest.request_body_memory_bytes`",
     "`api.rest.pool_max_idle_seconds` must be less than `api.rest.pool_max_lifetime_seconds`",
-    "`api.rest.pool_size` plus its reserved connections, `database.pool_size`, and the "
-    "administration reserve must fit `database.max_connections`",
+    "`api.rest.pool_size` plus its reserved connections, `api.app.pool_size` plus its "
+    "own, `database.pool_size`, and the administration reserve must fit "
+    "`database.max_connections`",
     "`api.rest.allowed_cors_origins` must contain the project's own HTTPS origin when the "
     "REST service is enabled",
     "`api.rest.statement_timeouts` may name only roles the platform derives",
@@ -204,6 +205,14 @@ API_REST_DEFAULTS: dict[str, Any] = {
     "allowed_cors_origins": [],
 }
 
+#: The application service's resolved defaults. Small on purpose: the auth
+#: service answers short queries against a five-table registry, and a pool it
+#: never fills is a claim on a budget two projects share on a 4 GB host.
+API_APP_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "pool_size": 4,
+}
+
 #: What PostgREST takes out of the cluster's connection budget beyond its pool.
 #:
 #: One for the `LISTEN` connection the schema cache needs -- it is held for the
@@ -214,6 +223,17 @@ API_REST_DEFAULTS: dict[str, Any] = {
 #: number is charged at all, since the failure it prevents is a cluster refusing
 #: connections to the pooler because the API took the last of them.
 POSTGREST_RESERVED_CONNECTIONS = 3
+
+#: What the auth service takes beyond its pool.
+#:
+#: Two, not three: it holds no `LISTEN` connection, because nothing notifies
+#: it of a schema change -- it talks to `app_private` through functions rather
+#: than reflecting a schema. What remains is the same startup-and-recovery
+#: overlap PostgREST is charged for, and it is charged for the same reason:
+#: what matters is that the number is charged at all. A service that took its
+#: pool's worth and nothing more would be right until the first restart under
+#: load, which is the moment the cluster has least to spare.
+AUTH_RESERVED_CONNECTIONS = 2
 
 #: Held back for migrations, backups, a direct developer session and PostgreSQL's
 #: own `superuser_reserved_connections`. If this is exhausted, the operation that
@@ -239,6 +259,25 @@ from agentic_postgres.naming import (  # noqa: E402 — placed with the constant
 from agentic_postgres.naming import (  # noqa: E402
     REST_PATH_SUFFIX as REST_PATH_SUFFIX,
 )
+
+
+def auth_connection_budget(app: dict[str, Any]) -> int:
+    """How many cluster connections the auth service commits to.
+
+    The same shape as :func:`postgrest_connection_budget`, and separate from it
+    for the reason ADR 0070 exists: two services drawing on one
+    `max_connections` must be bounded *together*, and the only way to bound them
+    together is for each to state what it takes. A single "API" figure covering
+    both would be one number standing for two commitments, which is the shape
+    that gave `app_runtime` everything and the authenticator nothing.
+
+    Charged whether or not the service is enabled, matching
+    `rendering.resolve_api_connection_budget`: a division of the budget that
+    moved when somebody toggled a service would make the bootstrap plane's
+    arithmetic depend on a flag it does not read.
+    """
+    size = int(app.get("pool_size", API_APP_DEFAULTS["pool_size"]))
+    return size + AUTH_RESERVED_CONNECTIONS
 
 
 def postgrest_connection_budget(rest: dict[str, Any]) -> int:
@@ -638,6 +677,7 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
     _validate_pooled_public(database)
     _validate_pool(database)
     _validate_memory_budget(database)
+    _validate_connection_budget(api, database)
     _validate_rest_service(api, database=database, domain=project["domain"])
     _validate_route_boundaries(api, mcp)
     _validate_storage(document.get("storage", {}))
@@ -740,6 +780,45 @@ def _validate_pool(database: dict[str, Any]) -> None:
         )
 
 
+def _validate_connection_budget(api: dict[str, Any], database: dict[str, Any]) -> None:
+    """Every claimant on `max_connections`, summed once (ADR 0070).
+
+    **Unconditional**, and that is the correction. This lived inside
+    `_validate_rest_service` behind two early returns, so it ran only for a
+    project that declared a REST service and enabled it -- while
+    `rendering.resolve_api_connection_budget` charges the budget whether or not
+    the service is on, deliberately, so that the bootstrap plane's division does
+    not move when somebody toggles a flag. A manifest with no REST section could
+    therefore declare a `database.pool_size` the bootstrap would refuse, and the
+    refusal would arrive on a host instead of in validation.
+
+    Both services are charged the same way and for the same reason. ADR 0070
+    exists because `app_runtime` was once given everything and the authenticator
+    nothing: two claimants bounded separately sum past what the server hands out.
+    A third claimant makes that arithmetic more load-bearing, not less.
+    """
+    rest = {**API_REST_DEFAULTS, **(api.get("rest") or {})}
+    app = {**API_APP_DEFAULTS, **(api.get("app") or {})}
+
+    rest_budget = postgrest_connection_budget(rest)
+    auth_budget = auth_connection_budget(app)
+    committed = (
+        rest_budget + auth_budget + database["pool_size"] + ADMINISTRATION_RESERVED_CONNECTIONS
+    )
+    ceiling = int(database.get("max_connections", DATABASE_BUDGET_DEFAULTS["max_connections"]))
+    if committed > ceiling:
+        raise ManifestError(
+            f"the connection budget does not fit: api.rest.pool_size "
+            f"({rest['pool_size']}) plus {POSTGREST_RESERVED_CONNECTIONS} reserved, "
+            f"api.app.pool_size ({app['pool_size']}) plus {AUTH_RESERVED_CONNECTIONS} "
+            f"reserved, database.pool_size ({database['pool_size']}), and "
+            f"{ADMINISTRATION_RESERVED_CONNECTIONS} held for administration come to "
+            f"{committed}, above database.max_connections ({ceiling}). The connection "
+            "that cannot be opened is the pooler's or the migration's, and neither "
+            "reports the reason as a capacity problem"
+        )
+
+
 def _validate_rest_service(api: dict[str, Any], *, database: dict[str, Any], domain: str) -> None:
     """The `api.rest` relations JSON Schema cannot express (Session 5, Run 2).
 
@@ -766,20 +845,6 @@ def _validate_rest_service(api: dict[str, Any], *, database: dict[str, Any], dom
         return
 
     _validate_rest_numbers(resolved)
-
-    budget = postgrest_connection_budget(resolved)
-    committed = budget + database["pool_size"] + ADMINISTRATION_RESERVED_CONNECTIONS
-    ceiling = int(database.get("max_connections", DATABASE_BUDGET_DEFAULTS["max_connections"]))
-    if committed > ceiling:
-        raise ManifestError(
-            f"the connection budget does not fit: api.rest.pool_size "
-            f"({resolved['pool_size']}) plus {POSTGREST_RESERVED_CONNECTIONS} reserved, "
-            f"database.pool_size ({database['pool_size']}), and "
-            f"{ADMINISTRATION_RESERVED_CONNECTIONS} held for administration come to "
-            f"{committed}, above database.max_connections ({ceiling}). The connection "
-            "that cannot be opened is the pooler's or the migration's, and neither "
-            "reports the reason as a capacity problem"
-        )
 
     origin = f"https://{domain}"
     if origin not in resolved.get("allowed_cors_origins", []):

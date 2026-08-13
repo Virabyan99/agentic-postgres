@@ -570,6 +570,24 @@ def apply_credential(
     psql(container, database, statement)
 
 
+def apply_connection_limit(container: str, database: str, role: str, limit: int) -> None:
+    """Bound a role that has no credential yet.
+
+    `apply_credential` sets `LOGIN`, the limit and the password in one statement,
+    because a role must never exist in a state where it can log in without a
+    bound. This is the other half of that rule: a role that cannot log in *may*
+    carry its bound early, and carrying it early is what leaves no window when
+    the credential arrives.
+
+    Deliberately does not touch `LOGIN` or the password. `ALTER ROLE ...
+    CONNECTION LIMIT` on a NOLOGIN role is a catalog change and nothing else,
+    which is what makes this safe to run on every deploy of a project whose auth
+    service does not exist yet.
+    """
+    statement = f"ALTER ROLE {migrations.quote_identifier(role)} CONNECTION LIMIT {int(limit)};"
+    psql(container, database, statement)
+
+
 def read_secret(project_key: str, consumer: str, name: str) -> str:
     """One materialized value, from the generation the project points at.
 
@@ -629,7 +647,9 @@ def connection_budget(container: str, database: str) -> tuple[int, int]:
     return maximum, reserved
 
 
-def connection_limits(maximum: int, reserved: int, api_budget: int) -> tuple[int, int]:
+def connection_limits(
+    maximum: int, reserved: int, api_budget: int, auth_budget: int
+) -> tuple[int, int, int]:
     """The application's ceiling and the API's, computed together (D161, ADR 0070).
 
     Together is the whole point. `app_runtime` used to be given
@@ -653,17 +673,18 @@ def connection_limits(maximum: int, reserved: int, api_budget: int) -> tuple[int
     every login", so an error here is the only honest failure.
     """
     available = maximum - reserved
-    application = available - api_budget - OPERATIONAL_CONNECTION_HEADROOM
+    application = available - api_budget - auth_budget - OPERATIONAL_CONNECTION_HEADROOM
     if application < 1:
         raise ValueError(
             f"max_connections={maximum} with {reserved} reserved leaves {available} usable; "
-            f"the API commits {api_budget} and {OPERATIONAL_CONNECTION_HEADROOM} are held "
-            "for operations, so the application would be left with "
+            f"the API commits {api_budget}, the auth service {auth_budget}, and "
+            f"{OPERATIONAL_CONNECTION_HEADROOM} are held for operations, so the "
+            "application would be left with "
             f"{application}. Raise database.max_connections or lower api.rest.pool_size; "
             "do not remove the headroom, because it is what leaves a psql available when "
             "this is wrong"
         )
-    return application, api_budget
+    return application, api_budget, auth_budget
 
 
 def app_runtime_password_available(project_key: str) -> bool:
@@ -908,7 +929,10 @@ def main() -> int:
     # exists for.
     maximum, reserved = connection_budget(container, database)
     api_budget = int(document["database"]["api_connection_budget"])
-    runtime_limit, api_limit = connection_limits(maximum, reserved, api_budget)
+    auth_budget = int(document["database"]["auth_connection_budget"])
+    runtime_limit, api_limit, auth_limit = connection_limits(
+        maximum, reserved, api_budget, auth_budget
+    )
 
     if app_runtime_password_available(key):
         limit = runtime_limit
@@ -942,6 +966,13 @@ def main() -> int:
         print(f"  API authenticator credential set, CONNECTION LIMIT {api_limit}")
     else:
         print("  API authenticator credential absent from this generation; role left NOLOGIN")
+
+    # The auth service's ceiling, the third claimant on one max_connections
+    # (ADR 0070). Its credential is Run 7's, in the same commit as the compose
+    # service that mounts it (D246), so the role stays NOLOGIN here and carries
+    # its bound anyway -- which is the order with no window in it.
+    apply_connection_limit(container, database, roles["auth_service"], auth_limit)
+    print(f"  auth service CONNECTION LIMIT {auth_limit} (role NOLOGIN until session 6)")
 
     # Applied, then read back. The statements above returning 0 says psql
     # accepted them, which is not the same as the catalog holding what they

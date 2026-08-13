@@ -162,7 +162,8 @@
           "maximum": 10000,
           "description": "Global PostgREST row-return ceiling."
         },
-        "rest": { "$ref": "#/$defs/restService" }
+        "rest": { "$ref": "#/$defs/restService" },
+        "app": { "$ref": "#/$defs/appService" }
       }
     },
     "mcp": {
@@ -274,6 +275,21 @@
   },
 
   "$defs": {
+    "appService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled"],
+      "description": "The application API service, Session 6: the auth service, served under `api.public_base_path` + `/app`. Declared separately from `rest` because the two commit separately to the cluster's connection budget, and ADR 0070 exists because granting the same headroom to two claimants independently is how a budget comes to sum past what the server will hand out. Optional as a whole, like `rest`. Only the pool is declared here: a manifest field with no consumer is a declaration nothing reads, and the Argon2 profile and its memory relation arrive with the service that uses them.",
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "pool_size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "Connections the auth service's psycopg pool may hold. Charged to the cluster's budget whether or not the service is enabled, for the reason `resolve_api_connection_budget` gives about REST: a division that depended on whether a service happened to be on would move when somebody toggled it."
+        }
+      }
+    },
     "restService": {
       "type": "object",
       "additionalProperties": false,

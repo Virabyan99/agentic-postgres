@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 9
+CURRENT_VERSION = 10
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -213,6 +213,7 @@ def migrate_rendered(
     statement_timeouts: dict[str, str],
     api_connection_budget: int,
     app_docs_url: str,
+    auth_connection_budget: int,
 ) -> dict[str, Any]:
     """Migrate a ``rendered`` document of any earlier version to the current one.
 
@@ -233,8 +234,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8}:
-        raise MigrationError(f"only versions 1 through 8 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
+        raise MigrationError(f"only versions 1 through 9 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -258,7 +259,10 @@ def migrate_rendered(
     if detect_version(document) == 7:
         document = migrate_v7_to_v8(document, api_connection_budget=api_connection_budget)
 
-    return migrate_v8_to_v9(document, app_docs_url=app_docs_url)
+    if detect_version(document) == 8:
+        document = migrate_v8_to_v9(document, app_docs_url=app_docs_url)
+
+    return migrate_v9_to_v10(document, auth_connection_budget=auth_connection_budget)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -753,6 +757,71 @@ def migrate_v8_to_v9(document: dict[str, Any], *, app_docs_url: str) -> dict[str
     return migrated
 
 
+def migrate_v9_to_v10(document: dict[str, Any], *, auth_connection_budget: int) -> dict[str, Any]:
+    """Return a version 10 ``rendered`` document derived from a version 9 one.
+
+    Version 10 adds ``database.auth_connection_budget``: how many cluster
+    connections the auth service commits to. It exists because the bootstrap
+    plane reads only this document (D102, ADR 0067), and a claimant it cannot see
+    is one it cannot divide the budget between -- which is ADR 0070's whole
+    subject.
+
+    Required rather than derived, for the reason every argument in this module
+    is: the figure comes from a manifest this document does not carry, and
+    ``config.auth_connection_budget`` is its one authority. This validates what
+    it is handed and computes nothing.
+
+    The validation is the v8 step's, applied to a third claimant: a positive
+    integer, and one that still leaves the application something. A budget where
+    the two services between them take everything is a document that renders and
+    a deploy that fails, and it fails in the bootstrap plane where the error
+    reads as a cluster problem.
+    """
+    version = detect_version(document)
+    if version == 10:
+        raise MigrationError("document is already version 10; migration would be a no-op")
+    if version != 9:
+        raise MigrationError(f"only version 9 can be migrated to 10, got {version}")
+
+    require_kind(document, "rendered")
+
+    database = document.get("database", {})
+    if "auth_connection_budget" in database:
+        raise MigrationError(
+            "database already carries auth_connection_budget; this is not a version 9 document"
+        )
+    if "api_connection_budget" not in database:
+        raise MigrationError(
+            "database carries no api_connection_budget, so this document predates version 8 "
+            "and cannot be a version 9 one"
+        )
+
+    if isinstance(auth_connection_budget, bool) or not isinstance(auth_connection_budget, int):
+        raise MigrationError(
+            f"auth_connection_budget must be an integer, got {auth_connection_budget!r}"
+        )
+    if auth_connection_budget < 1:
+        raise MigrationError(
+            f"auth_connection_budget is {auth_connection_budget}; a service that commits no "
+            "connection cannot answer a request, and 0 is how PostgreSQL spells 'reject "
+            "every login' rather than 'unlimited'"
+        )
+
+    maximum = int(database["budget"]["max_connections"])
+    api = int(database["api_connection_budget"])
+    if api + auth_connection_budget >= maximum:
+        raise MigrationError(
+            f"the two services commit {api} + {auth_connection_budget} of "
+            f"max_connections ({maximum}), leaving nothing for the application or for "
+            "administration"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["database"]["auth_connection_budget"] = auth_connection_budget
+    migrated["schema_version"] = 10
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -779,5 +848,6 @@ __all__ = [
     "migrate_v6_to_v7",
     "migrate_v7_to_v8",
     "migrate_v8_to_v9",
+    "migrate_v9_to_v10",
     "require_kind",
 ]

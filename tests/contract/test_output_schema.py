@@ -684,3 +684,32 @@ def test_a_project_with_no_rest_service_still_publishes_a_commitment() -> None:
     assert rendering.resolve_api_connection_budget({}) == config.postgrest_connection_budget({})
     assert rendering.resolve_api_connection_budget({"api": None}) > 0
     assert rendering.resolve_api_connection_budget({"api": {"rest": None}}) > 0
+
+
+def test_the_rendered_budgets_are_each_services_own(alpha: dict[str, Any]) -> None:
+    """Two claimants, two figures, each from its own authority (ADR 0070).
+
+    Found by mutation: making the renderer publish the API's figure for both
+    left every test green, because everything else exercising the auth budget
+    goes through the migration path and never reads what the renderer wrote.
+
+    The inequality is what does the work. Both budgets equalling their own
+    `config` function would still pass if `config` returned one number for both;
+    asserting they *differ* for a manifest whose pools differ is what makes the
+    two authorities distinguishable.
+    """
+    from agentic_postgres import config
+
+    manifest = config.load_manifest(REPO_ROOT / "project.example.yaml")
+    api = manifest.get("api") or {}
+
+    database = alpha["database"]
+    assert database["api_connection_budget"] == config.postgrest_connection_budget(
+        api.get("rest") or {}
+    )
+    assert database["auth_connection_budget"] == config.auth_connection_budget(api.get("app") or {})
+
+    assert database["api_connection_budget"] != database["auth_connection_budget"], (
+        "the two services publish the same commitment for a manifest whose pools differ; "
+        "one of them is being derived from the other"
+    )

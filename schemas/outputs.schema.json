@@ -35,7 +35,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            9
+            10
           ]
         },
         "document_kind": {
@@ -345,7 +345,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            9
+            10
           ]
         },
         "document_kind": {
@@ -679,7 +679,8 @@
         "direct",
         "access_profiles",
         "statement_timeouts",
-        "api_connection_budget"
+        "api_connection_budget",
+        "auth_connection_budget"
       ],
       "description": "Version 7. The rendered branch carries no `observed` block at all -- not an empty one, not a nulled one. ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be unrepresentable here rather than merely constrained. That is why the two branches have separate definitions instead of one shared one. Version 4 added `access_profiles` (ADR 0041). Version 7 added `statement_timeouts` (ADR 0067). Version 8 added `api_connection_budget` (ADR 0070).",
       "properties": {
@@ -709,6 +710,11 @@
         },
         "api_connection_budget": {
           "$ref": "#/$defs/apiConnectionBudget"
+        },
+        "auth_connection_budget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version 10. How many cluster connections the auth service commits to: its pool plus its reservations. Published whether or not the service is enabled, so the bootstrap plane's division of the budget does not move when somebody toggles a flag. The third claimant on one `max_connections` (ADR 0070) -- and the reason that division is a function rather than a subtraction."
         }
       }
     },
@@ -725,7 +731,8 @@
         "access_profiles",
         "statement_timeouts",
         "observed",
-        "api_connection_budget"
+        "api_connection_budget",
+        "auth_connection_budget"
       ],
       "description": "Version 7. Identical to the rendered branch plus `observed`, which is the only block here that is a measurement rather than a derivation. Version 8 added `api_connection_budget` (ADR 0070).",
       "properties": {
@@ -758,6 +765,11 @@
         },
         "api_connection_budget": {
           "$ref": "#/$defs/apiConnectionBudget"
+        },
+        "auth_connection_budget": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Version 10. How many cluster connections the auth service commits to: its pool plus its reservations. Published whether or not the service is enabled, so the bootstrap plane's division of the budget does not move when somebody toggles a flag. The third claimant on one `max_connections` (ADR 0070) -- and the reason that division is a function rather than a subtraction."
         }
       }
     },

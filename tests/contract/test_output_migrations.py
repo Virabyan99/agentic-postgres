@@ -169,6 +169,18 @@ def statement_timeouts_for(document: dict[str, Any]) -> dict[str, str]:
     return {document["database"]["roles"]["app_runtime"]: "30s"}
 
 
+def auth_budget_for(document: dict[str, Any]) -> int:
+    """What version 10 requires, from `config` rather than written out.
+
+    `config.auth_connection_budget` is the one place that figure is computed,
+    and the manifest-side budget check reasons about the same call. A literal
+    here would agree with it today and diverge on the day one of them moved --
+    which is the only day it would matter.
+    """
+    del document
+    return config.auth_connection_budget({})
+
+
 def app_docs_url_for(document: dict[str, Any]) -> str:
     """What version 9 requires, derived through `naming` from the document.
 
@@ -238,6 +250,7 @@ def chained(v1: dict[str, Any]) -> dict[str, Any]:
         statement_timeouts=statement_timeouts_for(v1),
         api_connection_budget=api_budget_for(v1),
         app_docs_url=app_docs_url_for(v1),
+        auth_connection_budget=auth_budget_for(v1),
     )
 
 
@@ -329,6 +342,7 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         statement_timeouts=statement_timeouts_for(v1),
         api_connection_budget=api_budget_for(v1),
         app_docs_url=app_docs_url_for(v1),
+        auth_connection_budget=auth_budget_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
 
@@ -379,6 +393,13 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
 
     migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
     assert migrated["schema_version"] == 9
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v9_to_v10(
+        migrated, auth_connection_budget=auth_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 10
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -456,6 +477,7 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
+            auth_connection_budget=auth_budget_for(v1),
         )
 
 
@@ -528,7 +550,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 9"):
+    with pytest.raises(MigrationError, match="already version 10"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -539,6 +561,7 @@ def test_a_current_version_document_is_not_migrated_again(
             statement_timeouts=statement_timeouts_for(chained),
             api_connection_budget=api_budget_for(chained),
             app_docs_url=app_docs_url_for(chained),
+            auth_connection_budget=auth_budget_for(chained),
         )
     with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_v4_to_v5(v5)
@@ -552,7 +575,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1 through 8"):
+    with pytest.raises(MigrationError, match="only versions 1 through 9"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -563,6 +586,7 @@ def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
+            auth_connection_budget=auth_budget_for(v1),
         )
 
 
@@ -579,6 +603,7 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
+            auth_connection_budget=auth_budget_for(v1),
         )
 
 
@@ -604,6 +629,7 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             statement_timeouts=statement_timeouts_for(v1),
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
+            auth_connection_budget=auth_budget_for(v1),
         )
 
 
@@ -720,6 +746,13 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
 
     migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
     assert migrated["schema_version"] == 9
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v9_to_v10(
+        migrated, auth_connection_budget=auth_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 10
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -888,6 +921,13 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
 
     migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
     assert migrated["schema_version"] == 9
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v9_to_v10(
+        migrated, auth_connection_budget=auth_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 10
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1000,6 +1040,13 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
 
     migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
     assert migrated["schema_version"] == 9
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v9_to_v10(
+        migrated, auth_connection_budget=auth_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 10
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1123,6 +1170,13 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
 
     migrated = output_migrations.migrate_v8_to_v9(migrated, app_docs_url=app_docs_url_for(migrated))
     assert migrated["schema_version"] == 9
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v9_to_v10(
+        migrated, auth_connection_budget=auth_budget_for(migrated)
+    )
+    assert migrated["schema_version"] == 10
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1445,6 +1499,9 @@ def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]
     migrated = output_migrations.migrate_v8_to_v9(
         v8_fixture, app_docs_url=app_docs_url_for(v8_fixture)
     )
+    migrated = output_migrations.migrate_v9_to_v10(
+        migrated, auth_connection_budget=auth_budget_for(migrated)
+    )
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1609,6 +1666,9 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
     migrated = output_migrations.migrate_v8_to_v9(
         v8_document, app_docs_url=app_docs_url_for(v8_document)
     )
+    migrated = output_migrations.migrate_v9_to_v10(
+        migrated, auth_connection_budget=auth_budget_for(migrated)
+    )
     config.validate_against_schema(migrated, "outputs.schema.json")
 
     without = {
@@ -1621,3 +1681,105 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
     # so the refusal is about the one key that was removed.
     with pytest.raises(config.ManifestError):
         config.validate_against_schema(without, "outputs.schema.json")
+
+
+# ---------------------------------------------------------------------------
+# The version 10 step
+# ---------------------------------------------------------------------------
+
+#: A real Session 6 render at version 9, captured with `deploy.sh --render-only`
+#: at commit `3e4a155` -- the last commit that still rendered version 9. Taken
+#: before the bump, because afterwards one cannot be produced from this tree
+#: (D245).
+FIXTURE_V9 = REPO_ROOT / "tests" / "fixtures" / "outputs-v9.json"
+
+
+@pytest.fixture
+def v9_fixture() -> dict[str, Any]:
+    return json.loads(FIXTURE_V9.read_text(encoding="utf-8"))
+
+
+def test_the_v9_fixture_is_a_real_render_at_version_9(v9_fixture: dict[str, Any]) -> None:
+    """A genuine version 9 render, and now a superseded one."""
+    assert v9_fixture["schema_version"] == 9
+    assert v9_fixture["document_kind"] == "rendered"
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(v9_fixture, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v9_to_v10(
+        v9_fixture, auth_connection_budget=auth_budget_for(v9_fixture)
+    )
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+
+def test_v10_adds_the_auth_services_connection_budget(v9_fixture: dict[str, Any]) -> None:
+    budget = auth_budget_for(v9_fixture)
+    migrated = output_migrations.migrate_v9_to_v10(v9_fixture, auth_connection_budget=budget)
+
+    assert migrated["schema_version"] == 10
+    assert migrated["database"]["auth_connection_budget"] == budget
+    # The API's is untouched: two claimants, two figures, and the step that adds
+    # one must not quietly restate the other.
+    assert (
+        migrated["database"]["api_connection_budget"]
+        == (v9_fixture["database"]["api_connection_budget"])
+    )
+
+
+def test_v10_refuses_a_budget_that_is_not_a_positive_integer(v9_fixture: dict[str, Any]) -> None:
+    for value in (0, -1, "6", 6.0, None, True):
+        with pytest.raises(MigrationError):
+            output_migrations.migrate_v9_to_v10(v9_fixture, auth_connection_budget=value)
+
+
+def test_v10_refuses_a_budget_that_leaves_the_application_nothing(
+    v9_fixture: dict[str, Any],
+) -> None:
+    """The two services between them may not take the whole cluster.
+
+    A document that renders and a deploy that fails is worse than a refusal: the
+    failure lands in the bootstrap plane, where it reads as a cluster problem.
+    """
+    maximum = v9_fixture["database"]["budget"]["max_connections"]
+    api = v9_fixture["database"]["api_connection_budget"]
+    with pytest.raises(MigrationError, match="leaving nothing"):
+        output_migrations.migrate_v9_to_v10(v9_fixture, auth_connection_budget=maximum - api)
+
+
+def test_v10_refuses_a_document_that_already_carries_it(v9_fixture: dict[str, Any]) -> None:
+    once = output_migrations.migrate_v9_to_v10(
+        v9_fixture, auth_connection_budget=auth_budget_for(v9_fixture)
+    )
+    once["schema_version"] = 9
+    with pytest.raises(MigrationError, match="already carries"):
+        output_migrations.migrate_v9_to_v10(once, auth_connection_budget=6)
+
+
+def test_v10_refuses_a_deployed_document(v9_fixture: dict[str, Any]) -> None:
+    deployed = {**v9_fixture, "document_kind": "deployed"}
+    with pytest.raises(MigrationError):
+        output_migrations.migrate_v9_to_v10(deployed, auth_connection_budget=6)
+
+
+def test_v10_does_not_mutate_its_input(v9_fixture: dict[str, Any]) -> None:
+    before = json.dumps(v9_fixture, sort_keys=True)
+    output_migrations.migrate_v9_to_v10(v9_fixture, auth_connection_budget=6)
+    assert json.dumps(v9_fixture, sort_keys=True) == before
+
+
+def test_the_renderer_and_the_migrator_agree_on_the_auth_budget(
+    v9_fixture: dict[str, Any],
+) -> None:
+    """One authority for the figure (ADR 0002 applied to a number).
+
+    `config.auth_connection_budget` is where the renderer gets it and what the
+    manifest was checked against. If the two ever disagreed, a migrated document
+    would publish a budget the bootstrap plane divides by and the manifest never
+    approved -- and both halves would look right in isolation.
+    """
+    del v9_fixture
+    assert config.auth_connection_budget({}) == (
+        config.API_APP_DEFAULTS["pool_size"] + config.AUTH_RESERVED_CONNECTIONS
+    )
+    assert config.auth_connection_budget({"pool_size": 9}) == 9 + config.AUTH_RESERVED_CONNECTIONS

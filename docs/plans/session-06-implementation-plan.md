@@ -112,6 +112,8 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D252** | (`publish_docs_credential`, since Run 9a.) "Rewritten on every deploy. bcrypt salts randomly, so the hash differs each time while the password does not; the file changes, **Traefik reloads it**, and the credential an operator holds keeps working." | **It does not reload it.** Measured on the host during the first documentation-credential rotation ever performed: the new password returned 401, the **old password returned 200**, and a wrong password 401 as the control. The htpasswd on disk was correct -- a `$2b$12$` hash that verifies against the active generation's password, written five seconds after it. The middleware names a `usersFile` **path**, so the parsed configuration is byte-identical every deploy, Traefik has nothing to reload, and the only moment it re-reads that file is when it rebuilds the middleware. | **Recovered by restarting the edge**, after which the new password opened the page and the old one was refused. `docs/api-operations.md` now carries the restart as a step. **The fix is not written yet**: inlining the hash in the middleware YAML would make the configuration genuinely change, and that is a claim about Traefik that gets measured against the locked digest before it is written down -- the last claim about this exact behaviour was an untested comment. | **Every documentation-credential rotation this project has documented would have silently failed**, with the deploy reporting success and the page still open to the old password. ADR 0019's lesson -- a configuration fact read from documentation is not a fact -- applied to a sentence in our own docstring. | **yes** |
 | **D253** | (`project-runtime.sh resume`, and the whole deploy path.) A deploy materializes a new generation, the bootstrap plane sets the role's verifier from it, and the services start against it. | **PostgREST kept a generation two rotations stale and the cluster moved underneath it.** Measured: the container was created at 21:02, survived two deploys, and mounted `generations/b79c30eae78ef7b9/...` while the secrets override and the active pointer both said `f9fde25ca41f3bdc`. The bootstrap set the cluster's password from the active generation; PostgREST authenticated with the stale file; it exited 1 and crash-looped, and the REST route went to **502**. `resume` runs `compose up -d --build --wait` with **no `--force-recreate`**. | **Recovered with `project-runtime.sh down` followed by a deploy**, which creates the containers fresh; volumes are preserved by design. `docs/api-operations.md` now carries the `down` as a step for any credential a container mounts. **The fix is not written yet** -- `--force-recreate` would restart the cluster on every deploy, and the better shape is probably to make the generation part of the service's config hash. Which of those is right depends on **why** a changed secret-mount source did not already trigger a recreate, and that is measurable. | Worse than D252, because it is an outage rather than a no-op: **the documented authenticator rotation would have taken any deployment down**, at whatever hour the operator chose to rotate, with the deploy reporting success throughout. | **yes** |
 | **D254** | (Implicit in five green host runs and 2 776 offline tests.) The deploy path is exercised on every run, so a defect in how it handles secrets would have surfaced. | **Every deploy before tonight materialized a new generation containing identical values**, because no secret had ever actually changed at the provider. A container holding a stale generation and one holding a fresh generation are indistinguishable when the two generations carry the same bytes. | **Recorded as the reason D252 and D253 were unreachable**, not as a separate fault. The rotation window is the only thing that could have found either, which is why "specified, implemented, tested offline, never executed" was worth treating as unproved rather than as done. | **The sharpest instance yet of this project's defect.** Not a value that looked measured and was not -- a whole *mechanism* that looked exercised and was not, because the input that would have exercised it had never varied. 148 generations had accumulated on the host; every one of them held the same credentials. | no |
+| **D255** | (Run 4, this session.) v9 was chosen with the session's remaining fields in mind, so that Run 10 would not force a tenth version -- `routes.app_docs` was pulled forward precisely to avoid a second bump. | **It missed the connection budget.** D228, in the same plan, says `connection_limits` gains a third claimant; the bootstrap plane reads only the deployed document (D102, ADR 0067), so the auth service's commitment has to be a field in it. Run 6 therefore needs **v10**, one run after v9 shipped and two host redeploys later. | **v10 adds `database.auth_connection_budget`.** Both branches, a `migrate_v9_to_v10` step, and `tests/fixtures/outputs-v9.json` captured before the bump — the discipline D245 established, applied on the first opportunity. | **A version bump is planned from the session's whole surface, not from the run in front of you.** I reasoned carefully in Run 4 about which fields to carry forward, and reasoned only about the two runs I was looking at. The cost is real: two bumps in one session, and each one is a redeploy of every project. | no |
+| **D256** | (Session 5, `_validate_rest_service`.) The manifest's connection-budget check runs on every project. | **It ran only for a project that declared a REST service and enabled it** — the check sat behind two early returns. Meanwhile `rendering.resolve_api_connection_budget` charges the budget *whether or not the service is enabled*, deliberately, so the bootstrap plane's division does not move when somebody toggles a flag. | **The check moves out into `_validate_connection_budget`, called unconditionally**, and covers both services. A manifest with no REST section could otherwise declare a `database.pool_size` the bootstrap plane would refuse — and the refusal would arrive on a host rather than in validation, reading as a cluster problem. | Found while adding the third claimant, not looked for. The document and the validator disagreed about when a budget is charged, and the document was right. | no |
 
 ---
 
@@ -422,12 +424,38 @@ code that calls them — D246's lesson from Run 4, applied one run later.
 placeholder: the claim list is not a per-project value and does not belong in the
 deployed document.
 
-### Run 6 — The bootstrap plane: `auth_service`
+### Run 6 — The bootstrap plane: `auth_service`  ·  **Done.**
 
-Role attributes, connection limit, SCRAM credential, role `statement_timeout`
-and the HBA rule — all in `bin/postgres-bootstrap.py`, none in a migration
-(D228). **`connection_limits` re-derived for three claimants**, not extended by
-subtraction (ADR 0070).
+**`connection_limits` re-derived for three claimants**, not extended by
+subtraction (ADR 0070). The division is now exact on the example manifests:
+application 23, api 13, auth 6, headroom 5 — summing to 47, which is
+`max_connections` 50 less the server's 3 reserved.
+
+The chain, each link with one authority: the manifest declares `api.app`
+(**new**, beside `api.rest`); `config.auth_connection_budget` computes the
+commitment as pool plus reservations; the renderer publishes it; **outputs v10**
+carries it to the bootstrap plane, which reads only this document (D102, ADR
+0067). That last step is why v10 exists one run after v9 — **D255**, and it is a
+miss of mine rather than a discovery.
+
+**The credential is not here.** `auth_service_password` is declared in Run 7, in
+the same commit as the `auth` compose service that consumes it (D246). So the
+role gets its ceiling and stays `NOLOGIN` with a null verifier — which is what
+`secrets.required.yaml` already says every service identity does until its owning
+session activates it. `apply_connection_limit` is a new, deliberately narrow
+statement: it touches neither `LOGIN` nor the password, so a role that cannot log
+in may carry its bound early, and carrying it early is the order with no window
+in it.
+
+**Found on the way (D256):** the manifest's budget check ran only for a project
+with an *enabled* REST service, while the document charges the budget
+unconditionally. It is now its own function, called unconditionally, covering
+both services.
+
+Six mutations, each red with a control. The one worth having is **M6** — the
+renderer publishing the API's figure for both services — which **stayed green**,
+because everything else exercising the auth budget goes through the migration
+path and nothing read what the renderer wrote. That gap is now a test.
 
 ### Run 7 — The service core, before any route
 

@@ -1,0 +1,138 @@
+{
+  "backup": {
+    "enabled": true,
+    "repository_prefix": "pgbackrest/fixture-alpha-dev/",
+    "stanza": "fixture-alpha-dev"
+  },
+  "capabilities": {
+    "enabled": []
+  },
+  "compose": {
+    "networks": {
+      "edge": "apg-fixture-alpha-dev-edge",
+      "internal": "apg-fixture-alpha-dev-internal"
+    },
+    "project_name": "apg-fixture-alpha-dev",
+    "volumes": {
+      "postgres": "apg-fixture-alpha-dev-postgres"
+    }
+  },
+  "database": {
+    "access_profiles": {
+      "migration_direct": {
+        "available_from_session": 4,
+        "password_secret_ref": null,
+        "role": "apg_fixture_alpha_dev_migration_user",
+        "status": "unavailable",
+        "transport": "direct"
+      },
+      "runtime_direct": {
+        "available_from_session": 4,
+        "password_secret_ref": null,
+        "role": "apg_fixture_alpha_dev_app_runtime",
+        "status": "unavailable",
+        "transport": "direct"
+      },
+      "runtime_pooled": {
+        "available_from_session": 4,
+        "password_secret_ref": null,
+        "role": "apg_fixture_alpha_dev_app_runtime",
+        "status": "unavailable",
+        "transport": "pooled"
+      }
+    },
+    "api_connection_budget": 13,
+    "budget": {
+      "maintenance_work_mem_mb": 64,
+      "max_connections": 50,
+      "memory_limit_mb": 768,
+      "shared_buffers_mb": 128,
+      "shm_size_mb": 256,
+      "unreclaimable_mb": 292,
+      "work_mem_mb": 4
+    },
+    "container": "apg-fixture-alpha-dev-postgres-1",
+    "direct": {
+      "available_from_session": 4,
+      "host": null,
+      "password_secret_ref": null,
+      "port": null,
+      "status": "unavailable",
+      "url": null
+    },
+    "name": "fixture_alpha_dev",
+    "pooled": {
+      "available_from_session": 4,
+      "host": null,
+      "password_secret_ref": null,
+      "port": null,
+      "status": "unavailable",
+      "url": null
+    },
+    "roles": {
+      "agent_reader": "apg_fixture_alpha_dev_agent_reader",
+      "agent_writer": "apg_fixture_alpha_dev_agent_writer",
+      "anon": "apg_fixture_alpha_dev_anon",
+      "api_documentation": "apg_fixture_alpha_dev_api_documentation",
+      "app_runtime": "apg_fixture_alpha_dev_app_runtime",
+      "auth_service": "apg_fixture_alpha_dev_auth_service",
+      "authenticated": "apg_fixture_alpha_dev_authenticated",
+      "backup_user": "apg_fixture_alpha_dev_backup_user",
+      "mcp_audit_service": "apg_fixture_alpha_dev_mcp_audit_service",
+      "migration_user": "apg_fixture_alpha_dev_migration_user",
+      "object_owner": "apg_fixture_alpha_dev_object_owner",
+      "postgrest_authenticator": "apg_fixture_alpha_dev_postgrest_authenticator",
+      "project_admin": "apg_fixture_alpha_dev_project_admin",
+      "storage_service": "apg_fixture_alpha_dev_storage_service"
+    },
+    "statement_timeouts": {
+      "apg_fixture_alpha_dev_anon": "2s",
+      "apg_fixture_alpha_dev_app_runtime": "30s",
+      "apg_fixture_alpha_dev_authenticated": "5s"
+    }
+  },
+  "document_kind": "rendered",
+  "inputs": {
+    "capabilities_sha256": "722ffa85d978963d8817eb23ba1973833b53c335fc155e15c9689f8dd89db5fb",
+    "project_sha256": "9234c99be7f08a28b4e0110676802121cbaa0074b1ef183a2e7941f9c01ed5da",
+    "secrets_contract_sha256": "9360cbfadfab8814bfdd2d4784d5c6fa6c2c8e6294f2e6bd7db7b9553cea385d",
+    "source_specification_sha256": "4ac48e0507fcf9bc4ce3e44f2932f86417641081892c480a6d6ab315043d6728",
+    "versions_lock_sha256": "bcdf58fb81ba134c49f9478007faff8907379e2d4482f805b1580006298ac1ab"
+  },
+  "jwt": {
+    "audience": "urn:agentic-postgres:fixture-alpha:dev",
+    "issuer": "https://fixture-alpha-dev.test/api/app/auth"
+  },
+  "project": {
+    "domain": "fixture-alpha-dev.test",
+    "environment": "dev",
+    "generated_directory": ".generated/fixture-alpha-dev",
+    "key": "fixture-alpha-dev",
+    "slug": "fixture-alpha"
+  },
+  "routes": {
+    "app": "https://fixture-alpha-dev.test/api/app",
+    "app_docs": "https://fixture-alpha-dev.test/docs/app",
+    "docs": "https://fixture-alpha-dev.test/docs/rest",
+    "health": {
+      "status": "planned",
+      "url": "https://fixture-alpha-dev.test/__apg/healthz"
+    },
+    "mcp": "https://fixture-alpha-dev.test/mcp",
+    "rest": "https://fixture-alpha-dev.test/api/rest"
+  },
+  "schema_version": 9,
+  "secrets": {
+    "namespace": "agentic-postgres/fixture-alpha-dev",
+    "required_names": [
+      "session2_sentinel"
+    ],
+    "status": "planned"
+  },
+  "storage": {
+    "bucket": "fixture-alpha-dev",
+    "enabled": true,
+    "prefix": "objects/fixture-alpha-dev/"
+  },
+  "template_version": "0.1.0-dev"
+}
