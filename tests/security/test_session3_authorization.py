@@ -583,6 +583,20 @@ def test_only_the_activated_roles_may_log_in(
 
     *Still closed.* Any other service identity gaining LOGIN fails, which was the
     original point and is unchanged.
+
+    **Session 5 added a third source, and finding out cost a gate run** (D211,
+    ADR 0072). `postgrest_authenticator` is activated with LOGIN because a
+    service authenticates as it, and it is not an access profile -- profiles are
+    the transports a *developer or an application* reaches the cluster through.
+    So the role was activated, correct, and invisible in the document. This test
+    is in `tests/security/`, which the deployment sweep does not select, so five
+    host runs passed without it executing once.
+
+    The clause is derived like the others: a deployment whose **REST route is
+    published** has an authenticator that can log in; one whose route is not,
+    does not. Naming the role as an exception would have been the weakening this
+    repository forbids -- it would pass on a Session 4 deployment that had
+    somehow activated it, which is precisely the case this test exists to catch.
     """
     profiles = project_a["database"]["access_profiles"]
     # `migration_user` is Session 3's own activation and is expected on any
@@ -593,6 +607,13 @@ def test_only_the_activated_roles_may_log_in(
     expected = {roles["migration_user"]} | {
         profile["role"] for profile in profiles.values() if profile["status"] == "available"
     }
+
+    # The REST plane's own identity, read from the route the document publishes
+    # rather than from the session number: a deployment that serves the surface
+    # has a service logging in as this role, and the status is the document's
+    # own statement about whether it does.
+    if (project_a["routes"].get("rest") or {}).get("status") == "ready":
+        expected.add(roles["postgrest_authenticator"])
 
     names = "', '".join(sorted(roles.values()))
     observed = sql(

@@ -148,20 +148,39 @@ def assert_api_converged(
     # docs route alone, so the REST poll spent the window and the docs check
     # that followed was never inside one. The test that passed did so for a
     # reason that was not the property under test.
+    #
+    # **Two consecutive rounds, not one.** `docker restart` returns when the
+    # container has started, and Traefik has not necessarily processed the
+    # *stop* by then -- so the first check can see the pre-restart router and
+    # answer as though nothing happened. That stale success broke the loop, the
+    # steady-state checks ran, and the re-assertion after them landed in the
+    # window the restart had by then opened: one test whose stdout carried the
+    # success and whose stderr carried the 404 (D211).
+    #
+    # `postgres-bootstrap.py::await_cluster` reached the same conclusion against
+    # a different daemon: "a single success is exactly what the temporary server
+    # produces".
+    consecutive = 0
     while time.monotonic() < deadline:
         read = api_call(f"{base}/notes?select=id&limit=1", token=reader)
         if read.status != 200:
+            consecutive = 0
             last = f"the REST read answered {read.status} {read.body[:100]}"
             time.sleep(2)
             continue
         refusal = docs_command.check(url)
-        if refusal == 0:
+        if refusal != 0:
+            consecutive = 0
+            last = f"the REST read answered 200; the documentation route did not refuse ({refusal})"
+            time.sleep(2)
+            continue
+        consecutive += 1
+        if consecutive == 2:
             break
-        last = f"the REST read answered 200; the documentation route did not refuse ({refusal})"
         time.sleep(2)
     else:
         pytest.fail(
-            f"{key(document)} did not bring both routes back within "
+            f"{key(document)} did not bring both routes back, twice in a row, within "
             f"{RESTART_RETURN_TIMEOUT_SECONDS}s of the restart; last: {last}"
         )
 
