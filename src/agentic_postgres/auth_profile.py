@@ -24,15 +24,13 @@ silently the first time somebody added a convenience import.
 
 from __future__ import annotations
 
-import importlib
-import sys
 from types import ModuleType
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import service_source
 
-#: The directory the service's package lives in, put on the path so that
-#: `app.profile` is importable by name.
-SERVICE_ROOT = REPO_ROOT / "services" / "auth-api"
+#: The service's package root. Re-exported so callers that had it from here keep
+#: working; `service_source` is where it is decided (ADR 0084).
+SERVICE_ROOT = service_source.SERVICE_ROOT
 
 #: The one file. Named for the tests that assert what it may import.
 PROFILE_SOURCE = SERVICE_ROOT / "app" / "profile.py"
@@ -48,24 +46,13 @@ def _load() -> ModuleType:
     `other.__class__ is self.__class__` first. So
     `parse_encoded(hash) == auth_profile.FROZEN` was False for two structurally
     identical profiles -- a comparison that could never succeed, which is D173's
-    shape (`probe not in {api.notes,...}` can never fail) pointing the other way.
+    shape pointing the other way. Caught by the first test that compared across
+    the boundary.
 
-    Caught by the first test that compared across the boundary. Putting the
-    service root on `sys.path` and importing by name gives one module object,
-    so there is one `Argon2Profile` class and equality means what it reads as.
-
-    `app/__init__.py` imports nothing, so this does not drag `argon2`,
-    `fastapi` or `psycopg` into a deploy host that has none of them --
-    `test_the_frozen_profile_module_needs_only_the_standard_library` is what
-    keeps that true.
+    The mechanism now lives in `service_source`, because Run 8 gave it two more
+    users and a rule of its own (ADR 0084).
     """
-    root = str(SERVICE_ROOT)
-    if root not in sys.path:
-        # Appended, not prepended: this must never take precedence over a
-        # module the caller already has, and `app` is a common enough name that
-        # shadowing one would be a hard failure to attribute.
-        sys.path.append(root)
-    return importlib.import_module("app.profile")
+    return service_source.load("profile")
 
 
 _source = _load()

@@ -20,14 +20,23 @@ role never implies the scope.
 **A role that no token may name is absent, and asking about one raises.**
 `bin/dev-token.py` makes the same choice for the same reason, in its own words:
 "a command that offers the option invites somebody to find out."
+
+**The mapping itself lives in `services/auth-api/app/scopes.py`** (ADR 0084),
+because the issuer needs it and the image's build context cannot reach `src/`.
+What stays here is the half that needs the schema: every name the mapping grants
+is checked against `capabilities.schema.json` on the way out, so a scope added
+to the service that the schema does not admit fails the moment the repository
+reads the registry -- which is before any deployment could carry it.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
 
-from agentic_postgres import config
+from agentic_postgres import config, service_source
 from agentic_postgres.config import ManifestError
+
+_scopes = service_source.load("scopes")
 
 __all__ = [
     "ROLE_SCOPES",
@@ -60,43 +69,12 @@ def administrative_scopes() -> frozenset[str]:
     return approved_scopes() - agent_requestable_scopes()
 
 
-#: Role suffix -> the largest scope set a token naming that role may carry.
-#:
-#: Keys are suffixes from :data:`naming.ROLE_SUFFIXES`, not derived role names:
-#: the mapping is a property of the *kind* of identity, and a per-project role
-#: name would make this a per-project authorization model -- which ADR 0006
-#: rejected by name.
-ROLE_SCOPES: dict[str, frozenset[str]] = {
-    # No scopes at all. An anonymous caller's authority is its grants, and a
-    # scope claim on an anonymous token would be a claim about a subject there
-    # is no record of.
-    "anon": frozenset(),
-    # A human user of the application. A given token carries whatever the
-    # server-side record says; this is the ceiling.
-    "authenticated": frozenset({"notes:read", "notes:write", "tasks:read", "tasks:write"}),
-    # Exactly introspection, and ADR 0049's reasoning is unchanged: reading the
-    # shape of the API and none of its data.
-    "api_documentation": frozenset({"meta:read"}),
-    # Agents, whose ceiling is deliberately narrower than the human's on the
-    # write side. Session 9 activates the role memberships; until then a token
-    # naming one is refused at role switching, which is a tested property.
-    "agent_reader": frozenset({"notes:read", "tasks:read", "meta:read"}),
-    "agent_writer": frozenset({"notes:read", "notes:write", "tasks:read", "tasks:write"}),
-    # An administrator is also a user, so the ceiling is the union rather than
-    # the administrative class alone. The role does not imply any of it.
-    "project_admin": frozenset(
-        {
-            "notes:read",
-            "notes:write",
-            "tasks:read",
-            "tasks:write",
-            "admin_users:read",
-            "admin_users:write",
-            "admin_agents:read",
-            "admin_agents:write",
-        }
-    ),
-}
+#: Re-exported from the service's build context, which is the one
+#: declaration (ADR 0084). Assigned rather than restated: a copy here would
+#: be two authorities for one authorization model, and D175 records that a
+#: test comparing two constants goes green again the moment somebody
+#: regenerates the copy.
+ROLE_SCOPES: dict[str, frozenset[str]] = _scopes.ROLE_SCOPES
 
 
 def permitted_scopes(role_suffix: str) -> frozenset[str]:

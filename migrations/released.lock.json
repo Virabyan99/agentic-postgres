@@ -130,6 +130,17 @@
       "template": "templates/0011-identity-registry.sql",
       "template_sha256": "9768fd3b5a9a4cd1e784f470da5a4c8e0c7081bf00e3f2ea7adddb9dc5eebe3f",
       "version": "20260813120011"
+    },
+    {
+      "canonical_render_sha256": "3ea43190413445c55c9795f723f7a1963949ae96742964172db682b9cff95014",
+      "name": "auth_access_plane",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0012-auth-access-plane.sql",
+      "template_sha256": "32b615a28baab226234d90b22dbdb7f606b412d5a0c2c82305a87f5e7345fa25",
+      "version": "20260814120012"
     }
   ],
   "schema_version": 1

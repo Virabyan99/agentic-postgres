@@ -18,6 +18,7 @@ is still detectable if the process dies between the two renames.
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import re
 import secrets
@@ -28,7 +29,14 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import REPO_ROOT, config, naming, secrets_contract, template_version
+from agentic_postgres import (
+    REPO_ROOT,
+    config,
+    naming,
+    scope_registry,
+    secrets_contract,
+    template_version,
+)
 
 #: The session whose planned surface a render describes. Rendering is a
 #: planning operation, so this bounds which declared secrets appear in
@@ -465,6 +473,12 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "AUTH_SERVICE_ROLE_NAME",
     "AUTH_POOL_SIZE",
     "AUTH_MEMORY_LIMIT",
+    # Session 6, Run 8. The suffix -> derived-name map for every role a TOKEN
+    # may name. The service needs it because `naming.py` is the single authority
+    # for derivation (ADR 0002) and is not in the image; emitting it here means
+    # the container is handed names rather than deriving its own, which is the
+    # same rule ADR 0067 applies to the bootstrap plane.
+    "AUTH_ROLE_NAMES",
 )
 
 #: The pooler's port on its own project network. 6432 is the PgBouncer
@@ -689,6 +703,24 @@ def build_compose_env(
         # concatenate a suffix onto an interpolated value anyway.
         "AUTH_MEMORY_LIMIT": "{}m".format(
             app_service.get("memory_limit_mb", config.API_APP_DEFAULTS["memory_limit_mb"])
+        ),
+        # Compact JSON with sorted keys, so the value is byte-stable across
+        # renders -- `test_render_is_byte_identical_across_processes` compares
+        # the whole file and a dict's iteration order would fail it.
+        #
+        # Only the roles a token may name. The service identities -- the
+        # authenticator, the migration user, this service's own role -- are
+        # deliberately absent: `scope_registry` refuses to answer for them
+        # because "a command that offers the option invites somebody to find
+        # out", and a map that listed them would be that offer.
+        "AUTH_ROLE_NAMES": json.dumps(
+            {
+                suffix: identity.roles[suffix]
+                for suffix in sorted(scope_registry.ROLE_SCOPES)
+                if suffix in identity.roles
+            },
+            separators=(",", ":"),
+            sort_keys=True,
         ),
     }
     lines = [

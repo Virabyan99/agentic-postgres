@@ -118,6 +118,11 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D258** | (`versions.in.yaml`, Run 2's own note.) The Session 6 dependency set needs no build toolchain, and lists the compiled transitive packages — "argon2-cffi-bindings, cryptography, cffi, and **psycopg-binary if the C speedups are wanted**". | **`psycopg` alone does not import at all.** Measured against the locked `python:3.12-slim` digest: no libpq, no `pg_config`, no compiler, and `ImportError: no pq wrapper available` on the first import. Of psycopg's three implementations exactly one is reachable there, and it is the wheel that clause calls optional. **And `psycopg-pool` is a separate distribution at a different version** — 3.3.1 against psycopg's 3.3.4 — which the lock did not name at all. | **ADR 0083.** `psycopg[binary]` in the image, because psycopg's own metadata pins `psycopg-binary==3.3.4` exactly; `PSYCOPG_POOL_VERSION` as a lock entry, because psycopg declares the pool with no version and that makes it a real choice. | The conclusion the note reached was right and one clause inside it was a value that looked measured and was not — **§6's pattern, inside a comment written to record a measurement.** Corrected in place rather than deleted, because the sentence is otherwise the record of what Run 2 did. | **yes** |
 | **D259** | (D238, carried as an open item since Run 2.) `--update` re-resolves every image as well as every package; measured immediately before Run 2's update, per image: **zero drift**, because the lock was one day old. | **Run 7 added one package entry and two images moved in the same command** — `pgvector:pg18` and `python:3.12-slim`, both to digests nobody had measured. Locking a dependency would have shipped an unmeasured PostgreSQL upgrade and a new base image for every service, inside a run about authentication. | **`bin/lock-versions.sh --update --packages-only`** (ADR 0083): resolves packages, carries every image digest forward unchanged, needs no Docker, and **refuses** to carry one forward when `versions.in.yaml` names a different tag. Both controls run — no image line moved, and editing `pg18` to `pg17` blocked with exit 5. | D238 wrote down exactly this failure and called it *safe today*. It was safe for eleven days. **The finding is not the drift — it is that the control written in Run 2 was still there in Run 7 and fired.** | **yes** |
 | **D260** | (Implicit in every run of this session.) A mutation battery proves the tests it targets. | **Three of Run 7's twenty mutations stayed green, and each was a different way of measuring nothing.** (1) The executor's `asyncio.shield` removed — and **the docstring explaining why it was there had the reason backwards**: cancelling a *started* hash is harmless, and the leak is a *queued* submission whose `finally` never runs. (2) `hash_memory_budget_mb` replaced by `return 224` — the test computed the expected value from the same three constants, so it asserted `224 == 224`. (3) A compose variable renamed to one nothing emits — the test compared environment *keys* and never looked at what they interpolate. | Three new tests: the queued-cancellation case with a deliberately saturated executor; the floor's **slope** across three concurrencies, which no constant can satisfy; and every `${VAR}` the service reads checked against `COMPOSE_ENV_KEYS` and `versions.env`. | **The third one had already happened for real, minutes earlier**, and a render caught it rather than a test — I invented `AUTH_JWT_AUDIENCE` when `JWT_AUDIENCE` had existed since Session 5. D173's shape twice over: an assertion that cannot fail. **A battery is the only thing this session has that finds a tautology.** | no |
+| **D261** | (§5 of this plan.) Run 9 carries **migration 0012**, which extends the pre-request hook. | **Run 8 needs a migration first, and 0011 said so.** Migration 0011 granted `auth_service` schema USAGE and nothing else, with the reason written into it: the service reaches the registry *"through SECURITY DEFINER functions that arrive in the same commit as the code that calls them, which is Run 8's"*. Run 8's code cannot call functions that do not exist. | **Run 8 is 0012 and Run 9 becomes 0013.** Twelve released migrations, `freeze-lock` re-run, and the eleventh's own test now asserts 0011's **position** rather than the total -- a test pinned to the count goes red for a migration being added, which is the one event the lock exists to record. | Mechanical, and it is here because the plan numbered Run 9's migration before Run 8's existed. The same shape as D255 one run earlier: a number chosen from the run in front of you rather than from the session's whole surface. | no |
+| **D262** | (Implicit in every migration in this repository.) A function's GRANT list bounds who may call it. | **A newly created function is EXECUTABLE BY PUBLIC.** Measured on the locked image with a control: `proacl` is NULL on every new function, NULL means the built-in default, and that default includes PUBLIC. Worse, the `ALTER DEFAULT PRIVILEGES ... REVOKE ... FROM PUBLIC` that 0011 uses for TABLES and SEQUENCES **records nothing at all** for functions -- `pg_default_acl` stays empty and the next function created is still PUBLIC-executable, in both the `FUNCTIONS` and `ROUTINES` spellings. The control is a GRANT for tables in the same rig, which does store a row. | **0012 ends with the blanket `REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_private FROM PUBLIC` before its grants**, and the comment says it is load-bearing rather than tidy. | **The house pattern was already right and nobody knew why.** Every migration in `app_private` ends with that blanket revoke, and it is the only thing standing between these functions and every role holding schema USAGE. The `ALTER DEFAULT PRIVILEGES` half, which reads like the belt to its braces, does nothing for functions at all. | no |
+| **D263** | (Migration 0011, and every SECURITY DEFINER function in this repository.) A definer body names every object schema-qualified -- 0005: *"a caller who can create a temporary object shadows an unqualified name and executes it as the owner"*. | **`normalize(x, NFC)` cannot be schema-qualified.** The second argument is a KEYWORD in a grammar that exists only for the bare name, and `pg_catalog.normalize(x, NFC)` fails with `column "nfc" does not exist`. 0011's unique index is written in exactly that spelling, so 0012's lookup had to match it or match nothing. | **Neither.** Measured: `pg_catalog.normalize(x)` -- the one-argument form, which IS qualifiable -- equals `normalize(x, NFC)`, and the planner still uses `users_username_normalised_key` for it, against a control predicate that plans as a sequential scan. Nothing is bent and nothing is slower. | The rig built to answer the *other* question -- can `pg_temp` actually shadow an unqualified catalog call -- **could not demonstrate shadowing in either search_path order**. Its control did not fire, so it is recorded as uninformative rather than as evidence that shadowing is impossible. The decision was made on the measurement that did work. | no |
+| **D264** | (Run 7, this session, `services/auth-api/app/tokens.py`.) The service's JOSE `typ` is `at+jwt`, RFC 9068's media type for an access token. | **ADR 0078 had already chosen `JWT`, eight runs earlier**, and `jwt_claims.TOKEN_TYPE` says so. Two authorities for one header field, inside one service, in one session -- written by me, in the code written to defend against exactly this. | **`tokens.TOKEN_TYPE` reads the claim contract.** The accepted ADR is the one that stays; changing the value is a decision with alternatives and would need its own. RFC 9068's argument is real and is not dismissed -- what does that work here is `token_use`, which the contract already requires, which `verify_claims` checks, and which is signed inside the payload rather than in a header PostgREST ignores entirely. | Found by writing `keys.jose_header` and having to ask which constant it should read. **Nothing would have caught it**: both spellings were internally consistent, the pre-parser accepted what the issuer produced, and the test asserting the refusals was written from the wrong constant. | no |
+| **D265** | (§5 Run 8 of this plan.) *"Generic failures: unknown, wrong, disabled and **locked** all return the same code and the same work class."* | **There is no `locked` state and Session 6 does not add one.** `app_private.user_status` is `active` or `disabled`, and 0011 is released. | **The requirement is kept and the fourth word is not.** All three states that exist -- unknown, wrong password, disabled -- return the same status, the same bytes and the same Argon2 work, and the ORDER is fixed so a disabled subject costs what an active one costs. An automatic lockout is refused: with Argon2id at the frozen profile and the edge's rate limit, a per-account counter mostly buys an attacker a denial of service against a named administrator. An administrator-applied lock is `disabled`. | The underlying requirement -- every authentication failure is indistinguishable -- is the one that matters and it is fully implemented. Recorded rather than reconciled silently, because a reader comparing the plan to the code would otherwise find a state vocabulary with three words where the plan names four. | no |
 
 ---
 
@@ -505,12 +510,63 @@ backwards, a floor test that asserted `224 == 224`, and a variable-name check
 that never looked at variable names. The third had already happened for real
 minutes earlier — a render caught it, not a test.
 
-### Run 8 — Human endpoints and the local bootstrap
+### Run 8 — Human endpoints and the local bootstrap  ·  **Done.**
 
-`/auth/login`, `/auth/me`, `/auth/jwks.json`, the admin user lifecycle, and
-`bin/auth-admin.sh bootstrap` under the project advisory lock. Generic failures:
-unknown, wrong, disabled and locked all return the same code and the same work
-class.
+`/auth/login`, `/auth/me`, `/auth/jwks.json`, `GET|POST /admin/users`, `PATCH
+/admin/users/{id}`, and `bin/auth-admin.sh bootstrap`. **Migration 0012** is the
+access plane underneath them -- eight SECURITY DEFINER functions, which is what
+0011 deferred to "the same commit as the code that calls them" (**D261**: Run
+9's hook becomes 0013).
+
+**Proved against a real cluster, not a mock.** `tests/contract/test_auth_endpoints.py`
+applies all twelve rendered migrations to the locked image, bootstraps an
+administrator through the same function the operator command calls, and drives
+the same `create_app` the container runs. Twenty-nine tests; the transport is
+the only part that is not the product.
+
+**Measured before it was written, each with a control:**
+
+- **The bootstrap race is real.** Two connections driven through the
+  interleaving by hand -- not raced by threads and hoped over: without the lock
+  each reads "no administrator", each inserts, and the table ends with **two**.
+  With `pg_advisory_xact_lock` the second blocks, and on retry is refused by the
+  existence check, which is the line that reports something an operator can act
+  on. Also measured: a **session** lock is still held after COMMIT, so through a
+  transaction-mode pooler it would be stranded -- `bin/auth-admin.sh` connects
+  directly and uses the transaction form regardless.
+- **`auth_service` reaches nothing but its eight functions.** `SELECT` on
+  `app_private.users` is `permission denied for table users`; the two bootstrap
+  functions are `permission denied for function`.
+- **D262 — a new function is PUBLIC-executable**, and `ALTER DEFAULT PRIVILEGES
+  ... REVOKE ... FROM PUBLIC` records nothing for functions at all. The blanket
+  revoke every migration in this schema ends with is the only thing that works,
+  and it was already there.
+- **D263 — `normalize(x, NFC)` cannot be schema-qualified.** The qualifiable
+  one-argument form is equal and still uses the unique index, against a
+  sequential-scan control. The rig built to ask whether `pg_temp` can shadow an
+  unqualified call **could not demonstrate shadowing at all**; its control did
+  not fire and it is recorded as uninformative.
+
+**ADR 0084** generalises Run 7's one-off: a fact both planes need lives in
+`services/auth-api/app/` and `src/agentic_postgres/` imports it. Four modules
+now do, because the build context cannot reach `src/` and the alternative is the
+duplicate-plus-test shape D175 and D260 have both already cost this project.
+
+**D264 is mine, from Run 7.** `tokens.TOKEN_TYPE` was `at+jwt` while ADR 0078 had
+chosen `JWT` eight runs earlier -- two authorities for one header field inside
+one service. Nothing would have caught it: both spellings were internally
+consistent and the test asserting the refusals was written from the wrong one.
+
+**Sixteen mutations, and M5 is the one worth having.** Removing the
+`authz_version` comparison entirely left "a scope change invalidates an older
+token" **green**, because the scope-list comparison below it catches a scope
+change too -- so that test proved a redundant guard rather than the one it
+named. The test that closes it is disable-then-re-enable: role, scopes and
+status all end up identical to what the token carries, and only the version
+moved. **M14 is recorded as a deliberate PASS**: dropping the advisory lock
+leaves every test green, because no test in the suite drives two concurrent
+bootstraps -- the property is real, the measurement is in the run log, and the
+suite does not contain it.
 
 ### Run 9 — Agents, and migration 0012
 

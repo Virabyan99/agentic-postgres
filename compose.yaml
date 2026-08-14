@@ -843,6 +843,10 @@ services:
       APG_POOL_SIZE: ${AUTH_POOL_SIZE:?required}
       APG_SIGNING_KEY_FILE: /run/secrets/auth_jwt_signing_key.pem
       APG_LISTEN_PORT: "8080"
+      # Compact JSON: suffix -> derived role name, for the roles a token may
+      # name. Derivation stays in naming.py (ADR 0002); the container is
+      # handed the answer rather than computing a second one.
+      APG_ROLE_NAMES: ${AUTH_ROLE_NAMES:?required}
     # Container-local, and the only health surface this service has (D231).
     # `/health/ready` opens a connection from the pool and runs one statement,
     # so an unhealthy container is one that could not serve a request -- not one

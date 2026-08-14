@@ -52,6 +52,28 @@ def _required_int(name: str, *, minimum: int = 1) -> int:
     return value
 
 
+def _required_role_names(name: str) -> dict[str, str]:
+    """The suffix -> derived-name map, parsed strictly.
+
+    Rendered by `rendering.build_compose_env` from `naming.py`, which is the
+    single authority for derivation (ADR 0002). Parsed here rather than trusted:
+    a map that arrived as a list, or with a non-string value, would produce a
+    role name of the wrong type in a signed token.
+    """
+    import json
+
+    try:
+        parsed = json.loads(_required(name))
+    except ValueError as exc:
+        raise MissingSetting(f"{name} is not valid JSON") from exc
+    if not isinstance(parsed, dict) or not parsed:
+        raise MissingSetting(f"{name} must be a non-empty JSON object")
+    for suffix, role in parsed.items():
+        if not isinstance(suffix, str) or not isinstance(role, str) or not suffix or not role:
+            raise MissingSetting(f"{name} maps {suffix!r} to something that is not a role name")
+    return parsed
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """The resolved environment. Built once, at startup, or not at all."""
@@ -68,6 +90,7 @@ class Settings:
     pool_size: int
     signing_key_file: Path
     listen_port: int
+    role_names: dict[str, str]
 
     @property
     def conninfo(self) -> str:
@@ -122,6 +145,7 @@ def load(environ: dict[str, str] | None = None) -> Settings:
         pool_size=_required_int("APG_POOL_SIZE"),
         signing_key_file=Path(_required("APG_SIGNING_KEY_FILE")),
         listen_port=_required_int("APG_LISTEN_PORT"),
+        role_names=_required_role_names("APG_ROLE_NAMES"),
     )
 
 
@@ -143,4 +167,5 @@ REQUIRED_VARIABLES: tuple[str, ...] = (
     "APG_POOL_SIZE",
     "APG_SIGNING_KEY_FILE",
     "APG_LISTEN_PORT",
+    "APG_ROLE_NAMES",
 )

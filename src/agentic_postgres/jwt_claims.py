@@ -6,13 +6,16 @@ pre-request hook read `sub` and nothing else. No `scope`, `token_use`, `jti` or
 `nbf` had ever been signed, published or verified. So this module is the first
 one, written rather than extended, and ADR 0078 is its decision record.
 
-**One authority for the shape.** Two verifiers read a token -- the auth service
-with PyJWT, and the database's pre-request hook -- and a contract spelled twice
-is a contract that drifts. D177 watched exactly that happen to a URL, where the
-copy carrying a comment saying it was kept in step was the one that had drifted.
-Everything either verifier needs to know about the shape is here, and the SQL
-half is rendered from :func:`sql_required_claims` rather than typed into a
-migration.
+**One authority for the shape, and since Run 8 it is not this file** (ADR 0084).
+`REQUIRED_CLAIMS`, the token uses, the skew, the TTL ceiling and `verify_claims`
+live in `services/auth-api/app/claims.py` -- inside the image's build context --
+and are re-exported here. The service and the repository then read one
+declaration rather than two, which is what D177 cost the last time a contract
+was spelled twice: the copy carrying a comment saying it was kept in step was
+the one that had drifted.
+
+What remains here is everything that is *about* the contract rather than part of
+it, and neither half is something the running service does:
 
 **What PostgREST enforces was measured, not read.** Against the locked digest
 `postgrest:v14.16`, configured as `compose.yaml` configures it -- which matters,
@@ -34,9 +37,19 @@ Both are why the hook is a verifier rather than a consumer.
 
 from __future__ import annotations
 
-from typing import Any
+from agentic_postgres import service_source
 
-from agentic_postgres.config import ManifestError
+_claims = service_source.load("claims")
+
+#: Re-exported from the service's build context. Assigned rather than imported
+#: with a `from` so that a reader sees where they come from.
+ClaimError = _claims.ClaimError
+REQUIRED_CLAIMS = _claims.REQUIRED_CLAIMS
+TOKEN_TYPE = _claims.TOKEN_TYPE
+TOKEN_USES = _claims.TOKEN_USES
+CLOCK_SKEW_SECONDS = _claims.CLOCK_SKEW_SECONDS
+MAX_TTL_SECONDS = _claims.MAX_TTL_SECONDS
+verify_claims = _claims.verify_claims
 
 __all__ = [
     "CLOCK_SKEW_SECONDS",
@@ -51,55 +64,6 @@ __all__ = [
     "verify_claims",
 ]
 
-
-class ClaimError(ManifestError):
-    """A token's claims do not satisfy the contract."""
-
-
-#: The JOSE `typ`. Measured: PostgREST does **not** check it -- a token typed
-#: `at+jwt` is served -- so this is enforced by the service and the hook or by
-#: nobody.
-TOKEN_TYPE = "JWT"  # noqa: S105 -- a JOSE header value, not a credential
-
-#: The `token_use` discriminator. A token minted for one purpose must not be
-#: accepted for another, and PostgREST has no opinion about this claim at all.
-#: `agent` is issued in Session 6 and is refused at role switching until Session
-#: 9 grants the memberships, which is a tested property rather than a side
-#: effect.
-TOKEN_USES = ("access", "agent")
-
-#: Every claim a token must carry. Order is the wire order the issuer writes and
-#: the order the SQL literal is rendered in, so a reviewer comparing the two
-#: reads one list twice rather than two lists once.
-REQUIRED_CLAIMS = (
-    "iss",
-    "aud",
-    "sub",
-    "role",
-    "scope",
-    "token_use",
-    "jti",
-    "iat",
-    "nbf",
-    "exp",
-    "credential_version",
-    "authz_version",
-)
-
-#: Measured against the locked PostgREST, with a bisect: a token is accepted up
-#: to **30 seconds** past `exp`, and up to 30 seconds before `nbf`. 30 is served
-#: and 31 is refused, in both directions.
-#:
-#: This is not a curiosity. `jwt_keys.begin_rotation` computes a retirement
-#: deadline as `max_token_ttl + clock_skew`, so a rotation that used a smaller
-#: skew than the verifier applies would retire a key while tokens it signed were
-#: still being served. Anything computing a rotation window reads this.
-CLOCK_SKEW_SECONDS = 30
-
-#: The ceiling on a token's lifetime, matching `bin/dev-token.py`. A token is
-#: live for at most `MAX_TTL_SECONDS + CLOCK_SKEW_SECONDS`, and that sum -- not
-#: the TTL -- is the blast radius of a compromised token or a key cutover.
-MAX_TTL_SECONDS = 900
 
 #: What the locked PostgREST refuses on its own. Each entry is an observed 401
 #: or 403 with the baseline served in the same run.
@@ -135,6 +99,9 @@ def sql_required_claims() -> str:
     Quoting is trivial and stays trivial: every name is matched against a
     conservative pattern first, so a claim name that needed escaping would fail
     here rather than produce a plausible literal.
+
+    Stays in this module rather than moving with the contract: rendering a
+    migration literal is something the repository does and the service does not.
     """
     for claim in REQUIRED_CLAIMS:
         if not claim.replace("_", "").isalnum() or not claim[0].isalpha():
@@ -144,78 +111,3 @@ def sql_required_claims() -> str:
                 "quoting decision made in the wrong place"
             )
     return "ARRAY[" + ", ".join(f"'{claim}'" for claim in REQUIRED_CLAIMS) + "]::text[]"
-
-
-def verify_claims(
-    payload: Any,
-    *,
-    issuer: str,
-    audience: str,
-    now: int,
-    skew: int = CLOCK_SKEW_SECONDS,
-) -> dict[str, Any]:
-    """The service's half of the contract, as a pure function.
-
-    Signature verification is not here and deliberately: that is PyJWT's, over
-    key material this function never sees. What is here is everything a valid
-    signature does *not* establish -- and PostgREST's negative matrix is the
-    reason each check exists rather than a general sense of rigour.
-
-    `skew` is a parameter rather than a constant read inside, so a test can pin
-    the boundary without moving the product's value.
-    """
-    if not isinstance(payload, dict):
-        raise ClaimError("the token payload is not a JSON object")
-
-    missing = [claim for claim in REQUIRED_CLAIMS if claim not in payload]
-    if missing:
-        raise ClaimError(f"the token is missing required claims: {missing}")
-
-    # `iss` first, because it is the one PostgREST does not check at all and the
-    # one a token from anywhere else would fail.
-    if payload["iss"] != issuer:
-        raise ClaimError("the token was issued by another issuer")
-
-    # Present AND correct. PostgREST refuses a wrong audience and serves an
-    # absent one, so "present" is the half that has to be checked here.
-    if payload["aud"] != audience:
-        raise ClaimError("the token is not for this audience")
-
-    if payload["token_use"] not in TOKEN_USES:
-        raise ClaimError(f"token_use is not one of {TOKEN_USES}")
-
-    for name in ("iat", "nbf", "exp", "credential_version", "authz_version"):
-        value = payload[name]
-        # `bool` is an `int` in Python, and `True` where a version is expected
-        # would compare equal to 1 for the rest of this function's life.
-        if not isinstance(value, int) or isinstance(value, bool):
-            raise ClaimError(f"{name} is not an integer")
-
-    if payload["credential_version"] < 0 or payload["authz_version"] < 0:
-        raise ClaimError("a version claim is negative")
-
-    if now + skew < payload["nbf"]:
-        raise ClaimError("the token is not yet valid")
-    if now - skew >= payload["exp"]:
-        raise ClaimError("the token has expired")
-    if payload["exp"] <= payload["iat"]:
-        raise ClaimError("the token expires no later than it was issued")
-    if payload["exp"] - payload["iat"] > MAX_TTL_SECONDS:
-        raise ClaimError(f"the token's lifetime exceeds {MAX_TTL_SECONDS}s")
-
-    scope = payload["scope"]
-    if not isinstance(scope, list) or not all(isinstance(item, str) for item in scope):
-        raise ClaimError(
-            "scope is not an array of strings. PostgREST delivers whatever was signed, "
-            "including a space-delimited string, so the shape is this verifier's to assert"
-        )
-    if sorted(scope) != list(scope):
-        raise ClaimError("scope is not sorted; the issuer sorts before signing")
-    if len(set(scope)) != len(scope):
-        raise ClaimError("scope repeats an entry")
-
-    for name in ("sub", "role", "jti"):
-        if not isinstance(payload[name], str) or not payload[name]:
-            raise ClaimError(f"{name} is not a non-empty string")
-
-    return dict(payload)

@@ -150,9 +150,14 @@ def test_a_missing_required_header_member_is_refused(member: str) -> None:
         pre_parse(_token(header))
 
 
-@pytest.mark.parametrize("typ", ["JWT", "jwt", "at+JWT", "application/jwt", ""])
+@pytest.mark.parametrize("typ", ["at+jwt", "jwt", "at+JWT", "application/jwt", ""])
 def test_an_unpermitted_typ_is_refused(typ: str) -> None:
-    """Exact, and case-sensitive. RFC 9068's media type is `at+jwt`."""
+    """Exact, and case-sensitive. ADR 0078 chose `JWT` (D264).
+
+    `at+jwt` is in this list rather than being the accepted value, and that is
+    the correction: Run 7 wrote RFC 9068's media type here while the accepted
+    ADR had already chosen `JWT`. The test moved with the constant because the
+    constant was wrong, not because the test was inconvenient."""
     with pytest.raises(MalformedToken, match="unpermitted token type"):
         pre_parse(_token({**HEADER, "typ": typ}))
 

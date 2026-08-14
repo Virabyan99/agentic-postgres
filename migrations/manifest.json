@@ -167,6 +167,16 @@
         "auth_service"
       ],
       "description": "The identity registry: app_private.users, user_credentials, agents, agent_credentials and auth_contract_state, plus the is_scope_set helper the scope columns are checked against. Created from nothing -- the runbook's 'extend the existing users table' has no subject, so every column is NOT NULL from creation and the backfill is struck rather than written over zero rows (D218). No foreign key reaches app.notes.owner_id: that column holds a claim value and ADR 0029 states in its title that it is trusted, not authenticated. auth_service is granted schema USAGE and nothing else; the functions it will call arrive with the code that calls them. See ADR 0078, D218, D228."
+    },
+    {
+      "version": "20260814120012",
+      "name": "auth_access_plane",
+      "template": "templates/0012-auth-access-plane.sql",
+      "placeholders": [
+        "object_owner",
+        "auth_service"
+      ],
+      "description": "The access plane for human subjects: eight SECURITY DEFINER functions in app_private, granted to auth_service, which are the only way the service reaches the identity registry -- 0011 granted it schema USAGE and nothing else and said these would arrive with the code that calls them. Lookup is by the same normalised expression the unique index uses, and returns no row rather than raising for an unknown username, because the login path exists to make 'no such user' and 'wrong password' indistinguishable. auth_bootstrap_administrator takes a project-scoped pg_advisory_xact_lock derived from project_identity: measured, two concurrent callers without it both read 'no administrator' and both insert. It is NOT granted to auth_service -- a service that could call it is the public bootstrap endpoint that does not exist. The blanket REVOKE FROM PUBLIC is load-bearing rather than tidy: a new function is PUBLIC-executable by default and ALTER DEFAULT PRIVILEGES records nothing for functions (D262). This is 0012 and Run 9's hook becomes 0013 (D261). See ADR 0084, D261, D262."
     }
   ]
 }

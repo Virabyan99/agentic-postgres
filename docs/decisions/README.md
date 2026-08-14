@@ -147,3 +147,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0081](0081-the-frozen-argon2id-profile-is-checked-on-the-stored-hash.md) | The frozen Argon2id profile is checked on the stored hash | 6 | Accepted |
 | [0082](0082-the-auth-memory-limit-is-a-derived-claimant.md) | The auth service's memory limit is a derived claimant | 6 | Accepted |
 | [0083](0083-the-lock-names-what-it-can-dereference-and-what-is-a-choice.md) | The lock names what it can dereference, and what is actually a choice | 6 | Accepted |
+| [0084](0084-the-pure-contract-lives-in-the-build-context.md) | The pure contract lives in the build context, and the repository imports it | 6 | Accepted |

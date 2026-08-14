@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
+from app import claims as _claims
 from app.strict_json import MalformedBody, parse_object
 
 #: The largest bearer token this service will look at, in bytes. A token issued
@@ -64,14 +65,21 @@ PERMITTED_ALGORITHMS: Final = frozenset({"RS256"})
 #: precisely because they are instructions to go and fetch a key.
 PERMITTED_HEADER_MEMBERS: Final = frozenset({"alg", "kid", "typ"})
 
-#: The `typ` this service issues and accepts. RFC 9068's media type for an
-#: access token, which exists so that a token minted for one purpose cannot be
-#: replayed into a context expecting another.
-#: (S105 is bandit's hardcoded-password rule matching on the name `TOKEN_TYPE`.
-#: This is a media type, not a credential -- the value is published in every
-#: JOSE header this service emits. Suppressed with the reason rather than by
-#: renaming the constant, because `typ` is what the field is called.)
-TOKEN_TYPE: Final = "at+jwt"  # noqa: S105
+#: The `typ` this service issues and accepts -- **read from the claim contract,
+#: not chosen here** (D264).
+#:
+#: Run 7 wrote `at+jwt` at this line on RFC 9068's authority, and ADR 0078 had
+#: already chosen `JWT` eight runs earlier. Two authorities for one header field
+#: inside one service, in one session, which is §6's pattern arriving in the
+#: code written to defend against it. The accepted ADR is the one that stays;
+#: changing the value is a decision with alternatives and would need its own.
+#:
+#: RFC 9068's argument is real and is not dismissed: a distinct media type stops
+#: a token minted for one purpose being replayed into a context expecting
+#: another. What does that work here is `token_use`, which the contract already
+#: requires and which `verify_claims` checks -- and which, unlike `typ`, is
+#: signed inside the payload rather than in a header PostgREST ignores entirely.
+TOKEN_TYPE: Final = _claims.TOKEN_TYPE
 
 
 class MalformedToken(ValueError):

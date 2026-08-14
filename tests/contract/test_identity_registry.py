@@ -293,4 +293,10 @@ def test_0011_is_the_eleventh_and_the_lock_carries_it(entry: dict[str, Any]) -> 
     versions = [item["version"] for item in lock["migrations"]]
     assert entry["version"] in versions, "0011 is not in the released lock; run freeze-lock"
     assert versions == sorted(versions), "the lock is out of order"
-    assert len(versions) == 11
+
+    # Its POSITION, not the total. Run 8 appended 0012 (D261), and a test pinned
+    # to the count would go red every time a migration is added -- which is the
+    # one event the lock exists to record. What must not change is that 0011 is
+    # the eleventh; what may is how many come after it.
+    assert versions.index(entry["version"]) == 10
+    assert len(versions) >= 11

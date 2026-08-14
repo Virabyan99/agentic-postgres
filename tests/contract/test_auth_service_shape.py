@@ -76,6 +76,79 @@ def test_the_frozen_profile_module_needs_only_the_standard_library() -> None:
     )
 
 
+#: The modules `src/agentic_postgres/` imports out of the service (ADR 0084).
+#: Listed rather than discovered, because the rule is that only a *pure fact*
+#: may move -- a scan that found them would grow silently as somebody moved
+#: something that is not one.
+SHARED_MODULES = ("profile", "claims", "scopes")
+
+
+@pytest.mark.parametrize("module", SHARED_MODULES)
+def test_every_service_module_the_repository_imports_needs_only_the_standard_library(
+    module: str,
+) -> None:
+    """ADR 0084's load-bearing half.
+
+    `config.py` validates a manifest on a deploy host that has no `argon2`, no
+    `pyjwt` and no `psycopg` anywhere near it, and it reads these modules to do
+    it. That works only while they import nothing but the standard library --
+    and it would break silently, at the first convenience import, in a way that
+    surfaces as a deploy failing rather than a test.
+    """
+    source = (SERVICE_ROOT / "app" / f"{module}.py").read_text(encoding="utf-8")
+    imported: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".")[0])
+
+    outside = imported - sys.stdlib_module_names - {"app"}
+    assert not outside, (
+        f"app/{module}.py imports {sorted(outside)}, which is outside the standard "
+        "library; agentic_postgres imports this module on a host that has none of the "
+        "service's dependencies installed"
+    )
+
+
+def test_the_service_never_imports_the_repository() -> None:
+    """ADR 0084 is one-way, and the image is why.
+
+    `services/auth-api/` is the whole build context: `agentic_postgres` is not
+    in the image, so an import of it would work in every test and fail at
+    startup in the container -- the exact shape of a defect that survives an
+    offline suite and appears on a host.
+    """
+    offenders: list[str] = []
+    for path in sorted(SERVICE_ROOT.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            module = None
+            if isinstance(node, ast.Import):
+                module = ",".join(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+            if module and "agentic_postgres" in module:
+                offenders.append(f"{path.relative_to(REPO_ROOT)} imports {module}")
+    assert not offenders, offenders
+
+
+def test_the_shared_modules_are_the_ones_the_repository_actually_loads() -> None:
+    """The list above is not decoration; it has to match what `src/` does.
+
+    Otherwise a module could be added to the service and imported by the
+    repository without ever meeting the standard-library rule -- which is the
+    rule ADR 0084 rests on.
+    """
+    loaded: set[str] = set()
+    for path in sorted((REPO_ROOT / "src" / "agentic_postgres").glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        loaded.update(re.findall(r'service_source\.load\(\s*"([a-z_]+)"\s*\)', text))
+    assert loaded == set(SHARED_MODULES), (
+        f"the repository loads {sorted(loaded)} from the service, and this test covers "
+        f"{sorted(SHARED_MODULES)}"
+    )
+
+
 def test_the_repository_and_the_service_hold_one_profile_object() -> None:
     """Not two structurally equal ones (see `auth_profile._load`).
 
@@ -551,21 +624,43 @@ def test_that_scan_can_tell_code_from_prose() -> None:
     assert "PyJWKClient" in text, "the docstring that makes this control meaningful is gone"
 
 
-def test_the_application_publishes_only_the_two_container_local_health_paths() -> None:
-    """D231: the project's public health answer stays `__apg/healthz`.
+def test_the_application_serves_exactly_the_declared_paths() -> None:
+    """Two lists, and the router has to equal their union.
 
-    A third and fourth answer to "is this project up" is two more things to
-    keep in step, and one of them will drift.
+    D231 is the half about health: the project's public health answer stays
+    `__apg/healthz`, and a third and fourth answer to "is this project up" is
+    two more things to keep in step. `public_paths` is the other half -- what
+    Run 10 will publish through the edge.
+
+    Equality rather than containment, so a route added without a decision about
+    which side of the edge it belongs on fails here rather than appearing on the
+    internet. That is not hypothetical: the whole of Run 7's boundary was "this
+    service is not routable yet", and the thing that keeps it true is a test
+    that notices a new path.
     """
     application = main_module.create_app()
     served = set(main_module.route_paths(application))
-    declared = set(main_module.health_paths())
+    declared = set(main_module.health_paths()) | set(main_module.public_paths())
 
-    assert declared <= served, f"declared health paths {declared - served} are not served"
-    # FastAPI adds nothing else when docs and openapi are disabled.
     assert served == declared, (
-        f"the application serves unexpected paths: {sorted(served - declared)}"
+        f"unexpected: {sorted(served - declared)}; missing: {sorted(declared - served)}"
     )
+
+
+def test_no_health_path_is_in_the_public_list() -> None:
+    """The two lists are disjoint, which is what makes their union meaningful.
+
+    Without this, moving `/health/ready` into `public_paths` would keep the
+    equality above green while publishing a health endpoint through the edge --
+    the exact thing D231 decided against.
+    """
+    assert set(main_module.health_paths()).isdisjoint(main_module.public_paths())
+
+
+def test_the_admin_surface_is_reachable_only_under_admin() -> None:
+    """Every published path is one of the two prefixes the plan names (§6)."""
+    for path in main_module.public_paths():
+        assert path.startswith(("/auth/", "/admin/")), path
 
 
 def test_the_application_generates_no_openapi_document() -> None:

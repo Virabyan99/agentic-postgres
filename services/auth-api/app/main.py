@@ -30,10 +30,12 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
-from app import db
+from app import db, keys, routes
 from app import settings as settings_module
 from app.hashing import BoundedHasher
 from app.profile import HASH_CONCURRENCY
+from app.repository import Repository
+from app.service import AuthService
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -60,13 +62,30 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # make the file's contents a runtime input, and the rotation design needs
     # to know exactly when a verifier changed what it holds -- a restart is an
     # observable moment, a lazy re-read is not.
-    application.state.signing_key = settings.signing_key_file.read_bytes()
+    #
+    # `load_signing_key` derives the public JWK and the `kid` from the private
+    # key rather than reading a stored copy, which is ADR 0051's rule and the
+    # reason D257 refused a stored `jwt_public_jwks` secret.
+    signing_key = keys.load_signing_key(settings.signing_key_file)
+    application.state.signing_key = signing_key
 
-    application.state.hasher = BoundedHasher(concurrency=HASH_CONCURRENCY)
+    hasher = BoundedHasher(concurrency=HASH_CONCURRENCY)
+    application.state.hasher = hasher
 
     pool = db.build_pool(settings.conninfo, size=settings.pool_size)
     application.state.pool = pool
     async with db.pool_lifespan(pool):
+        # Assembled after the pool is open, so a route can assume a working one
+        # rather than checking. Nothing is served before this point: the
+        # lifespan has not yielded.
+        application.state.service = AuthService(
+            repository=Repository(pool),
+            hasher=hasher,
+            signing_key=signing_key,
+            issuer=settings.issuer,
+            audience=settings.audience,
+            role_suffixes={name: suffix for suffix, name in settings.role_names.items()},
+        )
         yield
 
 
@@ -111,6 +130,7 @@ def create_app() -> FastAPI:
             return JSONResponse({"status": "unready"}, status_code=503)
         return JSONResponse({"status": "ready"})
 
+    application.include_router(routes.router)
     return application
 
 
@@ -123,6 +143,23 @@ def health_paths() -> tuple[str, ...]:
     the edge.
     """
     return ("/health/live", "/health/ready")
+
+
+def public_paths() -> tuple[str, ...]:
+    """Every path Run 10 will publish through the edge.
+
+    Declared beside the health paths so the two lists are read together: what
+    the router carries has to be exactly these plus those, and a route added
+    without a decision about which side it falls on fails
+    `test_the_application_serves_exactly_the_declared_paths`.
+    """
+    return (
+        "/admin/users",
+        "/admin/users/{user_id}",
+        "/auth/jwks.json",
+        "/auth/login",
+        "/auth/me",
+    )
 
 
 def route_paths(application: FastAPI) -> tuple[str, ...]:
