@@ -12,6 +12,53 @@ pytest-timeout
 pytest-xdist
 PyYAML
 jsonschema
-pydantic
 httpx
-ruff
+
+# Pinned, and it is the only tool here that is (Session 6, Run 7).
+#
+# `--check` re-resolves this file and compares, so an unpinned entry means the
+# gate goes red the next time upstream publishes -- through nobody's change. It
+# has happened twice, both times with ruff, both times because a new release
+# formatted something differently from the one the tree was formatted with.
+# Pinning the formatter makes "the tree is formatted" a statement about a
+# specific formatter rather than about whichever one resolved today.
+#
+# The others are left floating deliberately rather than by omission: none has
+# ever produced a red gate, and pinning a test runner is a maintenance
+# commitment that belongs with the CI job ADR 0019 specifies and nobody has
+# built (§10). Recorded as a decision so the next reader does not read the
+# inconsistency as an oversight.
+ruff==0.16.3
+
+# ---------------------------------------------------------------------------
+# Session 6, Run 7. The auth service's runtime set, in the development
+# environment because its unit tests need the real libraries.
+#
+# SEC-CRED-002 is a `contract`-mode requirement that reads the Argon2id profile
+# back FROM THE ENCODED HASH. There is no way to satisfy that without producing
+# an encoded hash, which means argon2-cffi has to be installed here and not
+# only in the image. The same is true of every measured claim in Run 7's
+# batteries: PyJWT's unbounded header parse, psycopg-pool's `open=False`,
+# pydantic's `extra="forbid"`. A test that mocked them would be a test about
+# the mock (ADR 0065, arriving for the fifth time).
+#
+# EVERY VERSION HERE IS PINNED TO versions.in.yaml, and
+# `test_the_development_environment_installs_the_locked_service_versions`
+# asserts the two agree. Two files naming one version is this repository's
+# recurring defect; a test computing the relation is the only thing that has
+# ever stopped it. Unpinned entries would let uv resolve something newer than
+# the image runs, and the offline suite would then be measuring a version this
+# product does not ship.
+#
+# psycopg[binary] rather than a bare psycopg: measured in Run 7, the bare
+# distribution installs and then raises `ImportError: no pq wrapper available`
+# because there is no libpq on the machine (ADR 0083).
+argon2-cffi==25.1.0
+cryptography==50.0.0
+fastapi==0.121.2
+psycopg[binary]==3.3.4
+psycopg-pool==3.3.1
+pydantic==2.13.4
+pydantic-settings==2.14.2
+pyjwt==2.13.0
+uvicorn==0.50.2

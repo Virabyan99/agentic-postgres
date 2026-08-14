@@ -114,6 +114,10 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D254** | (Implicit in five green host runs and 2 776 offline tests.) The deploy path is exercised on every run, so a defect in how it handles secrets would have surfaced. | **Every deploy before tonight materialized a new generation containing identical values**, because no secret had ever actually changed at the provider. A container holding a stale generation and one holding a fresh generation are indistinguishable when the two generations carry the same bytes. | **Recorded as the reason D252 and D253 were unreachable**, not as a separate fault. The rotation window is the only thing that could have found either, which is why "specified, implemented, tested offline, never executed" was worth treating as unproved rather than as done. | **The sharpest instance yet of this project's defect.** Not a value that looked measured and was not -- a whole *mechanism* that looked exercised and was not, because the input that would have exercised it had never varied. 148 generations had accumulated on the host; every one of them held the same credentials. | no |
 | **D255** | (Run 4, this session.) v9 was chosen with the session's remaining fields in mind, so that Run 10 would not force a tenth version -- `routes.app_docs` was pulled forward precisely to avoid a second bump. | **It missed the connection budget.** D228, in the same plan, says `connection_limits` gains a third claimant; the bootstrap plane reads only the deployed document (D102, ADR 0067), so the auth service's commitment has to be a field in it. Run 6 therefore needs **v10**, one run after v9 shipped and two host redeploys later. | **v10 adds `database.auth_connection_budget`.** Both branches, a `migrate_v9_to_v10` step, and `tests/fixtures/outputs-v9.json` captured before the bump — the discipline D245 established, applied on the first opportunity. | **A version bump is planned from the session's whole surface, not from the run in front of you.** I reasoned carefully in Run 4 about which fields to carry forward, and reasoned only about the two runs I was looking at. The cost is real: two bumps in one session, and each one is a redeploy of every project. | no |
 | **D256** | (Session 5, `_validate_rest_service`.) The manifest's connection-budget check runs on every project. | **It ran only for a project that declared a REST service and enabled it** — the check sat behind two early returns. Meanwhile `rendering.resolve_api_connection_budget` charges the budget *whether or not the service is enabled*, deliberately, so the bootstrap plane's division does not move when somebody toggles a flag. | **The check moves out into `_validate_connection_budget`, called unconditionally**, and covers both services. A manifest with no REST section could otherwise declare a `database.pool_size` the bootstrap plane would refuse — and the refusal would arrive on a host rather than in validation, reading as a cluster problem. | Found while adding the third claimant, not looked for. The document and the validator disagreed about when a budget is charged, and the document was right. | no |
+| **D257** | (D227, and §5 Run 7 via D246.) Session 6 declares four secrets, and widens `value_kind` to admit `rsa_private_jwk` and `public_jwks` — because ADR 0055 exists so the kind says what the value *is*. | **Two of the four are not secrets, and the widening is not needed.** `jwt_public_jwks` is a stored copy of PUBLIC material that **ADR 0051 already derives**: `bin/render-jwks.py` builds the verification set from the private key at deploy time, on purpose — *one value, one derivation, and nothing that can drift from the key it claims to describe* — and writes it world-readable, because a `0400` file would imply a confidentiality the content does not have. And `rsa_private_jwk` would store a `kid` beside a key, when the `kid` this project uses is an RFC 7638 thumbprint **derived** by `jwt_keys.py`. | **Three secrets, and the enum does not widen.** `auth_service_password` (compose consumer `auth`, `pgpass`), `auth_jwt_signing_key` (compose consumer `auth`, `rsa_private_pem`) and `auth_jwt_prepared_key` (**root plane only**, never mounted before promotion). The JWKS is derived by the renderer that already derives one. | **D246 moved the widening here so it would arrive with its consumer. Arriving with its consumer is what showed it was not needed.** Both refusals are ADR 0051 and ADR 0055 *applied* rather than new decisions — which is why this is a divergence row and not a fourth ADR. | no |
+| **D258** | (`versions.in.yaml`, Run 2's own note.) The Session 6 dependency set needs no build toolchain, and lists the compiled transitive packages — "argon2-cffi-bindings, cryptography, cffi, and **psycopg-binary if the C speedups are wanted**". | **`psycopg` alone does not import at all.** Measured against the locked `python:3.12-slim` digest: no libpq, no `pg_config`, no compiler, and `ImportError: no pq wrapper available` on the first import. Of psycopg's three implementations exactly one is reachable there, and it is the wheel that clause calls optional. **And `psycopg-pool` is a separate distribution at a different version** — 3.3.1 against psycopg's 3.3.4 — which the lock did not name at all. | **ADR 0083.** `psycopg[binary]` in the image, because psycopg's own metadata pins `psycopg-binary==3.3.4` exactly; `PSYCOPG_POOL_VERSION` as a lock entry, because psycopg declares the pool with no version and that makes it a real choice. | The conclusion the note reached was right and one clause inside it was a value that looked measured and was not — **§6's pattern, inside a comment written to record a measurement.** Corrected in place rather than deleted, because the sentence is otherwise the record of what Run 2 did. | **yes** |
+| **D259** | (D238, carried as an open item since Run 2.) `--update` re-resolves every image as well as every package; measured immediately before Run 2's update, per image: **zero drift**, because the lock was one day old. | **Run 7 added one package entry and two images moved in the same command** — `pgvector:pg18` and `python:3.12-slim`, both to digests nobody had measured. Locking a dependency would have shipped an unmeasured PostgreSQL upgrade and a new base image for every service, inside a run about authentication. | **`bin/lock-versions.sh --update --packages-only`** (ADR 0083): resolves packages, carries every image digest forward unchanged, needs no Docker, and **refuses** to carry one forward when `versions.in.yaml` names a different tag. Both controls run — no image line moved, and editing `pg18` to `pg17` blocked with exit 5. | D238 wrote down exactly this failure and called it *safe today*. It was safe for eleven days. **The finding is not the drift — it is that the control written in Run 2 was still there in Run 7 and fired.** | **yes** |
+| **D260** | (Implicit in every run of this session.) A mutation battery proves the tests it targets. | **Three of Run 7's twenty mutations stayed green, and each was a different way of measuring nothing.** (1) The executor's `asyncio.shield` removed — and **the docstring explaining why it was there had the reason backwards**: cancelling a *started* hash is harmless, and the leak is a *queued* submission whose `finally` never runs. (2) `hash_memory_budget_mb` replaced by `return 224` — the test computed the expected value from the same three constants, so it asserted `224 == 224`. (3) A compose variable renamed to one nothing emits — the test compared environment *keys* and never looked at what they interpolate. | Three new tests: the queued-cancellation case with a deliberately saturated executor; the floor's **slope** across three concurrencies, which no constant can satisfy; and every `${VAR}` the service reads checked against `COMPOSE_ENV_KEYS` and `versions.env`. | **The third one had already happened for real, minutes earlier**, and a render caught it rather than a test — I invented `AUTH_JWT_AUDIENCE` when `JWT_AUDIENCE` had existed since Session 5. D173's shape twice over: an assertion that cannot fail. **A battery is the only thing this session has that finds a tautology.** | no |
 
 ---
 
@@ -457,23 +461,49 @@ renderer publishing the API's figure for both services — which **stayed green*
 because everything else exercising the auth budget goes through the migration
 path and nothing read what the renderer wrote. That gap is now a test.
 
-### Run 7 — The service core, before any route
+### Run 7 — The service core, before any route  ·  **Done.**
 
-**Carried in from Run 4 (D246):** the four secrets, appended to
-`secrets.required.yaml` in the same commit as the `auth` compose service they
-name, and the `value_kind` enum widened to admit `rsa_private_jwk` and
-`public_jwks` — because ADR 0055 exists so that the kind says what the value
-*is*, and declaring a JWK as a PEM would be that ADR's own defect one level in.
+`services/auth-api/` exists: the frozen Argon2id profile and its bounded
+executor, strict request parsing, the bounded compact-JWT pre-parser,
+local-only key resolution, the psycopg pool with `open=False` and an explicit
+lifespan, and an `auth` Compose service on `internal` **with no Traefik labels**
+— Run 10 publishes it, and `test_the_service_is_not_routable_yet` is what makes
+that a property rather than a thing nobody has done yet.
 
-Hashing (the frozen Argon2id profile, NFC normalization, the offline blocklist,
-dummy verification, the bounded executor whose semaphore is held until the worker
-actually finishes), strict JSON, the bounded compact-JWT pre-parser, local-JWKS-only
-key resolution, and the psycopg pool with `open=False` and explicit lifespan.
+**Three ADRs, each from a measurement with a control.**
 
-Every one of these is pure enough to test offline, which means **every one of them
-gets a mutation battery** — with `PYTHONDONTWRITEBYTECODE=1`, `__pycache__`
-cleared, snapshots to `/tmp` and `cp` restore, and a paired control in the same
-invocation.
+- **ADR 0081** — the profile is frozen, and frozen means *checked on the stored
+  hash*. `PasswordHasher.verify()` returns **True** for a hash made at a weaker
+  profile; `check_needs_rehash` reports the mismatch and nothing acts on it. So
+  the parameters are read back from the PHC string, by a hand-written parser
+  that does not call argon2 — because asking argon2 what argon2 just did is the
+  same authority twice.
+- **ADR 0082** — D234's relation, computed. Measured one profile per process
+  with a no-hash control: **0.0 MiB** for the control, 67.1 for one concurrent
+  hash, 131.1 for two, 259.0 for four. Linear, so the floor is
+  `concurrency x memory_cost + overhead` and a manifest that declares less is
+  refused offline. (The first attempt at this measurement reported 87 MiB for
+  every row — `ru_maxrss` is a high-water mark and the mark was already set.)
+- **ADR 0083** — the lock names what it can dereference *and what is actually a
+  choice*. Three findings, D258 and D259.
+
+**Carried in from Run 4 (D246): three secrets, not four, and the `value_kind`
+enum does not widen at all** — D257. `jwt_public_jwks` is a stored copy of
+public material ADR 0051 already derives; `rsa_private_jwk` would store a `kid`
+beside a key whose `kid` is derived. D246 moved the widening here so it would
+arrive with its consumer; arriving with its consumer is what showed it was not
+needed.
+
+**D239 decided, where D239 said it would be.** FastAPI stays at 0.121.2, now
+for a measured reason: the nine pinned versions **co-resolve** — which Run 2 did
+not establish, having asked each registry one package at a time — and the whole
+set imports. Control: `pyjwt==2.13.999` fails the same resolver.
+
+**Twenty mutations, and D260 is the finding.** Three stayed green, each a
+different way of measuring nothing: a shield whose docstring had its own reason
+backwards, a floor test that asserted `224 == 224`, and a variable-name check
+that never looked at variable names. The third had already happened for real
+minutes earlier — a render caught it, not a test.
 
 ### Run 8 — Human endpoints and the local bootstrap
 

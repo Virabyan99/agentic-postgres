@@ -224,6 +224,7 @@ and live in `src/agentic_postgres/config.py`; they are listed separately.
 
 | Field | Minimum | Maximum | Meaning |
 |---|---:|---:|---|
+| `api.app.memory_limit_mb` | 192 | 2,048 | The auth container's memory limit, in MiB. This minimum is a floor on the field; the real bound is ADR 0082's cross-field relation, which requires `hash_concurrency` x `memory_cost` plus the service's process overhead to fit -- so a manifest declaring too little fails validation rather than being killed by the OOM killer at the first burst of logins. Measured in Run 7: 67.1 MiB resident per concurrent hash at the frozen profile, linear in concurrency (131.1 at two, 259.0 at four), against a no-hash control that moved the resident figure by 0.0; and 60.9 MiB for the process with every dependency imported and an application object built. |
 | `api.app.pool_size` | 1 | 100 | Connections the auth service's psycopg pool may hold. Charged to the cluster's budget whether or not the service is enabled, for the reason `resolve_api_connection_budget` gives about REST: a division that depended on whether a service happened to be on would move when somebody toggled it. |
 | `api.max_rows` | 1 | 10,000 | Global PostgREST row-return ceiling. |
 | `api.rest.pool_acquisition_timeout_seconds` | 1 | 60 | How long a request waits for a connection before failing. Bounded above for the reason the pooler's queue timeout is: a request that waits without limit turns a capacity problem into a hang, and a hang has no error message to act on. |
@@ -266,6 +267,7 @@ enforced in `src/agentic_postgres/config.py`:
 - `api.rest.request_body_max_bytes` must equal `api.rest.request_body_memory_bytes`
 - `api.rest.pool_max_idle_seconds` must be less than `api.rest.pool_max_lifetime_seconds`
 - `api.rest.pool_size` plus its reserved connections, `api.app.pool_size` plus its own, `database.pool_size`, and the administration reserve must fit `database.max_connections`
+- `api.app.memory_limit_mb` must fit the frozen Argon2id profile: `hash_concurrency` x `memory_cost` plus the service's process overhead
 - `api.rest.allowed_cors_origins` must contain the project's own HTTPS origin when the REST service is enabled
 - `api.rest.statement_timeouts` may name only roles the platform derives
 - The derived REST prefix and the PostgREST documentation prefix must not overlap segment-wise, and neither may overlap the MCP prefix

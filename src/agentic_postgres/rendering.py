@@ -456,6 +456,15 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "API_BUFFERING_MIDDLEWARE_NAME",
     "API_STRIPPREFIX_MIDDLEWARE_NAME",
     "DOCS_CREDENTIAL_MIDDLEWARE_NAME",
+    # Session 6, Run 7. Every one is project-derived or manifest-declared, so
+    # this is the right file for them. The auth service's CREDENTIAL is not
+    # here and never will be: it is a mounted file libpq reads through the
+    # conninfo's `passfile=`, which is what keeps it out of the environment,
+    # the argument vector and `docker inspect` (D60).
+    "JWT_ISSUER",
+    "AUTH_SERVICE_ROLE_NAME",
+    "AUTH_POOL_SIZE",
+    "AUTH_MEMORY_LIMIT",
 )
 
 #: The pooler's port on its own project network. 6432 is the PgBouncer
@@ -581,6 +590,10 @@ def build_compose_env(
     # produced the file.
     api = api or {}
     rest = {**config.API_REST_DEFAULTS, **(api.get("rest") or {})}
+    # Defaults merged in for the same reason `rest` merges them: a project that
+    # declares no `api.app` section still has to render, and every variable
+    # compose.yaml marks `:?required` must therefore have a value (D150, D178).
+    app_service = {**config.API_APP_DEFAULTS, **(api.get("app") or {})}
 
     values = {
         "COMPOSE_PROJECT_NAME": identity.compose_project_name,
@@ -663,6 +676,20 @@ def build_compose_env(
         "API_BUFFERING_MIDDLEWARE_NAME": identity.api_buffering_middleware,
         "API_STRIPPREFIX_MIDDLEWARE_NAME": identity.api_stripprefix_middleware,
         "DOCS_CREDENTIAL_MIDDLEWARE_NAME": identity.docs_credential_middleware,
+        # The issuer, from the same `identity` the audience above comes from.
+        # There is no second derivation here and there must not be: a token
+        # this service signs and a token PostgREST verifies have to agree on
+        # both strings, and the only way to guarantee that is for both to read
+        # one authority (ADR 0002).
+        "JWT_ISSUER": identity.jwt_issuer,
+        "AUTH_SERVICE_ROLE_NAME": identity.roles["auth_service"],
+        "AUTH_POOL_SIZE": str(app_service.get("pool_size", config.API_APP_DEFAULTS["pool_size"])),
+        # Lowercase `m`, Docker's byte suffix, matching POSTGRES_MEMORY_LIMIT.
+        # The unit is attached here rather than in compose.yaml, which cannot
+        # concatenate a suffix onto an interpolated value anyway.
+        "AUTH_MEMORY_LIMIT": "{}m".format(
+            app_service.get("memory_limit_mb", config.API_APP_DEFAULTS["memory_limit_mb"])
+        ),
     }
     lines = [
         "# Generated. Do not edit; do not shell-source.",

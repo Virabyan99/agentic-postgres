@@ -126,12 +126,22 @@ feature_floors:
 # `--check` stays offline. What it verifies is that every entry carries a digest
 # `--update` could only have obtained by finding a real artifact.
 packages:
-  # Session 1. Not yet built from; Session 6's auth service is the first thing
-  # that will install it. Kept at the pinned version rather than moved to the
-  # runbook's 0.141.1 (D239): both exist, nothing measured requires the newer,
-  # and D37's rule is that a session uses what is already pinned. The bump has a
-  # place to be decided -- Run 7, where the service is built and can be run
-  # against it -- rather than being taken from a document.
+  # Session 1, and Run 7 is where D239 said the decision would be made: the run
+  # where the service exists and can be RUN against a version rather than
+  # assigned one. It stays at 0.121.2, and now for a measured reason rather
+  # than for D37's default.
+  #
+  # Measured in Run 7: the nine pinned versions co-resolve -- which is not what
+  # Run 2 established, since Run 2 asked each registry "does this release
+  # exist" one package at a time, and nine individually real versions can still
+  # have no solution together. Installed as a set they resolve to starlette
+  # 0.49.3 and pydantic 2.13.4, and the whole set imports. The control is Run
+  # 7's own: pyjwt==2.13.999 fails the same resolver with "your requirements are
+  # unsatisfiable".
+  #
+  # 0.141.1 is not adopted. Twenty minor releases is a real counter-argument and
+  # it is recorded rather than dismissed -- but nothing this session needs is in
+  # them, and the version that has now been built and run is this one.
   FASTAPI_VERSION:
     registry: pypi
     package: fastapi
@@ -188,10 +198,17 @@ packages:
   #
   # Also measured: none of these needs a build toolchain in the runtime image on
   # linux/amd64. The four named distributions are pure Python; their compiled
-  # dependencies -- argon2-cffi-bindings, cryptography, cffi, and psycopg-binary
-  # if the C speedups are wanted -- all publish cp312/abi3 manylinux x86_64
-  # wheels. That is a fact about the transitive set, not the named one, and the
-  # first pass of the measurement got it wrong by asking the named packages.
+  # dependencies -- argon2-cffi-bindings, cryptography, cffi and psycopg-binary
+  # -- all publish cp312/abi3 manylinux x86_64 wheels. That is a fact about the
+  # transitive set, not the named one, and the first pass of the measurement got
+  # it wrong by asking the named packages.
+  #
+  # This note originally ended "and psycopg-binary IF THE C SPEEDUPS ARE
+  # WANTED", which Run 7 measured and found false (D257): without it psycopg
+  # does not import at all on the locked base image. The conclusion above was
+  # right and one clause inside it was a value that looked measured and was
+  # not. It is corrected here rather than deleted, because the sentence is
+  # otherwise the record of what Run 2 actually did.
   PYJWT_VERSION:
     registry: pypi
     package: pyjwt
@@ -215,6 +232,49 @@ packages:
     registry: pypi
     package: psycopg
     version: "3.3.4"
+  # Two more distributions, both found by measuring in Run 7 rather than by
+  # reading, and both load-bearing.
+  #
+  # psycopg-binary carries the pq wrapper. The Session 6 note below used to
+  # call it optional -- "psycopg-binary if the C speedups are wanted" -- and
+  # that is wrong in the way this repository keeps producing. Measured against
+  # the locked python:3.12-slim digest: the image ships NO libpq, no pg_config
+  # and no compiler, and psycopg alone installs cleanly and then raises
+  # "ImportError: no pq wrapper available" on the first import. Its three
+  # implementations are psycopg_c (needs a compiler), psycopg_binary (this
+  # wheel) and a pure-Python path that needs a system libpq; exactly one of the
+  # three is reachable in that image. Not a speedup -- the difference between a
+  # service that starts and one that does not (ADR 0083).
+  #
+  # psycopg-binary is deliberately NOT an entry here, and the reason is the
+  # measurement rather than an omission (ADR 0083). It was written as one, and
+  # --update refused it:
+  #
+  #   PSYCOPG_BINARY_VERSION: psycopg-binary 3.3.4 publishes 0 sdists; the lock
+  #   records one canonical artifact per version and cannot choose
+  #
+  # Measured: psycopg-binary 3.3.4 publishes 55 artifacts and no sdist -- one
+  # wheel per platform and ABI. Every other package in this file publishes
+  # exactly one sdist and one wheel (pyjwt 2.13.0, as the control: 2 artifacts,
+  # 1 sdist, 1 wheel). ADR 0077's model met the first distribution that does
+  # not fit it.
+  #
+  # It does not need to fit. psycopg's own metadata declares
+  # `psycopg-binary==3.3.4; extra == "binary"` -- an EXACT equality -- so the
+  # binary's version is not a choice anybody here makes, and an entry for it
+  # would be a second authority for a value psycopg already fixes. The image
+  # installs `psycopg[binary]==${PSYCOPG_VERSION}` and the extra decides.
+  #
+  # The pool is the opposite case and that is why it is below. psycopg declares
+  # `psycopg-pool; extra == "pool"` with NO version, so the pool's version is a
+  # real choice -- and it is a different number, 3.3.1 against psycopg's 3.3.4.
+  # A reader who assumed PSYCOPG_VERSION covered the pool would have pinned a
+  # release that does not exist for that package, which is D201 arriving a
+  # second time through a different door.
+  PSYCOPG_POOL_VERSION:
+    registry: pypi
+    package: psycopg-pool
+    version: "3.3.1"
   # The password hashing wrapper, and the least established entry in this file:
   # five releases in total. Its own metadata is what pins the backend --
   # `argon2-cffi<26,>=23.1.0` under the `argon2` extra -- so the entry below is

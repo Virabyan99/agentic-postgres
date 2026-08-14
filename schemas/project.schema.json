@@ -279,7 +279,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["enabled"],
-      "description": "The application API service, Session 6: the auth service, served under `api.public_base_path` + `/app`. Declared separately from `rest` because the two commit separately to the cluster's connection budget, and ADR 0070 exists because granting the same headroom to two claimants independently is how a budget comes to sum past what the server will hand out. Optional as a whole, like `rest`. Only the pool is declared here: a manifest field with no consumer is a declaration nothing reads, and the Argon2 profile and its memory relation arrive with the service that uses them.",
+      "description": "The application API service, Session 6: the auth service, served under `api.public_base_path` + `/app`. Declared separately from `rest` because the two commit separately to the cluster's connection budget, and ADR 0070 exists because granting the same headroom to two claimants independently is how a budget comes to sum past what the server will hand out. Optional as a whole, like `rest`. The Argon2id profile is NOT declared here -- it is frozen in the service (ADR 0081), because a profile a manifest could weaken is not a frozen one -- but the memory limit that has to accommodate it is, because a container limit is a property of this deployment while the profile is a property of the product.",
       "properties": {
         "enabled": { "type": "boolean", "default": false },
         "pool_size": {
@@ -287,6 +287,13 @@
           "minimum": 1,
           "maximum": 100,
           "description": "Connections the auth service's psycopg pool may hold. Charged to the cluster's budget whether or not the service is enabled, for the reason `resolve_api_connection_budget` gives about REST: a division that depended on whether a service happened to be on would move when somebody toggled it."
+        },
+        "memory_limit_mb": {
+          "type": "integer",
+          "minimum": 192,
+          "maximum": 2048,
+          "default": 384,
+          "description": "The auth container's memory limit, in MiB. This minimum is a floor on the field; the real bound is ADR 0082's cross-field relation, which requires `hash_concurrency` x `memory_cost` plus the service's process overhead to fit -- so a manifest declaring too little fails validation rather than being killed by the OOM killer at the first burst of logins. Measured in Run 7: 67.1 MiB resident per concurrent hash at the frozen profile, linear in concurrency (131.1 at two, 259.0 at four), against a no-hash control that moved the resident figure by 0.0; and 60.9 MiB for the process with every dependency imported and an application object built."
         }
       }
     },

@@ -30,7 +30,7 @@ from typing import Any
 import yaml
 from jsonschema import Draft202012Validator
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, auth_profile
 
 # ---------------------------------------------------------------------------
 # Constants owned by the decision log
@@ -127,6 +127,8 @@ CROSS_FIELD_RELATIONS: tuple[str, ...] = (
     "`api.rest.pool_size` plus its reserved connections, `api.app.pool_size` plus its "
     "own, `database.pool_size`, and the administration reserve must fit "
     "`database.max_connections`",
+    "`api.app.memory_limit_mb` must fit the frozen Argon2id profile: "
+    "`hash_concurrency` x `memory_cost` plus the service's process overhead",
     "`api.rest.allowed_cors_origins` must contain the project's own HTTPS origin when the "
     "REST service is enabled",
     "`api.rest.statement_timeouts` may name only roles the platform derives",
@@ -211,6 +213,7 @@ API_REST_DEFAULTS: dict[str, Any] = {
 API_APP_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "pool_size": 4,
+    "memory_limit_mb": 384,
 }
 
 #: What PostgREST takes out of the cluster's connection budget beyond its pool.
@@ -278,6 +281,24 @@ def auth_connection_budget(app: dict[str, Any]) -> int:
     """
     size = int(app.get("pool_size", API_APP_DEFAULTS["pool_size"]))
     return size + AUTH_RESERVED_CONNECTIONS
+
+
+def auth_memory_floor_mb() -> int:
+    """The smallest `api.app.memory_limit_mb` that can hold the frozen profile.
+
+    ADR 0082. The relation is `hash_concurrency x memory_cost + process
+    overhead`, and it lives in `services/auth-api/app/profile.py` -- beside the
+    profile it is a relation about -- rather than being restated here. This
+    function exists so the validator has one call to make and so the number in
+    the failure message and the number in the bounds documentation are the same
+    number.
+
+    Measured in Run 7 rather than reasoned: 67.1 MiB resident for one
+    concurrent hash at the frozen profile, 131.1 for two and 259.0 for four,
+    against a no-hash control that moved the resident figure by 0.0 -- so the
+    relation is linear in concurrency and the constant is the process itself.
+    """
+    return auth_profile.hash_memory_budget_mb()
 
 
 def postgrest_connection_budget(rest: dict[str, Any]) -> int:
@@ -678,6 +699,11 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
     _validate_pool(database)
     _validate_memory_budget(database)
     _validate_connection_budget(api, database)
+    # Unconditional, for the reason D256 recorded about the line above: the
+    # renderer charges the auth service's budget whether or not it is enabled,
+    # so a check that ran only for an enabled service would disagree with the
+    # document.
+    _validate_auth_memory(api)
     _validate_rest_service(api, database=database, domain=project["domain"])
     _validate_route_boundaries(api, mcp)
     _validate_storage(document.get("storage", {}))
@@ -777,6 +803,36 @@ def _validate_pool(database: dict[str, Any]) -> None:
             "that is allowed to wait for a server connection longer than a stuck "
             "transaction is allowed to hold one will queue behind it rather than fail, "
             "and a queue with no error at the end of it is a hang"
+        )
+
+
+def _validate_auth_memory(api: dict[str, Any]) -> None:
+    """The auth container's limit must hold the profile it will run (ADR 0082).
+
+    D234's point, and the reason this is a relation rather than three numbers:
+    `memory_cost = 65536 KiB`, `hash_concurrency = 2` and a container limit are
+    three values with one true relationship between them, and until something
+    computes it, a manifest can raise concurrency without raising the limit and
+    find out at the first burst of logins -- from the OOM killer, on a host
+    with no swap, which does not choose politely and can take the edge with it.
+
+    The floor comes from `auth_profile`, which loads the same file the image
+    applies. Raising the limit is the fix, and the message says so: reducing
+    the profile is not available, which is the whole point of freezing it.
+    """
+    app = (api.get("app") or {}) if api else {}
+    limit = int(app.get("memory_limit_mb", API_APP_DEFAULTS["memory_limit_mb"]))
+    floor = auth_memory_floor_mb()
+    if limit < floor:
+        profile = auth_profile.FROZEN
+        raise ManifestError(
+            f"api.app.memory_limit_mb ({limit} MiB) cannot hold the frozen Argon2id "
+            f"profile. {auth_profile.HASH_CONCURRENCY} concurrent hashes at "
+            f"memory_cost {profile.memory_cost_kib} KiB is "
+            f"{auth_profile.HASH_CONCURRENCY * profile.memory_cost_kib // 1024} MiB, "
+            f"plus {auth_profile.PROCESS_OVERHEAD_MB} MiB of process overhead, so the "
+            f"floor is {floor} MiB. Raise the limit; the profile is frozen (ADR 0081) "
+            "and is not the adjustable side of this relation"
         )
 
 

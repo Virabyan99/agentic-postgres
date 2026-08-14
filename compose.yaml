@@ -754,6 +754,118 @@ services:
     networks:
       - edge
 
+  # Session 6's auth service (Run 7). The core, before any route.
+  #
+  # NOT on `edge`, and not by omission. Run 7 builds the process -- the frozen
+  # Argon2id profile and its bounded executor, strict request parsing, the
+  # bounded JWT pre-parser, local-only key resolution and the explicitly-opened
+  # pool -- and Run 10 publishes it, after the routers are built from
+  # `routes.app.url` and after `routes.app.status` has an administrator to gate
+  # on (D230). A service reachable from the edge before its first administrator
+  # exists is a service whose first caller decides who the administrator is.
+  #
+  # So there are no Traefik labels here either. `apg.traefik.scope: managed` is
+  # what makes a container visible to the edge at all (D186); adding it now
+  # would attach a router to something that has no endpoints to serve.
+  auth:
+    build:
+      context: ./services/auth-api
+      args:
+        BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+        # Every dependency version from the lock, so versions.env stays the
+        # single authority (ADR 0077). A version written into the Dockerfile
+        # would be a second declaration bin/lock-versions.sh cannot see, which
+        # is how SCALAR_VERSION named a release that never existed for four
+        # sessions (D201).
+        ARGON2_CFFI_VERSION: ${ARGON2_CFFI_VERSION:?required}
+        CRYPTOGRAPHY_VERSION: ${CRYPTOGRAPHY_VERSION:?required}
+        FASTAPI_VERSION: ${FASTAPI_VERSION:?required}
+        PSYCOPG_VERSION: ${PSYCOPG_VERSION:?required}
+        PSYCOPG_POOL_VERSION: ${PSYCOPG_POOL_VERSION:?required}
+        PYDANTIC_VERSION: ${PYDANTIC_VERSION:?required}
+        PYDANTIC_SETTINGS_VERSION: ${PYDANTIC_SETTINGS_VERSION:?required}
+        PYJWT_VERSION: ${PYJWT_VERSION:?required}
+        UVICORN_VERSION: ${UVICORN_VERSION:?required}
+    profiles: [session6]
+    restart: "on-failure:5"
+    labels:
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+    # Matches the uid/gid secrets.required.yaml declares for both of this
+    # service's consumers. The host sets ownership before Compose mounts the
+    # file (ADR 0010), so a mismatch is a container that cannot read its own
+    # credential -- and the usual fix for that is to widen 0400.
+    user: "65532:65532"
+    read_only: true
+    # uid/gid on the tmpfs because a read-only root filesystem gives the
+    # process nowhere else to write, and a tmpfs owned by root would be one the
+    # dropped-privilege process cannot use.
+    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Longer than the docs page's 5s: the lifespan closes the pool on the way
+    # out, and a container killed before that returns its connections leaves
+    # the cluster short until the backends time out.
+    stop_grace_period: 15s
+    mem_limit: ${AUTH_MEMORY_LIMIT:?required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Twelve variables, every one required, and not one of them a secret.
+    # `app/settings.py` declares the same twelve in REQUIRED_VARIABLES and
+    # test_the_compose_service_supplies_every_setting_the_service_requires
+    # compares the two lists -- because a renderer emitting a variable the
+    # compose file does not read, or the reverse, is D178.
+    #
+    # The credential is a MOUNTED FILE that libpq reads through the conninfo's
+    # `passfile=`, and the signing key is a mounted file read once at startup.
+    # Neither becomes an environment variable, an argument or a log line.
+    environment:
+      APG_PROJECT_KEY: ${PROJECT_KEY:?required}
+      APG_PROJECT_ENVIRONMENT: ${PROJECT_ENVIRONMENT:?required}
+      # The project's JWT identity, and the same two variables PostgREST's
+      # verification reads. Not `AUTH_`-prefixed: an issuer and an audience are
+      # properties of the PROJECT, derived once in naming.py, and a second name
+      # for one derived value is ADR 0002 broken at the smallest scale. The
+      # signer and the verifier have to agree on both strings, and the only way
+      # to guarantee that is for both to read one authority.
+      APG_JWT_ISSUER: ${JWT_ISSUER:?required}
+      APG_JWT_AUDIENCE: ${JWT_AUDIENCE:?required}
+      # PgBouncer, not the cluster directly: the auth service's queries are
+      # short and transactional, which is the shape transaction pooling is for,
+      # and the connection budget ADR 0070 divides is a budget on the pooler's
+      # side of the same arithmetic.
+      APG_DATABASE_HOST: ${PGBOUNCER_SERVICE_HOST:?required}
+      APG_DATABASE_PORT: ${PGBOUNCER_LISTEN_PORT:?required}
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_DATABASE_ROLE: ${AUTH_SERVICE_ROLE_NAME:?required}
+      APG_DATABASE_PASSFILE: /run/secrets/auth_service_pgpass
+      APG_POOL_SIZE: ${AUTH_POOL_SIZE:?required}
+      APG_SIGNING_KEY_FILE: /run/secrets/auth_jwt_signing_key.pem
+      APG_LISTEN_PORT: "8080"
+    # Container-local, and the only health surface this service has (D231).
+    # `/health/ready` opens a connection from the pool and runs one statement,
+    # so an unhealthy container is one that could not serve a request -- not one
+    # whose port happens to be open.
+    #
+    # start_period is 20s rather than 5: the lifespan opens the pool to
+    # min_size before it yields, and it will not yield at all if the cluster is
+    # not there.
+    healthcheck:
+      test:
+        [
+          CMD,
+          python,
+          -c,
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=2).status==200 else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - internal
+
   # Session 4's client compatibility fixtures (DBX-001..005).
   #
   # `session4-verify`, not `session4`, and the distinction is the same one

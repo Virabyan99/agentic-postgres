@@ -20,7 +20,13 @@ where = ["src"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["src", "bin", "tests"]
+# `services/auth-api` is listed so that `from app.profile import ...` inside the
+# service sorts as a first-party import rather than a third-party one. The
+# package is called `app` because that is its name inside the image (WORKDIR
+# /app), and a package whose import name changes between the repository and the
+# container is a package whose tests exercise a different module from the one
+# that runs.
+src = ["src", "bin", "tests", "services/auth-api"]
 
 [tool.ruff.lint]
 select = [
