@@ -31,6 +31,9 @@ CONVERGENCE = "templates/0007-api-surface-convergence.sql"
 REQUEST_PLANE = "templates/0008-http-request-plane.sql"
 DOCUMENTATION_ROLE = "templates/0009-documentation-role.sql"
 STATEMENT_TIMEOUT = "templates/0010-request-statement-timeout.sql"
+#: Session 6 Run 9. The fourth migration to define the hook, and therefore
+#: the effective one: it adds the comparison against current state.
+AGENT_PLANE = "templates/0013-agent-plane-and-current-state-hook.sql"
 
 _CREATE_VIEW = re.compile(r"CREATE VIEW api\.(\w+)\b.*?AS\s+SELECT\s+(.*?)\s+FROM\b", re.DOTALL)
 _DROP_VIEW = re.compile(r"DROP VIEW api\.(\w+)")
@@ -537,8 +540,8 @@ def test_the_effective_hook_is_the_last_migration_that_defines_it(
         for entry in manifest["migrations"]
         if HOOK_DEFINITION in statements(entry["template"])
     ]
-    assert defining == [REQUEST_PLANE, DOCUMENTATION_ROLE, STATEMENT_TIMEOUT]
-    assert effective_hook_template(manifest) == STATEMENT_TIMEOUT
+    assert defining == [REQUEST_PLANE, DOCUMENTATION_ROLE, STATEMENT_TIMEOUT, AGENT_PLANE]
+    assert effective_hook_template(manifest) == AGENT_PLANE
 
 
 def test_the_documentation_role_is_refused_a_request_identity(
@@ -716,9 +719,22 @@ def test_the_hook_is_not_security_definer(manifest: dict[str, Any]) -> None:
     set nothing, and looked exactly like a hook that ran and found nothing to
     do. It measured green as "no bound configured".
     """
+    # The FUNCTION, not the file. From 0013 the same template also creates
+    # `auth_claims_are_current`, which IS a definer -- deliberately, because the
+    # hook runs as the impersonated role and cannot read `app_private.users`.
+    # A scan of the whole file would now report the hook as a definer, which is
+    # a test measuring the wrong text rather than a change in the hook.
     body = statements(effective_hook_template(manifest))
-    assert "SECURITY INVOKER" in body
-    assert "SECURITY DEFINER" not in body
+    start = body.index("CREATE OR REPLACE FUNCTION app_private.postgrest_pre_request()")
+    end = body.index("END $fn$;", start)
+    hook = body[start:end]
+
+    assert "SECURITY INVOKER" in hook
+    assert "SECURITY DEFINER" not in hook, (
+        "the pre-request hook is a definer; `current_user` would be the function's "
+        "owner and the timeout lookup would ask for the owner's bound, find none, "
+        "and look exactly like a hook that ran and found nothing to do"
+    )
 
 
 def test_the_timeout_lookup_matches_the_role_the_request_became(

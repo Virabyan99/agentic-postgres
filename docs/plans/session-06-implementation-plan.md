@@ -123,6 +123,11 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D263** | (Migration 0011, and every SECURITY DEFINER function in this repository.) A definer body names every object schema-qualified -- 0005: *"a caller who can create a temporary object shadows an unqualified name and executes it as the owner"*. | **`normalize(x, NFC)` cannot be schema-qualified.** The second argument is a KEYWORD in a grammar that exists only for the bare name, and `pg_catalog.normalize(x, NFC)` fails with `column "nfc" does not exist`. 0011's unique index is written in exactly that spelling, so 0012's lookup had to match it or match nothing. | **Neither.** Measured: `pg_catalog.normalize(x)` -- the one-argument form, which IS qualifiable -- equals `normalize(x, NFC)`, and the planner still uses `users_username_normalised_key` for it, against a control predicate that plans as a sequential scan. Nothing is bent and nothing is slower. | The rig built to answer the *other* question -- can `pg_temp` actually shadow an unqualified catalog call -- **could not demonstrate shadowing in either search_path order**. Its control did not fire, so it is recorded as uninformative rather than as evidence that shadowing is impossible. The decision was made on the measurement that did work. | no |
 | **D264** | (Run 7, this session, `services/auth-api/app/tokens.py`.) The service's JOSE `typ` is `at+jwt`, RFC 9068's media type for an access token. | **ADR 0078 had already chosen `JWT`, eight runs earlier**, and `jwt_claims.TOKEN_TYPE` says so. Two authorities for one header field, inside one service, in one session -- written by me, in the code written to defend against exactly this. | **`tokens.TOKEN_TYPE` reads the claim contract.** The accepted ADR is the one that stays; changing the value is a decision with alternatives and would need its own. RFC 9068's argument is real and is not dismissed -- what does that work here is `token_use`, which the contract already requires, which `verify_claims` checks, and which is signed inside the payload rather than in a header PostgREST ignores entirely. | Found by writing `keys.jose_header` and having to ask which constant it should read. **Nothing would have caught it**: both spellings were internally consistent, the pre-parser accepted what the issuer produced, and the test asserting the refusals was written from the wrong constant. | no |
 | **D265** | (§5 Run 8 of this plan.) *"Generic failures: unknown, wrong, disabled and **locked** all return the same code and the same work class."* | **There is no `locked` state and Session 6 does not add one.** `app_private.user_status` is `active` or `disabled`, and 0011 is released. | **The requirement is kept and the fourth word is not.** All three states that exist -- unknown, wrong password, disabled -- return the same status, the same bytes and the same Argon2 work, and the ORDER is fixed so a disabled subject costs what an active one costs. An automatic lockout is refused: with Argon2id at the frozen profile and the edge's rate limit, a per-account counter mostly buys an attacker a denial of service against a named administrator. An administrator-applied lock is `disabled`. | The underlying requirement -- every authentication failure is indistinguishable -- is the one that matters and it is fully implemented. Recorded rather than reconciled silently, because a reader comparing the plan to the code would otherwise find a state vocabulary with three words where the plan names four. | no |
+| **D266** | (§5 Run 9 of this plan.) Migration 0012 *"adds `project_admin` to the authenticator's membership with exact `ADMIN FALSE, INHERIT FALSE, SET TRUE`"*. | **`GRANT role TO role` is the bootstrap plane's**, not the migration plane's (D102). `bin/postgres-bootstrap.py` already grants `anon`, `authenticated` and `api_documentation` to the authenticator with exactly those three options, and its comment already says the agent roles are Session 9's and are not granted. A fourth granted from a migration would be a second authority for role membership. | **`project_admin` joins that loop in the bootstrap plane.** The migration gives the role schema USAGE and EXECUTE on the hook, which is what a migration may do. The plane's `--check` now verifies all four memberships and the ABSENCE of both agent ones -- until this run it read one membership out of five. | Measured first: the syntax parses and records `admin=f, inherit=f, set=t`, against a control (a plain `GRANT`) that records `inherit=t`. **`INHERIT FALSE` is not cosmetic** -- without it the authenticator holds every request role's reach merely by connecting. | no |
+| **D267** | (My own first draft of migration 0013.) The blanket `REVOKE ALL ON ALL FUNCTIONS IN SCHEMA app_private FROM PUBLIC` takes 0012's eight grants to `auth_service` with it, so 0013 has to restate them — *"measured by applying this file to a cluster carrying 0012 and watching the service lose its access plane"*. | **That measurement was never run.** `REVOKE ... FROM PUBLIC` removes PUBLIC's entry and leaves every named grant intact — measured, with the control being an explicit `REVOKE ... FROM <role>`, which does remove it. | **The eight restatements are deleted and the comment with them.** `test_the_service_keeps_its_access_plane_after_0013` asserts it against a real cluster, because it is a claim about PostgreSQL rather than about the file. | **A fabricated measurement in a comment is worse than no comment**: the next reader has no way to tell it from the dozens in these migrations that are real. Caught by reading the sentence back before shipping — not by a test, and nothing in the suite would have. | no |
+| **D268** | (Migration 0008's own rule, applied to 0013.) A definer body names every object schema-qualified, and a placeholder is a placeholder. | **Two ways that goes wrong in one line.** `pg_catalog.current_user` is `missing FROM-clause entry for table "pg_catalog"` — `current_user` is a reserved keyword, not a function to look up, which is the same trap 0008 documents two dozen lines above for `nullif`. And `{{api_documentation}}` renders a QUOTED IDENTIFIER, so comparing it to a string compares against a column that does not exist; `{{api_documentation_name}}` exists for exactly this and 0009 already uses it. | **`current_user` unqualified, compared against the literal placeholder.** Both corrections are written into the file beside the line. | Caught by a test, on a hook that would have failed **every request**. The rule was applied to a construct instead of a name, in a file that already records the same mistake — which is what a rule reads like once it has become a habit. | no |
+| **D269** | (Runs 6, 7 and 8's mutation batteries, and this one.) A battery's `expected FAIL got PASS` means the test is weak. | **It can also mean the mutation never happened.** `mutate` asserted its anchor matched exactly once and raised when it did not — **and nothing checked**. The shell carried on, the run executed against an UNMUTATED tree, the tests passed, and the battery reported a weak test. Three of Run 9's twelve did this in one invocation, two of them because I had just added a second copy of the line I was anchoring on. | **A failed mutation is now a battery failure with its own message**, and it skips the run rather than measuring an unmutated tree. The two anchors are rebuilt from lines that really are unique. | **This is the failure a mutation battery exists to prevent, occurring inside one.** Runs 6-8 used the same harness; their results stand only because every anchor in them happened to match, which is luck rather than design. After the fix, M11 and M12 stayed green for the real reason — nothing asserted the bootstrap plane's grants at all, because the catalogue rig answers membership from a fake. Three tests now do. | no |
+| **D270** | (Migration 0013's first draft.) The pre-request hook is extended by copying its body forward and adding to it. | **The body it was copied from was two migrations out of date.** `CREATE OR REPLACE` replaces the WHOLE function, and the hook is now defined in four files -- 0008, 0009, 0010 and 0013 -- of which only the last one runs. Writing 0013 against 0008's text silently deleted 0010's statement-timeout carry and 0009's clause refusing the documentation role an identity. **Every request role would have run unbounded**, and a documentation token carrying a subject would have been quietly accepted. | **Rebuilt from 0010's body**, with the current-state comparison added after the two early returns and the timeout carry left where 0010 put it -- before them, because both early-returning callers can hold a connection. | Caught by seven tests, `test_the_effective_hook_is_the_last_migration_that_defines_it` among them -- which exists precisely because a function defined in four files has one definition that runs and three that read like documentation. **The test knew something the person editing the file did not**, which is the only reason this is a row rather than a deployment. | no |
 
 ---
 
@@ -570,15 +575,49 @@ leaves every test green, because no test in the suite drives two concurrent
 bootstraps -- the property is real, the measurement is in the run log, and the
 suite does not contain it.
 
-### Run 9 — Agents, and migration 0012
+### Run 9 — Agents, and migration 0013  ·  **Done.**
 
-Agent lifecycle and one-time secrets. Migration 0012 extends the pre-request hook
-to compare `credential_version`, `authz_version`, role and sorted scopes against
-current state, and adds `project_admin` to the authenticator's membership with
-exact `ADMIN FALSE, INHERIT FALSE, SET TRUE`.
+**The hook stops trusting a signature.** Until now it read `sub` and took the
+rest of the token on the strength of the signature being valid. A signature says
+a token was *issued*; it does not say the subject still exists, is still active,
+still holds that role or still holds those scopes. From here
+`credential_version`, `authz_version`, `role` and sorted `scope` are compared
+against current state **inside the request's own transaction**, and any mismatch
+is refused. That is SEC-REV-001's mechanism at the second verifier — the one a
+request to PostgREST actually touches.
 
-**Agent roles stay ungranted**, so an agent token fails at role switching before
-the hook runs — which is why no agent-specific pre-request error code is defined.
+The comparison goes through a definer helper returning a **boolean** over the
+whole claim tuple, never the subject's own values: a function answering "what are
+X's scopes" would let any authenticated caller enumerate authority through a hook
+it cannot avoid running.
+
+**Agents**: `POST /auth/agent-token`, `GET|POST /admin/agents`, `PATCH
+/admin/agents/{id}`, `POST /admin/agents/{id}/rotate-secret`. The secret is 256
+bits from the OS, shown once, and there is no function in either migration that
+returns it — the absence is asserted rather than trusted. Rotation moves
+`authz_version`, so the replaced secret's tokens stop working, which is what
+makes "rotate again" a recovery rather than a way to accumulate credentials.
+
+**Agent roles stay ungranted**, so an agent token fails at `SET ROLE` before the
+hook runs — measured, `permission denied to set role`, connected **as** the
+authenticator rather than through a superuser session that would have proved
+nothing.
+
+**Three divergences from the plan's own sentence** (**D261** the number,
+**D266** the membership plane, **D268** two ways one line of SQL goes wrong), and
+**D267**, where I wrote a measurement into a comment that I had never run and
+caught it by reading it back.
+
+**D270**: the first draft of 0013's hook was written against 0008's body and
+silently deleted everything 0010 added -- the statement-timeout carry and the
+documentation-role refusal. `CREATE OR REPLACE` replaces the whole function, the
+hook is defined in four files, and only the last one runs. Seven tests caught it.
+
+**D269 is the one to carry.** Twelve mutations; three reported *"expected FAIL
+got PASS"* and had **never been applied** — the harness raised on a bad anchor
+and nothing checked, so the run measured an unmutated tree and read as a weak
+test. Runs 6-8 used the same harness. After the fix, two stayed green for the
+real reason: nothing asserted the bootstrap plane's grants at all.
 
 ### Run 10 — Cutover, routes, and the second documentation surface
 

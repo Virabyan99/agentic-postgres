@@ -45,6 +45,11 @@
       "type": "identifier",
       "source": "database.roles.auth_service",
       "description": "The auth service's database identity. Session 6. Migration 0011 grants it schema USAGE and nothing else -- its LOGIN attribute, connection limit, SCRAM credential and statement_timeout are bootstrap-plane work, because anything ALTER ROLE is (D102), and the functions it will call arrive with the code that calls them."
+    },
+    "project_admin": {
+      "type": "identifier",
+      "source": "database.roles.project_admin",
+      "description": "The administrator's request role, and a request role only from Session 6 Run 9: before that it existed, NOLOGIN and unreachable, because the authenticator held no membership in it. What it may do ADMINISTRATIVELY is not decided here or by the role name -- it is decided by the scope in the token, which is what API-ADMIN-001 states and why a project_admin without admin_users:write is refused. The membership is granted by the bootstrap plane (D266, D102); this placeholder exists so migration 0013 can give the role schema USAGE and the EXECUTE every request role needs to run the pre-request hook."
     }
   },
   "migrations": [
@@ -177,6 +182,21 @@
         "auth_service"
       ],
       "description": "The access plane for human subjects: eight SECURITY DEFINER functions in app_private, granted to auth_service, which are the only way the service reaches the identity registry -- 0011 granted it schema USAGE and nothing else and said these would arrive with the code that calls them. Lookup is by the same normalised expression the unique index uses, and returns no row rather than raising for an unknown username, because the login path exists to make 'no such user' and 'wrong password' indistinguishable. auth_bootstrap_administrator takes a project-scoped pg_advisory_xact_lock derived from project_identity: measured, two concurrent callers without it both read 'no administrator' and both insert. It is NOT granted to auth_service -- a service that could call it is the public bootstrap endpoint that does not exist. The blanket REVOKE FROM PUBLIC is load-bearing rather than tidy: a new function is PUBLIC-executable by default and ALTER DEFAULT PRIVILEGES records nothing for functions (D262). This is 0012 and Run 9's hook becomes 0013 (D261). See ADR 0084, D261, D262."
+    },
+    {
+      "version": "20260814120013",
+      "name": "agent_plane_and_current_state_hook",
+      "template": "templates/0013-agent-plane-and-current-state-hook.sql",
+      "placeholders": [
+        "anon",
+        "api_documentation",
+        "api_documentation_name",
+        "auth_service",
+        "authenticated",
+        "object_owner",
+        "project_admin"
+      ],
+      "description": "The pre-request hook stops trusting a signature, and agents get the access plane 0012 gave humans. Until now the hook read `sub` and took the rest of the token on the strength of a valid signature; from here credential_version, authz_version, role and sorted scope are compared against current state inside the request's own transaction and any mismatch is refused -- which is what makes a disable, a password reset or a scope change take effect on the next request rather than at the next expiry (SEC-REV-001). The comparison goes through a SECURITY DEFINER helper returning a BOOLEAN over the whole claim tuple, never the subject's own values: a function answering 'what are X's scopes' would let any authenticated caller enumerate authority through a hook it cannot avoid running. project_admin becomes a request role and gets USAGE and EXECUTE; its authenticator MEMBERSHIP is the bootstrap plane's, not this file's (D266, D102). The agent roles stay ungranted, so an agent token fails at role switching before the hook runs. This is 0013 and the plan called it 0012 (D261). See D261, D266, D267."
     }
   ]
 }

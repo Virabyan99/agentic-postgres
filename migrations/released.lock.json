@@ -141,6 +141,22 @@
       "template": "templates/0012-auth-access-plane.sql",
       "template_sha256": "32b615a28baab226234d90b22dbdb7f606b412d5a0c2c82305a87f5e7345fa25",
       "version": "20260814120012"
+    },
+    {
+      "canonical_render_sha256": "f3cb021180f6c0002b3c29afe3fcfe66006566a25a453b62776629882f26f0e7",
+      "name": "agent_plane_and_current_state_hook",
+      "placeholders": [
+        "anon",
+        "api_documentation",
+        "api_documentation_name",
+        "auth_service",
+        "authenticated",
+        "object_owner",
+        "project_admin"
+      ],
+      "template": "templates/0013-agent-plane-and-current-state-hook.sql",
+      "template_sha256": "e175630f44f714a68ad86f86a3f572909e5f92cfacccbde57df1c355ba0e455c",
+      "version": "20260814120013"
     }
   ],
   "schema_version": 1

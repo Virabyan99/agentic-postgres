@@ -68,6 +68,8 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
 #: tokens to real administrators.
 ADMIN_USERS_WRITE = "admin_users:write"
 ADMIN_USERS_READ = "admin_users:read"
+ADMIN_AGENTS_WRITE = "admin_agents:write"
+ADMIN_AGENTS_READ = "admin_agents:read"
 
 
 def ceiling(role_suffix: str) -> frozenset[str] | None:

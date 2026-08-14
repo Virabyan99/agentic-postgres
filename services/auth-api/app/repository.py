@@ -1,13 +1,13 @@
 """Every statement this service sends, in one place.
 
-**Eight function calls and no table names.** `auth_service` holds schema USAGE
-on `app_private` and nothing else -- measured against the applied migrations:
-`SELECT` on `app_private.users` is `permission denied for table users`, and the
-eight granted functions answer. So a query written here that named a table would
+**Fourteen function calls and no table names.** `auth_service` holds schema
+USAGE on `app_private` and nothing else -- measured against the applied
+migrations: `SELECT` on `app_private.users` is `permission denied for table
+users`, and the granted functions answer. So a query written here that named a table would
 fail at run time rather than review, and this module is the whole surface a
 reviewer has to read to know what the service can reach.
 
-Two of the twelve functions 0012 creates are deliberately absent:
+Two of the functions 0012 creates are deliberately absent:
 `auth_bootstrap_administrator` and `auth_bootstrap_lock_key` are not granted to
 this role, because a service that could call them is the public bootstrap
 endpoint §4 says does not exist. Measured: both refuse with `permission denied
@@ -40,6 +40,23 @@ class Credential:
     credential_version: int
     authz_version: int
     password_hash: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class AgentCredential:
+    """What an agent token exchange needs.
+
+    No `credential_version`: an agent has no password to change, so a rotated
+    secret moves `authz_version` and there is nothing a second counter would
+    distinguish (0011).
+    """
+
+    agent_id: UUID
+    role_name: str
+    scopes: list[str]
+    status: str
+    authz_version: int
+    secret_hash: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,5 +188,71 @@ class Repository:
         row = await self._one(
             "SELECT app_private.auth_set_password(%s, %s) AS version",
             (user_id, password_hash),
+        )
+        return None if row is None else row["version"]
+
+    # -- agents ------------------------------------------------------------
+
+    async def lookup_agent(self, agent_id: UUID) -> AgentCredential | None:
+        """By id. None for an unknown one, never an exception.
+
+        An agent presents an identifier it was given rather than a name, so
+        there is no normalisation here and no guessable half of the credential.
+        """
+        row = await self._one(
+            "SELECT agent_id, role_name, scopes, status, authz_version, secret_hash "
+            "FROM app_private.auth_lookup_agent(%s)",
+            (agent_id,),
+        )
+        if row is None:
+            return None
+        return AgentCredential(
+            agent_id=row["agent_id"],
+            role_name=row["role_name"],
+            scopes=list(row["scopes"]),
+            status=row["status"],
+            authz_version=row["authz_version"],
+            secret_hash=row["secret_hash"],
+        )
+
+    async def list_agents(self) -> list[dict[str, Any]]:
+        return await self._all("SELECT * FROM app_private.auth_list_agents()", ())
+
+    async def create_agent(
+        self,
+        *,
+        name: str,
+        description: str,
+        role_name: str,
+        scopes: list[str],
+        owner_id: UUID,
+        secret_hash: str,
+    ) -> UUID:
+        row = await self._one(
+            "SELECT app_private.auth_create_agent(%s, %s, %s, %s, %s, %s) AS agent_id",
+            (name, description, role_name, scopes, owner_id, secret_hash),
+        )
+        assert row is not None
+        return row["agent_id"]
+
+    async def rotate_agent_secret(self, agent_id: UUID, secret_hash: str) -> int | None:
+        row = await self._one(
+            "SELECT app_private.auth_rotate_agent_secret(%s, %s) AS version",
+            (agent_id, secret_hash),
+        )
+        return None if row is None else row["version"]
+
+    async def set_agent_authorization(
+        self, agent_id: UUID, *, role_name: str, scopes: list[str]
+    ) -> int | None:
+        row = await self._one(
+            "SELECT app_private.auth_set_agent_authorization(%s, %s, %s) AS version",
+            (agent_id, role_name, scopes),
+        )
+        return None if row is None else row["version"]
+
+    async def set_agent_status(self, agent_id: UUID, status: str) -> int | None:
+        row = await self._one(
+            "SELECT app_private.auth_set_agent_status(%s, %s) AS version", (agent_id, status)
         )
         return None if row is None else row["version"]

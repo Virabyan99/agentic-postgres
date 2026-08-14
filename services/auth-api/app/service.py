@@ -10,6 +10,7 @@ makes that a property of the shape rather than of a check somebody remembers.
 from __future__ import annotations
 
 import json
+import secrets
 import time
 import uuid
 from dataclasses import dataclass
@@ -23,7 +24,7 @@ from app import keys as key_module
 from app import scopes as scope_map
 from app.errors import AuthenticationFailed, AuthorizationFailed, InvalidRequest
 from app.hashing import BoundedHasher, PasswordRejected, StoredHashRejected, assess, normalize
-from app.repository import Credential, Repository, SubjectState
+from app.repository import AgentCredential, Credential, Repository, SubjectState
 from app.tokens import LocalKeySet, MalformedToken, pre_parse
 
 #: How long an issued token lives. The contract's ceiling, not a fraction of it:
@@ -327,6 +328,135 @@ class AuthService:
                 f"a {role_suffix} may not hold {sorted(beyond)}; the ceiling is {sorted(ceiling)}"
             )
         return requested
+
+    # -- agents ------------------------------------------------------------
+
+    async def agent_token(self, agent_id: str, secret: str) -> IssuedToken:
+        """Exchange an agent's id and secret for a token. Same shape as a login.
+
+        The failure path is identical to `login`'s and for the same reasons: the
+        secret is verified before the status is consulted, an unknown id is
+        verified against the dummy hash, and every outcome is one
+        `AuthenticationFailed`. An agent that has been revoked must not be
+        distinguishable from one that never existed.
+
+        **The token is issued even though agent access is not live.** That is
+        deliberate and is §6's stated design: `postgrest_authenticator` holds no
+        membership in either agent role, so PostgREST refuses the token at `SET
+        ROLE` before the pre-request hook runs. Session 9 of the product
+        activates it; measured here as `permission denied to set role`.
+        """
+        try:
+            identifier = UUID(agent_id)
+        except ValueError:
+            # Still pay for a hash. An id that is not a UUID would otherwise be
+            # the one failure that answers in microseconds.
+            await self.hasher.verify(None, secret)
+            raise AuthenticationFailed("agent id is not a uuid") from None
+
+        credential = await self.repository.lookup_agent(identifier)
+        stored = credential.secret_hash if credential is not None else None
+        try:
+            matched = await self.hasher.verify(stored, secret)
+        except StoredHashRejected as exc:
+            raise AuthenticationFailed(f"stored hash unusable: {exc}") from exc
+
+        if credential is None:
+            raise AuthenticationFailed("no such agent")
+        if not matched:
+            raise AuthenticationFailed("secret mismatch")
+        if credential.status != "active":
+            raise AuthenticationFailed(f"agent is {credential.status}")
+
+        # (S106 matches on the argument name; "agent" is a token_use
+        # discriminator from the claim contract, published in every token.)
+        return self.issue(self._as_credential(credential), token_use="agent")  # noqa: S106
+
+    @staticmethod
+    def _as_credential(agent: AgentCredential) -> Credential:
+        """An agent, in the shape `issue` reads.
+
+        `credential_version` is 0, not 1, and not the `authz_version`. An agent
+        has no password, so there is no version of one -- and the contract
+        requires the claim to be present and non-negative, so it is present and
+        it is zero. Reusing `authz_version` for both would make a rotation move
+        two claims that mean different things, and a reader could not tell which
+        of them a mismatch referred to.
+        """
+        return Credential(
+            user_id=agent.agent_id,
+            role_name=agent.role_name,
+            scopes=agent.scopes,
+            status=agent.status,
+            credential_version=0,
+            authz_version=agent.authz_version,
+            password_hash=None,
+        )
+
+    async def create_agent(
+        self,
+        *,
+        name: str,
+        description: str,
+        role_suffix: str,
+        scopes: list[str],
+        owner_id: UUID,
+    ) -> tuple[UUID, str]:
+        """Returns the id AND the secret, once.
+
+        The plaintext is returned to the caller and never stored: the column
+        holds an Argon2id verifier at the frozen profile, there is no retrieval
+        function in either migration, and the documented recovery for a lost
+        secret is to rotate. `test_no_endpoint_returns_an_agent_secret_twice`
+        asserts the absence rather than trusting it.
+        """
+        role_name = self._role_name(role_suffix)
+        checked = self._check_scopes(role_suffix, scopes)
+        secret, hashed = await self._mint_secret()
+        agent_id = await self.repository.create_agent(
+            name=normalize(name),
+            description=normalize(description),
+            role_name=role_name,
+            scopes=checked,
+            owner_id=owner_id,
+            secret_hash=hashed,
+        )
+        return agent_id, secret
+
+    async def rotate_agent_secret(self, agent_id: UUID) -> tuple[str, int] | None:
+        secret, hashed = await self._mint_secret()
+        version = await self.repository.rotate_agent_secret(agent_id, hashed)
+        return None if version is None else (secret, version)
+
+    async def set_agent_authorization(
+        self, agent_id: UUID, *, role_suffix: str, scopes: list[str]
+    ) -> int | None:
+        role_name = self._role_name(role_suffix)
+        checked = self._check_scopes(role_suffix, scopes)
+        return await self.repository.set_agent_authorization(
+            agent_id, role_name=role_name, scopes=checked
+        )
+
+    async def set_agent_status(self, agent_id: UUID, status: str) -> int | None:
+        if status not in ("active", "revoked"):
+            # `revoked`, not `disabled`. 0011 gave agents their own enum because
+            # the words differ in kind: a user is disabled and can be re-enabled,
+            # an agent credential is revoked, which is terminal for that
+            # credential. Accepting the other vocabulary here would let a caller
+            # write a state the column cannot hold and find out from a 500.
+            raise InvalidRequest("status must be 'active' or 'revoked'")
+        return await self.repository.set_agent_status(agent_id, status)
+
+    async def _mint_secret(self) -> tuple[str, str]:
+        """A one-time secret and its verifier.
+
+        `token_urlsafe(32)` is 256 bits from the OS. It is NOT run through
+        `assess`: that function screens things a person chose, and its blocklist
+        and length rules are about human habits. A refusal here would be a
+        random string failing a policy written for passwords.
+        """
+        secret = secrets.token_urlsafe(32)
+        return secret, await self.hasher.hash(secret)
 
     async def _hash(self, password: str, *, forbidden: tuple[str, ...]) -> str:
         try:

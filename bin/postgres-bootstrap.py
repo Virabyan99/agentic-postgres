@@ -231,9 +231,15 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     #   ADMIN FALSE    so a compromised authenticator cannot hand the membership
     #                  to anything else.
     #
-    # The two agent roles are Session 9's and are not granted. They exist,
-    # NOLOGIN and unreachable, which is what makes the refusal above a
-    # measurement rather than a statement about a role nothing declared.
+    # The two agent roles are Session 9's and are STILL not granted, in the run
+    # that builds the agent lifecycle. That is the design and not an oversight:
+    # an agent token names an agent role, PostgREST fails at `SET ROLE` before
+    # `db-pre-request` ever runs, and the refusal is a property of the cluster
+    # rather than of a check the hook performs. Measured on the locked image:
+    # `SET ROLE <agent_reader>` as the authenticator is
+    # `permission denied to set role`. It is also why no agent-specific
+    # pre-request error code exists -- there is no path on which the hook could
+    # emit one.
     #
     # `api_documentation` joins them in Session 5 Run 7 (D158). It is a request
     # role like the other two -- reached by SET ROLE, holding no credential of
@@ -244,7 +250,21 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     # policy that denies. Measured: a bare documentation token calling
     # `create_note` comes back 403 "new row violates row-level security policy",
     # and one carrying a subject comes back 401 before it reaches anything.
-    for request_role in ("anon", "authenticated", "api_documentation"):
+    # `project_admin` joins them in Session 6 Run 9, and it arrives HERE rather
+    # than in a migration (D266). The plan put it in migration 0013; `GRANT role
+    # TO role` needs authority the migration plane does not hold (D102), and the
+    # three roles above already carry exactly these options from this loop. A
+    # fourth granted somewhere else would be a second authority for role
+    # membership, checked by nothing.
+    #
+    # What makes it safe to grant is the same thing that made `api_documentation`
+    # safe: the membership lets the authenticator BECOME the role, and every
+    # object that role can name is still guarded. `project_admin` reaches the API
+    # surface as a subject like any other -- what it may do administratively is
+    # decided by the scope in its token, not by the role name (API-ADMIN-001),
+    # and the auth service is a separate process that does not use this
+    # membership at all.
+    for request_role in ("anon", "authenticated", "api_documentation", "project_admin"):
         statements.append(
             f"GRANT {q(roles[request_role])} TO {q(roles['postgrest_authenticator'])} "
             f"WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;"
@@ -445,6 +465,52 @@ def check_violations(container: str, database: str, document: dict[str, Any]) ->
             f"{roles['migration_user']} membership of {roles['object_owner']} is "
             f"'{membership}', expected 'false false true' (admin, inherit, set)"
         )
+
+    # The request roles, read the same way and for the same reason. Until Run 9
+    # this checked one membership out of five, so the three the authenticator
+    # depends on were granted by a line nobody verified -- and `INHERIT FALSE`
+    # is not cosmetic: measured on the locked image, a plain `GRANT` records
+    # `inherit_option = true`, which would give the authenticator every request
+    # role's reach merely by connecting.
+    #
+    # The agent roles are checked for ABSENCE in the same pass. That refusal is
+    # what makes an agent token fail at role switching, and a membership added
+    # by accident would turn a tested property into a silently open path.
+    authenticator_literal = literal(roles["postgrest_authenticator"])
+    for request_role in ("anon", "authenticated", "api_documentation", "project_admin"):
+        granted = query(
+            container,
+            database,
+            "SELECT coalesce(string_agg(m.admin_option || ' ' || m.inherit_option "  # noqa: S608
+            "|| ' ' || m.set_option, ','), 'absent') FROM pg_auth_members m "
+            f"JOIN pg_roles granted ON granted.oid = m.roleid "
+            f"AND granted.rolname = {literal(roles[request_role])} "
+            "JOIN pg_roles member ON member.oid = m.member "
+            f"AND member.rolname = {authenticator_literal};",
+        )
+        if granted != "false false true":
+            violations.append(
+                f"{roles['postgrest_authenticator']} membership of {roles[request_role]} "
+                f"is '{granted}', expected 'false false true' (admin, inherit, set)"
+            )
+
+    for agent_role in ("agent_reader", "agent_writer"):
+        granted = query(
+            container,
+            database,
+            "SELECT coalesce(string_agg('present', ','), 'absent') "  # noqa: S608
+            "FROM pg_auth_members m "
+            f"JOIN pg_roles granted ON granted.oid = m.roleid "
+            f"AND granted.rolname = {literal(roles[agent_role])} "
+            "JOIN pg_roles member ON member.oid = m.member "
+            f"AND member.rolname = {authenticator_literal};",
+        )
+        if granted != "absent":
+            violations.append(
+                f"{roles['postgrest_authenticator']} holds a membership of "
+                f"{roles[agent_role]}, which Session 9 leaves ungranted on purpose: "
+                "an agent token must fail at role switching"
+            )
 
     # The migration plane cannot connect without both. A role with LOGIN and a
     # null verifier authenticates against nothing and fails at dbmate.

@@ -154,8 +154,12 @@ def public_paths() -> tuple[str, ...]:
     `test_the_application_serves_exactly_the_declared_paths`.
     """
     return (
+        "/admin/agents",
+        "/admin/agents/{agent_id}",
+        "/admin/agents/{agent_id}/rotate-secret",
         "/admin/users",
         "/admin/users/{user_id}",
+        "/auth/agent-token",
         "/auth/jwks.json",
         "/auth/login",
         "/auth/me",

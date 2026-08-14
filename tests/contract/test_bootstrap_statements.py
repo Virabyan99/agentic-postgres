@@ -202,6 +202,13 @@ def catalog(timeouts: dict[str, str], roles: list[str]) -> Any:
             return "\n".join(roles)
         if "admin_option" in sql:
             return "false false true"
+        # Run 9 asks a second membership question: are the agent roles ABSENT?
+        # Answered separately rather than folded into the line above, because
+        # the two questions want opposite answers -- a fake returning one string
+        # for both would make the agent check unobservable, which is the failure
+        # this fixture's own docstring records from the last time.
+        if "string_agg('present'" in sql:
+            return "absent"
         if "rolcanlogin" in sql:
             return "true true"
         if "pg_namespace" in sql or "pg_extension" in sql:
@@ -305,6 +312,83 @@ def test_a_document_naming_no_timeouts_asks_the_catalog_nothing(
 # ---------------------------------------------------------------------------
 # The connection budget, divided (D161, ADR 0070)
 # ---------------------------------------------------------------------------
+
+
+#: The roles the authenticator may become. Session 6 Run 9 adds the fourth
+#: (D266); the two agent roles are deliberately not here.
+REQUEST_ROLES = ("anon", "authenticated", "api_documentation", "project_admin")
+
+
+def _authenticator_grants(statements: list[str], roles: dict[str, str]) -> dict[str, str]:
+    """Every `GRANT <role> TO <authenticator>` the plane emits, by suffix."""
+    target = roles["postgrest_authenticator"]
+    found: dict[str, str] = {}
+    for statement in statements:
+        if not statement.startswith("GRANT ") or f'TO "{target}"' not in statement:
+            continue
+        for suffix, name in roles.items():
+            if statement.startswith(f'GRANT "{name}" '):
+                found[suffix] = statement
+    return found
+
+
+def test_the_authenticator_is_granted_every_request_role_and_no_other(
+    bootstrap: Any, document: dict[str, Any]
+) -> None:
+    """Found by mutation: nothing asserted these grants existed.
+
+    The catalogue verifier reads them back, but its rig answers the membership
+    question from a fake -- so adding `agent_reader` to the loop that BUILDS the
+    grants left the whole suite green. This reads the statements themselves.
+    """
+    roles = document["database"]["roles"]
+    granted = _authenticator_grants(bootstrap.build_statements(document, INSTANCE_UUID), roles)
+
+    assert set(granted) == set(REQUEST_ROLES), (
+        f"the authenticator is granted {sorted(granted)}; the request roles are "
+        f"{sorted(REQUEST_ROLES)}"
+    )
+
+
+def test_no_agent_role_is_granted_to_the_authenticator(
+    bootstrap: Any, document: dict[str, Any]
+) -> None:
+    """The absence an agent token's refusal depends on.
+
+    PostgREST fails at `SET ROLE` before `db-pre-request` runs, which is why no
+    agent-specific pre-request error code exists. A membership added by accident
+    would turn a tested property into a silently open path, and the only thing
+    that would notice is this.
+    """
+    roles = document["database"]["roles"]
+    granted = _authenticator_grants(bootstrap.build_statements(document, INSTANCE_UUID), roles)
+
+    for agent_role in ("agent_reader", "agent_writer"):
+        assert agent_role not in granted, (
+            f"{agent_role} is granted to the authenticator; Session 9 of the product "
+            "activates agent access, and until then the refusal is the property"
+        )
+
+
+def test_every_request_role_grant_carries_the_three_options(
+    bootstrap: Any, document: dict[str, Any]
+) -> None:
+    """`INHERIT FALSE` is not cosmetic, and a plain GRANT does not imply it.
+
+    Measured on the locked image: a `GRANT` without the options records
+    `inherit_option = true`, which would give the authenticator every request
+    role's reach merely by connecting -- no `SET ROLE` needed, and no request
+    involved. `SET TRUE` is what makes impersonation work at all, and
+    `ADMIN FALSE` stops a compromised authenticator handing the membership on.
+    """
+    roles = document["database"]["roles"]
+    granted = _authenticator_grants(bootstrap.build_statements(document, INSTANCE_UUID), roles)
+
+    for suffix, statement in sorted(granted.items()):
+        assert statement.endswith("WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;"), (
+            f"the grant of {suffix} is {statement!r}, which does not carry the three "
+            "options; a plain GRANT records inherit_option = true"
+        )
 
 
 def test_the_two_limits_and_the_reserve_fit_what_the_server_will_give(bootstrap: Any) -> None:

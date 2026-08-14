@@ -104,3 +104,40 @@ class SubjectResponse(BaseModel):
     credential_version: int
     authz_version: int
     last_login_at: str | None
+
+
+class AgentTokenRequest(_Strict):
+    """An agent presents an id and the secret it was shown once.
+
+    Two fields, like a login, and for the same reason: there is no third. An
+    agent cannot ask for a role or a scope any more than a person can.
+    """
+
+    agent_id: str = Field(min_length=1, max_length=64)
+    secret: str = Field(min_length=1, max_length=PASSWORD_MAX)
+
+
+class CreateAgentRequest(_Strict):
+    """`role` is a suffix, and only an agent role will be accepted.
+
+    The model does not enforce which: the ceiling in `scopes.ROLE_SCOPES` does,
+    and putting a second list here would be two authorities for one vocabulary.
+    """
+
+    name: str = Field(min_length=1, max_length=USERNAME_MAX)
+    description: str = Field(default="", max_length=DISPLAY_NAME_MAX)
+    role: str = Field(min_length=1, max_length=64)
+    scopes: list[str] = Field(min_length=1, max_length=32)
+
+
+class UpdateAgentRequest(_Strict):
+    """No `secret` field. Rotation is its own endpoint.
+
+    A `PATCH` carrying a secret would be a request whose body sometimes holds a
+    credential, which is exactly the shape that makes redaction a per-field
+    decision somebody has to remember.
+    """
+
+    role: str | None = Field(default=None, min_length=1, max_length=64)
+    scopes: list[str] | None = Field(default=None, min_length=1, max_length=32)
+    status: Literal["active", "revoked"] | None = None
