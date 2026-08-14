@@ -711,11 +711,16 @@ services:
         PYTHON_BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
     profiles: [session5]
     restart: "on-failure:5"
-    # The same two labels the REST service carries, for the same two reasons.
     # `apg.traefik.scope` because `infra/edge/traefik.yaml` constrains on it and
     # a container without it is invisible to the edge -- a correct router
-    # attached to nothing, answering 404 (D186). `traefik.docker.network`
-    # because this service is on two networks and Traefik cannot choose.
+    # attached to nothing, answering 404 (D186).
+    #
+    # `traefik.docker.network` is here although this service is on `edge` ONLY,
+    # and the comment that used to be here said it was on two networks, which it
+    # has never been. It is kept because it is correct rather than because the
+    # reason was: naming the network a router's backend is reached on cannot be
+    # wrong when there is one, and it stops being right by accident if a later
+    # session gives the page a second attachment.
     labels:
       apg.traefik.scope: managed
       apg.project.key: ${PROJECT_KEY:?required}
@@ -727,15 +732,21 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     stop_grace_period: 5s
-    # No environment beyond the two the server reads for its own paths, and
-    # neither is a secret. This service holds no credential of any kind: the
-    # documentation password is a Traefik concern (a `usersFile` the edge
-    # reads), and `secrets.required.yaml` declares it with a **root-plane
-    # consumer only**, which is what SEC-DOCS-001 asserts. A compose consumer
-    # here would be a container holding the password to its own front door.
+    # No environment beyond the paths the server reads, and none is a secret.
+    # This service holds no credential of any kind: the documentation password
+    # is a Traefik concern (a bcrypt hash inline in the middleware document the
+    # file provider parses, ADR 0086), and `secrets.required.yaml` declares it
+    # with a **root-plane consumer only**, which is what SEC-DOCS-001 asserts. A
+    # compose consumer here would be a container holding the password to its own
+    # front door.
+    #
+    # `APG_DOCS_APP_SNAPSHOT` is Run 10's second surface (D226): a second file
+    # in the directory already mounted, served under `/app` by the same process
+    # under the same CSP behind the same credential.
     environment:
       APG_DOCS_PORT: "8080"
       APG_DOCS_SNAPSHOT: /app/snapshot/openapi.json
+      APG_DOCS_APP_SNAPSHOT: /app/snapshot/app-openapi.json
     healthcheck:
       test:
         [
@@ -754,19 +765,28 @@ services:
     networks:
       - edge
 
-  # Session 6's auth service (Run 7). The core, before any route.
+  # Session 6's auth service. Run 7 built the process; **Run 10 publishes it.**
   #
-  # NOT on `edge`, and not by omission. Run 7 builds the process -- the frozen
-  # Argon2id profile and its bounded executor, strict request parsing, the
-  # bounded JWT pre-parser, local-only key resolution and the explicitly-opened
-  # pool -- and Run 10 publishes it, after the routers are built from
-  # `routes.app.url` and after `routes.app.status` has an administrator to gate
-  # on (D230). A service reachable from the edge before its first administrator
-  # exists is a service whose first caller decides who the administrator is.
+  # On `edge` as well as `internal` since Run 10, which is why
+  # `traefik.docker.network` is here: a container on two networks gives Traefik
+  # two addresses and no way to choose, and the one it picks is not necessarily
+  # the one the edge can reach.
   #
-  # So there are no Traefik labels here either. `apg.traefik.scope: managed` is
-  # what makes a container visible to the edge at all (D186); adding it now
-  # would attach a router to something that has no endpoints to serve.
+  # `apg.traefik.scope: managed` is what makes a container visible to the edge
+  # at all -- `infra/edge/traefik.yaml` constrains on it, so a container without
+  # it carries no route however correct its router is (D186). The router and
+  # service labels themselves are NOT here: their keys contain the derived
+  # router name and Compose cannot interpolate inside a label key (ADR 0013), so
+  # `runtime_override.py` renders them.
+  #
+  # **Publishing the container is not publishing the route.** `routes.app.status`
+  # stays `unavailable` until an active project administrator exists (D230): the
+  # deployed document does not name a URL, the operator is told to run the local
+  # bootstrap, and the deploy exits 0 -- a project awaiting its first
+  # administrator is not a failed deploy. What the route does *serve* before
+  # then is refusals, which is the same thing it serves to an unauthenticated
+  # caller afterwards; there is no endpoint that creates an administrator over
+  # HTTP, and `SEC-BOOT-001` asserts its absence rather than trusting it.
   auth:
     build:
       context: ./services/auth-api
@@ -789,8 +809,10 @@ services:
     profiles: [session6]
     restart: "on-failure:5"
     labels:
+      apg.traefik.scope: managed
       apg.project.key: ${PROJECT_KEY:?required}
       apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
     # Matches the uid/gid secrets.required.yaml declares for both of this
     # service's consumers. The host sets ownership before Compose mounts the
     # file (ADR 0010), so a mismatch is a container that cannot read its own
@@ -867,8 +889,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    # Both, and the order is the order Traefik would guess wrong in. `internal`
+    # is where the pooler and the cluster are; `edge` is where the request
+    # arrives from. `traefik.docker.network` above is what removes the guess.
     networks:
       - internal
+      - edge
 
   # Session 4's client compatibility fixtures (DBX-001..005).
   #

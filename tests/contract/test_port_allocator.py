@@ -20,6 +20,11 @@ from typing import Any
 import pytest
 import yaml
 
+# The one table of router and middleware names, so a name added to the builder
+# reaches every caller. Two literal argument lists is how a keyword-only
+# parameter gets added to a producer and half its callers (D250).
+from tests.contract.test_runtime_override import NAMES as OVERRIDE_NAMES
+
 from agentic_postgres import port_allocations, runtime_override
 from agentic_postgres.port_allocations import AllocationError
 
@@ -322,13 +327,7 @@ def test_an_override_without_an_allocation_publishes_nothing() -> None:
     later privileged render adds it.
     """
     document = runtime_override.build_override(
-        router_name="apg-alpha-dev-health",
-        rest_router_name="apg-alpha-dev-rest",
-        buffering_middleware_name="apg-alpha-dev-api-buffering",
-        stripprefix_middleware_name="apg-alpha-dev-api-stripprefix",
-        docs_router_name="apg-alpha-dev-docs",
-        docs_auth_middleware_name="apg-alpha-dev-docs-auth",
-        docs_stripprefix_middleware_name="apg-alpha-dev-docs-strip",
+        **OVERRIDE_NAMES,
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )
@@ -385,13 +384,7 @@ def test_the_override_carries_no_ports_entry_for_any_service() -> None:
     including one that never calls `publication()`.
     """
     payload = runtime_override.render_override(
-        router_name="apg-alpha-dev-health",
-        rest_router_name="apg-alpha-dev-rest",
-        buffering_middleware_name="apg-alpha-dev-api-buffering",
-        stripprefix_middleware_name="apg-alpha-dev-api-stripprefix",
-        docs_router_name="apg-alpha-dev-docs",
-        docs_auth_middleware_name="apg-alpha-dev-docs-auth",
-        docs_stripprefix_middleware_name="apg-alpha-dev-docs-strip",
+        **OVERRIDE_NAMES,
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/alpha-dev",
     )

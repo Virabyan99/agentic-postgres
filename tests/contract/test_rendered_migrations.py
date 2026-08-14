@@ -90,16 +90,21 @@ def test_the_modes_are_the_ones_a_non_root_container_can_read() -> None:
         assert path.stat().st_mode & 0o777 == rendering.MIGRATION_FILE_MODE, path.name
 
 
-#: The two things in a rendered directory that are not `0600`, and why.
+#: The three things in a rendered directory that are not `0600`, and why.
 #:
 #: `migrations` is a directory the installer widens so dbmate can read it.
-#: `openapi.json` is the reviewed OpenAPI snapshot the documentation page
-#: serves: it is a **published document** rather than a description of a
-#: deployment, it is a committed artefact a human approved, and the container
-#: that reads it runs as 65532 rather than as the owner of this directory
-#: (ADR 0069). A `0600` copy would reach the mount unreadable, which `serve.py`
-#: reports as 503 -- correctly, and permanently.
-RENDERED_EXEMPTIONS = {"migrations", rendering.SNAPSHOT_FILENAME}
+#: `openapi.json` and `app-openapi.json` are the reviewed OpenAPI snapshots the
+#: two documentation surfaces serve (D226): each is a **published document**
+#: rather than a description of a deployment, each is a committed artefact a
+#: human approved, and the container that reads them runs as 65532 rather than
+#: as the owner of this directory (ADR 0069). A `0600` copy would reach the
+#: mount unreadable, which `serve.py` reports as 503 -- correctly, and
+#: permanently.
+RENDERED_EXEMPTIONS = {
+    "migrations",
+    rendering.SNAPSHOT_FILENAME,
+    rendering.APP_SNAPSHOT_FILENAME,
+}
 
 
 def test_everything_else_in_the_rendered_directory_stays_owner_only() -> None:
@@ -122,9 +127,10 @@ def test_the_published_snapshot_is_the_only_world_readable_file() -> None:
     readable = sorted(
         path.name for path in ALPHA.iterdir() if path.is_file() and path.stat().st_mode & 0o004
     )
-    assert readable == [rendering.SNAPSHOT_FILENAME], (
-        f"{readable} are world-readable in the rendered directory. Only the published "
-        "snapshot may be, and only because it is served to the public"
+    assert readable == sorted([rendering.SNAPSHOT_FILENAME, rendering.APP_SNAPSHOT_FILENAME]), (
+        f"{readable} are world-readable in the rendered directory. Only the two published "
+        "snapshots may be, and only because they are served to whoever holds the "
+        "documentation credential"
     )
 
 

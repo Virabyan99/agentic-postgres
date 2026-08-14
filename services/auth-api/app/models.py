@@ -106,6 +106,61 @@ class SubjectResponse(BaseModel):
     last_login_at: str | None
 
 
+# The four failure bodies, as schemas.
+#
+# **A model docstring becomes a `description` in the published document**, so
+# these are written for whoever reads the reference rather than for whoever
+# maintains this file -- measured by reading the captured snapshot back, where
+# the first draft explained why a schema lives here at all and named two ADRs.
+# The reasoning that belongs to this repository stays in comments like this one.
+#
+# They are response shapes in a file of mostly request shapes because
+# `errors.py` returns literals, and a schema written beside the document instead
+# of beside the values would be a second authority on what a caller receives.
+
+
+class AuthenticationFailedResponse(BaseModel):
+    """Returned when no usable credential was presented.
+
+    The same body for every cause: unknown subject, wrong password, disabled
+    subject. Do not branch on it -- there is nothing else to read.
+    """
+
+    error: Literal["authentication_failed"]
+
+
+class AuthorizationFailedResponse(BaseModel):
+    """Returned when the caller is known and does not hold the required scope.
+
+    Distinct from an authentication failure on purpose: the caller has already
+    proved who it is, so telling it that its token is valid and insufficient
+    leaks nothing it does not know.
+    """
+
+    error: Literal["authorization_failed"]
+
+
+class MalformedRequestResponse(BaseModel):
+    """Returned when the request was refused before any domain logic ran.
+
+    An oversized body, a duplicate JSON member, a non-object root, an unknown
+    field, or a field outside its bounds. Which one is not reported.
+    """
+
+    error: Literal["malformed_request"]
+
+
+class InvalidRequestResponse(BaseModel):
+    """Returned when the request is well formed and jointly refused.
+
+    A scope outside the role's ceiling, a username already taken. `message`
+    says which, because the caller is an authenticated administrator.
+    """
+
+    error: Literal["invalid_request"]
+    message: str
+
+
 class AgentTokenRequest(_Strict):
     """An agent presents an id and the secret it was shown once.
 

@@ -47,12 +47,19 @@ RUN set -eu; \
 WORKDIR /app
 COPY --from=bundle /out/standalone.js /app/public/standalone.js
 COPY index.html /app/public/index.html
+# The application API's page (D226). A second HTML document and the same
+# bundle, because ADR 0060's note about verbs the REST surface advertises and
+# refuses is true of that surface and not of this one -- a page that carried it
+# over the auth API would be the first thing in this deployment to lie about a
+# surface, which is the sentence index.html itself uses.
+COPY app.html /app/public/app.html
 COPY serve.py /app/serve.py
 
-# The reviewed OpenAPI snapshot is **mounted**, not baked. It is the artefact a
-# human approved (`contracts/postgrest-openapi.canonical.json`), and baking it
-# would mean a documentation image per project per revision, each one a place
-# the reviewed bytes could differ from the reviewed bytes.
+# The reviewed OpenAPI snapshots are **mounted**, not baked. They are the
+# artefacts a human approved (`contracts/postgrest-openapi.canonical.json` and
+# `contracts/auth-openapi.canonical.json`), and baking them would mean a
+# documentation image per project per revision, each one a place the reviewed
+# bytes could differ from the reviewed bytes.
 VOLUME ["/app/snapshot"]
 
 USER 65532:65532

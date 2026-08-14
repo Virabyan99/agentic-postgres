@@ -86,6 +86,13 @@ EXIT_VALIDATION = 5
 #: from an absence.
 REST_PLANE_SESSION = 5
 
+#: The session that starts the auth service, and with it the application API
+#: route and its documentation surface. Below it there is no `auth` container to
+#: route to, so the deploy records `unavailable` rather than polling a route
+#: nothing serves -- the same shape `REST_PLANE_SESSION` has carried since
+#: Session 5.
+APP_PLANE_SESSION = 6
+
 #: The reviewed OpenAPI snapshot, mirroring `bin/api-contract.py`'s own
 #: constant. `test_the_deploy_and_the_contract_command_name_one_snapshot`
 #: asserts the two agree -- a deploy recording the digest of one file while
@@ -245,6 +252,40 @@ def _env_value(path: Path, key: str) -> str:
             return value
     fail(EXIT_VALIDATION, f"{key} is absent from {path}")
     raise AssertionError("unreachable")
+
+
+#: Every router and middleware name the override renders into a label key, as
+#: `render_override`'s keyword -> the `compose.env` key it comes from.
+#:
+#: One table, because there are two call sites: the privileged render and the
+#: deploy, both building the same document from the same file. They were two
+#: literal argument lists until Run 10 needed five more names, and D250 is what
+#: two copies of an argument list does -- a keyword-only parameter added to a
+#: producer, one caller updated and the other not, discovered on the host.
+#: Adding a name is now an entry here and nothing else.
+OVERRIDE_NAME_KEYS: dict[str, str] = {
+    "router_name": "HEALTH_ROUTER_NAME",
+    "rest_router_name": "REST_ROUTER_NAME",
+    "buffering_middleware_name": "API_BUFFERING_MIDDLEWARE_NAME",
+    "stripprefix_middleware_name": "API_STRIPPREFIX_MIDDLEWARE_NAME",
+    "docs_router_name": "DOCS_ROUTER_NAME",
+    "docs_auth_middleware_name": "DOCS_CREDENTIAL_MIDDLEWARE_NAME",
+    "docs_stripprefix_middleware_name": "DOCS_STRIPPREFIX_MIDDLEWARE_NAME",
+    "app_router_name": "APP_ROUTER_NAME",
+    "app_buffering_middleware_name": "APP_BUFFERING_MIDDLEWARE_NAME",
+    "app_stripprefix_middleware_name": "APP_STRIPPREFIX_MIDDLEWARE_NAME",
+    "app_docs_router_name": "APP_DOCS_ROUTER_NAME",
+}
+
+
+def _override_names(compose_env: Path) -> dict[str, str]:
+    """The name arguments `render_override` takes, read from one compose.env.
+
+    `_env_value` fails the deploy on a missing key rather than defaulting, so a
+    name this repository derives and forgets to emit is a refusal at step 4
+    rather than a router that quietly is not there.
+    """
+    return {keyword: _env_value(compose_env, key) for keyword, key in OVERRIDE_NAME_KEYS.items()}
 
 
 def _is_migration_artifact(path: Path, staging: Path) -> bool:
@@ -497,9 +538,18 @@ def publish_docs_credential(
     never attached and the container exits 0 having produced nothing.
 
     Rewritten on every deploy. bcrypt salts randomly, so the hash differs each
-    time while the password does not; the file changes, Traefik reloads it, and
-    the credential an operator holds keeps working. A conditional write would be
-    an optimisation bought with a branch that is wrong when the generation moved.
+    time while the password does not. A conditional write would be an
+    optimisation bought with a branch that is wrong when the generation moved.
+
+    **The hash goes inline into the middleware document** (ADR 0086). This
+    docstring used to continue "the file changes, Traefik reloads it, and the
+    credential an operator holds keeps working", and the host proved that
+    sentence false on the first documentation rotation this project ever
+    performed: new password 401, **old password 200**, correct hash on disk
+    (D252). The middleware named a `usersFile` *path*, so the parsed
+    configuration was identical either way and Traefik never rebuilt the one
+    component that re-reads that file. Now the rotation and the document the
+    provider parses are the same write.
     """
     source = (
         SECRET_ROOT
@@ -545,21 +595,31 @@ def publish_docs_credential(
         # quoting it would put a password hash in the deploy log.
         fail(EXIT_PRECONDITION, f"could not hash the documentation credential: {hashed.stderr}")
 
-    line = edge_credentials.htpasswd_line(hashed.stdout.strip())
-
     EDGE_DYNAMIC_DIR.mkdir(parents=True, exist_ok=True)
-    users = EDGE_DYNAMIC_DIR / edge_credentials.users_file_name(project_key)
-    _write_root_only(users, line.encode("utf-8"))
     middleware = EDGE_DYNAMIC_DIR / edge_credentials.middleware_file_name(project_key)
     _write_root_only(
         middleware,
         edge_credentials.render_middleware(
-            middleware_name=middleware_name, project_key=project_key
+            middleware_name=middleware_name,
+            project_key=project_key,
+            hashed=hashed.stdout.strip(),
         ),
     )
-    # The paths, never the contents.
-    print(f"  {middleware}")
-    print(f"  {users} (0600, bcrypt)")
+
+    # Every project deployed before ADR 0086 left a `<key>.htpasswd` here,
+    # holding a bcrypt hash nothing reads any more. Unlinked rather than left:
+    # a credential file no rotation reaches is the artifact this project keeps
+    # finding, and one that is also invisible to the provider would never be
+    # found at all. `missing_ok`, because the second deploy has nothing to
+    # remove and that is not an error.
+    retired = EDGE_DYNAMIC_DIR / edge_credentials.retired_users_file_name(project_key)
+    removed = retired.exists()
+    retired.unlink(missing_ok=True)
+
+    # The path, never the contents.
+    print(f"  {middleware} (0600, bcrypt inline)")
+    if removed:
+        print(f"  {retired} removed (ADR 0086: the hash is inline now)")
 
 
 def observe_docs(url: str) -> str:
@@ -595,6 +655,118 @@ def observe_docs(url: str) -> str:
         # in between `compose up` and Traefik noticing the container.
         print(f"  no documentation route: {type(error).__name__}: {error}")
         return "unavailable"
+
+
+def observe_active_administrator(database: dict[str, Any]) -> bool:
+    """Whether this project has an active administrator (D230).
+
+    **The gate on publishing `routes.app`.** No public application route may be
+    published before an administrator exists, because the first request to reach
+    one that has none is the request that decides who the administrator is.
+
+    D135 refused inventing a deployment state for this and D230 kept the
+    refusal: it is a *status field*, not a state machine, and every route
+    already has one. `routes.app` is `unavailable` until this returns True,
+    exactly as `routes.rest` is `unavailable` for a project that declares no
+    REST service (ADR 0062).
+
+    Asked of the registry rather than of the service, and as `object_owner`
+    through the same definer function `bin/auth-admin.sh list` uses -- so the
+    deploy and the operator's own command answer from one place. `auth_list_users`
+    returns no verifier and no hash, which is a property of the function rather
+    than of this caller remembering.
+
+    **False on every failure, and that is the safe direction.** A migration not
+    yet applied, a table that does not exist, a cluster that will not answer:
+    each of them means this deploy cannot show an administrator exists, and the
+    honest record of "cannot show" is the same as "there is none" for a decision
+    about whether to publish.
+    """
+    #: Neither name is interpolated into this string. `:"name"` becomes a quoted
+    #: identifier and `:'name'` a quoted literal, both by psql rather than by an
+    #: f-string -- so a role name is never concatenated into SQL here.
+    #:
+    #: **The SQL goes on stdin, and that is not a style choice.** Measured
+    #: against the locked PostgreSQL image: psql performs **no** variable
+    #: interpolation on a string passed with `-c`. `SET ROLE :"admin_owner"`
+    #: reached the server verbatim and failed with `syntax error at or near ":"`.
+    #: On stdin the same two lines interpolate -- `current_user` came back as
+    #: the owner, a role nothing names counted 0 rather than erroring, and
+    #: `x' OR '1'='1` as the literal counted 0 rather than every row. That is
+    #: why `bin/auth-admin.py` reads its SQL from stdin too.
+    statement = (
+        'SET ROLE :"admin_owner";\n'
+        "SELECT count(*) FROM app_private.auth_list_users()\n"
+        " WHERE status = 'active' AND role_name = :'admin_role';\n"
+    )
+
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            database["container"],
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            database["name"],
+            "-X",
+            "-qtA",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-v",
+            f"admin_owner={database['roles']['object_owner']}",
+            "-v",
+            f"admin_role={database['roles']['project_admin']}",
+        ],
+        input=statement,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    if result.returncode != 0:
+        print("  no administrator could be read; routes.app stays unavailable (D230)")
+        return False
+
+    counted = result.stdout.strip()
+    return counted.isdigit() and int(counted) > 0
+
+
+def observe_app(url: str, *, administrator: bool) -> str:
+    """`ready` when the application route **refuses** an unauthenticated caller.
+
+    Two conditions, and both have to hold. The first is D230's: an active
+    administrator exists. The second is the same shape `observe_docs` uses --
+    the route answers, and it answers with a refusal. A 401 from
+    `<routes.app>/auth/me` proves more than a 200 anywhere would: the router
+    matched, the strip worked (FastAPI saw `/auth/me` rather than
+    `/api/app/auth/me`, which would be a 404), and the service refused.
+
+    A 404 here is Traefik's own or FastAPI's and the two are indistinguishable
+    from outside (D186), so it records `unavailable` and prints what came back.
+    """
+    if not administrator:
+        print("  no active project administrator; routes.app stays unavailable (D230)")
+        return "unavailable"
+
+    result = run(
+        "curl",
+        "-ksS",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        "--max-time",
+        "10",
+        f"{url}/auth/me",
+    )
+    status = result.stdout.strip()
+    if status == "401":
+        return "ready"
+    print(f"  the application route answered {status or '(nothing)'} rather than 401")
+    return "unavailable"
 
 
 def observe_tls(host: dict[str, Any], domain: str) -> dict[str, Any]:
@@ -815,17 +987,9 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
     rendered_directory = deployed_output.rendered_path(key)
     compose_env = rendered_directory / "compose.env"
     payload = runtime_override.render_override(
-        router_name=_env_value(compose_env, "HEALTH_ROUTER_NAME"),
+        **_override_names(compose_env),
         https_entrypoint=host["edge"]["https_entrypoint"],
         rendered_directory=str(rendered_directory),
-        rest_router_name=_env_value(compose_env, "REST_ROUTER_NAME"),
-        buffering_middleware_name=_env_value(compose_env, "API_BUFFERING_MIDDLEWARE_NAME"),
-        stripprefix_middleware_name=_env_value(compose_env, "API_STRIPPREFIX_MIDDLEWARE_NAME"),
-        docs_router_name=_env_value(compose_env, "DOCS_ROUTER_NAME"),
-        docs_auth_middleware_name=_env_value(compose_env, "DOCS_CREDENTIAL_MIDDLEWARE_NAME"),
-        docs_stripprefix_middleware_name=_env_value(
-            compose_env, "DOCS_STRIPPREFIX_MIDDLEWARE_NAME"
-        ),
     )
     _write_root_only(rendered_directory / "runtime-compose.override.yaml", payload)
     print(f"  {rendered_directory / 'runtime-compose.override.yaml'}")
@@ -941,21 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  {state_directory}")
 
     override_payload = runtime_override.render_override(
-        router_name=_env_value(rendered_dir / "compose.env", "HEALTH_ROUTER_NAME"),
-        rest_router_name=_env_value(rendered_dir / "compose.env", "REST_ROUTER_NAME"),
-        buffering_middleware_name=_env_value(
-            rendered_dir / "compose.env", "API_BUFFERING_MIDDLEWARE_NAME"
-        ),
-        stripprefix_middleware_name=_env_value(
-            rendered_dir / "compose.env", "API_STRIPPREFIX_MIDDLEWARE_NAME"
-        ),
-        docs_router_name=_env_value(rendered_dir / "compose.env", "DOCS_ROUTER_NAME"),
-        docs_auth_middleware_name=_env_value(
-            rendered_dir / "compose.env", "DOCS_CREDENTIAL_MIDDLEWARE_NAME"
-        ),
-        docs_stripprefix_middleware_name=_env_value(
-            rendered_dir / "compose.env", "DOCS_STRIPPREFIX_MIDDLEWARE_NAME"
-        ),
+        **_override_names(rendered_dir / "compose.env"),
         https_entrypoint=host["edge"]["https_entrypoint"],
         # The installed path, not the checkout's. The override is written into
         # the staging copy of the very directory it names, and the name has to
@@ -1145,12 +1295,22 @@ def main(argv: list[str] | None = None) -> int:
     # record while nothing observed them, and is this run's work.
     rest_status = "unavailable"
     docs_status = "unavailable"
+    # Version 9's two, and Run 10's. `unavailable` is the value for a deployment
+    # through a session that does not start the auth service, and it is the
+    # value for one that does and has no administrator yet (D230).
+    app_status = "unavailable"
+    app_docs_status = "unavailable"
     jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
     api_block = dict(deployed_output.API_NOT_PUBLISHED)
 
     if arguments.through_session >= REST_PLANE_SESSION:
         jwt_block = observe_jwt(
-            rendered, deployed_output.rendered_path(key) / runtime_override.JWKS_FILENAME
+            rendered,
+            deployed_output.rendered_path(key) / runtime_override.JWKS_FILENAME,
+            # Read BEFORE this deploy overwrites it. The document on disk is
+            # still the previous one at this point in the run, and it is the
+            # only record of a rotation's deadline and its acknowledgements.
+            previous_jwt_block(key),
         )
         rest_url = rendered["routes"]["rest"]
         # A route is `ready` when something answers on it, which the served
@@ -1196,6 +1356,33 @@ def main(argv: list[str] | None = None) -> int:
             lambda: observe_docs(rendered["routes"]["docs"]),
             lambda observed: observed == "ready",
         )
+        # The second documentation surface (D226). Same container, same
+        # credential, same success condition -- a 401 with a Basic challenge --
+        # and its own observation, because "the container is up" is not "this
+        # router is wired": the two routers are separate labels and Traefik
+        # accepts or drops them one at a time (D208).
+        app_docs_status = observation.await_observation(
+            lambda: observe_docs(rendered["routes"]["app_docs"]),
+            lambda observed: observed == "ready",
+        )
+
+    if arguments.through_session >= APP_PLANE_SESSION:
+        # D230's gate, and the order matters: the administrator is read first,
+        # so a project that has none records `unavailable` without spending the
+        # observation window polling a route it is not going to publish.
+        administrator = observe_active_administrator(rendered["database"])
+        app_status = observation.await_observation(
+            lambda: observe_app(rendered["routes"]["app"], administrator=administrator),
+            lambda observed: observed == "ready",
+        )
+        if not administrator:
+            print(
+                "\n  This project has no active administrator, so its application route "
+                "is not published.\n  Create one, then re-run this deploy:\n\n"
+                f"    sudo bin/auth-admin.sh --outputs {deployed_output.deployed_path(key)} "
+                "bootstrap \\\n        --username <name> --display-name <name>\n\n"
+                "  A project awaiting its first administrator is not a failed deploy."
+            )
 
     # The transports, read out of the host's own allocation registry rather than
     # assumed from the fact that a pooler is running. `active` and nothing less
@@ -1249,26 +1436,23 @@ def main(argv: list[str] | None = None) -> int:
         # without a credential is the one outcome that must never be recorded
         # as published.
         docs_status=docs_status,
-        # Version 9's two, and both are `unavailable` for reasons that are facts
-        # about this deployment rather than placeholders.
+        # Version 9's two, observed since Run 10. They were literal
+        # `unavailable` from Run 4 until this run, exactly as `rest_status` and
+        # `docs_status` were literal until the sessions that started those
+        # surfaces replaced them.
         #
-        # `app` is the application API route. D230: it stays `unavailable` until
-        # an active project administrator exists, because the first request to
-        # reach a published route with no administrator is the request that
-        # decides who the administrator is. Run 8 builds the local bootstrap that
-        # creates one; until then there is nothing to observe, and a query whose
-        # answer cannot yet be anything else is not an observation.
+        # `app` is the application API route. D230: `ready` needs an active
+        # project administrator **and** a route that refuses an unauthenticated
+        # caller, because the first request to reach a published route with no
+        # administrator is the request that decides who the administrator is.
         #
-        # `app_docs` is the second documentation surface (D226). Run 10 publishes
-        # it. `publishedRoute` forces a null URL for both, so neither names an
-        # address nothing is listening on.
+        # `app_docs` is the second documentation surface (D226), observed the
+        # same way the first one is: a 401 with a Basic challenge.
         #
-        # Literal, exactly as `rest_status` and `docs_status` were literal until
-        # the sessions that started those surfaces replaced them with
-        # observations. A deploy that wrote anything else here would be claiming
-        # a surface it did not start.
-        app_status="unavailable",
-        app_docs_status="unavailable",
+        # `publishedRoute` forces a null URL for anything `unavailable`, so
+        # neither ever names an address nothing is listening on.
+        app_status=app_status,
+        app_docs_status=app_docs_status,
         api=api_block,
         jwt=jwt_block,
         # Measured above when this deploy started a cluster, and `NOT_OBSERVED`
@@ -1286,6 +1470,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  tls          {document['tls']['status']} ({document['tls']['acme_environment']})")
     print(f"  health       {document['routes']['health']['status']}")
     print(f"  docs         {document['routes']['docs']['status']}")
+    print(f"  app          {document['routes']['app']['status']}")
+    print(f"  app docs     {document['routes']['app_docs']['status']}")
     print(f"  database     {document['database']['observed']['status']}")
     print(f"\n\033[1mdeploy: {key} deployed through session {arguments.through_session}\033[0m")
     return 0
@@ -1345,24 +1531,71 @@ def _load_command(name: str, alias: str) -> Any:
     return module
 
 
-def observe_jwt(rendered: dict[str, Any], jwks_path: Path) -> dict[str, Any]:
+def previous_jwt_block(key: str) -> dict[str, Any]:
+    """The `jwt` block the last deploy wrote, or an empty mapping.
+
+    **The deployed document is the rotation's memory**, and this is where the
+    next deploy reads it. Two members cannot be derived from anything on disk:
+    `retire_after` is a moment a promotion chose, and
+    `verifier_acknowledgements` is what each verifier reported having loaded.
+    Both would be lost on every deploy if they were not carried forward, and
+    losing an acknowledgement is not a small thing -- it is the record a
+    promotion is blocked on (ADR 0088).
+
+    An unreadable or absent document is an empty mapping rather than an error:
+    the first deploy of a project has none, and a deploy that could not read the
+    previous one has still deployed. What it must not do is invent a deadline.
+    """
+    path = deployed_output.deployed_path(key)
+    if not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8")).get("jwt") or {}
+    except (OSError, ValueError) as error:
+        print(f"  the previous deployed document could not be read ({error}); no rotation state")
+        return {}
+
+
+def observe_jwt(
+    rendered: dict[str, Any], jwks_path: Path, previous: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """The issuer's public metadata, from the key set this deploy just wrote.
 
     Every member is something a verifier is entitled to hold: an issuer, an
     audience, an algorithm, key *identifiers* and a digest. No private JWK and no
     reference to one, which is what `SEC-BOOT-001` asserts.
 
-    The kid is read out of the rendered file rather than recomputed here. The
+    The kids are read out of the rendered file rather than recomputed here. The
     file is what PostgREST verifies against, so a document naming a different kid
     would be describing a key set nothing is using -- and recomputing from the
     private key would be a second derivation of the value ADR 0051 says has one.
+
+    **`active_kid` is the first key, and that is a fact about `render-jwks.py`'s
+    order rather than a convention.** It publishes the auth service's key first
+    when the service exists, then the bootstrap issuer's, then any prepared key
+    -- so the head of the set is the issuer whose tokens most callers hold. The
+    two files agree through that order and nothing else, which is why it is
+    stated in both.
+
+    `retire_after` and `verifier_acknowledgements` are carried forward from
+    `previous`. Neither is derivable from the key set: a deadline is a moment a
+    promotion chose, and an acknowledgement is what a verifier reported. A deploy
+    that reset them would silently unblock the next promotion.
     """
     if not jwks_path.is_file():
         return dict(deployed_output.JWT_NOT_PUBLISHED)
 
+    previous = previous or {}
     raw = jwks_path.read_bytes()
     document = json.loads(raw)
     kids = [key["kid"] for key in document["keys"]]
+
+    # A deadline is about a key that is still published. If the set no longer
+    # holds two keys the rotation has been retired, and carrying its deadline
+    # forward would describe an overlap that has ended -- which
+    # `validate_key_state` refuses, and rightly.
+    retire_after = previous.get("retire_after") if len(kids) > 1 else None
+    acknowledgements = previous.get("verifier_acknowledgements") if len(kids) > 1 else None
 
     return {
         "status": "ready",
@@ -1377,15 +1610,22 @@ def observe_jwt(rendered: dict[str, Any], jwks_path: Path) -> dict[str, Any]:
         # deployment that should have retired it, which is what makes it a
         # value rather than a sentence.
         "temporary": True,
-        # Null: no rotation is in flight. A date here is a rotation with a
-        # deadline, and Run 10 is what sets one.
-        "retire_after": None,
+        # Carried forward, not recomputed. A deadline is the moment a promotion
+        # chose and nothing on disk remembers it; recomputing it from `now`
+        # would move the retirement further away on every deploy, which is a
+        # rotation that never completes wearing the shape of one in progress.
+        "retire_after": retire_after,
         # Version 9. Null rather than an empty object, and the difference is the
         # whole point: an empty object says every verifier was asked and none has
-        # answered, and null says nothing has been asked. Before the first
-        # rotation the second is true. Run 10 records a digest per consumer here
-        # and blocks promotion until they agree.
-        "verifier_acknowledgements": None,
+        # answered, and null says nothing has been asked.
+        #
+        # Also carried forward, and this is the member that matters most:
+        # `promote_rotation` refuses unless every verifier's recorded digest
+        # matches the published set, so a deploy that reset this would silently
+        # unblock nothing -- it would silently *block* a promotion that had
+        # already been earned, and an operator would re-run the acknowledgement
+        # step wondering why it did not take.
+        "verifier_acknowledgements": acknowledgements,
     }
 
 

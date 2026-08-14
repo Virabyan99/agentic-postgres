@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Application API reference</title>
+  </head>
+  <body>
+    <!--
+      The application API's reference: the auth service published at
+      `{api.public_base_path}/app` (D226, ADR 0087).
+
+      A second HTML document rather than a shared one, and the reason is the
+      note below. `index.html` carries ADR 0060's warning about DELETE, PATCH
+      and POST appearing on a document generated from database privileges and
+      returning 403 -- a statement about the REST surface that is not true of
+      this one. A page that repeated it here would be describing a surface it
+      is not describing, which is the failure `index.html`'s own text names.
+
+      Same bundle, same server, same Content-Security-Policy, same credential.
+      One image (ADR 0069).
+    -->
+    <noscript>
+      <p>This reference renders with JavaScript. The document it renders is
+      served at <code>openapi.json</code> on this same path.</p>
+    </noscript>
+
+    <aside id="apg-surface-note">
+      <h2>Before you read the verbs</h2>
+      <p>
+        This document is generated from the service's own route definitions, not
+        from database privileges — so unlike the REST reference, what it
+        advertises is what the service implements.
+      </p>
+      <p>
+        <strong>A client never submits a role or a scope.</strong> Both are read
+        from server-side records, sorted and deduplicated before signing, and
+        refused outright if the stored value is outside the committed
+        vocabulary. A request that names one is refused rather than honoured.
+      </p>
+      <p>
+        The document is a reviewed snapshot, not a live capture. It is what a
+        human approved for this release.
+      </p>
+    </aside>
+
+    <div id="app"></div>
+
+    <!--
+      Relative, and served under this surface's own path. The edge strips the
+      documentation root, so this resolves to `/app/standalone.js` at the
+      container and `/docs/app/standalone.js` at the visitor -- and it resolves
+      correctly only because the slash-less form of this page is redirected to
+      the slash form first (ADR 0087). Without that redirect a browser given
+      `/docs/app` asks for `/docs/standalone.js`, which is measured 404.
+    -->
+    <script src="standalone.js"></script>
+    <script>
+      // The same three refusals `index.html` sets, for the same measured
+      // reasons: `withDefaultFonts: false` stops the bundle reaching
+      // fonts.scalar.com, no `proxyUrl` keeps a "try it" request off
+      // proxy.scalar.com, and both are refused again by the CSP this server
+      // sends -- which is the half a browser enforces (D202).
+      Scalar.createApiReference('#app', {
+        url: 'openapi.json',
+        withDefaultFonts: false,
+        hideClientButton: true,
+        hideModels: false,
+        persistAuth: false,
+        plugins: [],
+      });
+    </script>
+  </body>
+</html>

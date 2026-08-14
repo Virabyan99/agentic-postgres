@@ -93,22 +93,30 @@ refused. Without that, a window in which nothing was rotated passes every
 refusal — the old credential is refused because it *is* the new credential.
 
 **Read this first. The first real rotation window, on 2026-08-13, found two
-defects that no test could reach** (D252, D253, D254). Both are live; neither has
-a code fix yet.
+defects that no test could reach** (D252, D253, D254). **D252 is fixed** in
+Session 6 Run 10 (ADR 0086); **D253 is still live and has no code fix.**
 
 > **A rotated credential does not reach a running process on its own.**
 >
-> * A credential **Traefik** holds needs `bin/edge.sh --host host.yaml restart`.
->   The middleware names a `usersFile` path, so the parsed configuration does not
->   change and Traefik never rebuilds the middleware — which is the only moment
->   it re-reads that file. Without the restart the deploy reports success, the
->   page keeps working **with the old password**, and the new one is refused.
+> * ~~A credential **Traefik** holds needs `bin/edge.sh --host host.yaml
+>   restart`.~~ **Fixed, and the step is gone.** The middleware named a
+>   `usersFile` *path*, so the parsed configuration did not change and Traefik
+>   never rebuilt the middleware — which is the only moment it re-reads that
+>   file. The deploy reported success, the page kept working **with the old
+>   password**, and the new one was refused. Since ADR 0086 the bcrypt hash is
+>   written **inline** into the middleware document, so a rotation *is* a change
+>   to what the file provider parses. Measured against the locked Traefik both
+>   ways, with a control: rewriting a users file leaves the old password working;
+>   rewriting the inline hash makes the new one live and refuses the old within
+>   ten seconds. **No edge restart, so rotating one project's documentation
+>   password no longer interrupts every other project's routes.**
 > * A credential a **container mounts** needs
 >   `bin/project-runtime.sh … down` before the deploy. `resume` runs
 >   `compose up` without `--force-recreate`, so the container keeps the
 >   generation it started with while the bootstrap plane moves the cluster's
 >   password underneath it. Without the `down`, PostgREST crash-loops and the
->   REST route answers 502.
+>   REST route answers 502. **Still live.** It needs its own measurement of what
+>   Compose does with a changed bind-mount source, and Run 10 did not make it.
 >
 > Neither was visible before, because every deploy until then materialized a new
 > generation carrying **identical values** — a stale mount and a fresh one are
@@ -133,11 +141,14 @@ differ:
    --through-session 5 down`. Volumes are preserved.
 4. Redeploy through session 5. This materializes a new generation and re-applies
    the credential: the bootstrap plane sets the role's verifier,
-   `publish_docs_credential` rewrites the htpasswd file and the middleware, and
-   `render-jwks.py` rewrites the JWKS.
-5. **Restart the edge** if the credential is one Traefik holds:
-   `sudo bin/edge.sh --host host.yaml restart`.
-6. Admit the proof with the matching `--rotated-*-from-file` flag.
+   `publish_docs_credential` rewrites the middleware document with the new hash
+   inline, and `render-jwks.py` rewrites the JWKS.
+5. Admit the proof with the matching `--rotated-*-from-file` flag.
+
+There is no edge restart. Step 4 rewrites the document the file provider parses,
+which is what makes Traefik rebuild the middleware and honour the new credential
+(ADR 0086). Before that fix, step 4 rewrote a file the parsed configuration only
+*named*, and the old password kept working.
 
 Steps 3 and 4 are the same commands every time:
 
@@ -217,20 +228,18 @@ Basic Auth, in front of the page. Root plane, so it lands in `_root/`:
 sudo cp "$(gen alpha-dev)/_root/docs_basic_auth_password" /root/rotated-docs
 ```
 
-`publish_docs_credential` rewrites both the htpasswd file and the middleware on
-every deploy — and **that is not enough** (D252). Traefik holds the users file it
-read when it last built the middleware, and rewriting the file it points at does
-not rebuild anything. Restart the edge:
+`publish_docs_credential` rewrites the middleware document on every deploy, with
+the new bcrypt hash **inline** in it. That is the whole of it — redeploy, then
+admit with `--rotated-docs-from-file /root/rotated-docs`.
 
-```bash
-sudo bin/edge.sh --host host.yaml restart
-```
-
-Then admit it with `--rotated-docs-from-file /root/rotated-docs`.
-
-Measured on the host: without the restart the new password is refused with 401
-and **the old password still returns 200**, with the correct hash sitting on
-disk the whole time.
+**This used to need an edge restart and no longer does** (D252, ADR 0086). The
+middleware named a `usersFile`, so the rewrite changed a file the parsed
+configuration only pointed at; Traefik saw no change, rebuilt nothing, and a
+middleware re-reads that file only when it is rebuilt. Measured on the host: the
+new password was refused with 401 and **the old password still returned 200**,
+with the correct hash sitting on disk the whole time. Re-measured offline
+against the locked image, with a control, and the inline form takes effect on
+its own within ten seconds.
 
 The proof asserts the **new** password opens the page as well as that the old one
 does not. A rotation Traefik never reloaded refuses both, which passes a test
@@ -238,19 +247,34 @@ that only checks the old one.
 
 ### The signing key
 
-**This is a cutover, not an overlap, and the documentation used to say
-otherwise.** `jwt_keys.begin_rotation` and `complete_rotation` implement a
-two-phase rotation — publish both, then retire the old after the deadline — and
-**nothing calls them**. `bin/render-jwks.py` derives the JWKS from the one
-materialized private key and publishes exactly one key; the deploy writes
-`retire_after: None` unconditionally. There is no operator path that publishes
-two verification keys. ADR 0076 measured this and records it.
+**Session 6 Run 10 built the overlap this section used to say did not exist.**
+ADR 0076 recorded that `begin_rotation` and `complete_rotation` had no callers,
+that `render-jwks.py` published one key, and that the deploy wrote
+`retire_after: None` unconditionally — all true, and all now replaced. The path
+is four phases and the operator surface is `bin/rotate-signing-key.sh`
+(ADR 0088):
 
-So: one window, one key out, one key in, and no interval in which both verify.
-Acceptable here because `bin/dev-token.py` caps a token at 900 seconds and
-defaults to 300, tokens are minted on demand, and nothing holds a long-lived one
-— but it means **every outstanding token is refused the moment the deploy
-finishes**, so do this when nobody is holding one.
+    prepare      put the new key at APG_AUTH_JWT_PREPARED_KEY and redeploy.
+                 Both keys are published; the OLD one still signs, so no
+                 outstanding token is affected.
+    (recreate)   bring the project down and up. A running PostgREST never
+                 re-reads its key set -- measured -- and after the key set file
+                 has been REPLACED a `docker restart` leaves the container
+                 unable to start at all. It must be recreated.
+    acknowledge  `rotate-signing-key.sh … acknowledge` reads the key set out of
+                 each verifier's running container and records its digest.
+    promote      refused unless every verifier acknowledged the published set.
+                 Then move the promoted key to APG_AUTH_JWT_SIGNING_KEY, clear
+                 the prepared one, and redeploy.
+    retire       refused before `retire_after`. Then redeploy and recreate.
+
+`abandon` withdraws a prepared rotation that has not been promoted. After
+promotion there is no way back and the recovery is to complete forward.
+
+**The first use of this machinery is the issuer transition itself.** The
+bootstrap issuer's key and the auth service's key are both published while both
+are live, which fills the two-key ceiling — so a *further* rotation cannot be
+prepared until the bootstrap issuer retires.
 
 Capture the key **identifier**, not the key. `--rotated-jwt-from-file` takes the
 retired key's public material as JSON and reads `kid` out of it, so the

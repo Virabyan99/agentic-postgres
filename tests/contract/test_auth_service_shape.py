@@ -80,7 +80,12 @@ def test_the_frozen_profile_module_needs_only_the_standard_library() -> None:
 #: Listed rather than discovered, because the rule is that only a *pure fact*
 #: may move -- a scan that found them would grow silently as somebody moved
 #: something that is not one.
-SHARED_MODULES = ("profile", "claims", "scopes")
+#:
+#: `strict_json` joined in Run 10, for `MAX_BODY_BYTES`. That number is a pure
+#: fact by this rule's own test: the service enforces it on a parsed body, the
+#: edge enforces it on a request body one hop earlier, and the two have to be
+#: one number rather than two that happen to agree.
+SHARED_MODULES = ("profile", "claims", "scopes", "strict_json")
 
 
 @pytest.mark.parametrize("module", SHARED_MODULES)
@@ -415,19 +420,40 @@ def test_the_service_carries_no_credential_in_its_environment(
         assert "password=" not in str(value).lower(), name
 
 
-def test_the_service_is_not_routable_yet(auth_service: dict[str, Any]) -> None:
-    """Run 7's boundary, made checkable.
+def test_the_service_is_visible_to_the_edge_and_says_which_network_on(
+    auth_service: dict[str, Any],
+) -> None:
+    """Run 10 publishes it, and this replaces `test_the_service_is_not_routable_yet`.
 
-    `apg.traefik.scope: managed` is what makes a container visible to the edge
-    at all (D186). Its absence is why no router can be attached before Run 10
-    builds one -- and before `routes.app.status` has an administrator to gate
-    on (D230). This test is what turns "we did not do that yet" into a
-    property, so that adding the label is a deliberate change with a test to
-    update rather than a line that slips in.
+    That test asserted the absence of the scope label so that adding it would be
+    a deliberate change with a test to update rather than a line that slipped
+    in. It did its job -- it failed the moment the label was added -- and it is
+    replaced here by the stricter statement of what the label now has to be
+    accompanied by.
+
+    Three things, and each has its own failure:
+
+    * `apg.traefik.scope: managed` is what makes the container visible at all.
+      `infra/edge/traefik.yaml` constrains the docker provider on it, so without
+      it a correct, measured router is attached to nothing and the edge answers
+      404 while the service serves its own network (D186).
+    * `edge` as well as `internal`. Visible is not reachable.
+    * `traefik.docker.network`, because two networks give Traefik two addresses
+      and the one it picks is not necessarily the one the edge can reach.
+
+    The router and service labels are still absent here, and that is not a
+    leftover: their keys carry the derived router name and Compose cannot
+    interpolate inside a label key (ADR 0013), so `runtime_override.py` renders
+    them. `test_every_routed_service_carries_the_label_the_edge_filters_on` is
+    where the two halves are compared.
     """
-    assert auth_service["networks"] == ["internal"]
-    assert "apg.traefik.scope" not in auth_service.get("labels", {})
-    assert not any(key.startswith("traefik.") for key in auth_service.get("labels", {}))
+    labels = auth_service.get("labels", {})
+    assert set(auth_service["networks"]) == {"internal", "edge"}
+    assert labels.get("apg.traefik.scope") == "managed"
+    assert labels.get("traefik.docker.network") == "${EDGE_NETWORK_NAME:?required}"
+    assert not any(key.startswith("traefik.http.") for key in labels), (
+        "a router or middleware label here would carry an uninterpolated key (ADR 0013)"
+    )
 
 
 def test_the_service_has_a_memory_limit_from_the_renderer(

@@ -15,6 +15,7 @@ measurement are different facts wearing one field name.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import http.server
 import json
@@ -923,12 +924,16 @@ def test_the_documentation_password_never_reaches_a_command_line() -> None:
     )
 
 
-def test_the_publisher_writes_both_halves_and_neither_is_readable() -> None:
-    """A middleware naming a users file that does not exist is a router Traefik
-    drops -- which is the 404 this whole step exists to stop producing.
+def test_the_publisher_writes_one_document_and_retires_the_one_it_replaced() -> None:
+    """One artifact now, not two (ADR 0086), and the old one is unlinked.
 
-    Both names come from `edge_credentials`, so the file the middleware points
-    at and the file the publisher writes cannot be given different names.
+    Stricter than the assertion it replaces, which required the publisher to
+    write a users file *and* a middleware naming it. That pair is exactly what
+    D252 was: the middleware named a path, so a rotation rewrote a file the
+    parsed configuration did not mention and Traefik rebuilt nothing.
+
+    Both names still come from `edge_credentials`, so the document the deploy
+    writes and the file it removes cannot be given different names here.
     """
     import ast
 
@@ -940,11 +945,13 @@ def test_the_publisher_writes_both_halves_and_neither_is_readable() -> None:
         if isinstance(node, ast.FunctionDef) and node.name == "publish_docs_credential"
     )
     body = ast.dump(function)
-    assert "users_file_name" in body and "middleware_file_name" in body, (
+    assert "middleware_file_name" in body and "retired_users_file_name" in body, (
         "the publisher names one of the two files itself instead of asking edge_credentials"
     )
-    assert "htpasswd_line" in body, "the hash is written without passing the bcrypt check"
-    assert body.count("_write_root_only") == 2, "both files must be written root-only"
+    assert body.count("_write_root_only") == 1, (
+        "one document is written root-only, and there is no second file to write"
+    )
+    assert "unlink" in body, "the users file this design used to write is left on the host"
 
 
 def _docker_reachable() -> bool:
@@ -1034,24 +1041,23 @@ def test_the_publisher_produces_a_credential_the_edge_can_use(tmp_path, monkeypa
         runtime_image=image,
     )
 
-    users = dynamic / edge_credentials.users_file_name(project_key)
     middleware = dynamic / edge_credentials.middleware_file_name(project_key)
-    assert set(written) == {users, middleware}, (
-        f"the publisher wrote {sorted(p.name for p in written)}, not the two files the "
-        "middleware and the edge expect"
+    assert set(written) == {middleware}, (
+        f"the publisher wrote {sorted(p.name for p in written)}, not the one document the "
+        "file provider parses"
     )
 
-    user, _, hashed = users.read_text(encoding="utf-8").strip().partition(":")
+    document = yaml.safe_load(middleware.read_text(encoding="utf-8"))
+    basic = document["http"]["middlewares"]["apg-rehearsal-dev-docs-auth"]["basicAuth"]
+    assert "usersFile" not in basic, "the indirection D252 was caused by is back"
+
+    (entry,) = basic["users"]
+    user, _, hashed = entry.partition(":")
     assert user == edge_credentials.DOCS_USER
     # The product's own check, so this cannot pass on a format Traefik answers
     # 401 to in a way indistinguishable from a wrong password (D165).
     edge_credentials.assert_bcrypt(hashed)
 
-    document = yaml.safe_load(middleware.read_text(encoding="utf-8"))
-    basic = document["http"]["middlewares"]["apg-rehearsal-dev-docs-auth"]["basicAuth"]
-    assert basic["usersFile"].endswith(edge_credentials.users_file_name(project_key)), (
-        "the middleware names a users file the publisher did not write"
-    )
     assert basic["removeHeader"] is True
 
 
@@ -1108,12 +1114,11 @@ def test_the_published_hash_verifies_against_its_own_password_and_no_other(
         runtime_image=image,
     )
 
-    hashed = (
-        (dynamic / edge_credentials.users_file_name(project_key))
-        .read_text(encoding="utf-8")
-        .strip()
-        .partition(":")[2]
+    published = yaml.safe_load(
+        (dynamic / edge_credentials.middleware_file_name(project_key)).read_text(encoding="utf-8")
     )
+    (entry,) = published["http"]["middlewares"]["m"]["basicAuth"]["users"]
+    hashed = entry.partition(":")[2]
 
     def verifies(candidate: str) -> bool:
         finished = subprocess.run(
@@ -1244,3 +1249,149 @@ def test_observe_jwt_reports_absence_when_there_is_no_key_set(tmp_path: Path) ->
     deploy = _load_deploy_command()
     produced = deploy.observe_jwt({"jwt": {}}, tmp_path / "absent.json")
     assert produced == deployed_output.JWT_NOT_PUBLISHED
+
+
+# ---------------------------------------------------------------------------
+# What a deploy carries forward, and what it observes (Run 10)
+# ---------------------------------------------------------------------------
+
+
+def test_the_rotation_state_survives_a_deploy(tmp_path, monkeypatch) -> None:
+    """`retire_after` and `verifier_acknowledgements` are not derivable.
+
+    A deadline is a moment a promotion chose and an acknowledgement is what a
+    verifier reported; neither is written anywhere on disk except the deployed
+    document. A deploy that reset them would silently block a promotion that had
+    already been earned, and an operator would re-run the acknowledgement step
+    wondering why it did not take.
+    """
+    module = deploy_module()
+    jwks = tmp_path / "jwks.json"
+    jwks.write_text(json.dumps({"keys": [{"kid": "a" * 43}, {"kid": "b" * 43}]}), encoding="utf-8")
+    rendered = {"jwt": {"issuer": "https://probe.test/api/app/auth", "audience": "urn:x:y:z"}}
+    previous = {
+        "retire_after": "2026-08-11T12:05:30Z",
+        "verifier_acknowledgements": {"postgrest": "c" * 64},
+    }
+
+    block = module.observe_jwt(rendered, jwks, previous)
+    assert block["retire_after"] == "2026-08-11T12:05:30Z"
+    assert block["verifier_acknowledgements"] == {"postgrest": "c" * 64}
+
+    # The control: with no previous document there is nothing to carry, and the
+    # deploy must not invent a deadline.
+    fresh = module.observe_jwt(rendered, jwks, {})
+    assert fresh["retire_after"] is None
+    assert fresh["verifier_acknowledgements"] is None
+
+
+def test_a_retired_rotation_does_not_carry_its_deadline_forward(tmp_path) -> None:
+    """A deadline is about a key that is still published.
+
+    Once the set is back to one key the overlap has ended, and a deadline
+    describing it would be refused by `validate_key_state` -- correctly, and on
+    a document the deploy had already written.
+    """
+    module = deploy_module()
+    jwks = tmp_path / "jwks.json"
+    jwks.write_text(json.dumps({"keys": [{"kid": "a" * 43}]}), encoding="utf-8")
+    rendered = {"jwt": {"issuer": "https://probe.test/api/app/auth", "audience": "urn:x:y:z"}}
+
+    block = module.observe_jwt(
+        rendered, jwks, {"retire_after": "2026-08-11T12:05:30Z", "verifier_acknowledgements": {}}
+    )
+    assert block["retire_after"] is None
+    assert block["verifier_acknowledgements"] is None
+
+
+def test_the_application_route_is_not_published_without_an_administrator(monkeypatch) -> None:
+    """D230, and the reason it is a status rather than a state machine.
+
+    The first request to reach a published application route with no
+    administrator is the request that decides who the administrator is. D135
+    refused inventing a deployment state for that; every route already has a
+    status field, and `publishedRoute` forces a null URL when it is
+    `unavailable`.
+
+    **The route is made to answer correctly, and the answer is still
+    `unavailable`.** The first version of this test called `observe_app` with
+    the real `run()` against a hostname that does not resolve, so the curl
+    failed and the function returned `unavailable` for that reason -- it passed
+    with the administrator gate deleted. Found by the mutation battery, and it
+    is D173's shape: an assertion that could not fail.
+    """
+    module = deploy_module()
+
+    class Refusing:
+        stdout = "401"
+        stderr = ""
+        returncode = 0
+
+    monkeypatch.setattr(module, "run", lambda *command: Refusing())
+    assert module.observe_app("https://probe.test/api/app", administrator=False) == "unavailable", (
+        "the route answered exactly as a published one should and was published, so the "
+        "administrator gate is not doing anything"
+    )
+
+
+def test_the_application_route_is_published_only_when_it_refuses(monkeypatch) -> None:
+    """The control for the test above, and the same shape `observe_docs` uses.
+
+    A 401 from `/auth/me` proves the router matched, the strip worked -- FastAPI
+    saw `/auth/me` rather than `/api/app/auth/me`, which would be a 404 -- and
+    the service refused. A 200 anywhere would prove less.
+    """
+    module = deploy_module()
+
+    class Result:
+        def __init__(self, status: str) -> None:
+            self.stdout = status
+            self.stderr = ""
+            self.returncode = 0
+
+    monkeypatch.setattr(module, "run", lambda *command: Result("401"))
+    assert module.observe_app("https://probe.test/api/app", administrator=True) == "ready"
+
+    monkeypatch.setattr(module, "run", lambda *command: Result("200"))
+    assert module.observe_app("https://probe.test/api/app", administrator=True) == "unavailable"
+
+    monkeypatch.setattr(module, "run", lambda *command: Result("404"))
+    assert module.observe_app("https://probe.test/api/app", administrator=True) == "unavailable"
+
+
+def test_the_administrator_probe_interpolates_through_psql_rather_than_python() -> None:
+    """Measured: `psql -c` performs NO variable interpolation.
+
+    `SET ROLE :"admin_owner"` passed with `-c` reached the server verbatim and
+    failed with `syntax error at or near ":"`. On stdin the same two lines
+    interpolate -- `current_user` came back as the owner, a role nothing names
+    counted 0 rather than erroring, and `x' OR '1'='1` as the literal counted 0
+    rather than every row. That is why `bin/auth-admin.py` reads its SQL from
+    stdin too, and why a role name is never concatenated into this query.
+    """
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "observe_active_administrator"
+    )
+    body = ast.dump(function)
+    assert "arg='input'" in body, (
+        "the SQL is not sent on stdin, and psql interpolates no variable in a string "
+        'passed with -c -- measured, `SET ROLE :"admin_owner"` reached the server '
+        'verbatim and failed with `syntax error at or near ":"`'
+    )
+    assert "admin_owner=" in body and "admin_role=" in body, (
+        "the query's two names are not passed as psql variables"
+    )
+    statement = next(
+        node.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign)
+        and any(getattr(t, "id", None) == "statement" for t in node.targets)
+    )
+    assert isinstance(statement, ast.Constant), (
+        "the probe's SQL is built with an f-string; a role name is being concatenated "
+        "into a query that psql can quote for it"
+    )

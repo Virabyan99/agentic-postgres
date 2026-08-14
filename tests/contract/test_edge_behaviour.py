@@ -26,6 +26,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 import yaml
@@ -167,9 +168,12 @@ def _headers(message) -> dict[str, str]:
 
 
 class Edge:
-    def __init__(self, port: int, container: str) -> None:
+    def __init__(self, port: int, container: str, dynamic: Path | None = None) -> None:
         self.port = port
         self.container = container
+        #: The directory the file provider watches, so a test can rewrite what
+        #: it parses. `None` for a rig that has no business doing that.
+        self.dynamic = dynamic
 
     def call(self, path: str, *, host: str = "probe.test", body: bytes | None = None,
              credential: tuple[str, str] | None = None):  # fmt: skip
@@ -227,17 +231,20 @@ def edge(tmp_path_factory: pytest.TempPathFactory):
     (dynamic / "baseline.yaml").write_text(baseline, encoding="utf-8")
     (dynamic / "routers.yaml").write_text(STATIC and ROUTERS, encoding="utf-8")
 
-    # The generated middleware and the generated credential file.
-    (dynamic / edge_credentials.middleware_file_name(PROJECT_KEY)).write_bytes(
+    # The generated middleware, carrying the hash inline (ADR 0086). There is no
+    # separate credential file to write any more.
+    middleware_file = dynamic / edge_credentials.middleware_file_name(PROJECT_KEY)
+    middleware_file.write_bytes(
         edge_credentials.render_middleware(
-            middleware_name=f"{PROJECT_KEY}-docs", project_key=PROJECT_KEY
+            middleware_name=f"{PROJECT_KEY}-docs",
+            project_key=PROJECT_KEY,
+            hashed=bcrypt_hash(DOCS_PASSWORD),
         )
     )
-    (dynamic / edge_credentials.users_file_name(PROJECT_KEY)).write_text(
-        edge_credentials.htpasswd_line(bcrypt_hash(DOCS_PASSWORD)), encoding="utf-8"
-    )
-    # A second file in the same directory, hashed the way a host tool would do
-    # it, to prove the format check is not decoration.
+    # A stray `.htpasswd` in the same directory, hashed the way a host tool
+    # would do it. Nothing generates one now, and the property it proves is
+    # still worth holding: the provider must ignore the extension rather than
+    # discard the directory's whole configuration over a file it cannot parse.
     (dynamic / "wrong-format.htpasswd").write_text(
         f"docs:{'$6$rounds=5000$abcdefgh$' + 'x' * 43}\n", encoding="utf-8"
     )
@@ -279,7 +286,7 @@ def edge(tmp_path_factory: pytest.TempPathFactory):
         )  # fmt: skip
         assert mapping.returncode == 0, mapping.stderr
         port = int(mapping.stdout.strip().splitlines()[0].rsplit(":", 1)[-1])
-        rig = Edge(port, traefik)
+        rig = Edge(port, traefik, dynamic)
 
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
@@ -452,6 +459,62 @@ def test_the_credential_does_not_reach_the_upstream(edge: Edge) -> None:
 
 
 @requires_docker
+def test_a_rotated_credential_replaces_the_one_before_it(edge: Edge) -> None:
+    """D252, as a test that goes red if the indirection comes back.
+
+    This is the defect the host found on the first documentation rotation this
+    project ever performed: the new password 401, **the old password 200**, and
+    the correct hash on disk the whole time. The middleware named a `usersFile`
+    path, so the parsed configuration was byte-identical before and after, and
+    Traefik rebuilt nothing -- a middleware re-reads that file only when it is
+    rebuilt.
+
+    Measured both ways before ADR 0086 was written. With a `usersFile` the
+    rewrite has no effect at all; with the hash inline the new credential is
+    live and the old one is refused. So the assertion below is on *both* halves:
+    a test that only checked the new password would pass against a middleware
+    that had started accepting two.
+
+    The rig is restored afterwards, because the fixture is module-scoped and
+    every other credential test here holds the original password.
+    """
+    assert edge.dynamic is not None
+    document = edge.dynamic / edge_credentials.middleware_file_name(PROJECT_KEY)
+    before = document.read_bytes()
+
+    rotated = "documentation-probe-rotated"
+    try:
+        document.write_bytes(
+            edge_credentials.render_middleware(
+                middleware_name=f"{PROJECT_KEY}-docs",
+                project_key=PROJECT_KEY,
+                hashed=bcrypt_hash(rotated),
+            )
+        )
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            if edge.status("/docs/rest", credential=("docs", rotated)) == 200:
+                break
+            time.sleep(1)
+        else:
+            pytest.fail("the rotated credential never became live")
+
+        assert edge.status("/docs/rest", credential=("docs", DOCS_PASSWORD)) == 401, (
+            "the credential before the rotation still opens the route -- this is D252, "
+            "and it is what a usersFile does"
+        )
+    finally:
+        document.write_bytes(before)
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            if edge.status("/docs/rest", credential=("docs", DOCS_PASSWORD)) == 200:
+                break
+            time.sleep(1)
+        else:
+            pytest.fail("the rig's original credential was not restored")
+
+
+@requires_docker
 def test_the_credential_file_is_not_read_as_configuration(edge: Edge) -> None:
     """A `.htpasswd` beside the YAML, which the file provider must ignore.
 
@@ -495,21 +558,50 @@ def test_no_query_string_or_credential_reaches_the_access_log(edge: Edge) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_the_generated_middleware_names_a_file_the_provider_ignores() -> None:
+#: A valid-shaped bcrypt hash for the offline assertions. Not a real password's
+#: hash and never sent anywhere -- `assert_bcrypt` checks the format, and these
+#: tests are about what the document says.
+SHAPED_HASH = "$2b$12$" + "a" * 53
+
+
+def test_the_generated_middleware_carries_the_hash_inline() -> None:
+    """ADR 0086, and this replaces the `usersFile` assertion it supersedes.
+
+    Stricter rather than merely different: the old test asserted that a path
+    ended in `.htpasswd`, which was true throughout D252 -- the defect was that
+    the path was a path. This asserts the credential is *in* the document the
+    file provider parses, which is the property that makes a rotation take
+    effect, and it fails if anyone reintroduces the indirection.
+    """
     document = yaml.safe_load(
-        edge_credentials.render_middleware(middleware_name="m", project_key=PROJECT_KEY)
+        edge_credentials.render_middleware(
+            middleware_name="m", project_key=PROJECT_KEY, hashed=SHAPED_HASH
+        )
     )
     basic = document["http"]["middlewares"]["m"]["basicAuth"]
-    assert basic["usersFile"].endswith(".htpasswd")
-    assert basic["usersFile"].startswith(edge_credentials.TRAEFIK_DYNAMIC_DIR)
+    assert basic["users"] == [f"{edge_credentials.DOCS_USER}:{SHAPED_HASH}"]
+    assert "usersFile" not in basic, "the indirection D252 was caused by is back"
     assert basic["removeHeader"] is True
 
 
+def test_the_inline_entry_carries_no_trailing_newline() -> None:
+    """A newline inside the scalar becomes part of the hash Traefik compares,
+    which is a 401 on a correct password -- D165's symptom from a new cause."""
+    entry = edge_credentials.htpasswd_entry(SHAPED_HASH)
+    assert entry == entry.strip()
+    assert "\n" not in entry
+
+
 def test_the_generated_middleware_defines_no_router_and_no_service() -> None:
-    """A router here would point at a container that does not exist yet, and a
-    route to a missing service answers 502 rather than being absent."""
+    """ADR 0085: a file-provider service can only address a backend by DNS, and
+    the Compose service name resolves to whichever project the edge attached to
+    first -- measured, ten of ten to project A with project B unreachable. A
+    router here would serve one tenant's requests from another tenant's
+    container."""
     document = yaml.safe_load(
-        edge_credentials.render_middleware(middleware_name="m", project_key=PROJECT_KEY)
+        edge_credentials.render_middleware(
+            middleware_name="m", project_key=PROJECT_KEY, hashed=SHAPED_HASH
+        )
     )
     assert set(document["http"]) == {"middlewares"}
 
@@ -529,7 +621,7 @@ def test_a_hash_that_is_not_bcrypt_is_refused() -> None:
         "",
     ):
         with pytest.raises(ManifestError, match="not bcrypt"):
-            edge_credentials.htpasswd_line(rejected)
+            edge_credentials.htpasswd_entry(rejected)
 
 
 def test_the_refusal_does_not_echo_the_hash() -> None:
@@ -539,7 +631,7 @@ def test_the_refusal_does_not_echo_the_hash() -> None:
 
     secret = "$6$rounds=5000$SENSITIVE$" + "x" * 43
     with pytest.raises(ManifestError) as raised:
-        edge_credentials.htpasswd_line(secret)
+        edge_credentials.htpasswd_entry(secret)
     assert "SENSITIVE" not in str(raised.value)
 
 
@@ -547,4 +639,4 @@ def test_a_user_name_cannot_forge_a_second_field() -> None:
     from agentic_postgres.config import ManifestError
 
     with pytest.raises(ManifestError):
-        edge_credentials.htpasswd_line("$2b$12$" + "a" * 53, user="docs:admin")
+        edge_credentials.htpasswd_entry("$2b$12$" + "a" * 53, user="docs:admin")

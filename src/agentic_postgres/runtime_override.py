@@ -42,6 +42,17 @@ ROUTED_SERVICE = "edge-probe"
 REST_SERVICE = "postgrest"
 REST_SERVICE_PORT = 3000
 
+#: Session 6's auth service, and the port `uvicorn` binds inside its container.
+#:
+#: 8080 is not a default: `compose.yaml` sets `APG_LISTEN_PORT: "8080"` and
+#: `app/settings.py` requires it. The two agree through
+#: `test_the_compose_service_supplies_every_setting_the_service_requires`, and
+#: this constant is the third reader -- Traefik needs the container port, and a
+#: publication written against a number the process does not bind maps a router
+#: onto nothing.
+AUTH_SERVICE = "auth"
+AUTH_SERVICE_PORT = 8080
+
 #: Services that cannot start until the bootstrap plane has activated the role
 #: they authenticate as (ADR 0063).
 #:
@@ -60,7 +71,16 @@ REST_SERVICE_PORT = 3000
 #: Deferring "the profile of the session being deployed" was the obvious
 #: alternative and is wrong: a greenfield deploy through a later session would
 #: bring this up in the first phase and deadlock exactly as before.
-POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE,)
+#:
+#: `auth` joins the set in Run 10, when it is first started by a deploy. It
+#: authenticates as `auth_service`, which migration 0011 creates NOLOGIN and the
+#: bootstrap plane activates (D102), and its healthcheck opens a pool and runs a
+#: statement -- so an `auth` started before step 6 does not merely fail to serve,
+#: it fails its healthcheck and Compose restarts it five times against a role
+#: that cannot log in. The message is `password authentication failed`, which is
+#: what a *wrong* credential gets, and that is the diagnosis this constant
+#: exists to keep nobody from having to make.
+POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE, AUTH_SERVICE)
 
 #: Session 5's documentation service, the port `serve.py` binds, and the
 #: reviewed snapshot it serves.
@@ -105,6 +125,18 @@ PUBLIC_REFERENCE_PATHS: frozenset[str] = frozenset({JWKS_CONTAINER_PATH})
 #: the probe publishes none, because only Traefik publishes a host port.
 ROUTED_SERVICE_PORT = 8080
 
+#: The second documentation surface's file inside the snapshot mount (D226).
+#:
+#: The directory is already mounted for `openapi.json`; this is a second file in
+#: it, not a second mount and not a second container. One image, one CSP, one
+#: credential.
+APP_SNAPSHOT_FILENAME = "app-openapi.json"
+APP_SNAPSHOT_CONTAINER_PATH = "/app/snapshot/app-openapi.json"
+
+#: The Compose key that carries the second surface's container path into
+#: `serve.py`, named here for the reason `SNAPSHOT_ENV_KEY` is.
+APP_SNAPSHOT_ENV_KEY = "APG_DOCS_APP_SNAPSHOT"
+
 #: The migration plane's service, and where its rendered set appears inside it.
 #: The path is the one `compose.yaml` passes to `--migrations-dir`; the two
 #: living in two files is exactly how dbmate ends up reporting "no migrations
@@ -113,6 +145,11 @@ MIGRATION_SERVICE = "dbmate"
 MIGRATIONS_MOUNT = "/migrations"
 
 __all__ = [
+    "APP_SNAPSHOT_CONTAINER_PATH",
+    "APP_SNAPSHOT_ENV_KEY",
+    "APP_SNAPSHOT_FILENAME",
+    "AUTH_SERVICE",
+    "AUTH_SERVICE_PORT",
     "DATABASE_SERVICE",
     "DATABASE_SERVICE_PORT",
     "JWKS_CONTAINER_PATH",
@@ -180,6 +217,10 @@ def build_override(
     docs_router_name: str,
     docs_auth_middleware_name: str,
     docs_stripprefix_middleware_name: str,
+    app_router_name: str,
+    app_buffering_middleware_name: str,
+    app_stripprefix_middleware_name: str,
+    app_docs_router_name: str,
     publications: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
@@ -216,6 +257,14 @@ def build_override(
         raise ValueError("docs_auth_middleware_name is required")
     if not docs_stripprefix_middleware_name:
         raise ValueError("docs_stripprefix_middleware_name is required")
+    if not app_router_name:
+        raise ValueError("app_router_name is required")
+    if not app_buffering_middleware_name:
+        raise ValueError("app_buffering_middleware_name is required")
+    if not app_stripprefix_middleware_name:
+        raise ValueError("app_stripprefix_middleware_name is required")
+    if not app_docs_router_name:
+        raise ValueError("app_docs_router_name is required")
     if not https_entrypoint:
         raise ValueError("https_entrypoint is required")
     if not rendered_directory or not rendered_directory.startswith("/"):
@@ -294,18 +343,41 @@ def build_override(
                 "volumes": [f"{rendered_directory}/{JWKS_FILENAME}:{JWKS_CONTAINER_PATH}:ro"],
             },
             DOCS_SERVICE: {
-                "labels": _docs_labels(
-                    https_entrypoint=https_entrypoint,
-                    docs_router_name=docs_router_name,
-                    docs_auth_middleware_name=docs_auth_middleware_name,
-                    docs_stripprefix_middleware_name=docs_stripprefix_middleware_name,
-                ),
-                # The reviewed snapshot, read-only. The page serves these bytes
-                # and nothing else; `contracts/postgrest-openapi.canonical.json`
-                # is what a human approved and the render copies it here.
+                # Two routers onto one container (D226). The second surface is
+                # a second file in the mount below and a second entry in
+                # `serve.py`'s route table -- not a second image, a second CSP
+                # or a second credential.
+                "labels": {
+                    **_docs_labels(
+                        https_entrypoint=https_entrypoint,
+                        docs_router_name=docs_router_name,
+                        docs_auth_middleware_name=docs_auth_middleware_name,
+                        docs_stripprefix_middleware_name=docs_stripprefix_middleware_name,
+                    ),
+                    **_app_docs_labels(
+                        https_entrypoint=https_entrypoint,
+                        app_docs_router_name=app_docs_router_name,
+                        docs_auth_middleware_name=docs_auth_middleware_name,
+                        docs_stripprefix_middleware_name=docs_stripprefix_middleware_name,
+                    ),
+                },
+                # The two reviewed snapshots, read-only. The page serves these
+                # bytes and nothing else; `contracts/postgrest-openapi.canonical
+                # .json` and `contracts/auth-openapi.canonical.json` are what a
+                # human approved and the render copies them here.
                 "volumes": [
-                    f"{rendered_directory}/{SNAPSHOT_FILENAME}:{SNAPSHOT_CONTAINER_PATH}:ro"
+                    f"{rendered_directory}/{SNAPSHOT_FILENAME}:{SNAPSHOT_CONTAINER_PATH}:ro",
+                    f"{rendered_directory}/{APP_SNAPSHOT_FILENAME}"
+                    f":{APP_SNAPSHOT_CONTAINER_PATH}:ro",
                 ],
+            },
+            AUTH_SERVICE: {
+                "labels": _app_labels(
+                    https_entrypoint=https_entrypoint,
+                    app_router_name=app_router_name,
+                    app_buffering_middleware_name=app_buffering_middleware_name,
+                    app_stripprefix_middleware_name=app_stripprefix_middleware_name,
+                )
             },
         }
     }
@@ -332,16 +404,40 @@ def _docs_labels(
     `/docs/rest`, and the copy carrying a comment saying it was kept in step was
     the one that had not drifted.
 
-    **The prefix is stripped** (D187). `serve.py` serves `/`, `/standalone.js`
-    and `/openapi.json`; without the strip it receives `/docs/rest/standalone.js`
-    and answers 404 -- which at the edge reads as a missing route and is not one.
+    **The documentation ROOT is stripped, not the page path** (ADR 0087, D187).
+    Without any strip, `serve.py` would receive `/docs/rest/standalone.js` and
+    answer 404 -- which at the edge reads as a missing route and is not one.
+    Stripping the whole page path was the first design and it removed one bit
+    too many: `/docs/rest` and `/docs/rest/` both arrived as `/`, so the process
+    could not tell them apart and could not redirect the first to the second.
+    Measured -- a browser given `/docs/rest` resolves the page's own
+    `<script src="standalone.js">` to `/docs/standalone.js`, which **404s**,
+    with `/docs/rest/standalone.js` as the control at 200.
+
+    Stripping the root leaves `/rest`, `/rest/`, `/app` and `/app/`, which is
+    what lets one container serve two surfaces and answer the slash-less form
+    with a relative redirect.
+
+    **This middleware is shared with the application documentation router**,
+    which is now possible because the two strip the same thing.
 
     The credential middleware is referenced ``@file`` because it is defined by
-    Traefik's *file* provider, not by these labels: a `usersFile` names a path
-    inside the Traefik container and a label cannot carry one
-    (`edge_credentials.py`). A cross-provider reference without the suffix
-    resolves to nothing, and a router whose middleware does not resolve serves
-    the page **without asking for the password**.
+    Traefik's *file* provider, not by these labels. The reason is now a rule
+    rather than a limitation: since ADR 0086 the middleware carries the bcrypt
+    hash **inline**, and a label carrying it would put a credential into Compose
+    interpolation, which is one of the five places CLAUDE.md forbids a secret
+    value to reach. (It would also need every `$` doubled, and a hash that
+    survived interpolation half-escaped is a 401 on a correct password -- D165's
+    failure through a new door.)
+
+    A cross-provider reference without the ``@file`` suffix resolves to nothing,
+    and a router whose middleware does not resolve serves the page **without
+    asking for the password**.
+
+    The other two middlewares stay here as labels, and ADR 0085 is why: moving
+    them to the file provider was measured to change nothing, because the
+    *router* is a label and is withdrawn with the container whatever its
+    middlewares are doing.
     """
     router = f"traefik.http.routers.{docs_router_name}"
     service = f"traefik.http.services.{docs_router_name}"
@@ -364,6 +460,117 @@ def _docs_labels(
         ),
         f"{router}.service": docs_router_name,
         f"{service}.loadbalancer.server.port": str(DOCS_SERVICE_PORT),
+        # The ROOT, not `path`. ADR 0087, and the docstring above says why.
+        f"{stripprefix}.stripprefix.prefixes": "${DOCS_ROOT_PATH:?required}",
+    }
+
+
+def _app_docs_labels(
+    *,
+    https_entrypoint: str,
+    app_docs_router_name: str,
+    docs_auth_middleware_name: str,
+    docs_stripprefix_middleware_name: str,
+) -> dict[str, str]:
+    """The application documentation router: the same container, a second path.
+
+    **The same credential middleware and the same strip**, referenced by the
+    same names the REST documentation router uses. That is D226's decision
+    working: one page's worth of infrastructure serving two documents, so an
+    operator holds one password and the edge carries one rewrite.
+
+    Sharing the strip is what ADR 0087 bought. Both routers remove the
+    documentation *root*, so the container receives `/rest`, `/rest/`, `/app`
+    and `/app/` -- four paths it can tell apart. Both removing their own page
+    path would have delivered `/` for either surface, which is the state the
+    REST route was already in, and it is why that page did not render when its
+    URL was typed without a trailing slash.
+
+    The rule still matches the published page path, with the segment-boundary
+    pair, because `PathPrefix` is not segment-aware (D162).
+    """
+    router = f"traefik.http.routers.{app_docs_router_name}"
+    service = f"traefik.http.services.{app_docs_router_name}"
+    path = "${APP_DOCS_PAGE_PATH:?required}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.rule": (
+            f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
+        ),
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        # Baseline, credential, strip -- the same order and the same reasons the
+        # REST documentation router uses.
+        f"{router}.middlewares": (
+            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},"
+            f"{docs_auth_middleware_name}@file,{docs_stripprefix_middleware_name}"
+        ),
+        f"{router}.service": app_docs_router_name,
+        f"{service}.loadbalancer.server.port": str(DOCS_SERVICE_PORT),
+        # No `stripprefix.prefixes` here. The middleware is defined once, by
+        # `_docs_labels`, on this same container -- a second definition under
+        # the same name would be one of two answers to what gets removed.
+    }
+
+
+def _app_labels(
+    *,
+    https_entrypoint: str,
+    app_router_name: str,
+    app_buffering_middleware_name: str,
+    app_stripprefix_middleware_name: str,
+) -> dict[str, str]:
+    """The application API router: the auth service, published (Run 10).
+
+    **The boundary rule, re-measured for this route.** ``PathPrefix`` is a
+    string prefix, so the pair is what gives a segment boundary. Measured
+    against the locked Traefik with a control: `/api/app` and `/api/app/x`
+    serve, while `/api/application`, `/api/app-extra`, `/api/app2` and `/api`
+    all answer 404. The runbook named `/api/application` as the trap and this
+    repository had already fallen into it once (D162).
+
+    **The buffering middleware is the process's only body bound.** The service
+    refuses a body over `strict_json.MAX_BODY_BYTES`, and it refuses it *after*
+    `await request.body()` has read every byte -- measured, an 8 MiB body read
+    in full and then rejected against a 16 KiB limit, a factor of 512. So the
+    edge carries the same number one hop earlier, and it carries it from the
+    same declaration (`auth_limits.py`, ADR 0084) rather than from a second
+    constant that would agree until somebody changed one of them.
+
+    **The strip is the published path.** The service routes `/auth/login` and
+    `/admin/users` at its root; without the strip it receives `/api/app/auth/
+    login` and FastAPI answers 404, which at the edge reads as a missing route
+    and is not one (D187).
+
+    The router lives here, on the container, rather than in the file provider --
+    ADR 0085, measured: a file-provider service can name its backend only by
+    DNS, and the Compose service name resolves to whichever project the edge
+    attached to first.
+    """
+    router = f"traefik.http.routers.{app_router_name}"
+    service = f"traefik.http.services.{app_router_name}"
+    buffering = f"traefik.http.middlewares.{app_buffering_middleware_name}"
+    stripprefix = f"traefik.http.middlewares.{app_stripprefix_middleware_name}"
+    path = "${API_APP_PATH:?required}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.rule": (
+            f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
+        ),
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        f"{router}.middlewares": (
+            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},"
+            f"{app_buffering_middleware_name},{app_stripprefix_middleware_name}"
+        ),
+        f"{router}.service": app_router_name,
+        f"{service}.loadbalancer.server.port": str(AUTH_SERVICE_PORT),
+        # One number, from `strict_json.MAX_BODY_BYTES`, reaching the label as a
+        # value through `compose.env` -- which is ADR 0013's split doing what it
+        # is for: the middleware's NAME is in a key and is rendered, the limit is
+        # a value and is interpolated.
+        f"{buffering}.buffering.maxrequestbodybytes": "${AUTH_REQUEST_BODY_MAX_BYTES:?required}",
+        f"{buffering}.buffering.memrequestbodybytes": "${AUTH_REQUEST_BODY_MAX_BYTES:?required}",
         f"{stripprefix}.stripprefix.prefixes": path,
     }
 
@@ -446,6 +653,10 @@ def render_override(
     docs_router_name: str,
     docs_auth_middleware_name: str,
     docs_stripprefix_middleware_name: str,
+    app_router_name: str,
+    app_buffering_middleware_name: str,
+    app_stripprefix_middleware_name: str,
+    app_docs_router_name: str,
     publications: dict[str, Any] | None = None,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
@@ -459,6 +670,10 @@ def render_override(
         docs_router_name=docs_router_name,
         docs_auth_middleware_name=docs_auth_middleware_name,
         docs_stripprefix_middleware_name=docs_stripprefix_middleware_name,
+        app_router_name=app_router_name,
+        app_buffering_middleware_name=app_buffering_middleware_name,
+        app_stripprefix_middleware_name=app_stripprefix_middleware_name,
+        app_docs_router_name=app_docs_router_name,
         publications=publications,
     )
     header = (

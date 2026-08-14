@@ -31,6 +31,7 @@ from typing import Any
 
 from agentic_postgres import (
     REPO_ROOT,
+    auth_limits,
     config,
     naming,
     scope_registry,
@@ -61,6 +62,17 @@ DIRECTORY_MODE = 0o700
 #: whatever the current release happens to hold.
 CANONICAL_OPENAPI = REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json"
 SNAPSHOT_FILENAME = "openapi.json"
+
+#: The application API's reviewed document, and the name it is published under
+#: (D226, Run 10). A second file in the same directory -- one image, one CSP,
+#: one credential, two documents.
+#:
+#: `bin/app-contract.py` captures it and names the same source path. That
+#: command needs no host, because FastAPI generates the document from this
+#: checkout rather than from a running server; the review step is the same, and
+#: what is copied here is the approval rather than a fresh generation.
+CANONICAL_APP_OPENAPI = REPO_ROOT / "contracts" / "auth-openapi.canonical.json"
+APP_SNAPSHOT_FILENAME = "app-openapi.json"
 
 #: World-readable, and the only rendered file that is. Every other file here is
 #: `0600` because it describes a deployment; this one is a **published
@@ -479,6 +491,27 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # the container is handed names rather than deriving its own, which is the
     # same rule ADR 0067 applies to the bootstrap plane.
     "AUTH_ROLE_NAMES",
+    # Session 6, Run 10. The application API's route and the second
+    # documentation surface, in the same two shapes everything above uses: a
+    # *path* a router rule matches on, and a *name* that `runtime_override.py`
+    # renders into a label key because Compose cannot interpolate inside one
+    # (ADR 0013).
+    "API_APP_PATH",
+    "APP_ROUTER_NAME",
+    "APP_BUFFERING_MIDDLEWARE_NAME",
+    "APP_STRIPPREFIX_MIDDLEWARE_NAME",
+    "APP_DOCS_PAGE_PATH",
+    "APP_DOCS_ROUTER_NAME",
+    # The documentation ROOT, which is what the application documentation
+    # router strips -- not its page path. `_app_docs_labels` says why: two
+    # surfaces on one container cannot both arrive at `/`.
+    "DOCS_ROOT_PATH",
+    # The auth service's body bound, read from `strict_json.MAX_BODY_BYTES`
+    # rather than declared here (ADR 0084). It reaches a Traefik buffering
+    # middleware's label *value*, exactly as the REST route's limits do, and it
+    # is the only thing that bounds what the process allocates: the service's
+    # own check runs after `request.body()` has already read everything.
+    "AUTH_REQUEST_BODY_MAX_BYTES",
 )
 
 #: The pooler's port on its own project network. 6432 is the PgBouncer
@@ -690,6 +723,21 @@ def build_compose_env(
         "API_BUFFERING_MIDDLEWARE_NAME": identity.api_buffering_middleware,
         "API_STRIPPREFIX_MIDDLEWARE_NAME": identity.api_stripprefix_middleware,
         "DOCS_CREDENTIAL_MIDDLEWARE_NAME": identity.docs_credential_middleware,
+        # Session 6, Run 10. Every one from `identity`, so the URL the deployed
+        # document publishes and the rule the router matches on are the same
+        # expression evaluated once (ADR 0061, D177).
+        "API_APP_PATH": identity.route_app_path,
+        "APP_ROUTER_NAME": identity.app_router,
+        "APP_BUFFERING_MIDDLEWARE_NAME": identity.app_buffering_middleware,
+        "APP_STRIPPREFIX_MIDDLEWARE_NAME": identity.app_stripprefix_middleware,
+        "APP_DOCS_PAGE_PATH": identity.route_app_docs_path,
+        "APP_DOCS_ROUTER_NAME": identity.app_docs_router,
+        "DOCS_ROOT_PATH": naming.DOCS_ROOT_PATH,
+        # From `services/auth-api/app/strict_json.py`, through `auth_limits`
+        # (ADR 0084). Not a number declared here: the edge and the service
+        # enforce the same bound for two different reasons, and two constants
+        # would agree exactly until somebody changed one.
+        "AUTH_REQUEST_BODY_MAX_BYTES": str(auth_limits.MAX_BODY_BYTES),
         # The issuer, from the same `identity` the audience above comes from.
         # There is no second derivation here and there must not be: a token
         # this service signs and a token PostgREST verifies have to agree on
@@ -1037,6 +1085,18 @@ def render_project(
             snapshot.write_bytes(CANONICAL_OPENAPI.read_bytes())
             os.chmod(snapshot, SNAPSHOT_MODE)
             refuse_symlink(snapshot)
+
+            # The second surface's document, on identical terms (D226). It is
+            # copied whether or not `api.app` is enabled, and that is the same
+            # decision `openapi.json` embodies: the runtime override mounts both
+            # unconditionally, and Docker answers a mount source that does not
+            # exist by creating a **directory** there -- so a conditional copy
+            # turns "this project has no application API" into "this
+            # documentation container will not start".
+            app_snapshot = staging / APP_SNAPSHOT_FILENAME
+            app_snapshot.write_bytes(CANONICAL_APP_OPENAPI.read_bytes())
+            os.chmod(app_snapshot, SNAPSHOT_MODE)
+            refuse_symlink(app_snapshot)
 
             if validate_compose:
                 _validate_staged_compose(staging)

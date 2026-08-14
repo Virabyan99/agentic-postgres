@@ -21,13 +21,15 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app import errors
+from app import errors, openapi_docs
 from app import scopes as scope_map
 from app.models import (
     AgentTokenRequest,
     CreateAgentRequest,
     CreateUserRequest,
     LoginRequest,
+    SubjectResponse,
+    TokenResponse,
     UpdateAgentRequest,
     UpdateUserRequest,
 )
@@ -38,6 +40,179 @@ if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# The published reference (D226, ADR 0087)
+#
+# Two mechanisms, because they behave differently and the difference is
+# measured: `responses=` REPLACES what FastAPI generated, `openapi_extra` is
+# deep-merged into it. So every response goes through the first and only the
+# request body -- which the first cannot express without binding it -- goes
+# through the second. `openapi_docs.py` has the measurement.
+#
+# Neither wires anything. A declared body parameter would hand parsing to
+# FastAPI, whose binding is `json.loads` with no duplicate hook, which is the
+# exact defect `strict_json` exists for.
+#
+# Without all of this, the generated document is nine paths with no request
+# bodies and one `200` apiece. Measured before it was written.
+# ---------------------------------------------------------------------------
+
+DOC_LOGIN = openapi_docs.described(
+    summary="Exchange a username and password for a short-lived token",
+    description=(
+        "Decides whether these credentials match, and what the server already says this "
+        "subject's role and scopes are. It never decides the role or the scopes."
+    ),
+    request_model=LoginRequest,
+)
+RESP_LOGIN = {
+    200: openapi_docs.ok("A signed access token.", TokenResponse),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_ME = openapi_docs.described(
+    summary="The bearer's current state",
+    description=(
+        "Read from the registry inside this request, not from the token. A token whose "
+        "subject has changed underneath it is refused rather than reflected."
+    ),
+)
+RESP_ME = {
+    200: openapi_docs.ok("The subject as it is now.", SubjectResponse),
+    401: openapi_docs.UNAUTHENTICATED,
+}
+
+DOC_JWKS = openapi_docs.described(
+    summary="The verification key set",
+    description=(
+        "Public material only, derived from the signing key rather than stored beside it. "
+        "This endpoint decides nothing and requires no credential."
+    ),
+)
+RESP_JWKS = {200: openapi_docs.ok("An RFC 7517 JWK Set of public keys.")}
+
+DOC_LIST_USERS = openapi_docs.described(
+    summary="List the registered subjects",
+    description="Requires the `admin:users` scope. A role name does not grant it.",
+)
+RESP_LIST_USERS = {
+    200: openapi_docs.ok("Every registered subject, without credential material."),
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+}
+
+DOC_CREATE_USER = openapi_docs.described(
+    summary="Register a subject",
+    description=(
+        "`role` is a SUFFIX, mapped to a derived role name by the service. A client naming "
+        "a derived role would be a client that had to know how this deployment derives "
+        "names -- and one that could name another project's."
+    ),
+    request_model=CreateUserRequest,
+)
+RESP_CREATE_USER = {
+    200: openapi_docs.ok("The subject as created.", SubjectResponse),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_UPDATE_USER = openapi_docs.described(
+    summary="Change a subject's authority, status or password",
+    description=(
+        "Three concerns and three version bumps: role and scopes move `authz_version`, "
+        "status moves it too, and a password moves `credential_version`. Any token issued "
+        "before the change stops being accepted."
+    ),
+    request_model=UpdateUserRequest,
+)
+RESP_UPDATE_USER = {
+    200: openapi_docs.ok("The subject after the change.", SubjectResponse),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_AGENT_TOKEN = openapi_docs.described(
+    summary="Exchange an agent id and secret for a short-lived token",
+    description=(
+        "Decides whether this credential is current. The agent's authority comes from the "
+        "registry, and an agent cannot ask for a role or a scope any more than a person can."
+    ),
+    request_model=AgentTokenRequest,
+)
+RESP_AGENT_TOKEN = {
+    200: openapi_docs.ok("A signed access token.", TokenResponse),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_LIST_AGENTS = openapi_docs.described(
+    summary="List the registered agents",
+    description=(
+        "Requires the `admin:agents` scope. No response from this service ever returns an "
+        "agent secret; there is no endpoint that can."
+    ),
+)
+RESP_LIST_AGENTS = {
+    200: openapi_docs.ok("Every registered agent, without secret material."),
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+}
+
+DOC_CREATE_AGENT = openapi_docs.described(
+    summary="Register an agent and show its secret once",
+    description=(
+        "The secret is 256 bits from the OS and is returned by THIS response and no other. "
+        "If it is lost, the recovery is to rotate it -- which is why rotation exists and "
+        "why no retrieval endpoint does."
+    ),
+    request_model=CreateAgentRequest,
+)
+RESP_CREATE_AGENT = {
+    200: openapi_docs.ok("The agent, and its secret, once."),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_ROTATE_SECRET = openapi_docs.described(
+    summary="Replace an agent's secret and show the new one once",
+    description=(
+        "Moves `authz_version`, so tokens issued against the replaced secret stop working. "
+        "That is what makes rotating again a recovery rather than a way to accumulate "
+        "credentials."
+    ),
+)
+RESP_ROTATE_SECRET = {
+    200: openapi_docs.ok("The agent, and its new secret, once."),
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_UPDATE_AGENT = openapi_docs.described(
+    summary="Change an agent's authority or status",
+    description=(
+        "No `secret` field: rotation is its own endpoint, so no PATCH body ever carries a "
+        "credential."
+    ),
+    request_model=UpdateAgentRequest,
+)
+RESP_UPDATE_AGENT = {
+    200: openapi_docs.ok("The agent after the change."),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    422: openapi_docs.INVALID,
+}
 
 
 def _service(request: Request) -> AuthService:
@@ -50,6 +225,13 @@ async def _body(request: Request, model: type) -> object:
     The size bound is applied to the raw bytes by `parse_object` before the
     document is built, because a parser that has already allocated the body has
     already paid for it.
+
+    **The read is not bounded here, and Run 10 measured how far that goes.**
+    `request.body()` accumulates every byte the client sent before
+    `parse_object` looks at the length: an 8 MiB body is read in full and then
+    refused against a 16 KiB limit, with a 108-byte body as the control. What
+    bounds the *process* is the Traefik buffering middleware one hop earlier,
+    carrying the same number from the same declaration (`auth_limits.py`).
     """
     try:
         document = parse_object(await request.body())
@@ -86,7 +268,7 @@ async def _guard(handler: Callable[[], Awaitable[Response]]) -> Response:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", openapi_extra=DOC_LOGIN, responses=RESP_LOGIN)
 async def login(request: Request) -> Response:
     """API-AUTH-001. Issues a short-lived token, or fails identically four ways."""
 
@@ -109,7 +291,7 @@ async def login(request: Request) -> Response:
     return await _guard(run)
 
 
-@router.get("/auth/me")
+@router.get("/auth/me", openapi_extra=DOC_ME, responses=RESP_ME)
 async def me(request: Request) -> Response:
     """Reflects CURRENT state, not the token's copy of it.
 
@@ -140,7 +322,7 @@ async def me(request: Request) -> Response:
     return await _guard(run)
 
 
-@router.get("/auth/jwks.json")
+@router.get("/auth/jwks.json", openapi_extra=DOC_JWKS, responses=RESP_JWKS)
 async def jwks(request: Request) -> Response:
     """Publishes validated public keys and decides nothing.
 
@@ -167,7 +349,7 @@ async def jwks(request: Request) -> Response:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/admin/users")
+@router.get("/admin/users", openapi_extra=DOC_LIST_USERS, responses=RESP_LIST_USERS)
 async def list_users(request: Request) -> Response:
     """API-ADMIN-001: gated on the scope, never on the role name."""
 
@@ -198,7 +380,7 @@ async def list_users(request: Request) -> Response:
     return await _guard(run)
 
 
-@router.post("/admin/users")
+@router.post("/admin/users", openapi_extra=DOC_CREATE_USER, responses=RESP_CREATE_USER)
 async def create_user(request: Request) -> Response:
     async def run() -> Response:
         service = _service(request)
@@ -224,7 +406,7 @@ async def create_user(request: Request) -> Response:
     return await _guard(run)
 
 
-@router.patch("/admin/users/{user_id}")
+@router.patch("/admin/users/{user_id}", openapi_extra=DOC_UPDATE_USER, responses=RESP_UPDATE_USER)
 async def update_user(request: Request, user_id: str) -> Response:
     """Three concerns, three version bumps, applied in a fixed order."""
 
@@ -277,7 +459,7 @@ async def update_user(request: Request, user_id: str) -> Response:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/auth/agent-token")
+@router.post("/auth/agent-token", openapi_extra=DOC_AGENT_TOKEN, responses=RESP_AGENT_TOKEN)
 async def agent_token(request: Request) -> Response:
     """Decides whether this credential is current. Never the agent's authority.
 
@@ -303,7 +485,7 @@ async def agent_token(request: Request) -> Response:
     return await _guard(run)
 
 
-@router.get("/admin/agents")
+@router.get("/admin/agents", openapi_extra=DOC_LIST_AGENTS, responses=RESP_LIST_AGENTS)
 async def list_agents(request: Request) -> Response:
     async def run() -> Response:
         service = _service(request)
@@ -332,7 +514,7 @@ async def list_agents(request: Request) -> Response:
     return await _guard(run)
 
 
-@router.post("/admin/agents")
+@router.post("/admin/agents", openapi_extra=DOC_CREATE_AGENT, responses=RESP_CREATE_AGENT)
 async def create_agent(request: Request) -> Response:
     """Returns the secret ONCE, and this is the only response that ever carries it.
 
@@ -374,7 +556,11 @@ async def create_agent(request: Request) -> Response:
     return await _guard(run)
 
 
-@router.post("/admin/agents/{agent_id}/rotate-secret")
+@router.post(
+    "/admin/agents/{agent_id}/rotate-secret",
+    openapi_extra=DOC_ROTATE_SECRET,
+    responses=RESP_ROTATE_SECRET,
+)
 async def rotate_agent_secret(request: Request, agent_id: str) -> Response:
     async def run() -> Response:
         service = _service(request)
@@ -403,7 +589,9 @@ async def rotate_agent_secret(request: Request, agent_id: str) -> Response:
     return await _guard(run)
 
 
-@router.patch("/admin/agents/{agent_id}")
+@router.patch(
+    "/admin/agents/{agent_id}", openapi_extra=DOC_UPDATE_AGENT, responses=RESP_UPDATE_AGENT
+)
 async def update_agent(request: Request, agent_id: str) -> Response:
     async def run() -> Response:
         service = _service(request)

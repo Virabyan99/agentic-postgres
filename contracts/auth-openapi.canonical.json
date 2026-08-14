@@ -1,0 +1,993 @@
+{
+  "components": {
+    "schemas": {
+      "AuthenticationFailedResponse": {
+        "description": "Returned when no usable credential was presented.\n\nThe same body for every cause: unknown subject, wrong password, disabled\nsubject. Do not branch on it -- there is nothing else to read.",
+        "properties": {
+          "error": {
+            "const": "authentication_failed",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "AuthenticationFailedResponse",
+        "type": "object"
+      },
+      "AuthorizationFailedResponse": {
+        "description": "Returned when the caller is known and does not hold the required scope.\n\nDistinct from an authentication failure on purpose: the caller has already\nproved who it is, so telling it that its token is valid and insufficient\nleaks nothing it does not know.",
+        "properties": {
+          "error": {
+            "const": "authorization_failed",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "AuthorizationFailedResponse",
+        "type": "object"
+      },
+      "InvalidRequestResponse": {
+        "description": "Returned when the request is well formed and jointly refused.\n\nA scope outside the role's ceiling, a username already taken. `message`\nsays which, because the caller is an authenticated administrator.",
+        "properties": {
+          "error": {
+            "const": "invalid_request",
+            "title": "Error",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "InvalidRequestResponse",
+        "type": "object"
+      },
+      "MalformedRequestResponse": {
+        "description": "Returned when the request was refused before any domain logic ran.\n\nAn oversized body, a duplicate JSON member, a non-object root, an unknown\nfield, or a field outside its bounds. Which one is not reported.",
+        "properties": {
+          "error": {
+            "const": "malformed_request",
+            "title": "Error",
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "title": "MalformedRequestResponse",
+        "type": "object"
+      },
+      "SubjectResponse": {
+        "description": "What `/auth/me` reflects. Current state, never the token's copy of it.",
+        "properties": {
+          "authz_version": {
+            "title": "Authz Version",
+            "type": "integer"
+          },
+          "credential_version": {
+            "title": "Credential Version",
+            "type": "integer"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "username",
+          "display_name",
+          "role",
+          "scopes",
+          "status",
+          "credential_version",
+          "authz_version",
+          "last_login_at"
+        ],
+        "title": "SubjectResponse",
+        "type": "object"
+      },
+      "TokenResponse": {
+        "description": "What a successful login returns.\n\n`expires_at` as an absolute epoch second rather than `expires_in`: a\nduration is relative to a moment the client has to guess at, and the token's\nown `exp` is absolute. Two representations of one deadline is how they come\nto disagree.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "token_type": {
+            "const": "Bearer",
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "token_use": {
+            "title": "Token Use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_at",
+          "token_use"
+        ],
+        "title": "TokenResponse",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Agentic Postgres auth",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/admin/agents": {
+      "get": {
+        "description": "Requires the `admin:agents` scope. No response from this service ever returns an agent secret; there is no endpoint that can.",
+        "operationId": "list_agents_admin_agents_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Every registered agent, without secret material."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          }
+        },
+        "summary": "List the registered agents"
+      },
+      "post": {
+        "description": "The secret is 256 bits from the OS and is returned by THIS response and no other. If it is lost, the recovery is to rotate it -- which is why rotation exists and why no retrieval endpoint does.",
+        "operationId": "create_agent_admin_agents_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`role` is a suffix, and only an agent role will be accepted.\n\nThe model does not enforce which: the ceiling in `scopes.ROLE_SCOPES` does,\nand putting a second list here would be two authorities for one vocabulary.",
+                "properties": {
+                  "description": {
+                    "default": "",
+                    "maxLength": 256,
+                    "title": "Description",
+                    "type": "string"
+                  },
+                  "name": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "title": "Name",
+                    "type": "string"
+                  },
+                  "role": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "title": "Role",
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 32,
+                    "minItems": 1,
+                    "title": "Scopes",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name",
+                  "role",
+                  "scopes"
+                ],
+                "title": "CreateAgentRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The agent, and its secret, once."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Register an agent and show its secret once"
+      }
+    },
+    "/admin/agents/{agent_id}": {
+      "patch": {
+        "description": "No `secret` field: rotation is its own endpoint, so no PATCH body ever carries a credential.",
+        "operationId": "update_agent_admin_agents__agent_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "No `secret` field. Rotation is its own endpoint.\n\nA `PATCH` carrying a secret would be a request whose body sometimes holds a\ncredential, which is exactly the shape that makes redaction a per-field\ndecision somebody has to remember.",
+                "properties": {
+                  "role": {
+                    "anyOf": [
+                      {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Role"
+                  },
+                  "scopes": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 32,
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Scopes"
+                  },
+                  "status": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "active",
+                          "revoked"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Status"
+                  }
+                },
+                "title": "UpdateAgentRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The agent after the change."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Change an agent's authority or status"
+      }
+    },
+    "/admin/agents/{agent_id}/rotate-secret": {
+      "post": {
+        "description": "Moves `authz_version`, so tokens issued against the replaced secret stop working. That is what makes rotating again a recovery rather than a way to accumulate credentials.",
+        "operationId": "rotate_agent_secret_admin_agents__agent_id__rotate_secret_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agent_id",
+            "required": true,
+            "schema": {
+              "title": "Agent Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The agent, and its new secret, once."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Replace an agent's secret and show the new one once"
+      }
+    },
+    "/admin/users": {
+      "get": {
+        "description": "Requires the `admin:users` scope. A role name does not grant it.",
+        "operationId": "list_users_admin_users_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Every registered subject, without credential material."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          }
+        },
+        "summary": "List the registered subjects"
+      },
+      "post": {
+        "description": "`role` is a SUFFIX, mapped to a derived role name by the service. A client naming a derived role would be a client that had to know how this deployment derives names -- and one that could name another project's.",
+        "operationId": "create_user_admin_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "`role` is a SUFFIX, never a derived role name.\n\nA client naming `apg_alpha_dev_project_admin` would be a client that had to\nknow how this deployment derives names -- and one that could name a role\nfrom another project. The suffix is mapped to a derived name by the service,\nagainst `naming.ROLE_SUFFIXES`, which is the single authority (ADR 0002).",
+                "properties": {
+                  "display_name": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "title": "Display Name",
+                    "type": "string"
+                  },
+                  "password": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "title": "Password",
+                    "type": "string"
+                  },
+                  "role": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "title": "Role",
+                    "type": "string"
+                  },
+                  "scopes": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "maxItems": 32,
+                    "minItems": 1,
+                    "title": "Scopes",
+                    "type": "array"
+                  },
+                  "username": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "title": "Username",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "username",
+                  "display_name",
+                  "role",
+                  "scopes",
+                  "password"
+                ],
+                "title": "CreateUserRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectResponse"
+                }
+              }
+            },
+            "description": "The subject as created."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Register a subject"
+      }
+    },
+    "/admin/users/{user_id}": {
+      "patch": {
+        "description": "Three concerns and three version bumps: role and scopes move `authz_version`, status moves it too, and a password moves `credential_version`. Any token issued before the change stops being accepted.",
+        "operationId": "update_user_admin_users__user_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Every field optional, and at least one required -- checked in the route.\n\nThree separate concerns in one model, because they are three separate\nversion bumps: authorization moves `authz_version`, status moves it too, and\na password moves `credential_version`. The route applies whichever are\npresent, each through its own function.",
+                "properties": {
+                  "password": {
+                    "anyOf": [
+                      {
+                        "maxLength": 1024,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Password"
+                  },
+                  "role": {
+                    "anyOf": [
+                      {
+                        "maxLength": 64,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Role"
+                  },
+                  "scopes": {
+                    "anyOf": [
+                      {
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 32,
+                        "minItems": 1,
+                        "type": "array"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Scopes"
+                  },
+                  "status": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "active",
+                          "disabled"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Status"
+                  }
+                },
+                "title": "UpdateUserRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectResponse"
+                }
+              }
+            },
+            "description": "The subject after the change."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Change a subject's authority, status or password"
+      }
+    },
+    "/auth/agent-token": {
+      "post": {
+        "description": "Decides whether this credential is current. The agent's authority comes from the registry, and an agent cannot ask for a role or a scope any more than a person can.",
+        "operationId": "agent_token_auth_agent_token_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "An agent presents an id and the secret it was shown once.\n\nTwo fields, like a login, and for the same reason: there is no third. An\nagent cannot ask for a role or a scope any more than a person can.",
+                "properties": {
+                  "agent_id": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "title": "Agent Id",
+                    "type": "string"
+                  },
+                  "secret": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "title": "Secret",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agent_id",
+                  "secret"
+                ],
+                "title": "AgentTokenRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "A signed access token."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Exchange an agent id and secret for a short-lived token"
+      }
+    },
+    "/auth/jwks.json": {
+      "get": {
+        "description": "Public material only, derived from the signing key rather than stored beside it. This endpoint decides nothing and requires no credential.",
+        "operationId": "jwks_auth_jwks_json_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "An RFC 7517 JWK Set of public keys."
+          }
+        },
+        "summary": "The verification key set"
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "description": "Decides whether these credentials match, and what the server already says this subject's role and scopes are. It never decides the role or the scopes.",
+        "operationId": "login_auth_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Two fields, and there is deliberately no third.\n\nWhitespace is NOT stripped. `str_strip_whitespace` would silently change a\npassword whose first character is a space into a different password, and the\nsubject who set it that way could never log in again.",
+                "properties": {
+                  "password": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "title": "Password",
+                    "type": "string"
+                  },
+                  "username": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "title": "Username",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "title": "LoginRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenResponse"
+                }
+              }
+            },
+            "description": "A signed access token."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Exchange a username and password for a short-lived token"
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "description": "Read from the registry inside this request, not from the token. A token whose subject has changed underneath it is refused rather than reflected.",
+        "operationId": "me_auth_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubjectResponse"
+                }
+              }
+            },
+            "description": "The subject as it is now."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          }
+        },
+        "summary": "The bearer's current state"
+      }
+    }
+  }
+}

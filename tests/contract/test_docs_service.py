@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -27,6 +28,14 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 SERVICE = REPO_ROOT / "services" / "docs"
 PAGE = SERVICE / "index.html"
+#: The application API's page (D226). A second document under the same server,
+#: the same CSP and the same credential.
+APP_PAGE = SERVICE / "app.html"
+#: Both, for the properties that are about "a page this service serves" rather
+#: than about one surface's contents. Written as a list so a third page cannot
+#: be added without every one of them seeing it -- which is the failure mode
+#: D175 records for a registry, at the scale of a directory.
+PAGES = [PAGE, APP_PAGE]
 DOCKERFILE = SERVICE / "Dockerfile"
 
 
@@ -158,13 +167,64 @@ def test_every_response_carries_the_security_headers(serve: Any) -> None:
 
 
 def test_the_route_table_is_closed(serve: Any) -> None:
-    """Four paths, and no way to name a fifth.
+    """Eight paths across two surfaces, and no way to name a ninth.
 
     This is a shorter argument than any traversal defence: there is no path
     joining and no directory walk, so there is no path to traverse. Measured on
     the image -- `/../serve.py` and `/app/serve.py` are both 404.
+
+    The table was four paths at the container root until ADR 0087 moved both
+    surfaces under their own segment. The edge now strips only the documentation
+    *root*, which is what lets one container tell `/docs/rest` from `/docs/app`
+    -- and, the reason it changed, `/docs/rest` from `/docs/rest/`.
     """
-    assert set(serve.ROUTES) == {"/", "/index.html", "/standalone.js", "/openapi.json"}
+    assert set(serve.ROUTES) == {
+        "/rest/",
+        "/rest/index.html",
+        "/rest/standalone.js",
+        "/rest/openapi.json",
+        "/app/",
+        "/app/index.html",
+        "/app/standalone.js",
+        "/app/openapi.json",
+    }
+
+
+def test_the_two_surfaces_serve_two_documents_and_one_bundle(serve: Any) -> None:
+    """D226's claim, made checkable at the source.
+
+    "One image, one CSP, one credential" is only true if the second surface is a
+    second *file* rather than a second container -- so the bundle is shared and
+    the documents are not. A table pointing both surfaces at one snapshot would
+    render the REST document under the application's URL, which reads as a
+    working page.
+    """
+    assert serve.ROUTES["/rest/standalone.js"] == serve.ROUTES["/app/standalone.js"]
+    assert serve.ROUTES["/rest/openapi.json"][0] != serve.ROUTES["/app/openapi.json"][0]
+    assert serve.ROUTES["/rest/"][0] != serve.ROUTES["/app/"][0], (
+        "both surfaces serve the same HTML, so one of them carries the other's "
+        "surface note -- which is the page lying about what it describes"
+    )
+
+
+def test_the_slash_less_form_of_each_surface_redirects_relatively(serve: Any) -> None:
+    """ADR 0087, and the defect it repairs.
+
+    Measured against the locked Traefik: a browser given `/docs/rest` resolves
+    the page's own `<script src="standalone.js">` against `/docs/` and asks for
+    `/docs/standalone.js`, which **404s** -- with `/docs/rest/standalone.js` at
+    200 as the control. The page returned 200, the HTML was correct, and it did
+    not render.
+
+    The target must be **relative**. An absolute `/rest/` would send a visitor
+    at `/docs/rest` to a path no router matches, and it would be this process
+    deriving a published prefix it is deliberately never told (ADR 0061).
+    """
+    assert set(serve.REDIRECTS) == {"/rest", "/app"}
+    for source, target in serve.REDIRECTS.items():
+        assert not target.startswith("/"), f"{source} redirects to an absolute path: {target}"
+        assert f"/{target}" == f"{source}/", f"{source} redirects somewhere else: {target}"
+        assert f"{source}/" in serve.ROUTES, f"{source} redirects to a path with no route"
 
 
 def test_nothing_joins_a_request_path_to_a_directory(serve: Any) -> None:
@@ -224,29 +284,67 @@ def test_the_snapshot_is_mounted_rather_than_baked() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_page_loads_nothing_from_another_origin() -> None:
-    """Every `src` and `href` is relative.
+@pytest.mark.parametrize("page_path", PAGES, ids=lambda path: path.name)
+def test_the_page_loads_nothing_from_another_origin(page_path: Path) -> None:
+    """Every `src` and `href` is relative, on every page this service serves.
 
     The CSP refuses a cross-origin script anyway; this is the other half, so a
     page that tried would fail review rather than fail silently in a browser
     whose report nobody reads.
     """
-    page = PAGE.read_text(encoding="utf-8")
+    page = page_path.read_text(encoding="utf-8")
     external = re.findall(r'(?:src|href)\s*=\s*"([^"]+)"', page)
     remote = [value for value in external if value.startswith(("http://", "https://", "//"))]
-    assert not remote, f"the page loads {remote} from another origin"
+    assert not remote, f"{page_path.name} loads {remote} from another origin"
 
 
-def test_the_page_turns_off_the_two_defaults_that_fetch() -> None:
+@pytest.mark.parametrize("page_path", PAGES, ids=lambda path: path.name)
+def test_the_page_turns_off_the_two_defaults_that_fetch(page_path: Path) -> None:
     """`withDefaultFonts` is `default: true` at every measured version (D202).
 
     Set here *and* refused by the header, deliberately: this half is a promise
     about a third party's code honouring its own flag, and the header is the
-    half a browser enforces.
+    half a browser enforces. Asked of both pages, because a second surface that
+    forgot it would be refused by the CSP and would render without the
+    explanation.
     """
-    page = markup(PAGE.read_text(encoding="utf-8"))
+    page = markup(page_path.read_text(encoding="utf-8"))
     assert "withDefaultFonts: false" in page
     assert "proxyUrl" not in page, "a proxyUrl routes a reader's request through a third party"
+
+
+@pytest.mark.parametrize("page_path", PAGES, ids=lambda path: path.name)
+def test_every_asset_a_page_names_is_a_route_the_server_has(page_path: Path, serve: Any) -> None:
+    """ADR 0087's proof, and the one this repository was missing.
+
+    The measurement that found the defect: a browser given `/docs/rest` resolves
+    `<script src="standalone.js">` against `/docs/` and asks for
+    `/docs/standalone.js`, which 404s. Every proof the page had asked for the
+    page's own URL and read the status -- **none had ever asked for what the
+    page then asks for.**
+
+    Asserted here against the route table, which is where a relative reference
+    lands after the edge has stripped the documentation root: a page under
+    `/rest/` naming `standalone.js` resolves to `/rest/standalone.js`. The live
+    half runs at the edge, where the strip is real.
+    """
+    page = page_path.read_text(encoding="utf-8")
+    segment = serve.APP_SEGMENT if page_path is APP_PAGE else serve.REST_SEGMENT
+
+    named = set(re.findall(r'src\s*=\s*"([^"]+)"', page))
+    named |= set(re.findall(r"url:\s*'([^']+)'", page))
+    assert named, f"no asset reference was found in {page_path.name}; the scan is broken"
+
+    for reference in sorted(named):
+        assert not reference.startswith(("/", "http://", "https://", "//")), (
+            f"{page_path.name} names {reference!r} absolutely, which this server cannot "
+            "answer for -- it is never told the published prefix (ADR 0061)"
+        )
+        resolved = f"{segment}/{reference}"
+        assert resolved in serve.ROUTES, (
+            f"{page_path.name} asks for {reference!r}, which resolves to {resolved} and "
+            "is not a route this server has"
+        )
 
 
 def test_the_page_says_the_verbs_it_advertises_do_not_work() -> None:
@@ -265,10 +363,30 @@ def test_the_page_says_the_verbs_it_advertises_do_not_work() -> None:
     assert "403" in note
 
 
-def test_the_page_says_the_document_is_a_reviewed_snapshot() -> None:
+@pytest.mark.parametrize("page_path", PAGES, ids=lambda path: path.name)
+def test_the_page_says_the_document_is_a_reviewed_snapshot(page_path: Path) -> None:
     """A live capture and a reviewed one look identical to a reader."""
-    page = PAGE.read_text(encoding="utf-8")
+    page = page_path.read_text(encoding="utf-8")
     assert "snapshot" in page[page.index('id="apg-surface-note"') :]
+
+
+def test_the_application_page_does_not_repeat_the_rest_surfaces_warning() -> None:
+    """ADR 0060's note is about `follow-privileges`, which the auth service is not.
+
+    The REST document advertises DELETE, PATCH and POST that all return 403,
+    because it is generated from database privileges and no PostgREST setting
+    filters methods by grant. The application document is generated from route
+    definitions, so it advertises what the service implements -- and a page that
+    copied the warning across would be describing a surface it is not
+    describing, which is the failure `index.html`'s own note names.
+    """
+    note = APP_PAGE.read_text(encoding="utf-8")
+    note = note[note.index('id="apg-surface-note"') :]
+    assert "403" not in note, "the application page repeats the REST surface's warning"
+    assert "role" in note and "scope" in note, (
+        "the application page says nothing about the one rule underneath its whole "
+        "surface: a client never submits a role or a scope"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -20,9 +20,19 @@ pydantic 2.13.4:
 None of that is a defect in any of the three libraries. It is the shape of the
 default, and API-AUTH-002 says this service does not have the default.
 
-**The bound comes first.** The size check runs before the parse, because a
-parser that has already allocated the document is a parser that has already
-paid for it.
+**The bound comes first, and it comes first only among the things here.** The
+size check runs before the parse, because a parser that has already allocated
+the document is a parser that has already paid for it. It does **not** come
+before the read: the caller does ``parse_object(await request.body())`` and
+`request.body()` has already accumulated every byte the client sent.
+
+Measured in Run 10 against the locked FastAPI and Starlette, with a control: a
+108-byte body is read as 108 bytes, and an 8 MiB body is read **in full** and
+then refused for exceeding 16 KiB -- a factor of 512, with nothing bounding it
+above that. So the number below bounds the *parser*, and the *process* is
+bounded one hop earlier by a Traefik buffering middleware carrying this same
+value (`agentic_postgres/auth_limits.py`). Two enforcement points, one number,
+and each exists for a different reason.
 """
 
 from __future__ import annotations

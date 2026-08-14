@@ -50,8 +50,33 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from agentic_postgres import jwt_keys, secrets_contract
 from agentic_postgres.secret_generation import SECRET_ROOT
 
-#: The root-plane file the signing key is materialized into (ADR 0054, 0055).
+#: The root-plane file the bootstrap issuer's signing key is materialized into
+#: (ADR 0054, 0055).
 SIGNING_KEY_FILE = "bootstrap_jwt_signing_key.pem"
+
+#: The auth service's signing key, and the plane it lands on.
+#:
+#: **This file publishes it, and until Run 10 nothing did** (D276).
+#: `secrets.required.yaml` declares the key with the sentence "the JWKS every
+#: verifier reads is derived from it", and the only other reference to it in the
+#: repository was `compose.yaml`'s `APG_SIGNING_KEY_FILE` -- so the service
+#: signed with a key PostgREST had never been given. Measured against the locked
+#: PostgREST: a token signed by a key outside the published set is 401, with a
+#: published key at 200 as the control.
+#:
+#: It is on the COMPOSE plane, in the `auth` service's own directory, because
+#: the service is the issuer and has to read it. This command runs as root and
+#: reads it to derive public material; nothing here retains it.
+AUTH_SIGNING_KEY_FILE = "auth_jwt_signing_key.pem"
+AUTH_SERVICE = "auth"
+
+#: The prepared key, if a rotation has been prepared. Root plane with no service
+#: named, which is the safety property rather than a filing decision: between
+#: prepare and promote its public half is published so every verifier can
+#: acknowledge it, and its private half must reach no running process --
+#: otherwise a signer could use it before the verifiers agreed to accept it,
+#: which is the gap the acknowledgement step exists to close.
+PREPARED_KEY_FILE = "auth_jwt_prepared_key.pem"
 
 #: Where the rendered JWKS lands, and the name PostgREST is configured to read.
 #: The container path is project-neutral, which is why `compose.yaml` can carry
@@ -72,12 +97,13 @@ class JwksError(Exception):
         self.code = code
 
 
+def _generation_root(project_key: str, generation: str) -> Path:
+    return SECRET_ROOT / project_key / "generations" / generation
+
+
 def signing_key_path(project_key: str, generation: str) -> Path:
     path = (
-        SECRET_ROOT
-        / project_key
-        / "generations"
-        / generation
+        _generation_root(project_key, generation)
         / secrets_contract.ROOT_PLANE_DIRECTORY
         / SIGNING_KEY_FILE
     )
@@ -88,6 +114,25 @@ def signing_key_path(project_key: str, generation: str) -> Path:
             "the root plane by the deploy; a project deployed before session 5 has none.",
         )
     return path
+
+
+def auth_key_path(project_key: str, generation: str) -> Path:
+    """The auth service's signing key, on the compose plane, or None.
+
+    Optional because a project deployed through session 5 has no auth service
+    and therefore no such key. Not optional once it exists: a set that omitted
+    it would refuse every token the issuer issues, which is D276.
+    """
+    return _generation_root(project_key, generation) / AUTH_SERVICE / AUTH_SIGNING_KEY_FILE
+
+
+def prepared_key_path(project_key: str, generation: str) -> Path:
+    """The prepared key, or a path that is not there when no rotation is in flight."""
+    return (
+        _generation_root(project_key, generation)
+        / secrets_contract.ROOT_PLANE_DIRECTORY
+        / PREPARED_KEY_FILE
+    )
 
 
 def _run(command: list[str], *, stdin: bytes | None = None) -> bytes:
@@ -148,13 +193,46 @@ def read_public_parameters(key_path: Path) -> tuple[str, int]:
     )
 
 
-def build(project_key: str, generation: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Return the JWKS and the single public JWK it contains."""
-    modulus, exponent = read_public_parameters(signing_key_path(project_key, generation))
-    jwk = jwt_keys.public_jwk(modulus_hex=modulus, exponent=exponent)
-    # One key. A rotation publishes two and is Run 10's; `build_jwks` enforces
-    # the ceiling and every other rule, so nothing about that is restated here.
-    return jwt_keys.build_jwks([jwk]), jwk
+def _jwk_from(path: Path) -> dict[str, Any]:
+    modulus, exponent = read_public_parameters(path)
+    return jwt_keys.public_jwk(modulus_hex=modulus, exponent=exponent)
+
+
+def build(project_key: str, generation: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Return the JWKS and every public JWK in it, in published order.
+
+    **One key set, and every live issuer's key is in it.** PostgREST reads one
+    file, so a key missing from it is an issuer whose tokens are refused --
+    measured, 401, with a published key at 200 as the control. Until Run 10 this
+    published the bootstrap issuer's key alone while the auth service signed with
+    another one entirely (D276).
+
+    Order is the order a reader should guess in, and `build_jwks` preserves it:
+
+    * **the auth service's key first when it exists**, because it is the issuer
+      from Session 6 onward and the key most tokens carry;
+    * the bootstrap issuer's key, which is live until §4's retirement;
+    * the prepared key last, when a rotation is in flight.
+
+    The ceiling is two (`MAX_VERIFICATION_KEYS`) and it is not raised. Two
+    issuers during a transition is exactly what it is for; a third key would be
+    a second rotation begun while the first is in flight, and `build_jwks`
+    refuses it here rather than letting the set grow into one nobody retires
+    from.
+    """
+    keys: list[dict[str, Any]] = []
+
+    auth_key = auth_key_path(project_key, generation)
+    if auth_key.is_file():
+        keys.append(_jwk_from(auth_key))
+
+    keys.append(_jwk_from(signing_key_path(project_key, generation)))
+
+    prepared = prepared_key_path(project_key, generation)
+    if prepared.is_file():
+        keys.append(_jwk_from(prepared))
+
+    return jwt_keys.build_jwks(keys), keys
 
 
 def write(document: dict[str, Any], destination: Path) -> bool:
@@ -200,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
         if not arguments.rendered_dir.is_dir():
             raise JwksError(2, f"no rendered directory at {arguments.rendered_dir}")
 
-        document, jwk = build(arguments.project_key, arguments.generation)
+        document, keys = build(arguments.project_key, arguments.generation)
         destination = arguments.rendered_dir / JWKS_FILENAME
         changed = write(document, destination)
     except JwksError as error:
@@ -208,7 +286,20 @@ def main(argv: list[str] | None = None) -> int:
         return error.code
 
     verb = "wrote" if changed else "confirmed"
-    print(f"render-jwks: {verb} {destination} ({JWKS_MODE:04o}), kid {jwk['kid']}")
+    print(f"render-jwks: {verb} {destination} ({JWKS_MODE:04o}), {len(keys)} key(s)")
+    for jwk in keys:
+        print(f"  kid {jwk['kid']}")
+    if changed:
+        # The one sentence an operator needs and would otherwise learn from a
+        # 401. A running PostgREST reads this file at startup and never again --
+        # measured, a rewritten set left it refusing the new key while still
+        # accepting the old one (ADR 0088). And the deploy replaces this file
+        # rather than rewriting it, so a container bound to the old inode cannot
+        # even be restarted into the new one.
+        print(
+            "  the key set CHANGED: every verifier must be RECREATED, not restarted, "
+            "before it holds this set"
+        )
     return 0
 
 

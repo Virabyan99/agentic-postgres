@@ -52,6 +52,10 @@ MODULUS = (
 #: A second, different modulus, for the rotation tests. Differs in its last byte.
 OTHER_MODULUS = MODULUS[:-2] + "03"
 
+#: A third, for the one test that needs a rotation to be refused while another
+#: is published. Two would make that test compare a key against itself.
+THIRD_MODULUS = MODULUS[:-2] + "05"
+
 EXPONENT = 65537
 
 
@@ -298,104 +302,320 @@ def test_the_issuer_is_temporary_unless_something_says_otherwise(
     assert jwt_keys.initial_key_state(jwk=active, temporary=False)["temporary"] is False
 
 
-def test_phase_one_publishes_both_keys_and_records_the_deadline(
+#: The digest a verifier is imagined to report. A literal rather than a hash of
+#: anything under test: what is being measured is the comparison, and computing
+#: the expected value from the value under test is the tautology D260 found
+#: three of in one run.
+PREPARED = "a" * 64
+STALE = "b" * 64
+
+#: The verifiers this project has. One today; the list exists because promotion
+#: is blocked on *every* one of them, and a check written against a single name
+#: reads as though it could never have been plural.
+VERIFIERS = ["postgrest"]
+
+
+def prepared(state: dict, incoming: dict) -> dict:
+    return jwt_keys.prepare_rotation(state, incoming=incoming)
+
+
+def acknowledged(state: dict, digest: str = PREPARED) -> dict:
+    for consumer in VERIFIERS:
+        state = jwt_keys.record_acknowledgement(state, consumer=consumer, jwks_sha256=digest)
+    return state
+
+
+def test_prepare_publishes_both_keys_and_moves_nothing_that_signs(
     state: dict[str, object], incoming: dict[str, str]
 ) -> None:
-    rotating = jwt_keys.begin_rotation(
-        state,
-        incoming=incoming,
+    """The line that separates this design from the one it replaced.
+
+    `begin_rotation` published the second key *and* switched signing together,
+    so there was no moment at which anything could check that the verifiers held
+    the new key. After a prepare, every token in existence is still signed by a
+    key every verifier already had, and nothing has been risked.
+    """
+    rotating = prepared(state, incoming)
+
+    assert rotating["active_kid"] == state["active_kid"], "prepare moved the signing key"
+    assert rotating["verification_kids"] == [state["active_kid"], incoming["kid"]]
+    assert rotating["retire_after"] is None, "prepare recorded a deadline it cannot know yet"
+    assert rotating["verifier_acknowledgements"] == {}
+    jwt_keys.validate_key_state(rotating)
+
+
+def test_promotion_is_refused_until_every_verifier_has_acknowledged(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    """The refusal that makes promotion safe, and the measurement behind it.
+
+    A running PostgREST never re-reads its key set -- measured against the
+    locked image, a rewritten file left it refusing the new key while still
+    accepting the old one. So "the file was written" says nothing about what any
+    verifier holds, and promoting on it would sign tokens that verifier refuses.
+    """
+    rotating = prepared(state, incoming)
+
+    with pytest.raises(JwkError, match="have not acknowledged"):
+        jwt_keys.promote_rotation(
+            rotating,
+            incoming_kid=incoming["kid"],
+            consumers=VERIFIERS,
+            jwks_sha256=PREPARED,
+            now=NOW,
+            max_token_ttl_seconds=300,
+            clock_skew_seconds=30,
+        )
+
+
+def test_acknowledging_the_wrong_digest_does_not_authorise_a_promotion(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    """A verifier that reloaded something is not a verifier that reloaded THIS.
+
+    The stale case is the real one: a container recreated against the key set
+    from before the prepare reports a digest, and a check that only asked "has
+    this consumer answered" would take it.
+    """
+    rotating = acknowledged(prepared(state, incoming), STALE)
+
+    assert jwt_keys.unacknowledged(rotating, consumers=VERIFIERS, jwks_sha256=PREPARED) == VERIFIERS
+    with pytest.raises(JwkError, match="have not acknowledged"):
+        jwt_keys.promote_rotation(
+            rotating,
+            incoming_kid=incoming["kid"],
+            consumers=VERIFIERS,
+            jwks_sha256=PREPARED,
+            now=NOW,
+            max_token_ttl_seconds=300,
+            clock_skew_seconds=30,
+        )
+
+
+def test_promotion_with_no_verifiers_named_is_refused(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    """An empty list makes "every verifier has acknowledged" vacuously true.
+
+    That is the shape of a check that cannot fail, and this repository has
+    shipped three of them (D173, D260). Refused explicitly rather than left to
+    be discovered by whoever calls it with a list built from a filter.
+    """
+    with pytest.raises(JwkError, match="no verifiers were named"):
+        jwt_keys.promote_rotation(
+            acknowledged(prepared(state, incoming)),
+            incoming_kid=incoming["kid"],
+            consumers=[],
+            jwks_sha256=PREPARED,
+            now=NOW,
+            max_token_ttl_seconds=300,
+            clock_skew_seconds=30,
+        )
+
+
+def test_promotion_switches_the_key_and_records_the_deadline(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    rotating = jwt_keys.promote_rotation(
+        acknowledged(prepared(state, incoming)),
+        incoming_kid=incoming["kid"],
+        consumers=VERIFIERS,
+        jwks_sha256=PREPARED,
         now=NOW,
         max_token_ttl_seconds=300,
         clock_skew_seconds=30,
     )
+
     assert rotating["active_kid"] == incoming["kid"]
     assert rotating["verification_kids"] == [incoming["kid"], state["active_kid"]]
     assert rotating["retire_after"] == "2026-08-11T12:05:30Z"
     jwt_keys.validate_key_state(rotating)
 
 
-def test_the_deadline_is_computed_when_the_switch_happens(
+def test_the_deadline_is_the_token_lifetime_plus_the_skew(
     state: dict[str, object], incoming: dict[str, str]
 ) -> None:
-    """Not at phase two, because at phase two nobody remembers when phase one was.
-
-    That is the whole reason the deadline is a stored value rather than a rule
-    somebody applies later: the input it depends on stops being available.
-    """
-    rotating = jwt_keys.begin_rotation(
-        state, incoming=incoming, now=NOW, max_token_ttl_seconds=600, clock_skew_seconds=0
+    """Computed at promotion, because at retirement nobody remembers the moment."""
+    rotating = jwt_keys.promote_rotation(
+        acknowledged(prepared(state, incoming)),
+        incoming_kid=incoming["kid"],
+        consumers=VERIFIERS,
+        jwks_sha256=PREPARED,
+        now=NOW,
+        max_token_ttl_seconds=900,
+        clock_skew_seconds=30,
     )
-    assert rotating["retire_after"] == "2026-08-11T12:10:00Z"
+    assert rotating["retire_after"] == "2026-08-11T12:15:30Z"
 
 
-def test_phase_two_may_not_run_early(state: dict[str, object], incoming: dict[str, str]) -> None:
-    """The half that matters.
-
-    Completing before the window closes invalidates tokens that are still inside
-    their own lifetime, and the failure arrives at whoever holds one -- as an
-    authentication error with no cause visible from where it is seen.
-    """
-    rotating = jwt_keys.begin_rotation(
-        state, incoming=incoming, now=NOW, max_token_ttl_seconds=300, clock_skew_seconds=30
+def test_retirement_may_not_run_early(state: dict[str, object], incoming: dict[str, str]) -> None:
+    """Removing the retiring key early refuses tokens still inside their lifetime."""
+    rotating = jwt_keys.promote_rotation(
+        acknowledged(prepared(state, incoming)),
+        incoming_kid=incoming["kid"],
+        consumers=VERIFIERS,
+        jwks_sha256=PREPARED,
+        now=NOW,
+        max_token_ttl_seconds=300,
+        clock_skew_seconds=30,
     )
-    with pytest.raises(JwkError, match="still inside their own lifetime"):
-        jwt_keys.complete_rotation(rotating, now=NOW + timedelta(seconds=329))
+    with pytest.raises(JwkError, match="overlap window closes"):
+        jwt_keys.retire_rotation(rotating, now=NOW + timedelta(seconds=329))
 
-    done = jwt_keys.complete_rotation(rotating, now=NOW + timedelta(seconds=330))
+    done = jwt_keys.retire_rotation(rotating, now=NOW + timedelta(seconds=330))
     assert done["verification_kids"] == [incoming["kid"]]
     assert done["retire_after"] is None
+    assert done["verifier_acknowledgements"] == {}
     jwt_keys.validate_key_state(done)
 
 
-def test_a_second_rotation_cannot_begin_while_one_is_in_flight(
+def test_a_second_rotation_cannot_be_prepared_while_one_is_published(
     state: dict[str, object], incoming: dict[str, str]
 ) -> None:
     """A third verification key is the one nobody retires."""
-    rotating = jwt_keys.begin_rotation(
-        state, incoming=incoming, now=NOW, max_token_ttl_seconds=300, clock_skew_seconds=30
-    )
-    third = jwt_keys.public_jwk(modulus_hex=MODULUS[:-2] + "05", exponent=EXPONENT)
+    rotating = prepared(state, incoming)
+    third = jwt_keys.public_jwk(modulus_hex=THIRD_MODULUS, exponent=EXPONENT)
     with pytest.raises(JwkError, match="already in flight"):
-        jwt_keys.begin_rotation(
+        jwt_keys.prepare_rotation(rotating, incoming=third)
+
+
+def test_preparing_a_rotation_to_the_active_key_is_refused(
+    state: dict[str, object], active: dict[str, str]
+) -> None:
+    with pytest.raises(JwkError, match="the active key"):
+        jwt_keys.prepare_rotation(state, incoming=active)
+
+
+def test_promoting_the_key_that_already_signs_is_refused(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    rotating = acknowledged(prepared(state, incoming))
+    with pytest.raises(JwkError, match="already the active key"):
+        jwt_keys.promote_rotation(
             rotating,
-            incoming=third,
-            now=NOW + timedelta(seconds=1),
+            incoming_kid=str(state["active_kid"]),
+            consumers=VERIFIERS,
+            jwks_sha256=PREPARED,
+            now=NOW,
             max_token_ttl_seconds=300,
             clock_skew_seconds=30,
         )
 
 
-def test_rotating_to_the_same_key_is_refused(
-    state: dict[str, object], active: dict[str, str]
+def test_promoting_a_key_that_was_never_published_is_refused(
+    state: dict[str, object], incoming: dict[str, str]
 ) -> None:
-    """It would publish a new deadline for unchanged material.
+    """Promotion names what prepare published.
 
-    Which is a rotation nobody performed, recorded as one that was -- and the
-    next thing to read the document would believe the key had turned over.
+    The acknowledgement check would catch this too -- nothing can have
+    acknowledged a set containing a key nobody published -- but it would name
+    the wrong problem, and a message naming the wrong problem is what D186 cost.
     """
-    with pytest.raises(JwkError, match="the active key"):
-        jwt_keys.begin_rotation(
-            state, incoming=active, now=NOW, max_token_ttl_seconds=300, clock_skew_seconds=30
+    rotating = acknowledged(prepared(state, incoming))
+    with pytest.raises(JwkError, match="is not published"):
+        jwt_keys.promote_rotation(
+            rotating,
+            incoming_kid="z" * 43,
+            consumers=VERIFIERS,
+            jwks_sha256=PREPARED,
+            now=NOW,
+            max_token_ttl_seconds=300,
+            clock_skew_seconds=30,
         )
 
 
-def test_completing_a_rotation_that_is_not_happening_is_refused(
-    state: dict[str, object],
-) -> None:
-    with pytest.raises(JwkError, match="nothing to complete"):
-        jwt_keys.complete_rotation(state, now=NOW)
+def test_retiring_a_rotation_that_is_not_happening_is_refused(state: dict[str, object]) -> None:
+    with pytest.raises(JwkError, match="nothing to retire"):
+        jwt_keys.retire_rotation(state, now=NOW)
 
 
 def test_a_rotation_carrying_private_material_is_refused(
     state: dict[str, object], incoming: dict[str, str]
 ) -> None:
     with pytest.raises(JwkError, match="private parameters"):
-        jwt_keys.begin_rotation(
-            state,
-            incoming={**incoming, "d": "c3RvbGVu"},
+        jwt_keys.prepare_rotation(state, incoming={**incoming, "d": "secret"})
+
+
+def test_a_prepared_rotation_can_be_abandoned_and_a_promoted_one_cannot(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    """The only rollback this design has, available for exactly one phase.
+
+    Before promotion nothing signs with the incoming key, so withdrawing it
+    costs nothing and invalidates no token. After promotion the retired key's
+    private material is gone and the recovery is to complete forward -- so a
+    function offering to undo it would be offering something it cannot do.
+    """
+    rotating = acknowledged(prepared(state, incoming))
+    abandoned = jwt_keys.abandon_rotation(rotating)
+    assert abandoned["verification_kids"] == [state["active_kid"]]
+    assert abandoned["active_kid"] == state["active_kid"]
+    assert abandoned["verifier_acknowledgements"] == {}
+    jwt_keys.validate_key_state(abandoned)
+
+    promoted = jwt_keys.promote_rotation(
+        rotating,
+        incoming_kid=incoming["kid"],
+        consumers=VERIFIERS,
+        jwks_sha256=PREPARED,
+        now=NOW,
+        max_token_ttl_seconds=300,
+        clock_skew_seconds=30,
+    )
+    with pytest.raises(JwkError, match="complete it forward"):
+        jwt_keys.abandon_rotation(promoted)
+
+
+def test_abandoning_when_nothing_is_prepared_is_refused(state: dict[str, object]) -> None:
+    with pytest.raises(JwkError, match="nothing to abandon"):
+        jwt_keys.abandon_rotation(state)
+
+
+def test_preparing_again_clears_the_previous_rounds_acknowledgements(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    """A digest kept past the set it describes would authorise the next
+    promotion for free."""
+    finished = jwt_keys.retire_rotation(
+        jwt_keys.promote_rotation(
+            acknowledged(prepared(state, incoming)),
+            incoming_kid=incoming["kid"],
+            consumers=VERIFIERS,
+            jwks_sha256=PREPARED,
             now=NOW,
             max_token_ttl_seconds=300,
             clock_skew_seconds=30,
+        ),
+        now=NOW + timedelta(seconds=330),
+    )
+    third = jwt_keys.public_jwk(modulus_hex=THIRD_MODULUS, exponent=EXPONENT)
+    again = jwt_keys.prepare_rotation(finished, incoming=third)
+    assert again["verifier_acknowledgements"] == {}
+
+
+@pytest.mark.parametrize("consumer", ["", "Postgrest", "post grest", "1rest", "x" * 65])
+def test_an_unusable_consumer_name_is_refused(
+    state: dict[str, object], incoming: dict[str, str], consumer: str
+) -> None:
+    """The same pattern the outputs schema enforces.
+
+    A key state this module accepted and a document the schema refused would be
+    two answers to what a consumer may be called, which is ADR 0002 broken at
+    the smallest scale.
+    """
+    with pytest.raises(JwkError, match="consumer name"):
+        jwt_keys.record_acknowledgement(
+            prepared(state, incoming), consumer=consumer, jwks_sha256=PREPARED
+        )
+
+
+@pytest.mark.parametrize("digest", ["", "not-a-digest", "A" * 64, "a" * 63])
+def test_an_acknowledgement_that_is_not_a_digest_is_refused(
+    state: dict[str, object], incoming: dict[str, str], digest: str
+) -> None:
+    with pytest.raises(JwkError, match="sha256"):
+        jwt_keys.record_acknowledgement(
+            prepared(state, incoming), consumer="postgrest", jwks_sha256=digest
         )
 
 
@@ -409,20 +629,32 @@ def test_the_active_key_must_be_one_a_verifier_accepts(state: dict[str, object])
         jwt_keys.validate_key_state({**state, "active_kid": "z" * 43})
 
 
-def test_a_deadline_and_a_second_key_are_the_same_fact(
-    state: dict[str, object], incoming: dict[str, str]
+def test_a_deadline_without_a_retiring_key_is_refused(
+    state: dict[str, object],
 ) -> None:
-    """One without the other is a rotation that removes nothing or never ends."""
-    with pytest.raises(JwkError, match="same fact"):
+    """One key with a deadline is a rotation whose retirement removes nothing.
+
+    Replaces `test_a_deadline_and_a_second_key_are_the_same_fact`, which also
+    refused the converse -- two keys with no deadline. That is now the *prepared*
+    state, and the old invariant is exactly what made a prepare step
+    unrepresentable (ADR 0088).
+    """
+    with pytest.raises(JwkError, match="no retiring key"):
         jwt_keys.validate_key_state({**state, "retire_after": "2026-08-11T12:05:30Z"})
 
-    two_keys = {
-        **state,
-        "verification_kids": [state["active_kid"], incoming["kid"]],
-        "retire_after": None,
-    }
-    with pytest.raises(JwkError, match="same fact"):
-        jwt_keys.validate_key_state(two_keys)
+
+def test_two_keys_without_a_deadline_is_accepted(
+    state: dict[str, object], incoming: dict[str, str]
+) -> None:
+    """The prepared state, and the direction the old invariant got wrong."""
+    jwt_keys.validate_key_state(
+        {
+            **state,
+            "verification_kids": [state["active_kid"], incoming["kid"]],
+            "retire_after": None,
+            "verifier_acknowledgements": {},
+        }
+    )
 
 
 def test_a_repeated_verification_key_is_refused(state: dict[str, object]) -> None:
@@ -437,7 +669,14 @@ def test_a_repeated_verification_key_is_refused(state: dict[str, object]) -> Non
 
 
 def test_an_incomplete_state_is_refused(state: dict[str, object]) -> None:
-    for member in ("algorithm", "active_kid", "verification_kids", "temporary", "retire_after"):
+    for member in (
+        "algorithm",
+        "active_kid",
+        "verification_kids",
+        "temporary",
+        "retire_after",
+        "verifier_acknowledgements",
+    ):
         broken = {key: value for key, value in state.items() if key != member}
         with pytest.raises(JwkError, match="missing"):
             jwt_keys.validate_key_state(broken)
@@ -461,16 +700,20 @@ def test_the_state_members_are_the_ones_the_deployed_schema_names(
     # What the schema has and this does not is the identity half -- status,
     # issuer, audience and the JWKS digest -- which comes from the render and
     # from the file, not from the key.
+    # `verifier_acknowledgements` moved across this line in Run 10 and the note
+    # it used to carry is worth keeping as the record of why. It said the field
+    # was "on the identity side ... an observation of a deployment rather than a
+    # property of the key", which was true while nothing consumed it. ADR 0088
+    # made it the thing **promotion is blocked on**, so the module that decides
+    # whether a rotation may proceed is the module that has to hold it. Still
+    # observed rather than computed -- `record_acknowledgement` takes the digest
+    # from a caller that read it off a running container -- but no longer
+    # something this module can be ignorant of.
     assert accepted - produced == {
         "status",
         "issuer",
         "audience",
         "public_jwks_sha256",
-        # Version 9, and on the identity side of the line for the same reason
-        # the others are: it records what each verifier has actually loaded,
-        # which is an observation of a deployment rather than a property of
-        # the key. `begin_rotation` could not compute it if it tried.
-        "verifier_acknowledgements",
     }
 
 

@@ -89,6 +89,15 @@ DOCS_APP_PAGE_PATH = f"{DOCS_ROOT_PATH}/app"
 #: shape ADR 0061 is about with the failure not yet drawn.
 REST_PATH_SUFFIX = "/rest"
 
+#: Suffix appended to a project's `api.public_base_path` for the application
+#: API surface -- the auth service (Session 6).
+#:
+#: It was an inline f-string in `derive` until Run 10 needed the path as well as
+#: the URL. Both are built from this one constant for the reason ADR 0061 gives:
+#: the URL a person is given and the rule a router matches on must move
+#: together, and `jwt_issuer` is built from the same expression again.
+APP_PATH_SUFFIX = "/app"
+
 # --------------------------------------------------------------------------
 # Output validators (runbook §3.7 rule 4: context-specific validator + maximum)
 # --------------------------------------------------------------------------
@@ -286,12 +295,19 @@ def api_stripprefix_middleware_name(key: str) -> str:
 
 
 def docs_stripprefix_middleware_name(key: str) -> str:
-    """The documentation route's strip-prefix middleware.
+    """The strip-prefix middleware **both** documentation routers use.
 
-    Its own, not the REST route's: a middleware name is host-wide in Traefik, so
-    two routes sharing one would strip the same prefix from both -- and the two
-    prefixes differ. The REST middleware strips `/api/rest`; this strips
-    `/docs/rest`.
+    Its own, not the REST API route's: a middleware name is host-wide in
+    Traefik, so two routes sharing one strip the same prefix from both -- and
+    `/api/rest` is not `/docs`.
+
+    Shared between the two *documentation* routers for exactly that reason
+    read forwards. Since ADR 0087 both strip the documentation **root** rather
+    than their own page path, so the container receives `/rest`, `/rest/`,
+    `/app` and `/app/` and can tell the two surfaces apart. It could not before:
+    `/docs/rest` and `/docs/rest/` both arrived as `/`, and the missing
+    distinction is what made the page fail to render when its URL was typed
+    without a trailing slash -- measured, `/docs/standalone.js` 404.
     """
     return traefik_name(f"apg-{key}-docs-strip", context="traefik_middleware_docs_strip")
 
@@ -304,6 +320,56 @@ def docs_router_name(key: str) -> str:
     so the two cannot be mismatched.
     """
     return traefik_name(f"apg-{key}-docs", context="traefik_router_docs")
+
+
+def app_router_name(key: str) -> str:
+    """The router and service name for one project's application API route.
+
+    Session 6 Run 10, and the same construction as every route before it: one
+    name shared between `routers.<n>.service` and `services.<n>`.
+
+    It stays a *container label* rather than moving into the file provider, and
+    ADR 0085 is the measured reason: a file-provider service can address a
+    backend only by DNS, and the Compose service name is shared by every project
+    on the host -- measured, it resolves to whichever project the edge attached
+    to first, ten times out of ten, with the other unreachable by that name.
+    """
+    return traefik_name(f"apg-{key}-app", context="traefik_router_app")
+
+
+def app_stripprefix_middleware_name(key: str) -> str:
+    """The application route's strip-prefix middleware.
+
+    Its own, for the reason `docs_stripprefix_middleware_name` is its own: a
+    middleware name is host-wide, and the three prefixes differ. This strips
+    `{api.public_base_path}/app`, because the auth service serves `/auth/login`
+    and `/admin/users` at its root and would answer 404 for the published path.
+    """
+    return traefik_name(f"apg-{key}-app-stripprefix", context="traefik_middleware_app_strip")
+
+
+def app_buffering_middleware_name(key: str) -> str:
+    """The application route's body-size middleware.
+
+    Not a duplicate of the REST route's, and not decoration. The auth service
+    bounds a request body at `strict_json.MAX_BODY_BYTES` -- **after**
+    `request.body()` has read all of it. Measured with a control: a 108-byte
+    body is read as 108 bytes and an 8 MiB body is read in full and then refused
+    for exceeding 16 KiB. The service's bound protects its parser; this protects
+    the process, and it is the only thing that does.
+    """
+    return traefik_name(f"apg-{key}-app-buffering", context="traefik_middleware_app_buffering")
+
+
+def app_docs_router_name(key: str) -> str:
+    """The router and service name for the application documentation page.
+
+    A second router onto the *same* container as `docs_router_name` (D226): one
+    image, one CSP, one credential, one mounted snapshot directory holding a
+    second file. Two routers rather than one because the two surfaces publish
+    two paths and strip two different prefixes.
+    """
+    return traefik_name(f"apg-{key}-app-docs", context="traefik_router_app_docs")
 
 
 def docs_credential_middleware_name(key: str) -> str:
@@ -440,6 +506,18 @@ class ProjectIdentity:
     api_buffering_middleware: str = ""
     api_stripprefix_middleware: str = ""
     docs_credential_middleware: str = ""
+    #: The application API's *path*, split from `route_app` for the reason
+    #: `route_rest_path` is split from `route_rest`: one is the URL a person is
+    #: given and the other is what a router rule matches on, and D177 is what
+    #: happens when the two are derived twice and drift.
+    route_app_path: str = ""
+    #: Session 6 Run 10's routers and middlewares. Project-derived, so all five
+    #: reach `compose.env`; a middleware name is host-wide in Traefik, which is
+    #: what makes deriving them the thing that stops two projects sharing one.
+    app_router: str = ""
+    app_stripprefix_middleware: str = ""
+    app_buffering_middleware: str = ""
+    app_docs_router: str = ""
 
     jwt_issuer: str = ""
     jwt_audience: str = ""
@@ -496,7 +574,8 @@ def derive(
         roles=database_roles(key_sql),
         route_rest=f"https://{domain}{api_base_path}{REST_PATH_SUFFIX}",
         route_rest_path=f"{api_base_path}{REST_PATH_SUFFIX}",
-        route_app=f"https://{domain}{api_base_path}/app",
+        route_app=f"https://{domain}{api_base_path}{APP_PATH_SUFFIX}",
+        route_app_path=f"{api_base_path}{APP_PATH_SUFFIX}",
         route_mcp=f"https://{domain}{mcp_base_path}",
         # The page, not the root above it (ADR 0061).
         route_docs=f"https://{domain}{DOCS_PAGE_PATH}",
@@ -511,7 +590,11 @@ def derive(
         api_buffering_middleware=api_buffering_middleware_name(key),
         api_stripprefix_middleware=api_stripprefix_middleware_name(key),
         docs_credential_middleware=docs_credential_middleware_name(key),
-        jwt_issuer=f"https://{domain}{api_base_path}/app/auth",
+        app_router=app_router_name(key),
+        app_stripprefix_middleware=app_stripprefix_middleware_name(key),
+        app_buffering_middleware=app_buffering_middleware_name(key),
+        app_docs_router=app_docs_router_name(key),
+        jwt_issuer=f"https://{domain}{api_base_path}{APP_PATH_SUFFIX}/auth",
         jwt_audience=f"urn:agentic-postgres:{slug}:{environment}",
         secrets_namespace=f"agentic-postgres/{key}",
         storage_bucket=(

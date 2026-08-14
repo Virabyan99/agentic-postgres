@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import ast
 import re
+from pathlib import Path
 
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, naming, runtime_override
+from agentic_postgres import REPO_ROOT, naming, runtime_override, secrets_contract
 from agentic_postgres.naming import HEALTH_ROUTE_PATH
 
 #: The Compose model, for the one test that checks a declared service name
@@ -32,6 +33,10 @@ STRIPPREFIX = "apg-alpha-dev-api-stripprefix"
 DOCS_ROUTER = "apg-alpha-dev-docs"
 DOCS_AUTH = "apg-alpha-dev-docs-auth"
 DOCS_STRIPPREFIX = "apg-alpha-dev-docs-strip"
+APP_ROUTER = "apg-alpha-dev-app"
+APP_BUFFERING = "apg-alpha-dev-app-buffering"
+APP_STRIPPREFIX = "apg-alpha-dev-app-stripprefix"
+APP_DOCS_ROUTER = "apg-alpha-dev-app-docs"
 RENDERED = "/var/lib/agentic-postgres/rendered/alpha-dev"
 
 #: Every derived name the override renders into a label key. Collected here so a
@@ -45,6 +50,10 @@ NAMES = {
     "docs_router_name": DOCS_ROUTER,
     "docs_auth_middleware_name": DOCS_AUTH,
     "docs_stripprefix_middleware_name": DOCS_STRIPPREFIX,
+    "app_router_name": APP_ROUTER,
+    "app_buffering_middleware_name": APP_BUFFERING,
+    "app_stripprefix_middleware_name": APP_STRIPPREFIX,
+    "app_docs_router_name": APP_DOCS_ROUTER,
 }
 
 
@@ -115,6 +124,10 @@ def test_the_rendered_document_is_parseable_yaml() -> None:
         "docs_router_name",
         "docs_auth_middleware_name",
         "docs_stripprefix_middleware_name",
+        "app_router_name",
+        "app_buffering_middleware_name",
+        "app_stripprefix_middleware_name",
+        "app_docs_router_name",
         "https_entrypoint",
         "rendered_directory",
     ],
@@ -439,15 +452,9 @@ def test_the_mount_and_the_model_name_the_same_file() -> None:
     )
 
     override = runtime_override.build_override(
-        router_name="r",
+        **NAMES,
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/example-dev",
-        rest_router_name="rest",
-        buffering_middleware_name="buffer",
-        stripprefix_middleware_name="strip",
-        docs_router_name="docs",
-        docs_auth_middleware_name="docs-auth",
-        docs_stripprefix_middleware_name="docs-strip",
     )
     mounts = override["services"][runtime_override.REST_SERVICE]["volumes"]
     assert mounts == [
@@ -502,15 +509,9 @@ def test_every_routed_service_carries_the_label_the_edge_filters_on() -> None:
     label, value = matched.group(1), matched.group(2)
 
     override = runtime_override.build_override(
-        router_name="health",
+        **NAMES,
         https_entrypoint="websecure",
         rendered_directory="/var/lib/agentic-postgres/rendered/example-dev",
-        rest_router_name="rest",
-        buffering_middleware_name="buffer",
-        stripprefix_middleware_name="strip",
-        docs_router_name="docs",
-        docs_auth_middleware_name="docs-auth",
-        docs_stripprefix_middleware_name="docs-strip",
     )
     model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
 
@@ -645,18 +646,51 @@ def test_the_credential_is_demanded_before_the_prefix_is_stripped(
     assert parts.index(f"{DOCS_AUTH}@file") < parts.index(DOCS_STRIPPREFIX)
 
 
-def test_the_docs_prefix_is_stripped(docs_labels: dict[str, str]) -> None:
-    """`serve.py` serves `/`, `/standalone.js` and `/openapi.json` (D187).
+def test_the_docs_root_is_stripped_and_the_page_segment_is_not(
+    docs_labels: dict[str, str],
+) -> None:
+    """The ROOT, not the page path, and ADR 0087 is why.
 
-    Without the strip it receives `/docs/rest/standalone.js` and answers 404 --
-    which at the edge reads as a missing route and is not one. The prefix
-    stripped is the same expression the rule matches on, so the two cannot
-    disagree.
+    Without any strip `serve.py` receives `/docs/rest/standalone.js` and answers
+    404 -- which at the edge reads as a missing route and is not one (D187).
+    Stripping the whole page path removed one bit too many: `/docs/rest` and
+    `/docs/rest/` both arrived as `/`, so the process could not tell them apart
+    and could not redirect the first to the second. Measured -- a browser given
+    `/docs/rest` asks for `/docs/standalone.js`, which 404s.
+
+    This replaces `test_the_docs_prefix_is_stripped`, which asserted the strip
+    equalled `${DOCS_PAGE_PATH}`. That was true throughout the defect.
     """
     rule = docs_labels[f"traefik.http.routers.{DOCS_ROUTER}.rule"]
     stripped = docs_labels[f"traefik.http.middlewares.{DOCS_STRIPPREFIX}.stripprefix.prefixes"]
-    assert stripped == "${DOCS_PAGE_PATH:?required}"
-    assert stripped in rule
+    assert stripped == "${DOCS_ROOT_PATH:?required}"
+    assert stripped != "${DOCS_PAGE_PATH:?required}", (
+        "the whole page path is stripped again, so the container cannot tell the "
+        "slash-less form from the slash form and the page will not render"
+    )
+    # The rule still matches the page, which is what makes the root safe to
+    # strip: nothing but this surface's own paths reaches the middleware.
+    assert "${DOCS_PAGE_PATH:?required}" in rule
+
+
+def test_both_documentation_routers_share_one_strip(docs_labels: dict[str, str]) -> None:
+    """One middleware, because they now remove the same thing (ADR 0087).
+
+    A second middleware under a second name would be a second answer to what
+    gets removed, and Traefik's middleware namespace is host-wide -- so two
+    definitions of one rewrite is the shape that ends with whichever loaded last
+    deciding for both.
+    """
+    chain = docs_labels[f"traefik.http.routers.{APP_DOCS_ROUTER}.middlewares"]
+    assert chain.endswith(DOCS_STRIPPREFIX)
+    defined = [
+        key
+        for key in docs_labels
+        if key.startswith("traefik.http.middlewares.") and key.endswith(".stripprefix.prefixes")
+    ]
+    assert defined == [f"traefik.http.middlewares.{DOCS_STRIPPREFIX}.stripprefix.prefixes"], (
+        f"the documentation container defines {defined}; there is one rewrite here"
+    )
 
 
 def test_the_docs_router_and_service_names_agree(docs_labels: dict[str, str]) -> None:
@@ -687,7 +721,9 @@ def test_the_snapshot_mount_and_the_model_name_the_same_file() -> None:
     mounts = document["services"][runtime_override.DOCS_SERVICE]["volumes"]
     assert mounts == [
         f"{RENDERED}/{runtime_override.SNAPSHOT_FILENAME}:"
-        f"{runtime_override.SNAPSHOT_CONTAINER_PATH}:ro"
+        f"{runtime_override.SNAPSHOT_CONTAINER_PATH}:ro",
+        f"{RENDERED}/{runtime_override.APP_SNAPSHOT_FILENAME}:"
+        f"{runtime_override.APP_SNAPSHOT_CONTAINER_PATH}:ro",
     ]
 
     model = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
@@ -697,6 +733,17 @@ def test_the_snapshot_mount_and_the_model_name_the_same_file() -> None:
         f"compose.yaml reads {declared!r} and the override mounts at "
         f"{runtime_override.SNAPSHOT_CONTAINER_PATH!r}"
     )
+    # The second surface (D226), held to the same rule. Two files in one mounted
+    # directory, and the model and the override have to name each of them
+    # identically for the same reason: Docker creates a *directory* at a mount
+    # source that does not exist, so a mismatch is a document that will not
+    # parse rather than a file that is missing.
+    declared_app = environment[runtime_override.APP_SNAPSHOT_ENV_KEY]
+    assert declared_app == runtime_override.APP_SNAPSHOT_CONTAINER_PATH, (
+        f"compose.yaml reads {declared_app!r} and the override mounts at "
+        f"{runtime_override.APP_SNAPSHOT_CONTAINER_PATH!r}"
+    )
+    assert declared_app != declared, "both surfaces would serve the same document"
 
 
 def test_the_snapshot_mount_is_read_only() -> None:
@@ -706,3 +753,258 @@ def test_the_snapshot_mount_is_read_only() -> None:
     )
     for mount in document["services"][runtime_override.DOCS_SERVICE]["volumes"]:
         assert mount.endswith(":ro"), mount
+
+
+# ---------------------------------------------------------------------------
+# The application API route (Run 10)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def app_labels() -> dict[str, str]:
+    document = runtime_override.build_override(
+        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
+    return document["services"][runtime_override.AUTH_SERVICE]["labels"]
+
+
+def test_no_app_label_key_contains_an_interpolation(app_labels: dict[str, str]) -> None:
+    """The same rule as every router before it, and the same reason: Compose
+    renders a label KEY literally, producing a middleware actually named
+    `${X}` that the router's interpolated `middlewares` value never resolves to.
+    """
+    offenders = [key for key in app_labels if "$" in key]
+    assert not offenders, f"label keys must be fully rendered: {offenders}"
+
+
+def test_the_app_boundary_is_an_exact_path_or_a_child_of_it(app_labels: dict[str, str]) -> None:
+    """Measured against the locked Traefik for THIS route, not inherited.
+
+    `PathPrefix` is a string prefix, so a router ruled ``PathPrefix(`/api/app`)``
+    answers `/api/application` -- which the runbook named as the trap and which
+    this repository has fallen into once (D162). Re-measured with the pair in
+    place: `/api/app` and `/api/app/x` serve, while `/api/application`,
+    `/api/app-extra`, `/api/app2` and `/api` all answer 404.
+    """
+    rule = app_labels[f"traefik.http.routers.{APP_ROUTER}.rule"]
+    assert "Path(`${API_APP_PATH:?required}`)" in rule
+    assert "PathPrefix(`${API_APP_PATH:?required}/`)" in rule
+    without_pair = rule.replace("PathPrefix(`${API_APP_PATH:?required}/`)", "")
+    assert "PathPrefix(`${API_APP_PATH:?required}`)" not in without_pair, (
+        "a bare PathPrefix would answer /api/application"
+    )
+
+
+def test_the_app_prefix_is_stripped_before_the_service_sees_it(
+    app_labels: dict[str, str],
+) -> None:
+    """The service routes `/auth/login` at its root. Without the strip it
+    receives `/api/app/auth/login` and FastAPI answers 404 -- which at the edge
+    reads as a missing route and is not one (D187)."""
+    stripped = app_labels[f"traefik.http.middlewares.{APP_STRIPPREFIX}.stripprefix.prefixes"]
+    assert stripped == "${API_APP_PATH:?required}"
+
+
+def test_the_app_route_carries_a_body_limit(app_labels: dict[str, str]) -> None:
+    """The process's only body bound (D273).
+
+    The service refuses a body over `strict_json.MAX_BODY_BYTES` **after**
+    `request.body()` has read all of it -- measured, an 8 MiB body read in full
+    and then rejected against a 16 KiB limit, a factor of 512. So this
+    middleware is what bounds what the process allocates, and both settings
+    carry the same interpolation so nothing spills to disk on the way through.
+    """
+    for setting in ("maxrequestbodybytes", "memrequestbodybytes"):
+        key = f"traefik.http.middlewares.{APP_BUFFERING}.buffering.{setting}"
+        assert app_labels[key] == "${AUTH_REQUEST_BODY_MAX_BYTES:?required}"
+
+
+def test_the_edge_bound_is_the_service_bound() -> None:
+    """One number, read from the service's own module (ADR 0084).
+
+    Written as a comparison across the boundary rather than against a literal: a
+    test asserting `16384 == 16384` is D260's third mutation, which computed its
+    expectation from the constant under test and could not fail.
+    """
+    from agentic_postgres import auth_limits, service_source
+
+    assert auth_limits.MAX_BODY_BYTES == service_source.load("strict_json").MAX_BODY_BYTES
+
+
+def test_the_body_bound_reaches_the_rendered_environment() -> None:
+    """A middleware interpolating a variable nothing emits does not render at
+    all -- D178, which reached a live deploy."""
+    from agentic_postgres import rendering
+
+    assert "AUTH_REQUEST_BODY_MAX_BYTES" in rendering.COMPOSE_ENV_KEYS
+
+
+def test_the_app_router_and_service_names_agree(app_labels: dict[str, str]) -> None:
+    assert app_labels[f"traefik.http.routers.{APP_ROUTER}.service"] == APP_ROUTER
+    assert f"traefik.http.services.{APP_ROUTER}.loadbalancer.server.port" in app_labels
+
+
+def test_the_app_route_carries_the_baseline_chain_first(app_labels: dict[str, str]) -> None:
+    """The baseline puts the response policy on answers the edge generates
+    itself -- including the 413 the buffering middleware produces."""
+    chain = app_labels[f"traefik.http.routers.{APP_ROUTER}.middlewares"]
+    assert chain.startswith("${BASELINE_MIDDLEWARE_CHAIN:?required},")
+    assert chain.endswith(f"{APP_BUFFERING},{APP_STRIPPREFIX}")
+
+
+def test_the_application_documentation_router_shares_the_credential(
+    docs_labels: dict[str, str],
+) -> None:
+    """One password for two surfaces (D226). A second credential middleware
+    would be a second password an operator has to hold for one page's worth of
+    infrastructure."""
+    chain = docs_labels[f"traefik.http.routers.{APP_DOCS_ROUTER}.middlewares"]
+    assert f"{DOCS_AUTH}@file" in chain, "the application documentation route is not protected"
+
+
+# ---------------------------------------------------------------------------
+# The key set, and every live issuer in it (Run 10, D276)
+# ---------------------------------------------------------------------------
+
+
+def _write_key(path: Path) -> None:
+    """A real 2048-bit RSA key, because `build` shells out to openssl."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    path.write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+
+
+def test_the_key_set_carries_every_live_issuers_key(tmp_path, monkeypatch) -> None:
+    """D276, measured by building a key set rather than by reading the builder.
+
+    `secrets.required.yaml` declares `auth_jwt_signing_key` with the sentence
+    "the JWKS every verifier reads is derived from it", and until Run 10 nothing
+    derived it: the only other reference in the repository was `compose.yaml`'s
+    `APG_SIGNING_KEY_FILE`. The auth service signed with a key PostgREST had
+    never been given, and a token signed by a key outside the published set is
+    **401** -- measured, with a published key at 200 as the control.
+
+    **This is the second version of this test.** The first asserted that
+    `build`'s source named `auth_key_path`, and the mutation battery found it
+    green with the `keys.append` deleted -- the mutated builder still computed
+    the path and discarded it. A test that a function is mentioned is not a test
+    that a key is published.
+    """
+    module = _load_render_jwks()
+    generation = tmp_path / "probe-dev" / "generations" / "gen"
+    monkeypatch.setattr(module, "SECRET_ROOT", tmp_path)
+
+    _write_key(generation / secrets_contract.ROOT_PLANE_DIRECTORY / module.SIGNING_KEY_FILE)
+    _write_key(generation / module.AUTH_SERVICE / module.AUTH_SIGNING_KEY_FILE)
+
+    document, keys = module.build("probe-dev", "gen")
+    assert len(keys) == 2, "the key set does not carry both issuers"
+    assert [key["kid"] for key in document["keys"]] == [key["kid"] for key in keys]
+
+    # The auth service's key leads: it is the issuer from Session 6 onward, and
+    # `observe_jwt` reads `active_kid` off the head of this list.
+    auth_jwk = module._jwk_from(generation / module.AUTH_SERVICE / module.AUTH_SIGNING_KEY_FILE)
+    assert keys[0]["kid"] == auth_jwk["kid"], "the auth service's key is not the active one"
+
+
+def test_a_prepared_key_joins_the_published_set(tmp_path, monkeypatch) -> None:
+    """The control for the test above, and prepare's whole observable effect.
+
+    Without this, a builder that published a fixed two-key set would satisfy
+    every assertion above.
+    """
+    module = _load_render_jwks()
+    generation = tmp_path / "probe-dev" / "generations" / "gen"
+    monkeypatch.setattr(module, "SECRET_ROOT", tmp_path)
+
+    root = generation / secrets_contract.ROOT_PLANE_DIRECTORY
+    _write_key(root / module.SIGNING_KEY_FILE)
+
+    _, before = module.build("probe-dev", "gen")
+    assert len(before) == 1
+
+    _write_key(root / module.PREPARED_KEY_FILE)
+    _, after = module.build("probe-dev", "gen")
+    assert len(after) == 2
+    assert after[0]["kid"] == before[0]["kid"], "preparing a rotation moved the leading key"
+
+
+def test_a_third_key_is_refused_rather_than_published(tmp_path, monkeypatch) -> None:
+    """The ceiling, reached through the builder.
+
+    Two issuers during a transition is what `MAX_VERIFICATION_KEYS` is for. A
+    third is a second rotation begun while the first is in flight, and an
+    unbounded set is one nobody retires from.
+    """
+    module = _load_render_jwks()
+    generation = tmp_path / "probe-dev" / "generations" / "gen"
+    monkeypatch.setattr(module, "SECRET_ROOT", tmp_path)
+
+    root = generation / secrets_contract.ROOT_PLANE_DIRECTORY
+    _write_key(root / module.SIGNING_KEY_FILE)
+    _write_key(root / module.PREPARED_KEY_FILE)
+    _write_key(generation / module.AUTH_SERVICE / module.AUTH_SIGNING_KEY_FILE)
+
+    with pytest.raises(Exception, match="above the ceiling"):
+        module.build("probe-dev", "gen")
+
+
+def test_the_auth_key_is_read_from_the_services_own_plane() -> None:
+    """A compose-plane consumer, in the service's directory.
+
+    `secrets.required.yaml` gives it `plane: compose, service: auth`, and the
+    generation layout puts a compose consumer's file under the service's name.
+    A reader looking in `_root/` would find nothing and publish a set without
+    it, which is D276 again with the derivation present and pointed elsewhere.
+    """
+    module = _load_render_jwks()
+    path = module.auth_key_path("probe-dev", "gen")
+    assert path.name == module.AUTH_SIGNING_KEY_FILE
+    assert path.parent.name == module.AUTH_SERVICE
+    assert path.parent.name != secrets_contract.ROOT_PLANE_DIRECTORY
+
+
+def test_the_prepared_key_is_read_from_the_root_plane_where_no_service_holds_it() -> None:
+    """The safety property of the whole cutover, as a path.
+
+    Between prepare and promote the incoming key's PUBLIC half is published so
+    every verifier can acknowledge it, and its private half must reach no
+    running process -- a key a signer could reach is a key it could sign with
+    before the verifiers agreed to accept it, which is the gap the
+    acknowledgement step exists to close.
+    """
+    module = _load_render_jwks()
+    path = module.prepared_key_path("probe-dev", "gen")
+    assert path.parent.name == secrets_contract.ROOT_PLANE_DIRECTORY
+
+
+def test_the_declared_key_files_are_the_ones_the_secret_contract_writes() -> None:
+    """Three filenames in two files, and nothing else compares them.
+
+    A renderer looking for `auth_jwt_signing_key.pem` while the contract
+    materialized `auth_signing_key.pem` would publish a set missing that key and
+    say nothing -- the file is optional by construction, because a project
+    deployed through session 5 has none.
+    """
+    module = _load_render_jwks()
+    contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    targets = {
+        consumer["target_file"]
+        for secret in contract["secrets"]
+        for consumer in secret["consumers"]
+    }
+    for declared in (
+        module.SIGNING_KEY_FILE,
+        module.AUTH_SIGNING_KEY_FILE,
+        module.PREPARED_KEY_FILE,
+    ):
+        assert declared in targets, f"{declared} is not a file secrets.required.yaml writes"
