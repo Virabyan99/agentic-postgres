@@ -154,3 +154,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0088](0088-a-verifier-acknowledges-by-being-recreated.md) | A verifier acknowledges by being recreated | 6 | Accepted |
 | [0089](0089-a-claim-is-built-from-its-own-sessions-requirement-ids.md) | A claim is built from its own session's requirement IDs | 6 | Accepted |
 | [0090](0090-an-expiry-clause-is-keyed-to-the-event-not-to-the-session.md) | An expiry clause is keyed to the event, not to the session | 6 | Accepted |
+| [0091](0091-a-released-migration-that-cannot-apply-is-corrected-in-place.md) | A released migration that cannot apply is corrected in place | 6 | Accepted |

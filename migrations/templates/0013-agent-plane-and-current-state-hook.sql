@@ -397,11 +397,15 @@ CREATE FUNCTION app_private.auth_list_agents()
     ORDER BY pg_catalog.lower(pg_catalog.normalize(a.name))
   $fn$;
 
-RESET ROLE;
-
 -- ---------------------------------------------------------------------------
 -- Privileges
 -- ---------------------------------------------------------------------------
+--
+-- **This block runs as the object owner** (D285, ADR 0091). The `RESET ROLE`
+-- that used to sit here is now at the end of the migration, where 0011 already
+-- had it: `REVOKE ALL ON ALL FUNCTIONS` and `GRANT EXECUTE ON FUNCTION` both
+-- require ownership, and resetting first runs them as the connected role --
+-- `migration_user` on a host, which owns nothing.
 --
 -- The blanket revoke first, and it is load-bearing rather than tidy: a newly
 -- created function is EXECUTABLE BY PUBLIC, and the `ALTER DEFAULT PRIVILEGES`
@@ -466,6 +470,8 @@ GRANT EXECUTE ON FUNCTION app_private.auth_list_agents() TO {{auth_service}};
 --   app_private.auth_bootstrap_lock_key()
 
 REVOKE ALL ON ALL TABLES IN SCHEMA app_private FROM PUBLIC;
+
+RESET ROLE;
 
 -- Every prior migration that replaced this function issued one, and the
 -- consistency is worth more than the saved round trip.

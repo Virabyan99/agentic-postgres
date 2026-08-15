@@ -373,11 +373,19 @@ COMMENT ON FUNCTION app_private.auth_bootstrap_administrator(text, text, text, t
   'on. AP409 is deliberately not a retry-and-hope: a lost bootstrap output is '
   'recovered by inspecting state, never by bootstrapping again.';
 
-RESET ROLE;
-
 -- ---------------------------------------------------------------------------
 -- Privileges
 -- ---------------------------------------------------------------------------
+--
+-- **This block runs as the object owner, and the `RESET ROLE` that used to sit
+-- above it now sits below it** (D285, ADR 0091). `REVOKE ALL ON ALL FUNCTIONS`
+-- and `GRANT EXECUTE ON FUNCTION` both require ownership of every function
+-- they touch. Reset first and they run as the *connected* role -- which on a
+-- host is `migration_user`, and which owns nothing -- so the migration fails on
+-- its own first revoke with `permission denied for function is_scope_set
+-- (42501)`. 0011 already had these two in the right order; 0012 and 0013 did
+-- not, and nothing caught it because every offline proof applied migrations as
+-- a SUPERUSER, which bypasses the ownership check entirely.
 --
 -- **A newly created function is EXECUTABLE BY PUBLIC.** Measured on this
 -- server, with a control (D262): `proacl` is NULL on every function above,
@@ -419,6 +427,8 @@ GRANT EXECUTE ON FUNCTION app_private.auth_list_users() TO {{auth_service}};
 --   app_private.auth_bootstrap_lock_key()
 
 REVOKE ALL ON ALL TABLES IN SCHEMA app_private FROM PUBLIC;
+
+RESET ROLE;
 
 -- migrate:down
 DO $$ BEGIN

@@ -132,18 +132,18 @@
       "version": "20260813120011"
     },
     {
-      "canonical_render_sha256": "3ea43190413445c55c9795f723f7a1963949ae96742964172db682b9cff95014",
+      "canonical_render_sha256": "c55ad3a1da1747b532f72d57272a1d74dad8969bfa8bf35108df4e15332c01ac",
       "name": "auth_access_plane",
       "placeholders": [
         "auth_service",
         "object_owner"
       ],
       "template": "templates/0012-auth-access-plane.sql",
-      "template_sha256": "32b615a28baab226234d90b22dbdb7f606b412d5a0c2c82305a87f5e7345fa25",
+      "template_sha256": "1e654a0c4abac67b218bdf96f59dc3bf733897752bff2fdb63495ef2850d1dc6",
       "version": "20260814120012"
     },
     {
-      "canonical_render_sha256": "f3cb021180f6c0002b3c29afe3fcfe66006566a25a453b62776629882f26f0e7",
+      "canonical_render_sha256": "d6a58d67452cc482421915574229d7257ae07710cc5098063abfe36685d3eec3",
       "name": "agent_plane_and_current_state_hook",
       "placeholders": [
         "anon",
@@ -155,7 +155,7 @@
         "project_admin"
       ],
       "template": "templates/0013-agent-plane-and-current-state-hook.sql",
-      "template_sha256": "e175630f44f714a68ad86f86a3f572909e5f92cfacccbde57df1c355ba0e455c",
+      "template_sha256": "ef2d64e36e1abd150c35a92e2fbc61ccf26b985cfadc26486860f389dc40058e",
       "version": "20260814120013"
     }
   ],

@@ -278,6 +278,33 @@ disagree — which is D276's defect, not a stale assertion.
 
 ---
 
+## If the deploy fails partway
+
+**Read the ledger before touching anything.** dbmate prints `Applied: …` per
+migration, and the whole `up` runs in one transaction — so that line is not
+evidence anything was committed. The only statement about what a cluster holds
+is `app_private.schema_migrations`:
+
+```bash
+wsl bash -lc "ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@62.238.99.122 \
+  sudo apg-diag catalog alpha-dev migration-ledger"
+```
+
+**`--through-session 5` is not a rollback.** It holds back the later session's
+*services*, but migrations are not scoped by session — it applies all thirteen
+and fails the same way (D286). To restore service after a failed session-6
+deploy, start the held-back services against whatever the cluster already has:
+
+```bash
+sudo bin/project-runtime.sh --host host.yaml --project-key alpha-dev \
+  --through-session 5 resume
+```
+
+That brings `postgrest` up on the migrations already applied and re-attaches the
+edge. Measured on 2026-08-15: all three routes back to 200/200/401.
+
+---
+
 ## Traps
 
 **A passfile with group or world access is silently ignored.** libpq refuses it
