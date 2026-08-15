@@ -50,15 +50,61 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
-sys.path.insert(0, str(REPO_ROOT / "services" / "auth-api"))
 
 from agentic_postgres import scope_registry  # noqa: E402
-from app.hashing import Hasher, PasswordRejected, assess  # noqa: E402
+
+# `app.hashing` is deliberately NOT imported here (D292, ADR 0093).
+#
+# It imports `argon2` at module scope, and `argon2-cffi` exists in exactly one
+# place in this system: the auth service's image, where its Dockerfile pins it.
+# The host has no venv and its `python3` has no such package, so this import made
+# the command unrunnable on the only machine it is ever run on --
+# `ModuleNotFoundError: No module named 'argon2'`, on the first host bootstrap,
+# after the deploy had otherwise succeeded.
+#
+# The screening and the hashing now happen INSIDE the auth container, and that is
+# a better arrangement than the import would have been even had it worked: the
+# hash an administrator is created with is produced by the very process that
+# will later verify it, at the same argon2 build and the same frozen profile
+# (ADR 0081). A hash computed here could differ from the service's, and the
+# difference would surface as an administrator who cannot log in.
 
 #: The role suffix an administrator holds. A constant rather than an option:
 #: `--role` would let an operator bootstrap something that is not an
 #: administrator, and the refusal check keys on this exact role.
 ADMIN_ROLE_SUFFIX = "project_admin"
+
+#: The Compose service whose image carries the hasher.
+AUTH_SERVICE = "auth"
+
+#: Screen and hash one password, inside the auth container.
+#:
+#: Reads the password from **stdin** and writes the PHC string to stdout. The
+#: value is never an argument here for the same reason it is never one to this
+#: command: argv is visible in `ps`, in `/proc/<pid>/cmdline` and to any audit
+#: rule watching execve, and `docker exec`'s argv is the daemon's as well as
+#: this process's.
+#:
+#: The forbidden list *is* passed as arguments, and that is not an oversight:
+#: it holds the username and the project key, neither of which is a secret, and
+#: both of which appear in the deployed document this command already reads.
+#:
+#: `sys.stdin.buffer.read().decode()` rather than `input()`: a password may end
+#: in whitespace, and `input()` would strip the newline and nothing else while
+#: `readline` would keep it. The caller sends exactly the bytes it read from the
+#: terminal, and this decodes exactly those.
+_HASH_PROGRAM = """
+import sys
+from app.hashing import Hasher, PasswordRejected, assess
+
+password = sys.stdin.buffer.read().decode("utf-8")
+try:
+    screened = assess(password, forbidden=tuple(sys.argv[1:]))
+except PasswordRejected as exc:
+    print(str(exc), file=sys.stderr)
+    raise SystemExit(3) from None
+sys.stdout.write(Hasher().hash(screened))
+"""
 
 
 class OperatorError(Exception):
@@ -168,6 +214,84 @@ def quote_literal(value: str) -> str:
     return f"'{doubled}'"
 
 
+def auth_container(project_key: str) -> str:
+    """The running auth container for this project, by Compose label.
+
+    By label rather than by a derived name: the deployed document carries no
+    per-service container name -- only `database.container` -- and ADR 0002 is
+    explicit that a name is read rather than derived a second time. The labels
+    are what Compose itself wrote.
+    """
+    result = subprocess.run(
+        [
+            "docker",
+            "ps",
+            "--filter",
+            f"label=com.docker.compose.project.working_dir=/var/lib/agentic-postgres/rendered/{project_key}",
+            "--filter",
+            f"label=com.docker.compose.service={AUTH_SERVICE}",
+            "--format",
+            "{{.Names}}",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    )
+    names = [line for line in result.stdout.split() if line]
+    if not names:
+        raise PrerequisiteError(
+            f"no running {AUTH_SERVICE!r} container for {project_key}. The bootstrap "
+            "hashes the password with the service's own Argon2id build, so the service "
+            "has to be up. Deploy through session 6 first, then bootstrap."
+        )
+    return names[0]
+
+
+def screen_and_hash(*, project_key: str, password: str, forbidden: tuple[str, ...]) -> str:
+    """Screen a password and return its Argon2id PHC string.
+
+    Runs inside the auth container. The password goes over **stdin**; only the
+    forbidden values -- the username and the project key, neither secret -- are
+    arguments.
+
+    `stderr` is forwarded on a refusal because `assess` explains what it refused
+    and an operator at a terminal needs that. `stdout` is the hash and nothing
+    else: no echo, no logging, no temporary file.
+    """
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            auth_container(project_key),
+            "python",
+            "-c",
+            _HASH_PROGRAM,
+            *[value for value in forbidden if value],
+        ],
+        input=password,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if result.returncode == 3:
+        raise OperatorError(result.stderr.strip() or "the password was refused")
+    if result.returncode != 0:
+        raise DeploymentError(
+            f"the auth service could not hash the password (exit {result.returncode}): "
+            f"{result.stderr.strip()[:300]}"
+        )
+
+    hashed = result.stdout
+    if not hashed.startswith("$argon2id$"):
+        raise DeploymentError(
+            "the auth service returned something that is not an Argon2id hash. Nothing was written."
+        )
+    return hashed
+
+
 def bootstrap(arguments: argparse.Namespace) -> int:
     require_root()
     document = load_outputs(Path(arguments.outputs))
@@ -181,18 +305,14 @@ def bootstrap(arguments: argparse.Namespace) -> int:
         raise DeploymentError(f"the scope registry grants {ADMIN_ROLE_SUFFIX} nothing")
 
     password = read_password(arguments.password_fd)
-    try:
-        # Screened before it is hashed, with the project's own names refused --
-        # `alpha-dev` is exactly what a person types when asked for a password
-        # they will use once.
-        screened = assess(
-            password,
-            forbidden=(arguments.username, document.get("project", {}).get("key", "")),
-        )
-    except PasswordRejected as exc:
-        raise OperatorError(str(exc)) from exc
-
-    hashed = Hasher().hash(screened)
+    # Screened before it is hashed, with the project's own names refused --
+    # `alpha-dev` is exactly what a person types when asked for a password they
+    # will use once. Both happen in the auth container (D292).
+    hashed = screen_and_hash(
+        project_key=document.get("project", {}).get("key", ""),
+        password=password,
+        forbidden=(arguments.username, document.get("project", {}).get("key", "")),
+    )
 
     literal_scopes = ", ".join(quote_literal(scope) for scope in scopes)
     statement = (
