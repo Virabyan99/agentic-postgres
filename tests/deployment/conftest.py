@@ -760,6 +760,30 @@ def dev_token() -> Any:
 
 
 @pytest.fixture(scope="session")
+def bootstrap_command() -> Any:
+    """``bin/postgres-bootstrap.py``, for the enumerations it owns.
+
+    The bootstrap plane is the single authority on role membership (D102), so a
+    proof about which roles the authenticator may become reads the enumeration
+    from there rather than writing down a copy that cannot move when the plane
+    does. It wrote down a copy, and Session 6 moved the plane (D301).
+    """
+    return _load_command("postgres-bootstrap.py", "apg_postgres_bootstrap_live")
+
+
+@pytest.fixture(scope="session")
+def auth_admin_command() -> Any:
+    """``bin/auth-admin.py``, for the label every container query selects on.
+
+    Loaded rather than restated. ``PROJECT_KEY_LABEL`` is the value D293 arrived
+    at after the working-directory selector matched nothing on the host, and a
+    second copy here would be free to disagree with the product silently -- which
+    is exactly the state Run 14 found this fixture in (D299).
+    """
+    return _load_command("auth-admin.py", "apg_auth_admin_live")
+
+
+@pytest.fixture(scope="session")
 def docs_command() -> Any:
     """``bin/docs.py``, so ``check``'s definition of a refusal is not restated.
 
@@ -793,14 +817,18 @@ def mint_token(dev_token, as_root: None) -> Callable[..., str]:
     return sign
 
 
-@pytest.fixture(scope="session")
-def request_subject(dev_token) -> Callable[[str], str]:
-    """The per-project development subject, derived the way the command derives it."""
-
-    def derive(project_key: str) -> str:
-        return dev_token.development_subject(project_key)
-
-    return derive
+#: ``request_subject`` lived here until Run 14 and is gone rather than moved.
+#:
+#: It returned ``dev_token.development_subject(project_key)`` -- a derived UUIDv5
+#: that names nobody in ``app_private.users``. Migration 0013 compares a token's
+#: subject against that table inside the request transaction, so every proof
+#: using it got ``AP401: the request identity is no longer current``: ten of the
+#: twenty failures in the first host gate ever run (D298, ADR 0095).
+#:
+#: What replaces it is ``owner_session`` below: a subject the registry actually
+#: holds, with a token issued by the service that holds it. A proof about row
+#: policies is now made about an identity the deployment has heard of, which is
+#: a better measurement than the one it replaces and not merely a working one.
 
 
 @pytest.fixture(scope="session")
@@ -944,10 +972,13 @@ def psql() -> Callable[..., tuple[int, str, str]]:
     return run
 
 
-#: The probe subject. A fixed UUID that is nobody's development subject, so the
-#: rows it owns are attributable and cannot be confused with a real caller's --
-#: and so that a teardown deleting by owner cannot delete anything else.
-PROBE_SUBJECT = "00000000-5e55-4100-8000-0000000f8b1e"
+#: `PROBE_SUBJECT` was a fixed UUID here, owning the seeded rows. It is gone
+#: (ADR 0095): the rows now belong to ``owner_session.user_id``, a subject the
+#: identity registry actually holds, because 0013's hook refuses a token naming
+#: any other kind. The property the old comment wanted -- rows attributable to
+#: this fixture and to nothing else -- is stronger now rather than weaker: the
+#: subject is created and deleted by ``app_probe_subject`` under a username no
+#: real account uses, so a teardown deleting by owner cannot reach anyone.
 
 #: How long PostgREST may take to act on `NOTIFY pgrst, 'reload schema'` before
 #: the fixture calls it a failure rather than a delay. Generous on purpose: the
@@ -963,7 +994,7 @@ def acceptance_probe(
     psql: Callable[..., tuple[int, str, str]],
     rest_base: Callable[[dict[str, Any]], str],
     api_call: Callable[..., Any],
-    mint_token: Callable[..., str],
+    owner_session: OwnerSession,
 ) -> Any:
     """The transient acceptance object and its rows (plan §4.4).
 
@@ -1027,19 +1058,19 @@ def acceptance_probe(
         inserted = must(
             "WITH added AS ("
             "INSERT INTO app.notes (owner_id, title, content) "
-            f"SELECT '{PROBE_SUBJECT}'::uuid, 'apg-probe-' || g, '' "
+            f"SELECT '{owner_session.user_id}'::uuid, 'apg-probe-' || g, '' "
             f"FROM generate_series(1, {surplus}) g RETURNING 1) SELECT count(*) FROM added;",
             role=owner,
-            claim=PROBE_SUBJECT,
+            claim=owner_session.user_id,
         )
         # Asserted rather than assumed: an INSERT against a FORCE RLS table whose
         # policy claim is absent matches nothing and reports success, which is the
         # shape that made a migration's UPDATE silently do nothing (CLAUDE.md §6).
         if inserted != str(surplus):
             must(
-                f"DELETE FROM app.notes WHERE owner_id = '{PROBE_SUBJECT}';",
+                f"DELETE FROM app.notes WHERE owner_id = '{owner_session.user_id}';",
                 role=owner,
-                claim=PROBE_SUBJECT,
+                claim=owner_session.user_id,
             )
             must(f"DROP FUNCTION IF EXISTS {qualified}(double precision);", role=owner)
             pytest.fail(f"seeded {inserted} probe rows, expected {surplus}")
@@ -1062,7 +1093,12 @@ def acceptance_probe(
         # notification channel is not delivering, which is a finding about
         # `db-channel-enabled` rather than a slow fixture.
         probe_base = rest_base(project_a)
-        probe_token = mint_token(project_a, caller, subject=PROBE_SUBJECT)
+        # The registered owner's token, not a minted one: since ADR 0095 a
+        # subject in a token has to be one `app_private.users` holds, and the
+        # poll below would otherwise break out of its loop on a 401 -- which
+        # reads as `!= 404`, so the fixture would report a warm schema cache
+        # it never observed.
+        probe_token = owner_session.token
         deadline = time.monotonic() + PROBE_RELOAD_TIMEOUT_SECONDS
         last = None
         while time.monotonic() < deadline:
@@ -1082,9 +1118,9 @@ def acceptance_probe(
             # which is on the published surface.
             psql(
                 project_a,
-                f"DELETE FROM app.notes WHERE owner_id = '{PROBE_SUBJECT}';",
+                f"DELETE FROM app.notes WHERE owner_id = '{owner_session.user_id}';",
                 role=owner,
-                claim=PROBE_SUBJECT,
+                claim=owner_session.user_id,
             )
             psql(project_a, f"DROP FUNCTION IF EXISTS {qualified}(double precision);", role=owner)
             psql(project_a, "NOTIFY pgrst, 'reload schema';")
@@ -1098,7 +1134,7 @@ def acceptance_probe(
             yield {
                 "function": ACCEPTANCE_PROBE_FUNCTION,
                 "qualified": qualified,
-                "subject": PROBE_SUBJECT,
+                "subject": owner_session.user_id,
                 "max_rows": max_rows,
                 "seeded_rows": surplus,
             }
@@ -1108,9 +1144,9 @@ def acceptance_probe(
             )
             _, _, delete_error = psql(
                 project_a,
-                f"DELETE FROM app.notes WHERE owner_id = '{PROBE_SUBJECT}';",
+                f"DELETE FROM app.notes WHERE owner_id = '{owner_session.user_id}';",
                 role=owner,
-                claim=PROBE_SUBJECT,
+                claim=owner_session.user_id,
             )
             psql(project_a, "NOTIFY pgrst, 'reload schema';")
 
@@ -1122,9 +1158,9 @@ def acceptance_probe(
             )
             _, rows, _ = psql(
                 project_a,
-                f"SELECT count(*) FROM app.notes WHERE owner_id = '{PROBE_SUBJECT}';",
+                f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner_session.user_id}';",
                 role=owner,
-                claim=PROBE_SUBJECT,
+                claim=owner_session.user_id,
             )
             assert remaining == "0", (
                 f"{qualified} survived teardown ({dropped} {drop_error}); it is on the "
@@ -1331,6 +1367,11 @@ APP_PROBE_USERNAME = "apg-acceptance-probe"
 #: values. Nothing else in the deployment ever holds it.
 APP_PROBE_PASSWORD = "correct-horse-battery-staple-7412"  # noqa: S105
 
+#: The second probe subject's username. Two owners are needed to prove that one
+#: caller is not served another's rows, and since ADR 0095 an owner has to be a
+#: subject the registry holds.
+SECOND_APP_PROBE_USERNAME = "apg-acceptance-probe-second"
+
 
 @dataclasses.dataclass(frozen=True)
 class ProbeSubject:
@@ -1361,6 +1402,37 @@ def app_probe_subject(project_a: dict[str, Any], psql: Callable[..., tuple[int, 
     refuses an unsorted array (D248), and the refusal arrives as a constraint
     violation rather than as a reordering.
     """
+    yield from _registered_subject(project_a, psql, APP_PROBE_USERNAME, "Acceptance probe")
+
+
+@pytest.fixture(scope="module")
+def second_app_probe_subject(
+    project_a: dict[str, Any], psql: Callable[..., tuple[int, str, str]]
+) -> Any:
+    """A second registered subject, for the proofs that need two owners.
+
+    ADR 0095 is why this exists. ``API-REST-001``'s exclusion half reads one
+    identity's rows and then a *second* identity's, and asserts the two sets do
+    not intersect -- and a second identity now has to be one the registry holds,
+    because a token naming a subject is refused unless it does. The alternative
+    considered was to drop the second HTTP read and assert only that the first
+    caller does not see rows the database says belong to somebody else. That is
+    the same property measured once instead of twice, and it stops proving that
+    the *other* identity can see its own rows, which is the half that catches a
+    policy denying everyone.
+    """
+    yield from _registered_subject(
+        project_a, psql, SECOND_APP_PROBE_USERNAME, "Acceptance probe (second owner)"
+    )
+
+
+def _registered_subject(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    username: str,
+    display_name: str,
+) -> Any:
+    """Create one subject through the product's own function, and remove it."""
     from agentic_postgres import service_source
 
     hashing = service_source.load("hashing")
@@ -1371,47 +1443,137 @@ def app_probe_subject(project_a: dict[str, Any], psql: Callable[..., tuple[int, 
     # Deleted first rather than after: a previous run that died between the
     # INSERT and its teardown leaves a row, and `users_username_normalised_key`
     # would then refuse the create with a message about a unique index.
-    psql(project_a, f"DELETE FROM app_private.users WHERE username = '{APP_PROBE_USERNAME}';")
+    psql(project_a, f"DELETE FROM app_private.users WHERE username = '{username}';")
 
     array = ", ".join(f"'{scope}'" for scope in scopes)
     code, user_id, error = psql(
         project_a,
         "SELECT app_private.auth_create_user("
-        f"'{APP_PROBE_USERNAME}', 'Acceptance probe', '{role_name}', "
+        f"'{username}', '{display_name}', '{role_name}', "
         f"ARRAY[{array}]::text[], '{stored}');",
     )
-    assert code == 0 and user_id, f"could not create the probe subject: {error}"
+    assert code == 0 and user_id, f"could not create the probe subject {username!r}: {error}"
 
     try:
         yield ProbeSubject(
             user_id=user_id,
-            username=APP_PROBE_USERNAME,
+            username=username,
             password=APP_PROBE_PASSWORD,
             role_name=role_name,
             scopes=tuple(scopes),
         )
     finally:
-        psql(project_a, f"DELETE FROM app_private.users WHERE username = '{APP_PROBE_USERNAME}';")
+        # The subject's rows go first. They are owned by a uuid rather than by a
+        # foreign key, so deleting the subject alone would leave rows nothing
+        # can reach and nothing will clean up.
+        psql(
+            project_a,
+            f"DELETE FROM app.notes WHERE owner_id = '{user_id}';",
+            role=project_a["database"]["roles"]["object_owner"],
+            claim=user_id,
+        )
+        psql(project_a, f"DELETE FROM app_private.users WHERE username = '{username}';")
         _, remaining, _ = psql(
             project_a,
-            f"SELECT count(*) FROM app_private.users WHERE username = '{APP_PROBE_USERNAME}';",
+            f"SELECT count(*) FROM app_private.users WHERE username = '{username}';",
         )
         assert remaining == "0", (
-            f"the probe subject survived teardown ({remaining} rows); it is a subject "
-            "with a known password in a deployed identity registry"
+            f"the probe subject {username!r} survived teardown ({remaining} rows); it is "
+            "a subject with a known password in a deployed identity registry"
         )
+
+
+@dataclasses.dataclass(frozen=True)
+class OwnerSession:
+    """An ordinary subject's session: who it is, and a token that says so."""
+
+    user_id: str
+    token: str
+    role: str
+    scopes: tuple[str, ...]
+
+
+@pytest.fixture(scope="module")
+def owner_session(
+    project_a: dict[str, Any],
+    app_probe_subject: Any,
+    app_login: Callable[..., Any],
+) -> OwnerSession:
+    """A registered subject and a token the deployment issued for it (ADR 0095).
+
+    This is what replaced ``mint_token(..., subject=request_subject(...))`` in
+    every proof that needs an *owner* rather than a role. The reason is not
+    stylistic: migration 0013's hook compares the subject against
+    ``app_private.users`` and ``auth_claims_are_current`` is an EXISTS over five
+    equalities including ``credential_version``, ``authz_version`` and an exact
+    scope array. A bootstrap-issued token carries none of those three, so no
+    derived subject can satisfy it -- and the ten proofs that used one all
+    returned ``AP401`` the first time a host gate ran after 0013 (D298).
+
+    Obtained through ``POST /auth/login``, which is the route a real caller
+    uses. Minting it here would prove that this suite can sign.
+
+    **The probe's scopes are read-only and the write proofs still work**, which
+    is not an oversight: nothing in the data plane reads ``scope`` -- migrations
+    0003, 0004 and 0005 contain the word nowhere. Scopes are the auth service's
+    vocabulary; the write RPCs are authorized by GRANT to ``authenticated`` and
+    the rows by policy. A proof that writes through this session is therefore
+    measuring the grant and the policy, not the scope, and would not silently
+    start passing if scopes were widened.
+    """
+    answer = app_login(project_a, app_probe_subject.username, app_probe_subject.password)
+    assert answer.status == 200, (
+        f"the probe subject could not log in ({answer.status}: {answer.body[:200]}). "
+        "It was created moments ago through the product's own auth_create_user, so "
+        "this is the login path failing rather than a missing subject"
+    )
+    issued = json.loads(answer.body)
+    return OwnerSession(
+        user_id=app_probe_subject.user_id,
+        token=issued["access_token"],
+        role=app_probe_subject.role_name,
+        scopes=app_probe_subject.scopes,
+    )
+
+
+@pytest.fixture(scope="module")
+def second_owner_session(
+    project_a: dict[str, Any],
+    second_app_probe_subject: Any,
+    app_login: Callable[..., Any],
+) -> OwnerSession:
+    """A second registered subject's session. See ``second_app_probe_subject``."""
+    answer = app_login(
+        project_a, second_app_probe_subject.username, second_app_probe_subject.password
+    )
+    assert answer.status == 200, (
+        f"the second probe subject could not log in ({answer.status}: {answer.body[:200]})"
+    )
+    issued = json.loads(answer.body)
+    return OwnerSession(
+        user_id=second_app_probe_subject.user_id,
+        token=issued["access_token"],
+        role=second_app_probe_subject.role_name,
+        scopes=second_app_probe_subject.scopes,
+    )
 
 
 @pytest.fixture(scope="session")
-def service_container(sh: Runner) -> Callable[[str, str], str]:
+def service_container(sh: Runner, auth_admin_command: Any) -> Callable[[str, str], str]:
     """The running container for one project's Compose service, by name.
 
-    Filtered on the Compose **working directory** rather than on the project
-    name. Both are labels Compose writes, and the working directory is the one
-    this suite already knows independently: ``RENDERED_ROOT / project_key`` is
-    where the deploy installs the model. Using the project name would mean
-    re-deriving ``apg-<key>`` here, and ADR 0002 is explicit that a name is read
-    from the deployed document rather than derived a second time.
+    Filtered on ``apg.project.key``, a **first-party** label this repository
+    declares beside every service in ``compose.yaml``, carrying the same value
+    the deployed document does.
+
+    It read ``com.docker.compose.project.working_dir`` until Run 14, and that
+    label **matched nothing** -- three proofs reported `alpha-dev is running no
+    container for the 'auth' service` about a container that was up and healthy.
+    D293 measured this in Run 12 and fixed it in ``bin/auth-admin.py``; the same
+    selector survived here because nothing had run these proofs on a host
+    (D299). The old docstring's argument was that working_dir avoids re-deriving
+    ``apg-<key>``, which is true and does not apply: ``apg.project.key`` is not
+    derived here either, it is read off the container.
 
     The deployed document itself carries no per-service container name -- only
     ``database.container`` -- so there is nothing to read for `rest` or `auth`,
@@ -1419,21 +1581,18 @@ def service_container(sh: Runner) -> Callable[[str, str], str]:
     """
 
     def find(project_key: str, service: str) -> str:
-        names = sh(
-            "docker",
-            "ps",
-            "--filter",
-            f"label=com.docker.compose.project.working_dir={RENDERED_ROOT / project_key}",
-            "--filter",
+        filters = [
+            f"label={auth_admin_command.PROJECT_KEY_LABEL}={project_key}",
             f"label=com.docker.compose.service={service}",
-            "--format",
-            "{{.Names}}",
-        ).split()
+        ]
+        arguments = [item for value in filters for item in ("--filter", value)]
+        names = sh("docker", "ps", *arguments, "--format", "{{.Names}}").split()
         if not names:
             pytest.fail(
-                f"{project_key} is running no container for the {service!r} service. "
-                f"A service held back by the deploy leaves no container behind, so "
-                "this reads the same as one that crashed"
+                f"{project_key} is running no container for the {service!r} service, "
+                f"selecting on {filters}. A service held back by the deploy leaves no "
+                "container behind -- and so does a selector that matches nothing, which "
+                "is why the filters are named here rather than described (D293, D299)"
             )
         assert len(names) == 1, f"{project_key}/{service} has {len(names)} containers: {names}"
         return names[0]

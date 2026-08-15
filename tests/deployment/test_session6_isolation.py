@@ -159,8 +159,22 @@ def test_project_bs_key_set_does_not_verify_project_as_tokens(
         f"project A's token names kid {kid!r}, which project B publishes. B can verify "
         "A's signatures, so the refusal is about the subject rather than about the key"
     )
-    assert served == project_b["jwt"]["verification_kids"], (
-        f"project B serves {served} where its document records "
-        f"{project_b['jwt']['verification_kids']}; the two readings disagree, so neither "
-        "is a reliable statement about what B will verify"
+    # Both of B's readings, and A's kid must be in neither (ADR 0098). This
+    # asserted that the two were EQUAL, which they are not and need not be: the
+    # endpoint is what B's issuer signs with, and `verification_kids` is what B's
+    # verifier accepts -- one key and two, since Session 6 made the auth service
+    # a second issuer (D304).
+    #
+    # Stricter than the equality it replaces: that assertion could only fail on
+    # a set mismatch, and this one fails if A's key appears in anything B
+    # publishes OR in anything B verifies.
+    accepted = project_b["jwt"]["verification_kids"]
+    assert set(served) <= set(accepted), (
+        f"project B publishes {served} and verifies against {accepted}; its own issuer's "
+        "key is not one its verifier holds, so B refuses the tokens B issues"
+    )
+    assert kid not in accepted, (
+        f"project A's token names kid {kid!r}, which project B's verifier accepts. B can "
+        "verify A's signatures, so the refusal above is about the subject rather than "
+        "about the key"
     )

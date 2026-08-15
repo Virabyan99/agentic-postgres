@@ -41,7 +41,6 @@ API = str(REPO_ROOT / "bin" / "api.sh")
 def test_the_request_broker_performs_a_call_with_the_token_in_no_argv_or_output(
     project_a: dict[str, Any],
     mint_token: Callable[..., str],
-    request_subject: Callable[[str], str],
     sh: Callable[..., str],
     as_root: None,
 ) -> None:
@@ -76,10 +75,9 @@ def test_the_request_broker_performs_a_call_with_the_token_in_no_argv_or_output(
     # The token this run will use, minted here so its value is known. Minted the
     # same way `dev-token` mints it -- same key, same claims -- so a substring
     # search for it is a search for the credential the broker actually carried.
-    subject = request_subject(project_a["project"]["key"])
-    expected = mint_token(
-        project_a, project_a["database"]["roles"]["authenticated"], subject=subject
-    )
+    # `subject=None`, because that is what `dev-token` now mints (ADR 0095) and
+    # this value only means something if it is the same string the broker carried.
+    expected = mint_token(project_a, project_a["database"]["roles"]["authenticated"], subject=None)
     assert expected.count(".") == 2, "the minted value is not a JWT; the searches below are void"
     signing_input = expected.rsplit(".", 1)[0]
 

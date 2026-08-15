@@ -328,14 +328,32 @@ def test_a_request_role_reaches_one_private_function_and_no_private_data(
         )
         assert hook == "t", f"{role} cannot execute the pre-request hook"
 
-        others = sql(
+        # TWO functions are reachable, not one, and the second arrived
+        # with migration 0013 (ADR 0096). `postgrest_pre_request` is
+        # SECURITY INVOKER -- deliberately, so it can do nothing the caller
+        # could not -- and it calls `auth_claims_are_current`, so the request
+        # role needs EXECUTE on that too or every request fails.
+        #
+        # It is safe for the reason 0013 states beside the grant: the helper
+        # takes the whole claim tuple and returns a BOOLEAN. It does not answer
+        # "what are subject X's scopes", so a caller cannot enumerate another
+        # subject's authority through it -- a probe costs a correct guess of all
+        # five values.
+        #
+        # Still an allowlist, and still enumerated by name: a third function
+        # appearing in `app_private` under open default privileges fails here,
+        # which is what this assertion is for.
+        reachable = sql(
             project_a,
-            "SELECT coalesce(string_agg(p.proname, ','), '') FROM pg_proc p "
-            "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'app_private' "
-            "AND p.proname <> 'postgrest_pre_request' AND "
+            "SELECT coalesce(string_agg(p.proname, ',' ORDER BY p.proname), '') "
+            "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            "WHERE n.nspname = 'app_private' AND "
             f"has_function_privilege('{roles[role]}', p.oid, 'EXECUTE');",
         )
-        assert others == "", f"{role} can execute {others} in app_private"
+        assert reachable == "auth_claims_are_current,postgrest_pre_request", (
+            f"{role} can execute {reachable!r} in app_private, where the hook and "
+            "its comparison helper are the only two it may reach"
+        )
 
         tables = sql(
             project_a,
@@ -614,6 +632,19 @@ def test_only_the_activated_roles_may_log_in(
     # own statement about whether it does.
     if (project_a["routes"].get("rest") or {}).get("status") == "ready":
         expected.add(roles["postgrest_authenticator"])
+
+    # Session 6's identity plane, keyed the same way and for the same reason
+    # (ADR 0046, ADR 0096). `auth_service` is activated with LOGIN because the
+    # auth container authenticates as it -- and, like the authenticator, it is
+    # not an access profile, because a profile is a transport a developer or an
+    # application reaches the cluster through.
+    #
+    # Keyed on the ROUTE rather than on `deployed_through_session >= 6`: a
+    # session number is a proxy for the event, and D280 is what a proxy costs
+    # when the two come apart. A document that publishes an application route is
+    # a deployment that runs the service; one that does not, does not.
+    if project_a["routes"].get("app") is not None:
+        expected.add(roles["auth_service"])
 
     names = "', '".join(sorted(roles.values()))
     observed = sql(

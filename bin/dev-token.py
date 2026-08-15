@@ -12,11 +12,18 @@ argument vector, where every user on the host can read it out of `ps`. The
 environment block is readable only by the process's own user through `/proc`,
 which is the difference this whole design turns on.
 
-**Nothing about the token is chosen by the caller.** The role is one of three
-enumerated names resolved through the deployed document; the subject is derived
-from the project, not supplied; the lifetime is bounded; the issuer and audience
-come from the document. A caller who could name a role, a subject and a lifetime
-would be a caller who could mint any credential this issuer can sign.
+**Nothing about the token is chosen by the caller, and it carries no subject at
+all.** The role is one of three enumerated names resolved through the deployed
+document; the lifetime is bounded; the issuer and audience come from the
+document. A caller who could name a role, a subject and a lifetime would be a
+caller who could mint any credential this issuer can sign.
+
+The subject was *derived* from the project until Run 14, which was the same
+argument one step short. Migration 0013 compares a subject against
+`app_private.users` inside the request transaction, so a derived subject names
+nobody and is refused. **This issuer names a role; the auth service names a
+subject** (ADR 0095) -- which means a token from here can reach the surface and
+can read no owner's rows, and that is the property rather than a shortfall.
 
 Signing is `openssl dgst -sha256 -sign`, measured end to end against the locked
 PostgREST before this was written: a token signed that way and verified against
@@ -44,7 +51,6 @@ import os
 import subprocess
 import sys
 import time
-import uuid
 from pathlib import Path
 from typing import Any
 
@@ -100,11 +106,13 @@ MAX_TTL_SECONDS = jwt_claims.MAX_TTL_SECONDS
 #: The root-plane file the signing key is materialized into (ADR 0054, 0055).
 SIGNING_KEY_FILE = "bootstrap_jwt_signing_key.pem"
 
-#: The namespace the development subject is derived in. A UUIDv5 of the project
-#: key, so the subject is stable across runs, distinct per project, and not
-#: something a caller chose. A caller-supplied subject is a caller who can read
-#: any owner's rows through a policy that is working exactly as designed.
-SUBJECT_NAMESPACE = uuid.UUID("6f0f5a5c-2c53-4a24-9a1e-6a5f7d0f4a11")
+#: There is no subject namespace any more, and its absence is the decision
+#: (ADR 0095). `SUBJECT_NAMESPACE` and `development_subject()` derived a stable
+#: per-project UUIDv5 so that a caller could not choose one. Migration 0013
+#: settled the question differently and more strictly: a subject is compared
+#: against `app_private.users` inside the request transaction, so a derived one
+#: names nobody and is refused with `PT401`. This issuer names a **role**; the
+#: auth service names a subject.
 
 
 class TokenError(Exception):
@@ -194,11 +202,6 @@ def key_id(key_path: Path) -> str:
         # private key and openssl prints material from one on some failures.
         raise TokenError(5, f"could not derive this key's identifier: {error}") from error
     return jwt_keys.public_jwk(modulus_hex=modulus, exponent=exponent)["kid"]
-
-
-def development_subject(project_key: str) -> str:
-    """A stable per-project subject, derived rather than accepted."""
-    return str(uuid.uuid5(SUBJECT_NAMESPACE, project_key))
 
 
 def mint(
@@ -312,17 +315,26 @@ def main(argv: list[str] | None = None) -> int:
                 "outputs schema v6 has no documentation role at all.",
             )
 
-        # The documentation role gets no subject, and that is migration 0009's
-        # rule expressed at the other end: the pre-request hook *refuses* a
-        # documentation token that carries one, with 401. Minting one would
-        # produce a credential that is rejected by design, which reads as a
-        # broken tool rather than as the boundary working.
-        subject = None if arguments.role == "docs" else development_subject(project_key)
-
+        # NO ROLE GETS A SUBJECT (ADR 0095). This read
+        # `None if arguments.role == "docs" else development_subject(...)` until
+        # Run 14, when the first host gate after migration 0013 answered `PT401`
+        # to every token that named one.
+        #
+        # 0013's hook compares a subject against `app_private.users` inside the
+        # request's own transaction, and `auth_claims_are_current` is an EXISTS
+        # over five equalities including `credential_version`, `authz_version`
+        # and an exact scope array. A bootstrap token carries none of those
+        # three, so the comparison is against NULL and NO value of the subject
+        # can satisfy it. Only the identity registry's own issuer can name a
+        # subject, which is the property rather than the limitation -- and it is
+        # the one this module's docstring has argued for since Session 5.
+        #
+        # Migration 0009's older rule is subsumed: the documentation role was
+        # already refused a subject, and now nothing has one.
         token = mint(
             key_path=signing_key_path(project_key, document),
             role_name=role_name,
-            subject=subject,
+            subject=None,
             ttl=arguments.ttl_seconds,
             document=document,
         )

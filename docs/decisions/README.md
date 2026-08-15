@@ -158,3 +158,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0092](0092-the-auth-service-reaches-the-cluster-directly.md) | The auth service reaches the cluster directly | 6 | Accepted |
 | [0093](0093-an-operator-command-reaches-service-logic-through-a-container.md) | An operator command reaches service logic through a container | 6 | Accepted |
 | [0094](0094-a-tokens-kid-is-derived-from-the-key-that-signed-it.md) | A token's `kid` is derived from the key that signed it | 6 | Accepted |
+| [0095](0095-a-subject-in-a-token-is-the-identity-registrys-to-assert.md) | A subject in a token is the identity registry's to assert | 6 | Accepted |
+| [0096](0096-a-boundary-assertion-is-re-derived-not-relaxed.md) | A boundary assertion is re-derived, not relaxed | 6 | Accepted |
+| [0097](0097-a-structural-refusal-is-400-and-says-nothing.md) | A structural refusal is 400 and says nothing | 6 | Accepted |
+| [0098](0098-the-issuers-published-set-is-not-the-verifiers-set.md) | The issuer's published set is not the verifier's set | 6 | Accepted |

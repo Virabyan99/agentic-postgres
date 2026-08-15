@@ -161,8 +161,27 @@ def test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key(
             "bootstrap issuer is live is a value that looks measured and is not"
         )
 
+    # The AUTH SERVICE's own signing key is not a leak of this one.
+    #
+    # This scan excluded exactly one file -- the bootstrap key -- and read every
+    # other file in the generation for PEM markers. Session 6 gave the auth
+    # service a signing key of its own, on the compose plane, 0400 to uid 65532,
+    # and the scan reported it as "private key material was materialized into
+    # ...". It is where it is supposed to be: the service IS an issuer
+    # (ADR 0088), which is the whole reason `SEC-KEY-001` was rewritten
+    # per-service in Session 6 -- and that proof asserts this file's mode and
+    # location positively, so excluding it here loses no coverage (ADR 0096).
+    #
+    # What this proof still asserts is its own subject: no copy of the BOOTSTRAP
+    # issuer's key exists outside the root plane. The exclusion names ONE path,
+    # derived from the command that writes it, so a bootstrap key copied into
+    # the auth service's directory under any other name is still found.
+    permitted = {
+        key,
+        generation / jwks_command.AUTH_SERVICE / jwks_command.AUTH_SIGNING_KEY_FILE,
+    }
     for path in sorted(generation.rglob("*")):
-        if not path.is_file() or path == key:
+        if not path.is_file() or path in permitted:
             continue
         content = path.read_text(encoding="utf-8", errors="replace")
         for marker in PRIVATE_KEY_MARKERS:

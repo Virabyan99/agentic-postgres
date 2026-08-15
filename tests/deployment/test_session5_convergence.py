@@ -380,7 +380,7 @@ def test_the_reload_channel_still_delivers_after_a_cluster_restart(
     acceptance_probe,
     rest_base,
     api_call,
-    mint_token,
+    owner_session,
 ) -> None:
     """`LISTEN`/`NOTIFY` survives the cluster it listens to going away.
 
@@ -397,11 +397,10 @@ def test_the_reload_channel_still_delivers_after_a_cluster_restart(
     """
     del as_root
     base = rest_base(project_a)
-    reader = mint_token(
-        project_a,
-        project_a["database"]["roles"]["authenticated"],
-        subject=acceptance_probe["subject"],
-    )
+    # The probe seeds under the registered owner, and only that owner's own
+    # session can read them: a minted token naming the subject is refused by
+    # 0013's hook (ADR 0095).
+    reader = owner_session.token
     answer = api_call(
         f"{base}/rpc/{acceptance_probe['function']}",
         method="POST",

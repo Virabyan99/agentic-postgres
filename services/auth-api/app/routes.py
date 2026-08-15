@@ -233,21 +233,28 @@ async def _body(request: Request, model: type) -> object:
     bounds the *process* is the Traefik buffering middleware one hop earlier,
     carrying the same number from the same declaration (`auth_limits.py`).
     """
+    # Both refusals are `MalformedRequest` -- 400, carrying no message to the
+    # caller (ADR 0097). They were `InvalidRequest`, which is 422 with the reason
+    # in the body, and that is the shape reserved for an authenticated
+    # administrator; `/auth/login` has no caller identity at all. Measured on the
+    # host: a duplicate member in a login body came back
+    # `422 {"error":"invalid_request","message":"duplicate JSON member: 'username'"}`,
+    # which tells an unauthenticated caller which field it duplicated.
     try:
         document = parse_object(await request.body())
     except MalformedBody as exc:
-        raise errors.InvalidRequest(str(exc)) from exc
+        raise errors.MalformedRequest(str(exc)) from exc
     try:
         return model(**document)
     except ValidationError as exc:
         # The first error's type, never its input value: a validation error
         # renders the offending value, and the offending value can be a password.
         kinds = sorted({item["type"] for item in exc.errors()})
-        raise errors.InvalidRequest(f"request body is not valid: {kinds}") from exc
+        raise errors.MalformedRequest(f"request body is not valid: {kinds}") from exc
 
 
 async def _guard(handler: Callable[[], Awaitable[Response]]) -> Response:
-    """One place the four exception types become responses.
+    """One place the exception types become responses.
 
     A decorator rather than per-route `try` blocks, so a route added later
     cannot forget one and answer 500 with a traceback -- which for the login
@@ -259,6 +266,10 @@ async def _guard(handler: Callable[[], Awaitable[Response]]) -> Response:
         return errors.unauthenticated()
     except errors.AuthorizationFailed:
         return errors.unauthorized()
+    except errors.MalformedRequest:
+        # The reason is deliberately not passed on. `malformed()` takes no
+        # argument for the same reason `unauthenticated()` does not (ADR 0097).
+        return errors.malformed()
     except errors.InvalidRequest as exc:
         return errors.invalid(str(exc))
 

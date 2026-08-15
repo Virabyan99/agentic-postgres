@@ -98,7 +98,6 @@ def test_one_projects_token_and_credential_are_refused_by_the_other(
     rest_base: Callable[[dict[str, Any]], str],
     api_call: Callable[..., Any],
     mint_token: Callable[..., str],
-    request_subject: Callable[[str], str],
     materialized_secret: Callable[[str, str, str], str],
     pg_login: Callable[..., tuple[int, str, str]],
     as_root: None,
@@ -134,16 +133,19 @@ def test_one_projects_token_and_credential_are_refused_by_the_other(
     base = rest_base(target)
     target_role = target["database"]["roles"]["authenticated"]
     other_role = other["database"]["roles"]["authenticated"]
-    subject = request_subject(key(target))
-
-    own = mint_token(target, target_role, subject=subject)
+    # None of the three tokens names a subject, and none ever needed to: this
+    # proof is about a KEY and a ROLE crossing a project boundary. Carrying a
+    # subject made the positive control depend on an identity the target's
+    # registry does not hold, which since migration 0013 is a 401 that reads
+    # exactly like the isolation being proved (ADR 0095).
+    own = mint_token(target, target_role, subject=None)
     accepted = api_call(f"{base}/notes?limit=1", token=own)
     assert accepted.status == 200, (
         f"{key(target)} refused its own token ({accepted.status}); the refusals below "
         "would then be about a broken route rather than about isolation"
     )
 
-    foreign_key = mint_token(other, target_role, subject=subject)
+    foreign_key = mint_token(other, target_role, subject=None)
     assert foreign_key != own, "the two projects minted an identical token"
     refused = api_call(f"{base}/notes?limit=1", token=foreign_key)
     assert refused.status in (401, 403), (
@@ -151,7 +153,7 @@ def test_one_projects_token_and_credential_are_refused_by_the_other(
         "the two projects share verification material"
     )
 
-    foreign_role = mint_token(target, other_role, subject=subject)
+    foreign_role = mint_token(target, other_role, subject=None)
     refused = api_call(f"{base}/notes?limit=1", token=foreign_role)
     assert refused.status in (401, 403, 500), (
         f"{key(target)} served a token naming {key(other)}'s role ({refused.status})"

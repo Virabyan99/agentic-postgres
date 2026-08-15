@@ -67,7 +67,7 @@ def test_the_anonymous_role_reads_nothing_it_was_not_granted(
     rest_base: Callable[[dict[str, Any]], str],
     api_call: Callable[..., Any],
     mint_token: Callable[..., str],
-    request_subject: Callable[[str], str],
+    owner_session: Any,
 ) -> None:
     """SEC-ANON-001, and an empty 200 is not accepted as a refusal.
 
@@ -89,9 +89,12 @@ def test_the_anonymous_role_reads_nothing_it_was_not_granted(
     emptiness is meaningless and this says so rather than passing.
     """
     base = rest_base(project_a)
-    subject = request_subject(project_a["project"]["key"])
-
-    authenticated = mint_token(project_a, roles["authenticated"], subject=subject)
+    # A registered subject and the deployment's own token for it (ADR 0095).
+    # A minted token naming a subject is refused by 0013's hook, so the control
+    # write below would 401 and the anonymous emptiness that follows would be
+    # measuring a broken write path rather than the anonymous role.
+    subject = owner_session.user_id
+    authenticated = owner_session.token
     seeded = api_call(
         f"{base}/rpc/create_note",
         method="POST",
@@ -150,8 +153,7 @@ def test_the_private_schemas_are_unreachable_through_postgrest(
     rest_base: Callable[[dict[str, Any]], str],
     api_call: Callable[..., Any],
     psql: Callable[..., tuple[int, str, str]],
-    mint_token: Callable[..., str],
-    request_subject: Callable[[str], str],
+    owner_session: Any,
 ) -> None:
     """SEC-PRIV-001. Every private object refused **by attempting it**.
 
@@ -172,8 +174,7 @@ def test_the_private_schemas_are_unreachable_through_postgrest(
     on the hook is widened to the schema rather than to the function.
     """
     base = rest_base(project_a)
-    subject = request_subject(project_a["project"]["key"])
-    token = mint_token(project_a, roles["authenticated"], subject=subject)
+    token = owner_session.token
 
     reachable = api_call(f"{base}/notes?limit=1", token=token)
     assert reachable.status == 200, (
@@ -235,7 +236,8 @@ def test_role_switching_cannot_exceed_the_authenticators_memberships(
     api_call: Callable[..., Any],
     psql: Callable[..., tuple[int, str, str]],
     mint_token: Callable[..., str],
-    request_subject: Callable[[str], str],
+    owner_session: Any,
+    bootstrap_command: Any,
 ) -> None:
     """SEC-ROLE-001, with the allowed set derived rather than written down.
 
@@ -262,7 +264,6 @@ def test_role_switching_cannot_exceed_the_authenticators_memberships(
     evidence file reports as passed.
     """
     base = rest_base(project_a)
-    subject = request_subject(project_a["project"]["key"])
     authenticator = roles["postgrest_authenticator"]
 
     status, granted, error = psql(
@@ -276,11 +277,19 @@ def test_role_switching_cannot_exceed_the_authenticators_memberships(
     assert status == 0, f"could not read the authenticator's memberships: {error}"
     memberships = {name for name in granted.split(",") if name}
 
-    activated = {roles["anon"], roles["authenticated"], roles["api_documentation"]}
+    # DERIVED from the bootstrap plane's own enumeration, not restated here.
+    # This was a literal set of three, and Session 6 Run 9 granted the
+    # authenticator `project_admin` as well (D266) -- deliberately, in the plane
+    # that owns role membership -- so the first host gate afterwards reported the
+    # product's own decision as a violation. The docstring above asks for exactly
+    # this: "a session that activates another role must move this assertion with
+    # it", and a set the test writes down cannot move with anything (D301,
+    # ADR 0096).
+    activated = {roles[name] for name in bootstrap_command.AUTHENTICATOR_REQUEST_ROLES}
     assert memberships == activated, (
-        f"{authenticator} is a member of {sorted(memberships)}; this session activates "
-        f"exactly {sorted(activated)}. A session that activates another role must move "
-        "this assertion with it rather than leave the refusals below measuring nothing"
+        f"{authenticator} is a member of {sorted(memberships)}; the bootstrap plane "
+        f"grants exactly {sorted(activated)}. The catalog and the command that writes "
+        "it disagree, so the refusals below are about an unknown membership set"
     )
 
     # One row per attribute, named. The first version concatenated all three and
@@ -324,26 +333,22 @@ def test_role_switching_cannot_exceed_the_authenticators_memberships(
     # about membership rather than about a service that switches to nothing. A
     # PostgreSQL SQLSTATE in the body is that evidence -- the request reached the
     # database as some role -- where a JWT-layer rejection never gets that far.
-    reader = api_call(
-        f"{base}/notes?limit=1",
-        token=mint_token(project_a, roles["authenticated"], subject=subject),
-    )
+    reader = api_call(f"{base}/notes?limit=1", token=owner_session.token)
     assert reader.status in (200, 206) and json.loads(reader.body), (
         f"the authenticated role read nothing ({reader.status}); every refusal below "
         "would then be about a service that switches to nothing"
     )
 
     for role in sorted(memberships):
-        # The documentation role is minted **without** a subject, because
-        # migration 0009's hook refuses a documentation token that carries one --
-        # `AP401: the documentation role has no request identity`. `dev-token.sh`
-        # says so in its own help text. Minting all three the same way asked the
-        # product for a credential it is designed to reject, and read as a
-        # role-switch failure (D196).
-        carries_subject = None if role == roles["api_documentation"] else subject
+        # No role is minted with a subject any more, and the special case for the
+        # documentation role went with it (ADR 0095). D196's finding stands and
+        # has been generalised: a minted token may not name a subject at all, so
+        # asking the product for a credential it is designed to reject is no
+        # longer possible here. What a granted role reads is separately covered;
+        # what this loop needs is that the SWITCH happened.
         allowed = api_call(
             f"{base}/notes?limit=1",
-            token=mint_token(project_a, role, subject=carries_subject),
+            token=mint_token(project_a, role, subject=None),
         )
         if allowed.status in (200, 206):
             continue
@@ -364,9 +369,7 @@ def test_role_switching_cannot_exceed_the_authenticators_memberships(
     # way rather than by matching an error string.
     forbidden = sorted((set(roles.values()) - memberships) | {"apg_no_such_role"})
     for role in forbidden:
-        refused = api_call(
-            f"{base}/notes?limit=1", token=mint_token(project_a, role, subject=subject)
-        )
+        refused = api_call(f"{base}/notes?limit=1", token=mint_token(project_a, role, subject=None))
         assert refused.status in (401, 403, 500), (
             f"a token naming {role} returned {refused.status}; the authenticator "
             "switched to a role it is not a member of"

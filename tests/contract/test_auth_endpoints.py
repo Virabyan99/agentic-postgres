@@ -664,8 +664,19 @@ def test_a_duplicate_member_in_the_login_body_is_refused(drive: Any) -> None:
         "/auth/login",
         content='{"username": "ada", "username": "root", "password": "x"}',
     )
-    assert response.status_code == 422
-    assert response.json()["error"] == "invalid_request"
+    # 400 and `malformed_request`, not 422 and `invalid_request` (ADR 0097).
+    # This asserted 422 while the live proof asserted 400 -- two authorities for
+    # one status inside one service, each internally consistent, and the
+    # disagreement survived because the live one had never run (D264's shape,
+    # D303).
+    assert response.status_code == 400
+    assert response.json() == {"error": "malformed_request"}
+    # The property that was actually violated: an unauthenticated caller was
+    # told WHICH member it had duplicated. Asserting the absence of a message
+    # rather than the status alone is what makes this stricter than what it
+    # replaces.
+    assert "message" not in response.json()
+    assert "username" not in response.text
 
 
 def test_an_unknown_member_in_the_login_body_is_refused(drive: Any) -> None:
@@ -675,12 +686,20 @@ def test_an_unknown_member_in_the_login_body_is_refused(drive: Any) -> None:
         "/auth/login",
         content=json.dumps({"username": "ada", "password": PASSPHRASE, "role": "project_admin"}),
     )
-    assert response.status_code == 422
+    # A model with `extra="forbid"` refusing an unknown member is as structural
+    # as a duplicate one, and it was disclosing pydantic's error TYPES to an
+    # unauthenticated caller (ADR 0097).
+    assert response.status_code == 400
+    assert response.json() == {"error": "malformed_request"}
+    assert "role" not in response.text
 
 
 @pytest.mark.parametrize("body", ["[]", '"a string"', "42", "null", ""])
 def test_a_non_object_login_body_is_refused(drive: Any, body: str) -> None:
-    assert drive("POST", "/auth/login", content=body).status_code == 422
+    """400 with nothing in it, for every shape that is not an object (ADR 0097)."""
+    response = drive("POST", "/auth/login", content=body)
+    assert response.status_code == 400
+    assert response.json() == {"error": "malformed_request"}
 
 
 def test_an_oversized_bearer_token_is_refused_without_being_parsed(drive: Any) -> None:

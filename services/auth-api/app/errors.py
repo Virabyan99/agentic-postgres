@@ -72,6 +72,25 @@ class AuthorizationFailed(Exception):
         self.required = required
 
 
+class MalformedRequest(Exception):
+    """Refused on its shape, before any domain logic ran (ADR 0097).
+
+    Distinct from `InvalidRequest` because the two answer different callers.
+    This one is raised on an **unauthenticated** path as often as not -- a login
+    body that is not an object, that carries a duplicate member, or that names a
+    field the model forbids -- and `MALFORMED_REQUEST` is deliberately one token
+    for nine structural problems, because which of them a bad request had is not
+    information its sender needs.
+
+    The reason travels for the log and never for the caller, which is the shape
+    `AuthenticationFailed` already has and for the same reason.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class InvalidRequest(Exception):
     """Well-formed and refused. The message is returned to an administrator."""
 

@@ -47,6 +47,19 @@ EXIT_IDENTITY_MISMATCH = 11
 #: override (ADR 0030).
 IDENTITY_FIELDS = ("project_key", "database_name", "compose_project_name", "instance_uuid")
 
+#: The request roles the API authenticator may become, by document key.
+#:
+#: A module constant rather than a literal inside `role_statements`, so that the
+#: proof asserting "the memberships are exactly the activated set" can read the
+#: enumeration instead of restating it. It restated it, and Session 6 added
+#: `project_admin` here in Run 9 (D266) without moving the copy -- so the first
+#: host gate to run afterwards reported the product's own deliberate grant as a
+#: violation (D301, ADR 0096).
+#:
+#: The membership carries `ADMIN FALSE, INHERIT FALSE, SET TRUE` in every case;
+#: see `role_statements` for what each option is load-bearing for.
+AUTHENTICATOR_REQUEST_ROLES = ("anon", "authenticated", "api_documentation", "project_admin")
+
 
 def await_cluster(container: str, database: str, *, attempts: int = 60, delay: float = 2.0) -> None:
     """Wait for the cluster, not for the port.
@@ -273,7 +286,7 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     # decided by the scope in its token, not by the role name (API-ADMIN-001),
     # and the auth service is a separate process that does not use this
     # membership at all.
-    for request_role in ("anon", "authenticated", "api_documentation", "project_admin"):
+    for request_role in AUTHENTICATOR_REQUEST_ROLES:
         statements.append(
             f"GRANT {q(roles[request_role])} TO {q(roles['postgrest_authenticator'])} "
             f"WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;"

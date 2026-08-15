@@ -254,6 +254,18 @@ def test_materialized_files_are_read_only_and_owned_by_the_declared_consumer(
     for secret in active_secrets(contract, session=deployed_session):
         for consumer in secret["consumers"]:
             path = Path(secret_source_path(key, generation, consumer))
+            # `required: false` means the provider may hold no value, and the
+            # materializer then writes no file -- which is what D283 established
+            # when an optional secret's 404 failed a whole deployment. This proof
+            # kept the older rule and reported the absence of
+            # `auth_jwt_prepared_key` as a defect: that key exists only while a
+            # signing-key rotation is in flight, and none is (D302).
+            #
+            # `continue` rather than a relaxed assertion, so `assert checked`
+            # below still counts only what was actually read -- and a REQUIRED
+            # secret that is missing still fails on the next line.
+            if not secret.get("required", True) and not path.exists():
+                continue
             assert path.is_file(), f"{path} was not materialized"
 
             stat = path.stat()

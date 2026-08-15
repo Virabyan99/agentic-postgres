@@ -57,15 +57,17 @@ def surface() -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
-def reader(
-    project_a: dict[str, Any], mint_token: Callable[..., str], request_subject: Callable[[str], str]
-) -> str:
-    """An ``authenticated`` token carrying the project's development subject."""
-    return mint_token(
-        project_a,
-        project_a["database"]["roles"]["authenticated"],
-        subject=request_subject(project_a["project"]["key"]),
-    )
+def reader(owner_session: Any) -> str:
+    """An ``authenticated`` token for a subject the identity registry holds.
+
+    It carried the project's *development* subject -- a derived UUID naming
+    nobody -- until Run 14. Migration 0013's hook compares a subject against
+    ``app_private.users`` inside the request transaction, so every proof in this
+    module answered ``AP401`` the first time a host gate ran after it (D298).
+    The token now comes from ``POST /auth/login`` for a registered subject,
+    which is what a real caller holds (ADR 0095).
+    """
+    return owner_session.token
 
 
 # ---------------------------------------------------------------------------
@@ -187,8 +189,8 @@ def test_http_reads_reproduce_the_database_row_level_result(
     rest_base: Callable[[dict[str, Any]], str],
     api_call: Callable[..., Any],
     psql: Callable[..., tuple[int, str, str]],
-    mint_token: Callable[..., str],
-    request_subject: Callable[[str], str],
+    owner_session: Any,
+    second_owner_session: Any,
     reader: str,
 ) -> None:
     """API-REST-001. One claim, two transports, the same rows.
@@ -208,11 +210,16 @@ def test_http_reads_reproduce_the_database_row_level_result(
     Both halves are asserted. "A sees none of B's rows" is true of an empty
     table, so A must see some of its own first, and a second identity's rows must
     exist for the exclusion to have anything to exclude.
+
+    **Both identities are registered subjects** (ADR 0095). The second one used
+    to be a fixed UUID that existed nowhere, which 0013's hook now refuses -- and
+    which was always the weaker measurement, because two callers the deployment
+    has never heard of cannot demonstrate that the registry keeps them apart.
     """
     base = rest_base(project_a)
     roles = project_a["database"]["roles"]
-    mine = request_subject(project_a["project"]["key"])
-    other = "22222222-2222-2222-2222-222222222222"
+    mine = owner_session.user_id
+    other = second_owner_session.user_id
 
     seeded = api_call(
         f"{base}/rpc/create_note",
@@ -253,8 +260,7 @@ def test_http_reads_reproduce_the_database_row_level_result(
         f"only in the database {sorted(set(direct_ids) - set(http_ids))}"
     )
 
-    foreign = mint_token(project_a, roles["authenticated"], subject=other)
-    theirs = api_call(f"{base}/notes?select=id", token=foreign)
+    theirs = api_call(f"{base}/notes?select=id", token=second_owner_session.token)
     assert theirs.status == 200, f"the second identity's read returned {theirs.status}"
     theirs_ids = {row["id"] for row in json.loads(theirs.body)}
     assert theirs_ids, "the second identity owns no rows either; there is nothing to exclude"
@@ -272,7 +278,7 @@ def test_the_write_surface_is_exactly_the_named_rpcs(
     rest_base: Callable[[dict[str, Any]], str],
     api_call: Callable[..., Any],
     psql: Callable[..., tuple[int, str, str]],
-    request_subject: Callable[[str], str],
+    owner_session: Any,
     reader: str,
 ) -> None:
     """API-RPC-001. Generic writes fail, ownership is derived, one row moves.
@@ -298,7 +304,7 @@ def test_the_write_surface_is_exactly_the_named_rpcs(
     the advertisement.
     """
     base = rest_base(project_a)
-    mine = request_subject(project_a["project"]["key"])
+    mine = owner_session.user_id
 
     created = api_call(
         f"{base}/rpc/create_note",
@@ -452,7 +458,7 @@ def test_row_and_time_limits_are_enforced_by_the_server(
     rest_base: Callable[[dict[str, Any]], str],
     api_call: Callable[..., Any],
     acceptance_probe: dict[str, Any],
-    mint_token: Callable[..., str],
+    owner_session: Any,
 ) -> None:
     """API-LIMIT-001. A client cannot raise the ceiling by asking.
 
@@ -473,9 +479,11 @@ def test_row_and_time_limits_are_enforced_by_the_server(
     that is present and inert.
     """
     base = rest_base(project_a)
-    roles = project_a["database"]["roles"]
     ceiling = acceptance_probe["max_rows"]
-    reader = mint_token(project_a, roles["authenticated"], subject=acceptance_probe["subject"])
+    # The probe seeds its surplus rows under the registered owner, so the token
+    # that reads them is that owner's session rather than one minted here for a
+    # subject the registry does not hold (ADR 0095).
+    reader = owner_session.token
 
     under = api_call(f"{base}/notes?select=id&limit=5", token=reader)
     assert under.status == 200 and json.loads(under.body), (

@@ -103,14 +103,29 @@ def test_the_published_key_set_is_what_every_verifier_actually_loaded(
     )
     inside = [key["kid"] for key in loaded["keys"]]
 
-    assert declared == served == inside, (
-        "three readings of one key set disagree:\n"
+    # THE VERIFIER'S SET, read three ways, and they must be equal. The third
+    # is the one that cannot be inferred: a running PostgREST never re-reads its
+    # key set, so the file on disk can be right while the process holds the
+    # inode it opened at startup (D278, ADR 0088).
+    assert declared == inside, (
+        "two readings of the verifier's key set disagree:\n"
         f"  the deployed document says {declared}\n"
-        f"  the issuer publishes      {served}\n"
         f"  PostgREST has loaded      {inside}\n"
-        "A verifier holding a set the issuer does not publish refuses every token "
-        "the issuer signs (D276), and a set on disk that the process never re-read "
-        "is the stranded inode ADR 0088 describes."
+        "A set on disk that the process never re-read is the stranded inode "
+        "ADR 0088 describes."
+    )
+
+    # THE ISSUER'S SET is a non-empty SUBSET of it, not the same list (ADR 0098).
+    # `/auth/jwks.json` serves the one key the auth service signs with; the
+    # verifier is configured with every live issuer's key, which since Run 10 is
+    # two. This asserted equality and failed on both projects the first time it
+    # ran -- and equality was the weaker statement, because it holds trivially
+    # exactly while there is only one issuer (D304).
+    assert served, "the issuer publishes no key at all; nothing can verify what it signs"
+    assert set(served) <= set(declared), (
+        f"the issuer publishes {served}, and the verifier accepts {declared}. A key the "
+        "issuer signs with and the verifier does not hold refuses every token that "
+        "issuer mints, which is D276 exactly"
     )
 
     for key in loaded["keys"]:
