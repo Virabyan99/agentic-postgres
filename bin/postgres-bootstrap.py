@@ -788,6 +788,21 @@ POSTGREST_CONSUMER = {
     "format": "pgpass",
 }
 
+#: The auth service's, in the same shape and for the same reason (D288).
+#:
+#: Must match `secrets.required.yaml`'s declaration of `auth_service_password`
+#: exactly -- `recover_secret` reads the file according to the consumer it is
+#: handed, so a `target_file` that disagreed would look for a file that is not
+#: there and report the credential absent, leaving the role NOLOGIN with no
+#: error. `test_the_bootstrap_consumers_match_the_secret_contract` compares the
+#: two rather than trusting this copy.
+AUTH_SERVICE_CONSUMER = {
+    "plane": "compose",
+    "service": "auth",
+    "target_file": "auth_service_pgpass",
+    "format": "pgpass",
+}
+
 
 def materialized_secret_path(project_key: str, consumer: dict[str, Any]) -> Path | None:
     """The file this consumer's secret lands in, in the active generation.
@@ -805,19 +820,29 @@ def materialized_secret_path(project_key: str, consumer: dict[str, Any]) -> Path
     return path if path.is_file() else None
 
 
-def read_postgrest_password(path: Path) -> str:
-    """The authenticator's password, out of the pgpass line that carries it.
+def read_pgpass_password(path: Path, consumer: dict[str, Any], label: str) -> str:
+    """A role's password, out of the pgpass line that carries it.
 
     Through `secrets_contract.recover_secret` rather than a `split(':')` here.
     A second reader of that format would be a second opinion about what the file
     means, and the one that lives beside the writer is the one a round-trip test
     covers.
+
+    Takes the consumer rather than closing over one: two roles now read their
+    credential this way (D288), and a copy of this function per role is a second
+    place for the pgpass format to be misunderstood. `label` is only for the
+    message, which an operator reads at the worst possible moment.
     """
-    value = secrets_contract.recover_secret(path.read_text(encoding="utf-8"), POSTGREST_CONSUMER)
+    value = secrets_contract.recover_secret(path.read_text(encoding="utf-8"), consumer)
     if not value:
-        print("postgres-bootstrap: the API authenticator credential is empty.", file=sys.stderr)
+        print(f"postgres-bootstrap: the {label} credential is empty.", file=sys.stderr)
         raise SystemExit(EXIT_CONTRACT)
     return value
+
+
+def read_postgrest_password(path: Path) -> str:
+    """The API authenticator's password. See `read_pgpass_password`."""
+    return read_pgpass_password(path, POSTGREST_CONSUMER, "API authenticator")
 
 
 def read_migration_password(project_key: str) -> str:
@@ -1034,11 +1059,35 @@ def main() -> int:
         print("  API authenticator credential absent from this generation; role left NOLOGIN")
 
     # The auth service's ceiling, the third claimant on one max_connections
-    # (ADR 0070). Its credential is Run 7's, in the same commit as the compose
-    # service that mounts it (D246), so the role stays NOLOGIN here and carries
-    # its bound anyway -- which is the order with no window in it.
-    apply_connection_limit(container, database, roles["auth_service"], auth_limit)
-    print(f"  auth service CONNECTION LIMIT {auth_limit} (role NOLOGIN until session 6)")
+    # (ADR 0070) -- and its credential, which nothing set until the first host
+    # deploy failed on it (D288).
+    #
+    # This block used to apply the limit alone and print "role NOLOGIN until
+    # session 6". That sentence was written IN session 6, deferring the
+    # activation to a run that never came: Run 7 built the service, Run 10
+    # published it, and the role reached a host with no password at all. It is
+    # D276's shape -- a comment describing work nobody wrote.
+    #
+    # Now it mirrors `app_runtime` and `postgrest_authenticator` exactly: if the
+    # active generation carries the credential, the role gets it and its bound
+    # together; if it does not, the role is left NOLOGIN and the run SAYS so
+    # rather than implying a version of events.
+    auth_secret = materialized_secret_path(key, AUTH_SERVICE_CONSUMER)
+    if auth_secret is not None:
+        apply_credential(
+            container,
+            database,
+            roles["auth_service"],
+            read_pgpass_password(auth_secret, AUTH_SERVICE_CONSUMER, "auth service"),
+            connection_limit=auth_limit,
+        )
+        print(f"  auth service credential set, CONNECTION LIMIT {auth_limit}")
+    else:
+        apply_connection_limit(container, database, roles["auth_service"], auth_limit)
+        print(
+            "  auth service credential absent from this generation; role left NOLOGIN, "
+            f"CONNECTION LIMIT {auth_limit}"
+        )
 
     # Applied, then read back. The statements above returning 0 says psql
     # accepted them, which is not the same as the catalog holding what they

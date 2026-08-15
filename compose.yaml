@@ -854,12 +854,28 @@ services:
       # to guarantee that is for both to read one authority.
       APG_JWT_ISSUER: ${JWT_ISSUER:?required}
       APG_JWT_AUDIENCE: ${JWT_AUDIENCE:?required}
-      # PgBouncer, not the cluster directly: the auth service's queries are
-      # short and transactional, which is the shape transaction pooling is for,
-      # and the connection budget ADR 0070 divides is a budget on the pooler's
-      # side of the same arithmetic.
-      APG_DATABASE_HOST: ${PGBOUNCER_SERVICE_HOST:?required}
-      APG_DATABASE_PORT: ${PGBOUNCER_LISTEN_PORT:?required}
+      # The cluster directly, on 5432, exactly as PostgREST does (ADR 0092).
+      #
+      # This said "PgBouncer, not the cluster directly" until the first host
+      # deploy, and the reasoning was sound in itself -- short transactional
+      # queries are what transaction pooling is for. What it did not survive is
+      # that PgBouncer authenticates its clients against a userlist holding two
+      # roles, `app_runtime` and the pool admin, and `auth_service` is neither.
+      # The service failed with `FATAL: SASL authentication failed` before
+      # postgres was ever consulted (D289).
+      #
+      # Closing that gap the other way would have put the auth service's
+      # database password into PgBouncer's userlist -- a credential reaching the
+      # identity registry, held by a second container, to gain a pooling layer
+      # under a service that already runs its own psycopg pool. PostgREST is the
+      # precedent and it connects directly: `PGRST_DB_URI` names
+      # `POSTGRES_SERVICE_HOST:5432`.
+      #
+      # ADR 0070's arithmetic is unchanged. The budget is a division of one
+      # `max_connections`, and `AUTH_POOL_SIZE` (4) sits inside the role's
+      # CONNECTION LIMIT (6) whichever side of a pooler it is counted on.
+      APG_DATABASE_HOST: ${POSTGRES_SERVICE_HOST:?required}
+      APG_DATABASE_PORT: "5432"
       APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
       APG_DATABASE_ROLE: ${AUTH_SERVICE_ROLE_NAME:?required}
       APG_DATABASE_PASSFILE: /run/secrets/auth_service_pgpass
