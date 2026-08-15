@@ -29,6 +29,7 @@ import base64
 import json
 import stat
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -63,6 +64,7 @@ def test_the_published_key_set_is_what_every_verifier_actually_loaded(
     api_call: Callable[..., Any],
     sh: Callable[..., str],
     service_container: Callable[[str, str], str],
+    tmp_path: Path,
     as_root: None,
 ) -> None:
     """SEC-KEY-002's live invariant, and the proof D276 would have failed.
@@ -97,10 +99,22 @@ def test_the_published_key_set_is_what_every_verifier_actually_loaded(
     # are different questions once a JWKS has been replaced at a stable path:
     # the process keeps the inode it opened, so the file on disk can be correct
     # while the verifier holds the previous set (D278, ADR 0088).
+    #
+    # `docker cp`, not `docker exec ... cat`. **The locked PostgREST image has no
+    # `cat`** -- it has no shell and no coreutils at all -- so the exec spelling
+    # exits 127 with `executable file not found in $PATH`, which reads like a
+    # broken container rather than like a proof asking a distroless image for a
+    # program (D305). It had never run: this was the line after the container
+    # selector that D299 fixed.
+    #
+    # `docker cp` needs nothing inside the container and resolves the path
+    # through the container's own mount namespace, which is the same view `cat`
+    # would have had -- measured, with a plain bind of the same file as the
+    # control.
     container = service_container(project_a["project"]["key"], runtime_override.REST_SERVICE)
-    loaded = json.loads(
-        sh("docker", "exec", container, "cat", runtime_override.JWKS_CONTAINER_PATH)
-    )
+    extracted = tmp_path / "jwks-from-the-container.json"
+    sh("docker", "cp", f"{container}:{runtime_override.JWKS_CONTAINER_PATH}", str(extracted))
+    loaded = json.loads(extracted.read_text(encoding="utf-8"))
     inside = [key["kid"] for key in loaded["keys"]]
 
     # THE VERIFIER'S SET, read three ways, and they must be equal. The third
