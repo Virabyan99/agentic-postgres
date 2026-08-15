@@ -842,10 +842,22 @@ def api_call() -> Callable[..., ApiResponse]:
         method: str = "GET",
         token: str | None = None,
         body: Any = None,
+        raw: bytes | None = None,
         headers: dict[str, str] | None = None,
         timeout: int = 30,
     ) -> ApiResponse:
-        payload = json.dumps(body).encode("utf-8") if body is not None else None
+        # `raw` exists for one property `body` cannot express: a JSON document
+        # with a DUPLICATE member. `json.dumps` takes a dict, and a dict cannot
+        # hold one -- so a strict-parser proof written against `body` would be
+        # asserting that a document without duplicates is accepted, which is
+        # D173's shape. Mutually exclusive rather than merged, because a caller
+        # that passed both would be describing two different requests.
+        assert body is None or raw is None, "pass body= or raw=, not both"
+        payload = (
+            raw
+            if raw is not None
+            else (json.dumps(body).encode("utf-8") if body is not None else None)
+        )
         request = urllib.request.Request(url, data=payload, method=method)  # noqa: S310
         request.add_header("Accept", "application/json")
         if token is not None:
@@ -1119,3 +1131,328 @@ def acceptance_probe(
                 "published surface until somebody removes it by hand"
             )
             assert rows == "0", f"{rows} probe rows survived teardown ({delete_error})"
+
+
+# ---------------------------------------------------------------------------
+# Session 6 — the application API plane
+# ---------------------------------------------------------------------------
+
+#: The environment variable carrying the project administrator's password.
+#:
+#: An operator input, like ``APG_SECRET_SENTINEL_FILE``, and for the same reason
+#: rather than by analogy. ``bin/auth-admin.sh`` reads the password from a
+#: terminal, prints it nowhere and stores only an Argon2id hash, so **nothing on
+#: the host can recover it** -- which is the property ``SEC-CRED-001`` exists to
+#: assert. A suite that needs an administrator session therefore cannot derive
+#: one; it has to be given one, or say that it was not.
+#:
+#: The file is read rather than the value passed, so the password never reaches
+#: ``ps``, ``/proc/<pid>/cmdline`` or the gate's own shell history. That is the
+#: judgement ``auth-admin`` records for ``--password-fd``.
+# (S105 matches on the name. This is the name of an environment variable that
+# holds a *path*; no credential appears in this file.)
+ADMIN_PASSWORD_FILE = "APG_ADMIN_PASSWORD_FILE"  # noqa: S105
+
+
+@pytest.fixture(scope="session")
+def app_base() -> Callable[[dict[str, Any]], str]:
+    """One project's published application prefix, with no trailing slash.
+
+    From ``routes.app``, and only when it says ``ready`` -- the same refusal
+    ``rest_base`` makes, for the same reason. ``routes.app`` records
+    ``unavailable`` until the project has an administrator (the deploy's
+    two-stage convergence), and a test that composed a URL from the domain
+    instead would send its requests at a hostname with no application router
+    behind it, where every negative assertion passes against a 404.
+    """
+
+    def base(document: dict[str, Any]) -> str:
+        route = ((document.get("routes") or {}).get("app")) or {}
+        if route.get("status") != "ready" or not route.get("url"):
+            pytest.fail(
+                f"{document['project']['key']} publishes no ready application route "
+                f"(status {route.get('status')!r}), so there is no surface here to "
+                "measure. Bootstrap an administrator and redeploy."
+            )
+        return str(route["url"]).rstrip("/")
+
+    return base
+
+
+@pytest.fixture(scope="session")
+def admin_password() -> str:
+    """The project administrator's password, or a skip that says why.
+
+    Skipped rather than failed when the variable is absent: a gate run outside a
+    window where the operator had the password to hand is a legitimate run, and
+    the claim it cannot prove comes out ``not_run``. A skip is not a pass, and
+    the evidence model already reports the difference.
+    """
+    path = os.environ.get(ADMIN_PASSWORD_FILE)
+    if not path:
+        pytest.skip(
+            f"{ADMIN_PASSWORD_FILE} is unset, so no administrator session can be opened. "
+            "Pass --admin-password-file to the gate."
+        )
+    text = Path(path).read_text(encoding="utf-8")
+    # `\n` only. A password may legitimately end in a space, and `.strip()`
+    # would silently authenticate as something the operator did not type --
+    # which fails as a wrong password and reads as a broken deployment.
+    return text.removesuffix("\n")
+
+
+@dataclasses.dataclass(frozen=True)
+class AdminSession:
+    """An open administrator session, and the state the server says it has.
+
+    ``token`` and ``expires_at`` come from the login response; the rest comes
+    from ``/auth/me``, which reflects **current** state rather than the token's
+    copy of it. Decoding role and scopes out of the token here would make every
+    proof below a statement about what this suite unpacked, and what is under
+    test is what the server says.
+
+    ``expires_at`` is an absolute epoch second, not a duration: that is the
+    shape ``TokenResponse`` chose, so that one deadline has one representation.
+    """
+
+    username: str
+    token: str
+    expires_at: int
+    user_id: str
+    role: str
+    scopes: tuple[str, ...]
+
+
+@pytest.fixture(scope="session")
+def app_login(
+    api_call: Callable[..., Any], app_base: Callable[[dict[str, Any]], str]
+) -> Callable[..., Any]:
+    """POST /auth/login against one project. Returns the response; never judges.
+
+    Separate from ``admin_session`` because the negative proofs need a login
+    that *fails*, and a fixture that raised on a 401 could not express one.
+    """
+
+    def login(document: dict[str, Any], username: str, password: str) -> Any:
+        return api_call(
+            f"{app_base(document)}/auth/login",
+            method="POST",
+            body={"username": username, "password": password},
+        )
+
+    return login
+
+
+@pytest.fixture(scope="session")
+def administrator_username(
+    project_a: dict[str, Any], psql: Callable[..., tuple[int, str, str]]
+) -> str:
+    """The active project administrator's username, read from the cluster.
+
+    Read rather than configured, and this is the one place it can be read from:
+    ``observe_active_administrator`` records only *whether* an administrator
+    exists, so the deployed document carries no name. A second operator flag
+    naming the username would be a value nobody checked -- a typo in it would
+    produce a 401, and a 401 is what a broken authentication boundary looks
+    like. Taking the name from ``app_private.users`` means the login below can
+    only fail on the password.
+    """
+    # The DERIVED role name, from the document, not the suffix. `auth-admin`
+    # stores `database.roles[ADMIN_ROLE_SUFFIX]` -- `alpha_dev_project_admin`,
+    # not `project_admin` -- so a predicate on the suffix matches nothing and
+    # this fixture would report "no administrator" about a deployment that has
+    # one. ADR 0002: the name is read from `outputs.json`, never re-derived.
+    role_name = project_a["database"]["roles"]["project_admin"]
+    code, out, err = psql(
+        project_a,
+        "SELECT username FROM app_private.users "
+        f"WHERE role_name = '{role_name}' AND status = 'active' "
+        "ORDER BY created_at LIMIT 1;",
+    )
+    assert code == 0, f"could not read the administrator from the cluster: {err}"
+    if not out:
+        pytest.fail(
+            "no active project_admin exists in app_private.users, so `routes.app` "
+            "cannot be ready. Run `bin/auth-admin.sh ... bootstrap` and redeploy."
+        )
+    return out
+
+
+@pytest.fixture(scope="session")
+def admin_session(
+    project_a: dict[str, Any],
+    administrator_username: str,
+    admin_password: str,
+    app_login: Callable[..., Any],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+) -> AdminSession:
+    """One administrator session on project A, opened through the published route.
+
+    Through the route rather than by minting a token locally, deliberately: a
+    token this suite signed would prove that this suite can sign, and the thing
+    being measured is that the deployed service issues one and that the deployed
+    verifier accepts it.
+    """
+    answer = app_login(project_a, administrator_username, admin_password)
+    assert answer.status == 200, (
+        f"login as {administrator_username!r} answered {answer.status} "
+        f"({answer.reason or ''}). Either the password in {ADMIN_PASSWORD_FILE} is not "
+        "this deployment's, or the administrator's credential has been rotated since "
+        "it was written."
+    )
+    issued = json.loads(answer.body)
+
+    current = api_call(f"{app_base(project_a)}/auth/me", token=issued["access_token"])
+    assert current.status == 200, (
+        f"a token this deployment issued moments ago was refused by its own /auth/me "
+        f"({current.status}). That is the two-verifier failure D276 describes: the "
+        "issuer's key is not in the set the verifier reads."
+    )
+    subject = json.loads(current.body)
+    return AdminSession(
+        username=subject["username"],
+        token=issued["access_token"],
+        expires_at=int(issued["expires_at"]),
+        user_id=subject["user_id"],
+        role=subject["role"],
+        scopes=tuple(subject["scopes"]),
+    )
+
+
+#: The probe subject's username. Fixed, and nobody's real account: the teardown
+#: deletes by this name, so a generated one that leaked between runs would
+#: accumulate subjects nothing removes.
+APP_PROBE_USERNAME = "apg-acceptance-probe"
+
+#: Its password. A constant in the suite is not a secret leak -- this subject is
+#: created by the test, lives for the module, and is deleted by the teardown --
+#: but it must still pass `assess`, which refuses short and structurally weak
+#: values. Nothing else in the deployment ever holds it.
+APP_PROBE_PASSWORD = "correct-horse-battery-staple-7412"  # noqa: S105
+
+
+@dataclasses.dataclass(frozen=True)
+class ProbeSubject:
+    """A disposable human subject, created for one module and then removed."""
+
+    user_id: str
+    username: str
+    password: str
+    role_name: str
+    scopes: tuple[str, ...]
+
+
+@pytest.fixture(scope="module")
+def app_probe_subject(project_a: dict[str, Any], psql: Callable[..., tuple[int, str, str]]) -> Any:
+    """One ordinary (non-administrator) subject, created and then deleted.
+
+    Created through ``app_private.auth_create_user`` rather than through
+    ``POST /admin/users``, and the reason is not convenience: the endpoint is
+    one of the things under test here, so a fixture that used it would make
+    every proof below conditional on the endpoint it is meant to measure. The
+    function is the same one the endpoint calls.
+
+    The password hash is produced by the **service's own hasher** at the frozen
+    profile (ADR 0081, ADR 0084). A hash written at any other profile is refused
+    at verification time, which would look like a wrong password.
+
+    Scopes are sorted, and that is load-bearing rather than tidy: `is_scope_set`
+    refuses an unsorted array (D248), and the refusal arrives as a constraint
+    violation rather than as a reordering.
+    """
+    from agentic_postgres import service_source
+
+    hashing = service_source.load("hashing")
+    role_name = project_a["database"]["roles"]["authenticated"]
+    scopes = sorted(["notes:read", "tasks:read"])
+    stored = hashing.Hasher().hash(APP_PROBE_PASSWORD)
+
+    # Deleted first rather than after: a previous run that died between the
+    # INSERT and its teardown leaves a row, and `users_username_normalised_key`
+    # would then refuse the create with a message about a unique index.
+    psql(project_a, f"DELETE FROM app_private.users WHERE username = '{APP_PROBE_USERNAME}';")
+
+    array = ", ".join(f"'{scope}'" for scope in scopes)
+    code, user_id, error = psql(
+        project_a,
+        "SELECT app_private.auth_create_user("
+        f"'{APP_PROBE_USERNAME}', 'Acceptance probe', '{role_name}', "
+        f"ARRAY[{array}]::text[], '{stored}');",
+    )
+    assert code == 0 and user_id, f"could not create the probe subject: {error}"
+
+    try:
+        yield ProbeSubject(
+            user_id=user_id,
+            username=APP_PROBE_USERNAME,
+            password=APP_PROBE_PASSWORD,
+            role_name=role_name,
+            scopes=tuple(scopes),
+        )
+    finally:
+        psql(project_a, f"DELETE FROM app_private.users WHERE username = '{APP_PROBE_USERNAME}';")
+        _, remaining, _ = psql(
+            project_a,
+            f"SELECT count(*) FROM app_private.users WHERE username = '{APP_PROBE_USERNAME}';",
+        )
+        assert remaining == "0", (
+            f"the probe subject survived teardown ({remaining} rows); it is a subject "
+            "with a known password in a deployed identity registry"
+        )
+
+
+@pytest.fixture(scope="session")
+def service_container(sh: Runner) -> Callable[[str, str], str]:
+    """The running container for one project's Compose service, by name.
+
+    Filtered on the Compose **working directory** rather than on the project
+    name. Both are labels Compose writes, and the working directory is the one
+    this suite already knows independently: ``RENDERED_ROOT / project_key`` is
+    where the deploy installs the model. Using the project name would mean
+    re-deriving ``apg-<key>`` here, and ADR 0002 is explicit that a name is read
+    from the deployed document rather than derived a second time.
+
+    The deployed document itself carries no per-service container name -- only
+    ``database.container`` -- so there is nothing to read for `rest` or `auth`,
+    and this is the reading that replaces it.
+    """
+
+    def find(project_key: str, service: str) -> str:
+        names = sh(
+            "docker",
+            "ps",
+            "--filter",
+            f"label=com.docker.compose.project.working_dir={RENDERED_ROOT / project_key}",
+            "--filter",
+            f"label=com.docker.compose.service={service}",
+            "--format",
+            "{{.Names}}",
+        ).split()
+        if not names:
+            pytest.fail(
+                f"{project_key} is running no container for the {service!r} service. "
+                f"A service held back by the deploy leaves no container behind, so "
+                "this reads the same as one that crashed"
+            )
+        assert len(names) == 1, f"{project_key}/{service} has {len(names)} containers: {names}"
+        return names[0]
+
+    return find
+
+
+@pytest.fixture(scope="session")
+def jwks_command() -> Any:
+    """``bin/render-jwks.py``, so a `kid` is derived rather than trusted.
+
+    ADR 0090 re-keyed `SEC-BOOT-001`'s expiry clause to the published key set,
+    which means a proof has to answer "is *this* key the one the document names"
+    -- and that is a derivation, not a lookup. Loading the command is how the
+    answer comes from the product's own `openssl` invocations.
+
+    Reimplementing it here would be worse than duplication. `read_public_parameters`
+    exists in the shape it does because the obvious spelling prints private
+    parameters, and because openssl labels the exponent differently for a public
+    and a private key; a second copy would be written from the obvious spelling.
+    """
+    return _load_command("render-jwks.py", "apg_render_jwks_live")

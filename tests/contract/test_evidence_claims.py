@@ -716,3 +716,145 @@ def test_a_failed_claim_survives_the_merge_as_a_failure(tmp_path: Path) -> None:
     )
     assert result.returncode == 5
     assert json.loads(merged.read_text(encoding="utf-8"))["status"] == "failed"
+
+
+# ---------------------------------------------------------------------------
+# ADR 0089 — a claim is built from its own session's requirement IDs
+# ---------------------------------------------------------------------------
+#
+# `claim_session` derives a claim's session from its requirements, so building a
+# new claim out of an EARLIER session's requirement ID does not extend that
+# requirement -- it relocates the claim backwards. Measured before this was
+# written: `project_isolation: ("DEP-ISO-003",)` resolves to session 3, and the
+# real `merge` then turns Session 3's evidence from exit 0 / `passed` into exit
+# 5 / `failed`, writing the failing document anyway.
+#
+# The reverse is worse because it is silent. `token_non_resurrection:
+# ("SEC-REV-001",)` resolves to session 9, `claims_for_mode("host", 6)` simply
+# does not contain it, and the Session 6 gate exits 0 having never recorded the
+# property §2 of the plan calls the session's sharpest.
+
+
+#: Claim -> the session that introduced it. Written out rather than derived,
+#: which is the whole point: deriving it from `claim_session` would compare the
+#: mechanism against itself and pass for every possible registry (D260's second
+#: mutation -- a test that computes its expectation from the value under test).
+CLAIM_INTRODUCED_IN = {
+    "isolation": 2,
+    "secret_leakage": 2,
+    "least_privilege": 3,
+    "row_level_security": 3,
+    "database_isolation": 3,
+    "boot_convergence": 3,
+    "pooled_transport": 4,
+    "direct_transport": 4,
+    "transport_boundary": 4,
+    "connection_tooling": 4,
+    "transport_isolation": 4,
+    "rest_surface": 5,
+    "api_contract": 5,
+    "api_authorization": 5,
+    "bootstrap_identity": 5,
+    "api_isolation": 5,
+    "api_tooling": 5,
+    "public_api_boundary": 5,
+    "token_contract": 6,
+    "key_ownership": 6,
+    "credential_storage": 6,
+    "identity_endpoints": 6,
+    "admin_authorization": 6,
+    "token_non_resurrection": 6,
+    "project_isolation": 6,
+}
+
+
+def test_every_claim_is_declared_here() -> None:
+    """The table above and `CLAIMS` name the same claims.
+
+    Without this the check below is satisfied by deleting a row: a claim absent
+    from the table would simply not be checked, which is how a relocated claim
+    would slip through the thing written to catch it.
+    """
+    assert set(CLAIM_INTRODUCED_IN) == set(claims.CLAIMS), (
+        "the introduced-in table and CLAIMS disagree: "
+        f"only in table {sorted(set(CLAIM_INTRODUCED_IN) - set(claims.CLAIMS))}, "
+        f"only in CLAIMS {sorted(set(claims.CLAIMS) - set(CLAIM_INTRODUCED_IN))}"
+    )
+
+
+def test_a_claim_resolves_to_the_session_that_introduced_it() -> None:
+    """ADR 0089. A claim built from an earlier session's requirement ID moves.
+
+    The failure this catches is not a naming slip. A Session 6 claim that
+    resolved to Session 3 would make the Session 3, 4 and 5 gates each
+    answerable for proofs they cannot run, and their evidence would read
+    `failed` with the product unchanged.
+    """
+    misplaced = {
+        claim: (introduced, claims.claim_session(claim))
+        for claim, introduced in CLAIM_INTRODUCED_IN.items()
+        if claims.claim_session(claim) != introduced
+    }
+    assert not misplaced, (
+        "these claims resolve to a session other than the one that introduced them "
+        f"(claim, introduced, resolves to): {sorted(misplaced.items())}. "
+        "A claim's session is the MAX of its requirements' target sessions, so this "
+        "means a requirement from another session was named (ADR 0089)."
+    )
+
+
+def test_a_session_six_claim_is_not_answerable_by_an_earlier_gate() -> None:
+    """The consequence, stated as the thing an operator would actually notice.
+
+    Asserted separately from the session comparison above because it is a
+    different failure: a claim could resolve to the right session and still leak
+    if `claims_through_session` changed underneath it.
+    """
+    session_six = {claim for claim, n in CLAIM_INTRODUCED_IN.items() if n == 6}
+    for earlier in (2, 3, 4, 5):
+        leaked = sorted(session_six & set(claims.claims_through_session(earlier)))
+        assert not leaked, (
+            f"the session {earlier} gate is answerable for {leaked}, whose proofs are "
+            "Session 6 tests it has no way to run. Its evidence would report them "
+            "`not_run`, which the writer turns into a failed document"
+        )
+
+
+def test_no_requirement_is_named_by_two_claims() -> None:
+    """The half of ADR 0089 the session comparison above cannot see.
+
+    **The mutation battery found this test missing.** Rewriting
+    `admin_authorization` to `("API-ADMIN-001", "SEC-BOOT-001")` -- reusing
+    Session 5's requirement, which is one of the three mistakes ADR 0089 is
+    about -- left `test_a_claim_resolves_to_the_session_that_introduced_it`
+    green, because `claim_session` is a `max()` and `max(6, 5)` is still 6.
+
+    So the session check catches a claim built *entirely* from older
+    requirements and is blind to an older requirement *added alongside* a
+    current one. That second shape is the more likely mistake and the one with
+    the worse failure: `SEC-BOOT-001` means "the temporary bootstrap ISSUER
+    holds the only private key", and pressing it into a claim about
+    administrator creation gives one ID two guarantees, which is what D47
+    refused.
+
+    The invariant is that a requirement belongs to at most one claim. Measured
+    before it was asserted: no requirement is shared today, across twenty-five
+    claims and five sessions. It is not a law of nature -- a future session
+    whose guarantee genuinely rests on an earlier requirement's proofs would
+    need to relax it, and that is what an ADR is for. What it is not is an
+    accident: two claims resting on one set of proofs makes one claim's verdict
+    a function of the other's, which is the coupling `claim_session` already
+    refuses across sessions.
+    """
+    owners: dict[str, list[str]] = {}
+    for claim, requirements in claims.CLAIMS.items():
+        for requirement in requirements:
+            owners.setdefault(requirement, []).append(claim)
+
+    shared = {requirement: sorted(names) for requirement, names in owners.items() if len(names) > 1}
+    assert not shared, (
+        "these requirements are named by more than one claim: "
+        f"{shared}. Two claims resting on one set of proofs makes one claim's verdict a "
+        "function of the other's, and when the claims belong to different sessions it "
+        "also gives one requirement ID two guarantees (ADR 0089)."
+    )

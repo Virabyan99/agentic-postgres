@@ -84,27 +84,46 @@ def unimplemented(session: int, what: str) -> None:
 # two IDs one meaning -- the call D47 made when it dropped API-DB-001 against
 # SEC-VIEW-001. Session 5's negative matrix is proved under SEC-ROLE-001 and
 # SEC-ANON-001; the key separation of the *temporary* issuer is SEC-BOOT-001,
-# which Session 6 retires rather than inherits (ADR 0051).
+# which Session 6 was expected to retire rather than inherit (ADR 0051) -- and
+# did not: ADR 0088 built the cutover and Session 6 deliberately does not run it.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.future(session=6, requirement="SEC-JWT-001")
-def test_invalid_issuer_audience_algorithm_or_token_type_is_rejected() -> None:
-    unimplemented(6, "the full negative-token matrix, including expiry and nbf")
-
-
-@pytest.mark.future(session=6, requirement="SEC-KEY-001")
-def test_verifying_services_do_not_hold_the_private_signing_key() -> None:
-    unimplemented(6, "only the auth service can sign; verifiers hold public material")
-
-
-@pytest.mark.future(session=6, requirement="SEC-CRED-001")
-def test_raw_credentials_are_never_stored_or_logged() -> None:
-    unimplemented(6, "passwords and agent secrets exist only as hashes")
+# Activated in Run 11:
+#
+#   SEC-JWT-001, SEC-KEY-001, SEC-KEY-002
+#       -> tests/deployment/test_session6_tokens.py, plus the contract halves in
+#          tests/contract/test_auth_tokens.py, test_jwt_claims.py, test_jwt_keys.py
+#   SEC-CRED-001  -> tests/deployment/test_session6_credentials.py
+#   SEC-CRED-002  -> tests/contract/test_auth_hashing.py
+#   SEC-BOOT-002  -> tests/deployment/test_session6_admin.py
+#   SEC-REV-002   -> tests/deployment/test_session6_identity.py
+#
+# The three placeholders are gone rather than kept beside their implementations,
+# as every activated session before this one has done.
+#
+# Two of the new IDs are not the ones §2 of the plan named, and the reason is
+# mechanical rather than editorial (ADR 0089). `SEC-BOOT-001` already means that
+# the temporary bootstrap ISSUER holds the only private key, which is a
+# different guarantee from Session 6's "the first administrator is created
+# locally and exactly once"; `SEC-REV-001` is Session 9's and is about denial
+# through MCP. Reusing the second would have been silent -- `claim_session` is
+# the max of a claim's requirements' sessions, so the claim would have resolved
+# to Session 9 and disappeared from Session 6's own gate with no error.
+#
+# SEC-BOOT-001 stays Session 5's and stays where it is: Session 6 does NOT
+# retire the bootstrap issuer, because ADR 0088's cutover is built and
+# deliberately unexercised. Its expiry clause is re-keyed rather than fired
+# (ADR 0090).
 
 
 # ---------------------------------------------------------------------------
 # Session 9 — revocation and attribution
+#
+# SEC-REV-001 stays here and stays Session 9's. Session 6's non-resurrection
+# property is SEC-REV-002, and the two are not the same guarantee: this one is
+# about a revoked token failing its next read and write through MCP *and*
+# PostgREST, and Session 6 ships no MCP.
 # ---------------------------------------------------------------------------
 
 

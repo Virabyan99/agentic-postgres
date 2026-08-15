@@ -32,11 +32,18 @@ def unimplemented(session: int, what: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.future(session=6, requirement="API-AUTH-001")
-def test_login_and_identity_endpoints_behave() -> None:
-    unimplemented(6, "login issues a short-lived token and /auth/me reflects it")
-
-
-@pytest.mark.future(session=6, requirement="API-ADMIN-001")
-def test_admin_endpoints_require_explicit_admin_scope() -> None:
-    unimplemented(6, "a role name alone is insufficient for admin operations")
+# ---------------------------------------------------------------------------
+# Session 6 — activated in Run 11
+#
+#   API-AUTH-001, API-AUTH-002 -> tests/deployment/test_session6_identity.py
+#   API-ADMIN-001              -> tests/deployment/test_session6_admin.py
+#
+# API-AUTH-002's contract half stays in tests/contract/test_auth_strict_json.py
+# and test_auth_tokens.py, which Run 7 wrote. It is registered against the
+# requirement rather than duplicated here: the strict parser's refusals need no
+# deployment, and the one property that does -- that an oversized body is
+# refused by the EDGE rather than read in full by the service (D273) -- is the
+# live half and lives with the other deployment proofs.
+#
+# Both placeholders are gone rather than kept beside their implementations.
+# ---------------------------------------------------------------------------

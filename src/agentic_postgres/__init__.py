@@ -13,7 +13,13 @@ from pathlib import Path
 #: ``APG_ACCEPTANCE_SESSION`` overrides it; see plan decision P. Keeping a
 #: default here means a bare ``pytest`` run enforces the same registry policy
 #: as ``bin/session-01-check.sh`` instead of silently skipping it.
-CURRENT_SESSION = 5
+#:
+#: Moved to 6 in Session 6 Run 11, with the placeholders (D54). The move is what
+#: makes ``test_no_requirement_at_or_before_the_gate_session_remains_future``
+#: enforce this session's own requirements: every ID targeted at 6 or earlier
+#: must now point at a real test rather than at a ``future`` marker, so the
+#: eleven entries this run activated cannot quietly revert to placeholders.
+CURRENT_SESSION = 6
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

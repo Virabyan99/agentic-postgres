@@ -5,11 +5,29 @@ Replaces one Session 5 placeholder in
 ``tests/deployment/`` with the ``security`` marker, for D111's reason.
 
 ADR 0051's issuer is temporary by construction, and ``temporary`` is state in the
-deployed document rather than prose nobody executes: this test compares it
-against ``deployed_through_session`` and **goes red on the deployment that should
-have replaced it**. That is ADR 0046's rule -- a fact with an expiry date is
-written so the session which invalidates it makes the test fail rather than makes
-it stale.
+deployed document rather than prose nobody executes: this test **goes red on the
+deployment that retires it**. That is ADR 0046's rule -- a fact with an expiry
+date is written so that whatever invalidates it makes the test fail rather than
+makes it stale.
+
+**The clause was re-keyed in Session 6 Run 11 (ADR 0090), and this is a stricter
+test than the one it replaces.** It used to compare
+``deployed_through_session`` against a constant 6, on the reasoning that Session
+6 retires the issuer. Session 6 did not: ADR 0088 built the cutover and the
+operator guide forbids starting one, because two live issuers fill the two-key
+ceiling and the transition between them *is* the first rotation. Measured with a
+control, a deploy through session 6 failed at that assertion while an otherwise
+identical document at session 5 got past it -- so the host trip that deploys Run
+10 would have turned this green proof red for a correct deployment.
+
+The session number was always a proxy for "the retirement has happened". The
+deployed document now carries the state that answers directly, so the proxy is
+replaced by the event: while the issuer is temporary its key must still be
+**published**, and the `kid` is **derived here from the private key on disk**
+rather than read from the document that claims it. That second half is new, and
+it is D276's lesson applied to this requirement -- the document said which keys
+verify, and nothing had ever asked whether those identifiers came from the keys
+this deployment actually holds.
 """
 
 from __future__ import annotations
@@ -21,7 +39,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, secrets_contract
+from agentic_postgres import REPO_ROOT, jwt_keys, secrets_contract
 from agentic_postgres.secret_generation import SECRET_ROOT
 
 pytestmark = [
@@ -31,9 +49,9 @@ pytestmark = [
     pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS"),
 ]
 
-#: The session that retires the bootstrap issuer (ADR 0051). A deployment
-#: through this session or later must no longer be running on a temporary one.
-ISSUER_RETIRED_IN_SESSION = 6
+#: (Removed in Run 11 -- ADR 0090.) This was `ISSUER_RETIRED_IN_SESSION = 6`,
+#: compared against `deployed_through_session`. The retirement is an event, not
+#: a session, and the deployed document records the event.
 
 #: What a PEM private key opens with, in either encoding openssl emits.
 PRIVATE_KEY_MARKERS = ("-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KEY-----")
@@ -42,6 +60,7 @@ PRIVATE_KEY_MARKERS = ("-----BEGIN PRIVATE KEY-----", "-----BEGIN RSA PRIVATE KE
 def test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key(
     project_a: dict[str, Any],
     sh: Callable[..., str],
+    jwks_command: Any,
     as_root: None,
 ) -> None:
     """SEC-BOOT-001, in the four places the private key could be.
@@ -82,13 +101,6 @@ def test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key(
         f"the issuer signs with {jwt['algorithm']!r}. A symmetric algorithm makes every "
         "verifier an issuer, which is the property ADR 0051 refuses"
     )
-    assert jwt["temporary"] is True, "the bootstrap issuer is not marked temporary"
-    assert project_a["deployed_through_session"] < ISSUER_RETIRED_IN_SESSION, (
-        f"this project is deployed through session {project_a['deployed_through_session']} "
-        f"and still records a temporary issuer. Session {ISSUER_RETIRED_IN_SESSION} "
-        "replaces it (ADR 0051); this assertion is what was written to fail here rather "
-        "than to go quietly out of date"
-    )
     assert jwt["active_kid"] in jwt["verification_kids"], (
         "the active key id is not among the verification key ids, so nothing verifies "
         "what this issuer signs"
@@ -123,6 +135,31 @@ def test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key(
         f"{key} is {stat.S_IMODE(mode.st_mode):04o}, not 0400"
     )
     assert (mode.st_uid, mode.st_gid) == (0, 0), f"{key} is owned by {mode.st_uid}:{mode.st_gid}"
+
+    # ADR 0090's clause, and it replaces a comparison against a session number.
+    #
+    # The `kid` is DERIVED from the key on disk rather than read from the
+    # document that names it. Nothing had ever checked that the identifiers in
+    # `verification_kids` come from keys this deployment holds -- the document
+    # said which keys verify, and every proof took its word for it. That is
+    # D276's shape, and this is the same question asked of the bootstrap key.
+    modulus, exponent = jwks_command.read_public_parameters(key)
+    bootstrap_kid = jwt_keys.public_jwk(modulus_hex=modulus, exponent=exponent)["kid"]
+
+    if jwt["temporary"] is True:
+        assert bootstrap_kid in jwt["verification_kids"], (
+            f"the deployed document records a temporary issuer, but the bootstrap key's "
+            f"own thumbprint ({bootstrap_kid}) is not among the keys it publishes "
+            f"({jwt['verification_kids']}). Either the issuer was retired and the "
+            "document was not updated, or the published set was derived from a key "
+            "this host does not hold"
+        )
+    else:
+        assert bootstrap_kid not in jwt["verification_kids"], (
+            f"the issuer is no longer marked temporary, yet its key ({bootstrap_kid}) is "
+            "still published and still verifies tokens. `temporary: false` while the "
+            "bootstrap issuer is live is a value that looks measured and is not"
+        )
 
     for path in sorted(generation.rglob("*")):
         if not path.is_file() or path == key:

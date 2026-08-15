@@ -155,16 +155,16 @@ never re-reads its key set — measured.
 
 ---
 
-## 5. What Run 11 needs from this
+## 5. The Session 6 gate
 
-Run 11 writes `bin/session-06-check.sh`, adds the claims, and merges both
-evidence halves. It needs, from section 2 and 3:
+**Run 11 is done offline.** `bin/session-06-check.sh` exists, the seven claims
+are in `evidence_claims.CLAIMS`, and the eleven Session 6 registry entries point
+at real proofs. What does not exist is any evidence, because **every Session 6
+claim is `live_host` and none of these proofs has run in any environment yet.**
+That is what this trip is for.
 
-- both projects deployed through session 6 at outputs **v10**;
-- an administrator on each, so `routes.app` is `ready`;
-- `/docs/app` answering 401.
-
-Before any host gate run, re-render the fixtures or D212 returns:
+Before any host gate run, re-render the fixtures or D212 returns. The gate now
+**fails rather than skips** if you forget:
 
 ```bash
 ./deploy.sh --project project.example.yaml \
@@ -172,6 +172,68 @@ Before any host gate run, re-render the fixtures or D212 returns:
 ./deploy.sh --project project.second.example.yaml \
   --capabilities capabilities.example.yaml --render-only
 ```
+
+### The command
+
+```bash
+sudo bin/session-06-check.sh --mode host --host host.yaml \
+  --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
+  --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
+  --admin-password-file /root/alpha-dev-administrator \
+  --sentinel-file "$(sudo python3 -c "
+import json
+from pathlib import Path
+root = Path('/var/lib/agentic-postgres/secrets/alpha-dev')
+gen = json.loads((root / 'active-secret-generation.json').read_text())['generation_id']
+print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
+")"
+```
+
+**`--admin-password-file` is new and four claims depend on it.** The
+administrator's password cannot be recovered from the host — only an Argon2id
+hash is stored, which is exactly what `SEC-CRED-001` asserts — so the proofs
+that need an administrator session have to be given one. Write the password you
+typed at step 3 into a root-owned file, run the gate, then remove it:
+
+```bash
+sudo install -m 0600 /dev/null /root/alpha-dev-administrator
+sudo tee /root/alpha-dev-administrator >/dev/null    # type it, then Ctrl-D
+# ... run the gate ...
+sudo shred -u /root/alpha-dev-administrator
+```
+
+Without it, `token_contract`, `admin_authorization`, `token_non_resurrection`
+and `project_isolation` report `not_run`. That is the evidence model working —
+but it means the trip proved less than it could have, and you would have to come
+back.
+
+Then the other half, from a machine that is **not** the host, and the merge:
+
+```bash
+bin/session-06-check.sh --mode external --public-ipv4 62.238.99.122 \
+  --project-a-outputs ./alpha-outputs.json --ssh-destination op@62.238.99.122
+
+python bin/write-session-evidence.py --session 6 \
+  --host-input evidence/session-06-host.json \
+  --external-input evidence/session-06-external.json \
+  --output evidence/session-06.json
+```
+
+### What to expect the first time
+
+These proofs have never run. Treat a failure as a question rather than a verdict
+— the most likely causes, in order, are a fixture that was not re-rendered, a
+missing `--admin-password-file`, and `routes.app` still `unavailable` because
+the administrator was created but the project was not redeployed afterwards.
+
+**`SEC-BOOT-001` will pass, and it would not have before this run.** Its expiry
+clause compared `deployed_through_session` against a constant `6`, so deploying
+through session 6 turned a green proof red — for a correct deployment, because
+Session 6 deliberately does not retire the bootstrap issuer. It is now keyed to
+the key set instead (ADR 0090, D280). If it *does* fail, read what it says: it
+now derives the bootstrap key's `kid` from the private key on disk and checks
+that the published set contains it, so a failure means the JWKS and the keys
+disagree — which is D276's defect, not a stale assertion.
 
 ---
 

@@ -959,37 +959,179 @@
   priority: P0
   target_session: 6
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_invalid_issuer_audience_algorithm_or_token_type_is_rejected
+    - tests/contract/test_auth_tokens.py::test_an_unpermitted_algorithm_is_refused
+    - tests/contract/test_auth_tokens.py::test_an_unpermitted_typ_is_refused
+    - tests/contract/test_auth_tokens.py::test_a_token_naming_an_unknown_kid_is_refused_rather_than_tried_against_every_key
+    - tests/contract/test_jwt_claims.py::test_a_token_from_another_issuer_is_refused
+    - tests/contract/test_jwt_claims.py::test_a_token_for_another_audience_is_refused
+    - tests/contract/test_jwt_claims.py::test_expiry_is_honoured_with_the_leeway_and_not_beyond_it
+    - tests/deployment/test_session6_tokens.py::test_a_token_the_service_issues_is_accepted_by_the_other_verifier
+    - tests/deployment/test_session6_tokens.py::test_both_verifiers_refuse_the_same_bad_tokens
+    - tests/deployment/test_session6_tokens.py::test_an_expired_token_is_refused_by_both_within_the_measured_leeway
   description: >-
-    Wrong issuer, audience, algorithm, token type, or expiry is rejected.
+    The negative matrix, asked of both verifiers. Wrong issuer, audience,
+    algorithm, token type, `kid` or expiry is refused -- by the auth service,
+    which signs, and by PostgREST, which verifies independently from a JWKS
+    file it read at startup. The two are only two verifiers when something
+    makes them read the same key set: until Run 10 nothing did, and every
+    token the service issued would have been refused (D276). The expiry case
+    carries the measured 30-second leeway rather than the nominal deadline
+    (D241), so a token is live for 930s and not 900.
 
 - id: SEC-KEY-001
   priority: P0
   target_session: 6
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_verifying_services_do_not_hold_the_private_signing_key
-  description: Verifying services hold public material only.
+    - tests/deployment/test_session6_tokens.py::test_no_verifier_holds_private_signing_material
+    - tests/deployment/test_session6_tokens.py::test_the_published_key_set_is_what_every_verifier_actually_loaded
+  description: >-
+    Verifying services hold public material only. The property is now
+    per-service rather than global: the auth service IS an issuer and must
+    hold its own key at 0400, while every other running container holds none
+    and the bootstrap issuer's key stays in the root plane. The key set is
+    compared in four readings -- the deployed document, what the issuer
+    publishes, what the deploy wrote, and the bytes inside the PostgREST
+    container -- because a JWKS replaced at a stable path leaves a running
+    verifier holding the old inode (D278).
 
 - id: SEC-CRED-001
   priority: P0
   target_session: 6
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_raw_credentials_are_never_stored_or_logged
-  description: Raw user and agent credentials are never stored or logged.
+    - tests/deployment/test_session6_credentials.py::test_a_password_this_test_planted_reaches_no_store_and_no_log
+    - tests/deployment/test_session6_credentials.py::test_a_database_error_reaches_the_caller_without_its_detail
+  description: >-
+    Raw passwords and agent secrets never reach storage, logs, evidence,
+    process arguments, image layers or database error detail. Measured against
+    a value the test PLANTS, on both the success and the failure path: a scan
+    for a password-shaped string finds nothing in a system that stores hashes
+    and would pass equally against one that logs every password it receives.
 
 - id: API-AUTH-001
   priority: P0
   target_session: 6
   test_nodeids:
-    - tests/integration/test_future_api.py::test_login_and_identity_endpoints_behave
-  description: Login issues a short-lived token and the identity endpoint reflects it.
+    - tests/deployment/test_session6_identity.py::test_login_issues_a_short_lived_token_and_me_reflects_current_state
+  description: >-
+    Login issues a short-lived token and `/auth/me` reflects CURRENT state
+    rather than the token's copy of it, compared against an independent
+    reading of the same record through the cluster. The four ways a login can
+    fail -- unknown subject, wrong password, disabled subject, no credential
+    -- are compared to each other rather than to a literal, because what the
+    requirement buys is that they cannot be told apart.
 
 - id: API-ADMIN-001
   priority: P0
   target_session: 6
   test_nodeids:
-    - tests/integration/test_future_api.py::test_admin_endpoints_require_explicit_admin_scope
-  description: Admin endpoints require an explicit admin scope, not a role name.
+    - tests/deployment/test_session6_admin.py::test_the_admin_endpoints_require_the_scope_and_not_the_role
+  description: >-
+    Admin endpoints require an explicit scope, not a role name. Proved with
+    the case a role check passes: a subject holding `project_admin` with the
+    administrative scopes removed is refused, between an ordinary subject that
+    is refused and the real administrator that is not -- without the third
+    caller every refusal is consistent with an endpoint that does not exist.
+- id: SEC-CRED-002
+  priority: P0
+  target_session: 6
+  test_nodeids:
+    - tests/contract/test_auth_hashing.py::test_the_encoded_hash_records_the_frozen_profile
+    - tests/contract/test_auth_hashing.py::test_the_hand_written_parser_agrees_with_the_library_it_does_not_use
+    - tests/contract/test_auth_hashing.py::test_a_stored_hash_at_another_profile_cannot_authenticate
+    - tests/contract/test_auth_hashing.py::test_a_stronger_profile_is_also_refused
+    - tests/contract/test_auth_hashing.py::test_an_argon2i_hash_is_refused_though_every_number_matches
+  description: >-
+    The Argon2id profile is the frozen one, read back FROM THE ENCODED HASH
+    rather than from the constructor's arguments. ADR 0081 measured that
+    `PasswordHasher.verify()` returns True for a hash produced at a weaker
+    profile and that `check_needs_rehash` reports the mismatch to nobody, so
+    the profile is parsed out of the PHC string before the password is checked
+    -- by a hand-written parser, because asking argon2 what argon2 just did is
+    the same authority twice.
+- id: API-AUTH-002
+  priority: P0
+  target_session: 6
+  test_nodeids:
+    - tests/contract/test_auth_strict_json.py::test_a_duplicate_member_is_refused_and_the_default_resolves_it_silently
+    - tests/contract/test_auth_strict_json.py::test_a_non_object_root_is_refused
+    - tests/contract/test_auth_strict_json.py::test_an_oversized_body_is_refused_before_it_is_parsed
+    - tests/contract/test_auth_strict_json.py::test_pydantic_discards_an_unknown_member_unless_it_is_told_not_to
+    - tests/contract/test_auth_tokens.py::test_a_token_over_the_byte_limit_is_refused
+    - tests/contract/test_auth_tokens.py::test_an_unapproved_header_member_is_refused
+    - tests/deployment/test_session6_identity.py::test_the_published_route_applies_the_input_bounds_before_the_service_allocates
+  description: >-
+    Strict input: duplicate JSON members, unknown fields, non-object roots,
+    oversized bodies and unapproved JOSE headers are refused before any domain
+    logic runs. The live half is the one no contract test can reach:
+    `request.body()` reads every byte before the service's bound is applied
+    (D273), so the edge carries the same number as a buffering middleware and
+    an oversized request must be refused with 413 by Traefik rather than with
+    400 by the service.
+- id: SEC-KEY-002
+  priority: P0
+  target_session: 6
+  test_nodeids:
+    - tests/contract/test_jwt_keys.py::test_prepare_publishes_both_keys_and_moves_nothing_that_signs
+    - tests/contract/test_jwt_keys.py::test_promotion_is_refused_until_every_verifier_has_acknowledged
+    - tests/contract/test_jwt_keys.py::test_promotion_switches_the_key_and_records_the_deadline
+    - tests/contract/test_jwt_keys.py::test_retirement_may_not_run_early
+    - tests/contract/test_jwt_keys.py::test_a_second_rotation_cannot_be_prepared_while_one_is_published
+    - tests/deployment/test_session6_tokens.py::test_the_cutover_is_built_and_deliberately_unexercised
+    - tests/deployment/test_session6_tokens.py::test_the_two_issuers_are_both_published_during_the_overlap
+  description: >-
+    Prepare, acknowledge, promote, retire: promotion is blocked until every
+    verifier has acknowledged the prepared public generation, and retirement
+    may not run before the deadline. The transition itself is NOT exercised in
+    Session 6 and that is a decision (ADR 0088): two live issuers fill a
+    two-key ceiling, and the transition between them is the first rotation the
+    machinery exists for. What the live proofs assert is everything that holds
+    without starting one -- the deployed key state satisfies the model's own
+    validator, no rotation is in flight, and the acknowledgement record is
+    null rather than empty.
+- id: SEC-BOOT-002
+  priority: P0
+  target_session: 6
+  test_nodeids:
+    - tests/deployment/test_session6_admin.py::test_no_http_surface_creates_an_administrator
+    - tests/deployment/test_session6_admin.py::test_the_local_bootstrap_refuses_a_second_administrator
+  description: >-
+    The first administrator is created only through the local protected path,
+    exactly once, under a project advisory lock, and no public bootstrap
+    endpoint exists -- an authenticated administrator cannot create a second
+    one over HTTP either. A distinct ID from SEC-BOOT-001, which is about the
+    temporary bootstrap ISSUER holding the only private key: one ID for two
+    guarantees is what D47 refused (ADR 0089). The advisory-lock race itself
+    was driven by hand in Run 8 and is recorded in the run log rather than
+    raced against a live deployment.
+- id: SEC-REV-002
+  priority: P0
+  target_session: 6
+  test_nodeids:
+    - tests/deployment/test_session6_identity.py::test_a_disabled_and_re_enabled_subject_cannot_use_its_earlier_token
+  description: >-
+    Non-resurrection. Disable then re-enable, an authorization change then
+    reverted, and a password change then reverted all leave a previously
+    issued token refused. The re-enable case is the isolating one: role,
+    scopes and status all end identical to what the token carries, so the only
+    thing that can refuse it is `authz_version` -- Run 8's M5 showed the
+    obvious construction stays green with that comparison deleted. A distinct
+    ID from SEC-REV-001, which is Session 9's and is about denial through MCP
+    (ADR 0089).
+- id: DEP-ISO-006
+  priority: P0
+  target_session: 6
+  test_nodeids:
+    - tests/deployment/test_session6_isolation.py::test_the_two_projects_share_no_identity_material
+    - tests/deployment/test_session6_isolation.py::test_project_bs_route_refuses_project_as_administrator
+    - tests/deployment/test_session6_isolation.py::test_project_bs_key_set_does_not_verify_project_as_tokens
+  description: >-
+    Project A's tokens and admin session are refused by project B, and the two
+    share no key, issuer, audience or role name. The refusal is read twice --
+    as a status, with B's own 401 to an unauthenticated request as the control
+    that something is listening, and as a mechanism, by checking that the
+    `kid` A's token names is absent from what B publishes. A distinct ID from
+    DEP-ISO-003, whose reuse would resolve this claim to Session 3 and turn
+    three earlier sessions' evidence red (ADR 0089).
 
 # ---------------------------------------------------------------------------
 # Session 7 — object storage

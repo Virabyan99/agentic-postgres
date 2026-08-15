@@ -141,6 +141,49 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "api_isolation": ("DEP-ISO-005",),
     "api_tooling": ("DX-API-001",),
     "public_api_boundary": ("SEC-API-001",),
+    # Session 6 adds seven, and every one of them names requirement IDs targeted
+    # at Session 6. That sounds like a restatement of the obvious and is the
+    # decision ADR 0089 records, because the plan's own §7 table did not.
+    #
+    # Three of the six IDs §2 introduced as "new" already existed:
+    # `SEC-BOOT-001` (Session 5), `SEC-REV-001` (Session 9) and `DEP-ISO-003`
+    # (Session 3). Prefix validity was checked; the directory was not. Taking
+    # them literally was measured, and neither failure is loud:
+    #
+    #   `project_isolation: ("DEP-ISO-003",)` resolves to claim_session=3, so
+    #   the Session 3, 4 and 5 gates each gain a claim whose proofs are Session
+    #   6 auth tests. Run through the real `merge`, Session 3's evidence goes
+    #   from exit 0 / `passed` to exit 5 / `failed` -- and the failing document
+    #   is still written, so nobody gets an error to investigate.
+    #
+    #   `token_non_resurrection: ("SEC-REV-001",)` resolves to claim_session=9.
+    #   `claims_for_mode("host", 6)` simply does not contain it. No error, no
+    #   warning, no entry: the property §2 calls the session's sharpest would
+    #   have been absent from the evidence and the gate would have exited 0.
+    #
+    # So the three are `DEP-ISO-006`, `SEC-REV-002` and `SEC-BOOT-002`.
+    # `SEC-BOOT-002` is also a meaning split rather than only a session one:
+    # `SEC-BOOT-001` is that the temporary bootstrap *issuer* holds the only
+    # private key, and Session 6's property is that the first *administrator* is
+    # created locally and exactly once. One ID for two guarantees is what D47
+    # refused, read backwards.
+    #
+    # `admin_authorization` pairs API-ADMIN-001 with SEC-BOOT-002 because the
+    # scope check is only meaningful while administrator creation is not an HTTP
+    # capability -- an endpoint that mints administrators makes every scope
+    # check decorative.
+    #
+    # `key_ownership` carries SEC-KEY-002, whose transition is deliberately
+    # unexercised this session (ADR 0088). Its live proofs assert the
+    # invariants that hold without starting a rotation; the convergence itself
+    # is recorded in the run log as unproved rather than claimed here.
+    "token_contract": ("SEC-JWT-001", "API-AUTH-002"),
+    "key_ownership": ("SEC-KEY-001", "SEC-KEY-002"),
+    "credential_storage": ("SEC-CRED-001", "SEC-CRED-002"),
+    "identity_endpoints": ("API-AUTH-001",),
+    "admin_authorization": ("API-ADMIN-001", "SEC-BOOT-002"),
+    "token_non_resurrection": ("SEC-REV-002",),
+    "project_isolation": ("DEP-ISO-006",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().
