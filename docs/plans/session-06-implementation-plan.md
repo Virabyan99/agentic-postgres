@@ -156,6 +156,8 @@ and the repository disagree and the disagreement was **measured**, not assumed.
 | **D291** | (`bin/postgres-bootstrap.py::build_statements`.) The database's posture is `REVOKE ALL ON DATABASE ... FROM PUBLIC` followed by an explicit `GRANT CONNECT` -- *"PUBLIC loses everything first, so a grant below is the only way any role holds anything."* | **The grant names three roles and `auth_service` is not one of them.** With D288 and D289 fixed, the service authenticated for the first time and was refused one layer later: `FATAL: permission denied for database "alpha_dev"` / `DETAIL: User does not have CONNECT privilege`. Third defect in a row from one cause -- adding a service means touching every list that enumerates roles -- and each was visible only after the previous was fixed, because each failure hid the next. | **The role joins the grant, and the class gets two proofs rather than a third patch.** `test_every_credentialed_role_can_also_connect` compares the two lists in `postgres-bootstrap.py` against **each other** -- a role given a password must be one the CONNECT grant names -- so a fourth service fails at the source rather than on a host. And `test_auth_service_reaches_its_data.py` stops checking lists altogether: it builds a cluster from `build_statements`, applies the released migrations as `migration_user`, credentials the role through the product's own `apply_credential`, and then **connects as that role and calls the functions the service calls**. All four assertions pass, which is also how it is known there is no fourth defect of this class waiting. | **The sequence is the finding, not the missing line.** Three host round trips to add three lines, because each proof stopped at the first refusal and every offline rig had supplied by hand whatever the product had failed to grant. The new module is the shape that ends it: it asks the question the lists exist to answer -- *can this role, credentialed as the product credentials it, do the work the service does?* -- and supplies nothing but a cluster. **A test that enumerates a list can only be as complete as the person who wrote it; a test that exercises the capability cannot.** | no |
 | **D292** | (`bin/auth-admin.py`, Run 8, and its own docstring.) The bootstrap is *"created by a human at a terminal on the host, over the container-local privileged socket"*, and Run 8 proved it: *"an administrator bootstrapped through the same function the operator command calls."* | **The command cannot run on the host at all.** It does `sys.path.insert(..."services" / "auth-api")` and imports `app.hashing`, which imports `argon2` at module scope. `argon2-cffi` is pinned in exactly one place -- the auth service's Dockerfile -- so it exists inside that image and nowhere else. The host has no venv and its `python3` has no such package. Observed as `ModuleNotFoundError: No module named 'argon2'` at the first host bootstrap, **after a deploy that had otherwise fully succeeded**, at the last step before `routes.app` could be published. | **The screening and the hashing move inside the auth container** (ADR 0093), over `docker exec` with the password on stdin. `bin/auth-admin.py` imports nothing from `services/`. The rule generalises: an operator command reaches a service's logic by running it in that service's container, never by importing it -- with ADR 0084's seam intact, because `src/` may import pure contract facts and is used by tests, which run in a venv. | **ADR 0065/0066's class in its last hiding place: not a rig that configures the product differently, but an ENVIRONMENT more capable than either place the code runs.** Every proof of this command runs in the repository's venv, which installs the service's dependencies so the service's tests can run -- a superset of both the host and the image, in which code that works in neither works fine. Installing argon2 on the host would have been one line and the wrong one: two Argon2 builds is two answers to *what produced this hash*, which is the question ADR 0081 exists to keep singular. Running it in the container is stronger than the import ever was -- **the hash an administrator is created with is now produced by the very process that will verify it.** | **0093** |
 | **D293** | (D292's fix, written minutes earlier in this same run.) `bin/auth-admin.py` finds the running auth container by Compose label and runs the hasher inside it. | **The selector matched nothing, and the command reported the service down while it was running and healthy.** It filtered on `com.docker.compose.project.working_dir=/var/lib/agentic-postgres/rendered/<key>` -- Compose's record of where it was invoked from, which is not a value this repository sets and did not hold what the fix assumed. The operator was told *"no running 'auth' container ... Deploy through session 6 first"* and did, needlessly, because the container had been up since the previous deploy. | **The selector is `apg.project.key`, a FIRST-PARTY label** declared beside every service in `compose.yaml` and carrying the same value the deployed document does (ADR 0002's direction, applied to a container query). The refusal message now names the filters it used, because a selector that matches nothing and a service that is genuinely down are indistinguishable from the caller. Two tests compare the command's selector against `compose.yaml` -- the label must be one the service declares, and its value must be the key the command passes. | **A function written in the same run that fixed a defect, and exercised by nothing.** The module's other tests build their own cluster and never call `auth_container()`, so `pytest` was green over a function that could not work. This is the run's own pattern turned on the run: seven defects were found because a proof took a route the product does not take, and the eighth was written while documenting the seventh. **The gap between "the tests pass" and "the code runs" does not close by knowing about it.** | no |
+| **D294** | (`bin/dev-token.py:mint`, and its own docstring: *"the `kid` is the deployed document's active key id, so a token names the key it was signed with"*.) The identifier read from `jwt.active_kid` names the key this command signs with. | **It names the key this command does NOT hold.** `mint` has signed with `bootstrap_jwt_signing_key.pem` since Session 5. Run 10 closed D276 by publishing the auth service's key too, and `render-jwks.py:build` publishes it **first**, while `observe_jwt` takes `active_kid = kids[0]` -- so from that deploy onward every token was signed by one key and labelled with the other's identifier. Measured against the locked PostgREST with four arms: bootstrap-signed/auth-labelled is **401 `PGRST301`**; the same token labelled with its own key's `kid` is 200; with **no** `kid` it is 200; the auth key's own token is 200. **The image selects by `kid`.** Confirmed on alpha-dev through `bin/dev-token.sh` itself: 401 `PGRST301`, with an unauthenticated **200** on the same URL as the control that the route was never the problem, and Traefik's 19-byte 404 as the control for what a missing route looks like. This is why `routes.rest` was `unavailable`: `observe_served_document` could not read the document it had just published. | **The `kid` is derived from the key being signed with** (ADR 0094), through `render-jwks.py:read_public_parameters` loaded rather than reimplemented -- the reason `tests/deployment/conftest.py:jwks_command` already gives. Three tests, the isolating one handing `mint` a document whose `active_kid` is the *other* key's thumbprint; three mutations red with two controls green. Migration 0013's hook is **exonerated by the same measurement**: it raises `PT401`, which is also HTTP 401, but its body begins `AP401` and `PGRST301` is raised before a connection is taken. | **ADR 0090 asked exactly this question of the proof and not of the product, one run earlier.** It re-keyed `SEC-BOOT-001` to derive the bootstrap `kid` from the private key on disk *"rather than read it from the document that names it"*, and called that D276's question asked for the first time. The command that **signs** went on reading the document for one more run -- and that is the run in which the second key arrived. A derived value with one authority (ADR 0002) had quietly grown a second reader who could not tell the two apart while they agreed. **One function mints for every operator command**, so `bin/api.sh`, `bin/api-contract.sh`, `bin/docs.sh check` and the deploy's own observation were all refused together, which is what put `rest_surface` and `api_contract` at risk: not a broken REST surface, but every proof that authenticates to it. | [0094](../decisions/0094-a-tokens-kid-is-derived-from-the-key-that-signed-it.md) |
+| **D295** | (`bin/dev-token.py:mint`, `claims["iss"] = jwt["issuer"]`.) The token's issuer claim names the issuer that signed it. | **It names the auth service, which did not.** `jwt.issuer` on alpha-dev is `https://alpha-db.agenticpostgresql.com/api/app/auth`; the signer is the bootstrap issuer, whose key is `keys[1]` of the same set. The deployed document carries **one** issuer name and there are two live issuers -- the same shape as D294, in the claim beside it. | **Recorded, not fixed in Run 13.** ADR 0078 measured that the locked PostgREST never checks `iss`, and no consumer of a dev token verifies it, so nothing rejects the claim today. The fix needs a *name* for the bootstrap issuer that the deployed document does not carry, and inventing one inside a repair is how a second unmeasured value gets published. | Found by reading the four lines below the one that was wrong, which is the only reason it was found at all -- nothing measures it and nothing would have. **The bootstrap issuer has no name of its own in the document**, and that is the gap: `jwt.issuer` was a single-issuer field that Session 6 pointed at the new issuer without asking what the old one would then be called. | no |
 
 ---
 
@@ -818,6 +820,74 @@ The standing questions gain a third: not only *what would have to break for this
 to go red*, and *has it run since the thing it measures changed*, but **whose
 identity, and through which tool, does the proof use -- and are they the ones
 production uses?**
+
+### Run 13 — `routes.rest`, and a label that named the wrong key  ·  **Done offline.**
+
+Run 12 left alpha-dev converged with `routes.rest: unavailable` and no
+explanation. Two candidates were on the table -- PostgREST verifying against a
+key set that refuses the deploy's token, or migration 0013's current-state hook
+refusing a documentation-role token -- and **neither had been measured**. Both
+answer **401**: the hook raises with `ERRCODE = 'PT401'`, which PostgREST maps to
+HTTP 401, so the status code cannot tell them apart. **The body can**, and that
+is what the run turned on.
+
+**Measured before anything was changed, in two places.**
+
+*The image, because whether a `kid` selects a key or merely annotates one is a
+property of PostgREST.* A throwaway rig on the locked digest with a real cluster
+and a two-key JWKS built through `render-jwks.py`'s own derivation; four arms,
+three of them controls:
+
+| arm | signed by | header `kid` | result |
+|---|---|---|---|
+| **A** | bootstrap | **auth's kid** | **401 `PGRST301`** |
+| B | bootstrap | bootstrap's kid | 200 |
+| C | bootstrap | *omitted* | 200 |
+| D | auth | auth's kid | 200 |
+
+**PostgREST selects by `kid`.** B and D prove both keys verify, so the set is
+sound; C proves that with no `kid` it tries every key, which is what makes A's
+refusal attributable to the label alone.
+
+*Then the deployment*, because a rig is a second configuration of the product
+(ADR 0065, 0066) and arm A being the shape the product *builds* is not evidence
+it is the shape the product *sends*. Run on alpha-dev through `bin/dev-token.sh`
+-- the product's own command, minting as the product mints, presented to the
+published route, with the operator at the terminal: **401 `PGRST301`**, the same
+body as arm A. `jwt.active_kid` is `keys[0]` of the JWKS PostgREST reads.
+
+**Two controls carried that measurement**, and the run is worth as much as they
+are: the same URL with **no** `Authorization` header answered **200** with a
+complete OpenAPI document -- the route is present, routed and healthy, and the
+credential is what fails -- and a path no router claims answered **404 with a
+19-byte body**, Traefik's own (D186). Without the first, "401" is equally
+consistent with a broken route.
+
+**D294 / ADR 0094 is the defect.** `mint` signs with the bootstrap key and
+labelled the token with `jwt.active_kid`, which has named the **auth service's**
+key since Run 10 published it first. One function mints for every operator
+command, so `bin/api.sh`, `bin/api-contract.sh`, `bin/docs.sh check` and the
+deploy's own `observe_served_document` were refused together. The `kid` is now
+derived from the key being signed with. Three tests -- the isolating one hands
+`mint` a document whose `active_kid` is the *other* key's thumbprint, which no
+reading of the document can satisfy -- and three mutations red with controls
+green either side.
+
+**The finding is where the lesson had already been learned.** ADR 0090 changed
+`SEC-BOOT-001` one run earlier to derive the bootstrap `kid` *from the private
+key on disk rather than read it from the document that names it*, and called
+that D276's question asked for the first time. It was asked of the **proof** and
+not of the **product**; the command that signs went on reading the document for
+one more run, and that is the run in which the second key arrived. Run 12's
+question -- *whose identity, and through which tool* -- has a sibling: **when a
+defect class is fixed, which side of the system got the fix?**
+
+**D295 is recorded and not fixed.** The same function sets `iss` from the same
+document, so a bootstrap-signed token claims the auth service as its issuer.
+ADR 0078 measured that PostgREST never checks `iss` and no dev-token consumer
+verifies it, so nothing rejects it -- but the bootstrap issuer has **no name of
+its own** in the deployed document, and inventing one inside a repair would
+publish a second unmeasured value.
 
 ## 6. The auth surface
 

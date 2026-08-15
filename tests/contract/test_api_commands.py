@@ -28,6 +28,7 @@ were narrowed for.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -410,3 +411,172 @@ def test_a_missing_document_is_refused(command: Path) -> None:
 @pytest.mark.parametrize("command", [API, DOCS, DEV_TOKEN])
 def test_help_works_from_another_directory(command: Path, tmp_path: Path) -> None:
     assert run(command, "--help", cwd=tmp_path).returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# ADR 0094 / D294: the `kid` names the key that signed the token
+# ---------------------------------------------------------------------------
+
+
+def _dev_token_module() -> Any:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("apg_dev_token", SOURCES["dev-token"])
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _header_of(token: str) -> dict[str, Any]:
+    segment = token.split(".")[0]
+    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+
+
+@pytest.fixture
+def two_keys(tmp_path: Path) -> tuple[Path, Path]:
+    """Two RSA keys, because a project deployed through session 6 holds two.
+
+    Generated rather than committed: a `kid` is a thumbprint of the key, so a
+    fixture key would let this file assert a constant against itself.
+    """
+    generated = []
+    for name in ("signing", "other"):
+        path = tmp_path / f"{name}.pem"
+        result = subprocess.run(
+            ["openssl", "genrsa", "-out", str(path), "2048"],
+            capture_output=True,
+            check=False,
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stderr
+        generated.append(path)
+    return generated[0], generated[1]
+
+
+def test_the_minted_kid_is_the_thumbprint_of_the_key_that_signed_it(
+    two_keys: tuple[Path, Path],
+) -> None:
+    """ADR 0094, and the isolating case is a document naming the OTHER key.
+
+    This is the defect that left `routes.rest` `unavailable` on alpha-dev.
+    `render-jwks.py` publishes the auth service's key first from Session 6,
+    `observe_jwt` takes `active_kid = kids[0]`, and this command signs with the
+    *bootstrap* key -- so the token was signed by one key and labelled with the
+    other's identifier, and the locked PostgREST, which selects by `kid`, refused
+    it with 401 `PGRST301`.
+
+    A test that only compared the header's `kid` against the signing key's
+    thumbprint would have passed under the old spelling too, whenever the two
+    coincided -- which is every single-key deployment and was every offline
+    fixture. So the document handed in here names the *other* key. That
+    difference is the measurement: no reading of `active_kid` satisfies it.
+    """
+    dev_token = _dev_token_module()
+    signing_key, other_key = two_keys
+
+    signing_kid = dev_token.key_id(signing_key)
+    other_kid = dev_token.key_id(other_key)
+    assert signing_kid != other_kid, "two distinct keys produced one thumbprint"
+
+    token = dev_token.mint(
+        key_path=signing_key,
+        role_name="apg_a_api_documentation",
+        subject=None,
+        ttl=300,
+        document={
+            "jwt": {
+                "issuer": "https://alpha.example.test/api/app/auth",
+                "audience": "urn:a",
+                # What a session-6 deployed document actually says: the head of
+                # the published set is the auth service's key, which this
+                # command does not hold and cannot sign with.
+                "active_kid": other_kid,
+                "verification_kids": [other_kid, signing_kid],
+            }
+        },
+    )
+
+    header = _header_of(token)
+    assert header["kid"] == signing_kid, (
+        f"the token is labelled {header['kid']} and was signed by a key whose thumbprint is "
+        f"{signing_kid}; a verifier that selects by kid answers 401 PGRST301 to that"
+    )
+    assert header["kid"] != other_kid, "the kid came from the document rather than from the key"
+
+
+def test_the_minted_signature_verifies_under_the_key_its_kid_names(
+    two_keys: tuple[Path, Path], tmp_path: Path
+) -> None:
+    """The property, asserted against what the command produced (D277).
+
+    The test above compares two derived strings, which exercises this module's
+    arithmetic as much as the command's. This one takes the token apart,
+    resolves its `kid` to a key the way a verifier does, and asks openssl
+    whether that key signed it -- with the other key as the control that the
+    verification is capable of failing.
+    """
+    dev_token = _dev_token_module()
+    signing_key, other_key = two_keys
+    by_kid = {dev_token.key_id(signing_key): signing_key, dev_token.key_id(other_key): other_key}
+
+    token = dev_token.mint(
+        key_path=signing_key,
+        role_name="apg_a_anon",
+        subject=None,
+        ttl=300,
+        document={"jwt": {"active_kid": dev_token.key_id(other_key)}},
+    )
+    header_segment, claims_segment, signature_segment = token.split(".")
+    signing_input = f"{header_segment}.{claims_segment}".encode("ascii")
+    signature = base64.urlsafe_b64decode(signature_segment + "=" * (-len(signature_segment) % 4))
+
+    def verifies(key: Path) -> bool:
+        public = tmp_path / f"{key.stem}.pub"
+        extracted = subprocess.run(
+            ["openssl", "rsa", "-in", str(key), "-pubout", "-out", str(public)],
+            capture_output=True, check=False, timeout=60,
+        )  # fmt: skip
+        assert extracted.returncode == 0, extracted.stderr
+        signature_file = tmp_path / f"{key.stem}.sig"
+        signature_file.write_bytes(signature)
+        checked = subprocess.run(
+            ["openssl", "dgst", "-sha256", "-verify", str(public),
+             "-signature", str(signature_file)],
+            input=signing_input, capture_output=True, check=False, timeout=60,
+        )  # fmt: skip
+        return checked.returncode == 0
+
+    named = by_kid[_header_of(token)["kid"]]
+    assert verifies(named), (
+        "the token names a kid whose key did not sign it -- which is what a verifier answers 401 to"
+    )
+    unnamed = other_key if named == signing_key else signing_key
+    assert not verifies(unnamed), "openssl verified a signature made by a different key"
+
+
+@pytest.mark.parametrize("role", ["anon", "authenticated", "api_documentation"])
+def test_every_role_carries_a_kid(role: str, two_keys: tuple[Path, Path]) -> None:
+    """A `kid` is never omitted, and the reason is outside PostgREST.
+
+    Measured: PostgREST accepts a token carrying no `kid` at all -- it tries
+    every published key -- so omitting the member would have cured the 401 too.
+    The auth service's own verifier does not: `PERMITTED_HEADER_MEMBERS` and the
+    loop below it in `services/auth-api/app/tokens.py` require `alg`, `kid` and
+    `typ`, so a token minted without one is refused by the other verifier in the
+    same system (ADR 0094).
+    """
+    dev_token = _dev_token_module()
+    signing_key, _ = two_keys
+    token = dev_token.mint(
+        key_path=signing_key,
+        role_name=f"apg_a_{role}",
+        subject=None,
+        ttl=300,
+        document={"jwt": {}},
+    )
+    header = _header_of(token)
+    assert header["kid"] == dev_token.key_id(signing_key)
+    assert set(header) == {"alg", "kid", "typ"}, (
+        f"the auth service refuses an unapproved header member: {sorted(header)}"
+    )

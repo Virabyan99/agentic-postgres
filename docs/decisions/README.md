@@ -157,3 +157,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0091](0091-a-released-migration-that-cannot-apply-is-corrected-in-place.md) | A released migration that cannot apply is corrected in place | 6 | Accepted |
 | [0092](0092-the-auth-service-reaches-the-cluster-directly.md) | The auth service reaches the cluster directly | 6 | Accepted |
 | [0093](0093-an-operator-command-reaches-service-logic-through-a-container.md) | An operator command reaches service logic through a container | 6 | Accepted |
+| [0094](0094-a-tokens-kid-is-derived-from-the-key-that-signed-it.md) | A token's `kid` is derived from the key that signed it | 6 | Accepted |

@@ -50,7 +50,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import jwt_claims, scope_registry, secrets_contract
+from agentic_postgres import jwt_claims, jwt_keys, scope_registry, secrets_contract
 from agentic_postgres.secret_generation import SECRET_ROOT
 
 #: The three roles a token may name, and the key each resolves through in the
@@ -163,6 +163,39 @@ def base64url(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
+def key_id(key_path: Path) -> str:
+    """The RFC 7638 thumbprint of the key at `key_path`.
+
+    Loaded from `bin/render-jwks.py` rather than reimplemented, for the reason
+    `tests/deployment/conftest.py:jwks_command` already gives: the derivation has
+    the shape it does because the obvious spelling (`openssl rsa -in <private>
+    -noout -text`) prints `privateExponent` and both primes, and because openssl
+    labels the exponent differently for a public and a private key. A second copy
+    would be written from the obvious spelling.
+
+    Imported here rather than at module scope so that a caller who only wants
+    `signing_key_path` or `development_subject` -- and the test suite, which
+    imports this module off-host -- does not pay for a command that shells out to
+    openssl (ADR 0094).
+    """
+    import importlib.util
+
+    source = Path(__file__).resolve().parent / "render-jwks.py"
+    specification = importlib.util.spec_from_file_location("apg_dev_token_jwks", source)
+    if specification is None or specification.loader is None:
+        raise TokenError(3, f"cannot load {source}")
+    jwks_command = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(jwks_command)
+
+    try:
+        modulus, exponent = jwks_command.read_public_parameters(key_path)
+    except Exception as error:
+        # The message, never the path's contents: this function is handed a
+        # private key and openssl prints material from one on some failures.
+        raise TokenError(5, f"could not derive this key's identifier: {error}") from error
+    return jwt_keys.public_jwk(modulus_hex=modulus, exponent=exponent)["kid"]
+
+
 def development_subject(project_key: str) -> str:
     """A stable per-project subject, derived rather than accepted."""
     return str(uuid.uuid5(SUBJECT_NAMESPACE, project_key))
@@ -173,17 +206,29 @@ def mint(
 ) -> str:
     """Sign an RS256 token. The return value is a credential: do not log it.
 
-    The `kid` is the deployed document's active key id, so a token names the key
-    it was signed with. Measured: a token whose header carries a `kid` no JWKS
-    member matches is refused with the same `PGRST301` a wrong signature gets --
-    which is the correct outcome and the reason the value is read from the
-    document rather than guessed.
+    **The `kid` is derived from `key_path`, not read from the document** (ADR
+    0094). It was `jwt.active_kid` until Run 13, and that was correct for exactly
+    as long as the published set held one key. `render-jwks.py` publishes the
+    auth service's key *first* from Session 6, `observe_jwt` takes
+    `active_kid = kids[0]`, and this function signs with the **bootstrap** key --
+    so every token minted after that deploy was signed by one key and labelled
+    with the other's identifier.
+
+    Measured against the locked PostgREST, four arms: signed-by-bootstrap
+    labelled-auth is **401 `PGRST301`**, while the same token labelled with the
+    bootstrap key's own `kid` is 200, with no `kid` at all is 200, and the auth
+    key's own token is 200. The image selects by `kid`; the three controls are
+    what make that attributable to the label rather than to the signature.
+    Confirmed on alpha-dev through this command, against the published route,
+    with an unauthenticated 200 as the control that the route was never the
+    problem.
+
+    A thumbprint is a function of the key (ADR 0051), so deriving it here is the
+    one spelling under which the label cannot disagree with the signature.
     """
     jwt = document.get("jwt") or {}
     now = int(time.time())
-    header: dict[str, Any] = {"alg": "RS256", "typ": "JWT"}
-    if jwt.get("active_kid"):
-        header["kid"] = jwt["active_kid"]
+    header: dict[str, Any] = {"alg": "RS256", "typ": "JWT", "kid": key_id(key_path)}
 
     claims: dict[str, Any] = {"role": role_name, "iat": now, "exp": now + ttl}
     if jwt.get("issuer"):
