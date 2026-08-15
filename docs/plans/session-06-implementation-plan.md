@@ -965,6 +965,53 @@ everything above is *written* and only the offline suite (3124 passed) and the
 three offline gates have executed. **The measurement is the next host run**, and
 saying so here rather than discovering it later is D282's condition.
 
+### Run 15 — the evidence, and what it says  ·  **Done.**
+
+Both projects redeployed at `e842cc0`, the host gate run, the external half run
+off-host, both halves merged. **`evidence/session-06.json` exists for the first
+time.**
+
+```
+host      181 passed, 0 failed, 6 skipped
+external   20 passed, 0 failed, 8 skipped
+merged     23 of 25 claims passed
+```
+
+**All seven Session 6 claims passed** — `token_contract`, `key_ownership`,
+`credential_storage`, `identity_endpoints`, `admin_authorization`,
+`token_non_resurrection`, `project_isolation` — and so did `connection_tooling`,
+`public_api_boundary` and `transport_boundary` from the external half. Run 14's
+twenty failures went to zero.
+
+**Three of Run 14's fixes were verified and one was not a fix at all.** The ten
+`AP401`s, the container selector and D306 all went green. The 422 needed a
+**redeploy**, not a change: the running auth image was built from `ec9c0b4` while
+ADR 0097 landed in `5c39e98`, so for one gate run the proof was correctly
+describing the previous release. **A proof can be right about the deployment and
+wrong about the source tree in front of you**, and the two are told apart only by
+reading which release the host installed -- which the gate prints and nobody had
+been reading.
+
+**The document's overall status is `failed`, and that is the model working.**
+Two claims did not pass, both Session 5's, both blocked on the same thing:
+
+| claim | what is missing |
+|---|---|
+| `bootstrap_identity` | `SEC-BOOT-001`'s two rotation node IDs -- `APG_ROTATED_JWT_FROM_FILE`, `APG_ROTATED_AUTHENTICATOR_FROM_FILE` |
+| `api_authorization` | `SEC-DOCS-001`'s second node ID -- `APG_ROTATED_DOCS_FROM_FILE` |
+
+Everything else those claims are built from passed, including
+`test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key`, which
+this session repaired twice (ADR 0090's expiry clause, ADR 0096's PEM scan).
+**The rotation window is the whole of what is left.** The `APG_AFTER_REBOOT`
+skips block nothing: `boot_convergence` passed without them.
+
+**The signing-key rotation is now unblocked and was not before.** ADR 0088's
+cutover was forbidden during Session 6 until auth-service issuance and PostgREST
+verification were both proved; `token_contract` and `key_ownership` are exactly
+those two, and both are green. The transition between the two live issuers is the
+first rotation that machinery exists for, and it can now be run.
+
 ## 6. The auth surface
 
 Endpoints, and what each one is allowed to decide:

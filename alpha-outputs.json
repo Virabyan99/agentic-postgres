@@ -1,0 +1,203 @@
+{
+  "api": {
+    "api_surface_sha256": "14ad6bff0c0ea1a09966fb5951d63a26480fe8c3977c602d3231ea9a0d5e5dc8",
+    "canonical_openapi_sha256": "c55b0ca9fd44725a6c0d39d445ca3ebc2d39702f522f8f8c3a10b659d4f0f852",
+    "connection_budget_reserved": 13,
+    "exposed_schema": "api",
+    "max_rows": 500,
+    "pool_size": 10,
+    "project_openapi_sha256": "8e11151d077c8faa3ee663da2939f9934a3aef3c2f10f760afa676415a6e70c9",
+    "request_body_max_bytes": 1048576,
+    "status": "ready"
+  },
+  "bootstrap": {
+    "infisical_project_id": "2c146f6b-582c-4ce9-af87-4cef645c00c3",
+    "runtime_identity_id": "2aee2668-2103-4c1e-8031-48d474937203",
+    "state_path": "/etc/agentic-postgres/projects/alpha-dev/bootstrap-state.json",
+    "status": "complete"
+  },
+  "database": {
+    "access_profiles": {
+      "migration_direct": {
+        "available_from_session": 4,
+        "password_secret_ref": "migration_user_password",
+        "role": "apg_alpha_dev_migration_user",
+        "status": "available",
+        "transport": "direct"
+      },
+      "runtime_direct": {
+        "available_from_session": 4,
+        "password_secret_ref": "app_runtime_password",
+        "role": "apg_alpha_dev_app_runtime",
+        "status": "available",
+        "transport": "direct"
+      },
+      "runtime_pooled": {
+        "available_from_session": 4,
+        "password_secret_ref": "app_runtime_password",
+        "role": "apg_alpha_dev_app_runtime",
+        "status": "available",
+        "transport": "pooled"
+      }
+    },
+    "api_connection_budget": 13,
+    "auth_connection_budget": 6,
+    "budget": {
+      "maintenance_work_mem_mb": 64,
+      "max_connections": 50,
+      "memory_limit_mb": 768,
+      "shared_buffers_mb": 128,
+      "shm_size_mb": 256,
+      "unreclaimable_mb": 292,
+      "work_mem_mb": 4
+    },
+    "container": "apg-alpha-dev-postgres-1",
+    "direct": {
+      "available_from_session": 4,
+      "host": "127.0.0.1",
+      "password_secret_ref": "app_runtime_password",
+      "port": 15433,
+      "status": "available",
+      "url": "postgresql://apg_alpha_dev_app_runtime@127.0.0.1:15433/alpha_dev"
+    },
+    "name": "alpha_dev",
+    "observed": {
+      "extensions": {
+        "plpgsql": "1.0",
+        "vector": "0.8.6"
+      },
+      "instance_uuid": "90db04ed-c8c0-4fab-862b-e4e34e4ad0fa",
+      "memory": {
+        "anon_mb": 12,
+        "file_mb": 32,
+        "shmem_mb": 19
+      },
+      "server_version": "18.4",
+      "status": "observed"
+    },
+    "pooled": {
+      "available_from_session": 4,
+      "host": "127.0.0.1",
+      "password_secret_ref": "app_runtime_password",
+      "port": 15432,
+      "status": "available",
+      "url": "postgresql://apg_alpha_dev_app_runtime@127.0.0.1:15432/alpha_dev"
+    },
+    "roles": {
+      "agent_reader": "apg_alpha_dev_agent_reader",
+      "agent_writer": "apg_alpha_dev_agent_writer",
+      "anon": "apg_alpha_dev_anon",
+      "api_documentation": "apg_alpha_dev_api_documentation",
+      "app_runtime": "apg_alpha_dev_app_runtime",
+      "auth_service": "apg_alpha_dev_auth_service",
+      "authenticated": "apg_alpha_dev_authenticated",
+      "backup_user": "apg_alpha_dev_backup_user",
+      "mcp_audit_service": "apg_alpha_dev_mcp_audit_service",
+      "migration_user": "apg_alpha_dev_migration_user",
+      "object_owner": "apg_alpha_dev_object_owner",
+      "postgrest_authenticator": "apg_alpha_dev_postgrest_authenticator",
+      "project_admin": "apg_alpha_dev_project_admin",
+      "storage_service": "apg_alpha_dev_storage_service"
+    },
+    "statement_timeouts": {
+      "apg_alpha_dev_anon": "2s",
+      "apg_alpha_dev_app_runtime": "30s",
+      "apg_alpha_dev_authenticated": "5s"
+    }
+  },
+  "deployed_through_session": 6,
+  "document_kind": "deployed",
+  "edge": {
+    "control_network": "apg-edge-control",
+    "egress_network": "apg-edge-egress",
+    "project_edge_network": "apg-alpha-dev-edge",
+    "project_internal_network": "apg-alpha-dev-internal",
+    "project_network_attached": true,
+    "stack_name": "apg-edge"
+  },
+  "host": {
+    "id": "apg-vps-01",
+    "os_release": "26.04",
+    "public_ipv4": "62.238.99.122",
+    "public_ipv6": null
+  },
+  "jwt": {
+    "active_kid": "w4OqVzyJ0Z7wHxr9aZqNyid90Yx1ljQLI8-IVOM3x8o",
+    "algorithm": "RS256",
+    "audience": "urn:agentic-postgres:alpha:dev",
+    "issuer": "https://alpha-db.agenticpostgresql.com/api/app/auth",
+    "public_jwks_sha256": "41f134b682064635a4fad85a7290e3f082eab46af6713156aa3521b1b084720c",
+    "retire_after": null,
+    "status": "ready",
+    "temporary": true,
+    "verification_kids": [
+      "w4OqVzyJ0Z7wHxr9aZqNyid90Yx1ljQLI8-IVOM3x8o",
+      "sQQsxpzrDFDIZsUL_c_i6gsd2tVM6kXb-wuPhph_6Yg"
+    ],
+    "verifier_acknowledgements": null
+  },
+  "observed_at": "2026-08-15T15:58:38Z",
+  "project": {
+    "domain": "alpha-db.agenticpostgresql.com",
+    "environment": "dev",
+    "key": "alpha-dev",
+    "slug": "alpha"
+  },
+  "routes": {
+    "app": {
+      "status": "ready",
+      "url": "https://alpha-db.agenticpostgresql.com/api/app"
+    },
+    "app_docs": {
+      "status": "ready",
+      "url": "https://alpha-db.agenticpostgresql.com/docs/app"
+    },
+    "docs": {
+      "status": "ready",
+      "url": "https://alpha-db.agenticpostgresql.com/docs/rest"
+    },
+    "health": {
+      "status": "ready",
+      "url": "https://alpha-db.agenticpostgresql.com/__apg/healthz"
+    },
+    "rest": {
+      "status": "ready",
+      "url": "https://alpha-db.agenticpostgresql.com/api/rest"
+    }
+  },
+  "runtime": {
+    "compose_model_sha256": "c3dc9700ea537d3965becad55214ab145a499e55ca48dc111d241e3c78b1f4fd",
+    "release_path": "/opt/agentic-postgres/releases/e842cc05e3c7006b21ade40a30892111a588462a",
+    "state_directory": "/etc/agentic-postgres/projects/alpha-dev"
+  },
+  "schema_version": 10,
+  "secrets": {
+    "fresh": true,
+    "generation_id": "a30c0dd7d9218d16",
+    "generation_manifest": "/var/lib/agentic-postgres/secrets/alpha-dev/generations/a30c0dd7d9218d16/manifest.json",
+    "materialized_at": "2026-08-15T15:58:06Z",
+    "required_names": [
+      "app_runtime_password",
+      "auth_jwt_signing_key",
+      "auth_service_password",
+      "bootstrap_jwt_signing_key",
+      "docs_basic_auth_password",
+      "migration_user_password",
+      "pgbouncer_admin_password",
+      "postgres_init_superuser_password",
+      "postgrest_authenticator_password",
+      "session2_sentinel"
+    ],
+    "status": "ready"
+  },
+  "source_commit": "e842cc05e3c7006b21ade40a30892111a588462a",
+  "template_version": "0.1.0-dev",
+  "tls": {
+    "acme_environment": "production",
+    "certificate_sha256": "79b21420c0284a5796334bc80176687a28f0e53281a8718c1bf915c52b2b2019",
+    "not_after": "2026-11-05T06:50:01Z",
+    "not_before": "2026-08-07T06:50:02Z",
+    "resolver": "letsencrypt",
+    "status": "issued"
+  }
+}
