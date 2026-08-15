@@ -1,0 +1,511 @@
+# Session 7 implementation plan — the object-storage vertical slice
+
+> **Source runbook:** `session-07-r2-object-storage-vertical-slice-runbook-audited.md`.
+> **This document is not that document.** The runbook was written against a
+> repository where Sessions 1–6 had been implemented exactly as *their* runbooks
+> described. They were not. Sessions 1–6 produced **98 ADRs and 306 recorded
+> divergences**, and a large part of the runbook's account of "what Session 7
+> inherits" is an account of a system that does not exist here.
+>
+> §1 is the point of this document. Everything else is downstream of it.
+
+**What Session 7 does, in one sentence:** add one ownership-aware object
+workflow — upload intent, server-generated key, short-lived presigned PUT,
+completion verified against the provider, authorized presigned download,
+tombstone, and idempotent cleanup — without weakening a single boundary Sessions
+1–6 measured.
+
+**What it must not do:** reinterpret an inherited contract silently. That is
+CLAUDE.md §5's rule and it is why this file exists.
+
+---
+
+## 0. Where Session 7 actually starts
+
+From a **closed Session 6 carrying one debt**, and that debt is the first thing
+to plan around.
+
+```
+HEAD               d975800, clean, in sync with origin/main
+gate               offline PASSED (x3) · host PASSED (181/0/6) · external PASSED (20/0/8)
+claims             23 of 25 proved; evidence/session-07 will be the sixth document
+red                api_authorization, bootstrap_identity — Session 5's, and blocked
+                   ONLY on the rotation window (three APG_ROTATED_*_FROM_FILE inputs)
+projects           alpha-dev and beta-dev, both session 6, outputs v10, 13 migrations,
+                   an administrator on each, every route ready
+ADRs               98 (0001…0098)
+divergences        D1…D306.  **Session 7 owns D307 onward.**
+outputs schema     v10
+migrations         13 released.  **Session 7's is 0014.**
+roles              `storage_service` ALREADY EXISTS in naming.ROLE_SUFFIXES
+scopes             closed vocabulary, two classes (ADR 0079)
+connection budget  FULLY ALLOCATED: application 23, api 13, auth 6, headroom 5 = 47
+                   = max_connections 50 − 3 reserved (ADR 0070)
+```
+
+**Three facts decide the shape of this session, and the runbook knows none of
+them.**
+
+1. **The connection budget has no slack.** ADR 0070 divides 47 connections
+   exactly. A storage service with its own pool cannot be added without
+   re-deriving that division, and the division is published in `outputs.json`
+   and read by the bootstrap plane. This is the first thing to compute, not the
+   last.
+2. **The scope vocabulary is closed** (ADR 0079). `storage:read` and
+   `storage:write` are not a config edit; they are either an extension of the
+   frozen data class (ADR 0003) or a third class, and either needs an ADR. D220
+   proposed widening this surface once and D244 refused it.
+3. **A bootstrap-issued token can no longer name a subject** (ADR 0095). The
+   command that Session 5 and 6 used to test authenticated request paths,
+   `bin/dev-token.sh`, mints **role-only** tokens. Every storage proof that
+   needs an owner must authenticate as a registered subject through
+   `POST /auth/login`. The runbook's whole test plan assumes otherwise.
+
+---
+
+## 1. Runbook divergences
+
+Six columns, the house shape. Every row is a place where the runbook describes a
+repository that is not this one. Rows are **predictions made at plan time**;
+each is confirmed, corrected or replaced during implementation, and anything
+found *during* implementation is appended with the next free number.
+
+| # | Runbook says | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D307** | §10.1: "Create or activate a project-prefixed login role" `storage_service`, as though the name were new. | **`storage_service` has been in `naming.ROLE_SUFFIXES` since Session 3** and is derived for every project already, alongside `mcp_audit_service` and `backup_user`. It exists as a NOLOGIN stub with a null verifier, which is what `secrets.required.yaml` says every service identity is until its owning session activates it. | Session 7 **activates** it, in the shape Session 6 used for `auth_service`: the migration plane creates nothing, the **bootstrap plane** grants LOGIN, the credential and the `CONNECTION LIMIT` (D102, ADR 0067). Nothing is added to `ROLE_SUFFIXES`. | The role's existence is already proved by `test_only_the_activated_roles_may_log_in`, which derives the expected LOGIN set from the deployed document. **That proof will go red the moment `storage_service` logs in**, and the fix is ADR 0096's: re-derive from the event, not restate. Plan for it rather than discover it. | — |
+| **D308** | §7.4: outputs schema **version 7**, additive over "v6". | Outputs schema is **v10**. Both projects are on it. v7 was Session 5's. | Session 7 publishes **v11**, and the version is chosen **once, from the session's whole surface** — the storage block, the re-derived connection budget, the route, and the provider-health field together. | **D255 is exactly this mistake**: v9 was chosen one run early with the session's remaining fields in mind and still missed the budget. A version bump is planned from the session's whole surface, not from the run in front of you. | — |
+| **D309** | Adds a storage runtime with its own bounded pool and says nothing about the cluster's connection budget. | **The budget is exhausted.** ADR 0070 divides `max_connections` 50 less 3 reserved into application 23, api 13, auth 6 and headroom 5 = 47, computed in `config` and published in `outputs.json`, and the manifest check charges it **unconditionally** (D256). There is no fourth claimant. | **Run 1 re-derives the division for four claimants before any code is written**, in `config`, with the manifest bound and the document field moving together. Taking it out of headroom is not free: headroom is what an operator uses to fix a cluster that has run out. | A pool size chosen after the service is built is a number nobody computed. The division is a single authority (ADR 0002 applied to a number) and the bootstrap plane reads it from the document. | needed |
+| **D310** | §4.8: "Add exact scopes `storage:read` / `storage:write`", presented as a registry edit. | **The vocabulary is closed in two classes** (ADR 0079): DATA scopes, one per frozen-domain resource and verb, closed by ADR 0003's example domain; ADMINISTRATIVE scopes over the auth service's own surface. `$defs/agent_scope` is a separate closed subset. The schema is the sole authority and `scope_registry` is a mapping onto it. | An **ADR** decides whether an object is a resource of the frozen example domain (extending the data class) or whether storage is a third class. **`agent_scope` is not widened**, which is the runbook's own "agents deferred" stated where the schema can enforce it. | D220 asked for a scope widening and **D244 refused it** because `$defs/scope` is referenced only by `required_scopes`, so a careless edit widens the agent capability surface. The same edit is available here and must be made deliberately. | needed |
+| **D311** | §8.4/§8.6: a "protected broker" ingests the R2 access key over a TTY or file descriptor into an unpublished generation. | **There is no broker and there does not need to be one.** This repository has a provider (Infisical), `bin/bootstrap-providers.sh --plan/--apply`, `bin/materialize-secrets.sh`, per-consumer generations under `/var/lib/agentic-postgres/secrets/<key>/generations/<id>/<service>/`, and `secrets.required.yaml` as the contract. **D249**: no command sets a value at the provider — `--apply` creates what is missing and leaves existing values alone, so an operator-supplied value is pasted into Infisical by hand, exactly as `auth_service_password` was. | The R2 key id and secret are declared in `secrets.required.yaml` with a **new `value_kind`** — the bootstrap cannot generate them, because Cloudflare shows the secret exactly once. `--plan` names them and `--apply` refuses to invent them. The operator guide carries the Cloudflare step. | The runbook's broker would be a **second secret-delivery path** beside a working one, with its own file modes, its own ownership rules and its own bugs. **D257** is the precedent for the widening: `value_kind` was deliberately not widened until a consumer arrived. It has arrived. | needed |
+| **D312** | §11: migration `0012_storage_objects.sql.tmpl`. | **Thirteen migrations are released; Session 7's is `0014`.** The naming is `migrations/templates/0014-<name>.sql`, rendered by a deliberately incapable renderer (`{{name}}` → quoted identifier or literal, no conditionals), frozen with `bin/migrate.sh freeze-lock`. | `migrations/templates/0014-object-storage-plane.sql`. **It does not touch the pre-request hook.** | **D270**: the hook is defined in four files — 0008, 0009, 0010, 0013 — and only the last one runs. 0013's body carries the statement-timeout carry, the documentation-role clause and the current-state comparison; a 0014 that redefined it from an older body would silently delete all three. **ADR 0091** applies if 0014 ever needs correcting: fix-forward unless no cluster holds it. | — |
+| **D313** | §20.4 and the whole test plan assume a test token can be minted for a human subject. | **A bootstrap-issued token may not name a subject** (ADR 0095). `bin/dev-token.sh` mints `anon`, `authenticated` and `docs` tokens with **no `sub`**, because migration 0013's hook compares a subject against `app_private.users` and `auth_claims_are_current` is an EXISTS over five equalities a bootstrap token cannot satisfy. | Every storage proof that needs an owner uses the **`owner_session`** fixture — a subject created through `app_private.auth_create_user` and a token from `POST /auth/login`. `second_owner_session` exists for the cross-user half. | This is D298's whole lesson arriving in a new session. **The proofs are stronger for it**: a storage authorization test run as an identity the deployment has never heard of would be measuring nothing. | — |
+| **D314** | §7.2: a parallel error vocabulary, `STOR100`–`STOR111`, several of which return a *message* to an unauthenticated caller. | The auth service already has a closed error vocabulary with a decided split (**ADR 0097**): `malformed_request` → **400, no message**, for anything refused before domain logic; `invalid_request` → **422 with a message**, for an *authenticated administrator*. An unauthenticated caller is told nothing. | Storage errors **extend `services/auth-api/app/errors.py`** in that shape. A storage-specific code is admissible where it names a *state* the caller can act on (expired intent, not-yet-visible object) and the caller is authenticated; a structural refusal stays 400 with nothing in it. | ADR 0097 was written because a duplicate JSON member in an unauthenticated login body returned the administrator-facing shape naming the duplicated field. A second vocabulary would reintroduce that, and **D264** is what two authorities for one value cost. | — |
+| **D315** | §7.1: introduces `storage:` in the manifest as a new section, with a key format `objects/v1/<yyyy>/<mm>/<uuid>` and upload TTL bounded 60–900. | **A `storage:` section already exists** in `project.schema.json` and `project.example.yaml` — `enabled`, `bucket`, **`prefix`** (`objects/<key>/`), `upload_url_ttl_seconds` (bounded **60–3600**), `download_url_ttl_seconds`, `max_upload_bytes` — and the render prints it today. | Session 7 **extends** the existing section and reconciles the two key layouts into one. Narrowing a published bound is a schema change with an ADR; leaving both is two authorities for the key. | The existing `prefix` and the runbook's key template are **two derivations of the same string**, which is D177's shape. `naming.py` is the single authority for derived names (ADR 0002) and the object key belongs there or in one clearly-named module, not in both a manifest field and a service constant. | needed |
+| **D316** | §23.1: `bin/session-07-check.sh --project project.yaml --peer-project tests/fixtures/projects/project-b.yaml`. | Gates take **`--mode offline\|host\|external`** plus `--host`, `--project-a-outputs`, `--project-b-outputs`, and where the claims need them `--admin-password-file`, `--sentinel-file`, `--ssh-destination`. Offline mode runs with no host and no root; host mode needs root; external mode must run off-host. | `bin/session-07-check.sh` is written in `session-06-check.sh`'s shape, with a third refusal for whatever Session 7's equivalent of `--peer-project` is. | The three modes exist because a scan run on the host measures its own routing table, and because **D213** proved that a flag mentioned under a command is a flag nobody passes. Every flag a claim depends on goes **in** the usage command, not below it. | — |
+| **D317** | §6: a repository layout with `templates/compose/*.j2`, `templates/traefik/*.j2`, `versions/images.lock`, `services/app/app/`, `bootstrap/*.yaml`. | None of those paths exist. The real layout is `bin/*.sh` (operator surface) over `bin/*.py` (the work), `src/agentic_postgres/` (pure logic), `services/auth-api/app/`, one `compose.yaml` with per-session **profiles**, Traefik routers as **labels** rendered in `runtime_override.py` plus a file provider for what must come from root-owned state, `versions.env` + `versions.in.yaml`, `secrets.required.yaml`, `tests/{contract,deployment,security,external,integration}/`. | The delta is restated against the real tree in §5. **No `.j2` templates are added**; label keys are rendered in Python because Compose cannot interpolate inside a label key (ADR 0013). | A plan that names files which cannot exist produces a run that spends its first hour discovering that. | — |
+| **D318** | §20 invents a fresh test inventory and §6 a fresh registry. | **Four Session 7 requirement IDs already exist** in `tests/acceptance-registry.yaml`, pointing at placeholders in `tests/integration/test_future_storage.py`: `STO-OWN-001`, `STO-KEY-001`, `STO-URL-001` (all P0) and `STO-COMPLETE-001` (P1). | Session 7 **replaces those placeholders**, keeping the IDs and their descriptions, and adds new IDs only after grepping the registry. | **ADR 0089 / D279**: three of Session 6's six "new" requirement IDs were already taken, and because `claim_session` derives from `max()`, one of them would have turned three earlier sessions' evidence red while the other vanished silently from the gate. **Before adding a requirement ID, grep the registry.** And **D175**: a dropped registry proof is caught only by generated-file drift. | — |
+| **D319** | §16.1: an "exact-boundary router" for `/api/app/storage` that must not match `/api/app/storagex`. | Correct, and the reason is measured: **`PathPrefix(/api/rest)` matches `/api/restaurant`** — it is a string prefix, not a path prefix (**D162**). | The storage router uses the same construction Session 5 arrived at for `/api/rest`, and the boundary is proved by request, not by reading the label. | Traefik's own 404 and a routed 404 are identical from outside; Traefik's carries no `RouterName` and a 19-byte body (D186, D187). A boundary test that only checks the status code proves nothing. | — |
+| **D320** | Treats the storage runtime as a JWT verifier without saying what that does to the key set. | **There are two verifiers today** — PostgREST, from the rendered `jwks.json`, and the auth service, from its own key. **ADR 0098**: the issuer publishes what it signs with; the verifier is configured with every live issuer's key, and `served ⊆ declared`. **ADR 0088**: after any change to the published set, every verifier must be **recreated**, not restarted. | Storage becomes a **third verifier**, and every place that enumerates verifiers moves with it: `SEC-KEY-002`'s four readings, the cutover's recreate step, and the operator guide. | **D276** is what happens when an issuer's key is not in a verifier's set: 401 on every token, invisible until something asked both. Adding a verifier without adding it to that proof recreates the gap. | — |
+| **D321** | §18.1: "Add exact hash-locked versions of boto3, matching botocore." | True, and the mechanism has a trap. **D259/ADR 0083**: adding one package entry with a plain `--update` re-resolves **every image** and once moved `pgvector:pg18` and `python:3.12-slim`, which would have shipped an unmeasured PostgreSQL upgrade inside a storage session. | `bin/lock-versions.sh --update --packages-only`, and the image digests carried forward unchanged. **botocore is a separate distribution at a different version** and must be named — the exact shape of D258, where `psycopg-pool` was a separate distribution the lock never named. | The lock verifies what it can dereference; everything else in it is a comment with a colon in it (D201). | — |
+| **D322** | §4.1/§12.1: one image, two runtimes, selected by `APP_MODE=storage`. | There is one service directory, `services/auth-api/`, one build context, and one image per project named `apg-<key>-auth`. **ADR 0084**: a fact both planes need lives in `services/auth-api/app/` and `src/agentic_postgres/` imports it, because the build context cannot reach `src/` and the alternative is the duplicate-plus-test shape D175 and D260 have both already cost. | An **ADR** decides between a mode flag on the existing image and a second service directory. The least-privilege boundary the runbook wants — storage holds no signing key, auth holds no R2 credential — is enforced by the **secret contract's per-consumer materialization**, which already makes "one service cannot read another's credential" a filesystem property, and is independent of which choice is made. | Choosing by habit produces either a duplicated codebase nobody keeps in step or an image whose name lies about what it runs. Both are recoverable; neither should be silent. | needed |
+| **D323** | §4.21/§16.2: two CORS policies, one at the edge and one at R2. | **Nothing in this repository does CORS today.** The edge middleware surface is Traefik's, and the docs credential lives inline in the file provider (ADR 0086) after a measured failure of the label-only approach (D202, D208, ADR 0085). | The control-plane policy is a **Traefik middleware rendered from the manifest's origin list**, in the file provider where a root-owned value belongs; the R2 policy is provider configuration applied by the bootstrap. One origin list, two renderings, and a test that ties them together. | **D271/ADR 0085** is the measured lesson about where a middleware may live: moving a middleware to the file provider closes nothing if the *router* stays a label, and a file-provider service resolves its backend by DNS — which went to the wrong project ten times out of ten. | needed |
+| **D324** | Starts the storage service like any other Compose service. | Services that authenticate as a **bootstrap-activated role** must be held back until after the bootstrap step, or Compose restarts them five times against a role that cannot log in — with the message `password authentication failed`, which is what a *wrong* credential gets. `runtime_override.POST_BOOTSTRAP_SERVICES` is that list and currently holds `postgrest` and `auth`. | Storage joins `POST_BOOTSTRAP_SERVICES`, and its Compose entry uses `profiles: [session7]`. | The constant's own comment records the diagnosis it exists to keep nobody from having to make. A new service that skips it produces a healthcheck failure that reads as a credential defect. | — |
+| **D325** | §20 and §22 assume container-side inspection (`docker exec … cat`, shell probes). | **The locked PostgREST image is distroless** — no shell, no coreutils — and `docker exec … cat` exits 127 with `executable file not found in $PATH` (**D305**). The storage image's own hardening (read-only rootfs, uid 65532, no package manager) is the same direction. | Container-side reads use `docker cp`, measured with a control. Operator commands that need service logic run it **inside the service's container** rather than importing it (**ADR 0093**, after `auth-admin.py` imported a hasher that exists only in the auth image). | D305 was found only because D299's fix let execution reach the next line. **One unrun proof hides the next.** | — |
+| **D326** | §22.1: deployment records `storage_credentials_required`, publishes no route, and prints a resume command. | The product already has a shape for this and it is **not** a special deployment state: **D230's two-stage convergence**. `routes.app` records `unavailable` with the operator command printed, and the deploy **exits 0**; a redeploy after the missing input exists observes and publishes it. `published_route` drops the URL when the status is not `ready`, so an unpublished route names nothing. | `routes.storage` follows `routes.app` exactly: `unavailable` until the credential validates, the command printed, exit 0, and `ready` on the redeploy that observes it. | A second convergence mechanism would need its own tests, its own operator documentation and its own failure modes, beside one that is deployed and proved on two projects. | — |
+
+**Rows are added during implementation.** Next free number after the table above
+is **D327**.
+
+---
+
+## 2. What Session 7 adds to the acceptance registry
+
+**Grep the registry before choosing any requirement ID** (ADR 0089, D279). The
+prefix is not the check; the directory is.
+
+**Four IDs already exist** and are replaced rather than re-invented:
+
+| ID | Priority | Current node ID | What it becomes |
+|---|---|---|---|
+| `STO-OWN-001` | P0 | `tests/integration/test_future_storage.py::test_cross_user_object_download_is_denied` | A live proof that a second registered subject cannot obtain a download URL for the first's object, and that the refusal is indistinguishable from a nonexistent id. |
+| `STO-KEY-001` | P0 | `…::test_client_supplied_object_keys_are_rejected` | The request model admits no key or bucket field, and the generated key matches the derived format. |
+| `STO-URL-001` | P0 | `…::test_presigned_urls_never_reach_logs_or_the_audit_table` | A canary scan over application logs, the edge log, the journal, evidence, outputs and container inspection. |
+| `STO-COMPLETE-001` | P1 | `…::test_abandoned_upload_intents_are_not_downloadable` | Only an object verified against the provider becomes downloadable. |
+
+New IDs are chosen after a grep and follow the existing prefixes. The likely set,
+each of which must be **one guarantee** (D47, ADR 0089):
+
+- upload-intent bounds and the per-caller cap,
+- completion verification and its idempotence,
+- tombstone-before-grant linearization,
+- cleanup convergence including the late-writer case,
+- the runtime credential's bucket scope and peer denial,
+- the secret-consumer matrix (storage holds no signing key; auth holds no R2 key),
+- two-project isolation for buckets, credentials and object ids.
+
+**Claims** go in `src/agentic_postgres/evidence_claims.py::CLAIMS`, one claim per
+guarantee, built **only from Session 7's own IDs** — ADR 0089's rule, because
+`claim_session` derives from `max()` and an older ID mixed in either drags the
+claim into an earlier session or hides it from this one's gate. After editing
+the registry, `python bin/render-acceptance-matrix.py --write`.
+
+Two registry properties remain **review rules, not tests** (D174, D175): nothing
+detects a requirement relocated wholesale into the wrong environment, and nothing
+detects a requirement whose description outgrows its node ids. Session 7 does not
+fix that and must not assume it is fixed.
+
+---
+
+## 3. Environment feasibility
+
+| Requirement | Status | Note |
+|---|---|---|
+| Cloudflare account with R2 | **operator input** | Account id, jurisdiction, and the ability to create a bucket-scoped Object Read & Write token. The account is also the collision domain: bucket names are unique per account and jurisdiction. |
+| Infisical control-plane credential | **re-issued per session** | `docs/provider-bootstrap.md` shreds it after every bootstrap on purpose. Session 7 needs one for the two new secrets, exactly as Session 6 did. |
+| R2 reachable from the host | **must be measured** | Not assumed. The first live call is a `HeadBucket` from the host, through the same egress the runtime uses. |
+| Connection budget | **blocking** | See D309. Recomputed before any code. |
+| Memory | **must be measured** | A second application container has a floor. **ADR 0082** measured the auth service's the hard way: the first attempt reported 87 MiB for every row because `ru_maxrss` is a high-water mark already set by earlier work. One profile per process, with a no-work control. |
+| boto3 / botocore | **lock first** | `--packages-only` (D321). And **ADR 0083's lesson**: a wheel that "seems optional" may be the only reachable implementation — `psycopg` alone does not import on the locked base image. |
+| Docker, Compose, host baseline | **green** | Unchanged from Session 6; `session-01-check.sh` passes on the host. |
+
+**The unmeasured boundary that stays unmeasured:** IPv6. Eight
+`APG_PUBLIC_IPV6` proofs have never run, and running them from a machine without
+IPv6 would report every port closed — a fact about the scanner. Session 7 does
+not change that and must not claim to.
+
+---
+
+## 4. Safety plan for irreversible operations
+
+Five operations in this session cannot be undone by re-running a command.
+
+**1. Creating the bucket.** A bucket name is unique within the account and
+jurisdiction tuple, and a same-named bucket is **not** ownership proof. The
+bootstrap reads back account, name, jurisdiction, creation time and public-access
+state and stops for operator review when continuity cannot be proved. **It never
+deletes a bucket as rollback.**
+
+**2. Issuing the R2 token.** Cloudflare shows the secret once. The operator
+guide says so before the step, not after, and the value goes to Infisical, not
+to a terminal that scrolls. (Session 6 put an administrator password in a
+transcript by following an instruction that echoed it; the guide's §5 now says
+so explicitly. Do not repeat the shape.)
+
+**3. Publishing a secret generation.** Materialization writes a **new
+generation** and the deploy recreates every container onto it. Anything reading
+"what a container holds" reads the **live pointer**, never the deployed
+document's `secrets.generation_id` (**D76, D306**). A stable path that is
+*replaced* strands the mounted inode (**D278**), which is why the JWKS change
+needs `down` and not `restart`.
+
+**4. Applying migration 0014.** Forward-only. `bin/migrate.sh freeze-lock` after
+writing it. Applied as `migration_user`, never as a superuser — **D285**: every
+offline rig applied migrations as `psql -U postgres`, and a superuser bypasses
+the ownership check that made 0012 and 0013 fail on a real cluster.
+
+**5. Deleting objects.** Cleanup is **metadata-driven** and never lists the
+bucket. There is no orphan scan, and adding one later is a separate decision:
+a reconciler that lists and deletes untracked objects can delete data a human
+put there to recover something.
+
+**The standing rules apply unchanged.** `sudo` needs a TTY, so anything
+privileged that mutates is run by a human at a terminal. Read-only diagnosis is
+not: `apg-diag` has eight allowlisted verbs (ADR 0071) and the agent account can
+run unprivileged commands and write `/tmp`, which is how bundles and evidence
+move without the operator key.
+
+---
+
+## 5. Build order
+
+Runs are the unit. Each ends with the offline gate green on a clean tree, and
+CLAUDE.md §4's procedure applies to every one of them: measure third-party
+behaviour with a **control** before writing anything that depends on it, write
+the ADR when the measurement decides something with alternatives, then implement,
+then **try to break the tests** with a mutation battery whose failures are fatal
+(D269).
+
+### Run 1 — The budget, the scopes, and the shape of the boundary
+
+**Offline. Nothing is built until these three are decided**, because each of them
+changes what the rest of the session may assume.
+
+- **Re-derive the connection budget for four claimants** (D309) in `config`,
+  with the manifest bound, the document field and the bootstrap plane's division
+  moving together. Publish it in **outputs v11** and nowhere else.
+- **Decide the scope class** (D310) with an ADR. `agent_scope` is not widened.
+- **Decide the runtime boundary** (D322) with an ADR: a mode on the existing
+  image, or a second service directory.
+- **Decide the key derivation** (D315): one authority for the object key,
+  reconciling the manifest's `prefix` with the generated layout.
+- Extend `schemas/project.schema.json`'s existing `storage` section; add the
+  negative cases (wildcard origin, http origin outside development, a bound
+  outside its range, a bucket name that is not the derived one).
+- Grep the registry, then write the Session 7 entries and claims.
+
+**Exit:** two fixtures render with different buckets, different budgets and
+identical structure; `--render-only` still works with no host and no root.
+
+### Run 2 — The secret contract and the provider plan
+
+- Declare `r2_access_key_id`, `r2_secret_access_key` and
+  `storage_service_password` in `secrets.required.yaml`, with the new
+  `value_kind` for the two the bootstrap cannot generate (D311) and `pgpass`
+  format for the third where the consumer needs it.
+- Extend `bin/bootstrap-providers.sh` so `--plan` **names** the operator-supplied
+  secrets and `--apply` refuses to invent them, with a message that says where
+  the value comes from.
+- Write the Cloudflare steps into `docs/session-07-operator-guide.md` **before**
+  they are needed, including the one-time secret display.
+
+**Exit:** `--plan` on a fixture prints exactly the new secrets; a fake provider
+proves the refusal path. Remember that **a fake never 404s** (D283) — the
+optional/absent case needs its own fixture.
+
+### Run 3 — Migration 0014 and the storage plane
+
+- `migrations/templates/0014-object-storage-plane.sql`: the object table, its
+  state constraints, the cleanup lease columns, the contract-state row, and the
+  narrow `SECURITY DEFINER` functions.
+- Every function: owned by the non-login object owner, `SET search_path =
+  pg_catalog, pg_temp`, fully qualified names, **an explicit per-function revoke
+  from PUBLIC beside every `CREATE FUNCTION`** (D57, D262 — a new function is
+  PUBLIC-executable and `ALTER DEFAULT PRIVILEGES … REVOKE … FROM PUBLIC`
+  records nothing for functions), and a grant only to `storage_service`.
+- **A CHECK constraint passes when its expression is NULL** (ADR 0080). Every
+  state constraint is written and tested with that in front of you.
+- Do not touch the pre-request hook (D312).
+- Prove against a **real cluster**, applying all fourteen migrations as
+  `migration_user` (D285), not as a superuser.
+
+**Exit:** fresh apply, repeat no-op, ownership and ACLs, the transition matrix,
+the lease claim under concurrency, and cross-owner lookups returning nothing.
+
+### Run 4 — Activate `storage_service`
+
+- Bootstrap-plane activation: LOGIN, the credential, the `CONNECTION LIMIT` from
+  Run 1's division, `INHERIT FALSE` where a membership exists at all (**D266**:
+  without it the holder gets every request role's reach merely by connecting).
+- No membership in `authenticated`, `project_admin`, the agent roles, the owner
+  role or the migration role.
+- **Move the two proofs that will go red** rather than discovering them: the
+  LOGIN set derivation and the authenticator's membership set both derive from
+  the document and the bootstrap enumeration (ADR 0096).
+
+**Exit:** the role connects directly, executes exactly the storage functions, and
+can reach nothing else — proved by attempting, not by reading a catalog bit
+(**D103**: `has_table_privilege` returned true for a table the role could not
+read).
+
+### Run 5 — The R2 adapter, measured before it is trusted
+
+**Measure the provider before writing the client.** A throwaway rig against a
+real bucket, with controls, answering at minimum: does a presigned PUT with a
+signed `If-None-Match: *` behave as the runbook claims; what exactly does
+`HeadObject` return for content type, cache control, disposition, custom
+metadata and checksum under the locked SDK; what is the observed failure shape
+for an expired URL, a mutated key and a mutated signature.
+
+- One low-level client: region `auto`, the jurisdiction endpoint derived from
+  the account id, `s3v4`, one addressing style **frozen after being proved**,
+  explicit timeouts, bounded retries, **no ambient credential chain** and no
+  IMDS lookup.
+- A bounded executor. Not an unbounded threadpool.
+- **A fake adapter is a second configuration of the product** (ADR 0065, 0066).
+  If one exists, a test ties every setting the fake configures to the setting the
+  product configures — the shape of
+  `test_every_setting_the_behaviour_rig_configures_is_configured_by_the_product`,
+  which exists because a rig set `PGRST_DB_PRE_REQUEST` and the product never
+  did.
+
+**Exit:** every provider operation exercised against a real bucket, with the
+negative arms, and no URL or key in any log.
+
+### Run 6 — The endpoints
+
+Upload intent, completion, download URL, delete. Strict request parsing on the
+inherited path, errors in ADR 0097's shape (D314), no-store on every response
+that carries a URL, and the ownership-obscuring lookup that makes a cross-user id
+and a nonexistent id the same answer.
+
+**Completion holds no database transaction across the provider call**, and the
+finalize is a compare-and-swap that **revalidates the subject** — because a token
+that was current when the intent was created may not be current when it
+completes.
+
+### Run 7 — Publish: the route, the CORS pair, the container
+
+- The Compose service with `profiles: [session7]`, **`tmpfs` as a block
+  sequence** (D287 — the flow form parses as four mount paths and only the
+  daemon refuses, at container-create time), read-only rootfs, uid 65532, no
+  host port, internal and edge networks only.
+- `POST_BOOTSTRAP_SERVICES` gains it (D324).
+- The router, with the boundary proved by request (D319), and the control-plane
+  CORS middleware in the file provider (D323).
+- `routes.storage` follows D230's two-stage convergence (D326).
+
+**Read the access log before concluding anything about a 404** (D186, D187).
+
+### Run 8 — Cleanup, rotation, and the operator surface
+
+- `bin/storage-admin.sh` in the house shape: `bin/*.sh` over `bin/*.py`,
+  enumerated verbs, no arbitrary bucket or key, **no flag that prints a
+  credential** (D105), and service logic reached **through the container**
+  (ADR 0093).
+- Credential rotation modelled on `bin/rotate-signing-key.sh`'s phases rather
+  than invented. Note that R2 permission changes are **eventually consistent**,
+  so revocation is polled within a bounded window and never asserted
+  instantaneously.
+
+### Run 9 — The contract, the docs, the evidence
+
+- The aggregate app OpenAPI through the existing workflow: `bin/app-contract.sh
+  --check` compares, `--update` streams a candidate you redirect yourself.
+  **Deployment never approves.**
+- `/docs/app` gains the storage surface. The page must **fetch its own assets**
+  (D274 — `/docs/rest` rendered 200 with a blank page for four runs because
+  nothing ever requested the script its own markup names).
+- `bin/session-07-check.sh` in three modes (D316), the claims, the evidence.
+
+### Run 10 — The host trip
+
+Everything above is written and only the offline suite has executed. **The
+measurement is the host run.** Session 6's Run 12 found nine defects on its
+first host trip and Run 13's first gate returned twenty failures, nineteen of
+which were proofs that had never executed. Plan for the trip to find things;
+that is what it is for.
+
+---
+
+## 6. The storage surface
+
+Under `/api/app/storage`, human tokens only, no-store on every response.
+
+| Method | Path | Scope | Notes |
+|---|---|---|---|
+| `POST` | `/upload-intents` | write | Server generates the id and the key. No bucket or key field exists in the request model. |
+| `POST` | `/upload-intents/{id}/complete` | write | `HeadObject` outside any transaction; CAS finalize; idempotent. |
+| `GET` | `/objects/{id}/download-url` | read | Owned and available only; the ownership check is the linearization point. |
+| `DELETE` | `/objects/{id}` | write | Tombstone commits before any later grant can be authorized. |
+
+**No list endpoint.** The vertical slice proves operations by known id; a list
+endpoint needs pagination, ordering, filtering and its own review.
+
+**What the responses do not carry:** bucket, key, ETag, checksum, provider
+request id, or another user's existence.
+
+**What a presigned URL is:** a bearer credential with a short life. Issuing one
+is an authorization decision made at issue time; it is **not** revoked by a later
+tombstone. The documentation says so plainly rather than implying revocation,
+and the residual is bounded by TTL, unique keys, the first-write condition,
+provider deletion and repeated absence verification.
+
+---
+
+## 7. Evidence and claims
+
+Same model, unchanged: a claim's verdict is computed from the registry's node ids
+and JUnit results, never hand-entered, and **a skip is not a pass**. Host and
+external halves are written separately and merged by
+`bin/write-session-evidence.py --session 7`.
+
+`evidence/*` is gitignored by design. It is generated; regenerating it is how you
+get it back.
+
+**The two inherited red claims are Session 5's**, blocked only on the rotation
+window. Session 7 does not close them and must not appear to: if the window is
+held during this session, it closes them and the plan says so; if it is not, the
+Session 7 evidence document carries them red for the same stated reason.
+
+---
+
+## 8. Security invariant matrix
+
+| Invariant | Control | Proof |
+|---|---|---|
+| A client cannot choose a key or bucket | No such field exists in the request model | Schema plus a request that tries |
+| A user cannot reach another's object | Owner-filtered functions; identical answer for absent and foreign | Cross-user matrix with two registered subjects |
+| A pending or tombstoned object is not downloadable | State-gated lookup | State matrix |
+| A reused URL cannot overwrite a completed object | Unique key plus signed first-write condition | Replay PUT |
+| Metadata matches the bytes | `HeadObject` before availability | Mismatch arms |
+| A tombstone precedes every later grant | Database commit order | Race test with a deterministic order |
+| The storage runtime cannot sign a token | Per-consumer secret materialization | Mount and inspection scan |
+| The auth runtime holds no R2 credential | The same contract, from the other side | The same scan |
+| The runtime credential cannot administer the bucket | Bucket-scoped object token | Named operations attempted, not "management denied" |
+| A stale token cannot use storage | Current-subject check per request | Disable, reset, re-scope |
+| An agent token cannot use storage | Human-only verifier; `agent_scope` unwidened | Agent negative arms |
+| Cross-project authority is denied | Distinct buckets, credentials, issuer, audience, roles | Two-project gate |
+| No URL or key reaches a sink | No-store, allowlist logging | Canary scan across every sink |
+
+---
+
+## 9. Risks and stop conditions
+
+**Stop and ask** rather than proceeding, when:
+
+- the connection budget cannot be divided four ways without taking headroom to
+  zero;
+- the bucket name exists in the account and ownership cannot be proved;
+- the runtime credential can reach the peer project's bucket;
+- `--render-only` stops working without a host or root;
+- a Session 1–6 claim goes red and the fix would weaken a passing test.
+
+**The failure mode this session is most exposed to** is the one this project
+keeps producing: *a value that looked measured and was not*. Storage adds a
+provider whose behaviour is documented by somebody else, an SDK with defaults
+that reach the network, and a URL that is a credential. Every one of those is a
+place where a plausible wrong answer passes for exactly as long as nobody asks.
+
+The three standing questions, and the fourth Session 6 earned:
+
+1. What would have to break for this test to go red?
+2. Has it run at all, in this environment, since the thing it measures changed?
+3. Whose identity, and through which tool, does the proof run — and are they the
+   ones production uses?
+4. When a defect class was fixed, **which side of the system got the fix** — the
+   product or the proof?
+
+---
+
+## 10. Open items carried in
+
+- **The rotation window.** Two Session 5 claims are red pending three
+  `APG_ROTATED_*_FROM_FILE` inputs. **ADR 0088's signing-key cutover is now
+  unblocked** — it required auth-service issuance and PostgREST verification to
+  be proved, and both are green.
+- `requirements-dev.in` has produced a red gate twice; adding boto3 is the third
+  chance to do it carefully.
+- **Nothing knows which proofs have never executed** (D211–D214). A run-age per
+  node id would have caught four defects in one Session 5 run and nineteen in
+  one Session 6 run. No session has built it. Session 7 will add roughly a dozen
+  host-only proofs to the pile.
+- **The environment is not verified against the lock** (D297). `lock-dev-deps`
+  checks the lock file, not the installed distributions, and a stale venv on the
+  host killed a gate in collection.
+- `render-jwks` prints *"the key set CHANGED"* on **every** deploy (D296),
+  because `install_rendered` replaces the rendered directory and the byte
+  comparison has nothing to compare against. Adding a third verifier makes that
+  message more load-bearing, not less.
+- Secret generations accumulate; nothing prunes them.
+- `tests/deployment/conftest.py` is past a thousand lines and now carries the
+  REST plane, the app plane and the identity fixtures. Storage will add more.
+- The published REST document advertises `DELETE`, `PATCH` and `POST` on both
+  views and all three return 403 (ADR 0060) — recorded, not fixed.
+
+---
+
+## 11. Session 8 handoff
+
+Session 8 receives a private per-project bucket, a bucket-scoped runtime
+credential isolated from auth and from any future backup service, an activated
+`storage_service` role with function-only authority, a tested object lifecycle
+with cleanup leases and late-writer handling, human storage scopes, and a storage
+runtime that verifies public JWTs without holding signing material.
+
+Session 8 **must not** hand FastMCP the R2 credential, register storage tools
+implicitly from OpenAPI, admit an agent token to a storage endpoint without a
+committed capability and audit representation, or log a URL or a key in an agent
+audit record.
+
+---
+
+## Appendix — what to consult, and what to measure instead
+
+**Consult:** `docs/decisions/README.md` (98 ADRs, indexed); §1 of this document;
+`docs/plans/session-06-implementation-plan.md` §1 rows D215–D306 and §5 runs 13–15;
+`docs/session-06-operator-guide.md` for the host sequence this session extends.
+
+**Measure instead of consulting**, every time: what the provider returns, what
+the SDK does by default, what a header does to a signature, what a container
+holds, and whether a proof has ever run. Roughly half of Session 5's measured
+claims turned out wrong, and Session 6's first host gate returned twenty
+failures against a suite that was green offline.
+
+**Before measuring how a third party behaves, grep the plans for it.** Run 8
+measured how PostgreSQL grants `EXECUTE` on a new function and recorded it as a
+finding; Session 3 had measured the same thing three sessions earlier, in more
+detail, and the house pattern already reflected it (D57, D262). Every ADR is
+indexed; **nothing indexes the ~300 measured facts in the divergence tables by
+subject**, so the pointer has to be a grep.
+
+**Never write a measurement you did not run** (D267).
