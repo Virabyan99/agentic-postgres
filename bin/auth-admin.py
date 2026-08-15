@@ -214,36 +214,47 @@ def quote_literal(value: str) -> str:
     return f"'{doubled}'"
 
 
+#: The label this project puts on every container it owns, and the one this
+#: command selects on.
+#:
+#: A FIRST-PARTY label, not `com.docker.compose.project.working_dir` (D293).
+#: The first attempt filtered on the working directory, which is Compose's
+#: record of where it was invoked from rather than anything this repository
+#: sets -- and it matched nothing on the host, so the bootstrap reported the
+#: service down while it was running and healthy. `apg.project.key` is declared
+#: in `compose.yaml` beside every service and is the same value the deployed
+#: document carries.
+PROJECT_KEY_LABEL = "apg.project.key"
+
+
 def auth_container(project_key: str) -> str:
-    """The running auth container for this project, by Compose label.
+    """The running auth container for this project, by label.
 
     By label rather than by a derived name: the deployed document carries no
     per-service container name -- only `database.container` -- and ADR 0002 is
-    explicit that a name is read rather than derived a second time. The labels
-    are what Compose itself wrote.
+    explicit that a name is read rather than derived a second time.
     """
-    result = subprocess.run(
-        [
-            "docker",
-            "ps",
-            "--filter",
-            f"label=com.docker.compose.project.working_dir=/var/lib/agentic-postgres/rendered/{project_key}",
-            "--filter",
-            f"label=com.docker.compose.service={AUTH_SERVICE}",
-            "--format",
-            "{{.Names}}",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=60,
-    )
+    filters = [
+        f"label={PROJECT_KEY_LABEL}={project_key}",
+        f"label=com.docker.compose.service={AUTH_SERVICE}",
+    ]
+    arguments = ["docker", "ps"]
+    for value in filters:
+        arguments += ["--filter", value]
+    arguments += ["--format", "{{.Names}}"]
+
+    result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=60)
     names = [line for line in result.stdout.split() if line]
     if not names:
+        # The filters are named in the message. A selector that matches nothing
+        # and a service that is genuinely down look identical from here, and the
+        # first version of this command reported the second while the first was
+        # true.
         raise PrerequisiteError(
-            f"no running {AUTH_SERVICE!r} container for {project_key}. The bootstrap "
-            "hashes the password with the service's own Argon2id build, so the service "
-            "has to be up. Deploy through session 6 first, then bootstrap."
+            f"no running {AUTH_SERVICE!r} container matched {filters}. If the service is "
+            "up, the selector is wrong; if it is down, deploy through session 6 first. "
+            "The bootstrap hashes the password with the service's own Argon2id build, so "
+            "the service has to be running either way."
         )
     return names[0]
 

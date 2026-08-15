@@ -36,6 +36,10 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
 COMPOSE = REPO_ROOT / "compose.yaml"
 BOOTSTRAP = REPO_ROOT / "bin" / "postgres-bootstrap.py"
+AUTH_ADMIN = REPO_ROOT / "bin" / "auth-admin.py"
+
+#: The Compose service name, as compose.yaml defines it.
+AUTH_SERVICE_NAME = "auth"
 
 #: Compose environment KEYS this module reads out of the parsed document.
 #:
@@ -59,6 +63,14 @@ def compose() -> dict[str, Any]:
 @pytest.fixture(scope="module")
 def bootstrap() -> Any:
     specification = importlib.util.spec_from_file_location("apg_postgres_bootstrap", BOOTSTRAP)
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def _auth_admin() -> Any:
+    specification = importlib.util.spec_from_file_location("apg_auth_admin", AUTH_ADMIN)
     assert specification and specification.loader
     module = importlib.util.module_from_spec(specification)
     specification.loader.exec_module(module)
@@ -265,3 +277,57 @@ def test_postgrest_and_auth_agree_on_how_to_reach_the_cluster(compose: dict[str,
     assert "POSTGRES_SERVICE_HOST" in postgrest, "PostgREST no longer connects directly"
     assert "POSTGRES_SERVICE_HOST" in auth_host, "the auth service no longer connects directly"
     assert ":5432/" in postgrest
+
+
+# ---------------------------------------------------------------------------
+# D293 — the selector has to name a label the service actually carries
+# ---------------------------------------------------------------------------
+
+
+def test_the_bootstrap_selects_the_auth_container_by_a_label_it_carries(
+    compose: dict[str, Any], bootstrap: Any
+) -> None:
+    """The command finds the auth container by label. This checks the label exists.
+
+    **Written after the selector was wrong** (D293). The first version filtered
+    on `com.docker.compose.project.working_dir`, which is Compose's record of
+    where it was invoked from rather than anything this repository sets. It
+    matched nothing on the host, so the bootstrap reported the auth service down
+    while it was running and healthy -- and the operator was told to deploy again.
+
+    The failure was possible because nothing exercised `auth_container()`: the
+    module's other tests build their own cluster and never call it. A function
+    with no caller in any test is the shape this whole session keeps finding.
+
+    So this compares the command's selector against `compose.yaml` itself. A
+    label the service does not declare cannot select it, whatever the label
+    means elsewhere.
+    """
+    admin = _auth_admin()
+    labels = compose["services"][AUTH_SERVICE_NAME].get("labels") or {}
+    assert isinstance(labels, dict), "the auth service's labels are not a mapping"
+
+    assert admin.PROJECT_KEY_LABEL in labels, (
+        f"bin/auth-admin.py selects the auth container on {admin.PROJECT_KEY_LABEL!r}, "
+        f"which the service does not declare. It declares {sorted(labels)}. A selector "
+        "that matches nothing reports the service down while it is running (D293)"
+    )
+    assert admin.AUTH_SERVICE == AUTH_SERVICE_NAME, (
+        f"the command looks for the Compose service {admin.AUTH_SERVICE!r}, which "
+        f"compose.yaml does not define; it defines {AUTH_SERVICE_NAME!r}"
+    )
+
+
+def test_the_project_key_label_is_the_documents_project_key(compose: dict[str, Any]) -> None:
+    """And the label's VALUE is the key the command passes.
+
+    `auth_container` is given `document["project"]["key"]`. The label
+    interpolates `${PROJECT_KEY}`, which `rendering.py` fills from the same
+    field -- so this asserts the two ends of one value rather than that a label
+    with the right name exists.
+    """
+    labels = compose["services"][AUTH_SERVICE_NAME]["labels"]
+    assert labels["apg.project.key"] == "${PROJECT_KEY:?required}", (
+        f"the auth service's project-key label is {labels['apg.project.key']!r}; the "
+        "bootstrap passes the deployed document's project.key and expects them to match"
+    )
