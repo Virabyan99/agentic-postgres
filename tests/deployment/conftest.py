@@ -760,6 +760,40 @@ def dev_token() -> Any:
 
 
 @pytest.fixture(scope="session")
+def active_generation() -> Callable[[dict[str, Any]], str]:
+    """The generation a project's containers are **running on**, from the pointer.
+
+    Not ``project_a["secrets"]["generation_id"]``, and the difference is D76:
+    the document's generation is **deploy-time history**, and the live pointer
+    moves at the first restart. ``bin/project-runtime.sh``'s own header says
+    ``up: materialize secrets -> compose up``, so every unit restart writes a new
+    generation and recreates every container onto it -- which the restart-matrix
+    proofs in ``test_session4_convergence.py`` do, **inside the gate run**.
+
+    So a proof about what a running container holds reads this; a proof about
+    what a deployment recorded reads the document. Using the document for the
+    first question passes only while nothing has restarted since the deploy, and
+    fails afterwards naming a generation that is merely older rather than wrong
+    (D306).
+
+    Read from the same file `bin/render-secret-override.py` reads, rather than
+    by listing ``generations/`` and taking the newest: the directories accumulate
+    and nothing prunes them, so a listing sorted by name is a fact about mtime
+    standing in for the pointer.
+    """
+
+    def read(document: dict[str, Any]) -> str:
+        pointer = SECRET_ROOT / document["project"]["key"] / "active-secret-generation.json"
+        if not pointer.is_file():
+            pytest.fail(f"{document['project']['key']} has no active generation at {pointer}")
+        generation = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
+        assert generation, f"{pointer} names no generation"
+        return str(generation)
+
+    return read
+
+
+@pytest.fixture(scope="session")
 def bootstrap_command() -> Any:
     """``bin/postgres-bootstrap.py``, for the enumerations it owns.
 

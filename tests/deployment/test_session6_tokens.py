@@ -278,6 +278,7 @@ def test_no_verifier_holds_private_signing_material(
     project_a: dict[str, Any],
     sh: Callable[..., str],
     service_container: Callable[[str, str], str],
+    active_generation: Callable[[dict[str, Any]], str],
     as_root: None,
 ) -> None:
     """SEC-KEY-001, and the shape it has to have now that there are two issuers.
@@ -292,13 +293,26 @@ def test_no_verifier_holds_private_signing_material(
     it. Checked from ``docker inspect`` rather than from the Compose model, for
     the reason SEC-DOCS-001 records: the model says what was asked for.
 
+    **The generation comes from the live pointer, not from the document.** This
+    read ``project_a["secrets"]["generation_id"]`` and failed on a correct
+    deployment: the gate's own restart-matrix proofs restart project A's unit,
+    ``project-runtime.sh up`` re-materializes secrets, and every container is
+    recreated onto a new generation -- so by the time this ran, the containers
+    held `9418d7ae…` while the document still recorded `9fefc82f…`. That is D76,
+    which `bin/dev-token.py` quotes in its own docstring, met by a proof written
+    four runs later (D306).
+
+    Which generation to read is decided by the question: this one is *what a
+    running container holds*, so it is the pointer. A proof about what a
+    deployment recorded would read the document.
+
     Goes red if: the signing key gains a second compose consumer; a verifier
     gains a mount that reaches either private key; or the auth service's key
     mode is relaxed.
     """
     del as_root
     project_key = project_a["project"]["key"]
-    generation = SECRET_ROOT / project_key / "generations" / project_a["secrets"]["generation_id"]
+    generation = SECRET_ROOT / project_key / "generations" / active_generation(project_a)
 
     auth_key = generation / runtime_override.AUTH_SERVICE / "auth_jwt_signing_key.pem"
     assert auth_key.is_file(), f"the auth service has no signing key at {auth_key}"
