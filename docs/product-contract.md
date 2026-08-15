@@ -243,7 +243,7 @@ and live in `src/agentic_postgres/config.py`; they are listed separately.
 | `database.idle_transaction_timeout_seconds` | 10 | 600 | How long a client may hold a server connection inside an idle transaction. Cannot be disabled here, because in transaction pooling one idle transaction holds a server connection out of the pool for as long as it lasts. |
 | `database.maintenance_work_mem_mb` | 16 | 512 | VACUUM and index-build working memory. Charged in full against the guardrail because one maintenance operation can hold it for a long time. |
 | `database.max_client_connections` | 1 | 10,000 | PgBouncer client connection ceiling. |
-| `database.max_connections` | 10 | 200 | PostgreSQL max_connections on the cluster itself, not the pooler's ceiling. Deliberately small: Session 4's answer to connection count is a pooler, and a large per-cluster limit would make the pooler decorative. |
+| `database.max_connections` | 10 | 200 | PostgreSQL max_connections on the cluster itself, not the pooler's ceiling. Deliberately small: Session 4's answer to connection count is a pooler, and a large per-cluster limit would make the pooler decorative. 56 since Session 7, and the six are what the storage service costs (ADR 0099) -- at 50 the budget divided exactly three ways with nothing spare, and a fourth claimant pushed the application's remainder below the pooler's own pool. |
 | `database.max_prepared_statements` | 1 | 1,000 | How many protocol-level named prepared statements the pooler tracks per connection. Must be non-zero: at 0 a named statement is unusable the moment transaction pooling moves the client to a different backend, which was measured against the locked image rather than read from its documentation. This is the setting a failing client test must never be 'fixed' by lowering. |
 | `database.memory_limit_mb` | 128 | 4,096 | The container mem_limit. NOT the same number as the guardrail: a container limit caps page cache too, so a limit set equal to the unreclaimable budget makes the cluster live in permanent cache reclaim. Measured at 512 MiB with these defaults, two clusters pegged their limit with several hundred reclaim events and no OOM kill. Must exceed the derived unreclaimable budget. |
 | `database.pool_size` | 1 | 1,000 | Server-side pool size. Must not exceed max_client_connections. |
@@ -254,9 +254,10 @@ and live in `src/agentic_postgres/config.py`; they are listed separately.
 | `database.work_mem_mb` | 1 | 64 | Per-sort-node working memory. Allocated on demand, so it does not multiply by max_connections in practice; the guardrail charges a flat per-backend anonymous allowance instead. See the Session 3 plan 3.3. |
 | `mcp.max_response_bytes` | 1,024 | 10,485,760 | Agent response size ceiling. |
 | `mcp.max_result_rows` | 1 | 1,000 | Agent read row ceiling. Must not exceed api.max_rows. |
-| `storage.download_url_ttl_seconds` | 60 | 3,600 | Presigned download URL lifetime. |
+| `storage.download_url_ttl_seconds` | 60 | 3,600 | Presigned download URL lifetime. Shorter than the upload default because an upload is one deliberate act by the holder and a download URL is the one that ends up pasted somewhere. |
 | `storage.max_upload_bytes` | 1 | 5,368,709,120 | Largest accepted upload. P0 default is 25 MiB. |
-| `storage.upload_url_ttl_seconds` | 60 | 3,600 | Presigned upload URL lifetime. |
+| `storage.pool_size` | 1 | 64 | The storage service's cluster pool (Session 7, ADR 0099). Charged against database.max_connections as pool_size + 2 reserved, whether or not storage is enabled -- a division that moved when somebody toggled a flag would make the bootstrap plane's arithmetic depend on a flag it does not read. Raising it lowers what is left for the application, and the bootstrap refuses when that remainder falls below database.pool_size, because the pooler cannot fill a pool larger than the role's own CONNECTION LIMIT. |
+| `storage.upload_url_ttl_seconds` | 60 | 3,600 | Presigned upload URL lifetime. A presigned URL is a bearer credential with a short life, so this is the residual exposure of one issued URL -- it is not revoked by a later tombstone, and the documentation says so plainly rather than implying otherwise. |
 
 Relations between these fields cannot be expressed in JSON Schema and are
 enforced in `src/agentic_postgres/config.py`:
@@ -272,7 +273,8 @@ enforced in `src/agentic_postgres/config.py`:
 - The derived unreclaimable budget must not exceed the per-project memory guardrail
 - `api.rest.request_body_max_bytes` must equal `api.rest.request_body_memory_bytes`
 - `api.rest.pool_max_idle_seconds` must be less than `api.rest.pool_max_lifetime_seconds`
-- `api.rest.pool_size` plus its reserved connections, `api.app.pool_size` plus its own, `database.pool_size`, and the administration reserve must fit `database.max_connections`
+- `api.rest.pool_size` plus its reserved connections, `api.app.pool_size` plus its own, `storage.pool_size` plus its own, `database.pool_size`, and the administration reserve must fit `database.max_connections`
+- What `database.max_connections` leaves the application after every service's commitment and the operational headroom must cover `database.pool_size`; the pooler cannot fill a pool larger than the application role's own `CONNECTION LIMIT`, and the refusal it produces names the role rather than the arithmetic
 - `api.app.memory_limit_mb` must fit the frozen Argon2id profile: `hash_concurrency` x `memory_cost` plus the service's process overhead
 - `api.rest.allowed_cors_origins` must contain the project's own HTTPS origin when the REST service is enabled
 - `api.rest.statement_timeouts` may name only roles the platform derives

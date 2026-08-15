@@ -36,13 +36,34 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
     "anon": frozenset(),
     # A human user of the application. A given token carries whatever the
     # server-side record says; this is the ceiling.
-    "authenticated": frozenset({"notes:read", "notes:write", "tasks:read", "tasks:write"}),
+    #
+    # `objects:*` since Session 7 (ADR 0100). Object storage is human-only, and
+    # where that is ENFORCED is `required_scopes`' $ref to $defs/agent_scope --
+    # which the storage class is deliberately absent from -- not here. A ceiling
+    # says what a token naming this role may carry; it cannot say what a
+    # capability manifest may ask for, and ADR 0006's whole argument is that
+    # those must not be the same list.
+    "authenticated": frozenset(
+        {
+            "notes:read",
+            "notes:write",
+            "tasks:read",
+            "tasks:write",
+            "objects:read",
+            "objects:write",
+        }
+    ),
     # Exactly introspection, and ADR 0049's reasoning is unchanged: reading the
     # shape of the API and none of its data.
     "api_documentation": frozenset({"meta:read"}),
     # Agents, whose ceiling is deliberately narrower than the human's on the
     # write side. Session 9 activates the role memberships; until then a token
     # naming one is refused at role switching, which is a tested property.
+    #
+    # No `objects:*`, and this is the second of the two places Session 7's
+    # human-only property is written -- the schema's $ref being the first. An
+    # agent's ceiling not containing a scope and a manifest being unable to
+    # request it are different guarantees, and the storage surface wants both.
     "agent_reader": frozenset({"notes:read", "tasks:read", "meta:read"}),
     "agent_writer": frozenset({"notes:read", "notes:write", "tasks:read", "tasks:write"}),
     # An administrator is also a user, so the ceiling is the union rather than
@@ -53,6 +74,8 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
             "notes:write",
             "tasks:read",
             "tasks:write",
+            "objects:read",
+            "objects:write",
             "admin_users:read",
             "admin_users:write",
             "admin_agents:read",

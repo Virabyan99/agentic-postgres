@@ -94,7 +94,31 @@ found *during* implementation is appended with the next free number.
 | **D326** | §22.1: deployment records `storage_credentials_required`, publishes no route, and prints a resume command. | The product already has a shape for this and it is **not** a special deployment state: **D230's two-stage convergence**. `routes.app` records `unavailable` with the operator command printed, and the deploy **exits 0**; a redeploy after the missing input exists observes and publishes it. `published_route` drops the URL when the status is not `ready`, so an unpublished route names nothing. | `routes.storage` follows `routes.app` exactly: `unavailable` until the credential validates, the command printed, exit 0, and `ready` on the redeploy that observes it. | A second convergence mechanism would need its own tests, its own operator documentation and its own failure modes, beside one that is deployed and proved on two projects. | — |
 
 **Rows are added during implementation.** Next free number after the table above
-is **D327**.
+is **D333**.
+
+### Found during Run 1
+
+Four rows, and the first two are why Run 1 needed ADRs rather than edits. Both
+were measured with a control before anything was written; neither is a runbook
+conflict, which is the point — they are conflicts between the repository and
+itself that a fourth claimant was the first change large enough to reach.
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D327** | D309 assumed the connection budget was one arithmetic that a fourth claimant would simply not fit into. | **There are two arithmetics and nothing compares them.** `config._validate_connection_budget` charges `database.pool_size` (20) for the application; `postgres-bootstrap.connection_limits` grants the application the *remainder*. They agreed only by coincidence — 23 against 20, three to spare — and the bootstrap's only guard was `application < 1`. Measured across storage pools 0–8 with the current tree as the control: the manifest check passes up to pool 4 while the remainder falls below the pooler's pool from pool **2** onward. | The relation `application >= database.pooler_pool_size` is checked **in the bootstrap plane**, which is the only plane that knows the live `max_connections` and `superuser_reserved_connections`. Outputs v11 publishes `pooler_pool_size` so it can. The manifest keeps its own cheaper, earlier sum. | `default_pool_size` is per `(user, database)` and `app_runtime` is the pooler's only application user, so a remainder below it is a pool the pooler cannot fill. PostgreSQL refuses the backend with `too many connections for role` and PgBouncer hands that to the client — **the message names the role, and the number that caused it was computed in a different file.** | [0099](../decisions/0099-the-budget-is-divided-four-ways-and-the-remainder-covers-the-pool.md) |
+| **D328** | D310 assumed a third scope class was a schema addition plus a registry mapping. | **The administrative class was derived as the complement**, `approved − agent_requestable`, which is correct for exactly two classes and silently wrong for three. Measured with four arms and two controls: adding `objects:*` to `$defs/scope` alone turns `test_the_administrative_class_is_derived_not_listed` red; adding them to `authenticated`'s ceiling as well also turns `test_an_administrative_scope_is_reachable_only_by_the_admin_role` red. The result is not "storage is unclassified" — it is **"storage is administrative", asserted by arithmetic**. | The complement is removed. All three classes are listed in `capabilities.schema.json` and `assert_classes_partition_the_vocabulary` asserts they are pairwise disjoint and their union is exactly `$defs/scope`, raising where the registry is read. | **The misclassification would have survived its own guard.** Both tests that noticed look exactly like tests somebody would update when adding a scope. A relation that catches an *unclassified* name is strictly stronger than one that catches a duplicated one, and a complement has no notion of unclassified — every name it does not recognise is silently a member. | [0100](../decisions/0100-the-scope-vocabulary-has-three-classes-and-they-partition-it.md) |
+| **D329** | — | `rendering.build_outputs` wrote `"schema_version": 10` as a **literal**, beside `deployed_output.SCHEMA_VERSION`, which is what the deployed branch and `evidence` read. Three places hold this number and only `test_current_version_agrees_with_the_renderer` tied them — a test doing the work an import does for free, and the fourth version bump to find the literal by hand. | The literal is replaced by `deployed_output.SCHEMA_VERSION`. The test stays: it now compares two authorities that cannot disagree, which costs nothing and would catch a fourth appearing. | Caught by re-rendering the fixtures and reading the version back rather than by the test, which is the order that matters: the render was the first thing to *use* the change. **A generated artifact read back is a cheaper check than the test that would eventually have failed.** | — |
+| **D330** | D315 predicted the manifest's `storage.prefix` and the runbook's key template were two live derivations of one string. | **Half right, and the half that was wrong is the half that mattered.** `naming.derive` already applies both defaults — `r2_bucket(bucket or key)` and `prefix or f"objects/{key}/"` — so the manifest's values are *overrides of a derivation*, not inputs to one, and `naming` is already ADR 0002's single authority. Nothing needed fixing. What was genuinely missing was the **per-object suffix**, which no code derives because nothing had needed one. | ADR 0102 leaves the prefix where it is and puts the suffix in `services/auth-api/app/object_keys.py`, composed with the prefix in exactly one function. | **The prediction was checked by reading the deriver rather than by trusting the schema's sentence** — D276's rule run forwards. A row that had been "reconciled" without that check would have moved a working derivation to fix a problem that did not exist. | [0102](../decisions/0102-the-object-key-is-one-derivation-over-the-prefix-naming-owns.md) |
+
+| **D331** | Run 1's last bullet: "Grep the registry, then write the Session 7 entries and claims." | **The evidence model refuses both, and each refusal is correct.** `claim_mode` raises *"has no live proof: every test it names runs in a checkout, so no deployment is being measured"* — Run 1's guarantees are the connection division and the scope partition, both proved entirely offline, so under **ADR 0045** neither is a claim. Separately, `test_every_later_requirement_has_a_placeholder` requires a requirement above the gate's session to exist as a `future` marker, and `CURRENT_SESSION` is still 6 — but these proofs already *run*, so marking them `future` would have been false. | The entries and the claims are **removed**, with the reasoning left in both files. **The tests stay**: they are ordinary suite properties now and become registry requirements in the run that has a deployment to measure them against and that moves `CURRENT_SESSION`. | The registry's model assumes a session's requirements are proved against that session's *deployment*. Run 1 is offline by design, so it produces guarantees that are real and not yet claimable. **Writing them anyway would have made two claims that report `not_run` forever** — which is D211–D214's condition manufactured deliberately, and the plan's own §2 warns against a claim that quietly becomes an unneeded one. | — |
+
+| **D332** | — | **The mutation battery found a field no proof could distinguish from a constant.** M7 replaced the renderer's `int(project["database"]["pool_size"])` with a hard-coded `20` and the whole suite stayed green: nothing asserted `database.pooler_pool_size` at all, and both fixtures declared 20 anyway, so even a test that read it would have agreed with the constant. This is the field the bootstrap plane **refuses a deployment over**. | `project.second.example.yaml` drops to `pool_size: 16`, and four tests now read the published field against its manifest and against the other project's. M7 goes red. | **The pair of fixtures was the actual defect.** Two fixtures that agree on a value cannot prove the value is read — the same reasoning ADR 0070's own budget test states ("the inequality is what does the work"), applied to a field added one run earlier without it. It is also the second time this session that a *difference between the fixtures* was what made a proof possible, the first being the storage budget. | — |
+
+**Predictions confirmed as written:** D307 (`storage_service` is in `ROLE_SUFFIXES`),
+D308 (outputs is v10, Session 7 publishes v11), D309, D310, D312 (thirteen
+migrations released), D315 in part (the `storage:` section exists with the bounds
+listed), D318 (four `STO-*` ids already exist, pointing at
+`tests/integration/test_future_storage.py`), D322.
 
 ---
 
@@ -206,6 +230,69 @@ then **try to break the tests** with a mutation battery whose failures are fatal
 (D269).
 
 ### Run 1 — The budget, the scopes, and the shape of the boundary
+
+**Done.** Four ADRs (**0099–0102**), six divergence rows (**D327–D332**), outputs
+**v11**, and the suite green on a clean tree.
+
+**The battery: seven mutations, zero unexpected, both controls green.** M1–M6
+each killed the tests written for them. **M7 did not, and it is the run's last
+finding** — a hard-coded `20` for `database.pooler_pool_size` left the whole
+suite green, because nothing asserted the field and both fixtures declared the
+same value. That is D332, and it is now closed rather than recorded: the second
+fixture drops to 16 and four tests read the published figure against its
+manifest. **The field the bootstrap plane refuses a deployment over was
+published by a line no proof could distinguish from a constant.**
+
+What was measured, each with a control that had to pass first:
+
+- **The budget cannot hold a fourth claimant at `max_connections` 50.** Both
+  arithmetics were run for storage pools 0 through 8 against the example
+  manifest. The control — the current tree, no storage claimant — shows the
+  manifest sum at 44/50 and the application's remainder at 23 against a pooler
+  pool of 20. A storage pool of 2 already puts the remainder below 20.
+  **`max_connections` rises to 56**, which keeps the remainder at exactly 23;
+  the memory cost was measured at 12 MiB per cluster, 608 MiB of a 1600 MiB
+  guardrail for two projects. **D327** is the finding that outranks the number:
+  two arithmetics, never compared.
+- **A third scope class is not a schema addition.** Four arms, two controls,
+  tree left clean. The complement made `objects:*` administrative by
+  arithmetic, and the two tests that noticed both look like tests somebody would
+  update while adding a scope. **D328.**
+- **The runtime boundary** is one image and two modes, decided on ADR 0084's
+  constraint one level out: build contexts do not overlap, so a second service
+  directory could not import the JWT verifier, the strict parser or the error
+  vocabulary any more than either can reach `src/`. The least-privilege boundary
+  is the secret contract's per-consumer materialization and is independent of
+  the choice.
+- **The object key** needed no reconciliation on the half the plan predicted:
+  `naming.derive` already applies both defaults, so the manifest's `bucket` and
+  `prefix` are overrides of a derivation. **D330.** What was missing is the
+  per-object suffix.
+
+Shipped: `storage.pool_size` and `storage.allowed_cors_origins` in the manifest
+schema with their negative cases; `config.storage_connection_budget`;
+`connection_limits` taking four claimants and refusing a remainder below the
+pooler's pool; outputs **v11** with `storage_connection_budget`,
+`pooler_pool_size`, `routes.storage` and the resolved storage bounds, chosen
+together from the session's whole surface (D308/D255); `migrate_v10_to_v11` with
+a **genuine v10 render** as its fixture, produced in a detached worktree at
+`d975800`; `$defs/storage_scope` and `$defs/administrative_scope` with the
+partition check; `naming.STORAGE_PATH_SUFFIX` and `route_storage`;
+`STO-BUDGET-001` and `STO-SCOPE-001` in the registry with the claims
+`connection_budget_division` and `storage_scope_class`.
+
+**The two fixtures now differ in their storage budget** — alpha at pool 4, alpine
+at 2 — so the pair proves the division is resolved per project rather than read
+from one place.
+
+**What Run 1 did not do, stated rather than left to be discovered:** the clusters
+are still running `max_connections` 50. Until they are restarted, a redeployed
+project renders v11 and `connection_limits` **refuses**, naming the restart. That
+is the intended behaviour and it belongs to Run 10's host sequence.
+
+---
+
+*The original plan text for this run follows.*
 
 **Offline. Nothing is built until these three are decided**, because each of them
 changes what the rest of the session may assume.

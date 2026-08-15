@@ -35,7 +35,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            10
+            11
           ]
         },
         "document_kind": {
@@ -157,7 +157,8 @@
             "mcp",
             "docs",
             "health",
-            "app_docs"
+            "app_docs",
+            "storage"
           ],
           "properties": {
             "rest": {
@@ -191,6 +192,10 @@
             },
             "app_docs": {
               "$ref": "#/$defs/httpsUrl"
+            },
+            "storage": {
+              "$ref": "#/$defs/httpsUrl",
+              "description": "Version 11. The object-storage surface's URL, derived by `naming` like every other route here and published whether or not storage is enabled -- a rendered document names what a deployment would create, and the readiness claim lives on the deployed branch."
             }
           }
         },
@@ -244,8 +249,13 @@
           "required": [
             "enabled",
             "bucket",
-            "prefix"
+            "prefix",
+            "upload_url_ttl_seconds",
+            "download_url_ttl_seconds",
+            "max_upload_bytes",
+            "allowed_cors_origins"
           ],
+          "description": "Version 11 resolved the manifest's storage bounds into this block. The runtime reads them from HERE and never from the manifest, which is ADR 0002 applied to four numbers: this document is the one thing every plane reads, and a service re-reading the manifest would be a second authority for a bound the deploy was checked against. `bucket` and `prefix` were already this shape -- the manifest's values are overrides of a `naming` derivation, not inputs to one. There is no readiness claim here: whether the provider actually answers is `routes.storage`'s status on the deployed branch (D326), because a second convergence mechanism would need its own tests and its own failure modes beside one that is already proved on two projects.",
           "properties": {
             "enabled": {
               "type": "boolean"
@@ -262,7 +272,32 @@
                 "string",
                 "null"
               ],
-              "pattern": "^[^/].*/$"
+              "pattern": "^[^/].*/$",
+              "description": "The object key's first half, and `naming` is its single authority (ADR 0102). The second half -- `v1/<uuid4>` -- is generated per upload intent by `services/auth-api/app/object_keys.py`, which is the only place the two are ever concatenated. Nothing else spells `objects/`."
+            },
+            "upload_url_ttl_seconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 3600
+            },
+            "download_url_ttl_seconds": {
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 3600
+            },
+            "max_upload_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5368709120
+            },
+            "allowed_cors_origins": {
+              "type": "array",
+              "uniqueItems": true,
+              "maxItems": 8,
+              "items": {
+                "$ref": "#/$defs/httpsOrigin"
+              },
+              "description": "The ONE origin list for storage (D323). The edge middleware and the bucket's own CORS policy are two renderings of this array, tied together by a test -- two lists would be two policies that agree until one of them is edited."
             }
           }
         },
@@ -345,7 +380,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            10
+            11
           ]
         },
         "document_kind": {
@@ -463,9 +498,10 @@
             "rest",
             "docs",
             "app",
-            "app_docs"
+            "app_docs",
+            "storage"
           ],
-          "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them.",
+          "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them. Version 11 added `storage`.",
           "properties": {
             "health": {
               "type": "object",
@@ -501,6 +537,10 @@
             "app_docs": {
               "$ref": "#/$defs/publishedRoute",
               "description": "Version 9. The application API's documentation page: a second surface of the same documentation service (D226, ADR 0069), not a second service. `unavailable` until the surface is published."
+            },
+            "storage": {
+              "$ref": "#/$defs/publishedRoute",
+              "description": "Version 11. The object-storage surface, and it follows `app` exactly (D326, D230's two-stage convergence): `unavailable` with a null URL until the R2 credential validates, the operator command printed, the deploy exiting 0, and `ready` on the redeploy that observes it. A dedicated `storage_credentials_required` deployment state was considered and refused for `app`'s reason -- `publishedRoute` already expresses this and every reader already understands it, while a second convergence mechanism would need its own tests, its own operator documentation and its own failure modes beside one that is deployed and proved on two projects."
             }
           }
         },
@@ -680,9 +720,11 @@
         "access_profiles",
         "statement_timeouts",
         "api_connection_budget",
-        "auth_connection_budget"
+        "auth_connection_budget",
+        "storage_connection_budget",
+        "pooler_pool_size"
       ],
-      "description": "Version 7. The rendered branch carries no `observed` block at all -- not an empty one, not a nulled one. ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be unrepresentable here rather than merely constrained. That is why the two branches have separate definitions instead of one shared one. Version 4 added `access_profiles` (ADR 0041). Version 7 added `statement_timeouts` (ADR 0067). Version 8 added `api_connection_budget` (ADR 0070).",
+      "description": "Version 7. The rendered branch carries no `observed` block at all -- not an empty one, not a nulled one. ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be unrepresentable here rather than merely constrained. That is why the two branches have separate definitions instead of one shared one. Version 4 added `access_profiles` (ADR 0041). Version 7 added `statement_timeouts` (ADR 0067). Version 8 added `api_connection_budget` (ADR 0070). Version 11 added `storage_connection_budget` and `pooler_pool_size` (ADR 0099).",
       "properties": {
         "name": {
           "$ref": "#/$defs/postgresIdentifier"
@@ -715,6 +757,12 @@
           "type": "integer",
           "minimum": 1,
           "description": "Version 10. How many cluster connections the auth service commits to: its pool plus its reservations. Published whether or not the service is enabled, so the bootstrap plane's division of the budget does not move when somebody toggles a flag. The third claimant on one `max_connections` (ADR 0070) -- and the reason that division is a function rather than a subtraction."
+        },
+        "storage_connection_budget": {
+          "$ref": "#/$defs/storageConnectionBudget"
+        },
+        "pooler_pool_size": {
+          "$ref": "#/$defs/poolerPoolSize"
         }
       }
     },
@@ -732,9 +780,11 @@
         "statement_timeouts",
         "observed",
         "api_connection_budget",
-        "auth_connection_budget"
+        "auth_connection_budget",
+        "storage_connection_budget",
+        "pooler_pool_size"
       ],
-      "description": "Version 7. Identical to the rendered branch plus `observed`, which is the only block here that is a measurement rather than a derivation. Version 8 added `api_connection_budget` (ADR 0070).",
+      "description": "Version 7. Identical to the rendered branch plus `observed`, which is the only block here that is a measurement rather than a derivation. Version 8 added `api_connection_budget` (ADR 0070). Version 11 added `storage_connection_budget` and `pooler_pool_size` (ADR 0099).",
       "properties": {
         "name": {
           "$ref": "#/$defs/postgresIdentifier"
@@ -770,8 +820,30 @@
           "type": "integer",
           "minimum": 1,
           "description": "Version 10. How many cluster connections the auth service commits to: its pool plus its reservations. Published whether or not the service is enabled, so the bootstrap plane's division of the budget does not move when somebody toggles a flag. The third claimant on one `max_connections` (ADR 0070) -- and the reason that division is a function rather than a subtraction."
+        },
+        "storage_connection_budget": {
+          "$ref": "#/$defs/storageConnectionBudget"
+        },
+        "pooler_pool_size": {
+          "$ref": "#/$defs/poolerPoolSize"
         }
       }
+    },
+    "httpsOrigin": {
+      "type": "string",
+      "maxLength": 253,
+      "pattern": "^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:[0-9]{1,5})?$",
+      "description": "Scheme, host, optional port, and nothing else. Refuses a path, a query, a fragment, a wildcard, a userinfo component, plain http, and the literal `null` that a sandboxed iframe and a file:// document send -- an allowlist containing `null` admits anything that can arrange to be opaque. The same pattern `project.schema.json` uses for both origin lists, and it is written twice because the two schemas share no $defs; `test_the_origin_patterns_agree` is what keeps them one grammar."
+    },
+    "storageConnectionBudget": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version 11. How many cluster connections the storage service commits to: its pool plus its reservations. The fourth claimant on one `max_connections` (ADR 0099), published whether or not storage is enabled for the reason the other three are -- the bootstrap plane's division must not move when somebody toggles a flag it does not read."
+    },
+    "poolerPoolSize": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Version 11. The pooler's server-side pool, `database.pool_size` from the manifest, published for exactly one purpose: so the bootstrap plane can check that what is LEFT for the application covers it (D327, ADR 0099). Two arithmetics exist over this budget -- the manifest charges this figure for the application, the bootstrap grants the application the remainder -- and nothing compared them until Session 7. They agreed by coincidence, 23 against 20. `default_pool_size` is per (user, database) and the application role is the pooler's only application user, so a remainder below this is a pool the pooler cannot fill, and PostgreSQL reports it as `too many connections for role` -- naming the role rather than the number."
     },
     "statementTimeouts": {
       "type": "object",

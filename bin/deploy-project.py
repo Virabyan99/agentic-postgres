@@ -1300,6 +1300,12 @@ def main(argv: list[str] | None = None) -> int:
     # value for one that does and has no administrator yet (D230).
     app_status = "unavailable"
     app_docs_status = "unavailable"
+    # Version 11's, and it is literal for exactly as long as `app_status` was
+    # (Run 4 to Run 10): this run publishes no storage route, so `unavailable`
+    # is not a placeholder standing in for an observation -- it IS the
+    # observation. Session 7 Run 7 replaces it with one that measures, and
+    # D326 is why it is a route status rather than a deployment state.
+    storage_status = "unavailable"
     jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
     api_block = dict(deployed_output.API_NOT_PUBLISHED)
 
@@ -1453,6 +1459,11 @@ def main(argv: list[str] | None = None) -> int:
         # neither ever names an address nothing is listening on.
         app_status=app_status,
         app_docs_status=app_docs_status,
+        # Version 11. `unavailable` until the R2 credential validates and the
+        # route answers (D326), which makes this the provider-health field --
+        # `publishedRoute` forces a null URL for it, so an unpublished storage
+        # surface names no address.
+        storage_status=storage_status,
         api=api_block,
         jwt=jwt_block,
         # Measured above when this deploy started a cluster, and `NOT_OBSERVED`

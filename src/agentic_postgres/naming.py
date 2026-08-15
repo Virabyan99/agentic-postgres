@@ -98,6 +98,19 @@ REST_PATH_SUFFIX = "/rest"
 #: together, and `jwt_issuer` is built from the same expression again.
 APP_PATH_SUFFIX = "/app"
 
+#: Suffix appended to the application API's path for the object-storage surface
+#: (Session 7). It sits UNDER `APP_PATH_SUFFIX` rather than beside it, because
+#: storage is a second surface of the application API and shares its issuer and
+#: audience -- so the published path is `/api/app/storage`.
+#:
+#: One constant, and both the URL and the path are built from it, for ADR 0061's
+#: reason: the URL a person is given and the rule a router matches on must move
+#: together. The router's rule is NOT a bare `PathPrefix` on this string --
+#: `PathPrefix(/api/rest)` matches `/api/restaurant` because it is a string
+#: prefix and not a path prefix (D162), and the storage router uses the
+#: construction Session 5 arrived at for that.
+STORAGE_PATH_SUFFIX = "/storage"
+
 # --------------------------------------------------------------------------
 # Output validators (runbook §3.7 rule 4: context-specific validator + maximum)
 # --------------------------------------------------------------------------
@@ -511,6 +524,13 @@ class ProjectIdentity:
     #: given and the other is what a router rule matches on, and D177 is what
     #: happens when the two are derived twice and drift.
     route_app_path: str = ""
+    #: Session 7's object-storage surface, under the application API. Both
+    #: members derived from one expression for ADR 0061's reason, and the URL is
+    #: published whether or not storage is enabled -- a rendered document names
+    #: what a deployment would create, and whether the provider answers is the
+    #: deployed branch's `routes.storage` status (D326).
+    route_storage: str = ""
+    route_storage_path: str = ""
     #: Session 6 Run 10's routers and middlewares. Project-derived, so all five
     #: reach `compose.env`; a middleware name is host-wide in Traefik, which is
     #: what makes deriving them the thing that stops two projects sharing one.
@@ -576,6 +596,8 @@ def derive(
         route_rest_path=f"{api_base_path}{REST_PATH_SUFFIX}",
         route_app=f"https://{domain}{api_base_path}{APP_PATH_SUFFIX}",
         route_app_path=f"{api_base_path}{APP_PATH_SUFFIX}",
+        route_storage=(f"https://{domain}{api_base_path}{APP_PATH_SUFFIX}{STORAGE_PATH_SUFFIX}"),
+        route_storage_path=f"{api_base_path}{APP_PATH_SUFFIX}{STORAGE_PATH_SUFFIX}",
         route_mcp=f"https://{domain}{mcp_base_path}",
         # The page, not the root above it (ADR 0061).
         route_docs=f"https://{domain}{DOCS_PAGE_PATH}",

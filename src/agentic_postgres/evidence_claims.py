@@ -184,6 +184,18 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "admin_authorization": ("API-ADMIN-001", "SEC-BOOT-002"),
     "token_non_resurrection": ("SEC-REV-002",),
     "project_isolation": ("DEP-ISO-006",),
+    # Session 7 adds nothing here in Run 1, and that is a measured constraint
+    # rather than an omission (D331).
+    #
+    # Run 1 wrote `connection_budget_division` and `storage_scope_class` and the
+    # model refused both: `claim_mode` raises *"has no live proof: every test it
+    # names runs in a checkout, so no deployment is being measured"*. Run 1's
+    # guarantees are the connection division and the scope partition, and both
+    # are proved entirely offline -- so neither is a claim under ADR 0045, which
+    # shapes a claim by where it can be measured.
+    #
+    # The proofs exist and run; what does not yet exist is a deployment for them
+    # to be measured against. They are registered by the run that has one.
 }
 
 #: Worst-first, so combining two observations of one test is a max().

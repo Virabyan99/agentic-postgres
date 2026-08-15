@@ -871,3 +871,169 @@ def test_fixtures_are_not_mutated_by_validation(base: dict[str, Any]) -> None:
     before = copy.deepcopy(base)
     config.validate_project_semantics(base)
     assert base == before
+
+
+# ---------------------------------------------------------------------------
+# Session 7: the storage service's bounds and the fourth connection claimant
+# ---------------------------------------------------------------------------
+
+
+def test_storage_defaults_match_the_schema() -> None:
+    """The duplication in `config.STORAGE_DEFAULTS` cannot drift silently.
+
+    `default` in JSON Schema annotates; it does not populate. A validator
+    accepts a manifest naming none of these and hands it back unchanged, so
+    `STORAGE_DEFAULTS` is what actually decides the value -- and the renderer
+    resolves the document's storage block through it, so a drift here is a bound
+    the runtime enforces and the manifest never approved.
+
+    `enabled` is excluded: it is `required` in the schema, so there is no
+    default to compare against, and the mapping's `False` is what a caller that
+    omits the whole section gets.
+    """
+    schema = config.load_schema("project.schema.json")
+    properties = schema["properties"]["storage"]["properties"]
+    compared = 0
+    for key, value in config.STORAGE_DEFAULTS.items():
+        if key == "enabled":
+            continue
+        assert properties[key]["default"] == value, key
+        compared += 1
+    assert compared == len(config.STORAGE_DEFAULTS) - 1, (
+        "the loop compared fewer keys than the mapping holds; a `continue` is "
+        "swallowing something it was not written for"
+    )
+
+
+def test_the_origin_patterns_agree() -> None:
+    """One grammar for an HTTPS origin, stated in two schemas that share no $defs.
+
+    `project.schema.json` bounds what an operator may write and
+    `outputs.schema.json` bounds what the render publishes; a document cannot
+    $ref across files here, so the pattern is written twice. This is what makes
+    the second copy safe -- and it is a real risk rather than a theoretical one,
+    because the whole value of the pattern is the four things it refuses
+    (a wildcard, plain http, a path, and the literal `null`) and a copy that
+    relaxed any of them would still look like an allowlist.
+    """
+    project = config.load_schema("project.schema.json")
+    outputs = config.load_schema("outputs.schema.json")
+
+    rest = project["$defs"]["restService"]["properties"]
+    storage = project["properties"]["storage"]["properties"]
+    published = outputs["$defs"]["httpsOrigin"]
+
+    patterns = {
+        "api.rest.allowed_cors_origins": rest["allowed_cors_origins"]["items"]["pattern"],
+        "storage.allowed_cors_origins": storage["allowed_cors_origins"]["items"]["pattern"],
+        "outputs $defs/httpsOrigin": published["pattern"],
+    }
+    assert len(set(patterns.values())) == 1, f"the origin grammars have diverged: {patterns}"
+
+    # And the grammar actually refuses what it is for. Asserted by matching,
+    # not by reading the regex: a pattern test that only compares two strings
+    # goes green when both copies are wrong.
+    import re
+
+    compiled = re.compile(next(iter(patterns.values())))
+    for accepted in ("https://app.example.test", "https://app.example.test:8443"):
+        assert compiled.match(accepted), accepted
+    for refused in (
+        "*",
+        "https://*.example.test",
+        "http://app.example.test",
+        "null",
+        "https://app.example.test/path",
+        "https://user@app.example.test",
+        "https://app.example.test?q=1",
+        "https://app.example.test#f",
+    ):
+        assert not compiled.match(refused), refused
+
+
+def test_the_connection_budget_charges_the_storage_service(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """ADR 0099's fourth claimant, refused when the sum does not fit.
+
+    Paired with a control on the line below the refusal: the same manifest at a
+    pool size that fits must pass. Without it this would not distinguish
+    "charges storage" from "refuses every manifest".
+    """
+    base.setdefault("storage", {"enabled": False})
+    base["storage"]["pool_size"] = 4
+    check(tmp_path, base)  # control: the default division fits
+
+    base["storage"]["pool_size"] = 40
+    with pytest.raises(config.ManifestError, match=r"storage\.pool_size"):
+        check(tmp_path, base)
+
+
+def test_the_storage_budget_is_charged_even_when_storage_is_disabled(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """A division that moved when somebody toggled a flag would make the
+    bootstrap plane's arithmetic depend on a flag it does not read.
+
+    The same property D256 recorded for the REST service, which sat behind two
+    early returns and ran only for an enabled one.
+    """
+    base["storage"] = {"enabled": False, "pool_size": 40}
+    with pytest.raises(config.ManifestError, match=r"storage\.pool_size"):
+        check(tmp_path, base)
+
+
+def test_a_wildcard_or_http_storage_origin_is_refused(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The negative cases Run 1 owes, on the field that will render two policies.
+
+    A control first: a well-formed HTTPS origin is accepted, so a passing test
+    below cannot be a manifest that is refused for some unrelated reason.
+    """
+    base["storage"] = {
+        "enabled": True,
+        "bucket": "fixture-alpha-dev",
+        "prefix": "objects/fixture-alpha-dev/",
+        "allowed_cors_origins": ["https://app.fixture-alpha-dev.test"],
+    }
+    check(tmp_path, base)
+
+    for refused in (
+        "*",
+        "https://*.fixture-alpha-dev.test",
+        "http://app.fixture-alpha-dev.test",
+        "null",
+        "https://app.fixture-alpha-dev.test/uploads",
+    ):
+        base["storage"]["allowed_cors_origins"] = [refused]
+        with pytest.raises(config.ManifestError):
+            check(tmp_path, base)
+
+
+def test_a_disabled_storage_service_may_name_no_origin(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """An origin list on a surface that is not served is a policy nobody applies."""
+    base["storage"] = {
+        "enabled": False,
+        "allowed_cors_origins": ["https://app.fixture-alpha-dev.test"],
+    }
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, base)
+
+
+def test_a_storage_bound_outside_its_range_is_refused(tmp_path: Path, base: dict[str, Any]) -> None:
+    """ADR 0007 keeps bounds in the schema; this is what proves they are enforced."""
+    base.setdefault("storage", {"enabled": False})
+    for field, value in (
+        ("upload_url_ttl_seconds", 59),
+        ("upload_url_ttl_seconds", 3601),
+        ("download_url_ttl_seconds", 59),
+        ("download_url_ttl_seconds", 3601),
+        ("max_upload_bytes", 0),
+        ("max_upload_bytes", 5368709121),
+        ("pool_size", 0),
+        ("pool_size", 65),
+    ):
+        candidate = {**base, "storage": {**base["storage"], field: value}}
+        with pytest.raises(config.ManifestError):
+            check(tmp_path, candidate)

@@ -64,6 +64,15 @@ storage:
   upload_url_ttl_seconds: 600
   download_url_ttl_seconds: 300
   max_upload_bytes: 26214400
+  # Session 7. Charged against database.max_connections as pool_size + 2
+  # reserved, whether or not storage is enabled (ADR 0099). Deliberately
+  # DIFFERENT from project.second.example.yaml's, so the pair proves the budget
+  # is resolved per project rather than read from one place -- two fixtures
+  # agreeing on every number would render identically for a reason that has
+  # nothing to do with the code being right.
+  pool_size: 4
+  allowed_cors_origins:
+    - https://app.fixture-alpha-dev.test
 
 backup:
   enabled: true

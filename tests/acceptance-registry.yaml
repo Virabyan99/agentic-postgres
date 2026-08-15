@@ -1165,6 +1165,30 @@
     - tests/integration/test_future_storage.py::test_abandoned_upload_intents_are_not_downloadable
   description: Only objects verified against storage become downloadable.
 
+# Session 7 Run 1 added `STO-BUDGET-001` and `STO-SCOPE-001` here and then
+# REMOVED them, which is D331 and is worth the paragraph.
+#
+# Two rules refused them, and both are right:
+#
+#   * `test_every_later_requirement_has_a_placeholder` -- a requirement whose
+#     `target_session` is above the gate's session must exist as a `future`
+#     marker. These two have proofs that already RUN, so marking them `future`
+#     would have been false; and `CURRENT_SESSION` is still 6.
+#   * `claim_mode` -- a claim needs at least one live proof. Run 1's guarantees
+#     are the connection division and the scope partition, both proved entirely
+#     offline, so under ADR 0045 neither is a claim at all.
+#
+# The registry's model assumes a session's requirements are proved against that
+# session's deployment. Run 1 is offline by design, so its guarantees are
+# ordinary suite properties until there is a deployment to measure them against.
+# **The tests exist and pass**; only their registration waits.
+#
+# The prefixes were nonetheless grepped against every id in this file before
+# being chosen (ADR 0089, D279): three of Session 6's six "new" ids turned out
+# to be taken, and because `claim_session` derives from `max()`, one of them
+# would have turned three earlier sessions' evidence red while another vanished
+# from the gate entirely. `STO-BUDGET-` and `STO-SCOPE-` are free.
+
 # ---------------------------------------------------------------------------
 # Session 8 — agent reads
 # ---------------------------------------------------------------------------

@@ -158,6 +158,12 @@ def build(rendered: dict, **overrides):
         # that has no administrator yet.
         "app_status": "unavailable",
         "app_docs_status": "unavailable",
+        # Version 11, unpublished by default for the same reason and one more:
+        # `unavailable` is what a project publishes until its R2 credential
+        # validates (D326), so it is the state of every project that has not had
+        # the Cloudflare step run for it -- which is all of them until Session 7
+        # reaches a host.
+        "storage_status": "unavailable",
         "api": deployed_output.API_NOT_PUBLISHED,
         "jwt": deployed_output.JWT_NOT_PUBLISHED,
         # Required with no default in the builder, for the reason
@@ -187,7 +193,7 @@ def published(rendered: dict, **overrides):
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 10
+    assert document["schema_version"] == 11
     assert document["project"]["key"] == KEY
 
 

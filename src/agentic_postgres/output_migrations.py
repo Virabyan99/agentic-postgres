@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 10
+CURRENT_VERSION = 11
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -214,6 +214,10 @@ def migrate_rendered(
     api_connection_budget: int,
     app_docs_url: str,
     auth_connection_budget: int,
+    storage_connection_budget: int,
+    pooler_pool_size: int,
+    storage_route_url: str,
+    storage_settings: dict[str, Any],
 ) -> dict[str, Any]:
     """Migrate a ``rendered`` document of any earlier version to the current one.
 
@@ -234,8 +238,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9}:
-        raise MigrationError(f"only versions 1 through 9 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}:
+        raise MigrationError(f"only versions 1 through 10 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -262,7 +266,16 @@ def migrate_rendered(
     if detect_version(document) == 8:
         document = migrate_v8_to_v9(document, app_docs_url=app_docs_url)
 
-    return migrate_v9_to_v10(document, auth_connection_budget=auth_connection_budget)
+    if detect_version(document) == 9:
+        document = migrate_v9_to_v10(document, auth_connection_budget=auth_connection_budget)
+
+    return migrate_v10_to_v11(
+        document,
+        storage_connection_budget=storage_connection_budget,
+        pooler_pool_size=pooler_pool_size,
+        storage_route_url=storage_route_url,
+        storage_settings=storage_settings,
+    )
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -822,6 +835,128 @@ def migrate_v9_to_v10(document: dict[str, Any], *, auth_connection_budget: int) 
     return migrated
 
 
+#: What version 11 requires of the storage block, beyond the three members
+#: version 1 already carried. Named so the failure message and the check read
+#: one list.
+_V11_STORAGE_MEMBERS = (
+    "upload_url_ttl_seconds",
+    "download_url_ttl_seconds",
+    "max_upload_bytes",
+    "allowed_cors_origins",
+)
+
+
+def migrate_v10_to_v11(
+    document: dict[str, Any],
+    *,
+    storage_connection_budget: int,
+    pooler_pool_size: int,
+    storage_route_url: str,
+    storage_settings: dict[str, Any],
+) -> dict[str, Any]:
+    """Return a version 11 ``rendered`` document derived from a version 10 one.
+
+    Version 11 adds four things and they are one decision (ADR 0099, D308): the
+    storage service's connection budget, the pooler's pool size, the storage
+    route, and the storage block's resolved bounds. **Chosen together, from the
+    session's whole surface**, because D255 is the record of the alternative --
+    version 9 was picked one run early with the session's remaining fields in
+    mind and still missed the budget.
+
+    Required rather than derived, for the reason every argument in this module
+    is: each value comes from a manifest this document does not carry, and each
+    has exactly one authority elsewhere -- `config.storage_connection_budget`,
+    the manifest's `database.pool_size`, `naming.derive`, and
+    `config.STORAGE_DEFAULTS` resolved against the manifest. This validates what
+    it is handed and computes nothing.
+
+    **`pooler_pool_size` is validated against the division, and that check is
+    the version's substance.** A v11 document whose remainder cannot cover the
+    pooler's pool is one the bootstrap plane will refuse (D327), and refusing it
+    here means an archived document is migrated into a state that deploys rather
+    than into one that fails on a host.
+    """
+    version = detect_version(document)
+    if version == 11:
+        raise MigrationError("document is already version 11; migration would be a no-op")
+    if version != 10:
+        raise MigrationError(f"only version 10 can be migrated to 11, got {version}")
+
+    require_kind(document, "rendered")
+
+    database = document.get("database", {})
+    if "storage_connection_budget" in database:
+        raise MigrationError(
+            "database already carries storage_connection_budget; this is not a version 10 document"
+        )
+    if "auth_connection_budget" not in database:
+        raise MigrationError(
+            "database carries no auth_connection_budget, so this document predates version "
+            "10 and cannot be a version 10 one"
+        )
+
+    for name, value in (
+        ("storage_connection_budget", storage_connection_budget),
+        ("pooler_pool_size", pooler_pool_size),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise MigrationError(f"{name} must be an integer, got {value!r}")
+        if value < 1:
+            raise MigrationError(
+                f"{name} is {value}; a service that commits no connection cannot answer a "
+                "request, and 0 is how PostgreSQL spells 'reject every login' rather than "
+                "'unlimited'"
+            )
+
+    maximum = int(database["budget"]["max_connections"])
+    api = int(database["api_connection_budget"])
+    auth = int(database["auth_connection_budget"])
+    committed = api + auth + storage_connection_budget
+    if committed >= maximum:
+        raise MigrationError(
+            f"the three services commit {api} + {auth} + {storage_connection_budget} of "
+            f"max_connections ({maximum}), leaving nothing for the application or for "
+            "administration"
+        )
+    # The relation D327 records, checked where it can be checked without a
+    # cluster. `superuser_reserved_connections` is a live setting this document
+    # does not carry, so the arithmetic here is the optimistic one -- it assumes
+    # nothing is reserved. A document that fails even that cannot pass on a host,
+    # which is what makes the one-sided check worth making.
+    if maximum - committed <= pooler_pool_size:
+        raise MigrationError(
+            f"max_connections ({maximum}) less the services' {committed} leaves "
+            f"{maximum - committed} for the application, the pooler's pool of "
+            f"{pooler_pool_size} and the operational headroom together. The pooler alone "
+            "would not fit, and the failure arrives as `too many connections for role` at "
+            "a client rather than as arithmetic here (D327, ADR 0099)"
+        )
+
+    if not isinstance(storage_route_url, str) or not storage_route_url.startswith("https://"):
+        raise MigrationError(
+            f"storage_route_url must be an https URL, got {storage_route_url!r}. It is "
+            "`naming.derive`'s and this module derives no name (ADR 0002)"
+        )
+
+    missing = [name for name in _V11_STORAGE_MEMBERS if name not in storage_settings]
+    if missing:
+        raise MigrationError(
+            f"storage_settings is missing {missing}. Version 11 resolves the manifest's "
+            "storage bounds into the document so the runtime reads them from one place; "
+            "a partial block would leave the service defaulting the rest, which is the "
+            "second authority the resolution exists to remove"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["database"]["storage_connection_budget"] = storage_connection_budget
+    migrated["database"]["pooler_pool_size"] = pooler_pool_size
+    migrated["routes"]["storage"] = storage_route_url
+    for name in _V11_STORAGE_MEMBERS:
+        migrated["storage"][name] = _copy(storage_settings[name])
+    migrated["schema_version"] = 11
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -849,5 +984,6 @@ __all__ = [
     "migrate_v7_to_v8",
     "migrate_v8_to_v9",
     "migrate_v9_to_v10",
+    "migrate_v10_to_v11",
     "require_kind",
 ]

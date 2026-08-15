@@ -45,8 +45,21 @@ def test_the_data_class_is_still_exactly_the_five_adr_0003_closes() -> None:
     }
 
 
-def test_the_administrative_class_is_derived_not_listed() -> None:
-    """One per (platform identity resource, verb), and nowhere written twice."""
+def test_the_administrative_class_is_one_per_identity_resource_and_verb() -> None:
+    """One per (platform identity resource, verb), closed by the auth surface.
+
+    **Replaces `test_the_administrative_class_is_derived_not_listed`**, which
+    asserted a property ADR 0100 removed: the class is listed in the schema now,
+    not derived as the union less the data class. A test asserting that it is
+    derived cannot be kept once it is not, and CLAUDE.md §5 admits replacement by
+    a stricter test on an ADR's authority.
+
+    Stricter in the way that matters. The old version's disjointness check
+    covered one pair, because there were only two classes to compare; the
+    partition test below covers every pair *and* the union -- which is what
+    catches the failure the complement produced and this could not: an approved
+    name belonging to no class at all.
+    """
     assert scope_registry.administrative_scopes() == {
         "admin_users:read",
         "admin_users:write",
@@ -54,7 +67,115 @@ def test_the_administrative_class_is_derived_not_listed() -> None:
         "admin_agents:write",
     }
     assert scope_registry.administrative_scopes() <= scope_registry.approved_scopes()
-    assert not (scope_registry.administrative_scopes() & scope_registry.agent_requestable_scopes())
+
+
+def test_the_storage_class_is_one_per_object_verb() -> None:
+    """ADR 0100. Two segments and a (resource, verb) pair, like every other scope.
+
+    `storage:*` was the runbook's spelling and names a *surface* rather than a
+    resource -- the ground on which ADR 0049 refused `openapi:read`.
+    """
+    assert scope_registry.storage_scopes() == {"objects:read", "objects:write"}
+    assert scope_registry.storage_scopes() <= scope_registry.approved_scopes()
+
+
+def test_the_three_classes_partition_the_vocabulary() -> None:
+    """The relation that replaced the complement (ADR 0100)."""
+    scope_registry.assert_classes_partition_the_vocabulary()
+
+    classes = (
+        scope_registry.agent_requestable_scopes(),
+        scope_registry.storage_scopes(),
+        scope_registry.administrative_scopes(),
+    )
+    union: set[str] = set()
+    for members in classes:
+        assert not (union & members), "two classes name the same scope"
+        union |= members
+    assert union == scope_registry.approved_scopes()
+
+
+def test_an_unclassified_scope_is_refused_rather_than_absorbed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The measured failure, turned into a guard.
+
+    Before ADR 0100 the administrative class was `approved - agent_requestable`,
+    so a name added to the union and to no class was *classified administrative
+    by arithmetic*. Run 1 measured it: adding `objects:read` and `objects:write`
+    to `$defs/scope` alone turned the administrative-class tests red for a reason
+    nobody would have connected to the cause -- and both of those tests look
+    exactly like tests somebody would update when adding a scope, so the
+    misclassification would have survived its own guard.
+
+    Driven through the loader rather than by editing the schema on disk, because
+    the property is about what the registry does with a vocabulary rather than
+    about a file. The first line is the control: the real vocabulary partitions,
+    so a failure below is the injected name and not a broken check.
+    """
+    scope_registry.assert_classes_partition_the_vocabulary()
+
+    widened = scope_registry.approved_scopes() | {"telemetry:read"}
+    monkeypatch.setattr(scope_registry, "approved_scopes", lambda: widened)
+
+    with pytest.raises(ManifestError, match="telemetry:read"):
+        scope_registry.assert_classes_partition_the_vocabulary()
+
+    # And it fails where the registry is READ, not only when asked directly --
+    # which is what makes it reachable before any deployment could carry it.
+    with pytest.raises(ManifestError, match="telemetry:read"):
+        scope_registry.permitted_scopes("authenticated")
+
+
+def test_a_scope_in_two_classes_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A name in two classes makes the classes depend on evaluation order.
+
+    A failure the complement could never have had: with one class derived by
+    subtraction an overlap was unrepresentable. Listing all three makes it
+    possible, so it is checked.
+    """
+    scope_registry.assert_classes_partition_the_vocabulary()
+
+    overlapping = scope_registry.storage_scopes() | {"notes:read"}
+    monkeypatch.setattr(scope_registry, "storage_scopes", lambda: overlapping)
+    with pytest.raises(ManifestError, match="notes:read"):
+        scope_registry.assert_classes_partition_the_vocabulary()
+
+
+def test_a_class_may_not_name_a_scope_the_union_does_not_admit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A class is a subset of the vocabulary, never an extension of it (ADR 0006)."""
+    scope_registry.assert_classes_partition_the_vocabulary()
+
+    extended = scope_registry.storage_scopes() | {"objects:delete"}
+    monkeypatch.setattr(scope_registry, "storage_scopes", lambda: extended)
+    with pytest.raises(ManifestError, match="objects:delete"):
+        scope_registry.assert_classes_partition_the_vocabulary()
+
+
+def test_the_agent_class_is_not_widened_by_the_storage_class() -> None:
+    """Session 7's human-only property, asserted where it is enforced.
+
+    §8 of the Session 7 plan: an agent token cannot use storage. What makes that
+    true is `required_scopes`' $ref to `$defs/agent_scope`, so the assertion is
+    set membership rather than a prefix -- ADR 0006's argument about names
+    applies here exactly as it does to `admin_`.
+    """
+    assert not (scope_registry.agent_requestable_scopes() & scope_registry.storage_scopes())
+    for role in ("agent_reader", "agent_writer"):
+        assert not (scope_registry.permitted_scopes(role) & scope_registry.storage_scopes()), role
+
+
+def test_a_human_may_hold_a_storage_scope_and_a_service_identity_may_not() -> None:
+    """The other half of the same claim, with the holders enumerated."""
+    storage = scope_registry.storage_scopes()
+    holders = {
+        role
+        for role in scope_registry.ROLE_SCOPES
+        if scope_registry.permitted_scopes(role) & storage
+    }
+    assert holders == {"authenticated", "project_admin"}
 
 
 def test_a_capability_manifest_cannot_request_an_administrative_scope() -> None:

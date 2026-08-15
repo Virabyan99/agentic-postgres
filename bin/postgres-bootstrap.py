@@ -736,9 +736,14 @@ def connection_budget(container: str, database: str) -> tuple[int, int]:
 
 
 def connection_limits(
-    maximum: int, reserved: int, api_budget: int, auth_budget: int
-) -> tuple[int, int, int]:
-    """The application's ceiling and the API's, computed together (D161, ADR 0070).
+    maximum: int,
+    reserved: int,
+    api_budget: int,
+    auth_budget: int,
+    storage_budget: int,
+    pooler_pool_size: int,
+) -> tuple[int, int, int, int]:
+    """Every ceiling, computed together (D161, ADR 0070; D327, ADR 0099).
 
     Together is the whole point. `app_runtime` used to be given
     `maximum - reserved - headroom` -- everything -- and the authenticator was
@@ -746,33 +751,62 @@ def connection_limits(
     limits that sum past what the server will hand out. A budget that looks
     computed and is not.
 
-    So the division is: the API takes the commitment the manifest was checked
-    against, the operational headroom is held back, and **the application gets
-    what is left**. That last part is deliberate rather than a leftover. The
-    application role serves both the pooler's server-side pool and the direct
-    access profile, so a ceiling of `database.pool_size` would refuse a
-    developer's direct session whenever the pooler was busy -- and any allowance
-    added on top would be a number nobody measured.
+    So the division is: each service takes the commitment the manifest was
+    checked against, the operational headroom is held back, and **the
+    application gets what is left**. That last part is deliberate rather than a
+    leftover. The application role serves both the pooler's server-side pool and
+    the direct access profile, so a ceiling of `database.pool_size` would refuse
+    a developer's direct session whenever the pooler was busy -- and any
+    allowance added on top would be a number nobody measured.
+
+    **The remainder is checked against the pooler's pool, and that check is
+    D327.** Two arithmetics exist over this budget: the manifest charges
+    `database.pool_size` for the application, and this charges the remainder.
+    Nothing compared them until ADR 0099, and they agreed only by coincidence --
+    23 against 20, with 3 to spare. `default_pool_size` is per (user, database)
+    and `app_runtime` is the pooler's only application user, so a remainder
+    below it is a pool the pooler cannot fill: PostgreSQL refuses the backend
+    with `too many connections for role`, PgBouncer hands that to the client,
+    and the message names the role rather than the number that caused it.
 
     Returned rather than applied so the arithmetic is testable without a
-    cluster. The interesting cases are a small `max_connections` and a large
-    reservation, and both must raise rather than produce a value PostgreSQL
-    reads as something else: a negative limit is "unlimited" and 0 is "refuse
-    every login", so an error here is the only honest failure.
+    cluster. Every failure raises rather than producing a value PostgreSQL reads
+    as something else: a negative limit is "unlimited" and 0 is "refuse every
+    login", so an error here is the only honest failure.
     """
     available = maximum - reserved
-    application = available - api_budget - auth_budget - OPERATIONAL_CONNECTION_HEADROOM
+    application = (
+        available - api_budget - auth_budget - storage_budget - OPERATIONAL_CONNECTION_HEADROOM
+    )
     if application < 1:
         raise ValueError(
             f"max_connections={maximum} with {reserved} reserved leaves {available} usable; "
-            f"the API commits {api_budget}, the auth service {auth_budget}, and "
-            f"{OPERATIONAL_CONNECTION_HEADROOM} are held for operations, so the "
-            "application would be left with "
-            f"{application}. Raise database.max_connections or lower api.rest.pool_size; "
-            "do not remove the headroom, because it is what leaves a psql available when "
-            "this is wrong"
+            f"the API commits {api_budget}, the auth service {auth_budget}, the storage "
+            f"service {storage_budget}, and {OPERATIONAL_CONNECTION_HEADROOM} are held for "
+            f"operations, so the application would be left with {application}. Raise "
+            "database.max_connections or lower a pool_size; do not remove the headroom, "
+            "because it is what leaves a psql available when this is wrong"
         )
-    return application, api_budget, auth_budget
+    if application < pooler_pool_size:
+        sufficient = (
+            pooler_pool_size
+            + api_budget
+            + auth_budget
+            + storage_budget
+            + OPERATIONAL_CONNECTION_HEADROOM
+            + reserved
+        )
+        raise ValueError(
+            f"max_connections={maximum} with {reserved} reserved leaves the application "
+            f"{application} connections, below the pooler's server-side pool of "
+            f"{pooler_pool_size}. `default_pool_size` is per (user, database) and this role "
+            "is the pooler's only application user, so the pool could not fill: PostgreSQL "
+            "would refuse the backend with `too many connections for role` and PgBouncer "
+            "would hand that to the client, naming the role rather than this arithmetic. "
+            f"Raise database.max_connections to at least {sufficient}, "
+            "or lower database.pool_size"
+        )
+    return application, api_budget, auth_budget, storage_budget
 
 
 def app_runtime_password_available(project_key: str) -> bool:
@@ -1043,8 +1077,14 @@ def main() -> int:
     maximum, reserved = connection_budget(container, database)
     api_budget = int(document["database"]["api_connection_budget"])
     auth_budget = int(document["database"]["auth_connection_budget"])
-    runtime_limit, api_limit, auth_limit = connection_limits(
-        maximum, reserved, api_budget, auth_budget
+    storage_budget = int(document["database"]["storage_connection_budget"])
+    # The pooler's server-side pool, published at v11 for exactly one purpose:
+    # so this plane can check that the remainder covers it (D327, ADR 0099).
+    # It is the manifest's `database.pool_size`, carried through the document
+    # rather than re-read, because the bootstrap plane reads one document (D102).
+    pooler_pool_size = int(document["database"]["pooler_pool_size"])
+    runtime_limit, api_limit, auth_limit, storage_limit = connection_limits(
+        maximum, reserved, api_budget, auth_budget, storage_budget, pooler_pool_size
     )
 
     if app_runtime_password_available(key):
@@ -1110,6 +1150,19 @@ def main() -> int:
             "  auth service credential absent from this generation; role left NOLOGIN, "
             f"CONNECTION LIMIT {auth_limit}"
         )
+
+    # The storage service's ceiling, applied to a role that is still a NOLOGIN
+    # stub. Session 7 Run 1 computes the division; Run 4 activates the role and
+    # gives it a credential.
+    #
+    # Applied now rather than waiting, and that is the point of ADR 0070's
+    # "computed together": the ceiling is what the division produced, and a
+    # claimant whose number is computed but not applied is a claimant the
+    # catalog does not know about. `apply_connection_limit` is the same call the
+    # auth service's credential-absent branch makes, for the same reason -- the
+    # limit is a property of the role, not of whether it can log in yet.
+    apply_connection_limit(container, database, roles["storage_service"], storage_limit)
+    print(f"  storage service role, CONNECTION LIMIT {storage_limit} (NOLOGIN until run 4)")
 
     # Applied, then read back. The statements above returning 0 says psql
     # accepted them, which is not the same as the catalog holding what they

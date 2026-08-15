@@ -21,7 +21,12 @@ database:
   pooled_public: false
   pooled_public_cidrs: []
   max_client_connections: 100
-  pool_size: 20
+  # Sixteen, against the alpha fixture's twenty. The difference exists so that
+  # `database.pooler_pool_size` in the rendered document can be told apart from
+  # a constant: Run 1's mutation battery replaced the field with a hard-coded
+  # 20 and every test stayed green, because both fixtures said 20. A pair of
+  # fixtures that agree on a value cannot prove the value is read.
+  pool_size: 16
 
 api:
   public_base_path: /api
@@ -57,6 +62,14 @@ storage:
   upload_url_ttl_seconds: 600
   download_url_ttl_seconds: 300
   max_upload_bytes: 26214400
+  # Two, against the alpha fixture's four, and the difference is the point:
+  # the pair is what proves the connection budget is resolved per project
+  # (ADR 0099). It also puts this project's storage budget at 4 and alpha's at
+  # 6, so a document that carried one project's figure for the other would show
+  # up as a wrong number rather than as an identical one.
+  pool_size: 2
+  allowed_cors_origins:
+    - https://app.fixture-alpine-dev.test
 
 backup:
   enabled: true

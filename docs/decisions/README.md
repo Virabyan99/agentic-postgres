@@ -162,3 +162,7 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0096](0096-a-boundary-assertion-is-re-derived-not-relaxed.md) | A boundary assertion is re-derived, not relaxed | 6 | Accepted |
 | [0097](0097-a-structural-refusal-is-400-and-says-nothing.md) | A structural refusal is 400 and says nothing | 6 | Accepted |
 | [0098](0098-the-issuers-published-set-is-not-the-verifiers-set.md) | The issuer's published set is not the verifier's set | 6 | Accepted |
+| [0099](0099-the-budget-is-divided-four-ways-and-the-remainder-covers-the-pool.md) | The budget is divided four ways, and the remainder must cover the pooler's pool | 7 | Accepted |
+| [0100](0100-the-scope-vocabulary-has-three-classes-and-they-partition-it.md) | The scope vocabulary has three classes, and they partition the union | 7 | Accepted |
+| [0101](0101-one-image-two-modes-and-the-secret-contract-is-the-boundary.md) | One image, two modes, and the secret contract is the boundary | 7 | Accepted |
+| [0102](0102-the-object-key-is-one-derivation-over-the-prefix-naming-owns.md) | The object key is one derivation over the prefix `naming` owns | 7 | Accepted |

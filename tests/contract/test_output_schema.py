@@ -713,3 +713,138 @@ def test_the_rendered_budgets_are_each_services_own(alpha: dict[str, Any]) -> No
         "the two services publish the same commitment for a manifest whose pools differ; "
         "one of them is being derived from the other"
     )
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_published_storage_budget_is_the_manifests(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """The fourth claimant, from its own authority (ADR 0099).
+
+    The same shape the API's and the auth service's already have, and for the
+    same reason: the manifest-side budget check reasons about
+    `config.storage_connection_budget`, and the bootstrap plane divides the live
+    budget using whatever this publishes.
+    """
+    document = yaml.safe_load((REPO_ROOT / manifest).read_text(encoding="utf-8"))
+    expected = config.storage_connection_budget(document.get("storage") or {})
+
+    published = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    assert published["database"]["storage_connection_budget"] == expected
+
+
+def test_the_two_projects_publish_different_storage_budgets(rendered: dict[str, Path]) -> None:
+    """The inequality is what does the work, exactly as it does for the other two.
+
+    Both budgets equalling their own `config` call would still pass if the
+    renderer published one project's figure for both. Asserting they *differ*
+    for manifests whose storage pools differ is what makes the two
+    distinguishable -- which is why the fixtures were given different pools.
+    """
+    alpha = json.loads((rendered["project.example.yaml"] / "outputs.json").read_text("utf-8"))
+    alpine = json.loads(
+        (rendered["project.second.example.yaml"] / "outputs.json").read_text("utf-8")
+    )
+    assert (
+        alpha["database"]["storage_connection_budget"]
+        != alpine["database"]["storage_connection_budget"]
+    ), "both projects publish one storage commitment for manifests whose pools differ"
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_published_pooler_pool_is_the_manifests(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """`database.pooler_pool_size` is read from the manifest, not assumed (D327).
+
+    **Found by mutation, and this test exists because of it.** Run 1's battery
+    replaced the renderer's `int(project["database"]["pool_size"])` with a
+    hard-coded 20 and every test in the suite stayed green -- nothing asserted
+    the field at all, and both fixtures said 20 anyway. A field the bootstrap
+    plane refuses a deployment over was published by a line no proof could
+    distinguish from a constant.
+
+    The fixtures now differ (20 and 16), and the inequality below is what makes
+    the constant detectable.
+    """
+    document = yaml.safe_load((REPO_ROOT / manifest).read_text(encoding="utf-8"))
+    expected = int(document["database"]["pool_size"])
+
+    published = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    assert published["database"]["pooler_pool_size"] == expected
+
+
+def test_the_two_projects_publish_different_pooler_pools(rendered: dict[str, Path]) -> None:
+    """The other half of the mutation's answer: one constant cannot serve both."""
+    alpha = json.loads((rendered["project.example.yaml"] / "outputs.json").read_text("utf-8"))
+    alpine = json.loads(
+        (rendered["project.second.example.yaml"] / "outputs.json").read_text("utf-8")
+    )
+    assert alpha["database"]["pooler_pool_size"] != alpine["database"]["pooler_pool_size"], (
+        "both projects publish one pooler pool for manifests whose pools differ; the "
+        "field is indistinguishable from a constant"
+    )
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_published_division_leaves_the_pooler_its_pool(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """The relation the bootstrap plane will refuse a deployment over (ADR 0099).
+
+    Checked here against the *rendered* `max_connections` rather than a live
+    server, so it is one-sided: it assumes nothing is reserved. A document that
+    fails even that arithmetic cannot pass on a host, which is what makes the
+    weaker check worth making at render time.
+    """
+    published = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    database = published["database"]
+    committed = (
+        database["api_connection_budget"]
+        + database["auth_connection_budget"]
+        + database["storage_connection_budget"]
+    )
+    remaining = database["budget"]["max_connections"] - committed
+    assert remaining > database["pooler_pool_size"], (
+        f"{manifest} publishes a budget leaving {remaining} for the application, the "
+        f"pooler's {database['pooler_pool_size']} and the operational headroom together"
+    )
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_storage_route_is_published_and_is_the_derived_one(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """`naming` is the one derivation of a route (ADR 0002, ADR 0061).
+
+    Compared against `naming`'s own suffixes rather than a literal, so a change
+    to the published path fails here instead of producing a fixture that agrees
+    only with itself.
+    """
+    published = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    assert published["routes"]["storage"] == (
+        published["routes"]["app"] + naming.STORAGE_PATH_SUFFIX
+    )
+
+
+@pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
+def test_the_storage_block_carries_the_manifests_resolved_bounds(
+    rendered: dict[str, Path], manifest: str
+) -> None:
+    """The runtime reads its bounds from the document, never from the manifest.
+
+    ADR 0002 applied to four numbers: a service resolving its own default would
+    be a second authority for a bound the deploy was checked against.
+    """
+    document = yaml.safe_load((REPO_ROOT / manifest).read_text(encoding="utf-8"))
+    declared = {**config.STORAGE_DEFAULTS, **(document.get("storage") or {})}
+
+    published = json.loads((rendered[manifest] / "outputs.json").read_text(encoding="utf-8"))
+    storage = published["storage"]
+    for field in (
+        "upload_url_ttl_seconds",
+        "download_url_ttl_seconds",
+        "max_upload_bytes",
+    ):
+        assert storage[field] == declared[field], field
+    assert storage["allowed_cors_origins"] == sorted(declared["allowed_cors_origins"])

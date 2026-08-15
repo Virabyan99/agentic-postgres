@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from typing import Any
 
 import pytest
@@ -398,17 +399,24 @@ def test_the_two_limits_and_the_reserve_fit_what_the_server_will_give(bootstrap:
     -- and the authenticator nothing, because a ceiling for the API on top of
     everything is two limits that sum past what the server hands out. That is a
     budget that looks computed and is not.
+
+    Four claimants since ADR 0099, and the sum is the same relation.
     """
-    maximum, reserved, api_budget, auth_budget = 50, 3, 13, 6
-    application, api, auth = bootstrap.connection_limits(maximum, reserved, api_budget, auth_budget)
+    maximum, reserved = 56, 3
+    api_budget, auth_budget, storage_budget = 13, 6, 6
+    application, api, auth, storage = bootstrap.connection_limits(
+        maximum, reserved, api_budget, auth_budget, storage_budget, 20
+    )
 
     assert api == api_budget, "the API's ceiling is not the figure the document published"
     assert auth == auth_budget, "the auth service's ceiling is not the document's figure"
+    assert storage == storage_budget, "the storage service's ceiling is not the document's figure"
     assert application > 0
     assert (
-        application + api + auth + bootstrap.OPERATIONAL_CONNECTION_HEADROOM == maximum - reserved
+        application + api + auth + storage + bootstrap.OPERATIONAL_CONNECTION_HEADROOM
+        == maximum - reserved
     ), (
-        "the three limits and the operational headroom do not account for exactly what the "
+        "the four limits and the operational headroom do not account for exactly what the "
         "server will hand out; one of them is being computed independently of the others"
     )
 
@@ -419,36 +427,115 @@ def test_the_application_gets_what_is_left_rather_than_a_chosen_number(bootstrap
     Written as a difference rather than against a literal: a division that
     ignored the API's figure would return the same number for both calls and
     pass any single-value assertion.
+
+    `pooler_pool_size` is 1 so that the second call -- which deliberately drives
+    the remainder low -- fails this test's own assertion if the relation breaks,
+    rather than being refused by the pooler guard that
+    `test_a_remainder_below_the_poolers_pool_is_refused` owns.
     """
-    small, _, _ = bootstrap.connection_limits(50, 3, 10, 6)
-    large, _, _ = bootstrap.connection_limits(50, 3, 20, 6)
+    small, *_ = bootstrap.connection_limits(56, 3, 10, 6, 6, 1)
+    large, *_ = bootstrap.connection_limits(56, 3, 20, 6, 6, 1)
     assert small - large == 10, (
         "the application's ceiling did not move with the API's; the two are not being "
         "divided out of one budget"
     )
 
 
-def test_the_headroom_is_held_back_from_both(bootstrap: Any) -> None:
+def test_the_application_gives_way_to_the_storage_claimant_too(bootstrap: Any) -> None:
+    """The fourth claimant is divided out of the same budget, not added beside it.
+
+    The same difference-shaped assertion the API gets, applied to the argument
+    ADR 0099 introduced. Without it the new parameter would be exercised only as
+    a passenger -- present in every call and load-bearing in none, which is the
+    shape D260 found three times in one run.
+    """
+    small, *_ = bootstrap.connection_limits(56, 3, 13, 6, 2, 1)
+    large, *_ = bootstrap.connection_limits(56, 3, 13, 6, 6, 1)
+    assert small - large == 4, (
+        "the application's ceiling did not move with the storage service's; the fourth "
+        "claimant is not being divided out of the one budget"
+    )
+
+
+def test_the_headroom_is_held_back_from_all_of_them(bootstrap: Any) -> None:
     """It is what leaves a psql available when this arithmetic is wrong."""
-    application, api, auth = bootstrap.connection_limits(50, 3, 13, 6)
-    assert (50 - 3) - application - api - auth == bootstrap.OPERATIONAL_CONNECTION_HEADROOM
+    application, api, auth, storage = bootstrap.connection_limits(56, 3, 13, 6, 6, 20)
+    assert (56 - 3) - application - api - auth - storage == (
+        bootstrap.OPERATIONAL_CONNECTION_HEADROOM
+    )
+
+
+def test_a_remainder_below_the_poolers_pool_is_refused(bootstrap: Any) -> None:
+    """D327, and it is the reason ADR 0099 exists rather than a number choice.
+
+    `default_pool_size` is per (user, database) and `app_runtime` is the pooler's
+    only application user, so a remainder below it is a pool the pooler cannot
+    fill. PostgreSQL refuses the backend with `too many connections for role`,
+    PgBouncer hands that to the client, and the message names the role rather
+    than the arithmetic that produced it.
+
+    **Paired with a control that differs in one field.** The arm is the same
+    call with `max_connections` at 50 -- what it was before this session -- which
+    is exactly the state a cluster is in until its restart. Without the control
+    a passing test would not distinguish "refuses correctly" from "refuses
+    everything".
+    """
+    # Control: 56 leaves the application 23, above the pooler's 20.
+    application, *_ = bootstrap.connection_limits(56, 3, 13, 6, 6, 20)
+    assert application == 23, (
+        "the control does not produce the division ADR 0099 computed; the arm below would "
+        "be measuring something else"
+    )
+
+    # Arm: one field differs. 50 leaves 17, and 17 < 20.
+    with pytest.raises(ValueError, match=r"below the pooler's server-side pool"):
+        bootstrap.connection_limits(50, 3, 13, 6, 6, 20)
+
+
+def test_the_pooler_refusal_names_a_max_connections_that_would_work(bootstrap: Any) -> None:
+    """The message carries the number, and the number is right.
+
+    A refusal that says "raise max_connections" and leaves the operator to redo
+    the arithmetic is a refusal that gets guessed at. This asserts the suggested
+    ceiling actually passes, by calling with it -- so the message cannot drift
+    into naming a value that still fails.
+    """
+    with pytest.raises(ValueError) as caught:
+        bootstrap.connection_limits(50, 3, 13, 6, 6, 20)
+
+    match = re.search(r"at least (\d+)", str(caught.value))
+    assert match, f"the refusal names no ceiling to raise to: {caught.value}"
+
+    suggested = int(match.group(1))
+    application, *_ = bootstrap.connection_limits(suggested, 3, 13, 6, 6, 20)
+    assert application >= 20, (
+        f"the refusal suggested max_connections={suggested}, and at that value the "
+        f"application still gets {application} against a pooler pool of 20"
+    )
 
 
 @pytest.mark.parametrize(
-    ("maximum", "reserved", "api_budget", "auth_budget"),
+    ("maximum", "reserved", "api_budget", "auth_budget", "storage_budget"),
     [
-        (10, 3, 13, 6),  # the API alone exceeds what is available
-        (10, 3, 2, 6),  # nothing left after the headroom
-        (8, 3, 1, 6),  # a tiny cluster
-        (5, 5, 1, 6),  # the reservation takes everything
+        (10, 3, 13, 6, 6),  # the API alone exceeds what is available
+        (10, 3, 2, 6, 6),  # nothing left after the headroom
+        (8, 3, 1, 6, 6),  # a tiny cluster
+        (5, 5, 1, 6, 6),  # the reservation takes everything
         # The third claimant's own case: everything else fits and the auth
         # service is what tips it over. Without this the parameter set would
         # exercise the new argument only as a passenger.
-        (30, 3, 13, 20),
+        (30, 3, 13, 20, 2),
+        # The fourth claimant's own case, added by ADR 0099 for the same reason.
+        (30, 3, 13, 6, 20),
     ],
 )
 def test_a_budget_that_does_not_fit_raises_rather_than_returning_a_number(
-    bootstrap: Any, maximum: int, reserved: int, api_budget: int, auth_budget: int
+    bootstrap: Any,
+    maximum: int,
+    reserved: int,
+    api_budget: int,
+    auth_budget: int,
+    storage_budget: int,
 ) -> None:
     """A negative limit is 'unlimited' to PostgreSQL and 0 is 'refuse every login'.
 
@@ -456,9 +543,15 @@ def test_a_budget_that_does_not_fit_raises_rather_than_returning_a_number(
     an error is the only honest failure. Written as literals rather than derived
     from the constant, so emptying the constant cannot empty the parameter set
     (D190).
+
+    `pooler_pool_size` is 1 here on purpose: every case must fail on the
+    *remainder* being unusable, not on the pooler check that
+    `test_a_remainder_below_the_poolers_pool_is_refused` owns. A parameter set
+    where two different guards could produce the same exception is a set that
+    stops distinguishing them the day one of them breaks.
     """
-    with pytest.raises(ValueError, match=r"would be left with|leaves"):
-        bootstrap.connection_limits(maximum, reserved, api_budget, auth_budget)
+    with pytest.raises(ValueError, match=r"would be left with"):
+        bootstrap.connection_limits(maximum, reserved, api_budget, auth_budget, storage_budget, 1)
 
 
 def test_the_authenticator_is_activated_with_its_ceiling(bootstrap: Any) -> None:

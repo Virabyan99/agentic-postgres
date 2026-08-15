@@ -204,6 +204,62 @@ def api_budget_for(document: dict[str, Any]) -> int:
     return config.postgrest_connection_budget({})
 
 
+def storage_budget_for(document: dict[str, Any]) -> int:
+    """What version 11 requires, from `config` rather than written out.
+
+    The same shape as the two functions above and for the same reason:
+    `config.storage_connection_budget` is the one place that figure is computed
+    (ADR 0099), and a literal here would agree with it today.
+    """
+    del document
+    return config.storage_connection_budget({})
+
+
+def pooler_pool_size_for(document: dict[str, Any]) -> int:
+    """The pooler's server-side pool, from the example manifest.
+
+    `database.pool_size` has no schema default -- it is required, so every
+    manifest states it -- and an archived document is exactly a document that
+    came from a manifest. Reading the repository's own rather than writing a
+    literal keeps this fixture tied to a value somebody chose, and moves with it.
+    """
+    del document
+    manifest = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
+    return int(manifest["database"]["pool_size"])
+
+
+def storage_route_url_for(document: dict[str, Any]) -> str:
+    """What version 11 requires, derived through `naming` from the document.
+
+    Written out nowhere, exactly as `app_docs_url_for` is not: the path suffixes
+    are `naming`'s single authority (ADR 0061, ADR 0002) and the domain and base
+    path come from the document under test, so a change to either fails here
+    rather than producing a fixture that agrees only with itself.
+    """
+    domain = document["project"]["domain"]
+    # The published REST URL carries the manifest's own `api.public_base_path`,
+    # which this document records nowhere else. Recovering it from the rendered
+    # route is what keeps the fixture independent of the example manifest.
+    base_path = (
+        document["routes"]["rest"]
+        .removeprefix(f"https://{domain}")
+        .removesuffix(naming.REST_PATH_SUFFIX)
+    )
+    return f"https://{domain}{base_path}{naming.APP_PATH_SUFFIX}{naming.STORAGE_PATH_SUFFIX}"
+
+
+def storage_settings_for(document: dict[str, Any]) -> dict[str, Any]:
+    """What version 11 resolves into the storage block.
+
+    From `config.STORAGE_DEFAULTS` rather than written out: those are the values
+    a manifest that names none of them resolves to, and an archived document is
+    exactly a document whose manifest named none of them. Supplying literals
+    would be inventing an operator's choices.
+    """
+    del document
+    return {name: config.STORAGE_DEFAULTS[name] for name in output_migrations._V11_STORAGE_MEMBERS}
+
+
 def documentation_role_for(document: dict[str, Any]) -> str:
     """What a caller supplies for the v6 step (D158).
 
@@ -251,6 +307,10 @@ def chained(v1: dict[str, Any]) -> dict[str, Any]:
         api_connection_budget=api_budget_for(v1),
         app_docs_url=app_docs_url_for(v1),
         auth_connection_budget=auth_budget_for(v1),
+        storage_connection_budget=storage_budget_for(v1),
+        pooler_pool_size=pooler_pool_size_for(v1),
+        storage_route_url=storage_route_url_for(v1),
+        storage_settings=storage_settings_for(v1),
     )
 
 
@@ -343,6 +403,10 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         api_connection_budget=api_budget_for(v1),
         app_docs_url=app_docs_url_for(v1),
         auth_connection_budget=auth_budget_for(v1),
+        storage_connection_budget=storage_budget_for(v1),
+        pooler_pool_size=pooler_pool_size_for(v1),
+        storage_route_url=storage_route_url_for(v1),
+        storage_settings=storage_settings_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
 
@@ -400,6 +464,17 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
         migrated, auth_connection_budget=auth_budget_for(migrated)
     )
     assert migrated["schema_version"] == 10
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v10_to_v11(
+        migrated,
+        storage_connection_budget=storage_budget_for(migrated),
+        pooler_pool_size=pooler_pool_size_for(migrated),
+        storage_route_url=storage_route_url_for(migrated),
+        storage_settings=storage_settings_for(migrated),
+    )
+    assert migrated["schema_version"] == 11
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -478,6 +553,10 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
             auth_connection_budget=auth_budget_for(v1),
+            storage_connection_budget=storage_budget_for(v1),
+            pooler_pool_size=pooler_pool_size_for(v1),
+            storage_route_url=storage_route_url_for(v1),
+            storage_settings=storage_settings_for(v1),
         )
 
 
@@ -550,7 +629,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 10"):
+    with pytest.raises(MigrationError, match="already version 11"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -562,6 +641,10 @@ def test_a_current_version_document_is_not_migrated_again(
             api_connection_budget=api_budget_for(chained),
             app_docs_url=app_docs_url_for(chained),
             auth_connection_budget=auth_budget_for(chained),
+            storage_connection_budget=storage_budget_for(chained),
+            pooler_pool_size=pooler_pool_size_for(chained),
+            storage_route_url=storage_route_url_for(chained),
+            storage_settings=storage_settings_for(chained),
         )
     with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_v4_to_v5(v5)
@@ -575,7 +658,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1 through 9"):
+    with pytest.raises(MigrationError, match="only versions 1 through 10"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -587,6 +670,10 @@ def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
             auth_connection_budget=auth_budget_for(v1),
+            storage_connection_budget=storage_budget_for(v1),
+            pooler_pool_size=pooler_pool_size_for(v1),
+            storage_route_url=storage_route_url_for(v1),
+            storage_settings=storage_settings_for(v1),
         )
 
 
@@ -604,6 +691,10 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
             auth_connection_budget=auth_budget_for(v1),
+            storage_connection_budget=storage_budget_for(v1),
+            pooler_pool_size=pooler_pool_size_for(v1),
+            storage_route_url=storage_route_url_for(v1),
+            storage_settings=storage_settings_for(v1),
         )
 
 
@@ -630,6 +721,10 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             api_connection_budget=api_budget_for(v1),
             app_docs_url=app_docs_url_for(v1),
             auth_connection_budget=auth_budget_for(v1),
+            storage_connection_budget=storage_budget_for(v1),
+            pooler_pool_size=pooler_pool_size_for(v1),
+            storage_route_url=storage_route_url_for(v1),
+            storage_settings=storage_settings_for(v1),
         )
 
 
@@ -753,6 +848,17 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
         migrated, auth_connection_budget=auth_budget_for(migrated)
     )
     assert migrated["schema_version"] == 10
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v10_to_v11(
+        migrated,
+        storage_connection_budget=storage_budget_for(migrated),
+        pooler_pool_size=pooler_pool_size_for(migrated),
+        storage_route_url=storage_route_url_for(migrated),
+        storage_settings=storage_settings_for(migrated),
+    )
+    assert migrated["schema_version"] == 11
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -928,6 +1034,17 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
         migrated, auth_connection_budget=auth_budget_for(migrated)
     )
     assert migrated["schema_version"] == 10
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v10_to_v11(
+        migrated,
+        storage_connection_budget=storage_budget_for(migrated),
+        pooler_pool_size=pooler_pool_size_for(migrated),
+        storage_route_url=storage_route_url_for(migrated),
+        storage_settings=storage_settings_for(migrated),
+    )
+    assert migrated["schema_version"] == 11
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1047,6 +1164,17 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
         migrated, auth_connection_budget=auth_budget_for(migrated)
     )
     assert migrated["schema_version"] == 10
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v10_to_v11(
+        migrated,
+        storage_connection_budget=storage_budget_for(migrated),
+        pooler_pool_size=pooler_pool_size_for(migrated),
+        storage_route_url=storage_route_url_for(migrated),
+        storage_settings=storage_settings_for(migrated),
+    )
+    assert migrated["schema_version"] == 11
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1177,6 +1305,17 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
         migrated, auth_connection_budget=auth_budget_for(migrated)
     )
     assert migrated["schema_version"] == 10
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(migrated, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v10_to_v11(
+        migrated,
+        storage_connection_budget=storage_budget_for(migrated),
+        pooler_pool_size=pooler_pool_size_for(migrated),
+        storage_route_url=storage_route_url_for(migrated),
+        storage_settings=storage_settings_for(migrated),
+    )
+    assert migrated["schema_version"] == 11
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1502,6 +1641,13 @@ def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]
     migrated = output_migrations.migrate_v9_to_v10(
         migrated, auth_connection_budget=auth_budget_for(migrated)
     )
+    migrated = output_migrations.migrate_v10_to_v11(
+        migrated,
+        storage_connection_budget=storage_budget_for(migrated),
+        pooler_pool_size=pooler_pool_size_for(migrated),
+        storage_route_url=storage_route_url_for(migrated),
+        storage_settings=storage_settings_for(migrated),
+    )
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1669,6 +1815,13 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
     migrated = output_migrations.migrate_v9_to_v10(
         migrated, auth_connection_budget=auth_budget_for(migrated)
     )
+    migrated = output_migrations.migrate_v10_to_v11(
+        migrated,
+        storage_connection_budget=storage_budget_for(migrated),
+        pooler_pool_size=pooler_pool_size_for(migrated),
+        storage_route_url=storage_route_url_for(migrated),
+        storage_settings=storage_settings_for(migrated),
+    )
     config.validate_against_schema(migrated, "outputs.schema.json")
 
     without = {
@@ -1708,6 +1861,20 @@ def test_the_v9_fixture_is_a_real_render_at_version_9(v9_fixture: dict[str, Any]
 
     migrated = output_migrations.migrate_v9_to_v10(
         v9_fixture, auth_connection_budget=auth_budget_for(v9_fixture)
+    )
+    assert migrated["schema_version"] == 10
+    # Version 10 is no longer current, so the v9 fixture reaches a valid document
+    # only through the v11 step as well. Asserted against a literal 10 above and
+    # the constant below, deliberately: the fixture's own version is a fact about
+    # a file and the chain's endpoint is a fact about this release, and writing
+    # both as `CURRENT_VERSION` is how this assertion stopped meaning anything
+    # the last time a version was added.
+    migrated = output_migrations.migrate_v10_to_v11(
+        migrated,
+        storage_connection_budget=storage_budget_for(migrated),
+        pooler_pool_size=pooler_pool_size_for(migrated),
+        storage_route_url=storage_route_url_for(migrated),
+        storage_settings=storage_settings_for(migrated),
     )
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
@@ -1783,3 +1950,200 @@ def test_the_renderer_and_the_migrator_agree_on_the_auth_budget(
         config.API_APP_DEFAULTS["pool_size"] + config.AUTH_RESERVED_CONNECTIONS
     )
     assert config.auth_connection_budget({"pool_size": 9}) == 9 + config.AUTH_RESERVED_CONNECTIONS
+
+
+# ---------------------------------------------------------------------------
+# v10 -> v11 (Session 7, ADR 0099)
+# ---------------------------------------------------------------------------
+
+#: The Session 6 render, produced by `deploy.sh --render-only` at commit
+#: `d975800` -- Run 15, the last commit that still rendered version 10. Rendered
+#: in a detached worktree rather than hand-built from `outputs-v9.json`, for the
+#: reason every fixture in this module is a render: a document derived from the
+#: migrator agrees with the migrator by construction and proves nothing about
+#: what was shipped.
+FIXTURE_V10 = REPO_ROOT / "tests" / "fixtures" / "outputs-v10.json"
+
+
+@pytest.fixture
+def v10_fixture() -> dict[str, Any]:
+    return json.loads(FIXTURE_V10.read_text(encoding="utf-8"))
+
+
+def v11_arguments(document: dict[str, Any]) -> dict[str, Any]:
+    """Every version 11 argument, each from its own authority."""
+    return {
+        "storage_connection_budget": storage_budget_for(document),
+        "pooler_pool_size": pooler_pool_size_for(document),
+        "storage_route_url": storage_route_url_for(document),
+        "storage_settings": storage_settings_for(document),
+    }
+
+
+def test_the_v10_fixture_is_a_real_render_at_version_10(v10_fixture: dict[str, Any]) -> None:
+    """A genuine version 10 render, and now a superseded one.
+
+    The second assertion is what makes the version bump mean something: if a v10
+    document still validated, `schema_version` would be a label rather than a
+    contract and an old reader would have no way to tell it was out of date.
+    """
+    assert v10_fixture["schema_version"] == 10
+    assert v10_fixture["document_kind"] == "rendered"
+    assert "storage_connection_budget" not in v10_fixture["database"]
+    assert "storage" not in v10_fixture["routes"]
+    with pytest.raises(config.ManifestError):
+        config.validate_against_schema(v10_fixture, "outputs.schema.json")
+
+    migrated = output_migrations.migrate_v10_to_v11(v10_fixture, **v11_arguments(v10_fixture))
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+
+def test_v11_adds_the_storage_budget_the_route_and_the_resolved_bounds(
+    v10_fixture: dict[str, Any],
+) -> None:
+    """Four additions, one version, and D308 is why they arrive together.
+
+    D255 is the record of the alternative: version 9 was chosen one run early
+    with the session's remaining fields in mind and still missed the budget. A
+    version is planned from the session's whole surface, not from the run in
+    front of you.
+    """
+    arguments = v11_arguments(v10_fixture)
+    migrated = output_migrations.migrate_v10_to_v11(v10_fixture, **arguments)
+
+    assert migrated["schema_version"] == 11
+    assert (
+        migrated["database"]["storage_connection_budget"]
+        == (arguments["storage_connection_budget"])
+    )
+    assert migrated["database"]["pooler_pool_size"] == arguments["pooler_pool_size"]
+    assert migrated["routes"]["storage"] == arguments["storage_route_url"]
+    for name, value in arguments["storage_settings"].items():
+        assert migrated["storage"][name] == value
+
+    # The three earlier claimants are untouched. A step that adds one must not
+    # quietly restate the others -- that is how a figure the manifest approved
+    # gets replaced by one nobody checked.
+    for carried in ("api_connection_budget", "auth_connection_budget"):
+        assert migrated["database"][carried] == v10_fixture["database"][carried]
+    for carried in ("enabled", "bucket", "prefix"):
+        assert migrated["storage"][carried] == v10_fixture["storage"][carried]
+
+
+def test_v11_refuses_a_budget_that_is_not_a_positive_integer(v10_fixture: dict[str, Any]) -> None:
+    """0 is 'reject every login' to PostgreSQL and a bool is an int in Python."""
+    for field in ("storage_connection_budget", "pooler_pool_size"):
+        for value in (0, -1, "6", 6.0, None, True):
+            arguments = {**v11_arguments(v10_fixture), field: value}
+            with pytest.raises(MigrationError):
+                output_migrations.migrate_v10_to_v11(v10_fixture, **arguments)
+
+
+def test_v11_refuses_a_budget_that_leaves_the_application_nothing(
+    v10_fixture: dict[str, Any],
+) -> None:
+    maximum = v10_fixture["database"]["budget"]["max_connections"]
+    api = v10_fixture["database"]["api_connection_budget"]
+    auth = v10_fixture["database"]["auth_connection_budget"]
+    arguments = {
+        **v11_arguments(v10_fixture),
+        "storage_connection_budget": maximum - api - auth,
+    }
+    with pytest.raises(MigrationError, match="leaving nothing"):
+        output_migrations.migrate_v10_to_v11(v10_fixture, **arguments)
+
+
+def test_v11_refuses_a_remainder_that_cannot_cover_the_poolers_pool(
+    v10_fixture: dict[str, Any],
+) -> None:
+    """D327, checked where it can be checked without a cluster.
+
+    **Paired with a control that differs in one field.** The control is the same
+    call with the schema's own pool size, which must pass; the arm raises it to
+    what the budget cannot cover. Without the control a passing test would not
+    distinguish "refuses correctly" from "refuses everything", and a one-sided
+    refusal is exactly the tautology D173 records.
+    """
+    control = v11_arguments(v10_fixture)
+    output_migrations.migrate_v10_to_v11(v10_fixture, **control)
+
+    maximum = v10_fixture["database"]["budget"]["max_connections"]
+    committed = (
+        v10_fixture["database"]["api_connection_budget"]
+        + v10_fixture["database"]["auth_connection_budget"]
+        + control["storage_connection_budget"]
+    )
+    arm = {**control, "pooler_pool_size": maximum - committed}
+    with pytest.raises(MigrationError, match="pooler alone would not fit"):
+        output_migrations.migrate_v10_to_v11(v10_fixture, **arm)
+
+
+def test_v11_refuses_a_storage_route_it_would_have_to_derive(
+    v10_fixture: dict[str, Any],
+) -> None:
+    """ADR 0002: this module derives no name, and says so rather than guessing.
+
+    The route is `naming`'s. A migrator that built the URL from the document's
+    domain and base path would be a second derivation of an address the render
+    already owns, which is D177's shape.
+    """
+    for value in ("", "http://example.test/api/app/storage", "/api/app/storage", None, 7):
+        arguments = {**v11_arguments(v10_fixture), "storage_route_url": value}
+        with pytest.raises(MigrationError, match="https URL"):
+            output_migrations.migrate_v10_to_v11(v10_fixture, **arguments)
+
+
+def test_v11_refuses_a_partial_storage_block(v10_fixture: dict[str, Any]) -> None:
+    """A missing bound leaves the service defaulting it, which is the second
+    authority the resolution exists to remove."""
+    complete = storage_settings_for(v10_fixture)
+    for dropped in complete:
+        partial = {name: value for name, value in complete.items() if name != dropped}
+        arguments = {**v11_arguments(v10_fixture), "storage_settings": partial}
+        with pytest.raises(MigrationError, match="missing"):
+            output_migrations.migrate_v10_to_v11(v10_fixture, **arguments)
+
+
+def test_v11_refuses_a_document_that_already_carries_it(v10_fixture: dict[str, Any]) -> None:
+    once = output_migrations.migrate_v10_to_v11(v10_fixture, **v11_arguments(v10_fixture))
+    once["schema_version"] = 10
+    with pytest.raises(MigrationError, match="already carries"):
+        output_migrations.migrate_v10_to_v11(once, **v11_arguments(v10_fixture))
+
+
+def test_v11_refuses_a_deployed_document(v10_fixture: dict[str, Any]) -> None:
+    deployed = {**v10_fixture, "document_kind": "deployed"}
+    with pytest.raises(MigrationError):
+        output_migrations.migrate_v10_to_v11(deployed, **v11_arguments(v10_fixture))
+
+
+def test_v11_refuses_a_document_that_predates_version_10(v9_fixture: dict[str, Any]) -> None:
+    """The step is chained, never jumped. A v9 document reaches 11 through 10."""
+    with pytest.raises(MigrationError, match="only version 10"):
+        output_migrations.migrate_v10_to_v11(v9_fixture, **v11_arguments(v9_fixture))
+
+
+def test_v11_does_not_mutate_its_input(v10_fixture: dict[str, Any]) -> None:
+    before = json.dumps(v10_fixture, sort_keys=True)
+    output_migrations.migrate_v10_to_v11(v10_fixture, **v11_arguments(v10_fixture))
+    assert json.dumps(v10_fixture, sort_keys=True) == before
+
+
+def test_the_renderer_and_the_migrator_agree_on_the_storage_budget(
+    v10_fixture: dict[str, Any],
+) -> None:
+    """One authority for the figure (ADR 0002 applied to a number).
+
+    `config.storage_connection_budget` is where the renderer gets it and what
+    the manifest was checked against. If the two ever disagreed, a migrated
+    document would publish a budget the bootstrap plane divides by and the
+    manifest never approved -- and both halves would look right in isolation.
+    """
+    del v10_fixture
+    assert config.storage_connection_budget({}) == (
+        config.STORAGE_DEFAULTS["pool_size"] + config.STORAGE_RESERVED_CONNECTIONS
+    )
+    assert config.storage_connection_budget({"pool_size": 9}) == (
+        9 + config.STORAGE_RESERVED_CONNECTIONS
+    )

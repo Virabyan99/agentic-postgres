@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -245,6 +245,7 @@ def build_deployed_document(
     docs_status: str,
     app_status: str,
     app_docs_status: str,
+    storage_status: str,
     api: dict[str, Any],
     jwt: dict[str, Any],
     database_observed: dict[str, Any],
@@ -335,6 +336,16 @@ def build_deployed_document(
             # documentation surface is published.
             "app": published_route(rendered["routes"]["app"], app_status),
             "app_docs": published_route(rendered["routes"]["app_docs"], app_docs_status),
+            # Version 11, and it follows `app` exactly (D326). `unavailable`
+            # until the R2 credential validates, which makes this status the
+            # provider-health field -- a dedicated deployment state was
+            # considered and refused for `app`'s reason: `published_route`
+            # already expresses it and every reader already understands it.
+            #
+            # Required with no default, like every other status here. A default
+            # would let a deploy that observed nothing produce a document
+            # indistinguishable from one that did.
+            "storage": published_route(rendered["routes"]["storage"], storage_status),
         },
         "api": dict(api),
         "jwt": dict(jwt),

@@ -33,6 +33,7 @@ from agentic_postgres import (
     REPO_ROOT,
     auth_limits,
     config,
+    deployed_output,
     naming,
     scope_registry,
     secrets_contract,
@@ -179,6 +180,22 @@ def resolve_auth_connection_budget(project: dict[str, Any]) -> int:
     return config.auth_connection_budget(app)
 
 
+def resolve_storage_connection_budget(project: dict[str, Any]) -> int:
+    """What the storage service commits to, from `config` rather than arithmetic here.
+
+    The same shape as the two functions above and for the same reasons: one
+    answer computed in one place, and published whether or not the service is
+    enabled so that the bootstrap plane's division of the budget does not depend
+    on a flag it does not read.
+
+    ADR 0099's fourth claimant. The division is exact -- it was exact at three,
+    which is why adding one needed the ceiling raised rather than a number
+    chosen.
+    """
+    storage = project.get("storage") or {}
+    return config.storage_connection_budget(storage)
+
+
 def resolve_statement_timeouts(project: dict[str, Any], roles: dict[str, str]) -> dict[str, str]:
     """Resolve the manifest's suffix-keyed timeouts to derived role names.
 
@@ -223,7 +240,8 @@ def build_outputs(
     with an explicit ``unavailable`` status rather than a placeholder string
     that would eventually be pasted into a connection dialog.
     """
-    storage_enabled = bool(project.get("storage", {}).get("enabled", False))
+    storage_settings = {**config.STORAGE_DEFAULTS, **(project.get("storage") or {})}
+    storage_enabled = bool(storage_settings["enabled"])
     backup_enabled = bool(project.get("backup", {}).get("enabled", False))
 
     unavailable_endpoint = {
@@ -287,7 +305,13 @@ def build_outputs(
         # `ROLE_SUFFIXES`. Appending the role there is the whole change, which is
         # what single-authority derivation is for -- a second list here would be
         # the place the two could disagree.
-        "schema_version": 10,
+        # Read, not restated. This was the literal `10`, and a literal here is a
+        # second authority for a number `deployed_output` already owns -- caught
+        # only because `test_the_rendered_fixture_is_current` compares the two,
+        # which is a test doing the work an import does for free. Session 7's
+        # bump to 11 is the fourth time this literal has had to be found by
+        # hand.
+        "schema_version": deployed_output.SCHEMA_VERSION,
         "document_kind": "rendered",
         "inputs": dict(digests),
         "project": {
@@ -325,6 +349,15 @@ def build_outputs(
             # Version 10. The auth service's own commitment, charged whether or
             # not the service is enabled, for the reason the line above is.
             "auth_connection_budget": resolve_auth_connection_budget(project),
+            # Version 11. The fourth claimant (ADR 0099), charged on the same
+            # terms as the two above.
+            "storage_connection_budget": resolve_storage_connection_budget(project),
+            # Version 11, and it is not a claimant -- it is what the bootstrap
+            # plane checks the application's REMAINDER against (D327). Two
+            # arithmetics exist over this budget and until ADR 0099 nothing
+            # compared them; this is the field that lets the plane which knows
+            # the live numbers do the comparison.
+            "pooler_pool_size": int(project["database"]["pool_size"]),
         },
         "routes": {
             "rest": identity.route_rest,
@@ -337,6 +370,11 @@ def build_outputs(
             # written, and a readiness claim in a planning document is a lie
             # that automation would believe.
             "health": {"status": "planned", "url": identity.route_health},
+            # Version 11. Named whether or not storage is enabled, like every
+            # other route here: a rendered document describes what a deployment
+            # would create, and the readiness claim lives on the deployed
+            # branch (D326).
+            "storage": identity.route_storage,
         },
         "jwt": {"issuer": identity.jwt_issuer, "audience": identity.jwt_audience},
         "secrets": {
@@ -351,6 +389,20 @@ def build_outputs(
             "enabled": storage_enabled,
             "bucket": identity.storage_bucket,
             "prefix": identity.storage_prefix,
+            # Version 11. Resolved against the defaults here rather than at the
+            # runtime, for the reason the budget above is resolved here: the
+            # document is the one thing every plane reads (ADR 0002), and a
+            # service applying its own default would be a second authority for a
+            # bound the deploy was checked against.
+            **{
+                key: storage_settings[key]
+                for key in (
+                    "upload_url_ttl_seconds",
+                    "download_url_ttl_seconds",
+                    "max_upload_bytes",
+                )
+            },
+            "allowed_cors_origins": sorted(storage_settings["allowed_cors_origins"]),
         },
         "backup": {
             "enabled": backup_enabled,

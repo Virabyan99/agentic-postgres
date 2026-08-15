@@ -24,12 +24,14 @@
         "tasks:read",
         "tasks:write",
         "meta:read",
+        "objects:read",
+        "objects:write",
         "admin_users:read",
         "admin_users:write",
         "admin_agents:read",
         "admin_agents:write"
       ],
-      "description": "Every approved scope name. Two closed classes, and the classes are the point (ADR 0079). DATA scopes are one per (frozen-domain resource, verb) plus meta:read for schema introspection, closed by docs/decisions/0003-example-domain.md and growing only when that is superseded. ADMINISTRATIVE scopes are one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. A capability manifest may request only the data class: see $defs/agent_scope."
+      "description": "Every approved scope name: the union of three closed classes, and the classes are the point (ADR 0079, ADR 0100). DATA scopes are one per (frozen-domain resource, verb) plus meta:read for schema introspection, closed by docs/decisions/0003-example-domain.md and growing only when that is superseded. STORAGE scopes are one per (object, verb) over the object-storage surface, closed by that surface. ADMINISTRATIVE scopes are one per (platform identity resource, verb) over the auth service's own surface, closed by that surface, and are the only class that is DERIVED rather than listed -- as this union less the other two. A name added here and to no class raises where the registry is read: see scope_registry.assert_classes_partition_the_vocabulary. A capability manifest may request only the data class: see $defs/agent_scope."
     },
     "agent_scope": {
       "type": "string",
@@ -40,7 +42,25 @@
         "tasks:write",
         "meta:read"
       ],
-      "description": "The scopes a capability manifest may declare in required_scopes: the data class only. An administrative scope is issuable to a human administrator's token and is not requestable by a tool manifest. ADR 0006 rejected a pattern-validated vocabulary precisely because it would accept admin:everything, and one enum serving both purposes reintroduces that by another route."
+      "description": "The scopes a capability manifest may declare in required_scopes: the data class only. An administrative scope is issuable to a human administrator's token and is not requestable by a tool manifest. ADR 0006 rejected a pattern-validated vocabulary precisely because it would accept admin:everything, and one enum serving both purposes reintroduces that by another route. A STORAGE scope is absent for the same reason and one more: object storage is human-only in Session 7, and this $ref is where that is enforced rather than asserted."
+    },
+    "storage_scope": {
+      "type": "string",
+      "enum": [
+        "objects:read",
+        "objects:write"
+      ],
+      "description": "The object-storage class (ADR 0100). One per (object, verb) over the storage surface, closed by that surface. Referenced by no other schema member on purpose: it exists so the partition can be checked."
+    },
+    "administrative_scope": {
+      "type": "string",
+      "enum": [
+        "admin_users:read",
+        "admin_users:write",
+        "admin_agents:read",
+        "admin_agents:write"
+      ],
+      "description": "The platform identity class (ADR 0079), one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. LISTED here since ADR 0100; it used to be derived as the union less the data class, which is correct for two classes and silently wrong for three -- a name in the union and in no class was absorbed into this one, classified by arithmetic rather than by a decision. Measured in Session 7 Run 1. The three classes are now checked against the union exactly: see scope_registry.assert_classes_partition_the_vocabulary."
     },
     "capability": {
       "type": "object",

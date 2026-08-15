@@ -109,10 +109,10 @@
         },
         "max_connections": {
           "type": "integer",
-          "default": 50,
+          "default": 56,
           "minimum": 10,
           "maximum": 200,
-          "description": "PostgreSQL max_connections on the cluster itself, not the pooler's ceiling. Deliberately small: Session 4's answer to connection count is a pooler, and a large per-cluster limit would make the pooler decorative."
+          "description": "PostgreSQL max_connections on the cluster itself, not the pooler's ceiling. Deliberately small: Session 4's answer to connection count is a pooler, and a large per-cluster limit would make the pooler decorative. 56 since Session 7, and the six are what the storage service costs (ADR 0099) -- at 50 the budget divided exactly three ways with nothing spare, and a fourth claimant pushed the application's remainder below the pooler's own pool."
         },
         "work_mem_mb": {
           "type": "integer",
@@ -210,21 +210,43 @@
         },
         "upload_url_ttl_seconds": {
           "type": "integer",
+          "default": 900,
           "minimum": 60,
           "maximum": 3600,
-          "description": "Presigned upload URL lifetime."
+          "description": "Presigned upload URL lifetime. A presigned URL is a bearer credential with a short life, so this is the residual exposure of one issued URL -- it is not revoked by a later tombstone, and the documentation says so plainly rather than implying otherwise."
         },
         "download_url_ttl_seconds": {
           "type": "integer",
+          "default": 300,
           "minimum": 60,
           "maximum": 3600,
-          "description": "Presigned download URL lifetime."
+          "description": "Presigned download URL lifetime. Shorter than the upload default because an upload is one deliberate act by the holder and a download URL is the one that ends up pasted somewhere."
         },
         "max_upload_bytes": {
           "type": "integer",
+          "default": 26214400,
           "minimum": 1,
           "maximum": 5368709120,
           "description": "Largest accepted upload. P0 default is 25 MiB."
+        },
+        "pool_size": {
+          "type": "integer",
+          "default": 4,
+          "minimum": 1,
+          "maximum": 64,
+          "description": "The storage service's cluster pool (Session 7, ADR 0099). Charged against database.max_connections as pool_size + 2 reserved, whether or not storage is enabled -- a division that moved when somebody toggled a flag would make the bootstrap plane's arithmetic depend on a flag it does not read. Raising it lowers what is left for the application, and the bootstrap refuses when that remainder falls below database.pool_size, because the pooler cannot fill a pool larger than the role's own CONNECTION LIMIT."
+        },
+        "allowed_cors_origins": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "pattern": "^https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(:[0-9]{1,5})?$",
+            "maxLength": 253
+          },
+          "description": "Exact HTTPS origins a browser may reach the storage surface from. The same pattern api.rest.allowed_cors_origins uses, and the same refusals in one place: a path, a query, a fragment, a wildcard, a userinfo component, plain http, and the literal `null` that a sandboxed iframe and a file:// document send. This is the ONE origin list for storage; the edge middleware and the bucket's own CORS policy are two renderings of it (ADR 0085's ground, D323)."
         }
       },
       "if": {
@@ -234,7 +256,8 @@
       "then": {
         "properties": {
           "bucket": { "type": "null" },
-          "prefix": { "type": "null" }
+          "prefix": { "type": "null" },
+          "allowed_cors_origins": { "maxItems": 0 }
         }
       }
     },

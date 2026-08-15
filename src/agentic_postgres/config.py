@@ -125,8 +125,12 @@ CROSS_FIELD_RELATIONS: tuple[str, ...] = (
     "`api.rest.request_body_max_bytes` must equal `api.rest.request_body_memory_bytes`",
     "`api.rest.pool_max_idle_seconds` must be less than `api.rest.pool_max_lifetime_seconds`",
     "`api.rest.pool_size` plus its reserved connections, `api.app.pool_size` plus its "
-    "own, `database.pool_size`, and the administration reserve must fit "
-    "`database.max_connections`",
+    "own, `storage.pool_size` plus its own, `database.pool_size`, and the administration "
+    "reserve must fit `database.max_connections`",
+    "What `database.max_connections` leaves the application after every service's "
+    "commitment and the operational headroom must cover `database.pool_size`; the pooler "
+    "cannot fill a pool larger than the application role's own `CONNECTION LIMIT`, and "
+    "the refusal it produces names the role rather than the arithmetic",
     "`api.app.memory_limit_mb` must fit the frozen Argon2id profile: "
     "`hash_concurrency` x `memory_cost` plus the service's process overhead",
     "`api.rest.allowed_cors_origins` must contain the project's own HTTPS origin when the "
@@ -148,7 +152,16 @@ CROSS_FIELD_RELATIONS: tuple[str, ...] = (
 #: agree, so the duplication cannot drift silently.
 DATABASE_BUDGET_DEFAULTS: dict[str, int] = {
     "shared_buffers_mb": 128,
-    "max_connections": 50,
+    # 56 since Session 7, and the six are what the storage service costs
+    # (ADR 0099). It was 50, which divided exactly three ways with nothing
+    # spare: the application's remainder sat at 23 against a pooler pool of 20,
+    # and a fourth claimant of any useful size pushed it below -- at which point
+    # PgBouncer cannot fill its own pool and PostgreSQL refuses the backend with
+    # `too many connections for role`, naming the role rather than the
+    # arithmetic. Raising the ceiling keeps the remainder at 23 exactly, and
+    # costs PER_BACKEND_ANON_MB * 6 = 12 MiB per cluster, measured against a
+    # 1600 MiB host guardrail that 584 MiB was using.
+    "max_connections": 56,
     "work_mem_mb": 4,
     "maintenance_work_mem_mb": 64,
     "memory_limit_mb": 768,
@@ -227,6 +240,37 @@ API_APP_DEFAULTS: dict[str, Any] = {
 #: connections to the pooler because the API took the last of them.
 POSTGREST_RESERVED_CONNECTIONS = 3
 
+#: The storage service's resolved defaults (Session 7, ADR 0099).
+#:
+#: `pool_size` sits in the `storage:` section rather than under `api:` because
+#: that section already exists and is already this service's -- the precedent is
+#: `api.rest.pool_size` and `api.app.pool_size` living with the services they
+#: bound, not in a budget block of their own.
+#:
+#: Four, the auth service's size, for the auth service's reason: short queries
+#: against a narrow table set, and a pool it never fills is a claim on a budget
+#: two projects share on a 4 GB host.
+#: Duplicated from `schemas/project.schema.json` for the reason
+#: `DATABASE_BUDGET_DEFAULTS` is: JSON Schema `default` annotates, it does not
+#: populate, and a validator hands back a document without these keys unchanged.
+#: `test_storage_defaults_match_the_schema` asserts the two agree.
+STORAGE_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "pool_size": 4,
+    "upload_url_ttl_seconds": 900,
+    "download_url_ttl_seconds": 300,
+    "max_upload_bytes": 26214400,
+    "allowed_cors_origins": [],
+}
+
+#: What the storage service takes beyond its pool.
+#:
+#: Two, the auth service's reservation and for its stated reason: it holds no
+#: `LISTEN` connection, so what is charged above the pool is the
+#: startup-and-recovery overlap, where a pool being re-established while the old
+#: connections are still closing is briefly over its own size.
+STORAGE_RESERVED_CONNECTIONS = 2
+
 #: What the auth service takes beyond its pool.
 #:
 #: Two, not three: it holds no `LISTEN` connection, because nothing notifies
@@ -281,6 +325,22 @@ def auth_connection_budget(app: dict[str, Any]) -> int:
     """
     size = int(app.get("pool_size", API_APP_DEFAULTS["pool_size"]))
     return size + AUTH_RESERVED_CONNECTIONS
+
+
+def storage_connection_budget(storage: dict[str, Any]) -> int:
+    """How many cluster connections the storage service commits to.
+
+    The third of three functions with one shape, and the shape is ADR 0070's
+    point extended by ADR 0099: every claimant states what it takes, in one
+    place, so that the division can be computed rather than assumed. A single
+    figure covering two services is one number standing for two commitments.
+
+    Charged whether or not storage is enabled, matching the other two: a
+    division that moved when somebody toggled a service would make the bootstrap
+    plane's arithmetic depend on a flag it does not read.
+    """
+    size = int(storage.get("pool_size", STORAGE_DEFAULTS["pool_size"]))
+    return size + STORAGE_RESERVED_CONNECTIONS
 
 
 def auth_memory_floor_mb() -> int:
@@ -698,11 +758,13 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
     _validate_pooled_public(database)
     _validate_pool(database)
     _validate_memory_budget(database)
-    _validate_connection_budget(api, database)
+    _validate_connection_budget(
+        api, database, {**STORAGE_DEFAULTS, **(document.get("storage") or {})}
+    )
     # Unconditional, for the reason D256 recorded about the line above: the
     # renderer charges the auth service's budget whether or not it is enabled,
     # so a check that ran only for an enabled service would disagree with the
-    # document.
+    # document. Storage is charged the same way for the same reason (ADR 0099).
     _validate_auth_memory(api)
     _validate_rest_service(api, database=database, domain=project["domain"])
     _validate_route_boundaries(api, mcp)
@@ -836,7 +898,9 @@ def _validate_auth_memory(api: dict[str, Any]) -> None:
         )
 
 
-def _validate_connection_budget(api: dict[str, Any], database: dict[str, Any]) -> None:
+def _validate_connection_budget(
+    api: dict[str, Any], database: dict[str, Any], storage: dict[str, Any]
+) -> None:
     """Every claimant on `max_connections`, summed once (ADR 0070).
 
     **Unconditional**, and that is the correction. This lived inside
@@ -848,18 +912,34 @@ def _validate_connection_budget(api: dict[str, Any], database: dict[str, Any]) -
     therefore declare a `database.pool_size` the bootstrap would refuse, and the
     refusal would arrive on a host instead of in validation.
 
-    Both services are charged the same way and for the same reason. ADR 0070
+    Every service is charged the same way and for the same reason. ADR 0070
     exists because `app_runtime` was once given everything and the authenticator
     nothing: two claimants bounded separately sum past what the server hands out.
-    A third claimant makes that arithmetic more load-bearing, not less.
+    A fourth claimant makes that arithmetic more load-bearing, not less.
+
+    **What this check is and is not**, because ADR 0099 turns on the
+    distinction. This sum charges `database.pool_size` for the application. The
+    bootstrap plane does something different: it gives the application whatever
+    is *left* after the services and the headroom, computed against what the
+    live server reports. The two agree today and nothing here can prove they
+    will -- the live `max_connections` and `superuser_reserved_connections` are
+    not in this file, and a rendered guess about them is what D94 refused. So
+    the relation `application >= database.pool_size` is checked in the plane
+    that can ask the server, and what stays here is the cheaper, earlier check
+    that does not need to be right about the live cluster to be useful.
     """
     rest = {**API_REST_DEFAULTS, **(api.get("rest") or {})}
     app = {**API_APP_DEFAULTS, **(api.get("app") or {})}
 
     rest_budget = postgrest_connection_budget(rest)
     auth_budget = auth_connection_budget(app)
+    storage_budget = storage_connection_budget(storage)
     committed = (
-        rest_budget + auth_budget + database["pool_size"] + ADMINISTRATION_RESERVED_CONNECTIONS
+        rest_budget
+        + auth_budget
+        + storage_budget
+        + database["pool_size"]
+        + ADMINISTRATION_RESERVED_CONNECTIONS
     )
     ceiling = int(database.get("max_connections", DATABASE_BUDGET_DEFAULTS["max_connections"]))
     if committed > ceiling:
@@ -867,11 +947,12 @@ def _validate_connection_budget(api: dict[str, Any], database: dict[str, Any]) -
             f"the connection budget does not fit: api.rest.pool_size "
             f"({rest['pool_size']}) plus {POSTGREST_RESERVED_CONNECTIONS} reserved, "
             f"api.app.pool_size ({app['pool_size']}) plus {AUTH_RESERVED_CONNECTIONS} "
-            f"reserved, database.pool_size ({database['pool_size']}), and "
-            f"{ADMINISTRATION_RESERVED_CONNECTIONS} held for administration come to "
-            f"{committed}, above database.max_connections ({ceiling}). The connection "
-            "that cannot be opened is the pooler's or the migration's, and neither "
-            "reports the reason as a capacity problem"
+            f"reserved, storage.pool_size ({storage['pool_size']}) plus "
+            f"{STORAGE_RESERVED_CONNECTIONS} reserved, database.pool_size "
+            f"({database['pool_size']}), and {ADMINISTRATION_RESERVED_CONNECTIONS} held "
+            f"for administration come to {committed}, above database.max_connections "
+            f"({ceiling}). The connection that cannot be opened is the pooler's or the "
+            "migration's, and neither reports the reason as a capacity problem"
         )
 
 
