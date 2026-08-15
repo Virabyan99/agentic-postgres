@@ -822,7 +822,8 @@ services:
     # uid/gid on the tmpfs because a read-only root filesystem gives the
     # process nowhere else to write, and a tmpfs owned by root would be one the
     # dropped-privilege process cannot use.
-    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    tmpfs:
+      - /tmp:rw,mode=0700,uid=65532,gid=65532
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     # Longer than the docs page's 5s: the lifespan closes the pool on the way
@@ -923,7 +924,8 @@ services:
     profiles: [session4-verify]
     restart: "no"
     read_only: true
-    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    tmpfs:
+      - /tmp:rw,mode=0700,uid=65532,gid=65532
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     user: "65532:65532"
@@ -951,7 +953,8 @@ services:
     profiles: [session4-verify]
     restart: "no"
     read_only: true
-    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    tmpfs:
+      - /tmp:rw,mode=0700,uid=65532,gid=65532
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     user: "65532:65532"
@@ -975,7 +978,8 @@ services:
     profiles: [session4-verify]
     restart: "no"
     read_only: true
-    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    tmpfs:
+      - /tmp:rw,mode=0700,uid=65532,gid=65532
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     user: "65532:65532"
@@ -1003,7 +1007,8 @@ services:
     profiles: [session4-verify]
     restart: "no"
     read_only: true
-    tmpfs: [/tmp:rw,mode=0700,uid=65532,gid=65532]
+    tmpfs:
+      - /tmp:rw,mode=0700,uid=65532,gid=65532
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     user: "65532:65532"
