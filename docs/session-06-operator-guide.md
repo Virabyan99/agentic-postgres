@@ -204,6 +204,19 @@ at real proofs. What does not exist is any evidence, because **every Session 6
 claim is `live_host` and none of these proofs has run in any environment yet.**
 That is what this trip is for.
 
+**First, re-sync the environment.** Session 6 added nine packages to
+`requirements-dev.txt` (ADR 0083) and a venv created before that imports none of
+them. The gate prints `lock-dev-deps: requirements-dev.txt is current` either
+way — that checks the **lock**, not what is installed — and then dies in
+collection with `ModuleNotFoundError: No module named 'cryptography'`, which
+names neither the cause nor the remedy (**D297**). Unprivileged, `op` owns it:
+
+```bash
+cd ~op/agentic-postgres
+source .venv/bin/activate
+python -m pip install --require-hashes -r requirements-dev.txt
+```
+
 Before any host gate run, re-render the fixtures or D212 returns. The gate now
 **fails rather than skips** if you forget:
 
