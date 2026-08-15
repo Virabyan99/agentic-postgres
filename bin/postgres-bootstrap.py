@@ -187,10 +187,19 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     statements.append(
         f"GRANT CREATE, CONNECT, TEMPORARY ON DATABASE {db} TO {q(roles['object_owner'])};"
     )
+    # Every role that opens a connection of its own, and the list is exhaustive
+    # rather than growing: `REVOKE ALL ... FROM PUBLIC` above means a role absent
+    # here cannot connect at all, however correct its password is.
+    #
+    # `auth_service` joined this line after the first host deploy, which failed
+    # with `FATAL: permission denied for database` and `DETAIL: User does not
+    # have CONNECT privilege` (D291) -- the third defect in a row from the same
+    # cause, which is that adding a service means touching every list that
+    # enumerates roles, and nothing enumerated the lists.
     statements.append(
         f"GRANT CONNECT ON DATABASE {db} TO "
         f"{q(roles['migration_user'])}, {q(roles['app_runtime'])}, "
-        f"{q(roles['postgrest_authenticator'])};"
+        f"{q(roles['postgrest_authenticator'])}, {q(roles['auth_service'])};"
     )
 
     # CONNECT only, for the application runtime role. CREATE and TEMPORARY are

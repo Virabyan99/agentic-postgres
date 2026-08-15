@@ -93,6 +93,44 @@ def test_the_bootstrap_activates_every_role_a_service_logs_in_as(bootstrap: Any)
         )
 
 
+def test_every_credentialed_role_can_also_connect(bootstrap: Any) -> None:
+    """A password without CONNECT is a role that authenticates and is then refused.
+
+    **This is the third defect in a row from one cause** (D288, D289, D291):
+    adding a service means touching every list in this repository that
+    enumerates roles, and nothing enumerated the lists. `auth_service` was
+    missing from the credential block, then pointed at a pooler that did not
+    know it, then missing from the database's CONNECT grant -- each found only
+    after the previous was fixed, because each failure hid the next.
+
+    So this asserts the two lists against **each other** rather than against a
+    third copy of the role names. Both are in `postgres-bootstrap.py`; the
+    invariant is that they agree. A future service that gains a credential and
+    not a CONNECT fails here, which is the case that reached a host three times.
+
+    `REVOKE ALL ON DATABASE ... FROM PUBLIC` runs immediately above the grant, so
+    a role absent from it cannot connect at all however correct its password is.
+    """
+    source = BOOTSTRAP.read_text(encoding="utf-8")
+
+    grant = re.search(r"GRANT CONNECT ON DATABASE \{db\} TO \"?(.*?);", source, re.DOTALL)
+    assert grant, "the CONNECT grant could not be located in postgres-bootstrap.py"
+    connectable = set(re.findall(r"roles\['(\w+)'\]", grant.group(0)))
+    assert connectable, "no roles were parsed out of the CONNECT grant"
+
+    credentialed = set(re.findall(r'apply_credential\((?:[^)]|\n)*?roles\["(\w+)"\]', source))
+    assert credentialed, "no roles were parsed out of the apply_credential calls"
+
+    # `object_owner` is granted separately above and is NOLOGIN; `migration_user`
+    # is credentialed through its own path. Neither weakens the check below.
+    stranded = sorted(credentialed - connectable)
+    assert not stranded, (
+        f"these roles are given a password but never granted CONNECT on the database: "
+        f"{stranded}. They authenticate and are then refused with `permission denied for "
+        "database ... User does not have CONNECT privilege` (D291)"
+    )
+
+
 def test_the_bootstrap_no_longer_defers_the_auth_role_to_a_later_session(bootstrap: Any) -> None:
     """The specific sentence that deferred it, gone.
 
