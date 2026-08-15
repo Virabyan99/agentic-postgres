@@ -199,6 +199,13 @@ def materialize(key: str, contract: dict[str, Any], session: int) -> int:
     target = generations / generation
 
     written = 0
+    # What was actually materialized, which is not the same list as what was
+    # declared once an optional secret may be absent. The manifest is built from
+    # this rather than from the contract: the comment on `write_manifest` below
+    # says a deployment must not "claim secrets are ready and name a file that
+    # does not exist", and building it from the declaration would do exactly
+    # that for a `required: false` secret the provider does not hold.
+    materialized: list[dict[str, Any]] = []
     try:
         staging.mkdir(mode=0o700)
         os.chown(staging, 0, 0)
@@ -212,6 +219,26 @@ def materialize(key: str, contract: dict[str, Any], session: int) -> int:
                     secret_path=secret["provider_path"],
                 )
             except InfisicalError as exc:
+                # `required: false` means the provider is allowed not to hold it,
+                # and until Session 6 met the host **nothing here read that
+                # field**. `bootstrap-providers.py` filtered on it when deciding
+                # what to CREATE, so an optional secret was never created -- and
+                # this loop then fetched it anyway and failed the whole
+                # materialization on the 404. Session 6 is the first session to
+                # declare an optional secret (`auth_jwt_prepared_key`, which
+                # exists only while a rotation is in flight), so the field had
+                # never been exercised. D276's shape in the file that declares
+                # it: a property stated in the contract that no code read.
+                #
+                # Only a 404 is "absent". Any other failure -- a timeout, a 500,
+                # a DNS failure -- still fails the run, because treating those as
+                # absent would write a generation missing a secret the provider
+                # actually holds, and the deploy would start a service without
+                # it. That is why `InfisicalError` carries a status rather than
+                # this branching on the message.
+                if not secret["required"] and exc.status == 404:
+                    print(f"  {secret['name']}: absent at the provider, and optional")
+                    continue
                 fail(EXIT_SECRET, f"could not read {secret['name']}: {exc}")
 
             for consumer in secret["consumers"]:
@@ -238,6 +265,7 @@ def materialize(key: str, contract: dict[str, Any], session: int) -> int:
             # Dropped as soon as it is written. Holding every value until the
             # end would keep them all resident for the whole run for no reason.
             del value
+            materialized.append(secret)
 
         # Written into the staging directory, so the manifest is part of the
         # generation rather than an annotation added to it afterwards. The
@@ -247,7 +275,7 @@ def materialize(key: str, contract: dict[str, Any], session: int) -> int:
             build_manifest(
                 project_key=key,
                 generation_id=generation,
-                secrets=list(active_secrets(contract, session=session)),
+                secrets=materialized,
             ),
             staging / "manifest.json",
         )

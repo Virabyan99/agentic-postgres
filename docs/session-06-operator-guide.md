@@ -69,8 +69,49 @@ git rev-parse --short HEAD      # confirm this is the sha you just bundled
 # 2. DOWN. Volumes are preserved.
 sudo bin/project-runtime.sh --host host.yaml --project-key alpha-dev \
   --through-session 5 down
+```
 
-# 3. Materialize, then deploy through 6.
+**3. Create the new provider secrets. This step was missing from the first
+version of this guide and it stops the deploy** (D284). Session 6 introduces two
+*required* secrets — `auth_service_password` and `auth_jwt_signing_key` — and no
+command here sets a value at the provider (D249). Without this you get:
+
+```
+materialize-secrets: could not read auth_service_password:
+  GET /api/v3/secrets/raw/APG_AUTH_SERVICE_PASSWORD failed with HTTP 404
+```
+
+`--apply` needs the control-plane credential, and **it will not be on the host**:
+`docs/provider-bootstrap.md` shreds it after every bootstrap on purpose, so every
+new session re-issues one. In Infisical, on the existing control-plane identity,
+create a new Universal Auth client secret — shown exactly once.
+
+```bash
+CRED=/root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
+sudo install -d -m 0700 -o root -g root "$(dirname "$CRED")"
+sudo install -m 0600 -o root -g root /dev/null "$CRED"
+sudo nano "$CRED"        # TWO lines: client ID, then client secret. Not JSON.
+
+sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml --plan
+# expect exactly: create secret value auth_service_password
+#                 create secret value auth_jwt_signing_key
+sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
+  --apply --operator-credential-file "$CRED"
+```
+
+**Keep `$CRED` until every project has been applied** — beta-dev needs the same
+step, and one client secret does both. Then:
+
+```bash
+sudo shred -u "$CRED"
+sudo find /root/.config/agentic-postgres -name '*.save' -print   # nano's copy
+```
+
+`auth_jwt_prepared_key` is **not** created and must not be: it is
+`required: false` and exists only while a rotation is in flight.
+
+```bash
+# 4. Materialize, then deploy through 6.
 sudo bin/materialize-secrets.sh --project project.alpha.yaml \
   --requirements secrets.required.yaml --session 6
 sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \

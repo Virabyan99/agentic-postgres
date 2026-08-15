@@ -43,7 +43,23 @@ USER_AGENT = "agentic-postgres/2"
 
 
 class InfisicalError(RuntimeError):
-    """An API call failed. The message never contains a credential or a value."""
+    """An API call failed. The message never contains a credential or a value.
+
+    ``status`` is the HTTP status when the failure was a *response*, and ``None``
+    when it was anything else -- a DNS failure, a timeout, a non-JSON body. That
+    distinction is load-bearing rather than informational: a secret declared
+    ``required: false`` is expected to be absent, and only a **404** may be read
+    as absent. A connection failure treated as "not there" would materialize a
+    generation silently missing a secret the provider actually holds, and the
+    deploy would then start a service without it.
+
+    An attribute rather than something parsed back out of the message, because
+    the message is written for a human and the code that branches on it is not.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -142,7 +158,9 @@ class InfisicalClient:
         except urllib.error.HTTPError as exc:
             # The body is deliberately not included. On a failed auth call it
             # can echo request fields, and this message reaches logs.
-            raise InfisicalError(f"{method} {path} failed with HTTP {exc.code}") from None
+            raise InfisicalError(
+                f"{method} {path} failed with HTTP {exc.code}", status=exc.code
+            ) from None
         except urllib.error.URLError as exc:
             raise InfisicalError(f"{method} {path} could not reach the API: {exc.reason}") from None
 
