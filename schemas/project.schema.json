@@ -201,7 +201,7 @@
           "type": ["string", "null"],
           "minLength": 3,
           "maxLength": 63,
-          "description": "R2 bucket. Defaults to the project key."
+          "description": "R2 bucket. Defaults to `apg-{project_key}` -- namespaced like every other derived identifier here, because a bucket's collision domain is the whole Cloudflare account and a bare project key sits in the same namespace as whatever else that account holds (ADR 0105, D339). A value given HERE is used verbatim and is not prefixed: the override exists so an operator can point at a bucket named by a convention that is not ours, and prefixing it would defeat the only reason it exists. A collision on an overridden name is the operator's to resolve, and the bootstrap still refuses to adopt a bucket it did not create."
         },
         "prefix": {
           "type": ["string", "null"],

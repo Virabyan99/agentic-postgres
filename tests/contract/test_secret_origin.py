@@ -32,7 +32,7 @@ from rendered_fixtures import (  # type: ignore[import-not-found]
     needs_rendered_fixtures,
 )
 
-from agentic_postgres import REPO_ROOT, config, secrets_contract
+from agentic_postgres import REPO_ROOT, config, naming, secrets_contract
 from agentic_postgres.config import ManifestError
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
@@ -617,8 +617,13 @@ def test_every_storage_variable_is_read_from_the_manifest(key: str, manifest: Pa
     assert rendered["STORAGE_UPLOAD_URL_TTL_SECONDS"] == str(storage["upload_url_ttl_seconds"])
     assert rendered["STORAGE_DOWNLOAD_URL_TTL_SECONDS"] == str(storage["download_url_ttl_seconds"])
     assert rendered["STORAGE_MAX_UPLOAD_BYTES"] == str(storage["max_upload_bytes"])
-    assert rendered["STORAGE_BUCKET"] == storage["bucket"]
-    assert rendered["STORAGE_PREFIX"] == storage["prefix"]
+    # Through `naming`, because the manifest may declare neither: alpha takes the
+    # derived names and alpine overrides both, so `storage["bucket"]` is absent
+    # for one of them. That split is deliberate (ADR 0105) -- until Run 3 both
+    # fixtures restated the defaults, so nothing exercised the derivation and
+    # changing it left the suite green.
+    assert rendered["STORAGE_BUCKET"] == naming.storage_bucket_name(key, storage.get("bucket"))
+    assert rendered["STORAGE_PREFIX"] == naming.storage_object_prefix(key, storage.get("prefix"))
     assert rendered["STORAGE_SERVICE_ROLE_NAME"].endswith("_storage_service")
     assert key.replace("-", "_") in rendered["STORAGE_SERVICE_ROLE_NAME"]
 

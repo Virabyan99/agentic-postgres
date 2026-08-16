@@ -59,8 +59,17 @@ mcp:
 
 storage:
   enabled: true
-  bucket: fixture-alpha-dev
-  prefix: objects/fixture-alpha-dev/
+  # No `bucket:` and no `prefix:`, deliberately: this fixture exercises the
+  # DERIVED names while project.second.example.yaml overrides both. Until Run 3
+  # both fixtures declared exactly what the derivation produced, so no fixture
+  # exercised the derivation at all -- changing it would have left the whole
+  # suite green. That is D332's rule, and it is why D339 was invisible to every
+  # test in the repository until a live account was listed.
+  #
+  # Derived here: bucket `apg-fixture-alpha-dev` (ADR 0105, namespaced because a
+  # bucket's collision domain is the whole Cloudflare account) and prefix
+  # `objects/fixture-alpha-dev/` (not namespaced -- it lives inside a bucket we
+  # already own, so there is nothing to collide with).
   upload_url_ttl_seconds: 600
   download_url_ttl_seconds: 300
   max_upload_bytes: 26214400

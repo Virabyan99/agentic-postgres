@@ -147,7 +147,19 @@ differs on every one.
 |---|---|---|---|---|---|
 | **D337** | 0014 grants `storage_service` EXECUTE on its seven functions, which is what the plan's "a grant only to `storage_service`" describes. | **All seven grants were unreachable.** The role had EXECUTE and no `USAGE ON SCHEMA app_private`, and PostgreSQL refuses the call with `permission denied for schema app_private` *before* it looks at the function's ACL. 0011 granted this to `auth_service` in the migration that created the registry, one file before the functions arrived; storage has one file for both, and the line was simply absent. | `GRANT USAGE ON SCHEMA app_private TO {{storage_service}};` beside the revoke, with the reason written where the grant is. | **Caught offline by a test that CALLED a function rather than one that read `pg_proc.proacl`** — the ACL was correct and an ACL test would have stayed green. This is D288/D289/D291's class exactly: *adding a service means touching every list that enumerates roles, and nothing enumerates the lists.* The difference is that this time it cost a test run instead of a host deploy. | — |
 | **D338** | Run 3's exit criterion names "the lease claim under concurrency" as though the mechanism were settled. | **Neither mechanism had ever been measured here** — nothing under `docs/`, `migrations/`, `src/` or `tests/` mentioned `SKIP LOCKED` at all. Both were measured on the locked pg18 digest with controls that fired: two claimants with `SKIP LOCKED` take different rows while the same query without it blocks until `lock_timeout` kills the second; and a plain CAS lease under READ COMMITTED produces exactly one winner, because the re-check runs against the new row version. | Both, doing different jobs. The **lease predicate is correctness** — the provider DELETE happens outside the transaction, and a row lock is released at COMMIT and at crash. **`SKIP LOCKED` is throughput** and nothing else. | The battery confirms the ADR rather than contradicting it: removing `SKIP LOCKED` left every test **green**, which is what ADR 0104 says it should do, and is recorded as a deliberate expected-PASS rather than pretended away. Removing the lease predicate went red. **The dangerous half is the one no offline test would notice**, because no offline test spans two transactions with a network call between them. | [0104](../decisions/0104-the-lease-is-the-correctness-mechanism-and-the-row-lock-is-not.md) |
-| **D339** | §4 item 1 treats bucket-name collision as an operator-review stop, and ADR 0102/D330 settled the prefix derivation as "nothing needed fixing". | **The bucket is the only derived identifier in this project with no namespace.** Every Traefik router, middleware and database role carries `apg-`/`apg_` — `apg_fixture_alpha_dev_storage_service` — while `naming.storage_bucket_name` returns the bare project key: `alpha-dev`, `beta-dev`. Read from the live Cloudflare account (read-only, no mutation): it already holds six unrelated buckets, `items`, `photos`, `pictures`, `cursor-clone-files`, `note-app-marshal-images`, `vector-attachments`. None collides today. | **Open, and it is a decision for before Run 5 creates anything.** Recorded here rather than changed unilaterally, because the derivation is Run 1's (ADR 0102) and CLAUDE.md §5 forbids reconciling a conflict silently. | The collision domain for a bucket name is the whole account, and `alpha-dev` is exactly what a human names something else in a shared account. A collision is a hard stop by design, not a silent overwrite — so this is an operational trap rather than a security hole. **It costs nothing to change now and cannot be changed after a bucket holds objects: R2 has no rename.** D330's prediction was checked by reading the deriver; it was not checked against a real account. | needed? |
+| **D339** | §4 item 1 treats bucket-name collision as an operator-review stop, and ADR 0102/D330 settled the prefix derivation as "nothing needed fixing". | **The bucket is the only derived identifier in this project with no namespace.** Every Traefik router, middleware and database role carries `apg-`/`apg_` — `apg_fixture_alpha_dev_storage_service` — while `naming.storage_bucket_name` returns the bare project key: `alpha-dev`, `beta-dev`. Read from the live Cloudflare account (read-only, no mutation): it already holds six unrelated buckets, `items`, `photos`, `pictures`, `cursor-clone-files`, `note-app-marshal-images`, `vector-attachments`. None collides today. | **Namespaced: the derived name is now `apg-{project_key}`.** An explicit `storage.bucket` override is used **verbatim** and is not prefixed — the override exists so an operator can point at a bucket named by a convention that is not ours. The object-key prefix is unchanged: it is scoped by a bucket this project already owns. | The collision domain for a bucket name is the whole account, and `alpha-dev` is exactly what a human names something else in a shared account. A collision is a hard stop by design, not a silent overwrite — so this is an operational trap rather than a security hole. **It cost nothing to change and could not have been changed after a bucket held objects: R2 has no rename.** D330's prediction was checked by reading the deriver; it was never checked against a real account. | [0105](../decisions/0105-the-bucket-carries-the-namespace-every-other-derived-name-carries.md) |
+
+**D339's second half is the one to carry.** Both fixtures declared `bucket` and
+`prefix` as *exactly what the derivation produced*, so **no fixture exercised the
+derivation at all** — changing it would have left the whole suite green.
+`project.example.yaml` now declares neither and takes both derived names, while
+`project.second.example.yaml` overrides both. That is **D332's rule for the third
+time this session**, in its sharper form: a fixture that restates a default
+cannot prove the default is read.
+
+**And the finding's provenance matters.** D333 was found by running a code path
+nobody had run; D339 by listing an account nobody had listed. Both were invisible
+to a green suite, and both were about a value that looked settled.
 
 **The Run 3 battery: 13 mutations, 0 unexpected, 0 battery failures, three
 controls green.** M2 is a deliberate expected-PASS and is the one worth reading.
@@ -463,9 +475,15 @@ reach the role by `SET ROLE`, which exercises the grants and says nothing about
 the login path. **That is Run 4's exit criterion** and the test module's docstring
 names the gap rather than implying coverage.
 
-**D339 is open and is cheap now.** The R2 bucket is the only derived identifier
-in this project without an `apg` namespace. Decide before Run 5 creates one — R2
-has no rename.
+**D339 was found by leaving the repository, and is closed.** Listing the live
+Cloudflare account read-only showed six unrelated buckets — `items`, `photos`,
+`pictures` and three more — and the R2 bucket was the only derived identifier in
+this project without the `apg` namespace every router, middleware and role
+carries. **ADR 0105** namespaces the derived name; an explicit override stays
+verbatim. Free to do now, impossible after Run 5 creates a bucket, because R2 has
+no rename. The half worth carrying is that **both fixtures restated the
+derivation**, so nothing exercised it — alpha now takes the derived names and
+alpine overrides them.
 
 ---
 

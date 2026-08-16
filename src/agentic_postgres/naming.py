@@ -422,8 +422,24 @@ def storage_bucket_name(key: str, override: str | None = None) -> str:
     named. D330 is the near miss: the manifest's ``bucket`` and ``prefix`` were
     predicted to be a second live derivation and turned out to be overrides of
     this one, and the prediction was only settled by reading the deriver.
+
+    **The derived name carries the ``apg-`` namespace every other derived
+    identifier here carries** (D339, ADR 0105). Traefik routers and middlewares
+    are ``apg-<key>-…`` and database roles are ``apg_<key>_…``; the bucket was
+    the sole exception, and a bucket's collision domain is the whole Cloudflare
+    account. Read from a real account rather than reasoned about: one already
+    held six unrelated buckets named ``items``, ``photos``, ``pictures`` and
+    the like, and a bare ``alpha-dev`` sits in exactly that namespace.
+
+    **An explicit ``override`` is used verbatim and is NOT namespaced.** The
+    override exists so an operator can point at a bucket named by a convention
+    that is not ours, and prefixing it would defeat the only reason it is there.
+    A collision on an overridden name is then the operator's to resolve, which
+    is what an override means -- and the bootstrap still refuses to adopt a
+    bucket it did not create, so the failure is a stop rather than a silent
+    reuse.
     """
-    return r2_bucket(override if override else key)
+    return r2_bucket(override if override else f"apg-{key}")
 
 
 def storage_object_prefix(key: str, override: str | None = None) -> str:

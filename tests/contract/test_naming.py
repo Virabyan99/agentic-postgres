@@ -320,7 +320,12 @@ def test_derived_identity_matches_the_specified_table(alpha: naming.ProjectIdent
     assert alpha.jwt_issuer == "https://fixture-alpha-dev.test/api/app/auth"
     assert alpha.jwt_audience == "urn:agentic-postgres:fixture-alpha:dev"
     assert alpha.secrets_namespace == "agentic-postgres/fixture-alpha-dev"
-    assert alpha.storage_bucket == "fixture-alpha-dev"
+    # `apg-` since Run 3 (ADR 0105, D339): every other derived identifier here
+    # carries the namespace and the bucket was the sole exception, while a
+    # bucket's collision domain is the whole Cloudflare account rather than this
+    # project. The PREFIX deliberately does NOT carry it -- it lives inside a
+    # bucket this project already owns, so there is nothing to collide with.
+    assert alpha.storage_bucket == "apg-fixture-alpha-dev"
     assert alpha.storage_prefix == "objects/fixture-alpha-dev/"
     assert alpha.backup_stanza == "fixture-alpha-dev"
     assert alpha.backup_repository_prefix == "pgbackrest/fixture-alpha-dev/"
@@ -426,6 +431,30 @@ def test_fixture_identities_are_isolated() -> None:
 # ---------------------------------------------------------------------------
 # Output validators
 # ---------------------------------------------------------------------------
+
+
+def test_the_derived_bucket_is_namespaced_and_an_override_is_not() -> None:
+    """ADR 0105 / D339, and both halves matter.
+
+    A bucket's collision domain is the whole Cloudflare account, not this
+    project, and the bucket was the only derived identifier here without the
+    `apg` namespace every router, middleware and role carries. Measured rather
+    than reasoned about: a real account already held `items`, `photos`,
+    `pictures` and three more, which is exactly the namespace a bare
+    `alpha-dev` sits in.
+
+    The second assertion is the one that would be lost by "fixing" this
+    symmetrically. An explicit override exists so an operator can point at a
+    bucket named by a convention that is not ours, and prefixing it would make
+    `bucket: my-existing-bucket` silently mean something else.
+    """
+    assert naming.storage_bucket_name("alpha-dev") == "apg-alpha-dev"
+    assert naming.storage_bucket_name("alpha-dev", "my-existing-bucket") == "my-existing-bucket"
+
+    # The prefix is deliberately NOT namespaced: it is scoped by a bucket this
+    # project owns, so there is nothing to collide with.
+    assert naming.storage_object_prefix("alpha-dev") == "objects/alpha-dev/"
+    assert naming.storage_object_prefix("alpha-dev", "custom/") == "custom/"
 
 
 def test_r2_bucket_rejects_names_that_violate_the_provider_rules() -> None:
