@@ -254,9 +254,20 @@ POSTGREST_RESERVED_CONNECTIONS = 3
 #: `DATABASE_BUDGET_DEFAULTS` is: JSON Schema `default` annotates, it does not
 #: populate, and a validator hands back a document without these keys unchanged.
 #: `test_storage_defaults_match_the_schema` asserts the two agree.
+#:
+#: `memory_limit_mb` is 384 -- the application API's figure, INHERITED RATHER
+#: THAN MEASURED, and said so here because this repository's defect pattern is a
+#: value that looked measured and was not. §3 of the session plan lists a second
+#: application container's memory floor as "must be measured", and it cannot be
+#: until Run 5 has an adapter to measure; ADR 0082 is the shape that measurement
+#: has to take, one profile per process with a no-work control, because
+#: `ru_maxrss` is a high-water mark that reports the same plausible number for
+#: every row. It is a manifest field rather than a constant so that the number
+#: is visible and overridable while it is still provisional.
 STORAGE_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "pool_size": 4,
+    "memory_limit_mb": 384,
     "upload_url_ttl_seconds": 900,
     "download_url_ttl_seconds": 300,
     "max_upload_bytes": 26214400,

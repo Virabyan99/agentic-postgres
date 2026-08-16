@@ -46,11 +46,18 @@ Usage: bin/bootstrap-providers.sh --host FILE --project FILE --plan
        sudo bin/bootstrap-providers.sh --host FILE --project FILE --destroy \
             --confirm PROJECT_KEY
 
-  --plan     Report what would be created or changed. Contacts the provider
-             read-only and writes nothing. Needs no root in a checkout; on a
-             host it needs sudo to read this project's recorded state, which
-             is root-owned, and says so rather than treating it as absent.
-  --apply    Create what is missing and record the resulting identifiers.
+  --plan     Report what would be created or changed, and name every secret an
+             operator has to supply by hand. Contacts nothing and writes
+             nothing: the comparison is between the committed contract and this
+             project's recorded state, and both are local. (This said "contacts
+             the provider read-only" for five sessions and never did -- D334.)
+             Needs no root in a checkout; on a host it needs sudo to read the
+             recorded state, which is root-owned, and says so rather than
+             treating it as absent.
+  --apply    Create what is missing and record the resulting identifiers. It
+             does NOT create an operator-supplied value and will not invent
+             one: those come from a third party's console and are pasted into
+             the provider by hand (ADR 0103, D249).
   --destroy  Remove the resources this project's state file says we own, by ID.
 
   --host FILE                      The host manifest.

@@ -1051,6 +1051,112 @@ services:
     networks:
       - internal
 
+
+  # Session 7's object-storage runtime. The SAME IMAGE as `auth`, in a second
+  # mode selected by `APP_MODE` (ADR 0101) -- one build context, because a
+  # second service directory could not import the JWT verifier, the strict
+  # request parser or the error vocabulary any more than either can reach
+  # `src/`. The least-privilege boundary the two need is not the image: it is
+  # the secret contract's per-consumer materialization, which is what makes
+  # "storage holds no signing key, auth holds no R2 credential" a property of
+  # the filesystem rather than a rule somebody keeps.
+  #
+  # No Traefik router labels. `apg.traefik.scope: managed` is what the edge
+  # filters on and the identity labels are here, but the router itself is Run
+  # 7's: a label set that published `/api/app/storage` before anything answered
+  # it would route to a container that 404s, and Traefik's own 404 and a routed
+  # one are indistinguishable from outside (D186, D187).
+  #
+  # `profiles: [session7]` and CURRENT_SESSION is 6, so nothing starts this yet:
+  # `project-runtime.sh` selects `--profile session${n}` for n up to
+  # --through-session. Measured before the entry was written -- adding it left
+  # the whole offline suite green but for the one test that exists to be
+  # answered when a secret name is added.
+  storage:
+    build:
+      context: ./services/auth-api
+      args:
+        BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+        ARGON2_CFFI_VERSION: ${ARGON2_CFFI_VERSION:?required}
+        CRYPTOGRAPHY_VERSION: ${CRYPTOGRAPHY_VERSION:?required}
+        FASTAPI_VERSION: ${FASTAPI_VERSION:?required}
+        PSYCOPG_VERSION: ${PSYCOPG_VERSION:?required}
+        PSYCOPG_POOL_VERSION: ${PSYCOPG_POOL_VERSION:?required}
+        PYDANTIC_VERSION: ${PYDANTIC_VERSION:?required}
+        PYDANTIC_SETTINGS_VERSION: ${PYDANTIC_SETTINGS_VERSION:?required}
+        PYJWT_VERSION: ${PYJWT_VERSION:?required}
+        UVICORN_VERSION: ${UVICORN_VERSION:?required}
+    profiles:
+      - session7
+    restart: on-failure:5
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+    user: 65532:65532
+    read_only: true
+    # A block sequence, not a flow sequence. `[/tmp:rw,mode=0700,...]` is valid
+    # YAML and parses as FOUR mount paths, which `compose config` cannot catch
+    # because four strings are as valid as one (D287).
+    tmpfs:
+      - /tmp:rw,mode=0700,uid=65532,gid=65532
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    mem_limit: ${STORAGE_MEMORY_LIMIT:?required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # The mode, and it is required rather than defaulted for ADR 0055's
+      # reason applied to behaviour: an image that picked a mode by omission
+      # would start the wrong service with a correct-looking configuration.
+      APP_MODE: storage
+      APG_PROJECT_KEY: ${PROJECT_KEY:?required}
+      APG_PROJECT_ENVIRONMENT: ${PROJECT_ENVIRONMENT:?required}
+      # Storage is a second surface of the application API and shares its
+      # issuer and audience, so it verifies the same tokens `auth` issues. It
+      # is a THIRD verifier (ADR 0098, D320) and holds no signing key: there is
+      # no APG_SIGNING_KEY_FILE here and there must not be.
+      APG_JWT_ISSUER: ${JWT_ISSUER:?required}
+      APG_JWT_AUDIENCE: ${JWT_AUDIENCE:?required}
+      APG_DATABASE_HOST: ${POSTGRES_SERVICE_HOST:?required}
+      APG_DATABASE_PORT: '5432'
+      APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
+      APG_DATABASE_ROLE: ${STORAGE_SERVICE_ROLE_NAME:?required}
+      APG_DATABASE_PASSFILE: /run/secrets/storage_service_pgpass
+      APG_POOL_SIZE: ${STORAGE_POOL_SIZE:?required}
+      APG_LISTEN_PORT: '8080'
+      APG_ROLE_NAMES: ${AUTH_ROLE_NAMES:?required}
+      # The bucket and the key prefix, derived by naming.py and handed in --
+      # never re-derived here (ADR 0002). The R2 credential is NOT here and
+      # never will be: both halves are mounted files, which is what keeps them
+      # out of the environment, the argument vector and `docker inspect` (D60).
+      APG_STORAGE_BUCKET: ${STORAGE_BUCKET:?required}
+      APG_STORAGE_PREFIX: ${STORAGE_PREFIX:?required}
+      APG_STORAGE_ACCESS_KEY_ID_FILE: /run/secrets/r2_access_key_id
+      APG_STORAGE_SECRET_ACCESS_KEY_FILE: /run/secrets/r2_secret_access_key
+      APG_STORAGE_UPLOAD_URL_TTL_SECONDS: ${STORAGE_UPLOAD_URL_TTL_SECONDS:?required}
+      APG_STORAGE_DOWNLOAD_URL_TTL_SECONDS: ${STORAGE_DOWNLOAD_URL_TTL_SECONDS:?required}
+      APG_STORAGE_MAX_UPLOAD_BYTES: ${STORAGE_MAX_UPLOAD_BYTES:?required}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health/ready',
+          timeout=2).status==200 else 1)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - internal
+      - edge
+
 networks:
   edge:
     name: ${EDGE_NETWORK_NAME:?required}

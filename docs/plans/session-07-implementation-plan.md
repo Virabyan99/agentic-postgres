@@ -93,8 +93,8 @@ found *during* implementation is appended with the next free number.
 | **D325** | §20 and §22 assume container-side inspection (`docker exec … cat`, shell probes). | **The locked PostgREST image is distroless** — no shell, no coreutils — and `docker exec … cat` exits 127 with `executable file not found in $PATH` (**D305**). The storage image's own hardening (read-only rootfs, uid 65532, no package manager) is the same direction. | Container-side reads use `docker cp`, measured with a control. Operator commands that need service logic run it **inside the service's container** rather than importing it (**ADR 0093**, after `auth-admin.py` imported a hasher that exists only in the auth image). | D305 was found only because D299's fix let execution reach the next line. **One unrun proof hides the next.** | — |
 | **D326** | §22.1: deployment records `storage_credentials_required`, publishes no route, and prints a resume command. | The product already has a shape for this and it is **not** a special deployment state: **D230's two-stage convergence**. `routes.app` records `unavailable` with the operator command printed, and the deploy **exits 0**; a redeploy after the missing input exists observes and publishes it. `published_route` drops the URL when the status is not `ready`, so an unpublished route names nothing. | `routes.storage` follows `routes.app` exactly: `unavailable` until the credential validates, the command printed, exit 0, and `ready` on the redeploy that observes it. | A second convergence mechanism would need its own tests, its own operator documentation and its own failure modes, beside one that is deployed and proved on two projects. | — |
 
-**Rows are added during implementation.** Next free number after the table above
-is **D333**.
+**Rows are added during implementation.** Next free number after the tables below
+is **D337**.
 
 ### Found during Run 1
 
@@ -119,6 +119,36 @@ D308 (outputs is v10, Session 7 publishes v11), D309, D310, D312 (thirteen
 migrations released), D315 in part (the `storage:` section exists with the bounds
 listed), D318 (four `STO-*` ids already exist, pointing at
 `tests/integration/test_future_storage.py`), D322.
+
+### Found during Run 2
+
+Four rows. **D333 is a live product defect** — the first one this session that
+was not a conflict between the plan and the repository but a conflict between an
+ADR and its own implementation.
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D333** | ADR 0055: "every secret declares its `value_kind`, and bootstrap generates accordingly", implemented and settled since Session 5. | **It was half implemented, and the missing half is the one that runs on a new project.** `generate_secret_value` had exactly ONE caller — `add_missing_secrets`, the converge path. `apply()`'s fresh-bootstrap loop called `secrets.token_hex(SECRET_ENTROPY_BYTES)` inline, correct in Session 2 when the sentinel was the only declared secret and hex was genuinely what it was. Measured with a control, one contract, one process: the fresh path produced **64 characters of hex** for `bootstrap_jwt_signing_key`; the converge path a PKCS#8 PEM. | `apply()` goes through the generator, and `generate_secret_value` now takes the **secret** rather than its kind, so the origin question is askable at the one place a value is created. A behavioural regression test drives the real fresh-bootstrap branch and reads what came out. | **It never fired because both live projects were bootstrapped in Session 2** and reached every later credential through the converge path. A project bootstrapped from scratch today would store a hex string as its RSA signing key, every check here would pass, and the failure would surface as a JWKS derived from something that is not a key — which is ADR 0055's own opening paragraph, describing itself. *When a decision is implemented, ask which of its callers got the implementation.* | [0103](../decisions/0103-where-a-value-comes-from-is-not-what-kind-of-value-it-is.md) |
+| **D334** | D311: the R2 pair are declared with a **new `value_kind`**, because the bootstrap cannot generate them. | **`value_kind` cannot answer that question, and the R2 secret access key is the proof.** Cloudflare's documentation defines it as the SHA-256 of the API token's value — a 64-character lowercase hex string, byte-indistinguishable from `secrets.token_hex(32)`. So `value_kind: random_hex` is **true**, and spelling it `operator_supplied` would make the contract stop describing the value *and* would silently forbid a future operator-supplied credential from ever being written in `pgpass` format, because that rule is keyed on `value_kind == "random_hex"`. | A separate required field, **`origin: generated \| operator_supplied`**, orthogonal to `value_kind`. Eleven existing secrets gained `origin: generated` — a fact that was already true and nowhere stated. | Two questions were being asked of one field, and one of them was being answered by omission. This is ADR 0055's argument for why `value_kind` exists at all, applied one level out. **Read from the vendor's documentation, not measured against a live account**, and recorded as such. | [0103](../decisions/0103-where-a-value-comes-from-is-not-what-kind-of-value-it-is.md) |
+| **D335** | Run 2's first bullet: declare three secrets. Run 7 adds the `storage` service. | **The service has to exist several runs earlier than the plan puts it.** `test_every_consumer_names_a_real_compose_service` refuses a compose-plane grant to a service `compose.yaml` does not have (D246), and — the part the plan missed — `bin/postgres-bootstrap.py` recovers a role's password from the *consumer* when it activates it, so **Run 4's activation of `storage_service` needs the declaration too**. Deferring to Run 7 would have blocked Run 4. | The Compose entry lands in **Run 2**, with the three declarations. Measured first: a control (clean tree, 3166 passed) against a probe (the service plus the three secrets), and the probe's only failure was `test_every_required_secret…can_be_recorded_as_managed` — the test that exists to be answered when a secret name is added. It is inert meanwhile: `profiles: [session7]`, and `project-runtime.sh` selects `--profile session<n>` only up to `--through-session`. | The alternative was declaring the R2 pair root-plane "for now", which is against precedent — `auth_jwt_prepared_key` shows this repository promotes by declaring a *second secret*, not by moving a consumer's plane — and would have committed to an unmeasured claim about Cloudflare's permission model that Run 5 is the run to measure. | — |
+| **D336** | `bin/bootstrap-providers.sh --help`: "`--plan` … Contacts the provider read-only and writes nothing." | **`--plan` contacts nothing.** `describe_plan` reads the committed contract and the local state file and returns; there is no `ControlPlane` on that path and there never has been. The sentence has been wrong since Session 2. | The help text is corrected to say what it does. **The behaviour is kept**, and it is the better one: `--plan` needs no credential and no network, which is what makes it safe to run anywhere. | Recorded rather than fixed-by-implementing, because the documented behaviour is the worse of the two. It also explains a cost accepted deliberately in ADR 0103: the operator-supplied list prints unconditionally, done or not, because this command genuinely cannot know. | — |
+
+**Also found, and closed in the same commit:** the two example fixtures agreed on
+four of the eight storage variables published this run — `memory_limit_mb`, both
+TTLs and `max_upload_bytes`. That is **D332 recurring one run after it was
+recorded**, and the rule it produced ("when you add a published field, make the
+fixtures disagree about it") was applied on the day the fields landed rather than
+in the run that would have discovered why. `project.second.example.yaml` now
+differs on every one.
+
+**The battery's own finding.** M3 — recording operator-supplied secrets in
+`managed_resources` — stayed **green** on the first run.
+`test_an_operator_supplied_secret_is_never_recorded_as_ours` was asserting on
+`generated_provider_secrets`, the helper the state document is built *from*,
+rather than on the document `apply()` builds. An assertion about a function
+wearing the name of an assertion about behaviour (D173's shape). It now captures
+the real document. Second run: **10 mutations, 0 unexpected, 0 battery failures,
+three controls green.**
 
 ---
 
@@ -314,6 +344,59 @@ changes what the rest of the session may assume.
 identical structure; `--render-only` still works with no host and no root.
 
 ### Run 2 — The secret contract and the provider plan
+
+**Done.** One ADR (**0103**), four divergence rows (**D333–D336**), and a live
+product defect that had been latent for two sessions.
+
+**D333 is the finding.** `generate_secret_value` had exactly one caller. The
+fresh-bootstrap path in `apply()` called `token_hex` inline, so a project
+bootstrapped from scratch at Session 5 or later would have stored 64 characters
+of hex as its RSA signing key — ADR 0055's own opening paragraph, describing
+itself, two sessions after the ADR was accepted. It never fired because both live
+projects were bootstrapped in Session 2, when the only declared secret genuinely
+was hex, and every later credential reached them through the converge path.
+Measured with a control: one contract, one process, fresh path hex, converge path
+PEM. **When a decision is implemented, ask which of its callers got the
+implementation** — the Run 14 question, asked of a caller rather than of a side.
+
+**The plan's own proposal was refused, and the refusal is ADR 0103.** D311 asked
+for a new `value_kind`. Cloudflare defines the R2 Secret Access Key as the
+SHA-256 of the API token's value, so it *is* a 64-character hex string:
+`random_hex` is true about it, and a widened `value_kind` would have made the
+contract unable to state that while also breaking the `pgpass` rule, which is
+keyed on `value_kind == "random_hex"`. `origin` is a second field instead, and
+the eleven existing secrets now say `origin: generated` — a fact that was already
+true and nowhere written.
+
+**The Compose entry moved forward four runs, and it was measured before it moved
+(D335).** `postgres-bootstrap.py` recovers a role's password from the consumer,
+so Run 4's activation of `storage_service` needs the declaration as much as Run 7
+does. A control (clean tree: 3166 passed) against a probe (the `storage` service
+plus the three secrets) left the whole offline suite green but for one test — the
+one that exists to be answered when a secret name is added. It is inert
+meanwhile: `profiles: [session7]` against `CURRENT_SESSION` 6.
+
+Shipped: `origin` in the schema, the contract and `secrets_contract`;
+`storage_service_password`, `r2_access_key_id` and `r2_secret_access_key`;
+`generate_secret_value(secret)` with the origin refusal first; `--plan`/`--apply`
+naming operator-supplied secrets and never proposing to create them;
+`managed_resources` refusing them in the schema and the stricter test that
+enforces it; the `storage` Compose service in `POST_BOOTSTRAP_SERVICES`; eight
+`STORAGE_*` variables with `naming.storage_bucket_name`/`storage_object_prefix`
+as their single derivation; `storage.memory_limit_mb`, declared and marked
+**unmeasured**; and `docs/session-07-operator-guide.md` with the Cloudflare steps
+written before they are needed.
+
+**Two things to know before Run 3.** The fixtures agreed on four of the eight new
+storage variables — D332 recurring one run after it was recorded — and now
+disagree on all eight. And the battery caught the run's own test being a
+tautology: M3 stayed green because the test read the helper rather than the
+document `apply()` builds. Final battery: **10 mutations, 0 unexpected, three
+controls green.**
+
+---
+
+*The original plan text for this run follows.*
 
 - Declare `r2_access_key_id`, `r2_secret_access_key` and
   `storage_service_password` in `secrets.required.yaml`, with the new

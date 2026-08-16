@@ -55,6 +55,24 @@ PLANES = ("compose", "root")
 #: What the materializer writes into a consumer's file (ADR 0056).
 FORMATS = ("raw", "pgpass")
 
+#: Who creates a secret's value (ADR 0103), which is a different question from
+#: what kind of value it is.
+#:
+#: `generated` is every secret through Session 6: the provider bootstrap makes
+#: one from `value_kind`. `operator_supplied` is a value that exists only
+#: because a third party issued it, so there is nothing to generate and the
+#: bootstrap must say so rather than converge.
+#:
+#: A separate field rather than a widened `value_kind`, because the R2 secret
+#: access key answers both questions and the answers do not agree: Cloudflare
+#: defines it as the SHA-256 of the API token value, so it *is* a 64-character
+#: hex string, and `secrets.token_hex(32)` would produce something
+#: indistinguishable from a credential nobody issued.
+ORIGINS = ("generated", "operator_supplied")
+
+#: The origin that no generator may run for.
+OPERATOR_SUPPLIED = "operator_supplied"
+
 #: The `pgpass` template. Wildcards in all four match fields, deliberately: the
 #: alternative names a host, a port, a database and a role that `naming.py`
 #: already derives, which is a second derivation path inside a secret file and a
@@ -76,6 +94,27 @@ def load_secret_contract(path: Path) -> dict[str, Any]:
 def active_secrets(contract: dict[str, Any], session: int) -> list[dict[str, Any]]:
     """Secrets introduced by ``session`` or earlier, in declaration order."""
     return [s for s in contract["secrets"] if s["introduced_in_session"] <= session]
+
+
+def is_operator_supplied(secret: dict[str, Any]) -> bool:
+    """Whether this secret's value can only come from a third party (ADR 0103).
+
+    Read from the declared ``origin`` and never inferred from the name or the
+    provider path. Inferring is how `value_kind` came to be doing this job by
+    implication: every secret was generated, so nothing had to say so, and the
+    first secret that was not would have been generated anyway.
+    """
+    return secret["origin"] == OPERATOR_SUPPLIED
+
+
+def operator_supplied_secrets(contract: dict[str, Any], session: int) -> list[dict[str, Any]]:
+    """Active secrets an operator has to obtain and paste, in declaration order.
+
+    What ``--plan`` names separately, because the operator's next action for one
+    of these is not "run --apply" -- it is to go to a third party's console,
+    issue a credential, and put the value in the provider by hand (D249).
+    """
+    return [secret for secret in active_secrets(contract, session) if is_operator_supplied(secret)]
 
 
 def is_root_plane(consumer: dict[str, Any]) -> bool:
@@ -355,6 +394,8 @@ def _reject_duplicates(values: list[Any], what: str, why: str) -> None:
 __all__ = [
     "CONTAINER_SECRET_DIR",
     "FORMATS",
+    "OPERATOR_SUPPLIED",
+    "ORIGINS",
     "PGPASS_TEMPLATE",
     "PLANES",
     "ROOT_PLANE_DIRECTORY",
@@ -367,8 +408,10 @@ __all__ = [
     "container_secret_path",
     "generation_directory",
     "granted_services",
+    "is_operator_supplied",
     "is_root_plane",
     "load_secret_contract",
+    "operator_supplied_secrets",
     "recover_secret",
     "render_secret",
     "secret_source_path",

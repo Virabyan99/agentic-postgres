@@ -130,22 +130,46 @@ def test_every_required_secret_the_contract_declares_can_be_recorded_as_managed(
     Asserted from the committed contract rather than from a list written here,
     so the next session's secret fails this test on the day it is declared
     rather than on the day someone deploys it.
+
+    **Replaced by a stricter form in Session 7, authorised by ADR 0103.** The
+    coverage half is now keyed on `origin: generated` rather than on every
+    required secret, and the test gains a refusal it did not have: an
+    `operator_supplied` secret may NOT appear in this enum. The narrowing is not
+    a weakening — the enum is the licence to destroy, and `r2_secret_access_key`
+    is a credential Cloudflare issued and a human pasted in, so this project
+    never created it and §8.2 says it may not remove it. Without the second
+    half, the obvious way to make the first half pass would have been to add
+    both R2 names to the enum, which is exactly the wrong answer.
     """
-    from agentic_postgres.secrets_contract import load_secret_contract
+    from agentic_postgres.secrets_contract import is_operator_supplied, load_secret_contract
 
     contract = load_secret_contract(REPO_ROOT / "secrets.required.yaml")
-    declared = {secret["name"] for secret in contract["secrets"] if secret["required"]}
+    required = [secret for secret in contract["secrets"] if secret["required"]]
+    generated = {s["name"] for s in required if not is_operator_supplied(s)}
+    supplied = {s["name"] for s in required if is_operator_supplied(s)}
 
     schema = json.loads(
         (REPO_ROOT / "schemas" / "bootstrap-state.schema.json").read_text(encoding="utf-8")
     )
     allowed = set(schema["properties"]["managed_resources"]["items"]["enum"])
 
-    missing = sorted(declared - allowed)
+    missing = sorted(generated - allowed)
     assert not missing, (
         f"secrets.required.yaml declares {missing}, which bootstrap state cannot record. "
         "Add each name to the enum in schemas/bootstrap-state.schema.json — deliberately, "
         "because that list is the licence to destroy them."
+    )
+
+    assert supplied, (
+        "no required secret declares `origin: operator_supplied`, so the refusal below "
+        "measures nothing. This is the assertion D283 is named for: a field nothing "
+        "exercises is a field nothing honours."
+    )
+    licensed = sorted(supplied & allowed)
+    assert not licensed, (
+        f"{licensed} are operator-supplied and appear in `managed_resources`. That enum is "
+        "read by --destroy, so listing a credential a third party issued and a human pasted "
+        "in licenses this project to remove something it never created (§8.2, ADR 0103)."
     )
 
 

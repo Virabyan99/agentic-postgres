@@ -229,6 +229,13 @@
           "maximum": 5368709120,
           "description": "Largest accepted upload. P0 default is 25 MiB."
         },
+        "memory_limit_mb": {
+          "type": "integer",
+          "default": 384,
+          "minimum": 128,
+          "maximum": 2048,
+          "description": "The storage container's memory limit. 384 is the application API's figure, INHERITED RATHER THAN MEASURED. A second application container's memory floor is listed as 'must be measured' in this session's feasibility table and cannot be until there is an adapter to measure; it is a manifest field precisely so the number stays visible and overridable while it is provisional, rather than being a literal nobody knows is unmeasured. ADR 0082 is the shape that measurement has to take -- one profile per process with a no-work control, because ru_maxrss is a high-water mark already set by earlier work and reports the same plausible number for every row."
+        },
         "pool_size": {
           "type": "integer",
           "default": 4,

@@ -406,6 +406,36 @@ def r2_bucket(value: str, *, context: str = "r2_bucket") -> str:
     )
 
 
+def storage_bucket_name(key: str, override: str | None = None) -> str:
+    """The R2 bucket for a project, whether or not storage is enabled.
+
+    Split out of :func:`derive` in Session 7 Run 2 so there is still exactly one
+    derivation (ADR 0002) with two readers. ``derive`` publishes ``None`` in the
+    identity when storage is disabled -- a rendered document must not name a
+    bucket for a service that is off -- but ``compose.env`` has to carry a value
+    for every variable regardless, because Compose's ``${VAR:?required}``
+    refuses an *empty* value as well as an unset one (D178, ADR 0062) and a
+    project with storage off would otherwise not render at all.
+
+    So the two readers want different things from one derivation, which is
+    precisely the case that produces a second copy if the derivation is not
+    named. D330 is the near miss: the manifest's ``bucket`` and ``prefix`` were
+    predicted to be a second live derivation and turned out to be overrides of
+    this one, and the prediction was only settled by reading the deriver.
+    """
+    return r2_bucket(override if override else key)
+
+
+def storage_object_prefix(key: str, override: str | None = None) -> str:
+    """The object-key prefix for a project. See :func:`storage_bucket_name`.
+
+    The per-object suffix is not here: ADR 0102 puts it in
+    ``services/auth-api/app/object_keys.py``, composed with this prefix in
+    exactly one function, because the build context cannot reach ``src/``.
+    """
+    return override if override else f"objects/{key}/"
+
+
 def project_key(slug: str, environment: str) -> str:
     """``{slug}-{environment}`` (runbook §3.7 rule 1)."""
     return f"{slug}-{environment}"
@@ -619,12 +649,8 @@ def derive(
         jwt_issuer=f"https://{domain}{api_base_path}{APP_PATH_SUFFIX}/auth",
         jwt_audience=f"urn:agentic-postgres:{slug}:{environment}",
         secrets_namespace=f"agentic-postgres/{key}",
-        storage_bucket=(
-            r2_bucket(storage_bucket if storage_bucket else key) if storage_enabled else None
-        ),
-        storage_prefix=(
-            (storage_prefix if storage_prefix else f"objects/{key}/") if storage_enabled else None
-        ),
+        storage_bucket=(storage_bucket_name(key, storage_bucket) if storage_enabled else None),
+        storage_prefix=(storage_object_prefix(key, storage_prefix) if storage_enabled else None),
         backup_stanza=((backup_stanza if backup_stanza else key) if backup_enabled else None),
         backup_repository_prefix=(
             (backup_repository_prefix if backup_repository_prefix else f"pgbackrest/{key}/")

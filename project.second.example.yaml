@@ -59,9 +59,19 @@ storage:
   enabled: true
   bucket: fixture-alpine-dev
   prefix: objects/fixture-alpine-dev/
-  upload_url_ttl_seconds: 600
-  download_url_ttl_seconds: 300
-  max_upload_bytes: 26214400
+  # Every one of these differs from the alpha fixture's, and that is D332's rule
+  # applied on the day the fields are published rather than a run later: two
+  # fixtures that agree on a value cannot prove the value is read. A hard-coded
+  # constant in the renderer would leave the whole suite green for as long as
+  # both projects happened to want 600.
+  upload_url_ttl_seconds: 900
+  download_url_ttl_seconds: 120
+  max_upload_bytes: 10485760
+  # 256 against alpha's 384 -- and alpha declares none at all, so the pair also
+  # exercises the default rather than only the override. Provisional on both
+  # sides: a second application container's memory floor is listed as "must be
+  # measured" and cannot be until there is an adapter to measure it.
+  memory_limit_mb: 256
   # Two, against the alpha fixture's four, and the difference is the point:
   # the pair is what proves the connection budget is resolved per project
   # (ADR 0099). It also puts this project's storage budget at 4 and alpha's at

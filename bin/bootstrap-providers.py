@@ -44,7 +44,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import CURRENT_SESSION, REPO_ROOT
+from agentic_postgres import CURRENT_SESSION, REPO_ROOT, secrets_contract
 from agentic_postgres.bootstrap_state import (
     BootstrapStateError,
     credential_paths,
@@ -77,16 +77,39 @@ SECRET_ENTROPY_BYTES = 32
 RSA_KEY_BITS = 2048
 
 
-def generate_secret_value(kind: str) -> str:
-    """Create one secret value of the declared kind (ADR 0055).
+def generate_secret_value(secret: dict[str, Any]) -> str:
+    """Create one secret value for a declared secret (ADR 0055, ADR 0103).
 
-    The dispatch is exhaustive and raises on an unknown kind rather than falling
-    through to `token_hex`. That fall-through is the whole reason `value_kind`
-    exists: a 64-character hex string stored under a name that says *key* would
-    satisfy the contract, the manifest, the file mode and every check here, and
-    would fail several runs later as a JWKS derived from something that is not a
-    key -- with nothing in between naming the wrong value.
+    Takes the whole secret rather than its `value_kind`, and that is the point.
+    Two questions have to be answered before a value exists -- *may anything
+    generate this at all*, and *what kind of value is it* -- and a signature
+    that accepted only the second made the first unaskable at the one place a
+    value is created. It was also how the fresh-bootstrap path came to skip this
+    function entirely and call `token_hex` inline (D333): a bare string argument
+    is easy to route around, a contract entry is not.
+
+    The origin check comes first. An `operator_supplied` secret has no generator
+    and must not acquire one by accident: an R2 secret access key is a
+    64-character hex string, so `random_hex` would produce a perfectly-shaped
+    credential Cloudflare has never issued, and every check in this repository
+    would pass.
+
+    The kind dispatch is exhaustive and raises rather than falling through to
+    `token_hex`. That fall-through is the whole reason `value_kind` exists: a
+    64-character hex string stored under a name that says *key* would satisfy
+    the contract, the manifest, the file mode and every check here, and would
+    fail several runs later as a JWKS derived from something that is not a key
+    -- with nothing in between naming the wrong value.
     """
+    if secrets_contract.is_operator_supplied(secret):
+        raise ValueError(
+            f"{secret['name']} is operator-supplied and has no generator. Its value comes "
+            f"from the issuing third party and is pasted into the provider by hand at "
+            f"{secret['provider_path']}/{secret['provider_key']}. Generating one here would "
+            "write a well-formed credential that authenticates to nothing"
+        )
+
+    kind = secret["value_kind"]
     if kind == "random_hex":
         return secrets.token_hex(SECRET_ENTROPY_BYTES)
     if kind == "rsa_private_pem":
@@ -153,6 +176,53 @@ def declared_provider_secrets(session: int) -> list[dict[str, Any]]:
     """
     contract = load_secret_contract(REPO_ROOT / "secrets.required.yaml")
     return [secret for secret in active_secrets(contract, session) if secret["required"]]
+
+
+def generated_provider_secrets(session: int) -> list[dict[str, Any]]:
+    """The declared secrets this command may create a value for (ADR 0103).
+
+    Everything `declared_provider_secrets` returns, less the ones whose value is
+    a third party's to issue. This is the list that drives creation *and* the
+    list that drives `managed_resources`, deliberately: §8.2's rule is that we
+    record what we created and destroy nothing else, and a value pasted in by a
+    human from Cloudflare's console was not created here.
+    """
+    return [
+        secret
+        for secret in declared_provider_secrets(session)
+        if not secrets_contract.is_operator_supplied(secret)
+    ]
+
+
+def operator_supplied_provider_secrets(session: int) -> list[dict[str, Any]]:
+    """The declared secrets an operator has to obtain and paste by hand.
+
+    Reported by both `--plan` and `--apply`, always, rather than only when
+    something is missing. There is nothing local to compare against: this
+    command deliberately never reads a value from the provider, so it cannot
+    know whether the operator has done it yet. Stating the standing requirement
+    is honest; a "0 changes" that quietly omitted them would not be, and the
+    failure it hides is a 404 in the middle of the next materialization.
+    """
+    return [
+        secret
+        for secret in declared_provider_secrets(session)
+        if secrets_contract.is_operator_supplied(secret)
+    ]
+
+
+def report_operator_supplied(session: int) -> None:
+    """Name every secret this command will not create, and where it comes from."""
+    pending = operator_supplied_provider_secrets(session)
+    if not pending:
+        return
+    print()
+    print(f"{len(pending)} secret(s) are operator-supplied and are NOT created by --apply:")
+    for secret in pending:
+        print(f"  {secret['name']:28s} {secret['provider_path']}/{secret['provider_key']}")
+    print("  Each is issued by a third party and shown once. Paste the value into the")
+    print("  provider by hand -- no command here sets a value at the provider (D249).")
+    print("  Steps: docs/session-07-operator-guide.md")
 
 
 def fail(code: int, message: str) -> None:
@@ -508,7 +578,7 @@ def describe_plan(key: str, state: dict[str, Any] | None, digest: str, session: 
     print(f"session  {session}")
     print()
 
-    declared = declared_provider_secrets(session)
+    declared = generated_provider_secrets(session)
 
     if state is None:
         changes = [
@@ -522,6 +592,7 @@ def describe_plan(key: str, state: dict[str, Any] | None, digest: str, session: 
             print(f"  {change}")
         print()
         print(f"{len(changes)} change(s) proposed.")
+        report_operator_supplied(session)
         return 0
 
     changes: list[str] = []
@@ -539,21 +610,30 @@ def describe_plan(key: str, state: dict[str, Any] | None, digest: str, session: 
     if not changes:
         print("no changes.")
         print("The recorded state matches the manifest, and every credential file is present.")
+        report_operator_supplied(session)
         return 0
 
     for change in changes:
         print(f"  {change}")
     print()
     print(f"{len(changes)} change(s) proposed.")
+    report_operator_supplied(session)
     return 0
 
 
 def missing_secret_names(state: dict[str, Any], session: int) -> list[str]:
-    """Declared and required at this session, minus what this project owns."""
+    """Declared, required and *generatable* at this session, minus what we own.
+
+    Operator-supplied secrets are excluded rather than reported missing forever.
+    They are never recorded in `managed_resources` -- this project did not
+    create them -- so a set difference would name them on every run, and a
+    change list that always proposes the same two changes is one an operator
+    stops reading.
+    """
     managed = set(state.get("managed_resources", []))
     return [
         secret["name"]
-        for secret in declared_provider_secrets(session)
+        for secret in generated_provider_secrets(session)
         if secret["name"] not in managed
     ]
 
@@ -582,7 +662,7 @@ def add_missing_secrets(
 
     pending = [
         secret
-        for secret in declared_provider_secrets(session)
+        for secret in generated_provider_secrets(session)
         if secret["name"] in set(missing_secret_names(state, session))
     ]
 
@@ -605,7 +685,7 @@ def add_missing_secrets(
                 state["environment_slug"],
                 secret["provider_path"],
                 secret["provider_key"],
-                generate_secret_value(secret["value_kind"]),
+                generate_secret_value(secret),
             )
             (created if fresh else adopted).append(secret["name"])
     except (BootstrapStateError, KeyError, ValueError) as exc:
@@ -624,6 +704,7 @@ def add_missing_secrets(
     for name in adopted:
         print(f"bootstrap-providers: {name} was already present at the provider; not overwritten")
     print(f"bootstrap-providers: recorded in {state_path(key)}")
+    report_operator_supplied(session)
     return 0
 
 
@@ -696,15 +777,25 @@ def apply(
         client_id = control.attach_universal_auth(identity_id)
         secret_id, client_secret = control.create_client_secret(identity_id, f"{key} runtime")
 
-        # The sentinel. secrets.required.yaml describes it as "a random 32+ byte
-        # value created by bootstrap", and nothing created it -- materialize
-        # would have asked the provider for a secret that was never written.
+        # Every value goes through `generate_secret_value`, which is what this
+        # loop did NOT do until Run 2 (D333). It called `token_hex` inline --
+        # correct in Session 2, when the sentinel was the only declared secret
+        # and hex was genuinely what it was, and silently wrong from Session 5
+        # onward: a project bootstrapped from scratch got 64 characters of hex
+        # stored as its RSA signing key, and every check in this repository
+        # would have passed. It never fired only because both live projects were
+        # bootstrapped in Session 2 and reached their later credentials through
+        # `add_missing_secrets`, which did call the generator.
         #
-        # 32 bytes from secrets.token_hex, generated here and handed straight to
-        # the provider. It is never written to this host, never printed, and not
-        # kept after the call: the only copy is the provider's, and
+        # Measured with a control before it was fixed: the fresh path produced
+        # hex for `bootstrap_jwt_signing_key`, the converge path a PKCS#8 PEM,
+        # from one contract in one process. ADR 0055 had been half implemented
+        # for two sessions.
+        #
+        # The value is never written to this host, never printed, and not kept
+        # after the call: the only copy is the provider's, and
         # materialize-secrets fetching it is the thing being proved.
-        for secret in declared_provider_secrets(session):
+        for secret in generated_provider_secrets(session):
             control.ensure_folder(
                 project_id, infisical["environment_slug"], secret["provider_path"]
             )
@@ -713,9 +804,12 @@ def apply(
                 infisical["environment_slug"],
                 secret["provider_path"],
                 secret["provider_key"],
-                secrets.token_hex(SECRET_ENTROPY_BYTES),
+                generate_secret_value(secret),
             )
-    except (BootstrapStateError, KeyError) as exc:
+    # ValueError joins the pair `add_missing_secrets` has always caught: it is
+    # what `generate_secret_value` raises, and an uncaught one here prints a
+    # traceback from a command that handles credentials.
+    except (BootstrapStateError, KeyError, ValueError) as exc:
         fail(EXIT_PROVIDER, str(exc))
 
     paths = credential_paths(key)
@@ -774,7 +868,11 @@ def apply(
                 # reads this list -- and a contract test asserts the enum covers
                 # every required secret the contract declares, so the two cannot
                 # drift the way this file and secrets.required.yaml did.
-                *(secret["name"] for secret in declared_provider_secrets(session)),
+                #
+                # `generated_`, not `declared_`: an operator-supplied value was
+                # issued by a third party and pasted in by a human, so this
+                # project did not create it and §8.2 says it may not destroy it.
+                *(secret["name"] for secret in generated_provider_secrets(session)),
             }
         ),
         "created_at": timestamp,
@@ -787,6 +885,7 @@ def apply(
 
     print(f"bootstrap-providers: created 4 resource(s) for {key}")
     print(f"bootstrap-providers: recorded them in {state_path(key)}")
+    report_operator_supplied(session)
     return 0
 
 

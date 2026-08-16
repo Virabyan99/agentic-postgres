@@ -53,6 +53,16 @@ REST_SERVICE_PORT = 3000
 AUTH_SERVICE = "auth"
 AUTH_SERVICE_PORT = 8080
 
+#: Session 7's object-storage runtime, and the port it binds.
+#:
+#: The same image as `auth` in a second mode (ADR 0101), so the port is the same
+#: number for the same reason: `compose.yaml` sets `APG_LISTEN_PORT` and the
+#: settings module requires it. A separate Compose service rather than a second
+#: surface of `auth`, because it authenticates as a different role, holds a
+#: different credential, and takes its own share of the connection budget.
+STORAGE_SERVICE = "storage"
+STORAGE_SERVICE_PORT = 8080
+
 #: Services that cannot start until the bootstrap plane has activated the role
 #: they authenticate as (ADR 0063).
 #:
@@ -80,7 +90,14 @@ AUTH_SERVICE_PORT = 8080
 #: that cannot log in. The message is `password authentication failed`, which is
 #: what a *wrong* credential gets, and that is the diagnosis this constant
 #: exists to keep nobody from having to make.
-POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE, AUTH_SERVICE)
+#:
+#: `storage` joins in Session 7 Run 2, in the same commit as its Compose entry
+#: rather than in the run that first starts it (D324). It authenticates as
+#: `storage_service`, which is NOLOGIN until the bootstrap plane activates it,
+#: so it fails in exactly the shape described above -- and adding a service to
+#: `compose.yaml` while leaving this list alone is the mistake the paragraph
+#: above exists to prevent, which makes "later" the wrong answer.
+POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE, AUTH_SERVICE, STORAGE_SERVICE)
 
 #: Session 5's documentation service, the port `serve.py` binds, and the
 #: reviewed snapshot it serves.
@@ -164,6 +181,8 @@ __all__ = [
     "REST_SERVICE_PORT",
     "ROUTED_SERVICE",
     "ROUTED_SERVICE_PORT",
+    "STORAGE_SERVICE",
+    "STORAGE_SERVICE_PORT",
     "build_override",
     "is_loopback",
     "publication",

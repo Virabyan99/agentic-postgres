@@ -564,6 +564,23 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # is the only thing that bounds what the process allocates: the service's
     # own check runs after `request.body()` has already read everything.
     "AUTH_REQUEST_BODY_MAX_BYTES",
+    # Session 7, Run 2. The storage runtime's configuration, in the same two
+    # shapes everything above uses: values the container reads, and identifiers
+    # `naming.py` derives and hands over rather than letting the image derive
+    # its own (ADR 0002, ADR 0067).
+    #
+    # The R2 credential is NOT here and never will be. Both halves are mounted
+    # files whose container paths `compose.yaml` names, which is what keeps a
+    # third party's credential out of the environment, the argument vector and
+    # `docker inspect` -- the rule D60 states for every database password here.
+    "STORAGE_SERVICE_ROLE_NAME",
+    "STORAGE_POOL_SIZE",
+    "STORAGE_MEMORY_LIMIT",
+    "STORAGE_BUCKET",
+    "STORAGE_PREFIX",
+    "STORAGE_UPLOAD_URL_TTL_SECONDS",
+    "STORAGE_DOWNLOAD_URL_TTL_SECONDS",
+    "STORAGE_MAX_UPLOAD_BYTES",
 )
 
 #: The pooler's port on its own project network. 6432 is the PgBouncer
@@ -655,6 +672,7 @@ def build_compose_env(
     budget: dict[str, int],
     database: dict[str, Any],
     api: dict[str, Any] | None = None,
+    storage: dict[str, Any] | None = None,
 ) -> bytes:
     """Exactly :data:`COMPOSE_ENV_KEYS`, in that order, and nothing else.
 
@@ -693,6 +711,11 @@ def build_compose_env(
     # declares no `api.app` section still has to render, and every variable
     # compose.yaml marks `:?required` must therefore have a value (D150, D178).
     app_service = {**config.API_APP_DEFAULTS, **(api.get("app") or {})}
+    # Session 7, and merged for the reason `rest` and `app_service` are: the
+    # `storage:` section is optional, every key compose.yaml marks `:?required`
+    # must have a value whether or not a project declares one, and Compose
+    # refuses an EMPTY value as well as an unset one (D178, ADR 0062).
+    storage_settings = {**config.STORAGE_DEFAULTS, **(storage or {})}
 
     values = {
         "COMPOSE_PROJECT_NAME": identity.compose_project_name,
@@ -822,6 +845,29 @@ def build_compose_env(
             separators=(",", ":"),
             sort_keys=True,
         ),
+        # Session 7, Run 2.
+        #
+        # `storage_service` is read from `identity.roles`, which has carried it
+        # since Session 3 -- the role has existed as a NOLOGIN stub all along
+        # and Session 7 activates it rather than creating it (D307).
+        "STORAGE_SERVICE_ROLE_NAME": identity.roles["storage_service"],
+        "STORAGE_POOL_SIZE": str(storage_settings["pool_size"]),
+        # Lowercase `m`, Docker's byte suffix, as POSTGRES_MEMORY_LIMIT and
+        # AUTH_MEMORY_LIMIT are. The number is provisional and `config` says so.
+        "STORAGE_MEMORY_LIMIT": "{}m".format(storage_settings["memory_limit_mb"]),
+        # Through `naming`, and unconditionally -- not from `identity`, whose
+        # storage fields are None when the service is disabled because a
+        # rendered document must not name a bucket for a service that is off.
+        # Compose refuses an empty value as firmly as an unset one (D178), so a
+        # project with storage disabled would not render at all. One derivation,
+        # two readers, which is what `storage_bucket_name` exists for.
+        "STORAGE_BUCKET": naming.storage_bucket_name(identity.key, storage_settings.get("bucket")),
+        "STORAGE_PREFIX": naming.storage_object_prefix(
+            identity.key, storage_settings.get("prefix")
+        ),
+        "STORAGE_UPLOAD_URL_TTL_SECONDS": str(storage_settings["upload_url_ttl_seconds"]),
+        "STORAGE_DOWNLOAD_URL_TTL_SECONDS": str(storage_settings["download_url_ttl_seconds"]),
+        "STORAGE_MAX_UPLOAD_BYTES": str(storage_settings["max_upload_bytes"]),
     }
     lines = [
         "# Generated. Do not edit; do not shell-source.",
@@ -1109,6 +1155,7 @@ def render_project(
                     outputs["database"]["budget"],
                     project["database"],
                     project["api"],
+                    project.get("storage"),
                 ),
             )
             write_private(staging / "rendered-summary.txt", build_summary(outputs))
