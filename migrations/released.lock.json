@@ -157,6 +157,17 @@
       "template": "templates/0013-agent-plane-and-current-state-hook.sql",
       "template_sha256": "ef2d64e36e1abd150c35a92e2fbc61ccf26b985cfadc26486860f389dc40058e",
       "version": "20260814120013"
+    },
+    {
+      "canonical_render_sha256": "8444dcb064f13f7c86accdb10971e3f14279d37d6edd679a643c5c52e81a6156",
+      "name": "object_storage_plane",
+      "placeholders": [
+        "object_owner",
+        "storage_service"
+      ],
+      "template": "templates/0014-object-storage-plane.sql",
+      "template_sha256": "cd8fabf559357b32371f0a44f15061c0917065fe3bb89a08de2e90c857e20769",
+      "version": "20260816120014"
     }
   ],
   "schema_version": 1

@@ -167,3 +167,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0101](0101-one-image-two-modes-and-the-secret-contract-is-the-boundary.md) | One image, two modes, and the secret contract is the boundary | 7 | Accepted |
 | [0102](0102-the-object-key-is-one-derivation-over-the-prefix-naming-owns.md) | The object key is one derivation over the prefix `naming` owns | 7 | Accepted |
 | [0103](0103-where-a-value-comes-from-is-not-what-kind-of-value-it-is.md) | Where a value comes from is not what kind of value it is | 7 | Accepted |
+| [0104](0104-the-lease-is-the-correctness-mechanism-and-the-row-lock-is-not.md) | The lease is the correctness mechanism, and the row lock is not | 7 | Accepted |

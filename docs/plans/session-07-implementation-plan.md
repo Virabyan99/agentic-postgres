@@ -94,7 +94,7 @@ found *during* implementation is appended with the next free number.
 | **D326** | §22.1: deployment records `storage_credentials_required`, publishes no route, and prints a resume command. | The product already has a shape for this and it is **not** a special deployment state: **D230's two-stage convergence**. `routes.app` records `unavailable` with the operator command printed, and the deploy **exits 0**; a redeploy after the missing input exists observes and publishes it. `published_route` drops the URL when the status is not `ready`, so an unpublished route names nothing. | `routes.storage` follows `routes.app` exactly: `unavailable` until the credential validates, the command printed, exit 0, and `ready` on the redeploy that observes it. | A second convergence mechanism would need its own tests, its own operator documentation and its own failure modes, beside one that is deployed and proved on two projects. | — |
 
 **Rows are added during implementation.** Next free number after the tables below
-is **D337**.
+is **D340**.
 
 ### Found during Run 1
 
@@ -140,6 +140,17 @@ recorded**, and the rule it produced ("when you add a published field, make the
 fixtures disagree about it") was applied on the day the fields landed rather than
 in the run that would have discovered why. `project.second.example.yaml` now
 differs on every one.
+
+### Found during Run 3
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D337** | 0014 grants `storage_service` EXECUTE on its seven functions, which is what the plan's "a grant only to `storage_service`" describes. | **All seven grants were unreachable.** The role had EXECUTE and no `USAGE ON SCHEMA app_private`, and PostgreSQL refuses the call with `permission denied for schema app_private` *before* it looks at the function's ACL. 0011 granted this to `auth_service` in the migration that created the registry, one file before the functions arrived; storage has one file for both, and the line was simply absent. | `GRANT USAGE ON SCHEMA app_private TO {{storage_service}};` beside the revoke, with the reason written where the grant is. | **Caught offline by a test that CALLED a function rather than one that read `pg_proc.proacl`** — the ACL was correct and an ACL test would have stayed green. This is D288/D289/D291's class exactly: *adding a service means touching every list that enumerates roles, and nothing enumerates the lists.* The difference is that this time it cost a test run instead of a host deploy. | — |
+| **D338** | Run 3's exit criterion names "the lease claim under concurrency" as though the mechanism were settled. | **Neither mechanism had ever been measured here** — nothing under `docs/`, `migrations/`, `src/` or `tests/` mentioned `SKIP LOCKED` at all. Both were measured on the locked pg18 digest with controls that fired: two claimants with `SKIP LOCKED` take different rows while the same query without it blocks until `lock_timeout` kills the second; and a plain CAS lease under READ COMMITTED produces exactly one winner, because the re-check runs against the new row version. | Both, doing different jobs. The **lease predicate is correctness** — the provider DELETE happens outside the transaction, and a row lock is released at COMMIT and at crash. **`SKIP LOCKED` is throughput** and nothing else. | The battery confirms the ADR rather than contradicting it: removing `SKIP LOCKED` left every test **green**, which is what ADR 0104 says it should do, and is recorded as a deliberate expected-PASS rather than pretended away. Removing the lease predicate went red. **The dangerous half is the one no offline test would notice**, because no offline test spans two transactions with a network call between them. | [0104](../decisions/0104-the-lease-is-the-correctness-mechanism-and-the-row-lock-is-not.md) |
+| **D339** | §4 item 1 treats bucket-name collision as an operator-review stop, and ADR 0102/D330 settled the prefix derivation as "nothing needed fixing". | **The bucket is the only derived identifier in this project with no namespace.** Every Traefik router, middleware and database role carries `apg-`/`apg_` — `apg_fixture_alpha_dev_storage_service` — while `naming.storage_bucket_name` returns the bare project key: `alpha-dev`, `beta-dev`. Read from the live Cloudflare account (read-only, no mutation): it already holds six unrelated buckets, `items`, `photos`, `pictures`, `cursor-clone-files`, `note-app-marshal-images`, `vector-attachments`. None collides today. | **Open, and it is a decision for before Run 5 creates anything.** Recorded here rather than changed unilaterally, because the derivation is Run 1's (ADR 0102) and CLAUDE.md §5 forbids reconciling a conflict silently. | The collision domain for a bucket name is the whole account, and `alpha-dev` is exactly what a human names something else in a shared account. A collision is a hard stop by design, not a silent overwrite — so this is an operational trap rather than a security hole. **It costs nothing to change now and cannot be changed after a bucket holds objects: R2 has no rename.** D330's prediction was checked by reading the deriver; it was not checked against a real account. | needed? |
+
+**The Run 3 battery: 13 mutations, 0 unexpected, 0 battery failures, three
+controls green.** M2 is a deliberate expected-PASS and is the one worth reading.
 
 **The battery's own finding.** M3 — recording operator-supplied secrets in
 `managed_resources` — stayed **green** on the first run.
@@ -413,6 +424,52 @@ proves the refusal path. Remember that **a fake never 404s** (D283) — the
 optional/absent case needs its own fixture.
 
 ### Run 3 — Migration 0014 and the storage plane
+
+**Done.** One ADR (**0104**), three divergence rows (**D337–D339**), migration
+**0014** released and frozen, and twenty tests against a real cluster.
+
+**D337 is the finding, and it was caught offline for once.** `storage_service`
+held EXECUTE on all seven functions and **no `USAGE` on the schema**, so
+PostgreSQL refused every call with `permission denied for schema app_private`
+before it ever looked at an ACL. An ACL test would have been green — the ACLs
+were right. It went red because the test *called the function*. D288/D289/D291's
+class, at the cost of a test run rather than a host deploy.
+
+**Neither cleanup mechanism had ever been measured in this repository** — nothing
+mentioned `SKIP LOCKED` anywhere. Both were, on the locked pg18 digest, with
+controls that fired: without `SKIP LOCKED` the second claimant blocks until
+`lock_timeout` kills it, and a plain CAS lease under READ COMMITTED yields
+exactly one winner because the re-check runs against the new row version. ADR
+0104 takes both, doing different jobs: **the lease is correctness** (the provider
+DELETE is outside the transaction, and a row lock dies at COMMIT and at crash),
+**`SKIP LOCKED` is throughput**. The battery's M2 removes `SKIP LOCKED` and stays
+**green**, which is what the ADR says should happen and is recorded as a
+deliberate expected-PASS.
+
+Shipped: `app_private.storage_objects` under a one-way state machine with five
+coherence constraints written against ADR 0080; `storage_contract_state`; seven
+SECURITY DEFINER functions granted to `storage_service` and nothing else, with no
+privilege of any kind on the table; the `storage_service` placeholder in
+`migrations/manifest.json`; the frozen lock at fourteen; and
+`tests/contract/test_storage_plane.py` — ownership, ACLs, the transition matrix,
+cross-owner indistinguishability, the lease across transactions, expiry reclaim,
+and two concurrent workers partitioning the queue.
+
+**What Run 3 does NOT prove, stated rather than left to be discovered.**
+`storage_service` still cannot log in: it has a connection limit from Run 1 but
+is absent from the `CONNECT` grant `build_statements` issues, and its LOGIN
+attribute and credential are bootstrap-plane work (D102). So the privilege proofs
+reach the role by `SET ROLE`, which exercises the grants and says nothing about
+the login path. **That is Run 4's exit criterion** and the test module's docstring
+names the gap rather than implying coverage.
+
+**D339 is open and is cheap now.** The R2 bucket is the only derived identifier
+in this project without an `apg` namespace. Decide before Run 5 creates one — R2
+has no rename.
+
+---
+
+*The original plan text for this run follows.*
 
 - `migrations/templates/0014-object-storage-plane.sql`: the object table, its
   state constraints, the cleanup lease columns, the contract-state row, and the

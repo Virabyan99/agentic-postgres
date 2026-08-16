@@ -50,6 +50,11 @@
       "type": "identifier",
       "source": "database.roles.project_admin",
       "description": "The administrator's request role, and a request role only from Session 6 Run 9: before that it existed, NOLOGIN and unreachable, because the authenticator held no membership in it. What it may do ADMINISTRATIVELY is not decided here or by the role name -- it is decided by the scope in the token, which is what API-ADMIN-001 states and why a project_admin without admin_users:write is refused. The membership is granted by the bootstrap plane (D266, D102); this placeholder exists so migration 0013 can give the role schema USAGE and the EXECUTE every request role needs to run the pre-request hook."
+    },
+    "storage_service": {
+      "type": "identifier",
+      "source": "database.roles.storage_service",
+      "description": "The storage runtime's database identity. Session 7. The role has been in naming.ROLE_SUFFIXES since Session 3 as a NOLOGIN stub with a null verifier, so 0014 creates nothing and activates nothing (D307): its LOGIN attribute, connection limit, SCRAM credential and statement_timeout are bootstrap-plane work, because anything ALTER ROLE is (D102). This file grants it EXECUTE on seven SECURITY DEFINER functions and no privilege of any kind on app_private.storage_objects -- which is what makes 'the service cannot read another owner's row even by composing its own SQL' a property of the catalog rather than of the service's code."
     }
   },
   "migrations": [
@@ -197,6 +202,16 @@
         "project_admin"
       ],
       "description": "The pre-request hook stops trusting a signature, and agents get the access plane 0012 gave humans. Until now the hook read `sub` and took the rest of the token on the strength of a valid signature; from here credential_version, authz_version, role and sorted scope are compared against current state inside the request's own transaction and any mismatch is refused -- which is what makes a disable, a password reset or a scope change take effect on the next request rather than at the next expiry (SEC-REV-001). The comparison goes through a SECURITY DEFINER helper returning a BOOLEAN over the whole claim tuple, never the subject's own values: a function answering 'what are X's scopes' would let any authenticated caller enumerate authority through a hook it cannot avoid running. project_admin becomes a request role and gets USAGE and EXECUTE; its authenticator MEMBERSHIP is the bootstrap plane's, not this file's (D266, D102). The agent roles stay ungranted, so an agent token fails at role switching before the hook runs. This is 0013 and the plan called it 0012 (D261). See D261, D266, D267."
+    },
+    {
+      "version": "20260816120014",
+      "name": "object_storage_plane",
+      "template": "templates/0014-object-storage-plane.sql",
+      "placeholders": [
+        "object_owner",
+        "storage_service"
+      ],
+      "description": "The object-storage plane: app_private.storage_objects under a one-way pending -> available -> tombstoned state machine, storage_contract_state, and seven SECURITY DEFINER functions granted to storage_service and to nothing else. The service holds no privilege of any kind on the table, so a defect in it cannot read another owner's row even by composing its own SQL, and the proof attempts the read rather than asking has_table_privilege (D103). The download lookup answers absent, foreign, pending and tombstoned identically -- a caller that could tell them apart could enumerate another user's ids (STO-OWN-001), and that filter is the linearization point a committed tombstone precedes. Completion is a compare-and-set on state = pending, so it is idempotent and returns the current state rather than raising. The cleanup claim carries both halves of ADR 0104: the lease predicate is the correctness mechanism, because the provider DELETE happens outside the transaction and a row lock is released at COMMIT and at crash, and FOR UPDATE SKIP LOCKED is throughput only -- both measured on the locked pg18 digest with controls. Every CHECK was written against ADR 0080: a CHECK passes when its expression is NULL, so the coherence constraints are shaped to be total while the column checks are deliberately partial where the column is nullable. Does not touch the pre-request hook (D270). This is 0014 and the runbook called it 0012 (D312). See ADR 0104, D57, D262, D285, D307."
     }
   ]
 }
