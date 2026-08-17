@@ -173,6 +173,11 @@ def test_the_bootstrap_consumers_match_the_secret_contract(bootstrap: Any) -> No
     for name, consumer in (
         ("postgrest_authenticator_password", bootstrap.POSTGREST_CONSUMER),
         ("auth_service_password", bootstrap.AUTH_SERVICE_CONSUMER),
+        # Session 7 Run 4. Three roles now recover a credential through the
+        # contract, which is three chances for a `target_file` to disagree --
+        # and the failure is silent every time: the file is not found, the
+        # credential is reported absent, and the role is left NOLOGIN.
+        ("storage_service_password", bootstrap.STORAGE_SERVICE_CONSUMER),
     ):
         secret = declared.get(name)
         assert secret, f"{name} is not declared in secrets.required.yaml"

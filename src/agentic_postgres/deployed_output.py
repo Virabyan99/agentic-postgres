@@ -119,6 +119,7 @@ __all__ = [
     "RENDERED_ROOT",
     "ROUTE_NOT_PUBLISHED",
     "SCHEMA_VERSION",
+    "activated_login_roles",
     "build_deployed_document",
     "deployed_path",
     "published_route",
@@ -373,6 +374,59 @@ def build_deployed_document(
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
     return validate_deployed_document(document)
+
+
+def activated_login_roles(document: dict[str, Any], roles: dict[str, str]) -> set[str]:
+    """The roles a deployed document says can log in, derived from the document.
+
+    **Extracted in Session 7 Run 4, and the mutation battery is why.** This
+    derivation lived inline in `test_only_the_activated_roles_may_log_in`, a test
+    gated on `APG_LIVE_HOST` -- so mutating any clause of it left the whole
+    offline suite green. It is a pure function over a dict, so "the suite cannot
+    drive this" was never true; only "nothing had" was.
+
+    Every clause is keyed on the EVENT rather than on a session number, which is
+    ADR 0096 and the reason D280 cost a run: a proxy fails on the day it and the
+    thing it stands for come apart.
+
+    * `migration_user` is Session 3's own activation, on every deployment.
+    * An **available access profile** names a role a developer or an application
+      reaches the cluster through, and an available profile can log in.
+    * A **ready REST route** means something is authenticating as the API
+      authenticator. That role is not a profile -- profiles are transports -- so
+      without this clause it is activated, correct, and invisible (D211).
+    * An **application route present at all** means the auth container is running
+      and authenticating as `auth_service`.
+    * The **storage credential in `secrets.required_names`** means the active
+      generation carries the file, which is the same fact
+      `postgres-bootstrap.activate_storage_service` reads when it decides whether
+      to credential the role. `routes.storage` was the symmetrical choice and is
+      wrong: it means "the document is v11", and v11 was published while
+      `CURRENT_SESSION` was still 6 -- so a correct deployment today renders a
+      storage route, materializes no storage secret, and leaves the role
+      correctly NOLOGIN.
+
+    Returns role NAMES rather than suffixes, so a caller compares the result
+    against `pg_roles` without a second mapping step.
+    """
+    activated = {roles["migration_user"]}
+
+    profiles = (document.get("database") or {}).get("access_profiles") or {}
+    activated |= {
+        profile["role"] for profile in profiles.values() if profile.get("status") == "available"
+    }
+
+    routes = document.get("routes") or {}
+    if (routes.get("rest") or {}).get("status") == "ready":
+        activated.add(roles["postgrest_authenticator"])
+    if routes.get("app") is not None:
+        activated.add(roles["auth_service"])
+
+    required = (document.get("secrets") or {}).get("required_names") or []
+    if "storage_service_password" in required:
+        activated.add(roles["storage_service"])
+
+    return activated
 
 
 def validate_deployed_document(document: Any) -> dict[str, Any]:

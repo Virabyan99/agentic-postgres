@@ -30,6 +30,8 @@ from typing import Any
 
 import pytest
 
+from agentic_postgres import deployed_output
+
 # ruff: noqa: S608
 #
 # Every statement below interpolates values that came from the rendered
@@ -616,35 +618,19 @@ def test_only_the_activated_roles_may_log_in(
     repository forbids -- it would pass on a Session 4 deployment that had
     somehow activated it, which is precisely the case this test exists to catch.
     """
-    profiles = project_a["database"]["access_profiles"]
-    # `migration_user` is Session 3's own activation and is expected on any
-    # deployment this module runs against; the profile roles are whatever the
-    # deployed session published. On a Session 3 deployment no profile is
-    # available, and the expected set is exactly the one name the old assertion
-    # allowed.
-    expected = {roles["migration_user"]} | {
-        profile["role"] for profile in profiles.values() if profile["status"] == "available"
-    }
-
-    # The REST plane's own identity, read from the route the document publishes
-    # rather than from the session number: a deployment that serves the surface
-    # has a service logging in as this role, and the status is the document's
-    # own statement about whether it does.
-    if (project_a["routes"].get("rest") or {}).get("status") == "ready":
-        expected.add(roles["postgrest_authenticator"])
-
-    # Session 6's identity plane, keyed the same way and for the same reason
-    # (ADR 0046, ADR 0096). `auth_service` is activated with LOGIN because the
-    # auth container authenticates as it -- and, like the authenticator, it is
-    # not an access profile, because a profile is a transport a developer or an
-    # application reaches the cluster through.
+    # **The derivation moved to `deployed_output.activated_login_roles` in
+    # Session 7 Run 4, and the mutation battery is why.** Every clause of it used
+    # to live here, in a module gated on `APG_LIVE_HOST` -- so mutating any one
+    # of them left the entire offline suite green. It is a pure function over a
+    # dict, so "the suite cannot drive this" was never true; only "nothing had"
+    # was, which is D211-D214's condition.
     #
-    # Keyed on the ROUTE rather than on `deployed_through_session >= 6`: a
-    # session number is a proxy for the event, and D280 is what a proxy costs
-    # when the two come apart. A document that publishes an application route is
-    # a deployment that runs the service; one that does not, does not.
-    if project_a["routes"].get("app") is not None:
-        expected.add(roles["auth_service"])
+    # What stays here is the half that genuinely needs a host: comparing the
+    # derived set against `pg_roles` on a live cluster. The clauses themselves
+    # are now driven offline by a decision table in
+    # `tests/contract/test_deployed_output.py`, over synthetic documents that
+    # cannot exist on any one deployment.
+    expected = deployed_output.activated_login_roles(project_a, roles)
 
     names = "', '".join(sorted(roles.values()))
     observed = sql(

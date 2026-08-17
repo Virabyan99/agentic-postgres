@@ -94,7 +94,7 @@ found *during* implementation is appended with the next free number.
 | **D326** | §22.1: deployment records `storage_credentials_required`, publishes no route, and prints a resume command. | The product already has a shape for this and it is **not** a special deployment state: **D230's two-stage convergence**. `routes.app` records `unavailable` with the operator command printed, and the deploy **exits 0**; a redeploy after the missing input exists observes and publishes it. `published_route` drops the URL when the status is not `ready`, so an unpublished route names nothing. | `routes.storage` follows `routes.app` exactly: `unavailable` until the credential validates, the command printed, exit 0, and `ready` on the redeploy that observes it. | A second convergence mechanism would need its own tests, its own operator documentation and its own failure modes, beside one that is deployed and proved on two projects. | — |
 
 **Rows are added during implementation.** Next free number after the tables below
-is **D340**.
+is **D343**.
 
 ### Found during Run 1
 
@@ -163,6 +163,20 @@ to a green suite, and both were about a value that looked settled.
 
 **The Run 3 battery: 13 mutations, 0 unexpected, 0 battery failures, three
 controls green.** M2 is a deliberate expected-PASS and is the one worth reading.
+
+### Found during Run 4
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D340** | Cross-project isolation is "a role cannot reach a peer project's database", full stop. | **Every service role can connect to the `postgres` maintenance database**, and always could. `build_statements` issues `REVOKE ALL ON DATABASE … FROM PUBLIC` on the **project** database only, so the maintenance database keeps PostgreSQL's default PUBLIC CONNECT — `app_runtime`, `postgrest_authenticator`, `auth_service` and `storage_service` alike. Measured: the role connects, reads `pg_database`, and is still refused every project table. | **Recorded, not fixed.** Session 7 did not introduce it and Run 4 does not close it: the change touches every role in every session. `test_the_maintenance_database_is_reachable_by_every_service_role` asserts the CURRENT state, so a later session that closes it turns the test red and the fix is to invert it. | Found by writing an isolation test that asserted more than the product ever claimed. The exposure is catalog metadata — database and role names — and **not** project data, which the peer-database test proves separately against a database that exists rather than an absent one. A refusal against an absent database would have passed for the wrong reason. | — |
+| **D341** | The LOGIN-set proof is a host proof, so its clauses can only be exercised on a host. | **Every clause is a pure function over a dict**, and the mutation battery proved nothing was exercising them: mutating any one left the whole offline suite green, because the test lives in a module gated on `APG_LIVE_HOST`. "The suite cannot drive this" was never true; only "nothing had" was — D211-D214's condition, produced by where a function happened to live. | The derivation moves to `deployed_output.activated_login_roles`, the host test calls it, and a **decision table over synthetic documents** drives it offline. Several of those documents cannot exist on any single deployment, which is exactly why a host could not have tested them. | It also removed a second authority: the bootstrap decides which roles are credentialed and this test independently re-derived the same set, agreeing only by careful writing (D264's shape). **The battery's real find was not a weak test — it was a testable thing nobody had put anywhere testable.** | — |
+| **D342** | The reach test credentials the storage role "through the product's own `apply_credential`", as its docstring said. | **The product's DECISION was never exercised.** The fixture called `apply_credential` directly, so a mutation removing the credential logic entirely — the `materialized_secret_path` check and both branches — left every test green. That is D288/D289/D291's mistake **inside the module whose docstring says it does not make it**: a rig reaching the right end state by a route the product does not take. | `activate_storage_service` is extracted so the decision is reachable, the fixture writes a generation where the materializer writes one, and the product is asked to find it. M2 and M3 now go red. | The docstring was true about the *ALTER ROLE* and false about the *decision*, and the decision is the part that has failed before. **A claim that a rig uses the product's code has to name which part.** | — |
+
+**The Run 4 battery: 7 mutations, 0 unexpected, 0 battery failures, three
+controls green** — after two false starts whose only finding was that the
+battery's own anchors go stale when the code under them is refactored mid-run.
+Grep every anchor before starting; the battery is ten minutes and a grep is a
+second.
 
 **The battery's own finding.** M3 — recording operator-supplied secrets in
 `managed_resources` — stayed **green** on the first run.
@@ -507,6 +521,44 @@ alpine overrides them.
 the lease claim under concurrency, and cross-owner lookups returning nothing.
 
 ### Run 4 — Activate `storage_service`
+
+**Done.** Three divergence rows (**D340–D342**), no ADR — every decision here was
+an existing one applied.
+
+`storage_service` is now activated by the bootstrap plane exactly as
+`auth_service` is: it joins the `CONNECT` grant, `STORAGE_SERVICE_CONSUMER` is
+cross-checked against the contract, and `activate_storage_service` sets the
+credential and the `CONNECTION LIMIT` together when the active generation carries
+the file — or leaves the role NOLOGIN and says so. **The deferral is discharged
+in the run that owns it**, rather than restated as a comment pointing at a later
+run: that sentence is what D288 cost, and the previous version of this block
+carried it verbatim.
+
+`tests/contract/test_storage_service_reaches_its_data.py` is Run 4's exit
+criterion — the role connecting over TCP with a password the product set, running
+all seven functions, holding no membership, unable to become another role, and
+refused a peer project's database. Run 3's module keeps its `SET ROLE` form
+deliberately: 0014 decides grants, not logins, and the two together are what
+D211-D214 asks for.
+
+**The battery found two things worth more than the mutations.** The reach test
+was credentialing the role itself, so the product's decision was untested
+(**D342**) — D288's mistake inside the module written to avoid it. And every
+clause of the LOGIN-set proof was untestable offline purely because of where the
+function lived (**D341**); it is now `deployed_output.activated_login_roles` with
+a decision table over documents no single deployment can produce. The storage
+clause is keyed on `secrets.required_names`, **not** on `routes.storage` — that
+key means "the document is v11", and v11 exists while `CURRENT_SESSION` is 6, so
+it would have failed a correct deployment.
+
+**D340 is recorded rather than fixed:** every service role can reach the
+`postgres` maintenance database and read its catalog, because `REVOKE ALL ON
+DATABASE` only ever touches the project database. Pre-existing, project data
+still unreachable, and asserted as current so a later session closing it goes red.
+
+---
+
+*The original plan text for this run follows.*
 
 - Bootstrap-plane activation: LOGIN, the credential, the `CONNECTION LIMIT` from
   Run 1's division, `INHERIT FALSE` where a membership exists at all (**D266**:

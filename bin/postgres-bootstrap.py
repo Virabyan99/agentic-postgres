@@ -209,10 +209,18 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     # have CONNECT privilege` (D291) -- the third defect in a row from the same
     # cause, which is that adding a service means touching every list that
     # enumerates roles, and nothing enumerated the lists.
+    #
+    # `storage_service` joins in Session 7 Run 4 -- in the run that ACTIVATES the
+    # role, not the run that starts a container. Run 3 met the same class one
+    # layer up and offline: the role held EXECUTE on all seven storage functions
+    # and no USAGE on the schema, so every grant reached nothing (D337). Two
+    # instances of one cause in two runs is the argument for adding a role to
+    # every list at once rather than to the list in front of you.
     statements.append(
         f"GRANT CONNECT ON DATABASE {db} TO "
         f"{q(roles['migration_user'])}, {q(roles['app_runtime'])}, "
-        f"{q(roles['postgrest_authenticator'])}, {q(roles['auth_service'])};"
+        f"{q(roles['postgrest_authenticator'])}, {q(roles['auth_service'])}, "
+        f"{q(roles['storage_service'])};"
     )
 
     # CONNECT only, for the application runtime role. CREATE and TEMPORARY are
@@ -859,6 +867,63 @@ AUTH_SERVICE_CONSUMER = {
     "format": "pgpass",
 }
 
+#: The storage runtime's, in the same shape and for the same reasons.
+#:
+#: Session 7 Run 4. Must match `secrets.required.yaml`'s declaration of
+#: `storage_service_password` exactly, and
+#: `test_the_bootstrap_consumers_match_the_secret_contract` compares the two --
+#: which is why the secret was declared in Run 2 rather than left until a
+#: container needed it. The bootstrap plane reads the credential back out of the
+#: consumer's own materialized file, so the consumer has to exist before the
+#: role can be activated at all.
+STORAGE_SERVICE_CONSUMER = {
+    "plane": "compose",
+    "service": "storage",
+    "target_file": "storage_service_pgpass",
+    "format": "pgpass",
+}
+
+
+def activate_storage_service(
+    container: str, database: str, project_key: str, role: str, limit: int
+) -> bool:
+    """Give the storage role its credential and its ceiling. True if credentialed.
+
+    **Extracted so it can be driven by a test** (Session 7 Run 4). The mutation
+    battery is why: with this logic inline, a mutation that never applied the
+    credential at all left every test green, because the reach test called
+    `apply_credential` itself. That is D288/D289/D291's mistake occurring inside
+    the module written to avoid it -- a rig that reaches the right end state by a
+    route the product does not take proves the end state is reachable, not that
+    the product reaches it (ADR 0065/0066).
+
+    The decision is the part worth testing, not the ALTER ROLE: *does the active
+    generation carry this consumer's file?* If it does, the role gets the
+    credential and the bound together; if it does not, the role keeps its bound
+    and stays NOLOGIN, and the caller says so. `storage_service_password` is
+    `origin: generated`, so `--apply` creates it -- an absent credential here
+    means the generation predates session 7, not that an operator missed a step
+    at Cloudflare.
+    """
+    secret = materialized_secret_path(project_key, STORAGE_SERVICE_CONSUMER)
+    if secret is None:
+        apply_connection_limit(container, database, role, limit)
+        print(
+            "  storage service credential absent from this generation; role left NOLOGIN, "
+            f"CONNECTION LIMIT {limit}"
+        )
+        return False
+
+    apply_credential(
+        container,
+        database,
+        role,
+        read_pgpass_password(secret, STORAGE_SERVICE_CONSUMER, "storage service"),
+        connection_limit=limit,
+    )
+    print(f"  storage service credential set, CONNECTION LIMIT {limit}")
+    return True
+
 
 def materialized_secret_path(project_key: str, consumer: dict[str, Any]) -> Path | None:
     """The file this consumer's secret lands in, in the active generation.
@@ -1151,18 +1216,27 @@ def main() -> int:
             f"CONNECTION LIMIT {auth_limit}"
         )
 
-    # The storage service's ceiling, applied to a role that is still a NOLOGIN
-    # stub. Session 7 Run 1 computes the division; Run 4 activates the role and
-    # gives it a credential.
+    # The storage service's ceiling and credential. Session 7 Run 1 computed the
+    # division; Run 4 activates the role.
     #
-    # Applied now rather than waiting, and that is the point of ADR 0070's
-    # "computed together": the ceiling is what the division produced, and a
-    # claimant whose number is computed but not applied is a claimant the
-    # catalog does not know about. `apply_connection_limit` is the same call the
-    # auth service's credential-absent branch makes, for the same reason -- the
-    # limit is a property of the role, not of whether it can log in yet.
-    apply_connection_limit(container, database, roles["storage_service"], storage_limit)
-    print(f"  storage service role, CONNECTION LIMIT {storage_limit} (NOLOGIN until run 4)")
+    # Identical in shape to the auth service's block above, and deliberately so.
+    # The previous version applied the limit alone and printed a message
+    # deferring the activation to this run -- the same shape the auth block once
+    # carried, deferring to a session that was already the current one. D288 is
+    # what that cost: the role reached a host with no password at all, because a
+    # comment deferring work is not the same as a later run doing it. The
+    # deferral is discharged in the run that owns it rather than restated.
+    #
+    # (`test_the_bootstrap_no_longer_defers_the_auth_role_to_a_later_session`
+    # scans this file for that phrasing, so it is described here rather than
+    # quoted -- a text scan cannot tell a quotation from a directive.)
+    #
+    # If the active generation carries the credential the role gets it and its
+    # bound together; if it does not, the role is left NOLOGIN and the run SAYS
+    # so. `storage_service_password` is `origin: generated`, so `--apply`
+    # creates it -- an absent credential here means the generation predates
+    # session 7, not that an operator forgot something at Cloudflare.
+    activate_storage_service(container, database, key, roles["storage_service"], storage_limit)
 
     # Applied, then read back. The statements above returning 0 says psql
     # accepted them, which is not the same as the catalog holding what they

@@ -6,15 +6,19 @@ The schema half of Session 7. Everything here runs against the locked
 Session 6 applied migrations with `psql -U postgres`, a superuser bypasses the
 ownership check, and that is how 0012 and 0013 shipped unable to apply.
 
-**What this module does NOT prove, stated rather than left to be discovered.**
-`storage_service` cannot log in yet: it has a connection limit from Run 1 but is
-absent from the `CONNECT` grant `postgres-bootstrap.build_statements` issues, and
-its LOGIN attribute and credential are bootstrap-plane work — anything
-`ALTER ROLE` is (D102). That is **Run 4's**, and its exit criterion is the one
-this module cannot reach: *the role connects directly and executes exactly these
-functions*. So the privilege tests here reach the role through `SET ROLE` from a
-superuser session, which proves the GRANTS are right and proves nothing about the
-login path. D211-D214 are what happens when that distinction is left implicit.
+**What this module does not prove, and where that now lives.** The privilege
+tests here reach `storage_service` through `SET ROLE` from a superuser session,
+which exercises the GRANTS and says nothing about the login path — when this was
+written the role had a connection limit from Run 1 and was absent from the
+`CONNECT` grant, so there was no login path to exercise.
+
+**Run 4 built it, and `tests/contract/test_storage_service_reaches_its_data.py`
+is the proof**: the role connecting over TCP with a password the product's own
+`apply_credential` set, running all seven functions, and refused everything else.
+This module keeps the `SET ROLE` form deliberately — it is about what migration
+0014 decides, and 0014 decides grants rather than logins. The two together are
+what D211-D214 asks for: the gap was named while it existed rather than
+discovered later.
 
 The privilege proofs attempt the operation rather than reading a catalog bit.
 D103 recorded `has_table_privilege` returning true for a table the role could not

@@ -1401,3 +1401,156 @@ def test_the_administrator_probe_interpolates_through_psql_rather_than_python() 
         "the probe's SQL is built with an f-string; a role name is being concatenated "
         "into a query that psql can quote for it"
     )
+
+
+# ---------------------------------------------------------------------------
+# Which roles a deployed document says can log in (Session 7 Run 4)
+# ---------------------------------------------------------------------------
+#
+# **These exist because a mutation battery found the clauses untestable.** The
+# derivation lived inline in `test_only_the_activated_roles_may_log_in`, which is
+# gated on `APG_LIVE_HOST`, so mutating any clause left the whole offline suite
+# green. It is a pure function over a dict; "the suite cannot drive this" was
+# never true, only "nothing had" -- D211-D214's condition.
+#
+# Written as a table over synthetic documents rather than as one happy-path
+# assertion, because the dangerous half is every row that must NOT activate a
+# role. The documents are deliberately not real renders: several of these
+# combinations cannot occur on one deployment, which is exactly why a live host
+# cannot test them.
+
+LOGIN_ROLES = {
+    "migration_user": "apg_x_migration_user",
+    "postgrest_authenticator": "apg_x_postgrest_authenticator",
+    "auth_service": "apg_x_auth_service",
+    "storage_service": "apg_x_storage_service",
+    "app_runtime": "apg_x_app_runtime",
+}
+
+
+def _login_document(
+    *,
+    profiles: dict | None = None,
+    rest_status: str | None = None,
+    app_route: object = None,
+    required_names: list[str] | None = None,
+) -> dict:
+    document: dict = {"database": {"access_profiles": profiles or {}}, "routes": {}, "secrets": {}}
+    if rest_status is not None:
+        document["routes"]["rest"] = {"status": rest_status, "url": None}
+    if app_route is not None:
+        document["routes"]["app"] = app_route
+    if required_names is not None:
+        document["secrets"]["required_names"] = required_names
+    return document
+
+
+def test_a_bare_deployment_activates_only_the_migration_user() -> None:
+    """Session 3's own activation, and the floor every other row is measured
+    against. If this returned more, every assertion below would hold for a
+    reason that has nothing to do with its own clause."""
+    assert deployed_output.activated_login_roles(_login_document(), LOGIN_ROLES) == {
+        LOGIN_ROLES["migration_user"]
+    }
+
+
+def test_an_available_access_profile_activates_its_role() -> None:
+    activated = deployed_output.activated_login_roles(
+        _login_document(
+            profiles={"runtime_pooled": {"role": LOGIN_ROLES["app_runtime"], "status": "available"}}
+        ),
+        LOGIN_ROLES,
+    )
+    assert LOGIN_ROLES["app_runtime"] in activated
+
+
+def test_an_unavailable_access_profile_does_not() -> None:
+    """The control for the row above. A derivation that added every profile's
+    role regardless of status would pass that test and would then demand LOGIN
+    from a role no session has activated."""
+    activated = deployed_output.activated_login_roles(
+        _login_document(
+            profiles={
+                "runtime_pooled": {"role": LOGIN_ROLES["app_runtime"], "status": "unavailable"}
+            }
+        ),
+        LOGIN_ROLES,
+    )
+    assert LOGIN_ROLES["app_runtime"] not in activated
+
+
+@pytest.mark.parametrize(
+    ("status", "activated"),
+    [("ready", True), ("unavailable", False)],
+)
+def test_the_rest_route_activates_the_authenticator_only_when_ready(
+    status: str, activated: bool
+) -> None:
+    """D211: the authenticator is not an access profile, so without this clause
+    it is activated, correct, and invisible to the document."""
+    result = deployed_output.activated_login_roles(_login_document(rest_status=status), LOGIN_ROLES)
+    assert (LOGIN_ROLES["postgrest_authenticator"] in result) is activated
+
+
+def test_an_application_route_activates_the_auth_service() -> None:
+    result = deployed_output.activated_login_roles(
+        _login_document(app_route={"status": "unavailable", "url": None}), LOGIN_ROLES
+    )
+    assert LOGIN_ROLES["auth_service"] in result, (
+        "an application route that is present but not ready still means the auth container "
+        "is authenticating as this role -- the route's presence is the event, not its status"
+    )
+
+
+def test_no_application_route_leaves_the_auth_service_inactive() -> None:
+    result = deployed_output.activated_login_roles(_login_document(), LOGIN_ROLES)
+    assert LOGIN_ROLES["auth_service"] not in result
+
+
+def test_the_storage_role_is_keyed_on_the_credential_and_not_on_the_route() -> None:
+    """**The row that would have failed a correct deployment** (D307, D280).
+
+    `routes.storage` is present in every v11 document, and v11 was published
+    while `CURRENT_SESSION` was still 6 -- so a deploy at session 6 renders a
+    storage route, materializes no storage secret, and correctly leaves the role
+    NOLOGIN. Keying on the route would have demanded LOGIN from it and turned a
+    correct deployment red.
+
+    This document has the route and not the credential, which is exactly that
+    deployment, and it cannot be produced on a host today to check by hand.
+    """
+    document = _login_document(required_names=["session2_sentinel"])
+    document["routes"]["storage"] = {"status": "unavailable", "url": None}
+
+    result = deployed_output.activated_login_roles(document, LOGIN_ROLES)
+    assert LOGIN_ROLES["storage_service"] not in result, (
+        "the storage role is expected to log in on a deployment that never materialized its "
+        "credential. The key is `secrets.required_names`, not the route"
+    )
+
+
+def test_the_storage_credential_in_the_generation_activates_the_role() -> None:
+    """The other half. Without it the clause could be `if False` and every other
+    row here would still pass -- which is precisely what the battery's M5 was."""
+    result = deployed_output.activated_login_roles(
+        _login_document(required_names=["session2_sentinel", "storage_service_password"]),
+        LOGIN_ROLES,
+    )
+    assert LOGIN_ROLES["storage_service"] in result
+
+
+def test_a_full_session_seven_deployment_activates_every_service_identity() -> None:
+    """All five clauses at once, so a derivation that handled them only in
+    isolation is caught."""
+    result = deployed_output.activated_login_roles(
+        _login_document(
+            profiles={
+                "runtime_pooled": {"role": LOGIN_ROLES["app_runtime"], "status": "available"}
+            },
+            rest_status="ready",
+            app_route={"status": "ready", "url": "https://x.test/api/app"},
+            required_names=["storage_service_password"],
+        ),
+        LOGIN_ROLES,
+    )
+    assert result == set(LOGIN_ROLES.values())
