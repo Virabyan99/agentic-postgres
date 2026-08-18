@@ -173,13 +173,21 @@ In Infisical, in **each project's** environment, create two secrets under the
 | `APG_R2_ACCESS_KEY_ID` | the Access Key ID from step 3 |
 | `APG_R2_SECRET_ACCESS_KEY` | the Secret Access Key from step 3 |
 
-The folder does not have to exist first — `bootstrap-providers.sh --apply`
-creates it while adding `APG_STORAGE_SERVICE_PASSWORD`, and Infisical answers 404
-on a write to a path that does not exist, which reads exactly like a wrong
-endpoint and is not.
+**You must create the `/storage` folder yourself, first (D379).** This page used
+to say `--apply` creates it while adding `APG_STORAGE_SERVICE_PASSWORD`. It does
+not: that secret's `provider_path` is **`/database`**, alongside every other role
+password. `/storage` is the only folder in the whole contract holding **no
+generated secret** — both of its entries are `operator_supplied` — so no command
+here can ever create it, and running `--apply` first changes nothing about
+whether it exists.
 
-**Order that avoids the 404:** run `--apply` first so the folder and the
-generated credential exist, then paste the two values.
+Infisical answers **404 on a write to a path that does not exist**, which reads
+exactly like a wrong endpoint and is not. So: create the folder in the UI, then
+paste the two values into it.
+
+**Putting them in `/database` instead does not work and fails late.** The 404
+does not arrive when you paste; it arrives at `materialize-secrets`, naming
+`APG_R2_ACCESS_KEY_ID` — several steps and one `down` project later.
 
 ```bash
 CRED=/root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
