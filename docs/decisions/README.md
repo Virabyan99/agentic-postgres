@@ -169,3 +169,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0103](0103-where-a-value-comes-from-is-not-what-kind-of-value-it-is.md) | Where a value comes from is not what kind of value it is | 7 | Accepted |
 | [0104](0104-the-lease-is-the-correctness-mechanism-and-the-row-lock-is-not.md) | The lease is the correctness mechanism, and the row lock is not | 7 | Accepted |
 | [0105](0105-the-bucket-carries-the-namespace-every-other-derived-name-carries.md) | The bucket carries the namespace every other derived name carries | 7 | Accepted |
+| [0106](0106-the-account-is-an-operator-input-and-the-endpoint-is-derived-from-it.md) | The account is an operator input, and the endpoint is derived from it | 7 | Accepted |
+| [0107](0107-the-addressing-style-is-path-because-it-is-the-only-invariant-one.md) | The addressing style is `path`, because it is the only invariant one | 7 | Accepted |

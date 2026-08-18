@@ -452,6 +452,51 @@ def storage_object_prefix(key: str, override: str | None = None) -> str:
     return override if override else f"objects/{key}/"
 
 
+#: The jurisdictions Cloudflare documents for R2, and the only values
+#: `storage.jurisdiction` admits.
+#:
+#: READ FROM VENDOR DOCUMENTATION, NOT MEASURED, and recorded as such because
+#: this repository's defect pattern is a value that looked measured and was not.
+#: Run 5 measured `default` -- the probe bucket reports `jurisdiction: default`
+#: and every arm of the rig dialled its endpoint. The other two are names in a
+#: list that nothing here has ever dialled (ADR 0106).
+R2_JURISDICTIONS: tuple[str, ...] = ("default", "eu", "fedramp")
+
+#: A Cloudflare account id as it appears in the endpoint hostname.
+_R2_ACCOUNT_ID = re.compile(r"\A[0-9a-f]{32}\Z")
+
+
+def storage_endpoint_url(account_id: str, jurisdiction: str = "default") -> str:
+    """The S3 endpoint for one Cloudflare account, derived in exactly one place.
+
+    Measured in Run 5 against a real account rather than read from the S3
+    documentation: ``https://<ACCOUNT_ID>.r2.cloudflarestorage.com``, with a
+    jurisdictional bucket reachable only through its own host. The account id is
+    32 lowercase hex characters.
+
+    **This is the only assembly site** (ADR 0002, ADR 0106). The container is
+    handed the finished URL as ``STORAGE_ENDPOINT`` rather than the two
+    fragments and a format string, because a second assembly inside the image
+    would be a second authority for a value the deploy already knows -- which is
+    what two derivations of the documentation route cost in Session 5 (D177),
+    where the copy whose comment said it was "kept in step" was the one that had
+    drifted.
+
+    The account id is validated here rather than trusted from the manifest: a
+    malformed one produces a hostname that resolves to nothing, and a DNS
+    failure at the first presign is a much worse place to learn about a typo
+    than validation is.
+    """
+    if not _R2_ACCOUNT_ID.match(account_id):
+        raise NamingError(f"R2 account id must be 32 lowercase hex characters: {account_id!r}")
+    if jurisdiction not in R2_JURISDICTIONS:
+        raise NamingError(
+            f"unknown R2 jurisdiction {jurisdiction!r}; expected one of {R2_JURISDICTIONS}"
+        )
+    label = "" if jurisdiction == "default" else f"{jurisdiction}."
+    return f"https://{account_id}.{label}r2.cloudflarestorage.com"
+
+
 def project_key(slug: str, environment: str) -> str:
     """``{slug}-{environment}`` (runbook §3.7 rule 1)."""
     return f"{slug}-{environment}"

@@ -187,6 +187,30 @@ wearing the name of an assertion about behaviour (D173's shape). It now captures
 the real document. Second run: **10 mutations, 0 unexpected, 0 battery failures,
 three controls green.**
 
+### Found during Run 5
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D343** | §3's feasibility table lists "Account id, jurisdiction" as operator input, so the value has somewhere to go. | **Nothing in the repository accepts either, and nothing could.** The `storage` service is handed a bucket, a prefix and two credential files and has **no way to know where the bucket is**: no endpoint and no account id in `compose.yaml`'s eight `STORAGE_*` variables, none in `rendering.py`, and `schemas/project.schema.json`'s storage block is `additionalProperties: false`, so an operator could not supply one even by hand. Four runs built the storage plane past this row. | **ADR 0106.** `storage.account_id` (required when enabled, no default) and `storage.jurisdiction` become manifest fields; `naming.storage_endpoint_url` is the one derivation; `STORAGE_ENDPOINT` is rendered and handed to the container finished. Not published in `outputs.json` — that document names what a deployment *exposes*, and this is where one container dials **out**, like `APG_DATABASE_HOST`. | D276's shape from the other side. There, a declaration said the JWKS was derived from a key and nothing derived it; here, a plan says a value is an operator input and nothing reads it. **A plan's input table is not an interface — grep for the reader.** | 0106 |
+| **D344** | "Freeze one addressing style" is done by setting `s3={"addressing_style": …}`. | **The config key is not honoured for every bucket name.** Measured with one client configuration: `apg-session7-r2-probe` presigns virtual-hosted, `apg.dotted.probe` silently presigns **path** — botocore falls back when the name is not a usable TLS hostname label, with no warning and a perfectly valid URL. The deciding input is `storage.bucket`, which ADR 0105 uses **verbatim** and the schema bounds only at 3–63 characters. | **ADR 0107: freeze `path`**, the only style botocore always actually emits, and refuse `auto` although it resolves to path today. The test presigns against a dotted and a plain bucket and reads the URLs; asserting the config key would pass in exactly the case the ADR exists to prevent. | Both styles work against R2 — a presigned PUT under each returned 200 with bytes sent — so this is chosen for invariance, not capability. *A value that looked configured and was not*, which is this repository's pattern with the polarity of D192 reversed: there a rig set what the product did not, here the product sets what the library ignores. | 0107 |
+| **D345** | `retries={"max_attempts": 3}` means three attempts. | **It means three RETRIES.** Measured at client construction across N = 1, 2, 3, 5, which resolve to `total_max_attempts` 2, 3, 4, 6 — botocore adds one, though the AWS documentation calls the key "the maximum number of attempts". The adapter was silently buying four tries, up to 60s of read timeouts inside a request holding a connection from ADR 0099's budget. | The constant is now `TOTAL_ATTEMPTS = 3` with `_BOTOCORE_MAX_ATTEMPTS` **derived** from it, and the test asserts `total_max_attempts` on the **resolved client** rather than the key that was set. | Found only because the first draft of the test read back the key it had just set, got a `KeyError`, and the fix was to look at what botocore had actually stored. A test that had asserted `config.retries["max_attempts"] == 3` would have been a tautology (D173) **and** would have agreed with an adapter sending four requests. | — |
+| **D346** | `DeleteObject` is idempotent on an absent key (ADR 0104 inherits this from the S3 documentation), and a presigned `If-None-Match: *` gives first-write-wins. | **Both true, and now measured against R2 rather than inherited.** Absent-key DELETE returns **204**, identical to deleting a present key, with no `DeleteMarker` and no `VersionId`; the control deleted a real key and `HeadObject` then returned 404. The condition lands in `X-Amz-SignedHeaders`, first write 200, second **412 PreconditionFailed**, with two controls: the same key presigned *without* the condition overwrites at 200, and a caller that **omits** the header gets **403 SignatureDoesNotMatch** rather than an unconditional write. | Recorded; ADR 0104's cleanup design stands unchanged, now on measurement. The omit-the-header arm is the one that matters — it makes the condition cryptographic rather than cooperative, which is the only kind of enforcement worth anything against the holder of a bearer credential. | Three more R2 facts fell out and are in `storage_client.py` beside the code that depends on them: **`HeadObject` returns no checksum of any kind** (so completion cannot verify a provider-computed digest, whatever §8's matrix implies — only `ContentLength` and an ETag measured equal to the body MD5); a mutated key and a mutated signature are **both** 403 `SignatureDoesNotMatch`, indistinguishable to the caller, which is the wanted shape; and `HeadBucket` on a bucket that does not exist returns **403, not 404**, so "absent" and "not in your token's scope" are one answer. | — |
+| **D347** | An Object Read & Write token can create the bucket, so one bucket-scoped credential does everything (§3). | **It cannot.** Measured: `CreateBucket` **403 AccessDenied**, `ListBuckets` **403**, `HeadBucket` on an unrelated bucket in the same account **403**, and the R2 REST API refuses the same token outright (`10000`). Bucket creation *did* succeed — through the Cloudflare REST API, which is how the probe bucket exists. So §4 is right that the bootstrap needs a separate credential and §3's assumption is wrong. | Recorded. Run 5's adapter holds the Object R&W token and never creates a bucket, so nothing here is blocked. **Which kind the second credential is — an R2 Admin S3 token via `CreateBucket`, or a Cloudflare API token with R2 write via REST — is unmeasured and belongs to Run 8**, with the bootstrap that needs it. | **The control did not fire, and the honest half of this row is why.** The second token issued as the Admin arm turned out to be behaviourally identical to the first — same refusals, same scope — so the pair discriminated nothing. Recorded as UNINFORMATIVE for the admin arm rather than reported from the arm that did run, which is Session 6 Run 9's rule about a mutation without its control, applied to a credential. | — |
+
+**The Run 5 battery: 9 mutations, 0 unexpected on the second run, 0 battery
+failures, both controls green and every file restored byte-identical.**
+
+**The battery's own finding, and it is D260 happening again to me.** M9 removed
+`asyncio.shield` from `BoundedR2._run` and **every test stayed green** — including
+the one written minutes earlier whose docstring said it covered exactly that
+case. The test used `concurrency=1`, so its second caller blocked on the
+*semaphore* rather than on the executor, and nothing was ever queued: the leak
+needs a **thread pool smaller than `concurrency`**, which is what
+`BoundedHasher`'s own test does and says it does. The identical mistake, in the
+identical shape, one file away from the module that records having made it
+first. *Reading how a prior test solved a problem is not the same as reading
+that it had the problem.*
+
 ---
 
 ## 2. What Session 7 adds to the acceptance registry
@@ -575,6 +599,34 @@ can reach nothing else — proved by attempting, not by reading a catalog bit
 read).
 
 ### Run 5 — The R2 adapter, measured before it is trusted
+
+**Done.** Two ADRs (**0106**, **0107**), five divergence rows (**D343–D347**),
+boto3/botocore locked, and the adapter written against nine measured arms rather
+than against the S3 documentation.
+
+**What the measurement changed rather than confirmed.** Three things: the
+addressing style cannot be frozen by setting the config key (D344), botocore's
+`max_attempts` is retries rather than attempts (D345), and an Object Read &
+Write token cannot create a bucket, so §3's one-token assumption is wrong
+(D347). What it *confirmed* is ADR 0104's foundation: `DeleteObject` on an
+absent key is a 204, and the first-write condition is enforced inside the
+signature rather than by client cooperation (D346).
+
+**And the gap that had to be closed before any client could exist (D343):**
+nothing in the repository accepted a Cloudflare account id, so the container had
+no way to know where its bucket was. Four runs had built the storage plane past
+a feasibility-table row that named it as an operator input.
+
+Shipped: `BOTO3_VERSION`/`BOTOCORE_VERSION` in the lock via
+`--update --packages-only` with all ten image digests carried forward;
+`storage.account_id` and `storage.jurisdiction` in the schema, `config` and both
+example manifests, which **disagree on both**; `naming.storage_endpoint_url` as
+the single derivation and `STORAGE_ENDPOINT` rendered from it;
+`services/auth-api/app/storage_client.py` — the frozen client, `StorageConfig`
+read from mounted credential files, `R2Adapter`'s four operations and no list
+operation, `BoundedR2`, and `redact`; and 47 tests.
+
+*The original plan text for this run follows.*
 
 **Measure the provider before writing the client.** A throwaway rig against a
 real bucket, with controls, answering at minimum: does a presigned PUT with a

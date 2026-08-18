@@ -798,6 +798,8 @@ services:
         # is how SCALAR_VERSION named a release that never existed for four
         # sessions (D201).
         ARGON2_CFFI_VERSION: ${ARGON2_CFFI_VERSION:?required}
+        BOTO3_VERSION: ${BOTO3_VERSION:?required}
+        BOTOCORE_VERSION: ${BOTOCORE_VERSION:?required}
         CRYPTOGRAPHY_VERSION: ${CRYPTOGRAPHY_VERSION:?required}
         FASTAPI_VERSION: ${FASTAPI_VERSION:?required}
         PSYCOPG_VERSION: ${PSYCOPG_VERSION:?required}
@@ -1078,6 +1080,8 @@ services:
       args:
         BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
         ARGON2_CFFI_VERSION: ${ARGON2_CFFI_VERSION:?required}
+        BOTO3_VERSION: ${BOTO3_VERSION:?required}
+        BOTOCORE_VERSION: ${BOTOCORE_VERSION:?required}
         CRYPTOGRAPHY_VERSION: ${CRYPTOGRAPHY_VERSION:?required}
         FASTAPI_VERSION: ${FASTAPI_VERSION:?required}
         PSYCOPG_VERSION: ${PSYCOPG_VERSION:?required}
@@ -1137,6 +1141,12 @@ services:
       # out of the environment, the argument vector and `docker inspect` (D60).
       APG_STORAGE_BUCKET: ${STORAGE_BUCKET:?required}
       APG_STORAGE_PREFIX: ${STORAGE_PREFIX:?required}
+      # Where the bucket is. Derived from the manifest's account id and
+      # jurisdiction by naming.storage_endpoint_url and handed over finished --
+      # the image never assembles a URL (ADR 0106). The account id is an
+      # IDENTIFIER, not a credential: it is in the hostname of every request, so
+      # it travels as an environment variable, unlike the two halves below.
+      APG_STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:?required}
       APG_STORAGE_ACCESS_KEY_ID_FILE: /run/secrets/r2_access_key_id
       APG_STORAGE_SECRET_ACCESS_KEY_FILE: /run/secrets/r2_secret_access_key
       APG_STORAGE_UPLOAD_URL_TTL_SECONDS: ${STORAGE_UPLOAD_URL_TTL_SECONDS:?required}

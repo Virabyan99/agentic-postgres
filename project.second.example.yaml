@@ -59,6 +59,15 @@ storage:
   enabled: true
   bucket: fixture-alpine-dev
   prefix: objects/fixture-alpine-dev/
+  # A different account from alpha's, and a NAMED jurisdiction where alpha omits
+  # the field (ADR 0106). The two together are what make the endpoint derivation
+  # measurable: alpha proves the default branch, this one proves the branch that
+  # inserts a jurisdiction label, and a renderer ignoring either input would
+  # fail one of them. `eu` is the only non-default value with a documented
+  # endpoint form; nothing here has ever dialled it, and the schema's comment
+  # says so rather than implying all three jurisdictions are proved.
+  account_id: fedcba9876543210fedcba9876543210
+  jurisdiction: eu
   # Every one of these differs from the alpha fixture's, and that is D332's rule
   # applied on the day the fields are published rather than a run later: two
   # fixtures that agree on a value cannot prove the value is read. A hard-coded

@@ -264,8 +264,15 @@ POSTGREST_RESERVED_CONNECTIONS = 3
 #: `ru_maxrss` is a high-water mark that reports the same plausible number for
 #: every row. It is a manifest field rather than a constant so that the number
 #: is visible and overridable while it is still provisional.
+#: `jurisdiction` defaults to "default"; `account_id` deliberately has NO
+#: default. A default account id would be exactly the shape ADR 0055 and D333
+#: warn about -- a well-formed value that authenticates to nothing, discovered
+#: at the first provider call instead of at validation. `_validate_storage`
+#: refuses an enabled block that omits it (ADR 0106).
 STORAGE_DEFAULTS: dict[str, Any] = {
     "enabled": False,
+    "account_id": None,
+    "jurisdiction": "default",
     "pool_size": 4,
     "memory_limit_mb": 384,
     "upload_url_ttl_seconds": 900,
@@ -311,6 +318,7 @@ ADMINISTRATION_RESERVED_CONNECTIONS = 5
 #: The manifest layer still must not import a URL to compare prefixes, which is
 #: why these are paths and why the names stay. `naming` imports nothing from
 #: this module, so the import is one-way.
+from agentic_postgres import naming  # noqa: E402 — see _validate_storage (ADR 0106)
 from agentic_postgres.naming import (  # noqa: E402 — placed with the constants it defines
     DOCS_PAGE_PATH as DOCS_REST_PATH,
 )
@@ -1102,13 +1110,35 @@ def _validate_storage(storage: dict[str, Any]) -> None:
     enabled = storage.get("enabled", False)
     bucket = storage.get("bucket")
     prefix = storage.get("prefix")
+    account_id = storage.get("account_id")
 
     if not enabled:
-        if bucket is not None or prefix is not None:
+        if bucket is not None or prefix is not None or account_id is not None:
             raise ManifestError(
-                "storage is disabled, so storage.bucket and storage.prefix must be absent or null"
+                "storage is disabled, so storage.bucket, storage.prefix and "
+                "storage.account_id must be absent or null"
             )
         return
+
+    # The positive requirement lives here rather than in the schema because the
+    # message can name where the value comes from. A JSON Schema failure reads
+    # "'account_id' is a required property", which is true and tells an operator
+    # nothing about a value that exists only in a Cloudflare dashboard.
+    if not account_id:
+        raise ManifestError(
+            "storage is enabled, so storage.account_id is required: the S3 endpoint is "
+            "derived from it (ADR 0106) and there is no default, because a well-formed "
+            "account id that authenticates to nothing would fail at the first provider "
+            "call instead of here. It is the 32-hex string in the dashboard URL -- see "
+            "docs/session-07-operator-guide.md section 2."
+        )
+    # Validated through the deriver rather than beside it: one authority for
+    # what a well-formed account id and jurisdiction are (ADR 0002). Re-checking
+    # the pattern here would be a second copy that can drift from naming.py's.
+    try:
+        naming.storage_endpoint_url(account_id, storage.get("jurisdiction", "default"))
+    except naming.NamingError as exc:
+        raise ManifestError(f"storage: {exc}") from exc
 
     if bucket is not None:
         if not 3 <= len(bucket) <= 63:

@@ -578,6 +578,7 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "STORAGE_MEMORY_LIMIT",
     "STORAGE_BUCKET",
     "STORAGE_PREFIX",
+    "STORAGE_ENDPOINT",
     "STORAGE_UPLOAD_URL_TTL_SECONDS",
     "STORAGE_DOWNLOAD_URL_TTL_SECONDS",
     "STORAGE_MAX_UPLOAD_BYTES",
@@ -864,6 +865,24 @@ def build_compose_env(
         "STORAGE_BUCKET": naming.storage_bucket_name(identity.key, storage_settings.get("bucket")),
         "STORAGE_PREFIX": naming.storage_object_prefix(
             identity.key, storage_settings.get("prefix")
+        ),
+        # The endpoint, derived once (ADR 0106) and handed over finished rather
+        # than as two fragments the image would have to reassemble.
+        #
+        # When storage is disabled there is no account id, and Compose refuses
+        # an empty value as firmly as an unset one (D178) -- the same problem
+        # STORAGE_BUCKET has three lines above, answered the same way. The
+        # placeholder is a reserved-TLD host that resolves to nothing anywhere,
+        # so a service that somehow dialled it fails to connect rather than
+        # reaching something real. Nothing dials it: the consumer is on the
+        # `session7` profile and `project-runtime.sh` does not start it.
+        "STORAGE_ENDPOINT": (
+            naming.storage_endpoint_url(
+                storage_settings["account_id"],
+                storage_settings.get("jurisdiction", "default"),
+            )
+            if storage_settings.get("account_id")
+            else "https://storage.disabled.invalid"
         ),
         "STORAGE_UPLOAD_URL_TTL_SECONDS": str(storage_settings["upload_url_ttl_seconds"]),
         "STORAGE_DOWNLOAD_URL_TTL_SECONDS": str(storage_settings["download_url_ttl_seconds"]),

@@ -890,16 +890,36 @@ def test_storage_defaults_match_the_schema() -> None:
     `enabled` is excluded: it is `required` in the schema, so there is no
     default to compare against, and the mapping's `False` is what a caller that
     omits the whole section gets.
+
+    **`account_id` is excluded too, and the exclusion IS the decision rather
+    than an exemption from it** (ADR 0106, Session 7 Run 5). It deliberately has
+    no schema default, because a default account id would be a well-formed value
+    that authenticates to nothing -- ADR 0055's and D333's shape, where a
+    generated stand-in for an operator-supplied value was entirely plausible and
+    useless. `STORAGE_DEFAULTS` carries `None` so that
+    `{**STORAGE_DEFAULTS, **manifest}` has the key at all; the requirement is
+    enforced by `config._validate_storage`, whose message can name the operator
+    guide as a schema failure cannot, and `test_storage_defaults_carry_no_account_id`
+    asserts the `None`.
+
+    The exclusions are a named set, and each one is asserted to have no schema
+    default rather than merely skipped -- otherwise this test would go quiet in
+    exactly the case where somebody added the default it exists to forbid.
     """
     schema = config.load_schema("project.schema.json")
     properties = schema["properties"]["storage"]["properties"]
+    without_defaults = {"enabled", "account_id"}
     compared = 0
     for key, value in config.STORAGE_DEFAULTS.items():
-        if key == "enabled":
+        if key in without_defaults:
+            assert "default" not in properties[key], (
+                f"{key} is skipped here because it has no schema default, and it now "
+                "has one -- so either this exclusion or the schema is wrong"
+            )
             continue
         assert properties[key]["default"] == value, key
         compared += 1
-    assert compared == len(config.STORAGE_DEFAULTS) - 1, (
+    assert compared == len(config.STORAGE_DEFAULTS) - len(without_defaults), (
         "the loop compared fewer keys than the mapping holds; a `continue` is "
         "swallowing something it was not written for"
     )
@@ -993,6 +1013,10 @@ def test_a_wildcard_or_http_storage_origin_is_refused(tmp_path: Path, base: dict
         "enabled": True,
         "bucket": "fixture-alpha-dev",
         "prefix": "objects/fixture-alpha-dev/",
+        # Required once storage is enabled (ADR 0106). Present so that the
+        # control below fails for the reason this test is about, rather than for
+        # a missing account -- which is the whole job of a control.
+        "account_id": "0123456789abcdef0123456789abcdef",
         "allowed_cors_origins": ["https://app.fixture-alpha-dev.test"],
     }
     check(tmp_path, base)

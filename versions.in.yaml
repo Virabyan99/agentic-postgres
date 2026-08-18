@@ -292,3 +292,47 @@ packages:
     registry: pypi
     package: uvicorn
     version: "0.50.2"
+
+  # ---------------------------------------------------------------------------
+  # Session 7. The object-storage client.
+  #
+  # Measured against the locked python:3.12-slim digest before either number was
+  # written here, because ADR 0083 is the standing reason "it installs" and "it
+  # imports" are two claims: psycopg installed cleanly at the locked version and
+  # then raised `ImportError: no pq wrapper available` on the first import, in
+  # this exact image. Rig A, three arms:
+  #
+  #   * boto3 and botocore at 1.43.72 install and import here with no compiler
+  #     and no system library. The transitive set is jmespath 1.1.0,
+  #     python-dateutil 2.9.0.post0, s3transfer 0.19.2, six 1.17.0 and urllib3
+  #     2.7.0 -- all pure Python, unlike Session 6's set, whose four named
+  #     distributions pulled in four compiled ones.
+  #   * A low-level s3 client constructs with an explicit endpoint, region
+  #     `auto`, `s3v4`, bounded retries and explicit timeouts, and presigns a
+  #     PUT carrying X-Amz-Algorithm and X-Amz-SignedHeaders.
+  #   * CONTROL: botocore==1.43.999 is refused with "Could not find a version".
+  #     Without that arm, "1.43.72 resolved" is a statement about the network.
+  #
+  # botocore is named for D258's reason and NOT for D258's evidence, and the
+  # distinction is worth the sentence. psycopg-pool was a separate distribution
+  # at a genuinely different number (3.3.1 against psycopg's 3.3.4), so a reader
+  # who assumed one pin covered both would have named a release that does not
+  # exist. Here the two move in lockstep and boto3 alone resolves botocore to
+  # exactly 1.43.72 today -- measured, arm A3. What makes the second entry
+  # load-bearing is that boto3 declares a RANGE, `botocore<1.44.0,>=1.43.72`,
+  # not the exact equality psycopg declares for psycopg-binary. A range is a
+  # choice somebody makes, and an unnamed choice is made by whoever runs pip on
+  # whatever day they run it. That is the same reason psycopg-binary is
+  # deliberately absent above: its version is fixed by an `==`, so an entry
+  # would be a second authority for a value already decided.
+  #
+  # Both publish one sdist and one wheel, so ADR 0077's one-canonical-artifact
+  # model dereferences them without the psycopg-binary problem.
+  BOTO3_VERSION:
+    registry: pypi
+    package: boto3
+    version: "1.43.72"
+  BOTOCORE_VERSION:
+    registry: pypi
+    package: botocore
+    version: "1.43.72"

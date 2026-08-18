@@ -11,6 +11,8 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 ARG ARGON2_CFFI_VERSION
+ARG BOTO3_VERSION
+ARG BOTOCORE_VERSION
 ARG CRYPTOGRAPHY_VERSION
 ARG FASTAPI_VERSION
 ARG PSYCOPG_POOL_VERSION
@@ -61,8 +63,10 @@ RUN set -eu; \
       "pydantic==${PYDANTIC_VERSION}" \
       "pydantic-settings==${PYDANTIC_SETTINGS_VERSION}" \
       "pyjwt==${PYJWT_VERSION}" \
-      "uvicorn==${UVICORN_VERSION}"; \
-    python -c "import argon2, fastapi, jwt, psycopg, psycopg_pool, pydantic, uvicorn"
+      "uvicorn==${UVICORN_VERSION}" \
+      "boto3==${BOTO3_VERSION}" \
+      "botocore==${BOTOCORE_VERSION}"; \
+    python -c "import argon2, boto3, botocore, fastapi, jwt, psycopg, psycopg_pool, pydantic, uvicorn"
 
 WORKDIR /app
 COPY app /app/app

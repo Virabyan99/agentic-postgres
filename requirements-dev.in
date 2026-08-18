@@ -62,3 +62,24 @@ pydantic==2.13.4
 pydantic-settings==2.14.2
 pyjwt==2.13.0
 uvicorn==0.50.2
+
+# ---------------------------------------------------------------------------
+# Session 7, Run 5. The R2 adapter's set, here for the same reason the block
+# above is: the adapter's unit tests presign real URLs and assert their shape,
+# and a mocked botocore would be a test about the mock (ADR 0065, again).
+#
+# The addressing-style test in particular CANNOT be written against a fake.
+# ADR 0107 exists because botocore silently falls back from virtual to path
+# addressing when a bucket name is not usable as a TLS hostname label -- a
+# behaviour of the real library that no stand-in would reproduce, because a
+# fake would do whatever its author believed the config key meant, which is
+# precisely the belief the measurement overturned.
+#
+# Both pinned to versions.in.yaml, which
+# `test_the_development_environment_installs_the_locked_service_versions`
+# enforces. botocore is named although boto3 resolves it to the same number
+# today, because boto3 declares a RANGE (`botocore<1.44.0,>=1.43.72`) rather
+# than the exact equality psycopg declares for psycopg-binary -- and an unnamed
+# choice inside a range is made by whoever runs the resolver, on the day.
+boto3==1.43.72
+botocore==1.43.72

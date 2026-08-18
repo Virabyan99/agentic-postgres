@@ -208,6 +208,17 @@
           "maxLength": 256,
           "description": "Relative object prefix ending in '/'. Defaults to objects/{project_key}/."
         },
+        "account_id": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{32}$",
+          "description": "The Cloudflare account the bucket lives in, 32 lowercase hex characters. Required when storage is enabled and forbidden when it is not. This is an IDENTIFIER, not a credential -- it appears in the endpoint hostname of every request and in the dashboard URL -- so it is a manifest field rather than a secret: putting a non-credential through per-consumer materialization would spend the machinery that makes 'one service cannot read another's credential' a filesystem property on a value that is not one, and would make the endpoint unresolvable at --render-only time (ADR 0106). The endpoint is derived from it by naming.storage_endpoint_url and handed to the container as STORAGE_ENDPOINT; it is never assembled a second time inside the image."
+        },
+        "jurisdiction": {
+          "type": "string",
+          "enum": ["default", "eu", "fedramp"],
+          "default": "default",
+          "description": "The R2 jurisdiction the bucket was created in. A jurisdictional bucket is reachable ONLY through its own endpoint host, and most S3 clients hold one endpoint per client, so this belongs to the endpoint derivation rather than being a label. Only 'default' has been measured -- Run 5's probe bucket reports jurisdiction 'default' and every arm of the rig dialled its endpoint. The other two are READ FROM VENDOR DOCUMENTATION and have never been dialled by anything here; the enum is closed at what Cloudflare documents today and says so rather than implying all three are proved (ADR 0106)."
+        },
         "upload_url_ttl_seconds": {
           "type": "integer",
           "default": 900,
@@ -264,6 +275,7 @@
         "properties": {
           "bucket": { "type": "null" },
           "prefix": { "type": "null" },
+          "account_id": { "type": "null" },
           "allowed_cors_origins": { "maxItems": 0 }
         }
       }

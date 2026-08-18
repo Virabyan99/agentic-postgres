@@ -624,6 +624,13 @@ def test_every_storage_variable_is_read_from_the_manifest(key: str, manifest: Pa
     # changing it left the suite green.
     assert rendered["STORAGE_BUCKET"] == naming.storage_bucket_name(key, storage.get("bucket"))
     assert rendered["STORAGE_PREFIX"] == naming.storage_object_prefix(key, storage.get("prefix"))
+    # Through `naming` for the same reason as the two above, and this pair
+    # covers both branches of the derivation: alpha omits `jurisdiction` and
+    # alpine names `eu`, so a renderer that dropped the jurisdiction would fail
+    # one fixture instead of passing for both (ADR 0106, D332, D343).
+    assert rendered["STORAGE_ENDPOINT"] == naming.storage_endpoint_url(
+        storage["account_id"], storage.get("jurisdiction", "default")
+    )
     assert rendered["STORAGE_SERVICE_ROLE_NAME"].endswith("_storage_service")
     assert key.replace("-", "_") in rendered["STORAGE_SERVICE_ROLE_NAME"]
 
@@ -653,6 +660,10 @@ def test_the_two_fixtures_disagree_about_every_storage_variable() -> None:
         "STORAGE_UPLOAD_URL_TTL_SECONDS",
         "STORAGE_DOWNLOAD_URL_TTL_SECONDS",
         "STORAGE_MAX_UPLOAD_BYTES",
+        # Added in Run 5 with the field itself (ADR 0106). The two fixtures
+        # differ in BOTH inputs -- account id and jurisdiction -- so neither a
+        # constant endpoint nor one that ignores the jurisdiction survives.
+        "STORAGE_ENDPOINT",
     ):
         assert alpha[variable] != alpine[variable], (
             f"both fixtures render {variable}={alpha[variable]}, so a constant in the "

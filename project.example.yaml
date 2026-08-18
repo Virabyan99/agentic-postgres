@@ -59,6 +59,20 @@ mcp:
 
 storage:
   enabled: true
+  # The Cloudflare account, from which the S3 endpoint is derived (ADR 0106).
+  # An IDENTIFIER rather than a credential -- it appears in the hostname of
+  # every request -- so it belongs here and not in secrets.required.yaml.
+  #
+  # This differs from project.second.example.yaml's, and `jurisdiction` is
+  # omitted here while alpine names `eu`, so the pair covers the branch that
+  # inserts a jurisdiction label and the branch that does not. Two fixtures
+  # agreeing on a value cannot prove the value is read (D332), and one that
+  # restates a default cannot prove the default -- which is why this fixture
+  # leaves `jurisdiction` out entirely rather than writing `default`.
+  #
+  # Not a real account: well-formed (32 lowercase hex, which is what
+  # `naming.storage_endpoint_url` enforces) and belonging to nobody.
+  account_id: 0123456789abcdef0123456789abcdef
   # No `bucket:` and no `prefix:`, deliberately: this fixture exercises the
   # DERIVED names while project.second.example.yaml overrides both. Until Run 3
   # both fixtures declared exactly what the derivation produced, so no fixture
