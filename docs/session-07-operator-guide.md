@@ -492,6 +492,21 @@ proposes creating `r2_access_key_id`, stop — §6 says what that means. Then
 `--apply` with the control-plane credential, and only then paste the two R2
 values into Infisical under `/storage`, so the folder exists first.
 
+**2b. Sync the host's dev environment (D384).** The gate runs the suite, and it
+resolves `.venv/bin/python` deliberately — `sudo` resets PATH to `secure_path`,
+so a venv you activated is invisible to it. That venv is the one nobody updates.
+As the **operator**, not under `sudo`:
+
+```bash
+.venv/bin/python -m pip install --require-hashes -r requirements-dev.txt
+```
+
+Session 7 added `boto3` and `botocore`, so skipping this ends the gate in
+collection with `ModuleNotFoundError: No module named 'boto3'` and four errored
+contract modules — which is what happened in Run 10, and in Session 6 before it
+(D297). **Any session that adds a dev dependency guarantees this**; nothing
+verifies the installed distributions against the lock.
+
 **3. The cluster restart, and it is a restart.** `max_connections` moves from 50
 to 56 (ADR 0099) and is **not** a reloadable parameter. Until the clusters are
 restarted a redeployed project renders outputs v11 and `connection_limits`
