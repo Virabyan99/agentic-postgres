@@ -252,6 +252,41 @@ maintaining the battery rather than in the battery itself. The harness's own
 anchor check is what makes the battery trustworthy; the script editing it had no
 such check.
 
+### Found during Run 7
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D352** | The storage router is the same construction as every route before it, with the boundary proved by request (D319). | **It is the first route published INSIDE another one**, and the plan does not mention that at all. `/api/app/storage` lies under `/api/app`, which the auth service has served since Session 6 Run 10, so every request to the storage surface matches **two** routers. No request has ever matched two before — every route so far is a sibling — so no ordering has ever been measured. | Measured on the locked Traefik and read back from its own API: **the default priority is the rule string's length, exactly** (`priority=68` for a 68-character rule, `priority=84` for an 84-character one). The storage rule is the application rule with `/storage` inserted into both matchers, so it is exactly sixteen characters longer for every project and every domain — correct by construction. **ADR 0108**: the ordering is derived and no `priority` is pinned anywhere. | **Priority is length, not specificity**, and that is the trap. With a control: a router ruled ``PathPrefix(`/api/app/deep`)`` is *strictly more specific* than the application router and **loses to it**, at 50 characters against 68. A storage rule written the concise way — one `PathPrefix`, which is what anyone reaching for brevity writes — would be shorter than its parent's and would never match a request, with a 404 from the auth service as the only symptom. | **0108** |
+| **D353** | D319: the boundary is proved by request, and D162's shape applies — a sibling path answers 404. | **A sibling of a NESTED path is not a 404.** Measured: `/api/app/storagex`, `/api/app/storage-extra` and `/api/app/storage2` all reach the **application** backend, because the parent router catches them. `/api/application` is the control at 404, Traefik's own. | The boundary proof is a claim about **which service answered**, never about a status code. Offline: the rule shapes and the interpolated rule lengths. On the host: `RouterName` from the access log. | This is D186 and D187 arriving through a door the existing tests do not cover. A sibling reaches FastAPI, which answers 404 for a path it does not serve — and from outside that is byte-for-byte the same 404 as Traefik's for a route that does not exist. Every previous boundary test in this repository asserts a status code, and every one of them is about a *sibling* route. | 0108 |
+| **D354** | D323: the CORS middleware belongs in the file provider, "where a root-owned value belongs". | **The origin list is not a root-owned value.** It is `storage.allowed_cors_origins` — a manifest field, rendered into `compose.env` and published in `outputs.json`. ADR 0086's rule for the file provider is about where a **secret** may go (an inline bcrypt hash), and ADR 0085 already measured that the file provider buys nothing for lifecycle. | **ADR 0109**: a container label on the `storage` service, with the origin list reaching it as one comma-separated `compose.env` value. Measured: Traefik parses a comma-separated label into a list, read back from its own API as `['https://a.example', 'https://b.example']`. | And splitting them costs something measured: a router referencing a middleware defined **elsewhere** goes `status=disabled` with `middleware "…" does not exist` when that definition goes away, and the route answers Traefik's own 404. A label on the storage container has exactly the router's lifetime; a file-provider document is a second artifact with a second one. | **0109** |
+| **D355** | §4.21/§16.2: "two CORS policies" — the edge one being a policy that decides who may reach the storage surface. | **The edge CORS middleware does not refuse anybody.** Measured with controls: a request from an unlisted origin is **forwarded to the service and answered normally**, with only `Access-Control-Allow-Origin` withheld; the preflight is answered by Traefik itself (200, no ACAO) and never reaches the container. What refuses the page is the browser. | Recorded in ADR 0109, in `naming.storage_cors_middleware_name`'s docstring, in `_storage_labels`, and in the operator guide's §5.1 — every place a reader could otherwise infer an access decision from an allowlist. It is attached unconditionally, because an empty list was measured to parse to `None`, leave the middleware `enabled`, and permit nothing. | An allowlist reads like a control and is not one. `curl` is unaffected in both directions, and a caller that sends no `Origin` header is indistinguishable from a server-side client — which is a legitimate and supported way to use this API. Every claim this project makes about who may reach the storage surface rests on the bearer token and the ownership filter, and the documentation now says so where the allowlist is. |  0109 |
+| **D356** | A browser uploads an object: it calls the storage surface, then `PUT`s to a presigned R2 URL. | **The login that produces the token is not reachable cross-origin.** `/api/app/auth/login` carries no CORS middleware and there is no `api.app.allowed_cors_origins` field, so a browser-only flow — log in from a page, then upload — is not possible today. | **Recorded, not fixed.** A second origin list is a manifest change and a decision about the *auth* surface, not the storage surface. The alternative reading is that the application logs in server-side and hands the browser a token, which needs no CORS on `/auth` at all. | Neither reading is Run 7's to choose, and choosing by habit would publish a cross-origin login surface nobody asked for. Named here so the next session decides it deliberately rather than discovering it from a browser console. | — |
+| **D357** | — | The deploy's closing summary printed five routes by hand and **`rest` was not one of them** — the one route Session 5 was entirely about. Nothing noticed for two sessions, because a missing line looks exactly like a route that does not exist. | The summary is derived from `document["routes"]`, so a sixth route is printed by existing. | Found while adding `storage` to the list, which is the same edit that would have perpetuated it. **A hand-maintained list of a derived thing is a list that is one addition behind.** | — |
+
+**The Run 7 battery: 15 mutations, both controls green, every file restored
+byte-identical.** After the fix below, none survived.
+
+**M8 survived the first round, and it is the finding to carry.**
+`test_the_router_names_the_port_the_container_binds` compared `compose.yaml`'s
+`APG_LISTEN_PORT` against `runtime_override.STORAGE_SERVICE_PORT` — **two
+constants, neither of which is what the router publishes.** Pointing the label
+at `REST_SERVICE_PORT` (3000, against the container's 8080) left it green: the
+two constants still agreed, and the thing under test was never read.
+
+That is D173's tautology and D260's `224 == 224`, in a test written specifically
+to prevent a routing defect — and the reason a reader would not catch it either
+is that `AUTH_SERVICE_PORT` and `STORAGE_SERVICE_PORT` hold the same number, so
+naming the wrong one renders identically today. The comparison is now against the
+**rendered label**.
+
+**M4 was added because M3 was not enough.** M3 makes the router name a middleware
+it does not define; M4 leaves the definition in place and drops it from the
+chain. The first version of the middleware test asserted only the first
+direction, so a defined-but-unattached CORS middleware — a policy that exists,
+parses, and is applied to no request, which Traefik reports as `enabled` — would
+have been green. *An assertion that every name resolves is not an assertion that
+every definition is used.*
+
 ---
 
 ## 2. What Session 7 adds to the acceptance registry
@@ -730,6 +765,33 @@ that was current when the intent was created may not be current when it
 completes.
 
 ### Run 7 — Publish: the route, the CORS pair, the container
+
+**Done.** Six divergence rows (**D352–D357**) and two ADRs, **0108** and
+**0109**, both from measurements against the locked Traefik with controls.
+
+**The finding is D352**, and the plan does not mention it: `/api/app/storage` is
+the **first route this project publishes inside another one**. Every route
+before it is a sibling, so no request has ever matched two routers and no
+ordering has ever been measured. Traefik's default priority is the rule string's
+**length** — not its specificity — and a storage rule written the concise way
+would be shorter than the application rule it sits inside and would never match
+a request.
+
+Shipped: `naming.storage_router_name` and its three middleware names, four
+`ProjectIdentity` members, five `compose.env` keys,
+`runtime_override._storage_labels` and `STORAGE_CORS_METHODS`, the four entries
+in `OVERRIDE_NAME_KEYS` that reach both call sites, `STORAGE_PLANE_SESSION` and
+`observe_storage` with `STORAGE_CREDENTIAL_NAMES` as its gate, a second origin in
+the alpha fixture so the join and the sort are measurable (D332), §5.1 of the
+operator guide, and `tests/contract/test_storage_route.py` — 16 tests.
+
+**The Compose service needed nothing.** Run 2 built it with `profiles:
+[session7]`, the block-sequence `tmpfs` (D287), a read-only rootfs, uid 65532,
+no host port, and `internal` + `edge`; Run 2 also added it to
+`POST_BOOTSTRAP_SERVICES` (D324) rather than deferring to this run. Both are
+asserted here rather than assumed.
+
+*The original plan text for this run follows.*
 
 - The Compose service with `profiles: [session7]`, **`tmpfs` as a block
   sequence** (D287 — the flow form parses as four mount paths and only the

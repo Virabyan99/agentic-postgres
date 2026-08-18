@@ -582,6 +582,31 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "STORAGE_UPLOAD_URL_TTL_SECONDS",
     "STORAGE_DOWNLOAD_URL_TTL_SECONDS",
     "STORAGE_MAX_UPLOAD_BYTES",
+    # Session 7, Run 7. The published route, in the same two shapes the
+    # application route uses one line-block above: a *path* a router rule
+    # matches on, and three *names* `runtime_override.py` renders into label
+    # keys because Compose cannot interpolate inside one (ADR 0013).
+    #
+    # `API_STORAGE_PATH` is the application path plus `/storage`, and the
+    # relationship is load-bearing rather than cosmetic: the storage rule is the
+    # application rule with that suffix inserted into both matchers, which makes
+    # it exactly sixteen characters longer and therefore higher-priority
+    # (ADR 0108 -- Traefik's default priority was measured to be the rule
+    # string's length).
+    "API_STORAGE_PATH",
+    "STORAGE_ROUTER_NAME",
+    "STORAGE_BUFFERING_MIDDLEWARE_NAME",
+    "STORAGE_STRIPPREFIX_MIDDLEWARE_NAME",
+    "STORAGE_CORS_MIDDLEWARE_NAME",
+    # The origin allowlist, as one comma-separated value (ADR 0109). Measured:
+    # Traefik parses a comma-separated label into a list, read back from its own
+    # API as `['https://a.example', 'https://b.example']`.
+    #
+    # It is a VALUE and not a name, so it stays an interpolation reference and
+    # never reaches `runtime_override.py` -- and it is the same sorted list the
+    # rendered document publishes under `storage.allowed_cors_origins`, because
+    # one origin list with two renderings is the whole point of D323.
+    "STORAGE_CORS_ALLOWED_ORIGINS",
 )
 
 #: The pooler's port on its own project network. 6432 is the PgBouncer
@@ -887,6 +912,28 @@ def build_compose_env(
         "STORAGE_UPLOAD_URL_TTL_SECONDS": str(storage_settings["upload_url_ttl_seconds"]),
         "STORAGE_DOWNLOAD_URL_TTL_SECONDS": str(storage_settings["download_url_ttl_seconds"]),
         "STORAGE_MAX_UPLOAD_BYTES": str(storage_settings["max_upload_bytes"]),
+        # Session 7, Run 7. From `identity`, so the URL the deployed document
+        # publishes and the rule the router matches on are one expression
+        # evaluated once (ADR 0061, D177) -- and so the sixteen-character
+        # relationship ADR 0108 rests on holds by construction.
+        "API_STORAGE_PATH": identity.route_storage_path,
+        "STORAGE_ROUTER_NAME": identity.storage_router,
+        "STORAGE_BUFFERING_MIDDLEWARE_NAME": identity.storage_buffering_middleware,
+        "STORAGE_STRIPPREFIX_MIDDLEWARE_NAME": identity.storage_stripprefix_middleware,
+        "STORAGE_CORS_MIDDLEWARE_NAME": identity.storage_cors_middleware,
+        # The same sorted list the rendered document publishes, comma-joined --
+        # measured to parse into a list by the locked Traefik, read back from
+        # its own API rather than inferred from a response header.
+        #
+        # **It is legitimately EMPTY**, for any project that enables storage and
+        # names no browser origins, and an empty list was measured to permit
+        # nothing rather than everything. That is why the label references it as
+        # `${STORAGE_CORS_ALLOWED_ORIGINS?required}` and not with the `:?` form
+        # every other key here uses: the colon form refuses an empty value as
+        # firmly as an unset one (D178), and this is the one key whose empty
+        # case is meaningful. `POSTGREST_CORS_ORIGINS` has carried the same
+        # distinction since Session 5.
+        "STORAGE_CORS_ALLOWED_ORIGINS": ",".join(sorted(storage_settings["allowed_cors_origins"])),
     }
     lines = [
         "# Generated. Do not edit; do not shell-source.",

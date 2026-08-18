@@ -187,14 +187,46 @@ reloadable parameter — and it belongs to Run 10's host sequence, not to this
 page.
 
 **There is no storage deployment yet.** `compose.yaml` carries a `storage`
-service from Run 2, but it is on the `session7` profile and `CURRENT_SESSION` is
-6, so nothing starts it: `bin/project-runtime.sh` selects `--profile session<n>`
-only up to `--through-session`. The service has no route, no endpoints and no
-adapter. Run 7 publishes it.
+service from Run 2, its endpoints and migrations from Run 6, and its route from
+Run 7 — but it is on the `session7` profile and `CURRENT_SESSION` is 6, so
+nothing starts it: `bin/project-runtime.sh` selects `--profile session<n>` only
+up to `--through-session`. **Everything below §5.1 describes a deployment that
+has not happened on any host.**
 
 **Do not run the signing-key cutover in the same window as any of this.** It is
 unblocked (ADR 0088) and it is a separate maintenance window with its own
 recreate step.
+
+---
+
+## 5.1 The route, and the two things about it worth knowing
+
+The surface is published at `https://<domain>/api/app/storage`, under the
+application API rather than beside it, and `routes.storage` in the deployed
+document reports it.
+
+**It converges in two stages, and the first one is not a failure.** A deploy
+whose active secret generation carries no `r2_access_key_id` and
+`r2_secret_access_key` records `routes.storage` as **`unavailable`**, prints the
+missing names, and **exits 0**. Provision both at the provider, re-materialize,
+and re-run the deploy: the second one observes the route and publishes it. This
+is the same shape `routes.app` has used since Session 6 for a project awaiting
+its first administrator (D230, D326), and it is a status field rather than a
+deployment state.
+
+**The CORS policy is an instruction to a browser. It is not an access control.**
+`storage.allowed_cors_origins` in the project manifest becomes a Traefik
+middleware on the storage route, and measured against the locked Traefik: a
+request from an origin that is **not** on the list is forwarded to the service
+and answered normally — only the `Access-Control-Allow-Origin` header is
+withheld, and it is the browser that then refuses to hand the response to the
+page. `curl`, a server-side client, and anything that does not send an `Origin`
+header are unaffected in both directions.
+
+So do not read the origin list as a statement about who can reach the storage
+API. What refuses a caller is the bearer token and the ownership filter. An
+empty list is a valid configuration and permits no browser origin; it does not
+permit everything.
 
 ---
 

@@ -181,6 +181,7 @@ __all__ = [
     "REST_SERVICE_PORT",
     "ROUTED_SERVICE",
     "ROUTED_SERVICE_PORT",
+    "STORAGE_CORS_METHODS",
     "STORAGE_SERVICE",
     "STORAGE_SERVICE_PORT",
     "build_override",
@@ -240,6 +241,10 @@ def build_override(
     app_buffering_middleware_name: str,
     app_stripprefix_middleware_name: str,
     app_docs_router_name: str,
+    storage_router_name: str,
+    storage_buffering_middleware_name: str,
+    storage_stripprefix_middleware_name: str,
+    storage_cors_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
@@ -284,6 +289,14 @@ def build_override(
         raise ValueError("app_stripprefix_middleware_name is required")
     if not app_docs_router_name:
         raise ValueError("app_docs_router_name is required")
+    if not storage_router_name:
+        raise ValueError("storage_router_name is required")
+    if not storage_buffering_middleware_name:
+        raise ValueError("storage_buffering_middleware_name is required")
+    if not storage_stripprefix_middleware_name:
+        raise ValueError("storage_stripprefix_middleware_name is required")
+    if not storage_cors_middleware_name:
+        raise ValueError("storage_cors_middleware_name is required")
     if not https_entrypoint:
         raise ValueError("https_entrypoint is required")
     if not rendered_directory or not rendered_directory.startswith("/"):
@@ -396,6 +409,26 @@ def build_override(
                     app_router_name=app_router_name,
                     app_buffering_middleware_name=app_buffering_middleware_name,
                     app_stripprefix_middleware_name=app_stripprefix_middleware_name,
+                )
+            },
+            # Session 7 Run 7. A separate Compose service from `auth` rather than
+            # a second router onto it (which is what `docs` does for its two
+            # surfaces): storage authenticates as a different role, holds a
+            # different credential and takes its own share of the connection
+            # budget, so the two containers have to be separable.
+            #
+            # The entry is written unconditionally, exactly as the four above
+            # are. Whether the container exists is `profiles: [session7]`'s
+            # question, and an override naming a service Compose has not
+            # selected is inert -- which is what has let this file describe the
+            # `auth` service since Run 10 for deployments that never started it.
+            STORAGE_SERVICE: {
+                "labels": _storage_labels(
+                    https_entrypoint=https_entrypoint,
+                    storage_router_name=storage_router_name,
+                    storage_buffering_middleware_name=storage_buffering_middleware_name,
+                    storage_stripprefix_middleware_name=storage_stripprefix_middleware_name,
+                    storage_cors_middleware_name=storage_cors_middleware_name,
                 )
             },
         }
@@ -594,6 +627,133 @@ def _app_labels(
     }
 
 
+#: The methods the CORS middleware advertises, and the one authority for them.
+#:
+#: `OPTIONS` is here because the browser's preflight uses it and the middleware
+#: answers it -- measured: with the middleware attached the `OPTIONS` never
+#: reached the backend, and with it removed (the control) it did. The other
+#: three are the storage surface's own, and
+#: `test_the_cors_middleware_advertises_the_methods_the_router_serves` compares
+#: this tuple against what `storage_routes.router` declares, so a fifth endpoint
+#: cannot be added without this list being answered.
+STORAGE_CORS_METHODS: tuple[str, ...] = ("DELETE", "GET", "OPTIONS", "POST")
+
+
+def _storage_labels(
+    *,
+    https_entrypoint: str,
+    storage_router_name: str,
+    storage_buffering_middleware_name: str,
+    storage_stripprefix_middleware_name: str,
+    storage_cors_middleware_name: str,
+) -> dict[str, str]:
+    """The object-storage router: the first route nested inside another one.
+
+    **The two-matcher rule is load-bearing twice over here.** It is the segment
+    boundary every route since D162 has used -- ``PathPrefix`` is a string
+    prefix, so ``PathPrefix(`/api/app/storage`)`` alone would answer
+    ``/api/app/storagex``. And it is what makes this router *win*.
+
+    ADR 0108, measured against the locked Traefik and read back from its own
+    API: **the default priority is the rule string's length**, exactly
+    (`priority=68` for a 68-character rule, `priority=84` for an 84-character
+    one). Every request to this surface also matches the application router one
+    segment above, and this rule is the application's with `/storage` inserted
+    into both matchers -- exactly sixteen characters longer, for every project
+    and every domain, because both carry the same `Host()` clause.
+
+    The trap, with the control that proves it is one: a router ruled
+    ``PathPrefix(`/api/app/deep`)`` is strictly *more specific* than the
+    application router and **loses to it**, at 50 characters against 68. Writing
+    this rule the concise way would produce a storage service that is never
+    reached, with no error anywhere and a 404 from the auth service as the only
+    symptom -- which at the edge is indistinguishable from a missing route
+    (D186, D187).
+
+    **A sibling here is not a 404**, and that is the second difference from
+    every route before it. `/api/app/storagex` is caught by the *parent* router
+    and reaches the auth service, which answers 404. So the boundary is a claim
+    about which service answered, never about a status code; the host proof
+    reads `RouterName` from the access log.
+
+    **The strip is the published storage path**, not the application path. The
+    service routes `/upload-intents` and `/objects/{id}` at its root, and this
+    router's middleware chain is its own -- borrowing the application router's
+    strip was measured to couple the two containers' lifetimes: a router whose
+    middleware is defined by labels on another container goes `status=disabled`
+    when that container stops, and answers Traefik's own 404.
+
+    **The buffering middleware carries the same number as the application
+    route's**, from the same `compose.env` key, because both modes run the same
+    `strict_json` in the same image (ADR 0101) and the service refuses an
+    oversized body only after reading every byte of it.
+
+    **The CORS middleware is a label** (ADR 0109), not a file-provider document
+    as D323 predicted -- the origin list is a manifest field published in
+    `outputs.json`, not a root-owned value, and the file provider's rule
+    (ADR 0086) is about where a *secret* may go. It is attached unconditionally,
+    including when the list is empty, because an empty list was measured to
+    permit nothing rather than everything.
+
+    **It instructs a browser and does not control access.** Measured: a request
+    from an unlisted origin is forwarded to the service and answered normally,
+    with only the `Access-Control-Allow-Origin` header withheld. What refuses a
+    caller here is the bearer token and the ownership filter.
+    """
+    router = f"traefik.http.routers.{storage_router_name}"
+    service = f"traefik.http.services.{storage_router_name}"
+    buffering = f"traefik.http.middlewares.{storage_buffering_middleware_name}"
+    stripprefix = f"traefik.http.middlewares.{storage_stripprefix_middleware_name}"
+    cors = f"traefik.http.middlewares.{storage_cors_middleware_name}"
+    path = "${API_STORAGE_PATH:?required}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.rule": (
+            f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
+        ),
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        # Baseline, CORS, buffering, strip. CORS is before the buffering
+        # middleware because it answers the preflight itself and a preflight has
+        # no body to bound; it is after the baseline so the preflight it
+        # generates carries the same response policy every other answer does --
+        # which is the measured reason the REST route puts its 413 there.
+        f"{router}.middlewares": (
+            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},"
+            f"{storage_cors_middleware_name},"
+            f"{storage_buffering_middleware_name},{storage_stripprefix_middleware_name}"
+        ),
+        f"{router}.service": storage_router_name,
+        f"{service}.loadbalancer.server.port": str(STORAGE_SERVICE_PORT),
+        # `AUTH_REQUEST_BODY_MAX_BYTES`, deliberately: one number from
+        # `strict_json.MAX_BODY_BYTES` through `auth_limits` (ADR 0084), reaching
+        # both routes. A `STORAGE_REQUEST_BODY_MAX_BYTES` would be a second
+        # constant that agreed with the first until somebody changed one, which
+        # is D264's cost paid a second time.
+        f"{buffering}.buffering.maxrequestbodybytes": "${AUTH_REQUEST_BODY_MAX_BYTES:?required}",
+        f"{buffering}.buffering.memrequestbodybytes": "${AUTH_REQUEST_BODY_MAX_BYTES:?required}",
+        f"{stripprefix}.stripprefix.prefixes": path,
+        # `?required` rather than `:?required`, and it is the only key in this
+        # module written that way. The colon form refuses an EMPTY value as
+        # firmly as an unset one (D178), and an empty origin list is a
+        # legitimate configuration -- a project that enables storage and permits
+        # no browser origin. Measured: an empty list parses to `None` and the
+        # middleware stays enabled and permits nothing.
+        f"{cors}.headers.accesscontrolalloworiginlist": "${STORAGE_CORS_ALLOWED_ORIGINS?required}",
+        f"{cors}.headers.accesscontrolallowmethods": ",".join(STORAGE_CORS_METHODS),
+        # `Authorization` because every storage request carries a bearer token,
+        # and `Content-Type` because the two POST bodies are JSON. Nothing else:
+        # a header not listed here is one a browser will not send.
+        f"{cors}.headers.accesscontrolallowheaders": "Authorization,Content-Type",
+        f"{cors}.headers.accesscontrolmaxage": "600",
+        # Measured to appear on real responses and NOT on the preflight
+        # responses, which is Traefik's behaviour and not something this setting
+        # changes. Recorded in ADR 0109; nothing between a browser and this edge
+        # caches, and a cache placed there would need the preflight to vary.
+        f"{cors}.headers.addvaryheader": "true",
+    }
+
+
 def _rest_labels(
     *,
     https_entrypoint: str,
@@ -676,6 +836,10 @@ def render_override(
     app_buffering_middleware_name: str,
     app_stripprefix_middleware_name: str,
     app_docs_router_name: str,
+    storage_router_name: str,
+    storage_buffering_middleware_name: str,
+    storage_stripprefix_middleware_name: str,
+    storage_cors_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
@@ -693,6 +857,10 @@ def render_override(
         app_buffering_middleware_name=app_buffering_middleware_name,
         app_stripprefix_middleware_name=app_stripprefix_middleware_name,
         app_docs_router_name=app_docs_router_name,
+        storage_router_name=storage_router_name,
+        storage_buffering_middleware_name=storage_buffering_middleware_name,
+        storage_stripprefix_middleware_name=storage_stripprefix_middleware_name,
+        storage_cors_middleware_name=storage_cors_middleware_name,
         publications=publications,
     )
     header = (

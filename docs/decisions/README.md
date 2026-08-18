@@ -171,3 +171,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0105](0105-the-bucket-carries-the-namespace-every-other-derived-name-carries.md) | The bucket carries the namespace every other derived name carries | 7 | Accepted |
 | [0106](0106-the-account-is-an-operator-input-and-the-endpoint-is-derived-from-it.md) | The account is an operator input, and the endpoint is derived from it | 7 | Accepted |
 | [0107](0107-the-addressing-style-is-path-because-it-is-the-only-invariant-one.md) | The addressing style is `path`, because it is the only invariant one | 7 | Accepted |
+| [0108](0108-a-nested-route-is-ordered-by-rule-length-and-the-ordering-is-derived.md) | A nested route is ordered by rule length, and the ordering is derived | 7 | Accepted |
+| [0109](0109-the-cors-middleware-is-a-label-and-it-instructs-a-browser-rather-than-controlling-access.md) | The CORS middleware is a label, and it instructs a browser rather than controlling access | 7 | Accepted |

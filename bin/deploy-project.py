@@ -93,6 +93,17 @@ REST_PLANE_SESSION = 5
 #: Session 5.
 APP_PLANE_SESSION = 6
 
+#: The session that starts the object-storage runtime, and with it the storage
+#: route. Below it the `storage` container is not selected -- its Compose entry
+#: carries `profiles: [session7]` and `project-runtime.sh` passes
+#: `--profile session<n>` only up to `--through-session` -- so there is nothing
+#: to route to and `routes.storage` records `unavailable` without polling.
+#:
+#: The same shape the two constants above carry, and the same reason: a status
+#: derived from an absence is a measurement, and a status polled against a
+#: container that was never selected is a timeout.
+STORAGE_PLANE_SESSION = 7
+
 #: The reviewed OpenAPI snapshot, mirroring `bin/api-contract.py`'s own
 #: constant. `test_the_deploy_and_the_contract_command_name_one_snapshot`
 #: asserts the two agree -- a deploy recording the digest of one file while
@@ -275,6 +286,10 @@ OVERRIDE_NAME_KEYS: dict[str, str] = {
     "app_buffering_middleware_name": "APP_BUFFERING_MIDDLEWARE_NAME",
     "app_stripprefix_middleware_name": "APP_STRIPPREFIX_MIDDLEWARE_NAME",
     "app_docs_router_name": "APP_DOCS_ROUTER_NAME",
+    "storage_router_name": "STORAGE_ROUTER_NAME",
+    "storage_buffering_middleware_name": "STORAGE_BUFFERING_MIDDLEWARE_NAME",
+    "storage_stripprefix_middleware_name": "STORAGE_STRIPPREFIX_MIDDLEWARE_NAME",
+    "storage_cors_middleware_name": "STORAGE_CORS_MIDDLEWARE_NAME",
 }
 
 
@@ -766,6 +781,63 @@ def observe_app(url: str, *, administrator: bool) -> str:
     if status == "401":
         return "ready"
     print(f"  the application route answered {status or '(nothing)'} rather than 401")
+    return "unavailable"
+
+
+#: The two halves of the R2 credential, by the names `secrets.required.yaml`
+#: gives them. Read from the ACTIVE generation's required set rather than from
+#: the manifest, because the manifest says what a deployment wants and the
+#: generation says what it has -- which is the same distinction
+#: `deployed_output.activated_login_roles` draws for the storage role's password,
+#: and for the same reason: v11 was published while `CURRENT_SESSION` was 6.
+STORAGE_CREDENTIAL_NAMES: tuple[str, ...] = ("r2_access_key_id", "r2_secret_access_key")
+
+
+def observe_storage(url: str, *, credentialed: bool) -> str:
+    """`ready` when the storage route **refuses** an unauthenticated caller.
+
+    D326's shape, and `observe_app`'s exactly: a status field rather than the
+    deployment state the runbook wanted, `unavailable` until the input exists,
+    the command printed, and the deploy exits 0.
+
+    **The gate is the credential**, because a storage container without one
+    starts, serves, and answers every request with the 404 its provider errors
+    collapse to (`storage_routes._guard`) -- which is indistinguishable from an
+    object that is not yours. A route that answers a refusal for the wrong
+    reason is exactly the false green this repository keeps producing.
+
+    **The probe is a 401 from a well-formed object id.** It proves four things a
+    200 anywhere could not: the storage router matched rather than the
+    application router one segment above it (ADR 0108 -- the two overlap, and
+    the wrong winner answers 404 from FastAPI, which at the edge is Traefik's
+    own 404 for all anyone can see); the strip worked, since the service routes
+    `/objects/{id}/download-url` at its root; the process is up; and it refuses.
+
+    The id is a fixed all-zeroes uuid rather than a random one, so the request
+    is reproducible and names nothing that could exist. It never reaches the
+    ownership filter: authentication fails first.
+    """
+    if not credentialed:
+        print(
+            "  no R2 credential in the active generation; routes.storage stays unavailable (D326)"
+        )
+        return "unavailable"
+
+    result = run(
+        "curl",
+        "-ksS",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        "--max-time",
+        "10",
+        f"{url}/objects/00000000-0000-4000-8000-000000000000/download-url",
+    )
+    status = result.stdout.strip()
+    if status == "401":
+        return "ready"
+    print(f"  the storage route answered {status or '(nothing)'} rather than 401")
     return "unavailable"
 
 
@@ -1300,11 +1372,10 @@ def main(argv: list[str] | None = None) -> int:
     # value for one that does and has no administrator yet (D230).
     app_status = "unavailable"
     app_docs_status = "unavailable"
-    # Version 11's, and it is literal for exactly as long as `app_status` was
-    # (Run 4 to Run 10): this run publishes no storage route, so `unavailable`
-    # is not a placeholder standing in for an observation -- it IS the
-    # observation. Session 7 Run 7 replaces it with one that measures, and
-    # D326 is why it is a route status rather than a deployment state.
+    # Version 11's, and Run 7's. `unavailable` is the value for a deployment
+    # through a session that does not select the `storage` container, and it is
+    # the value for one that does and whose active generation carries no R2
+    # credential (D326).
     storage_status = "unavailable"
     jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
     api_block = dict(deployed_output.API_NOT_PUBLISHED)
@@ -1388,6 +1459,32 @@ def main(argv: list[str] | None = None) -> int:
                 f"    sudo bin/auth-admin.sh --outputs {deployed_output.deployed_path(key)} "
                 "bootstrap \\\n        --username <name> --display-name <name>\n\n"
                 "  A project awaiting its first administrator is not a failed deploy."
+            )
+
+    if arguments.through_session >= STORAGE_PLANE_SESSION:
+        # The credential is read first, for the reason the administrator above
+        # is: a project without one records `unavailable` without spending the
+        # observation window polling a route it is not going to publish.
+        #
+        # From the ACTIVE generation's required set, not from the manifest.
+        # A project whose manifest declares storage and whose generation carries
+        # no R2 credential is exactly the state a first Session 7 deploy is in,
+        # and the two are different facts (D76, D306).
+        credentialed = all(name in secrets["required_names"] for name in STORAGE_CREDENTIAL_NAMES)
+        storage_status = observation.await_observation(
+            lambda: observe_storage(rendered["routes"]["storage"], credentialed=credentialed),
+            lambda observed: observed == "ready",
+        )
+        if not credentialed:
+            missing = [
+                name for name in STORAGE_CREDENTIAL_NAMES if name not in secrets["required_names"]
+            ]
+            print(
+                "\n  This project has no R2 credential in its active secret generation, so "
+                "its storage route\n  is not published. Provision it, then re-run this "
+                f"deploy:\n\n    missing: {', '.join(missing)}\n"
+                "    see docs/session-07-operator-guide.md for the provider steps\n\n"
+                "  A project awaiting its storage credential is not a failed deploy (D326)."
             )
 
     # The transports, read out of the host's own allocation registry rather than
@@ -1479,10 +1576,13 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"  {destination}")
     print(f"  tls          {document['tls']['status']} ({document['tls']['acme_environment']})")
-    print(f"  health       {document['routes']['health']['status']}")
-    print(f"  docs         {document['routes']['docs']['status']}")
-    print(f"  app          {document['routes']['app']['status']}")
-    print(f"  app docs     {document['routes']['app_docs']['status']}")
+    # Every route in the document, derived from the document rather than listed.
+    # It was five hand-written lines and `rest` was not one of them -- the one
+    # route the summary omitted was the one Session 5 was about, and nothing
+    # noticed for two sessions because a missing line looks like a route that
+    # does not exist. Deriving it means a sixth route is printed by existing.
+    for name, route in sorted(document["routes"].items()):
+        print(f"  {name.replace('_', ' '):12} {route['status']}")
     print(f"  database     {document['database']['observed']['status']}")
     print(f"\n\033[1mdeploy: {key} deployed through session {arguments.through_session}\033[0m")
     return 0

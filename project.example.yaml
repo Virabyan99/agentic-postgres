@@ -94,7 +94,16 @@ storage:
   # agreeing on every number would render identically for a reason that has
   # nothing to do with the code being right.
   pool_size: 4
+  # TWO origins here against project.second.example.yaml's one, and written out
+  # of order on purpose. Run 7 renders this list into a Traefik label as one
+  # comma-separated value, and with a single entry everywhere `",".join(...)`
+  # is indistinguishable from `origins[0]` -- a fixture pair that agreed on the
+  # LENGTH would have left that green (D332). The reversed order does the same
+  # job for the sort: `outputs.json` and `compose.env` both publish the sorted
+  # list, and a renderer that dropped the sort would render this fixture in
+  # declaration order and nothing would notice.
   allowed_cors_origins:
+    - https://studio.fixture-alpha-dev.test
     - https://app.fixture-alpha-dev.test
 
 backup:

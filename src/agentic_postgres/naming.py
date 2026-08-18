@@ -385,6 +385,88 @@ def app_docs_router_name(key: str) -> str:
     return traefik_name(f"apg-{key}-app-docs", context="traefik_router_app_docs")
 
 
+def storage_router_name(key: str) -> str:
+    """The router and service name for one project's object-storage surface.
+
+    **The first NESTED route this project publishes**, and ADR 0108 is what that
+    costs. `/api/app/storage` lies inside `/api/app`, so every request to it
+    matches two routers, and Traefik's default priority was measured to be the
+    rule string's **length** -- read back from its own API as `priority=84` for
+    an 84-character rule and `priority=68` for a 68-character one.
+
+    The storage rule is the application rule with `/storage` inserted into both
+    matchers, so it is exactly sixteen characters longer for every project and
+    every domain (both carry the same `Host()` clause, which cancels). The
+    nested route wins by construction rather than by luck, which is why no
+    explicit `priority` is set on any router.
+
+    Measured with the control that makes it a finding rather than a
+    reassurance: a router ruled ``PathPrefix(`/api/app/deep`)`` is *strictly
+    more specific* than the application router and **loses to it**, because at
+    50 characters it is shorter than the parent's 68. Concision changes routing.
+    """
+    return traefik_name(f"apg-{key}-storage", context="traefik_router_storage")
+
+
+def storage_stripprefix_middleware_name(key: str) -> str:
+    """The storage route's strip-prefix middleware.
+
+    Its own rather than the application route's, and the rig measured why
+    sharing is not free: a router referencing a middleware defined by labels on
+    **another container** resolves while that container runs and goes
+    `status=disabled` when it stops, taking the borrowing route to Traefik's own
+    404. `auth` and `storage` are separate containers with separate restarts, so
+    a shared middleware would make either one's restart the other's outage.
+
+    It strips `{api.public_base_path}/app/storage`, because the storage surface
+    serves `/upload-intents` and `/objects/{id}` at its root.
+    """
+    return traefik_name(
+        f"apg-{key}-storage-stripprefix", context="traefik_middleware_storage_strip"
+    )
+
+
+def storage_buffering_middleware_name(key: str) -> str:
+    """The storage route's body-size middleware.
+
+    The same bound as the application route's and for the same measured reason
+    (`app_buffering_middleware_name`): the service refuses an oversized body
+    *after* `request.body()` has read every byte of it, so the edge has to carry
+    the limit one hop earlier. Storage runs the same `strict_json` in the same
+    image, so the number is the same one -- and it reaches both labels from the
+    same `compose.env` key, `AUTH_REQUEST_BODY_MAX_BYTES`, rather than from a
+    second constant that would agree until somebody changed one of them.
+
+    Its own name, not the application route's, for the lifetime reason above.
+    """
+    return traefik_name(
+        f"apg-{key}-storage-buffering", context="traefik_middleware_storage_buffering"
+    )
+
+
+def storage_cors_middleware_name(key: str) -> str:
+    """The storage route's CORS middleware (ADR 0109).
+
+    A **container label**, not a file-provider document -- which is where D323
+    predicted it, on the premise that the origin list is a root-owned value. It
+    is not: it is `storage.allowed_cors_origins`, a manifest field, rendered
+    into `compose.env` and published in `outputs.json`. ADR 0086's rule for the
+    file provider is about where a *secret* may go, and this is not one.
+
+    Per-project because Traefik's middleware namespace is host-wide, which for
+    this middleware would mean one project's origin allowlist deciding
+    another's -- the same collision `docs_credential_middleware_name` records
+    for a password.
+
+    **This middleware instructs a browser; it does not control access.**
+    Measured: a request from an unlisted origin is forwarded to the service and
+    answered normally, and only the `Access-Control-Allow-Origin` header is
+    withheld. Every claim this project makes about who may reach the storage
+    surface rests on the bearer token and the ownership filter.
+    """
+    return traefik_name(f"apg-{key}-storage-cors", context="traefik_middleware_storage_cors")
+
+
 def docs_credential_middleware_name(key: str) -> str:
     """The per-project documentation credential middleware.
 
@@ -629,6 +711,20 @@ class ProjectIdentity:
     app_stripprefix_middleware: str = ""
     app_buffering_middleware: str = ""
     app_docs_router: str = ""
+    #: Session 7 Run 7's router and its three middlewares. Derived for every
+    #: project whether or not storage is enabled, for the reason `route_storage`
+    #: is: a rendered document names what a deployment would create, and the
+    #: `storage` Compose service is held behind `profiles: [session7]` anyway.
+    #:
+    #: The strip and the buffering middleware are storage's own rather than
+    #: shared with `app`'s, because a middleware defined by labels on another
+    #: container is withdrawn with that container and disables the borrowing
+    #: router (measured). The CORS middleware is a label rather than a
+    #: file-provider document (ADR 0109).
+    storage_router: str = ""
+    storage_stripprefix_middleware: str = ""
+    storage_buffering_middleware: str = ""
+    storage_cors_middleware: str = ""
 
     jwt_issuer: str = ""
     jwt_audience: str = ""
@@ -707,6 +803,10 @@ def derive(
         app_stripprefix_middleware=app_stripprefix_middleware_name(key),
         app_buffering_middleware=app_buffering_middleware_name(key),
         app_docs_router=app_docs_router_name(key),
+        storage_router=storage_router_name(key),
+        storage_stripprefix_middleware=storage_stripprefix_middleware_name(key),
+        storage_buffering_middleware=storage_buffering_middleware_name(key),
+        storage_cors_middleware=storage_cors_middleware_name(key),
         jwt_issuer=f"https://{domain}{api_base_path}{APP_PATH_SUFFIX}/auth",
         jwt_audience=f"urn:agentic-postgres:{slug}:{environment}",
         secrets_namespace=f"agentic-postgres/{key}",
