@@ -283,26 +283,71 @@ def test_the_schema_default_and_the_config_default_agree(tmp_path: Path) -> None
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize(
+    ("service", "declared"),
+    [
+        ("auth", settings_module.REQUIRED_VARIABLES),
+        ("storage", settings_module.STORAGE_VARIABLES),
+    ],
+)
 def test_the_compose_service_supplies_every_setting_the_service_requires(
-    auth_service: dict[str, Any],
+    compose_model: dict[str, Any], service: str, declared: tuple[str, ...]
 ) -> None:
-    """The check that would have caught D178.
+    """The check that would have caught D178, now once per mode.
 
     A renderer emitting a variable the compose file does not read, or a service
     reading one the compose file does not set, is a container that fails at
     start with a message about the wrong thing. `load()` raises on any missing
     one, so the two lists must be equal rather than merely overlapping.
+
+    **Both services, and separately** (Session 7 Run 6). Until this run only
+    `auth` was compared, so the eight `APG_STORAGE_*` variables the `storage`
+    service sets were checked against nothing at all. Parametrised rather than
+    unioned, because one combined list would be satisfied by a compose file that
+    handed every variable to both services -- and the boundary ADR 0101 rests on
+    is precisely that it does not.
+
+    `APP_MODE` is read by `main.create_app`, not by `settings.load`, so it is
+    added here rather than to either declaration. It is genuinely required: the
+    entrypoint is `--factory app.main:create_app`, called with no arguments, so
+    this variable is the only thing deciding which router is mounted.
     """
-    supplied = set(auth_service["environment"])
-    required = set(settings_module.REQUIRED_VARIABLES)
+    supplied = set(compose_model["services"][service]["environment"])
+    required = set(declared) | {"APP_MODE"}
 
     assert required - supplied == set(), (
-        f"app/settings.py requires {sorted(required - supplied)}, which compose.yaml "
-        "does not set; the container would fail at start"
+        f"the service requires {sorted(required - supplied)} for `{service}`, which "
+        "compose.yaml does not set; the container would fail at start"
     )
     assert supplied - required == set(), (
-        f"compose.yaml sets {sorted(supplied - required)} for `auth`, which "
-        "app/settings.py never reads -- a variable with no consumer"
+        f"compose.yaml sets {sorted(supplied - required)} for `{service}`, which "
+        "the service never reads -- a variable with no consumer"
+    )
+
+
+def test_each_mode_is_denied_the_other_s_credential_settings(
+    compose_model: dict[str, Any],
+) -> None:
+    """The boundary ADR 0101 rests on, asserted against the compose file.
+
+    One image runs both modes, so the image cannot be the boundary. What is real
+    is which variables and which mounted files each service is given: `auth`
+    holds no R2 credential and `storage` no signing key. `settings.load` refuses
+    to start when the forbidden one is present; this asserts the file never
+    presents it, so the two checks fail at different times rather than both
+    depending on a container actually starting.
+    """
+    for service, forbidden in settings_module.FORBIDDEN_VARIABLES.items():
+        supplied = set(compose_model["services"][service]["environment"])
+        for name in forbidden:
+            assert name not in supplied, (
+                f"compose.yaml gives `{service}` the variable {name}, which its mode must not hold"
+            )
+
+    auth_environment = set(compose_model["services"]["auth"]["environment"])
+    assert not {name for name in auth_environment if name.startswith("APG_STORAGE_")}, (
+        "the auth service is given storage settings; it holds no R2 credential and "
+        "must have nothing to point one at"
     )
 
 
@@ -664,7 +709,7 @@ def test_the_application_serves_exactly_the_declared_paths() -> None:
     service is not routable yet", and the thing that keeps it true is a test
     that notices a new path.
     """
-    application = main_module.create_app()
+    application = main_module.create_app("auth")
     served = set(main_module.route_paths(application))
     declared = set(main_module.health_paths()) | set(main_module.public_paths())
 
@@ -691,7 +736,7 @@ def test_the_admin_surface_is_reachable_only_under_admin() -> None:
 
 def test_the_application_generates_no_openapi_document() -> None:
     """`/docs/app` is a separate surface built from a reviewed snapshot (D226)."""
-    application = main_module.create_app()
+    application = main_module.create_app("auth")
     assert application.openapi_url is None
     assert application.docs_url is None
     assert application.redoc_url is None
@@ -702,7 +747,7 @@ def test_the_healthcheck_asks_the_path_the_application_serves(
 ) -> None:
     """The pair D236 is about: a probe naming a path nothing answers."""
     command = " ".join(str(part) for part in auth_service["healthcheck"]["test"])
-    served = main_module.route_paths(main_module.create_app())
+    served = main_module.route_paths(main_module.create_app("auth"))
     assert any(path in command for path in served), (
         f"the healthcheck asks for a path the application does not serve: {command}"
     )

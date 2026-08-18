@@ -24,18 +24,22 @@ means the pool hands out a connection that answers.
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
-from app import db, keys, routes
+from app import db, keys, routes, storage_client, storage_routes
 from app import settings as settings_module
 from app.hashing import BoundedHasher
 from app.profile import HASH_CONCURRENCY
 from app.repository import Repository
 from app.service import AuthService
+from app.storage_client import BoundedR2, R2Adapter
+from app.storage_repository import StorageRepository
+from app.storage_service import StorageService
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -43,6 +47,27 @@ if TYPE_CHECKING:
 #: Everything the process holds for its lifetime, assembled by the lifespan.
 #: On `app.state` rather than in module globals so that a test can build a
 #: second application without the first one's pool following it around.
+
+
+def _build_storage(pool: Any) -> StorageService:
+    """Assemble the storage plane from its own environment.
+
+    Read here rather than folded into `Settings`, because the storage settings
+    include two mounted CREDENTIAL FILES and `Settings` is a frozen dataclass
+    that is put on `app.state` and read by health handlers. A credential in it
+    would be one `repr()` away from a log line.
+    """
+    config = storage_client.load_config()
+    adapter = R2Adapter(config)
+    return StorageService(
+        StorageRepository(pool),
+        adapter,
+        BoundedR2(adapter),
+        max_upload_bytes=config.max_upload_bytes,
+        upload_ttl_seconds=config.upload_url_ttl_seconds,
+        download_ttl_seconds=config.download_url_ttl_seconds,
+        object_prefix=config.prefix,
+    )
 
 
 @asynccontextmanager
@@ -55,7 +80,8 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     process that was going to die on a missing key file should not spend four
     connections first.
     """
-    settings = settings_module.load()
+    mode = application.state.mode
+    settings = settings_module.load(mode=mode)
     application.state.settings = settings
 
     # Read once, at startup, and held in memory. Re-reading per request would
@@ -66,7 +92,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     # `load_signing_key` derives the public JWK and the `kid` from the private
     # key rather than reading a stored copy, which is ADR 0051's rule and the
     # reason D257 refused a stored `jwt_public_jwks` secret.
-    signing_key = keys.load_signing_key(settings.signing_key_file)
+    #
+    # **None in storage mode**, because storage is granted no signing key
+    # (ADR 0101, D320). `settings.load` has already refused to start if one was
+    # present, so this branch cannot silently skip a key that exists.
+    signing_key = (
+        keys.load_signing_key(settings.signing_key_file)
+        if settings.signing_key_file is not None
+        else None
+    )
     application.state.signing_key = signing_key
 
     hasher = BoundedHasher(concurrency=HASH_CONCURRENCY)
@@ -78,6 +112,12 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # Assembled after the pool is open, so a route can assume a working one
         # rather than checking. Nothing is served before this point: the
         # lifespan has not yielded.
+        #
+        # Both modes build the AuthService: storage VERIFIES the tokens auth
+        # issues (ADR 0098's third verifier) and so needs the same
+        # `authenticate`, including its current-state comparison. What it does
+        # not have is a signing key, so it can verify and never issue -- and
+        # `/auth/login` is not mounted for it to try.
         application.state.service = AuthService(
             repository=Repository(pool),
             hasher=hasher,
@@ -86,16 +126,35 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             audience=settings.audience,
             role_suffixes={name: suffix for suffix, name in settings.role_names.items()},
         )
+        if mode == "storage":
+            application.state.storage = _build_storage(pool)
         yield
 
 
-def create_app() -> FastAPI:
+def create_app(mode: str | None = None) -> FastAPI:
     """Build the application. A function, not a module-level object.
 
     A module-level `app = FastAPI()` runs at import, which means importing the
     module for a unit test starts building the thing under test. This is also
     what lets `tests/contract/` import `main.py` without a database.
+
+    **`mode` decides which router is mounted, and that is where ADR 0101's two
+    modes become real.** One image, two services, and the only moment the
+    boundary can be enforced is application construction: after this function
+    returns, the surface is whatever was mounted. An auth process with the
+    storage router attached would serve `/upload-intents` on a port nothing
+    published and nothing tested.
+
+    Required rather than defaulted, from `APP_MODE`, for ADR 0055's reasoning
+    applied to behaviour: a default would start the wrong service with a
+    correct-looking configuration.
     """
+    resolved = mode if mode is not None else os.environ.get("APP_MODE", "")
+    if resolved not in settings_module.APP_MODES:
+        raise settings_module.MissingSetting(
+            f"APP_MODE must be one of {sorted(settings_module.APP_MODES)}, not {resolved!r}"
+        )
+
     application = FastAPI(
         title="Agentic Postgres auth",
         lifespan=lifespan,
@@ -130,7 +189,14 @@ def create_app() -> FastAPI:
             return JSONResponse({"status": "unready"}, status_code=503)
         return JSONResponse({"status": "ready"})
 
-    application.include_router(routes.router)
+    # Exactly one of the two, never both. Written as an if/else over the mode
+    # rather than as two conditional `include_router` calls, so that adding a
+    # third mode is a change here and cannot leave both mounted by accident.
+    application.state.mode = resolved
+    if resolved == "storage":
+        application.include_router(storage_routes.router)
+    else:
+        application.include_router(routes.router)
     return application
 
 

@@ -211,6 +211,47 @@ identical shape, one file away from the module that records having made it
 first. *Reading how a prior test solved a problem is not the same as reading
 that it had the problem.*
 
+### Found during Run 6
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D348** | Migration 0014 gives the endpoints everything they need; Run 6 is "the endpoints" and adds no schema. | **Completion could not be written.** It must ask the provider how many bytes arrived before moving an object to `available`, and to ask it needs the key — which 0014 exposes only through `storage_lookup_for_download` (`state = 'available'`) and `storage_claim_cleanup_batch` (`state = 'tombstoned'`). **The pending state completion operates on was the one state with no reader.** Returning the key from the intent and having the client hand it back is refused by STO-KEY-001, whose entire content is that no client-supplied key reaches a presign. | **Migration 0015**, `storage_completion_key(uuid, uuid)`. Not an edit to 0014: ADR 0091's three conditions were checked rather than assumed, and **condition 2 fails** — 0014 applies perfectly well, and the ADR says in as many words that "a migration that merely did the wrong thing does not qualify". | Found by writing the completion path and having nowhere to get the key from. Nothing offline could have found it earlier: every Run 3 test calls the functions that exist. **A plane is complete when a caller can be written against it, not when its tests pass.** | — |
+| **D349** | 0014's comment: the compare-and-set "is what makes completion idempotent". | **True of the function and false of the path through it.** The endpoint reads the key first, and the first `storage_completion_key` filtered on `state = 'pending'` — so a retried completion 404'd *before* reaching the CAS that provides the idempotency. Caught by `test_completion_is_idempotent`, which failed on its first run. | 0015's predicate is `pending OR available`. Tombstoned stays excluded: completing one would resurrect it, and the state machine is one-way. | **A claim about a component is not a claim about the path through it.** The comment was accurate and the property was absent, which is a sharper version of D267 — there the measurement was fabricated, here it was real and about the wrong scope. | — |
+| **D350** | `APP_MODE` selects the mode, and the auth service is unaffected by Run 6. | **Adding the mode check would have broken the running auth container.** The entrypoint is `--factory app.main:create_app`, called with no arguments, so `create_app` reads `APP_MODE` from the environment — and the `auth` Compose service did not set it. A required mode with no default is right (ADR 0055's reasoning applied to behaviour), but it makes the variable load-bearing for a service that already exists. | `APP_MODE: auth` on the auth service, and `test_the_compose_service_supplies_every_setting_the_service_requires` is now parametrised over **both** services. | The test was comparing only `auth` against `REQUIRED_VARIABLES`, so the eight `APG_STORAGE_*` variables the `storage` service sets had been checked against **nothing at all** since Run 2. Parametrised rather than unioned: one combined list is satisfied by a compose file that hands every variable to both services, which is the boundary ADR 0101 rests on. | — |
+| **D351** | Storage mode reuses `settings.load`, which requires `APG_SIGNING_KEY_FILE`. | Storage holds **no** signing key, so `load` could not run at all in that mode. Making the field optional is not enough: a container that had somehow been handed a key would then start normally and hold one. | `load(mode=...)`, and in storage mode the variable must be **absent** — present is a refusal to start, not an ignored value. `Settings.signing_key_file` is `Path \| None`, and `FORBIDDEN_VARIABLES` states the rule so a compose test can assert the file never presents it. | ADR 0101 says one image, two modes, and the boundary is the secret contract's per-consumer materialization. That is only a boundary if something refuses when it is crossed — otherwise it is a description of what the file happens to say today. Storage is a third **verifier** (ADR 0098) and never an issuer. | — |
+
+**The Run 6 battery: 11 mutations, 1 stayed green — and that one is a
+deliberate no-op control.** Both controls green, every file restored
+byte-identical.
+
+**Three of the four the battery caught first time round were gaps in tests
+written minutes earlier**, which is the same finding Run 5 had and a different
+mechanism each time:
+
+* **M1** — every download test asserted a *refusal*, and none asserted that an
+  owner can download at all. Breaking the owner filter so `lookup_for_download`
+  matched nothing left the suite green. *A surface tested only through what it
+  denies is one nobody has checked answers.*
+* **M4** — replacing `uuid.uuid4()` with a constant stayed green, because
+  nothing asserted two intents get different keys. A fixed uuid4-shaped string
+  is a well-formed one, so `is_derived_key` still matched; ADR 0102's
+  "independent random values" was a claim with no test.
+* **M11** — mutating the **real** repository's ownership filter changed nothing,
+  because the endpoint suite replaces that module wholesale with a fake. The SQL
+  is proved against a cluster in `test_storage_plane.py` and the callers are
+  proved nowhere. `tests/contract/test_storage_repository.py` now records the
+  statement and the parameters, because the ownership filter *is* an argument
+  and swapping two `uuid`s is a type-correct mistake no signature catches.
+
+**And the battery lied once, in my own tooling.** The patch script that added the
+repository module to the battery's suite printed success without checking that
+its replacement had matched, so M11 stayed green a second time for a reason that
+had nothing to do with the code. That is D269 exactly — "a mutation that cannot
+be applied is a battery failure" — reproduced one level up, in the script
+maintaining the battery rather than in the battery itself. The harness's own
+anchor check is what makes the battery trustworthy; the script editing it had no
+such check.
+
 ---
 
 ## 2. What Session 7 adds to the acceptance registry
@@ -651,6 +692,32 @@ for an expired URL, a mutated key and a mutated signature.
 negative arms, and no URL or key in any log.
 
 ### Run 6 — The endpoints
+
+**Done.** Four divergence rows (**D348–D351**), migration **0015**, and the four
+endpoints under `/api/app/storage`.
+
+**No ADR.** Every decision this run made was already decided: ADR 0097 owns the
+error vocabulary (D314 asked for a parallel one and got two constants extending
+the existing split), ADR 0101 owns the two modes, ADR 0102 owns the key, ADR
+0104 owns the ordering, and **ADR 0091 answered the migration question without
+needing a new one** — its three conditions were checked, condition 2 failed, and
+the rule's own text says that case gets a new migration.
+
+**The finding is D348**: the plane Run 3 released could not have a caller
+written against it. Completion needs the key of a *pending* object and 0014
+exposed the key only for `available` and `tombstoned` rows. Every Run 3 test
+called the functions that existed, so nothing was red.
+
+Shipped: `object_keys.py` (ADR 0102's suffix, and a validator written
+independently of the generator); `storage_models.py`, whose `UploadIntentRequest`
+has no key or bucket field and whose `CompleteUploadRequest` is deliberately
+empty; `storage_repository.py`, eight functions and no table reference;
+`storage_service.py`, with `verify_uploaded_bytes` and `finalize` split so the
+subject can be re-authenticated **between** them; `storage_routes.py`;
+`OBJECT_UNAVAILABLE` and `OBJECT_STATE_CONFLICT` extending `errors.py`;
+`APP_MODE` on both Compose services; mode-aware `settings.load`; and 46 tests.
+
+*The original plan text for this run follows.*
 
 Upload intent, completion, download URL, delete. Strict request parsing on the
 inherited path, errors in ADR 0097's shape (D314), no-store on every response

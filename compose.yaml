@@ -836,8 +836,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Twelve variables, every one required, and not one of them a secret.
-    # `app/settings.py` declares the same twelve in REQUIRED_VARIABLES and
+    # Thirteen variables, every one required, and not one of them a secret.
+    # `app/settings.py` declares the same set in REQUIRED_VARIABLES and
     # test_the_compose_service_supplies_every_setting_the_service_requires
     # compares the two lists -- because a renderer emitting a variable the
     # compose file does not read, or the reverse, is D178.
@@ -846,6 +846,14 @@ services:
     # `passfile=`, and the signing key is a mounted file read once at startup.
     # Neither becomes an environment variable, an argument or a log line.
     environment:
+      # The mode, and it is required here for the same reason it is required on
+      # the `storage` service (ADR 0101). The entrypoint is
+      # `--factory app.main:create_app`, which is called with no arguments, so
+      # this variable is the only thing that decides which router is mounted.
+      # Omitting it does not default to auth -- `create_app` refuses to build,
+      # because an image that picked a mode by omission would start the wrong
+      # service with a correct-looking configuration.
+      APP_MODE: auth
       APG_PROJECT_KEY: ${PROJECT_KEY:?required}
       APG_PROJECT_ENVIRONMENT: ${PROJECT_ENVIRONMENT:?required}
       # The project's JWT identity, and the same two variables PostgREST's

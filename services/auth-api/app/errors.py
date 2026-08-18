@@ -55,6 +55,35 @@ MALFORMED_REQUEST: Final = {"error": "malformed_request"}
 #: an authenticated administrator, so a reason is safe and useful.
 INVALID_REQUEST: Final = {"error": "invalid_request"}
 
+#: Session 7. The one answer the storage surface gives for an object the caller
+#: cannot be told about: absent, another user's, still pending, or tombstoned.
+#:
+#: **Four causes, one body, and that is STO-OWN-001** rather than a courtesy.
+#: Distinguishing "does not exist" from "not yours" turns an object id into an
+#: oracle for whether a stranger's object exists, and object ids travel in URLs.
+#: The obscuring is not implemented here:
+#: `app_private.storage_lookup_for_download` filters on owner AND state in one
+#: predicate and returns zero rows for all four, so the service never learns
+#: which case it had and cannot leak a difference it does not hold.
+#:
+#: 404 rather than 403, because a 403 would confirm the object exists.
+OBJECT_UNAVAILABLE: Final = {"error": "object_unavailable"}
+
+#: Session 7. A state the OWNER can act on, returned only to them.
+#:
+#: D314 asked for a parallel `STOR100`-`STOR111` vocabulary, several of whose
+#: codes return a message to an unauthenticated caller. ADR 0097 already decided
+#: that split, and this extends it rather than restating it: a storage-specific
+#: code is admissible only where it names a state the caller can *act on* and
+#: the caller is authenticated as the object's owner. Everything structural
+#: stays `malformed_request` -- 400, with nothing in it.
+#:
+#: Reached only after the database has confirmed ownership, because
+#: `storage_complete_upload` returns the current state for the owner's row and
+#: NULL for every other case. So naming the state tells a caller about their own
+#: object and about nobody else's.
+OBJECT_STATE_CONFLICT: Final = {"error": "object_state_conflict"}
+
 
 class AuthenticationFailed(Exception):
     """Any of the four. Carries a reason for the log and never for the caller."""
@@ -95,6 +124,24 @@ class InvalidRequest(Exception):
     """Well-formed and refused. The message is returned to an administrator."""
 
 
+class ObjectUnavailable(Exception):
+    """Absent, another owner's, pending or tombstoned -- and never says which.
+
+    Carries no attributes on purpose. An exception with a `reason` would be a
+    place for the four causes to become distinguishable later, one careful
+    `if` at a time, and the whole property is that the service does not hold
+    the distinction to leak.
+    """
+
+
+class ObjectStateConflict(Exception):
+    """The owner's object is not in a state this operation can move it from."""
+
+    def __init__(self, state: str) -> None:
+        super().__init__(state)
+        self.state = state
+
+
 def unauthenticated() -> JSONResponse:
     """401, with `WWW-Authenticate` because RFC 9110 requires it on a 401.
 
@@ -120,3 +167,24 @@ def invalid(message: str) -> JSONResponse:
     """422, with a reason, for an authenticated administrator."""
     body: dict[str, Any] = {**INVALID_REQUEST, "message": message}
     return JSONResponse(body, status_code=422)
+
+
+def object_unavailable() -> JSONResponse:
+    """404, and the same 404 for four different causes (STO-OWN-001).
+
+    `no-store` because a cache that remembered this answer for an id would keep
+    answering it after the object became available -- and, worse, could serve
+    one user's 404 to another user whose object of that id does exist.
+    """
+    return JSONResponse(OBJECT_UNAVAILABLE, status_code=404, headers={"Cache-Control": "no-store"})
+
+
+def object_state_conflict(state: str) -> JSONResponse:
+    """409, naming the owner's own object's state.
+
+    Safe because it is unreachable unless the database matched the row on owner
+    id: every non-owned case comes back indistinguishable from absent and
+    becomes `object_unavailable` instead.
+    """
+    body: dict[str, Any] = {**OBJECT_STATE_CONFLICT, "state": state}
+    return JSONResponse(body, status_code=409, headers={"Cache-Control": "no-store"})

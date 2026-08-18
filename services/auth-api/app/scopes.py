@@ -94,6 +94,18 @@ ADMIN_USERS_READ = "admin_users:read"
 ADMIN_AGENTS_WRITE = "admin_agents:write"
 ADMIN_AGENTS_READ = "admin_agents:read"
 
+#: Session 7's storage class (ADR 0100), named here for the same reason as the
+#: four above: the endpoint, the registry and the test read one string.
+#:
+#: Both are in the `authenticated` and `project_admin` ceilings above and in
+#: **neither agent ceiling**, which is one of the two places object storage's
+#: human-only property is written -- the other being `$defs/agent_scope`, which
+#: `required_scopes` refs and which the storage class is absent from. A ceiling
+#: says what a token may carry; the schema says what a manifest may ask for.
+#: Session 7 wants both, so removing either does not silently open the surface.
+OBJECTS_READ = "objects:read"
+OBJECTS_WRITE = "objects:write"
+
 
 def ceiling(role_suffix: str) -> frozenset[str] | None:
     """The ceiling for one role, or None when no token may name it.

@@ -63,7 +63,7 @@ def generate() -> bytes:
     """
     from app.main import create_app
 
-    document = create_app().openapi()
+    document = create_app("auth").openapi()
     return json.dumps(document, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
 

@@ -208,7 +208,13 @@ def new_intent(
 def test_the_storage_functions_are_owned_by_the_object_owner(cluster: dict[str, Any]) -> None:
     """A SECURITY DEFINER function runs as its owner, so who owns it is the
     privilege it confers. One created outside the `SET LOCAL ROLE` would run as
-    `migration_user` and confer that instead."""
+    `migration_user` and confer that instead.
+
+    **Eight since Run 6**, not 0014's seven: migration 0015 adds
+    `storage_completion_key`, the function 0014 needed and did not have. The
+    count is updated rather than relaxed to a `>=`, because what it catches is a
+    function DISAPPEARING and a floor would stop catching that.
+    """
     result = su(
         cluster,
         "SELECT p.proname || '=' || pg_catalog.pg_get_userbyid(p.proowner) "
@@ -217,7 +223,7 @@ def test_the_storage_functions_are_owned_by_the_object_owner(cluster: dict[str, 
     )
     assert result.returncode == 0, result.stderr
     rows = [line for line in result.stdout.strip().splitlines() if line]
-    assert len(rows) == 7, f"expected seven storage functions, found {rows}"
+    assert len(rows) == 8, f"expected eight storage functions, found {rows}"
     for row in rows:
         assert row.endswith(f"={cluster['roles']['object_owner']}"), row
 

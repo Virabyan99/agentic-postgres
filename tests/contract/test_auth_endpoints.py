@@ -279,7 +279,7 @@ def drive(environment: dict[str, str], administrator: str) -> Any:
 
     previous = dict(os.environ)
     os.environ.update(environment)
-    application = main_module.create_app()
+    application = main_module.create_app("auth")
 
     @asynccontextmanager
     async def started() -> Any:

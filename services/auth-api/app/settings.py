@@ -20,6 +20,12 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+#: The two modes one image runs (ADR 0101). Required, never defaulted: an image
+#: that picked a mode by omission would start the wrong service with a
+#: correct-looking configuration, which is ADR 0055's reasoning applied to
+#: behaviour rather than to a value.
+APP_MODES: frozenset[str] = frozenset({"auth", "storage"})
+
 
 class MissingSetting(RuntimeError):
     """A required environment variable that was not set.
@@ -88,7 +94,13 @@ class Settings:
     database_role: str
     passfile: Path
     pool_size: int
-    signing_key_file: Path
+    #: `None` in storage mode, and its absence is a security property rather
+    #: than an optional field (ADR 0101, D320). One image runs both modes and
+    #: the boundary is the secret contract's per-consumer materialization: the
+    #: `storage` consumer is granted no signing key, so `APG_SIGNING_KEY_FILE`
+    #: is absent from its environment and there is nothing on its filesystem to
+    #: read. Storage is a third VERIFIER (ADR 0098) and never an issuer.
+    signing_key_file: Path | None
     listen_port: int
     role_names: dict[str, str]
 
@@ -114,23 +126,47 @@ class Settings:
         )
 
 
-def load(environ: dict[str, str] | None = None) -> Settings:
+def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settings:
     """Read the environment, or raise.
 
     `environ` is a parameter so the contract tests can exercise this without a
     process to configure -- and so that "what this service reads" is a list a
     test can assert against rather than a set of `os.environ` lookups scattered
     through the module that happens to need each one.
+
+    `mode` decides one thing: whether `APG_SIGNING_KEY_FILE` is required. In
+    storage mode it must be **absent**, not merely unread (ADR 0101). Tolerating
+    it would mean a container that had somehow been handed a signing key would
+    start normally and hold one -- and the whole point of running two modes from
+    one image is that the credential boundary is enforced somewhere real. Here,
+    that is a refusal to start.
     """
     if environ is not None:
         previous = dict(os.environ)
         os.environ.clear()
         os.environ.update(environ)
         try:
-            return load()
+            return load(mode=mode)
         finally:
             os.environ.clear()
             os.environ.update(previous)
+
+    if mode not in APP_MODES:
+        raise MissingSetting(f"APP_MODE must be one of {sorted(APP_MODES)}, not {mode!r}")
+
+    if mode == "storage":
+        # Absent, not ignored. A storage container holding a signing key is a
+        # second issuer nobody published, and ADR 0098's whole model is that a
+        # verifier's set is decided by what issuers declare -- an undeclared one
+        # would verify tokens no verifier was configured for.
+        if os.environ.get("APG_SIGNING_KEY_FILE"):
+            raise MissingSetting(
+                "APG_SIGNING_KEY_FILE is set in storage mode; storage is a verifier "
+                "and never an issuer, and must be granted no signing key (ADR 0101)"
+            )
+        signing_key_file: Path | None = None
+    else:
+        signing_key_file = Path(_required("APG_SIGNING_KEY_FILE"))
 
     return Settings(
         project_key=_required("APG_PROJECT_KEY"),
@@ -143,7 +179,7 @@ def load(environ: dict[str, str] | None = None) -> Settings:
         database_role=_required("APG_DATABASE_ROLE"),
         passfile=Path(_required("APG_DATABASE_PASSFILE")),
         pool_size=_required_int("APG_POOL_SIZE"),
-        signing_key_file=Path(_required("APG_SIGNING_KEY_FILE")),
+        signing_key_file=signing_key_file,
         listen_port=_required_int("APG_LISTEN_PORT"),
         role_names=_required_role_names("APG_ROLE_NAMES"),
     )
@@ -154,7 +190,8 @@ def load(environ: dict[str, str] | None = None) -> Settings:
 #: compare it against `compose.yaml` -- which is the check that would have
 #: caught D178, where a renderer emitted a variable and the compose file
 #: refused the empty value it emitted.
-REQUIRED_VARIABLES: tuple[str, ...] = (
+#: What both modes read.
+SHARED_VARIABLES: tuple[str, ...] = (
     "APG_PROJECT_KEY",
     "APG_PROJECT_ENVIRONMENT",
     "APG_JWT_ISSUER",
@@ -165,7 +202,34 @@ REQUIRED_VARIABLES: tuple[str, ...] = (
     "APG_DATABASE_ROLE",
     "APG_DATABASE_PASSFILE",
     "APG_POOL_SIZE",
-    "APG_SIGNING_KEY_FILE",
     "APG_LISTEN_PORT",
     "APG_ROLE_NAMES",
 )
+
+REQUIRED_VARIABLES: tuple[str, ...] = (*SHARED_VARIABLES, "APG_SIGNING_KEY_FILE")
+
+#: Session 7. What the storage mode reads INSTEAD of the signing key, plus the
+#: six settings that are its own. Declared beside the auth set so
+#: `test_the_compose_service_supplies_every_setting_the_service_requires` can
+#: compare each mode against the Compose service that runs it -- one list per
+#: mode, because a single union would be satisfied by a compose file that gave
+#: every variable to both services, which is the boundary ADR 0101 relies on.
+STORAGE_VARIABLES: tuple[str, ...] = (
+    *SHARED_VARIABLES,
+    "APG_STORAGE_ENDPOINT",
+    "APG_STORAGE_BUCKET",
+    "APG_STORAGE_PREFIX",
+    "APG_STORAGE_ACCESS_KEY_ID_FILE",
+    "APG_STORAGE_SECRET_ACCESS_KEY_FILE",
+    "APG_STORAGE_UPLOAD_URL_TTL_SECONDS",
+    "APG_STORAGE_DOWNLOAD_URL_TTL_SECONDS",
+    "APG_STORAGE_MAX_UPLOAD_BYTES",
+)
+
+#: The variable each mode must NOT be given. Stated as a set rather than left
+#: implicit, because "storage has no signing key" is only a property if
+#: something checks it -- and what checks it is `load`, which refuses to start.
+FORBIDDEN_VARIABLES: dict[str, tuple[str, ...]] = {
+    "auth": (),
+    "storage": ("APG_SIGNING_KEY_FILE",),
+}

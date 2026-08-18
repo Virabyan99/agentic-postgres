@@ -168,6 +168,17 @@
       "template": "templates/0014-object-storage-plane.sql",
       "template_sha256": "cd8fabf559357b32371f0a44f15061c0917065fe3bb89a08de2e90c857e20769",
       "version": "20260816120014"
+    },
+    {
+      "canonical_render_sha256": "cf2c363b99fa3f56f9bce8497353e1513e6c403fb40d8e75e67a8bd52ab07f0c",
+      "name": "storage_completion_key",
+      "placeholders": [
+        "object_owner",
+        "storage_service"
+      ],
+      "template": "templates/0015-storage-completion-key.sql",
+      "template_sha256": "54b3791f5ca177e08f6d9a00699d76b9185980d62c757c747a69190e6d55eef6",
+      "version": "20260818120015"
     }
   ],
   "schema_version": 1
