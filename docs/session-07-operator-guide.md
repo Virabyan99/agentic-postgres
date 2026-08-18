@@ -416,14 +416,26 @@ failures, nineteen of which were proofs that had never run. Expect this trip to
 find things; that is what it is for. Work through it in this order and stop at
 the first thing that surprises you.
 
-**0. Before leaving the workstation.** Re-render the fixtures, or the host gate
-reads stale ones and reports interpolation errors as a defect in `compose.yaml`
-(D212):
+**0. Re-render the fixtures — ON THE HOST, after transport (D383).** Otherwise
+the gate reads stale ones and reports interpolation errors as a defect in
+`compose.yaml` (D212):
 
 ```bash
 ./deploy.sh --project project.example.yaml        --capabilities capabilities.example.yaml --render-only
 ./deploy.sh --project project.second.example.yaml --capabilities capabilities.example.yaml --render-only
 ```
+
+> **This step used to say "before leaving the workstation", and that could not
+> work.** `.generated/*` is gitignored, so the rendered fixtures are not in the
+> transport bundle: every machine keeps its own, and the host's were last
+> written by whatever release it ran before. Run 10 followed the old wording
+> exactly and the host gate still refused at exit 6, naming both fixtures at
+> v10 against code that renders v11 — the gate doing its job.
+>
+> Neither root nor a running project is needed: `--render-only` is the one mode
+> that runs in a bare checkout. Run it as the operator user **after step 2**,
+> and re-run it any time the outputs schema version moves. Re-rendering on the
+> workstation is still worth doing — for the workstation's own offline gate.
 
 **1. The provider — §2, §2.1 and §3 only.** Create the buckets, **write the
 account ID into both manifests**, issue the two tokens. Two of these cannot be
