@@ -417,12 +417,21 @@ reads stale ones and reports interpolation errors as a defect in `compose.yaml`
 ./deploy.sh --project project.second.example.yaml --capabilities capabilities.example.yaml --render-only
 ```
 
-**1. The provider.** §2, §2.1, §3 and §4 above: create the bucket, **write the
-account ID into both manifests**, issue the token, put both halves into
-Infisical. Two of these cannot be undone by re-running a command and the secret
-is shown exactly once. **Confirm first that the two Run 5 probe tokens are
-revoked** — access key ids `5d4382d1…` and `63ff979a…` went through a chat
-transcript and only a human can revoke them in the dashboard.
+**1. The provider — §2, §2.1 and §3 only.** Create the buckets, **write the
+account ID into both manifests**, issue the two tokens. Two of these cannot be
+undone by re-running a command and the secret is shown exactly once. **Confirm
+first that the two Run 5 probe tokens are revoked** — access key ids
+`5d4382d1…` and `63ff979a…` went through a chat transcript and only a human can
+revoke them in the dashboard.
+
+> **§4 is NOT part of this step — it moved after transport (D378).**
+> `bootstrap-providers.sh --apply` reads the repository's
+> `secrets.required.yaml`, and the three storage secrets entered that file in
+> Run 2. Run against the Session 6 checkout the host currently holds, `--apply`
+> creates no `storage_service_password` and names neither operator-supplied
+> secret — and exits looking like it worked. **Session 6's guide has the right
+> order** (transport, `down`, provider secrets, materialize, deploy); this page
+> had inverted it. Keep both token values safe until step 2a.
 
 > **Run 10 status.** The probe tokens were confirmed revoked, and **both buckets
 > now exist** — created over the Cloudflare API rather than the dashboard
@@ -447,6 +456,21 @@ git fetch /tmp/apg.bundle main && git checkout -B main FETCH_HEAD
 Not a fast-forward merge. **Read the `release <sha>` line the deploy prints and
 confirm it is the sha you just fetched** — a skipped fetch has already produced
 one deploy of the previous commit.
+
+**2a. Now §4 — the provider secrets (D378).** Only with the release on the host
+does `secrets.required.yaml` know the three storage secrets. Per project, and
+`--plan` before `--apply`:
+
+```bash
+sudo bin/bootstrap-providers.sh --host host.yaml \
+     --project project.alpha.yaml --plan
+```
+
+Expect `create secret value storage_service_password`, and the two
+operator-supplied secrets **named but NOT proposed for creation**. If `--plan`
+proposes creating `r2_access_key_id`, stop — §6 says what that means. Then
+`--apply` with the control-plane credential, and only then paste the two R2
+values into Infisical under `/storage`, so the folder exists first.
 
 **3. The cluster restart, and it is a restart.** `max_connections` moves from 50
 to 56 (ADR 0099) and is **not** a reloadable parameter. Until the clusters are
