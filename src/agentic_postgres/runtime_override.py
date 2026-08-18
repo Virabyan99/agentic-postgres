@@ -125,6 +125,20 @@ SNAPSHOT_ENV_KEY = "APG_DOCS_SNAPSHOT"
 JWKS_FILENAME = "jwks.json"
 JWKS_CONTAINER_PATH = "/etc/postgrest/jwks.json"
 
+#: Where the SAME rendered file is mounted for the storage runtime (ADR 0113).
+#:
+#: One artefact, two verifiers, two container paths -- the path differs because
+#: each image's convention does, and the file does not. Storage reads it with
+#: `LocalKeySet.from_path`; PostgREST reads it through `PGRST_JWT_SECRET`. A
+#: second *copy* for storage would be a second authority for one value (D264),
+#: and deriving it again inside the image is what ADR 0002 exists to refuse.
+#:
+#: D381 is why this constant exists at all. Storage was declared the third
+#: verifier in ADR 0098, D320, `compose.yaml` and `main.py`, and was given no
+#: verification material of any kind -- so its first start on any host raised
+#: `AttributeError: 'NoneType' object has no attribute 'jwks'` and exited 3.
+STORAGE_JWKS_CONTAINER_PATH = "/etc/storage/jwks.json"
+
 #: Container paths a sensitive-named environment key may reference (ADR 0064).
 #:
 #: `PGRST_JWT_SECRET` is refused by ADR 0008's denylist -- it ends in `_secret`
@@ -182,6 +196,7 @@ __all__ = [
     "ROUTED_SERVICE",
     "ROUTED_SERVICE_PORT",
     "STORAGE_CORS_METHODS",
+    "STORAGE_JWKS_CONTAINER_PATH",
     "STORAGE_SERVICE",
     "STORAGE_SERVICE_PORT",
     "build_override",
@@ -429,7 +444,19 @@ def build_override(
                     storage_buffering_middleware_name=storage_buffering_middleware_name,
                     storage_stripprefix_middleware_name=storage_stripprefix_middleware_name,
                     storage_cors_middleware_name=storage_cors_middleware_name,
-                )
+                ),
+                # The third verifier's key set (ADR 0113). The SAME per-project
+                # file `postgrest` is given above, at a different container
+                # path, read-only, and public by construction: a modulus, an
+                # exponent, an algorithm and a thumbprint. Nothing here can
+                # sign, which is the property that lets a verifier hold it.
+                #
+                # Here rather than in `compose.yaml` for the same reason the
+                # REST mount is: the host side is a per-project absolute path
+                # and the model must stay project-neutral.
+                "volumes": [
+                    f"{rendered_directory}/{JWKS_FILENAME}:{STORAGE_JWKS_CONTAINER_PATH}:ro"
+                ],
             },
         }
     }

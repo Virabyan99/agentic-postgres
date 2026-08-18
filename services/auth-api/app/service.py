@@ -9,7 +9,6 @@ makes that a property of the shape rather than of a check somebody remembers.
 
 from __future__ import annotations
 
-import json
 import secrets
 import time
 import uuid
@@ -52,20 +51,32 @@ class Principal:
 
 
 class AuthService:
-    """Everything the routes call. Holds the pool, the hasher and the key."""
+    """Everything the routes call. Holds the pool, the hasher and the keys.
+
+    **Issuing and verifying are two capabilities, and this class may be given
+    either or both** (ADR 0113). `auth` holds a signing key and issues; `storage`
+    holds none and only verifies. The key set is therefore a **parameter** rather
+    than something derived here: D381 was a storage container told it was the
+    third verifier and handed nothing to verify with, because the set was
+    implied by a signing key that is deliberately absent in that mode.
+    """
 
     def __init__(
         self,
         *,
         repository: Repository,
         hasher: BoundedHasher,
-        signing_key: key_module.SigningKey,
+        signing_key: key_module.SigningKey | None,
+        key_set: LocalKeySet,
         issuer: str,
         audience: str,
         role_suffixes: dict[str, str],
     ) -> None:
         self.repository = repository
         self.hasher = hasher
+        #: `None` in storage mode. Every issuing path checks it, because "this
+        #: service cannot issue" is a property worth enforcing rather than a
+        #: route that happens not to be mounted.
         self.signing_key = signing_key
         self.issuer = issuer
         self.audience = audience
@@ -76,11 +87,12 @@ class AuthService:
         #: deriving it, because `naming.py` is the single authority and it is
         #: not in this image (ADR 0002).
         self.role_suffixes = role_suffixes
-        #: The service verifies with the same public material it publishes,
-        #: parsed through the same loader a verifier would use -- so a JWKS this
-        #: service could not read is a startup failure rather than a token
-        #: nobody can check.
-        self.key_set = LocalKeySet.load(json.dumps(signing_key.jwks()).encode("utf-8"))
+        #: Given, never derived (ADR 0113). An issuer builds it from the public
+        #: half of what it signs with, so it verifies exactly what it published;
+        #: a non-issuing verifier reads the rendered JWKS from a file. Both are
+        #: parsed by the same loader, so a key set this service could not read
+        #: is a startup failure rather than a token nobody can check.
+        self.key_set = key_set
 
     # -- login -------------------------------------------------------------
 
@@ -126,7 +138,19 @@ class AuthService:
         against the ceiling: a stored value outside the role's ceiling is a
         refusal rather than a quiet truncation, because a subject holding a
         scope its role may not carry is a state somebody has to know about.
+
+        **A verifier-only runtime refuses here, before any work** (ADR 0113).
+        `/auth/login` is not mounted in storage mode, so there is no caller and
+        this is a defect rather than a request to deny. It is stated instead of
+        left to an `AttributeError` on `None.private_pem` further down, because
+        that is precisely what D381 looked like in a log.
         """
+        if self.signing_key is None:
+            raise RuntimeError(
+                "this runtime holds no signing key and cannot issue; it is a verifier "
+                "only (ADR 0101, ADR 0113)"
+            )
+
         suffix = self.role_suffixes.get(credential.role_name)
         if suffix is None:
             raise InvalidRequest(

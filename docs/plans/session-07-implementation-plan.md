@@ -959,6 +959,55 @@ first host trip and Run 13's first gate returned twenty failures, nineteen of
 which were proofs that had never executed. Plan for the trip to find things;
 that is what it is for.
 
+**In progress.** The provider half is done and the host half is part-way.
+Measured: both R2 buckets created and read back (**D376**); the guide never told
+the operator where the account id goes (**D377**); `--apply` cannot run before
+transport (**D378**); nothing creates the `/storage` folder (**D379**);
+`apg-diag` cannot read the new service's logs (**D380**).
+
+On the host, **alpha-dev**: `max_connections` **56, reserved 3** — the restart
+landed; `storage_service` credential set with `CONNECTION LIMIT 6`; migrations
+**0014, 0015 and 0016 applied** as `migration_user`, ledger at 16. Then the
+storage container `Exited (3)` on the first start of that service anywhere, which
+is **D381** and Run 11. beta-dev is untouched at session 6.
+
+### Run 11 — The third verifier's key set
+
+**Done.** Fixing D381, found by Run 10's first host start.
+
+Measured before anything was written: the **platform's** JWKS producer
+(`jwt_keys.public_jwk` + `build_jwks`, what `bin/render-jwks.py` uses) against
+the **service's** verifier parser (`LocalKeySet`) — a pair nothing had ever put
+together, since `from_path`'s only caller in the repository was a contract test.
+It emits `kty` RSA, `alg` RS256, `use` sig and a computed `kid`; one key, two
+keys, and a file written the way `render-jwks.py` writes one all parse. Four
+controls — a private RSA member, `alg: HS256`, an empty set, a key with no `kid`
+— were each refused, so the acceptances mean something.
+
+**ADR 0113.** `AuthService` is **handed** its key set rather than deriving one,
+so both modes state their source at the call site and no branch leaves it
+implied. `signing_key` becomes `SigningKey | None`, which is what it has been in
+fact since ADR 0101. Storage gains `APG_JWKS_FILE`, a `STORAGE_VARIABLES` entry
+and a read-only mount of **the same rendered file PostgREST reads** — not a copy,
+which would be a second authority for one value (D264). `issue()` refuses at its
+first line when there is no signing key, rather than reaching an
+`AttributeError` on `None.private_pem` further down.
+
+`tests/contract/test_verifier_key_sets.py` — nine tests, including the one that
+would have caught D381: **construct the service the way storage mode constructs
+it.** Every existing construction passed a real key, so the line that
+dereferenced it was covered by every test and exercised by none in the shipping
+configuration.
+
+**Mutation battery, six mutations, all killed**, control green in the same
+invocation before and after and all three files restored byte-identical:
+removing the issue guard, making the key set optional, letting auth accept a
+second set, dropping the mount, giving storage its own **copy**, and dropping
+`APG_JWKS_FILE` from `STORAGE_VARIABLES`. Anchors pre-flighted — each matched
+exactly once before the battery ran.
+
+Suite **3477 passed, 261 skipped**.
+
 ---
 
 ## 6. The storage surface

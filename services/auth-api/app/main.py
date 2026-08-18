@@ -24,6 +24,7 @@ means the pool hands out a connection that answers.
 
 from __future__ import annotations
 
+import json
 import os
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -40,6 +41,7 @@ from app.service import AuthService
 from app.storage_client import BoundedR2, R2Adapter
 from app.storage_repository import StorageRepository
 from app.storage_service import StorageService
+from app.tokens import LocalKeySet
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -118,10 +120,29 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         # `authenticate`, including its current-state comparison. What it does
         # not have is a signing key, so it can verify and never issue -- and
         # `/auth/login` is not mounted for it to try.
+        #
+        # The key set is resolved HERE, per mode, and handed in (ADR 0113).
+        # Deriving it inside `AuthService` is exactly what D381 was: storage
+        # received `signing_key=None` precisely as intended, that argument was
+        # the only key-set source, and the container exited 3 on its first
+        # start on any host. An issuer verifies with the public half of what it
+        # signs with; a non-issuing verifier reads the same rendered JWKS
+        # PostgREST is given.
+        if signing_key is not None:
+            key_set = LocalKeySet.load(json.dumps(signing_key.jwks()).encode("utf-8"))
+        else:
+            jwks_file = settings.jwks_file
+            if jwks_file is None:  # pragma: no cover -- settings.load refuses this
+                raise settings_module.MissingSetting(
+                    "no signing key and no APG_JWKS_FILE: this runtime could verify nothing"
+                )
+            key_set = LocalKeySet.from_path(jwks_file)
+
         application.state.service = AuthService(
             repository=Repository(pool),
             hasher=hasher,
             signing_key=signing_key,
+            key_set=key_set,
             issuer=settings.issuer,
             audience=settings.audience,
             role_suffixes={name: suffix for suffix, name in settings.role_names.items()},

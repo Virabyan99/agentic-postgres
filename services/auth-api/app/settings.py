@@ -101,6 +101,16 @@ class Settings:
     #: is absent from its environment and there is nothing on its filesystem to
     #: read. Storage is a third VERIFIER (ADR 0098) and never an issuer.
     signing_key_file: Path | None
+    #: Where a NON-ISSUING verifier reads its key set (ADR 0113). `None` in auth
+    #: mode, where the set is derived from the signing key -- an issuer that
+    #: verified with anything other than what it signs with is the split ADR
+    #: 0098 exists to prevent.
+    #:
+    #: Exactly one of these two fields is set in either mode, and that is the
+    #: point. D381 was a container told it was the third verifier and given
+    #: nothing to verify with, because the key set was *implied* by a field that
+    #: is deliberately absent here.
+    jwks_file: Path | None
     listen_port: int
     role_names: dict[str, str]
 
@@ -165,8 +175,22 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
                 "and never an issuer, and must be granted no signing key (ADR 0101)"
             )
         signing_key_file: Path | None = None
+        # Required, not optional. A verifier with no key set refuses every
+        # token, and a container that starts and refuses everything is worse
+        # than one that does not start: it looks deployed (ADR 0113, D381).
+        jwks_file: Path | None = Path(_required("APG_JWKS_FILE"))
     else:
         signing_key_file = Path(_required("APG_SIGNING_KEY_FILE"))
+        # Absent in auth mode, and refused rather than ignored, for the same
+        # reason storage refuses a signing key: two sources for one key set is
+        # two authorities for one value (D264), and the issuer's set must be
+        # what it signs with.
+        if os.environ.get("APG_JWKS_FILE"):
+            raise MissingSetting(
+                "APG_JWKS_FILE is set in auth mode; an issuer verifies with what it signs "
+                "with, and must not be given a second key set (ADR 0113)"
+            )
+        jwks_file = None
 
     return Settings(
         project_key=_required("APG_PROJECT_KEY"),
@@ -180,6 +204,7 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
         passfile=Path(_required("APG_DATABASE_PASSFILE")),
         pool_size=_required_int("APG_POOL_SIZE"),
         signing_key_file=signing_key_file,
+        jwks_file=jwks_file,
         listen_port=_required_int("APG_LISTEN_PORT"),
         role_names=_required_role_names("APG_ROLE_NAMES"),
     )
@@ -216,6 +241,10 @@ REQUIRED_VARIABLES: tuple[str, ...] = (*SHARED_VARIABLES, "APG_SIGNING_KEY_FILE"
 #: every variable to both services, which is the boundary ADR 0101 relies on.
 STORAGE_VARIABLES: tuple[str, ...] = (
     *SHARED_VARIABLES,
+    # What it verifies with (ADR 0113). Its absence from this list is half of
+    # why D381 survived a green suite: the list and `compose.yaml` agreed, and
+    # a test comparing two incomplete lists is satisfied by both (D332).
+    "APG_JWKS_FILE",
     "APG_STORAGE_ENDPOINT",
     "APG_STORAGE_BUCKET",
     "APG_STORAGE_PREFIX",
@@ -230,6 +259,8 @@ STORAGE_VARIABLES: tuple[str, ...] = (
 #: implicit, because "storage has no signing key" is only a property if
 #: something checks it -- and what checks it is `load`, which refuses to start.
 FORBIDDEN_VARIABLES: dict[str, tuple[str, ...]] = {
-    "auth": (),
+    # An issuer verifies with what it signs with, so a second key set is
+    # refused rather than ignored (ADR 0113).
+    "auth": ("APG_JWKS_FILE",),
     "storage": ("APG_SIGNING_KEY_FILE",),
 }

@@ -249,8 +249,17 @@ def test_storage_mode_refuses_to_start_holding_a_signing_key(tmp_path):
     Tolerating the variable would mean a storage container that had somehow been
     handed a key would start normally and hold one. The boundary between the two
     modes is only real if something refuses.
+
+    **`APG_JWKS_FILE` was added to this environment by ADR 0113**, which made a
+    key set source required in storage mode. The assertion and the control are
+    both unchanged; what changed is that a storage environment carrying no key
+    set is no longer a *valid* one, so the control half would otherwise fail for
+    a reason this test is not about. Nothing was weakened -- D381 is what a
+    storage runtime with no key set actually does, and it is now asserted in
+    `tests/contract/test_verifier_key_sets.py`.
     """
     environment = {
+        "APG_JWKS_FILE": str(tmp_path / "jwks.json"),
         "APG_PROJECT_KEY": "alpha-dev",
         "APG_PROJECT_ENVIRONMENT": "dev",
         "APG_JWT_ISSUER": "https://alpha.example.com",

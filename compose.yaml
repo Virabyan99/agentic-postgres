@@ -1135,6 +1135,13 @@ services:
       # no APG_SIGNING_KEY_FILE here and there must not be.
       APG_JWT_ISSUER: ${JWT_ISSUER:?required}
       APG_JWT_AUDIENCE: ${JWT_AUDIENCE:?required}
+      # What it verifies WITH, and the thing D381 found missing: being told it
+      # is a verifier is not the same as being given a key set. The rendered
+      # JWKS -- the same file `postgrest` reads -- is mounted read-only by
+      # `runtime_override.py` and loaded through `LocalKeySet.from_path`
+      # (ADR 0113). The container path is fixed so this model stays
+      # project-neutral; the per-project host side lives in the override.
+      APG_JWKS_FILE: /etc/storage/jwks.json
       APG_DATABASE_HOST: ${POSTGRES_SERVICE_HOST:?required}
       APG_DATABASE_PORT: '5432'
       APG_DATABASE_NAME: ${POSTGRES_DATABASE_NAME:?required}
