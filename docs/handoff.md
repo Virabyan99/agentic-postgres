@@ -5,15 +5,26 @@ For whoever (or whatever) picks this up next. Onboarding is in
 about *this machine* that are not obvious from the repository.
 
 
-## Session 5's documents
+## The live handoff is not here
 
-- [The API surface](api-surface.md) — what is published, the four
-  authorities in order, and the three verbs the document advertises and the
-  surface refuses.
+**`CLAUDE.md` at the repository's launch folder is the per-run status**: what is
+done, what is next, and the traps. This file describes the *machine and the
+workflow* and is deliberately not rewritten every run — if the two disagree
+about where the project stands, `CLAUDE.md` is right.
+
+## The session documents
+
+- [The API surface](api-surface.md) — what is published, the four authorities in
+  order, and the three verbs the document advertises and the surface refuses.
 - [API operations](api-operations.md) — the divided connection budget, the
   restart matrix, and rotating each of the three credentials.
 - [Session 5 operator guide](session-05-operator-guide.md) — deploying,
   capturing the snapshot, the gate's three modes, and the evidence merge.
+- [Session 6 operator guide](session-06-operator-guide.md) — the identity plane
+  and the signing-key cutover's phases.
+- [Session 7 operator guide](session-07-operator-guide.md) — object storage: the
+  bucket, the token, the cleanup and rotation surface, and **§5.4, the host
+  sequence for the trip that has not happened yet**.
 
 ## Where the project lives
 
@@ -156,16 +167,21 @@ and the external half: `transport_boundary` and `connection_tooling` are measure
 from off-host, so a session document cannot be written from a host run alone
 ([ADR 0045](decisions/0045-a-claim-is-shaped-by-where-it-can-be-measured.md)).
 
-## Starting Session 5
+## Starting a session
 
-Read, in this order:
+Read `CLAUDE.md` first — it says which run is next. Then, in this order:
 
-1. [The Session 4 divergence table and decision log](plans/session-04-implementation-plan.md)
-   — every ambiguity that was closed, and why. **New ambiguities go there or
-   into an ADR; they do not get resolved inline.** The Session 3 table is
-   [here](plans/session-03-implementation-plan.md) and the Session 2 one
-   [here](plans/session-02-implementation-plan.md); both are still cited by
-   number.
+1. **The current session's divergence table and decision log**, in
+   `plans/session-0N-implementation-plan.md` §1 — every ambiguity that was
+   closed, and why. **New ambiguities go there or into an ADR; they are never
+   resolved inline.** Earlier sessions' tables are still cited by number and
+   remain the record: sessions
+   [02](plans/session-02-implementation-plan.md),
+   [03](plans/session-03-implementation-plan.md),
+   [04](plans/session-04-implementation-plan.md),
+   [05](plans/session-05-implementation-plan.md),
+   [06](plans/session-06-implementation-plan.md),
+   [07](plans/session-07-implementation-plan.md).
 2. [The product contract](product-contract.md) and the
    [ADRs](decisions/README.md).
 3. [The acceptance matrix](acceptance-matrix.md).

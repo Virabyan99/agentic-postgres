@@ -186,12 +186,21 @@ intended. **The restart is a restart, not a reload** — `max_connections` is no
 reloadable parameter — and it belongs to Run 10's host sequence, not to this
 page.
 
-**There is no storage deployment yet.** `compose.yaml` carries a `storage`
-service from Run 2, its endpoints and migrations from Run 6, and its route from
-Run 7 — but it is on the `session7` profile and `CURRENT_SESSION` is 6, so
-nothing starts it: `bin/project-runtime.sh` selects `--profile session<n>` only
-up to `--through-session`. **Everything below §5.1 describes a deployment that
-has not happened on any host.**
+**There is no storage deployment yet — and as of Run 9 the next deploy will
+attempt one.** `compose.yaml` has carried a `storage` service since Run 2, its
+endpoints and migrations since Run 6 and its route since Run 7, all held back by
+the `session7` profile: `bin/project-runtime.sh` selects `--profile session<n>`
+only up to `--through-session`. **Run 9 moved `CURRENT_SESSION` to 7, so that
+brake is off.**
+
+What that means in practice: a deploy will now try to start a storage container,
+and it **fails closed** without the two R2 secrets rather than starting without
+them (`must_refresh_on_start` is true for both halves). So §2, §3 and §4 of this
+guide are no longer optional preparation — they are prerequisites for the next
+deploy of any project.
+
+**Everything below still describes a deployment that has not happened on any
+host.** No storage container has ever started anywhere.
 
 **Do not run the signing-key cutover in the same window as any of this.** It is
 unblocked (ADR 0088) and it is a separate maintenance window with its own
@@ -360,6 +369,93 @@ bucket in the same account 403. Section 4's read-back of account, name,
 jurisdiction, creation time and public-access state is a step you perform and
 record; it is weaker than an automated check and it is meant to be honest about
 that rather than to look like evidence.
+
+## 5.4 The Run 10 host sequence, in order
+
+Everything Session 7 built is written and **none of it has ever executed**.
+Session 6's first host trip found nine defects and its first gate returned twenty
+failures, nineteen of which were proofs that had never run. Expect this trip to
+find things; that is what it is for. Work through it in this order and stop at
+the first thing that surprises you.
+
+**0. Before leaving the workstation.** Re-render the fixtures, or the host gate
+reads stale ones and reports interpolation errors as a defect in `compose.yaml`
+(D212):
+
+```bash
+./deploy.sh --project project.example.yaml        --capabilities capabilities.example.yaml --render-only
+./deploy.sh --project project.second.example.yaml --capabilities capabilities.example.yaml --render-only
+```
+
+**1. The provider.** §2, §3 and §4 above: create the bucket, issue the token,
+put both halves into Infisical. Two of these cannot be undone by re-running a
+command and the secret is shown exactly once. **Confirm first that the two Run 5
+probe tokens are revoked** — access key ids `5d4382d1…` and `63ff979a…` went
+through a chat transcript and only a human can revoke them in the dashboard.
+
+**2. Transport.** `git bundle` + `scp`, then on the host:
+
+```bash
+git fetch /tmp/apg.bundle main && git checkout -B main FETCH_HEAD
+```
+
+Not a fast-forward merge. **Read the `release <sha>` line the deploy prints and
+confirm it is the sha you just fetched** — a skipped fetch has already produced
+one deploy of the previous commit.
+
+**3. The cluster restart, and it is a restart.** `max_connections` moves from 50
+to 56 (ADR 0099) and is **not** a reloadable parameter. Until the clusters are
+restarted a redeployed project renders outputs v11 and `connection_limits`
+refuses, with a message naming exactly this.
+
+**4. Migrations.** Three are released and applied nowhere — 0014, 0015 and 0016.
+They go on as `migration_user`, never as a superuser: every offline rig applies
+them as `psql -U postgres`, and a superuser bypasses the ownership check that
+made 0012 and 0013 fail on a real cluster (D285).
+
+**5. Deploy, then bootstrap, then deploy again.** `routes.storage` follows the
+same two-stage convergence `routes.app` does, so the first deploy publishes it
+`unavailable` and the second makes it `ready`.
+
+**6. The storage surface, by hand, before the gate.** `bin/storage-admin.sh
+--outputs … credential-digest` then `verify-credential`, in that order — the
+first says the container picked up the generation, the second says the credential
+reaches the bucket. A container still on an old generation would pass the second
+and mean nothing by it.
+
+**7. The gate, both halves.**
+
+```bash
+sudo bin/session-07-check.sh --mode host --host host.yaml \
+     --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
+     --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
+     --sentinel-file <derived, see §4 of the Session 5 guide> \
+     --admin-password-file <path>
+
+bin/session-07-check.sh --mode external --public-ipv4 <addr> \
+     --project-a-outputs <fresh copy> --ssh-destination <dest>
+```
+
+External mode must run **off-host**: a scan from the host measures its own
+routing table. Without `--admin-password-file` the proofs needing an
+administrator session skip and their claims report `not_run` — which is the
+evidence model working, not a failure.
+
+**8. Merge the two halves.**
+
+```bash
+bin/write-session-evidence.py --session 7 \
+    --host-input evidence/session-07-host.json \
+    --external-input evidence/session-07-external.json \
+    --output evidence/session-07.json
+```
+
+**What is not part of this trip.** Do not start the signing-key cutover in the
+same window (ADR 0088 — it is unblocked, and it is its own window with its own
+recreate step), and the Session 5 rotation window is a separate decision that
+closes two older claims.
+
+---
 
 ## 6. If something goes wrong
 
