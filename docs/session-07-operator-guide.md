@@ -98,6 +98,36 @@ clients hold one endpoint per client.
 Note your **account ID** while you are there (Cloudflare dashboard → account
 home). The S3 endpoint is `https://<ACCOUNT_ID>.r2.cloudflarestorage.com`.
 
+### 2.1 Where the account ID goes — do this before you leave the dashboard
+
+**D377.** Until Run 10 this page told you to note the account ID and never said
+what consumes it. It goes in **each project's manifest**, which is an
+operator-owned gitignored file that exists only on the host:
+
+```yaml
+# ~op/agentic-postgres/project.alpha.yaml  (and project.beta.yaml)
+storage:
+  enabled: true
+  account_id: <32 lowercase hex characters>
+```
+
+`storage.account_id` is **required when storage is enabled** and forbidden when
+it is not (ADR 0106). It is an *identifier*, not a credential — it appears in the
+hostname of every request — which is why it belongs here and not in Infisical.
+`bucket` and `prefix` are derived from the project key and should be left out
+unless you are deliberately overriding them (ADR 0105).
+
+Leaving it unset is not silent: the deploy refuses with
+
+```
+storage is enabled, so storage.account_id is required: the S3 endpoint is
+derived from it
+```
+
+That is `config.py` working as designed. But you meet it at **§5.4 step 5** —
+several irreversible operations after the dashboard tab you needed is closed.
+Set it now.
+
 ---
 
 ## 3. Issue the API token — the step that cannot be repeated
@@ -387,11 +417,26 @@ reads stale ones and reports interpolation errors as a defect in `compose.yaml`
 ./deploy.sh --project project.second.example.yaml --capabilities capabilities.example.yaml --render-only
 ```
 
-**1. The provider.** §2, §3 and §4 above: create the bucket, issue the token,
-put both halves into Infisical. Two of these cannot be undone by re-running a
-command and the secret is shown exactly once. **Confirm first that the two Run 5
-probe tokens are revoked** — access key ids `5d4382d1…` and `63ff979a…` went
-through a chat transcript and only a human can revoke them in the dashboard.
+**1. The provider.** §2, §2.1, §3 and §4 above: create the bucket, **write the
+account ID into both manifests**, issue the token, put both halves into
+Infisical. Two of these cannot be undone by re-running a command and the secret
+is shown exactly once. **Confirm first that the two Run 5 probe tokens are
+revoked** — access key ids `5d4382d1…` and `63ff979a…` went through a chat
+transcript and only a human can revoke them in the dashboard.
+
+> **Run 10 status.** The probe tokens were confirmed revoked, and **both buckets
+> now exist** — created over the Cloudflare API rather than the dashboard
+> (**D376**) and read back the way §4 item 1 requires:
+>
+> | Bucket | Account | Jurisdiction | Location | Created | Public access |
+> |---|---|---|---|---|---|
+> | `apg-alpha-dev` | `ddfa208f…c626` | `default` | EEUR | 2026-08-18T15:25:45Z | **disabled**, no custom domain |
+> | `apg-beta-dev` | `ddfa208f…c626` | `default` | EEUR | 2026-08-18T15:26:01Z | **disabled**, no custom domain |
+>
+> Neither name existed in the account beforehand, so ownership is proved by
+> construction rather than by name equality (§1). **Do not re-create them.**
+> What remains of step 1 is the two tokens, the two manifest edits, and
+> Infisical.
 
 **2. Transport.** `git bundle` + `scp`, then on the host:
 
