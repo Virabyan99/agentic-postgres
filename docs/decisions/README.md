@@ -173,3 +173,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0107](0107-the-addressing-style-is-path-because-it-is-the-only-invariant-one.md) | The addressing style is `path`, because it is the only invariant one | 7 | Accepted |
 | [0108](0108-a-nested-route-is-ordered-by-rule-length-and-the-ordering-is-derived.md) | A nested route is ordered by rule length, and the ordering is derived | 7 | Accepted |
 | [0109](0109-the-cors-middleware-is-a-label-and-it-instructs-a-browser-rather-than-controlling-access.md) | The CORS middleware is a label, and it instructs a browser rather than controlling access | 7 | Accepted |
+| [0110](0110-the-bucket-administering-credential-is-not-an-s3-credential.md) | The bucket-administering credential is not an S3 credential | 7 | Accepted |
+| [0111](0111-an-object-is-collectable-only-once-nothing-can-still-write-to-its-key.md) | An object is collectable only once nothing can still write to its key | 7 | Accepted |

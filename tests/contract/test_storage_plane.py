@@ -653,15 +653,22 @@ def test_a_claimed_object_is_not_claimed_twice(
     holds a claim across transaction boundaries, which is the property a row lock
     cannot provide because it is released at COMMIT. The concurrent case is the
     test below.
+
+    **`ttl=-60` is required by migration 0016 and was not by 0014.** An object
+    that never completed is collectable only once its upload URL can no longer be
+    honoured (ADR 0111), so a default-TTL intent is now correctly refused by the
+    claim and this test's subject has to be one whose window has closed. The
+    assertion is unchanged and no weaker: what moved is the fixture, not the
+    property.
     """
-    identifier = new_intent(cluster, subjects["first"])
+    identifier = new_intent(cluster, subjects["first"], ttl=-60)
     as_storage(
         cluster,
         f"SELECT app_private.storage_tombstone('{identifier}'::uuid, '{subjects['first']}'::uuid);",
     )
 
     first = as_storage(
-        cluster, "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-a', 10, 300);"
+        cluster, "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-a', 10, 300, 0);"
     )
     assert first.returncode == 0, first.stderr
     assert identifier in first.stdout
@@ -669,7 +676,7 @@ def test_a_claimed_object_is_not_claimed_twice(
     # A separate statement, therefore a separate transaction. Any row lock the
     # first claim took is long gone; only the stored lease can refuse this.
     second = as_storage(
-        cluster, "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-b', 10, 300);"
+        cluster, "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-b', 10, 300, 0);"
     )
     assert second.returncode == 0, second.stderr
     assert identifier not in second.stdout, (
@@ -685,14 +692,14 @@ def test_an_expired_lease_is_reclaimed(cluster: dict[str, Any], subjects: dict[s
     The lease is set to a past instant directly, because the alternative is
     sleeping for the shortest lease the function will accept.
     """
-    identifier = new_intent(cluster, subjects["first"])
+    identifier = new_intent(cluster, subjects["first"], ttl=-60)
     as_storage(
         cluster,
         f"SELECT app_private.storage_tombstone('{identifier}'::uuid, '{subjects['first']}'::uuid);",
     )
     as_storage(
         cluster,
-        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-crashed', 10, 300);",
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-crashed', 10, 300, 0);",
     )
     owner(
         cluster,
@@ -701,7 +708,8 @@ def test_an_expired_lease_is_reclaimed(cluster: dict[str, Any], subjects: dict[s
     )
 
     reclaimed = as_storage(
-        cluster, "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-next', 10, 300);"
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-next', 10, 300, 0);",
     )
     assert identifier in reclaimed.stdout, (
         "an object whose lease expired was not reclaimed, so a worker that died mid-delete "
@@ -722,13 +730,14 @@ def test_an_expired_lease_is_reclaimed(cluster: dict[str, Any], subjects: dict[s
 def test_finishing_requires_still_holding_the_lease(
     cluster: dict[str, Any], subjects: dict[str, str]
 ) -> None:
-    identifier = new_intent(cluster, subjects["first"])
+    identifier = new_intent(cluster, subjects["first"], ttl=-60)
     as_storage(
         cluster,
         f"SELECT app_private.storage_tombstone('{identifier}'::uuid, '{subjects['first']}'::uuid);",
     )
     as_storage(
-        cluster, "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-holder', 10, 300);"
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-holder', 10, 300, 0);",
     )
 
     impostor = as_storage(
@@ -747,7 +756,8 @@ def test_finishing_requires_still_holding_the_lease(
 
     # And it leaves the queue.
     again = as_storage(
-        cluster, "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-next', 10, 300);"
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-next', 10, 300, 0);",
     )
     assert identifier not in again.stdout
 
@@ -765,7 +775,7 @@ def test_two_concurrent_workers_never_claim_the_same_object(
     """
     identifiers = []
     for _ in range(6):
-        identifier = new_intent(cluster, subjects["first"])
+        identifier = new_intent(cluster, subjects["first"], ttl=-60)
         as_storage(
             cluster,
             f"SELECT app_private.storage_tombstone('{identifier}'::uuid, "
@@ -778,7 +788,7 @@ def test_two_concurrent_workers_never_claim_the_same_object(
     def claim(worker: str) -> None:
         result = as_storage(
             cluster,
-            f"SELECT id FROM app_private.storage_claim_cleanup_batch('{worker}', 3, 300);",
+            f"SELECT id FROM app_private.storage_claim_cleanup_batch('{worker}', 3, 300, 0);",
         )
         claimed[worker] = [
             line.strip() for line in result.stdout.strip().splitlines() if line.strip()
@@ -797,3 +807,281 @@ def test_two_concurrent_workers_never_claim_the_same_object(
         "delete one object twice and, worse, two workers would be writing the same lease"
     )
     assert first or second, "neither worker claimed anything, so this asserts nothing"
+
+
+# ---------------------------------------------------------------------------
+# The write window (migration 0016, ADR 0111)
+# ---------------------------------------------------------------------------
+#
+# 0014's claim collects any tombstone with no live lease. Run 8 wrote the first
+# caller for it and the gap became visible: a PENDING object carries a presigned
+# PUT that is still honourable, and tombstoning does not revoke it. Collect that
+# object and a late write lands under a key no row will ever look at again --
+# and section 4 forbids an orphan scan, so nothing would ever find it.
+
+
+def test_a_tombstoned_pending_object_is_not_collected_while_its_upload_url_lives(
+    cluster: dict[str, Any], subjects: dict[str, str]
+) -> None:
+    """The defect Run 8 found, stated as the property that must hold.
+
+    A pending object's presigned PUT is minted for `intent_expires_at` and a
+    tombstone does not revoke it -- a presigned URL is a bearer credential and
+    nothing in this system can withdraw one. So an object that has never been
+    completed is collectable only once that moment has passed; before it, the
+    provider DELETE races a write that would succeed.
+
+    The control is the test below: the same object, past its deadline, IS
+    claimed. Without it this passes for a claim that collects nothing at all.
+    """
+    identifier = new_intent(cluster, subjects["first"], ttl=3600)
+    as_storage(
+        cluster,
+        f"SELECT app_private.storage_tombstone('{identifier}'::uuid, '{subjects['first']}'::uuid);",
+    )
+
+    claimed = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-window', 50, 300, 0);",
+    )
+    assert claimed.returncode == 0, claimed.stderr
+    assert identifier not in claimed.stdout, (
+        "the claim collected an object whose presigned upload URL is still live. "
+        "Deleting it now leaves a late write orphaned at the provider under a key "
+        "no row will ever collect again"
+    )
+
+
+def test_a_tombstoned_pending_object_is_collected_once_its_deadline_has_passed(
+    cluster: dict[str, Any], subjects: dict[str, str]
+) -> None:
+    """The control. The window closes, and the object becomes collectable.
+
+    This is what makes the test above a statement about the WINDOW rather than
+    about the claim having stopped working.
+    """
+    identifier = new_intent(cluster, subjects["first"], ttl=-60)
+    as_storage(
+        cluster,
+        f"SELECT app_private.storage_tombstone('{identifier}'::uuid, '{subjects['first']}'::uuid);",
+    )
+
+    claimed = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-window-b', 50, 300, 0);",
+    )
+    assert claimed.returncode == 0, claimed.stderr
+    assert identifier in claimed.stdout, "an expired intent was never collectable"
+
+
+def test_a_completed_object_is_collected_without_waiting_for_the_intent_deadline(
+    cluster: dict[str, Any], subjects: dict[str, str]
+) -> None:
+    """Completion closes the window early, and the predicate has to know that.
+
+    An available object's key already holds bytes, and every upload URL this
+    service mints carries `If-None-Match: *` -- measured in Run 5 to return 412
+    on the second write, and 403 to a caller who omits the header. So a replayed
+    PUT cannot reach it, and waiting for `intent_expires_at` would delay every
+    ordinary delete by the whole upload TTL for no gain.
+
+    Written as a separate test rather than an arm of the one above because it is
+    the half a predicate keyed only on the deadline would get wrong, and that
+    predicate would pass both of the other two.
+    """
+    identifier = new_intent(cluster, subjects["first"], ttl=3600)
+    completed = as_storage(
+        cluster,
+        f"SELECT app_private.storage_complete_upload('{identifier}'::uuid, "
+        f"'{subjects['first']}'::uuid, 1024);",
+    )
+    assert completed.stdout.strip().splitlines()[-1] == "available", completed.stderr
+    as_storage(
+        cluster,
+        f"SELECT app_private.storage_tombstone('{identifier}'::uuid, '{subjects['first']}'::uuid);",
+    )
+
+    claimed = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-window-c', 50, 300, 0);",
+    )
+    assert claimed.returncode == 0, claimed.stderr
+    assert identifier in claimed.stdout, (
+        "a completed object was held back by the intent deadline. Its key already "
+        "holds bytes and a replayed PUT is refused 412, so there is nothing to wait for"
+    )
+
+
+def test_the_write_grace_moves_the_deadline_and_is_not_decoration(
+    cluster: dict[str, Any], subjects: dict[str, str]
+) -> None:
+    """The fourth argument has to change which rows come back, or it is a comment.
+
+    Two arms over one object, ten seconds past its deadline: a sixty-second grace
+    refuses it and a zero grace returns it. The second arm is the control, and it
+    is what stops this passing for a claim that had simply stopped collecting --
+    the failure mode a single-arm test of a "safety" predicate always has.
+
+    The grace exists because a signature validator may allow leeway on an expiry
+    its documentation implies is exact -- PostgREST does, by thirty seconds
+    (D241) -- so `intent_expires_at < now()` is only the right line if the
+    provider agrees. Whatever number the service passes, the plane has to honour
+    it.
+    """
+    identifier = new_intent(cluster, subjects["first"], ttl=-10)
+    as_storage(
+        cluster,
+        f"SELECT app_private.storage_tombstone('{identifier}'::uuid, '{subjects['first']}'::uuid);",
+    )
+
+    held = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-grace', 50, 300, 60);",
+    )
+    assert held.returncode == 0, held.stderr
+    assert identifier not in held.stdout, (
+        "a sixty-second grace did not hold back an object ten seconds past its "
+        "deadline, so the grace argument reaches nothing"
+    )
+
+    collected = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-grace-b', 50, 300, 0);",
+    )
+    assert collected.returncode == 0, collected.stderr
+    assert identifier in collected.stdout, (
+        "the control failed: with no grace the same object was still not claimed, "
+        "so the arm above proves nothing about the grace"
+    )
+
+
+def test_a_negative_write_grace_is_refused_rather_than_clamped(
+    cluster: dict[str, Any], subjects: dict[str, str]
+) -> None:
+    """Clamping would hide exactly the bug it was asked about.
+
+    A negative grace moves the deadline *earlier*, which collects objects whose
+    upload URL is still live -- the defect 0016 exists to close, reintroduced
+    through the argument meant to close it. `greatest(x, 0)` would turn that into
+    silence, so the function raises.
+    """
+    refused = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-negative', 10, 300, -1);",
+    )
+    assert refused.returncode != 0, "a negative write grace was accepted"
+    assert "AP422" in refused.stderr, refused.stderr
+
+    # The control: the same call with a valid grace reaches the query rather
+    # than dying for some unrelated reason, such as the function not existing.
+    accepted = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-negative', 10, 300, 0);",
+    )
+    assert accepted.returncode == 0, accepted.stderr
+
+
+def test_the_three_argument_claim_is_gone(cluster: dict[str, Any]) -> None:
+    """0016 DROPPED the old signature; it is not an overload beside the new one.
+
+    Two functions answering "which objects are collectable" would be two
+    authorities for one rule, and the three-argument one is the version with the
+    defect -- so leaving it callable would leave the defect callable. Asserted by
+    calling it, not by reading `pg_proc`: a catalog row says what exists and this
+    says what a caller can reach.
+    """
+    result = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('worker-old', 10, 300);",
+    )
+    assert result.returncode != 0, (
+        "the three-argument claim is still callable, so the pre-0016 collectable "
+        "set is still reachable by passing fewer arguments"
+    )
+
+
+def _storage_admin() -> Any:
+    """`bin/storage-admin.py`, loaded by path because of the dash in its name."""
+    specification = importlib.util.spec_from_file_location(
+        "apg_storage_admin", REPO_ROOT / "bin" / "storage-admin.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_the_operator_status_agrees_with_the_claim_about_what_is_collectable(
+    cluster: dict[str, Any], subjects: dict[str, str]
+) -> None:
+    """Two authorities for one rule, tied together by behaviour.
+
+    `storage-admin status` reports how many tombstones are collectable now, and
+    it cannot ask the claim -- the claim LEASES what it returns, so a status verb
+    that called it would mutate the queue it was reporting on. So the predicate
+    exists twice: once in migration 0016 and once in `_STATUS_SQL`.
+
+    Collapsing them to one authority is not available either. The claim's
+    `FOR UPDATE SKIP LOCKED` is ADR 0104's throughput mechanism and it has to sit
+    on the base table, so the collectable set cannot be factored out into a
+    function or a view the claim then selects from.
+
+    What is left is D177's lesson applied honestly: when two derivations of one
+    value cannot be collapsed, tie them together with a test that runs both. The
+    documentation route was derived twice, the two disagreed, and the copy
+    carrying a comment saying it was "kept in step" was the one that had not
+    drifted -- a comment is not a mechanism.
+
+    Deliberately run against whatever the module's earlier tests have left in the
+    table. A mixed population -- leased, completed, expired, live, already
+    collected -- is a stronger input than a clean one, and both queries see the
+    same rows.
+    """
+    grace = 30
+
+    # A live intent (must be excluded by both), one past the deadline but inside
+    # the grace (excluded by both), and one past both (included by both).
+    new_intent(cluster, subjects["first"], ttl=3600)
+    inside_grace = new_intent(cluster, subjects["first"], ttl=-5)
+    outside_grace = new_intent(cluster, subjects["first"], ttl=-600)
+    completed = new_intent(cluster, subjects["first"], ttl=3600)
+    as_storage(
+        cluster,
+        f"SELECT app_private.storage_complete_upload('{completed}'::uuid, "
+        f"'{subjects['first']}'::uuid, 512);",
+    )
+    for identifier in (inside_grace, outside_grace, completed):
+        as_storage(
+            cluster,
+            f"SELECT app_private.storage_tombstone('{identifier}'::uuid, "
+            f"'{subjects['first']}'::uuid);",
+        )
+
+    statement = _storage_admin()._STATUS_SQL.replace("%GRACE%", str(grace))
+    reported = owner(cluster, f"{statement};")
+    assert reported.returncode == 0, reported.stderr
+    counts = dict(
+        line.split("|", 1) for line in reported.stdout.strip().splitlines() if "|" in line
+    )
+    collectable = int(counts["cleanup_collectable"])
+
+    claimed = as_storage(
+        cluster,
+        "SELECT id FROM app_private.storage_claim_cleanup_batch("
+        f"'worker-agreement', 10000, 300, {grace});",
+    )
+    assert claimed.returncode == 0, claimed.stderr
+    returned = [line.strip() for line in claimed.stdout.strip().splitlines() if line.strip()]
+
+    assert collectable == len(returned), (
+        f"status says {collectable} objects are collectable and the claim returned "
+        f"{len(returned)}. The predicate exists in two places and they have drifted"
+    )
+    # And the arms, so an agreement at zero is not mistaken for agreement.
+    assert outside_grace in claimed.stdout
+    assert completed in claimed.stdout
+    assert inside_grace not in claimed.stdout, (
+        "an object five seconds past its deadline was collected under a thirty "
+        "second grace, so the grace reaches neither query"
+    )
+    assert collectable > 0, "both queries returned nothing, so they agree about nothing"

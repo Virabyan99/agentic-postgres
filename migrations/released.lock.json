@@ -179,6 +179,17 @@
       "template": "templates/0015-storage-completion-key.sql",
       "template_sha256": "54b3791f5ca177e08f6d9a00699d76b9185980d62c757c747a69190e6d55eef6",
       "version": "20260818120015"
+    },
+    {
+      "canonical_render_sha256": "5e03897d2eca52adca088eff621805f903d141e6323ddbac1d4b5f70917822fe",
+      "name": "storage_cleanup_write_window",
+      "placeholders": [
+        "object_owner",
+        "storage_service"
+      ],
+      "template": "templates/0016-storage-cleanup-write-window.sql",
+      "template_sha256": "d22f03f841e11e08d63384b30c4cc6d32618783cf184bc0f0390fd5e4fb9d2b0",
+      "version": "20260818120016"
     }
   ],
   "schema_version": 1

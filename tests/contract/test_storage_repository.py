@@ -178,3 +178,125 @@ def test_the_repository_holds_no_privilege_of_its_own():
     )
     for verb in ("INSERT INTO", "UPDATE ", "DELETE FROM"):
         assert verb not in source.upper().replace("SELECT APP_PRIVATE", ""), verb
+
+
+# ---------------------------------------------------------------------------
+# The cleanup calls, whose arguments no other test looks at
+# ---------------------------------------------------------------------------
+#
+# `test_storage_cleanup.py` drives the sweep against a FAKE repository, so it
+# sees the arguments the sweep chose and never the SQL they end up in. The
+# cluster tests drive the SQL directly and never touch this class. Between the
+# two, the parameter list below was covered by nothing -- the same hole this
+# module was created for, one layer down: three positional integers of which two
+# are interchangeable by type.
+
+
+class MultiRowPool(RecordingPool):
+    """A pool whose cursor returns several rows, for the claim."""
+
+    def __init__(self, rows: list[dict[str, Any]]) -> None:
+        super().__init__(rows[0] if rows else {})
+        self._rows = rows
+
+    def connection(self):
+        sink, rows = self.calls, self._rows
+
+        class Cursor:
+            async def execute(self, statement, parameters):
+                sink.append((statement, parameters))
+
+            async def fetchall(self):
+                return rows
+
+            async def fetchone(self):
+                return rows[0] if rows else None
+
+        class Connection:
+            def cursor(self, row_factory=None):
+                return Cursor()
+
+        class Context:
+            async def __aenter__(self):
+                return Connection()
+
+            async def __aexit__(self, *exception):
+                return False
+
+        return Context()
+
+
+def test_the_claim_sends_lease_and_grace_in_the_order_0016_declares():
+    """Both are integers in seconds, so swapping them is type-correct.
+
+    A lease of 60 sent as a grace and a grace of 300 sent as a lease is a
+    perfectly valid call that collects the wrong objects and holds them for the
+    wrong time -- and 0016 cannot refuse it, because both values are legal in
+    both positions. Nothing but the argument list stands here.
+    """
+    identifier = uuid4()
+    pool = MultiRowPool([{"id": identifier, "object_key": "k", "attempts": 2}])
+    repository = StorageRepository(pool)
+
+    claims = run(
+        repository.claim_cleanup_batch(
+            holder="worker-x", limit=25, lease_seconds=300, write_grace_seconds=60
+        )
+    )
+
+    statement, parameters = pool.calls[0]
+    assert "storage_claim_cleanup_batch" in statement
+    assert parameters == ("worker-x", 25, 300, 60), (
+        "0016 declares (p_holder, p_limit, p_lease_seconds, p_write_grace_seconds) "
+        f"and the repository sent {parameters}"
+    )
+    assert [(c.object_id, c.object_key, c.attempts) for c in claims] == [(identifier, "k", 2)]
+
+
+def test_finishing_sends_the_holder_and_not_something_else():
+    """`finish_cleanup` matches on the holder, and that match is the lease.
+
+    Sending the wrong string returns False for every object and the sweep would
+    report every one as `lease_lost` -- which reads as "the lease was too short"
+    rather than as a defect, so nothing would look here.
+    """
+    identifier = uuid4()
+    pool = RecordingPool({"finished": True})
+    repository = StorageRepository(pool)
+
+    assert run(repository.finish_cleanup(object_id=identifier, holder="worker-y")) is True
+
+    statement, parameters = pool.calls[0]
+    assert "storage_finish_cleanup" in statement
+    assert parameters == (identifier, "worker-y")
+
+
+def test_expiring_intents_sends_the_limit_and_returns_the_count():
+    """Bounded, and the bound has to arrive as the bound."""
+    pool = RecordingPool({"moved": 4})
+    repository = StorageRepository(pool)
+
+    assert run(repository.expire_intents(limit=17)) == 4
+
+    statement, parameters = pool.calls[0]
+    assert "storage_expire_intents" in statement
+    assert parameters == (17,)
+
+
+def test_no_cleanup_call_is_filtered_by_an_owner():
+    """Cleanup is the deployment's work, not a subject's, and that is deliberate.
+
+    An owner-filtered claim would collect only one user's tombstones and leave
+    everybody else's bytes at the provider forever. The three functions take a
+    HOLDER, which identifies a worker, and the difference matters enough to
+    assert: `holder` and an owner id are both single values in the first
+    position.
+    """
+    import inspect
+
+    for name in ("expire_intents", "claim_cleanup_batch", "finish_cleanup"):
+        signature = inspect.signature(getattr(StorageRepository, name))
+        assert "owner_id" not in signature.parameters, (
+            f"{name} takes an owner. Cleanup runs over every owner's tombstones; "
+            "filtering it by subject would strand everybody else's objects"
+        )

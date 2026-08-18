@@ -357,7 +357,7 @@ def test_the_storage_role_can_run_the_functions_the_service_calls(
 
     claimed = as_storage(
         cluster,
-        "SELECT id FROM app_private.storage_claim_cleanup_batch('reach-worker', 10, 300);",
+        "SELECT id FROM app_private.storage_claim_cleanup_batch('reach-worker', 10, 300, 0);",
     )
     assert claimed.returncode == 0, claimed.stderr
     assert identifier in claimed.stdout

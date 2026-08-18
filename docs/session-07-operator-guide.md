@@ -230,6 +230,137 @@ permit everything.
 
 ---
 
+## 5.2 Cleanup, and the five verbs
+
+`bin/storage-admin.sh` is the operator surface for the storage plane. Five verbs,
+and **none of them takes a bucket or an object key**. The bucket comes from the
+deployed document; the only keys the command handles are ones the database
+already holds, and it hands them to a container rather than printing them — an
+object key is the unguessable half of a bearer credential.
+
+```bash
+sudo bin/storage-admin.sh --outputs /var/lib/apg/<project>/outputs.json status
+sudo bin/storage-admin.sh --outputs … cleanup [--limit 100] [--lease-seconds 300]
+sudo bin/storage-admin.sh --outputs … verify-credential
+sudo bin/storage-admin.sh --outputs … credential-digest
+sudo bin/storage-admin.sh --outputs … confirm-revoked --retired-credential-file <path>
+```
+
+**`cleanup` is the only verb that changes anything**, and what it changes is at
+Cloudflare: a provider DELETE cannot be undone and the bytes are not recoverable
+from here. So it prints `status` first and asks you to type `CLEANUP`, the same
+shape `rotate-signing-key.sh` uses before a promotion, and for the same reason —
+an operator approving a deletion should be reading what they are deleting. Pass
+`--yes` for a scheduled sweep once you have run it by hand at least once.
+
+**`verify-credential` writes nothing.** It is a `HeadObject` on a key that does
+not exist, so it is safe against a live project at any time. What it will not do
+is tell you *which* of the credential and the bucket is wrong: a bucket-scoped
+token cannot tell "absent" from "not yours" — `HeadBucket` on a nonexistent
+bucket was measured at **403, not 404** — and a command that guessed would be
+inventing a distinction the provider refuses to make.
+
+**What a sweep reports, and what each line means.** They are five different
+outcomes and they are deliberately not collapsed into "succeeded / failed":
+
+| line | meaning |
+|---|---|
+| `expired` | pending intents past their deadline, moved to `tombstoned` this pass |
+| `claimed` | tombstones this worker leased |
+| `deleted` | provider DELETEs that returned — an absent key returns 204 and counts |
+| `finished` | rows marked collected |
+| `lease_lost` | deleted, but the lease had gone to another worker. **Not an error** — the object is gone and somebody else holds the row |
+| `failed` | the provider refused. The lease is left to expire, which is the retry |
+| `abandoned` | claimed but not reached before the lease ran short. If this is every sweep, `--limit` is too high for `--lease-seconds` |
+
+**Deletion is at least once by design.** A worker may delete an object and die
+before recording it, and the next sweep deletes the same key again — which is
+safe because `DeleteObject` on an absent key was *measured* at 204 in Run 5.
+There is no orphan scan and there will not be one: a reconciler that lists the
+bucket and deletes what the database does not know about can delete data a human
+put there to recover something.
+
+**An object is not collected while anything can still write to its key**
+(ADR 0111). A tombstoned upload that never completed keeps its bytes collectable
+only once its presigned PUT can no longer be honoured — a tombstone does not
+revoke a presigned URL, and nothing in this system can. So `status` may report a
+backlog that `cleanup` correctly declines to touch yet. That is the design, not a
+stall.
+
+## 5.3 Rotating the R2 credential
+
+Six steps, and two of them are yours alone. The phases follow
+`bin/rotate-signing-key.sh`; what is missing here is an acknowledgement step,
+because a credential has no verifier fleet that must agree before it is safe to
+switch — one container holds it and no issued artefact outlives it.
+
+1. **Issue a new bucket-scoped Object Read & Write token** at Cloudflare, scoped
+   to this project's bucket only. By hand: no command here sets a value at a
+   provider. Save **both** halves — the secret is shown exactly once.
+
+2. **Write down the pair you are about to replace, now.**
+
+   ```json
+   {"access_key_id": "…", "secret_access_key": "…"}
+   ```
+
+   Put it in a root-owned file with mode `0600`. **After step 3 it is gone and
+   step 6 needs it.** This is the same shape as the `APG_ROTATED_*_FROM_FILE`
+   inputs the Session 5 rotation proofs take, and for the same reason: the proof
+   is given the value the window *replaced*, so the file is written before the
+   rotation rather than after.
+
+3. **Put the new pair into Infisical** at `APG_R2_ACCESS_KEY_ID` and
+   `APG_R2_SECRET_ACCESS_KEY`, by hand (D249).
+
+4. **Bring the project down and up.** Not `restart`. Materialization writes a
+   **new generation**, and what a container holds comes from the live pointer
+   rather than from the deployed document's `secrets.generation_id` (D76, D306).
+   D253 is the record of a rotated credential taking a container down because
+   `resume` runs `compose up` with no `--force-recreate`.
+
+5. **`credential-digest`, then `verify-credential`, in that order.** The first
+   says the container picked up the new generation; the second says the new
+   credential reaches the bucket. Both, and in that order — a container still on
+   the old generation would pass the second and mean nothing by it. The digest
+   is a SHA-256: no verb here prints a credential (D105).
+
+6. **Revoke the old token at Cloudflare**, by hand. Then:
+
+   ```bash
+   sudo bin/storage-admin.sh --outputs … confirm-revoked \
+       --retired-credential-file /root/apg-retired-r2.json \
+       --window-seconds 600
+   ```
+
+   It polls, and it reports one of three things:
+
+   * **`revoked`** — the retired credential is refused and the live one is
+     accepted. The live probe in the same iteration is the control: without it, a
+     retired credential failing because the bucket, the network or the endpoint
+     changed would read as a successful revocation.
+   * **not observed** — still accepted after the window. **This does not mean the
+     revocation failed.** R2 permission changes are eventually consistent, this
+     project has never measured how long one takes, and the window is a bound
+     chosen rather than measured. Re-run with a longer `--window-seconds`. The
+     command will not declare a credential revoked without having watched the
+     refusal happen.
+   * **control failed** — the *live* credential stopped being accepted during the
+     poll, so the run says nothing about the retired one. Check the deployment
+     before concluding anything.
+
+   Shred the retired-credential file once the poll has reported `revoked`.
+
+**Bucket administration is not here, and cannot be** (ADR 0110). Creating a
+bucket, reading its identity back, and issuing or revoking a token are Cloudflare
+REST API operations you perform with a Cloudflare API token that no process in
+this repository holds. The runtime's S3 credential cannot do any of them —
+measured in Run 5: `CreateBucket` 403, `ListBuckets` 403, `HeadBucket` on another
+bucket in the same account 403. Section 4's read-back of account, name,
+jurisdiction, creation time and public-access state is a step you perform and
+record; it is weaker than an automated check and it is meant to be honest about
+that rather than to look like evidence.
+
 ## 6. If something goes wrong
 
 **You closed the tab before saving the Secret Access Key.** Issue a new token

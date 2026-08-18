@@ -33,6 +33,20 @@ class DownloadTarget:
     verified_bytes: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class CleanupClaim:
+    """One leased tombstone: what to delete, and how often it has been tried.
+
+    `attempts` is incremented on CLAIM rather than on success (0014), so an
+    object that repeatedly kills its worker is visible. Counting successes would
+    leave the pathological case indistinguishable from the untouched one.
+    """
+
+    object_id: UUID
+    object_key: str
+    attempts: int
+
+
 class StorageRepository:
     """The pool, and the four calls. Holds no state of its own."""
 
@@ -135,6 +149,85 @@ class StorageRepository:
         )
         assert row is not None
         return row["object_key"]
+
+    # -- cleanup -------------------------------------------------------------
+    #
+    # **These three had no caller for five runs.** 0014 released the cleanup
+    # plane in Run 3 and nothing in the product called any of it until Run 8;
+    # the only exercise they had was SQL written inside two test modules. That
+    # is D348 exactly -- *a plane is complete when a caller can be written
+    # against it, not when its tests pass* -- and writing the caller is what
+    # exposed the missing write-window predicate that migration 0016 adds.
+    #
+    # None of the three is owner-scoped. Cleanup is not somebody's request: it
+    # runs as the deployment, over every owner's tombstones, which is why they
+    # take a HOLDER rather than a subject.
+
+    async def _all(self, statement: str, parameters: tuple[Any, ...]) -> list[dict[str, Any]]:
+        async with self._pool.connection() as connection:
+            cursor = connection.cursor(row_factory=dict_row)
+            await cursor.execute(statement, parameters)
+            return list(await cursor.fetchall())
+
+    async def expire_intents(self, *, limit: int) -> int:
+        """Tombstone pending objects past their deadline. Returns how many moved.
+
+        Bounded, for the reason every sweep here is: an unbounded write over a
+        table that has grown is a statement whose duration nobody chose.
+
+        (The wording avoids the SQL verb deliberately.
+        `test_the_repository_holds_no_privilege_of_its_own` scans this module's
+        source text for statement keywords, and it cannot tell prose from code.
+        A conservative scan is the right kind, so the prose moves.)
+        """
+        row = await self._one(
+            "SELECT app_private.storage_expire_intents(%s) AS moved",
+            (limit,),
+        )
+        assert row is not None
+        return int(row["moved"])
+
+    async def claim_cleanup_batch(
+        self, *, holder: str, limit: int, lease_seconds: int, write_grace_seconds: int
+    ) -> list[CleanupClaim]:
+        """Lease a batch of collectable tombstones.
+
+        The lease outlives this transaction and that is the whole point (ADR
+        0104): the provider DELETE happens afterwards, and a row lock would be
+        released at COMMIT and at crash. A worker that dies mid-delete loses its
+        hold by EXPIRY, which is the only mechanism that survives the connection.
+
+        `write_grace_seconds` is migration 0016's fourth argument, and passing it
+        is not a formality -- it is what keeps the claim from collecting an
+        object whose presigned upload URL is still live (ADR 0111).
+        """
+        rows = await self._all(
+            "SELECT id, object_key, attempts "
+            "FROM app_private.storage_claim_cleanup_batch(%s, %s, %s, %s)",
+            (holder, limit, lease_seconds, write_grace_seconds),
+        )
+        return [
+            CleanupClaim(
+                object_id=row["id"], object_key=row["object_key"], attempts=int(row["attempts"])
+            )
+            for row in rows
+        ]
+
+    async def finish_cleanup(self, *, object_id: UUID, holder: str) -> bool:
+        """Record that this holder collected the object. False if it no longer holds.
+
+        False is not an error and the caller must not treat it as one: the
+        worker's lease expired while it was working, somebody else claimed the
+        object, and the honest report is "I no longer hold this" rather than
+        "something failed". The work was still done -- and the second worker's
+        DELETE is a no-op against an absent key, measured at 204 in Run 5.
+        """
+        row = await self._one(
+            "SELECT app_private.storage_finish_cleanup(%s, %s) AS finished",
+            (object_id, holder),
+        )
+        assert row is not None
+        return bool(row["finished"])
 
     async def tombstone(self, *, object_id: UUID, owner_id: UUID) -> bool:
         """True when this call moved the object.

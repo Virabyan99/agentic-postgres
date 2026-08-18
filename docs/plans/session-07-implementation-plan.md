@@ -289,6 +289,20 @@ every definition is used.*
 
 ---
 
+### Found during Run 8
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D358** | Run 8 writes the cleanup worker against the plane migration 0014 released in Run 3. | **0014's claim collects an object whose presigned upload URL is still live.** `storage_tombstone` moves a PENDING object deliberately, and a tombstone does not revoke the presigned PUT minted for it — a presigned URL is a bearer credential and nothing in this system can withdraw one. So DELETE at T+10, cleanup at T+11, and a PUT at T+20 lands bytes under a key whose row is already `cleanup_completed_at` and will never be returned again. Section 4 forbids an orphan scan, so nothing would ever find them. Measured on the locked pg18 digest with two controls that came out the other way: an expired intent is claimed, a completed object is claimed. | **Migration 0016, ADR 0111.** The claim gains a fourth argument and the predicate `completed_at IS NOT NULL OR intent_expires_at < now() - grace`; the three-argument form is DROPPED rather than overloaded, and a contract test calls it and requires the call to fail. | **D348, a second time in one session, and the rule it produced was exactly right.** *A plane is complete when a caller can be written against it, not when its tests pass.* Every Run 3 test called the claim with an object it had tombstoned a moment earlier and got it back — which is the behaviour that is wrong, asserted as if it were the requirement. Five runs and two test modules covered this plane and none of them could see it, because none of them was a caller. | 0111 |
+| **D359** | `tests/contract/test_cli_contract.py` covers the operator command surface, so adding a command to `bin/` brings it under nine checks. | **Its two lists are hand-kept and twelve commands had accumulated outside them** — `bin/auth-admin.{sh,py}`, `bin/rotate-signing-key.{sh,py}`, `bin/session-06-check.sh`, `bin/apg-diag.sh`, `bin/app-contract.{sh,py}`, `bin/deploy-project.py`, `bin/migrate.py`, `bin/render-jwks.py`, `bin/render-secret-override.py`. None was checked for a CRLF, for a working `--help`, for the executable bit in the git index, or by `test_no_command_documents_a_secret_argument` — the check that enforces D105. | All twelve listed, and `test_every_command_in_bin_is_covered_by_this_module` derives the expectation from the directory in both directions. | **Every one of them passed all nine checks the moment it was listed, and that is the uncomfortable half**: nothing was wrong, so nothing ever drew attention to the omission across two sessions. D175's shape — a property kept by review rather than by a test — and D211's from the other side: not a green test measuring nothing, but a suite of green tests measuring a set nobody had stated the boundary of. | — |
+| **D360** | (`bin/apg-diag.sh`, found while closing D359) A command absent from the list is an oversight. | **One of them was absent for a real reason that had never been written down.** `apg-diag.sh` runs as `/usr/local/bin/apg-diag` under a `NOPASSWD` rule over that exact path (ADR 0071) and must NOT resolve a repository root — a `BASH_SOURCE`-derived `ROOT_DIR` would point at `/usr/local`. It failed the preamble check on its first listing. | `INSTALLED_COMMANDS`, a named exemption from **one** of the nine checks, guarded by a test asserting the repository names an absolute installed path for it somewhere other than the exemption list. | **An exemption that is written down is a decision; an omission is not.** Out of the list it escaped the other eight checks too, for a reason that only ever applied to one. The guard's first version asserted `provision-host.sh` installs the file — it does not, ADR 0071 records that the copy is placed by hand — and the premise was corrected rather than the assertion loosened. | — |
+| **D361** | D347 left open which kind the bucket-administering credential is, and Run 8 would measure it. | **It is decided without that measurement, on different grounds, and the capability question is left open on purpose.** An R2 Admin S3 token would be *interchangeable with the runtime's at every call site* — same protocol, same endpoint, same botocore client, same four method names — so the only thing keeping them apart would be which file a process read. | **ADR 0110.** The credential is a Cloudflare API token used against the REST API, held by a human, and no process in this repository holds it. `bin/storage-admin.sh` has **no bucket-administering verb** — not one that refuses, none — and a contract test walks its AST and its container programs for an administering call. | This project withholds a capability by making it **unreachable**, not by scoping it: per-consumer materialization is what makes "the auth service cannot read the R2 credential" a filesystem property. The storage image contains no code that can speak the Cloudflare REST API, and the network-name scan makes adding one a test failure. Deciding on structure also avoids issuing an account-wide admin token to answer a question whose answer would not change the design. | 0110 |
+| **D362** | ADR 0111's grace is a number the run produces. | **It is REASONED and not measured, and it says so where it is defined.** `WRITE_GRACE_SECONDS = 60` is twice the largest signature leeway this project has measured in any validator — PostgREST's thirty seconds on `exp` and `nbf`, D241. R2's own tolerance for a just-expired presigned URL is unmeasured: Run 5 established that an expired URL is refused (`ExpiredRequest`, 403) and not where the boundary sits. | Recorded, with the rig that would replace it written down at the constant: presign with a short `ExpiresIn`, PUT at increasing delays past it, control being the same PUT before expiry at 200. A contract test refuses a value at or below thirty. | The asymmetry decides the direction. Too generous costs a delay before bytes stop being billed; too small orphans an object nothing will ever find, because there is no orphan scan by design. **An unmeasured value that errs toward the recoverable failure, and names its own replacement, is not the same thing as a value that looked measured and was not.** | 0111 |
+| **D363** | §5 Run 8: "R2 permission changes are eventually consistent, so revocation is polled within a bounded window." | **True as an instruction and unmeasured as a fact** — this repository has never timed one. So the window is a bound chosen rather than a bound measured. | `confirm-revoked` reports **three** outcomes, not two: `revoked`, `not_observed` (still accepted after N seconds — explicitly *not* "the revocation failed"), and `control_failed`. It never declares a credential revoked without having watched the refusal happen. | **The poll carries its own control**: the LIVE credential is probed in the same iteration. Without it, a retired credential failing because the bucket, the network or the endpoint moved would read as a successful revocation — Session 6 Run 9's rule about a mutation without its control, applied to a credential. That control is also what makes the unmeasured window acceptable rather than a guess dressed as a result. | — |
+| **D364** | `storage-admin status` can report what is collectable by asking the plane. | **It cannot ask the claim** — the claim LEASES what it returns, so a status verb that called it would mutate the queue it was reporting on. And the two cannot be collapsed into one authority either: the claim's `FOR UPDATE SKIP LOCKED` is ADR 0104's throughput mechanism and has to sit on the base table, so the collectable set cannot be factored into a function or view the claim then selects from. | The predicate exists twice, deliberately, and `test_the_operator_status_agrees_with_the_claim_about_what_is_collectable` runs **both** against a real cluster with a mixed population and requires the counts to match, with arms proving the agreement is not an agreement at zero. | D177 is the record of the documentation route being derived twice, the two disagreeing, and **the copy carrying a comment saying it was "kept in step" being the one that had not drifted**. When two derivations cannot be collapsed, the answer is a test that runs both — a comment is not a mechanism. | — |
+| **D365** | A mutation battery's value is the survivors it finds. | **Twenty-six mutations across two batteries, zero survivors — and the honest reading is that the first battery's value arrived before it ran.** Four of the tests it exercised were written *anticipating* the survivors: the lease margin was only asserted as arithmetic, `sweep_from_environment` was the production entry point and nothing reached it, and the repository's three cleanup calls had their parameter order covered by nothing. The genuinely independent finding came from asking what the battery could **not** reach — `bin/storage-admin.py`'s own logic, which had no tests at all, so a mutation in the `-i` on `docker exec`, in a verb's exit code, or in what crosses on stdin would have survived silently. | `tests/contract/test_storage_admin.py`, and a second battery of eleven mutations against it. Both batteries: controls green before and after, every file restored byte-identical, anchors pre-flighted. | Runs 5, 6 and 7 each ended with a survivor that was a test written minutes earlier. Run 8 ended with none, and *that is not evidence the tests are stronger* — it is evidence the predictions were made first. **The question that produced the real finding was not "what survived" but "what could this battery not have reached".** | — |
+| **D366** | (small, and the reasoning is the point) `socket.gethostname()` is a harmless way to label a cleanup worker. | **`test_the_service_never_constructs_a_network_jwks_client` refuses any network-capable module reference anywhere under the service**, and it fired on the first run of the new module. | `os.uname().nodename` — the same fact from a call that cannot open a connection. | **The right response was to drop the capability, not to find another spelling of it.** `storage_client.redact` makes the identical choice about `urllib.parse` and says so: `urlsplit` would have been harmless, and buying an exemption for the safe half of a network module is how the unsafe half arrives. The scan is deliberately a NAME scan; routing around it with an equivalent import would have defeated it while passing it. | — |
+
 ## 2. What Session 7 adds to the acceptance registry
 
 **Grep the registry before choosing any requirement ID** (ADR 0089, D279). The
@@ -805,6 +819,50 @@ asserted here rather than assumed.
 **Read the access log before concluding anything about a 404** (D186, D187).
 
 ### Run 8 — Cleanup, rotation, and the operator surface
+
+**Done.** ADRs **0110** and **0111**, migration **0016**, and D358–D366.
+
+Measured, each with a control in the same run:
+
+* **The cleanup claim collects an object whose upload URL is still live** (D358).
+  On the locked pg18 digest, all sixteen migrations applied as `migration_user`:
+  a pending object tombstoned one statement earlier, with `intent_expires_at` an
+  hour away, comes back from the claim. Controls: an expired intent is claimed,
+  and a completed object is claimed — so the rig could tell a claim that
+  collects from one that does not. **Migration 0016 and ADR 0111.**
+* **The write grace reaches both queries.** A sixty-second grace holds back an
+  object ten seconds past its deadline; the same object with a zero grace is
+  collected. The second arm is the control.
+* **`status` and the claim agree about the collectable set**, run against a
+  mixed population on a real cluster, with arms so the agreement is not an
+  agreement at zero (D364).
+* **Two mutation batteries, twenty-six mutations, zero survivors**, controls
+  green before and after, every file restored byte-identical, anchors
+  pre-flighted. D365 is the honest reading of that zero.
+
+Shipped: migration **0016** and the lock re-frozen; `StorageRepository`'s three
+cleanup calls; `services/auth-api/app/storage_cleanup.py` — the sweep, its three
+orderings and the lease margin derived from the adapter's own constants;
+`bin/storage-admin.{sh,py}` with five enumerated verbs, none of which names a
+bucket or a key and none of which administers a bucket; four new contract
+modules or sections — `test_storage_cleanup.py`, `test_storage_admin.py`, the
+three repository cleanup tests and five plane tests; and `test_cli_contract.py`
+brought back into contact with its own directory (D359, D360).
+
+**Not shipped, and named rather than discovered later:**
+
+* **Nothing has run against R2 or against a container.** `verify-credential`,
+  `credential-digest`, `confirm-revoked` and `cleanup` all reach the storage
+  container, and no storage container has ever started — it sits on
+  `profiles: [session7]` and `CURRENT_SESSION` is 6. Their container-side
+  programs are asserted for what is readable from their text and for nothing
+  else, and the module says so. **This is D211–D214's condition, stated while it
+  is true.**
+* **`WRITE_GRACE_SECONDS` is reasoned, not measured** (D362), and the rig that
+  would replace it is written down at the constant.
+* **The revocation window is a bound chosen, not measured** (D363).
+* **The `storage.memory_limit_mb` floor is still 384 and still inherited.**
+
 
 - `bin/storage-admin.sh` in the house shape: `bin/*.sh` over `bin/*.py`,
   enumerated verbs, no arbitrary bucket or key, **no flag that prints a

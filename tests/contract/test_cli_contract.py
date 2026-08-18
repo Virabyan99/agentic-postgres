@@ -20,10 +20,29 @@ from agentic_postgres import REPO_ROOT
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
+#: Every operator command, and Run 8 made the list answerable to the directory.
+#:
+#: **Twelve commands had accumulated outside it.** `bin/auth-admin.sh`,
+#: `bin/rotate-signing-key.sh`, `bin/session-06-check.sh`, `bin/apg-diag.sh`,
+#: both halves of `bin/app-contract` and six more Python commands were all
+#: absent, so none of them was checked for a CRLF, for a working `--help`, for
+#: the executable bit in the git index, or by
+#: `test_no_command_documents_a_secret_argument` -- which is the check that
+#: enforces D105 and is a large part of why this module exists.
+#:
+#: Every one of them passed all nine checks the moment it was listed, and that
+#: is the uncomfortable half: nothing was wrong, so nothing ever drew attention
+#: to the omission. It is D175's shape -- a property kept by review rather than
+#: by a test -- and `test_every_command_in_bin_is_covered_by_this_module`
+#: converts it into one, because a hand-kept list of files stops covering the
+#: directory the first time somebody forgets and says nothing when it does.
 SHELL_COMMANDS = (
     "deploy.sh",
+    "bin/apg-diag.sh",
     "bin/api.sh",
     "bin/api-contract.sh",
+    "bin/app-contract.sh",
+    "bin/auth-admin.sh",
     "bin/bootstrap-providers.sh",
     "bin/compose.sh",
     "bin/connect.sh",
@@ -44,27 +63,38 @@ SHELL_COMMANDS = (
     "bin/project-runtime.sh",
     "bin/provision-host.sh",
     "bin/restore-test.sh",
+    "bin/rotate-signing-key.sh",
     "bin/session-01-check.sh",
     "bin/session-02-check.sh",
     "bin/session-03-check.sh",
     "bin/session-04-check.sh",
     "bin/session-05-check.sh",
+    "bin/session-06-check.sh",
     "bin/smoke-test.sh",
+    "bin/storage-admin.sh",
 )
 
 PYTHON_COMMANDS = (
     "bin/api.py",
     "bin/api-contract.py",
+    "bin/app-contract.py",
+    "bin/auth-admin.py",
     "bin/bootstrap-providers.py",
     "bin/database-access.py",
     "bin/database-ports.py",
     "bin/db-verify.py",
+    "bin/deploy-project.py",
     "bin/dev-token.py",
     "bin/docs.py",
     "bin/materialize-secrets.py",
+    "bin/migrate.py",
     "bin/postgres-bootstrap.py",
     "bin/render-acceptance-matrix.py",
     "bin/render-config.py",
+    "bin/render-jwks.py",
+    "bin/render-secret-override.py",
+    "bin/rotate-signing-key.py",
+    "bin/storage-admin.py",
     "bin/write-session-evidence.py",
 )
 
@@ -123,6 +153,21 @@ def test_commands_are_executable_in_the_git_index() -> None:
 # ---------------------------------------------------------------------------
 
 
+#: Commands that are INSTALLED rather than run from a checkout.
+#:
+#: `bin/apg-diag.sh` runs as `/usr/local/bin/apg-diag`, reached through a
+#: `NOPASSWD` sudo rule over that exact absolute path (ADR 0071). It has no
+#: repository to resolve a root from and must not try: a `BASH_SOURCE`-derived
+#: `ROOT_DIR` would point at `/usr/local`, and the whole value of the allowlist
+#: is that the file the sudo rule names depends on nothing outside itself.
+#:
+#: Named here rather than left out of `SHELL_COMMANDS`, which is where it was
+#: until Run 8. Out of the list it got none of the other eight checks -- the
+#: secret-argument scan included -- for a reason that only ever applied to one
+#: of them. An exemption that is written down is a decision; an omission is not.
+INSTALLED_COMMANDS = frozenset({"bin/apg-diag.sh"})
+
+
 @pytest.mark.parametrize("relative", SHELL_COMMANDS)
 def test_shell_script_preamble(relative: str) -> None:
     lines = (REPO_ROOT / relative).read_text(encoding="utf-8").splitlines()
@@ -130,7 +175,41 @@ def test_shell_script_preamble(relative: str) -> None:
 
     body = "\n".join(lines)
     assert "set -euo pipefail" in body, f"{relative} does not set -euo pipefail"
-    assert "BASH_SOURCE" in body, f"{relative} does not resolve its root from BASH_SOURCE"
+    if relative not in INSTALLED_COMMANDS:
+        assert "BASH_SOURCE" in body, f"{relative} does not resolve its root from BASH_SOURCE"
+
+
+def test_the_installed_commands_really_run_from_an_absolute_path() -> None:
+    """Guard the exemption, so it cannot quietly become a way to opt out.
+
+    An exemption list nothing checks is a list anything can be added to. The
+    claim each name here makes is that the command runs from an absolute
+    installed path rather than from a checkout, and that claim is checkable:
+    the repository has to say what that path is somewhere other than in this
+    list.
+
+    **The first version of this asserted the wrong thing** -- that
+    `provision-host.sh` installs the file. It does not; ADR 0071 records that the
+    copy is placed by hand and that it drifts from the repository until somebody
+    replaces it. The test went red on its first run and the premise was corrected
+    rather than the assertion loosened, which is the only reason it says anything
+    now.
+    """
+    corpus = "\n".join(
+        path.read_text(encoding="utf-8", errors="replace")
+        for path in [
+            *sorted((REPO_ROOT / "docs" / "decisions").glob("*.md")),
+            *sorted((REPO_ROOT / "tests" / "contract").glob("test_*.py")),
+        ]
+    )
+    for relative in sorted(INSTALLED_COMMANDS):
+        installed = f"/usr/local/bin/{Path(relative).stem}"
+        assert installed in corpus, (
+            f"{relative} is exempted from the repository-root preamble on the ground "
+            f"that it runs from an absolute installed path, and nothing in the ADRs or "
+            f"the contract tests names {installed}. Either the exemption is wrong or "
+            f"the decision behind it was never written down"
+        )
 
 
 @pytest.mark.parametrize("relative", SHELL_COMMANDS)
@@ -304,6 +383,43 @@ def test_commands_do_not_echo_a_planted_environment_variable() -> None:
     for relative in ("bin/doctor.sh", "bin/bootstrap-providers.sh", "bin/connect.sh"):
         result = run(str(REPO_ROOT / relative), env={"APG_CANARY": planted})
         assert planted not in result.stdout + result.stderr, f"{relative} leaked its environment"
+
+
+def test_every_command_in_bin_is_covered_by_this_module() -> None:
+    """The lists above must account for the directory, or they cover a subset.
+
+    **Written because they did not.** Run 8 found twelve commands outside them,
+    added over Sessions 5 and 6, and every one passed all nine checks the moment
+    it was listed. Nothing was broken -- which is precisely why nobody noticed
+    for two sessions, and why this cannot be left as a rule somebody remembers.
+
+    It is the same failure this repository keeps producing from the other side:
+    not a green test measuring nothing, but a suite of green tests measuring a
+    set nobody had stated the boundary of. D211 is the closest relative -- a
+    deployment sweep scoped by path, so `tests/security/` was never in it, and
+    five green host runs were five reports about a subset.
+
+    Goes red if: a command is added to `bin/` and not listed. That is the whole
+    point, and the fix is one line in the list rather than a change here.
+    """
+    on_disk = {
+        f"bin/{path.name}"
+        for path in (REPO_ROOT / "bin").iterdir()
+        if path.suffix in {".sh", ".py"} and path.is_file()
+    }
+    listed = set(SHELL_COMMANDS) | set(PYTHON_COMMANDS)
+
+    unlisted = sorted(on_disk - listed)
+    assert not unlisted, (
+        f"these commands are in bin/ and in neither list, so none of this module's "
+        f"checks -- including the secret-argument scan -- applies to them: {unlisted}"
+    )
+
+    # And the other direction, which is the cheaper mistake but a real one: a
+    # name in the list that no longer exists makes every parametrized case for
+    # it error rather than fail, and an errored case is easy to read past.
+    missing = sorted(name for name in listed if name.startswith("bin/") and name not in on_disk)
+    assert not missing, f"listed but absent from bin/: {missing}"
 
 
 def test_no_command_documents_a_secret_argument() -> None:
