@@ -10,7 +10,7 @@ actually collect. That is checked by running a real collection and
 comparing node IDs, not by searching files for function names — a text
 search passes on a commented-out test.
 
-**115 requirements** — 111 P0, 17 active in Session 1, 98 owned by later sessions.
+**123 requirements** — 117 P0, 17 active in Session 1, 106 owned by later sessions.
 
 ## By session
 
@@ -22,7 +22,7 @@ search passes on a commented-out test.
 | 4 | 16 | placeholders owned by Session 4 |
 | 5 | 15 | placeholders owned by Session 5 |
 | 6 | 11 | placeholders owned by Session 6 |
-| 7 | 4 | placeholders owned by Session 7 |
+| 7 | 12 | placeholders owned by Session 7 |
 | 8 | 6 | placeholders owned by Session 8 |
 | 9 | 5 | placeholders owned by Session 9 |
 | 10 | 5 | placeholders owned by Session 10 |
@@ -152,10 +152,18 @@ search passes on a commented-out test.
 
 | ID | Priority | Guarantee | Proof |
 |---|---|---|---|
-| `STO-COMPLETE-001` | P1 | Only objects verified against storage become downloadable. | `tests/integration/test_future_storage.py::test_abandoned_upload_intents_are_not_downloadable` |
-| `STO-KEY-001` | P0 | Object keys are generated server-side; client keys are rejected. | `tests/integration/test_future_storage.py::test_client_supplied_object_keys_are_rejected` |
-| `STO-OWN-001` | P0 | A user cannot obtain a download URL for another user's object. | `tests/integration/test_future_storage.py::test_cross_user_object_download_is_denied` |
-| `STO-URL-001` | P0 | A presigned URL never reaches a log or the audit table. | `tests/integration/test_future_storage.py::test_presigned_urls_never_reach_logs_or_the_audit_table` |
+| `DEP-ISO-007` | P0 | Two projects have distinct buckets, distinct object prefixes and distinct R2 credentials. Compared by digest, because credential-digest reports a SHA-256 precisely so a proof can assert two credentials differ without either existing outside a container. | `tests/deployment/test_session7_storage.py::test_two_projects_have_distinct_buckets_prefixes_and_credentials` |
+| `STO-AGENT-001` | P0 | Object storage is human-only (ADR 0100). An agent token is refused at every endpoint, and so is a registered human without the object scopes -- the second arm being what proves the successful proofs succeed because of the scope rather than because nothing is checked. | `tests/deployment/test_session7_storage.py::test_an_agent_token_cannot_reach_the_storage_surface`<br>`tests/deployment/test_session7_storage.py::test_a_subject_without_the_object_scopes_is_refused` |
+| `STO-BOUND-001` | P1 | An upload declaring more than the deployment's published bound is refused, and one at the bound is accepted. The limit is read from the deployed document rather than restated, so the proof cannot pass against a differently configured deployment. | `tests/deployment/test_session7_storage.py::test_an_upload_larger_than_the_configured_bound_is_refused` |
+| `STO-CLEAN-001` | P1 | The cleanup sweep collects a tombstoned object whose write window has closed and records completion only after the provider has been asked. The late-writer arm is proved offline against a real cluster, where the deadline can be moved without the proof arranging the condition it observes. | `tests/deployment/test_session7_storage.py::test_cleanup_collects_a_tombstone_whose_write_window_has_closed` |
+| `STO-COMPLETE-001` | P1 | Only an object verified against the provider becomes downloadable, and a retried completion is a 200 rather than a conflict. Idempotence is a separate arm because migration 0014's CAS was idempotent as a function and not as a path through it (D349). | `tests/deployment/test_session7_storage.py::test_an_intent_nobody_uploaded_is_not_downloadable`<br>`tests/deployment/test_session7_storage.py::test_completing_an_intent_nobody_uploaded_is_refused`<br>`tests/deployment/test_session7_storage.py::test_completion_is_idempotent` |
+| `STO-CRED-001` | P0 | The mounted credential reaches its own bucket and the operator surface has no bucket-administering verb to attempt (ADR 0110). Run 5 measured the refusals with the real token; the separation is now structural rather than scoped. | `tests/deployment/test_session7_storage.py::test_the_runtime_credential_cannot_administer_its_bucket` |
+| `STO-KEY-001` | P0 | Object keys are generated server-side and client keys are refused rather than ignored. The generated key matches the derived format (ADR 0102) and appears in no response body. | `tests/deployment/test_session7_storage.py::test_a_request_naming_a_key_or_a_bucket_is_refused`<br>`tests/deployment/test_session7_storage.py::test_the_generated_key_matches_the_derived_format_and_is_not_echoed` |
+| `STO-OWN-001` | P0 | A user cannot obtain a download URL for another user's object, and the refusal is indistinguishable from an id that never existed. The positive arm is not decoration: Run 6's mutation battery survived because every download proof asserted a refusal, so denying everybody left them all green. | `tests/deployment/test_session7_storage.py::test_a_second_subject_cannot_obtain_a_download_url_for_the_first_s_object`<br>`tests/deployment/test_session7_storage.py::test_the_owner_can_download_its_own_object` |
+| `STO-PUBLIC-001` | P0 | From off-host, every storage endpoint refuses an anonymous caller with 401 and never 404 -- authentication precedes the ownership filter, so an anonymous prober cannot distinguish a real object id from an invented one. The container's own port is not publicly reachable, and the published path is the derived one. Measured with 443 asserted open and the route asserted answering first, because a negative from an instrument that can see nothing is not a boundary. A separate id from SEC-API-001 rather than a widening of it: a claim is measured in exactly one environment (ADR 0045) and widening would move a Session 5 claim into Session 7 through max() (ADR 0089). | `tests/external/test_session7_public_storage.py::test_the_storage_surface_refuses_an_anonymous_caller_from_off_host`<br>`tests/external/test_session7_public_storage.py::test_the_published_storage_path_is_the_derived_one` |
+| `STO-SECRET-001` | P0 | The storage runtime holds no signing key and the auth runtime holds no R2 credential, read from inside each container rather than from the generation directory. Per-consumer materialization is what makes this a property of the filesystem rather than of anyone's discipline. | `tests/deployment/test_session7_storage.py::test_the_storage_runtime_holds_no_signing_key_and_the_auth_runtime_no_r2_key` |
+| `STO-TOMB-001` | P0 | A committed tombstone precedes every later grant, and DELETE answers identically for moved, already-tombstoned and never-existed. What it does not claim is revocation of a URL already issued: nothing in this system can withdraw a presigned URL. | `tests/deployment/test_session7_storage.py::test_a_deleted_object_yields_no_further_download_url`<br>`tests/deployment/test_session7_storage.py::test_deleting_twice_is_the_same_answer` |
+| `STO-URL-001` | P0 | Neither a presigned URL's signature nor an object key reaches any sink: both service logs, both container inspections, the journal, or the deployed document. A canary created by the proof itself, so a hit is a leak rather than a coincidence. | `tests/deployment/test_session7_storage.py::test_no_presigned_url_or_object_key_reaches_any_sink` |
 
 ### Session 8
 

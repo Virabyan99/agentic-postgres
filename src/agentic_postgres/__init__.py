@@ -14,12 +14,19 @@ from pathlib import Path
 #: default here means a bare ``pytest`` run enforces the same registry policy
 #: as ``bin/session-01-check.sh`` instead of silently skipping it.
 #:
-#: Moved to 6 in Session 6 Run 11, with the placeholders (D54). The move is what
-#: makes ``test_no_requirement_at_or_before_the_gate_session_remains_future``
-#: enforce this session's own requirements: every ID targeted at 6 or earlier
-#: must now point at a real test rather than at a ``future`` marker, so the
-#: eleven entries this run activated cannot quietly revert to placeholders.
-CURRENT_SESSION = 6
+#: Moved to 6 in Session 6 Run 11 and to 7 in Session 7 Run 9, each time with
+#: the placeholders (D54). The move is what makes
+#: ``test_no_requirement_at_or_before_the_gate_session_remains_future`` enforce
+#: this session's own requirements: every ID targeted at 7 or earlier must now
+#: point at a real test rather than at a ``future`` marker, so the eleven
+#: entries Run 9 activated cannot quietly revert to placeholders.
+#:
+#: **This also arms the `session7` Compose profile.** The storage container is
+#: held back by that profile, so until this line moved nothing could start one
+#: -- and nothing had. A deploy from here on will try to, which means the two R2
+#: secrets have to exist at the provider first. That is Run 10's sequence and
+#: `docs/session-07-operator-guide.md` is the order to follow.
+CURRENT_SESSION = 7
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

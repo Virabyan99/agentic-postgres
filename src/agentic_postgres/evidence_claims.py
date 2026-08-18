@@ -184,7 +184,7 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "admin_authorization": ("API-ADMIN-001", "SEC-BOOT-002"),
     "token_non_resurrection": ("SEC-REV-002",),
     "project_isolation": ("DEP-ISO-006",),
-    # Session 7 adds nothing here in Run 1, and that is a measured constraint
+    # Session 7 added nothing here in Run 1, and that was a measured constraint
     # rather than an omission (D331).
     #
     # Run 1 wrote `connection_budget_division` and `storage_scope_class` and the
@@ -192,10 +192,41 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # names runs in a checkout, so no deployment is being measured"*. Run 1's
     # guarantees are the connection division and the scope partition, and both
     # are proved entirely offline -- so neither is a claim under ADR 0045, which
-    # shapes a claim by where it can be measured.
+    # shapes a claim by where it can be measured. **They are still not here**,
+    # for the same reason, and their tests exist and pass as ordinary suite
+    # properties.
     #
-    # The proofs exist and run; what does not yet exist is a deployment for them
-    # to be measured against. They are registered by the run that has one.
+    # Run 9 adds the nine below, and every one names requirement IDs targeted at
+    # Session 7 and only at Session 7 (ADR 0089). That is not a restatement of
+    # the obvious: `claim_session` derives from `max()`, so a single older ID
+    # mixed in either drags the whole claim into an earlier session's evidence or
+    # hides it from this one's gate, and both failures are silent.
+    #
+    # One claim per guarantee (D47). `object_completion` carries two IDs because
+    # "an object becomes available only when the provider has verified it, and
+    # only within the bound this deployment published" is one guarantee measured
+    # from two sides; `storage_credentials` carries two for the same reason --
+    # what the runtimes hold, and what the credential they hold can do.
+    #
+    # **Every one of these will report `not_run` until a host trip.** All eleven
+    # requirements are proved by `live_host` tests that have never executed in
+    # any environment, because no deployment has ever started a storage
+    # container. D282 is Session 6 writing this sentence one run before its own
+    # trip found nine defects, and it is written here for the same reason: a
+    # claim that has never been measured must not be mistaken for one that
+    # passed.
+    "object_ownership": ("STO-OWN-001",),
+    "object_keys": ("STO-KEY-001",),
+    "presigned_url_containment": ("STO-URL-001",),
+    "object_completion": ("STO-COMPLETE-001", "STO-BOUND-001"),
+    "tombstone_ordering": ("STO-TOMB-001",),
+    "cleanup_convergence": ("STO-CLEAN-001",),
+    "storage_authorization": ("STO-AGENT-001",),
+    "storage_credentials": ("STO-SECRET-001", "STO-CRED-001"),
+    "storage_isolation": ("DEP-ISO-007",),
+    # The one Session 7 claim measured from off-host, which is what makes the
+    # gate's external mode meaningful for this session rather than ceremonial.
+    "public_storage_boundary": ("STO-PUBLIC-001",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().

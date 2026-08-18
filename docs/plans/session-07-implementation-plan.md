@@ -303,6 +303,20 @@ every definition is used.*
 | **D365** | A mutation battery's value is the survivors it finds. | **Twenty-six mutations across two batteries, zero survivors — and the honest reading is that the first battery's value arrived before it ran.** Four of the tests it exercised were written *anticipating* the survivors: the lease margin was only asserted as arithmetic, `sweep_from_environment` was the production entry point and nothing reached it, and the repository's three cleanup calls had their parameter order covered by nothing. The genuinely independent finding came from asking what the battery could **not** reach — `bin/storage-admin.py`'s own logic, which had no tests at all, so a mutation in the `-i` on `docker exec`, in a verb's exit code, or in what crosses on stdin would have survived silently. | `tests/contract/test_storage_admin.py`, and a second battery of eleven mutations against it. Both batteries: controls green before and after, every file restored byte-identical, anchors pre-flighted. | Runs 5, 6 and 7 each ended with a survivor that was a test written minutes earlier. Run 8 ended with none, and *that is not evidence the tests are stronger* — it is evidence the predictions were made first. **The question that produced the real finding was not "what survived" but "what could this battery not have reached".** | — |
 | **D366** | (small, and the reasoning is the point) `socket.gethostname()` is a harmless way to label a cleanup worker. | **`test_the_service_never_constructs_a_network_jwks_client` refuses any network-capable module reference anywhere under the service**, and it fired on the first run of the new module. | `os.uname().nodename` — the same fact from a call that cannot open a connection. | **The right response was to drop the capability, not to find another spelling of it.** `storage_client.redact` makes the identical choice about `urllib.parse` and says so: `urlsplit` would have been harmless, and buying an exemption for the safe half of a network module is how the unsafe half arrives. The scan is deliberately a NAME scan; routing around it with an equivalent import would have defeated it while passing it. | — |
 
+### Found during Run 9
+
+| # | Predicted / assumed | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D367** | §5 Run 9: "the aggregate app OpenAPI through the existing workflow" — a capture step. | **Aggregating it for the first time showed the storage half publishes a contract the service does not serve.** Every operation documented `200`, including the one that answers **201** and the one that answers **204**; no failure response was documented at all, though the routes return 400, 401, 403, 404 and 409; and a `422` was published in FastAPI's `HTTPValidationError` shape, which this service never emits — a malformed object id is `MalformedRequest`, a **400** in the house shape. | **ADR 0112.** Every storage route gains `status_code=`, `openapi_extra=` and `responses=`, built from the same `errors.py` constants the code returns, and `tests/contract/test_app_contract_aggregate.py` asserts the document against the surface rather than against itself. | **`openapi_docs.py` exists to prevent exactly this and says so in its own docstring**, recording the same measurement made for the auth router in Session 6: *"the document FastAPI generates from the signatures alone is nine paths, no request bodies, and a single 200 apiece."* It was written for one router and never applied to the other. D333's question — *when a decision is implemented, which of its callers got the implementation* — for the second time in one session, and it survived three runs because nothing aggregated the document until now. | 0112 |
+| **D368** | A route's published responses are what it declares. | **FastAPI adds a `422` to every operation with a parameter**, whether or not any input on that route can fail its validation. `DELETE /objects/{object_id}` takes one `str` path parameter, which accepts every string, so FastAPI's layer rejects nothing. The auth surface avoided this only by coincidence: every auth route with a path parameter happens to declare a real 422, which *replaces* FastAPI's. | Pruned in `create_app`, and **derived rather than listed**: an operation keeps its 422 when its route declared one. Pruned in the application rather than at capture time, so `create_app(mode).openapi()` and the committed snapshot cannot describe different surfaces. | **The prune had to run to a FIXED POINT** and the first version did not. `HTTPValidationError` references `ValidationError`, so one pass computed against a single snapshot removes the first and then finds the second still referenced — by the schema it has just deleted. It published an orphaned `ValidationError` that nothing pointed at, which `test_every_published_schema_is_referenced` now refuses. | 0112 |
+| **D369** | `contracts/auth-openapi.canonical.json` is the app contract. | It stopped being the auth document the moment it became an aggregate, and **the constant that names it was already `CANONICAL_APP_OPENAPI`** while the rendered artefact was already `app-openapi.json`. Only the file said `auth`. | Renamed to `contracts/app-openapi.canonical.json`, five references updated, `git mv` so the rename is recorded as one. | Cheapest at the moment the content changed, and a stale label on a *reviewed* artefact is the exact shape this repository keeps finding attached to a value nobody re-read. | — |
+| **D370** | `owner_session` is the fixture a Session 7 proof uses for an owner (§0, and it is what Session 6 built it for). | **It cannot reach the storage surface at all.** Its subject holds `notes:read` and `tasks:read`, and the fixture's own docstring explains that the write proofs still work because **nothing in the data plane reads `scope`** — migrations 0003, 0004 and 0005 contain the word nowhere. **Storage is the first surface where that stops being true**: `require_scope(principal, OBJECTS_WRITE)` runs on every write endpoint. Every storage proof would have been a 403. | `storage_probe_subject` and `second_storage_probe_subject`, holding `objects:read` and `objects:write`; `_registered_subject` takes its scopes with the old default unchanged. | **Two subjects rather than one widened subject**, deliberately. A single widened probe would make it impossible to prove the negative that matters most here — that a registered, authenticated human *without* the scope is refused — and a suite of 403s from an under-scoped fixture would have looked exactly like a working boundary. | — |
+| **D371** | A probe subject is torn down by deleting its rows and then the subject. | **`app_private.storage_objects.owner_id` is `ON DELETE RESTRICT`**, chosen in 0014 so that deleting a subject who still owns objects cannot orphan bytes at the provider. So the existing teardown would fail to delete any subject that had run a storage proof, and its own `remaining == "0"` assertion would fire on a foreign-key violation. | `_collect_owned_objects` ages the rows, tombstones them through `storage_tombstone`, and runs **the product's own `bin/storage-admin.sh cleanup`** — bytes before metadata. What the sweep cannot finish is reported and the rows are deliberately **not** deleted. | Found while writing the proofs, before a host run met it. The tempting teardown is `DELETE FROM storage_objects` — which would strand bytes at the provider, in the fixture written to test the plane that exists to prevent exactly that. | — |
+| **D372** | (small, and it is Run 8's mechanism working) A new gate script joins the operator surface. | `test_every_command_in_bin_is_covered_by_this_module` — written in Run 8 after twelve commands were found outside the CLI contract's lists — **failed on `bin/session-07-check.sh` within a minute of it existing**. | Listed. | Worth a row because the previous twelve accumulated over two sessions in silence. The gap between "a rule somebody keeps" and "a test" is one run of a suite. | — |
+| **D373** | §5 Run 9: `bin/session-07-check.sh` in three modes (D316) — and Session 7's claims are all host-measured, so external mode would record nothing. | **Session 7 does have an external guarantee**: from off-host, every storage endpoint must refuse an anonymous caller with **401 and never 404**. A 404 would mean the ownership filter ran before authentication, and an anonymous prober could then distinguish a real object id from an invented one — precisely what STO-OWN-001 denies to an authenticated stranger. | **`STO-PUBLIC-001`**, a new id with its own module, and the claim `public_storage_boundary`. Three modes are meaningful for this session rather than ceremonial. | **A new id rather than widening `SEC-API-001`.** A claim is measured in exactly one environment (ADR 0045), and `claim_session` derives from `max()` — so widening Session 5's requirement to cover a Session 7 surface would move that claim into Session 7's evidence and withdraw it from Session 5's, which is ADR 0089 and D279. | — |
+| **D374** | The page-text assertions check what the page says. | **One of them checked a string the page cannot contain.** The note is HTML wrapped at 80 columns, so the sentence a reader sees as *"there is no endpoint that lists your objects"* is `"no endpoint\n        that lists your objects"` in the file — and `"no endpoint that lists" in note` was therefore never true. It passed because it was joined by **`or`** to a clause that was. | Every prose check goes through `_surface_note`, which normalises whitespace; the `or` became `and`, because the two clauses are two distinct facts and a reader told only the first still loses objects. | **The battery found it, and the first reading was wrong.** Both docs mutations survived, and the tempting conclusion was "two weak tests". One was a mis-targeted mutation and uninformative; the other was an assertion whose subject does not exist in the text being searched, passing for a reason unrelated to what it claims. That is worse than a weak assertion and it is D173's shape with the polarity reversed. | — |
+| **D375** | (process, recorded because it nearly became a fabricated finding) A gate's refusal exits 2. | Reading the exit code **through the shell tool** reported `0` for `--peer-project`, `--capabilities` and `--bucket` alike, on three different gates. The refusals are correct: measured from a **script file**, every one exits 2. | Nothing to fix. Recorded. | This is the trap CLAUDE.md documents — `$?` inside `wsl bash -lc "…"` is expanded before WSL sees it, so a command that exited 2 is reported as 0, silently and with a plausible number. It was one step from a divergence row asserting a defect in a release control that does not have one. **Never read an exit code except from a script file**, including when the answer looks like a finding. | — |
+
 ## 2. What Session 7 adds to the acceptance registry
 
 **Grep the registry before choosing any requirement ID** (ADR 0089, D279). The
@@ -874,6 +888,49 @@ brought back into contact with its own directory (D359, D360).
   instantaneously.
 
 ### Run 9 — The contract, the docs, the evidence
+
+**Done.** **ADR 0112**, twelve activated requirements, ten claims,
+`bin/session-07-check.sh`, and D367–D375.
+
+Measured:
+
+* **The storage half of the application reference described a surface the
+  service does not serve** (D367) — read operation by operation against what the
+  routes return. Three independent defects, invisible until the document was
+  aggregated for the first time.
+* **FastAPI publishes a `422` on any operation with a parameter** (D368),
+  whether or not its validation can reject anything. Pruned, derived from the
+  route declarations, to a fixed point.
+* **Fifteen mutations, zero survivors** after two real findings — controls green
+  before and after, files restored byte-identical, anchors pre-flighted.
+
+Shipped: the aggregate contract and its rename; five response models and two
+shared error models; the four storage routes documented; the 422 pruner;
+`/docs/app`'s storage section; `tests/contract/test_app_contract_aggregate.py`
+(11), the three docs-page tests, `tests/deployment/test_session7_storage.py`
+(17) and `tests/external/test_session7_public_storage.py` (2);
+`storage_probe_subject`, `second_storage_probe_subject`, `agent_session`,
+`completed_object`, `storage_admin_command` and a teardown that respects
+`ON DELETE RESTRICT` (D370, D371); **twelve requirements activated and the four
+placeholders deleted**; **ten claims**; `bin/session-07-check.sh` and
+`tests/contract/test_session_seven_gate_modes.py` (30).
+
+**`CURRENT_SESSION` is now 7**, which is what makes the activated requirements
+enforceable — and it **arms the `session7` Compose profile**. Until this run
+nothing could start a storage container and nothing had. A deploy from here on
+will try to, so the two R2 secrets must exist at the provider first.
+
+**Not shipped, and named rather than discovered later:**
+
+* **Every Session 7 claim will report `not_run` until a host trip.** All twelve
+  requirements are proved by `live_host` or `external` tests that have **never
+  executed in any environment**. D282 is Session 6 writing this sentence one run
+  before its own trip found nine defects; it is written here for the same
+  reason, and the same expectation applies.
+* No evidence document exists and none can be written offline.
+* `WRITE_GRACE_SECONDS` is still reasoned (D362) and the revocation window is
+  still a bound chosen (D363).
+
 
 - The aggregate app OpenAPI through the existing workflow: `bin/app-contract.sh
   --check` compares, `--update` streams a candidate you redirect yourself.

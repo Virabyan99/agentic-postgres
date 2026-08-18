@@ -395,7 +395,7 @@ def build_override(
                 },
                 # The two reviewed snapshots, read-only. The page serves these
                 # bytes and nothing else; `contracts/postgrest-openapi.canonical
-                # .json` and `contracts/auth-openapi.canonical.json` are what a
+                # .json` and `contracts/app-openapi.canonical.json` are what a
                 # human approved and the render copies them here.
                 "volumes": [
                     f"{rendered_directory}/{SNAPSHOT_FILENAME}:{SNAPSHOT_CONTAINER_PATH}:ro",

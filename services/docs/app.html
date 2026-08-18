@@ -8,8 +8,14 @@
   </head>
   <body>
     <!--
-      The application API's reference: the auth service published at
-      `{api.public_base_path}/app` (D226, ADR 0087).
+      The application API's reference: BOTH halves of the surface published at
+      `{api.public_base_path}/app` (D226, ADR 0087) -- the auth service, and the
+      storage service under `/storage` (ADR 0101, one image and two modes).
+
+      One page, because a visitor sees one API. `bin/app-contract.py` merges the
+      two documents `create_app` produces and prefixes the storage half with
+      `naming.STORAGE_PATH_SUFFIX`, so the paths shown here are the published
+      ones rather than each container's internal view.
 
       A second HTML document rather than a shared one, and the reason is the
       note below. `index.html` carries ADR 0060's warning about DELETE, PATCH
@@ -42,6 +48,42 @@
       <p>
         The document is a reviewed snapshot, not a live capture. It is what a
         human approved for this release.
+      </p>
+
+      <h2>If you are using the object storage endpoints</h2>
+      <p>
+        <strong>An upload URL and a download URL are bearer credentials.</strong>
+        Anyone holding one can perform the operation it authorizes, for as long
+        as it lasts. They are returned to you once and are stored nowhere;
+        treat them the way you would treat a password.
+      </p>
+      <p>
+        <strong>Deleting an object does not revoke a download URL that has
+        already been issued.</strong> Nothing in this system can withdraw one.
+        The exposure is bounded by <code>expires_in</code> and by nothing else,
+        which is why the download lifetime is shorter than the upload's. If a
+        URL has leaked, waiting out its expiry is the remedy — deleting the
+        object is not.
+      </p>
+      <p>
+        <strong>Send an upload URL the headers the response names.</strong> The
+        URL is signed over <code>If-None-Match: *</code>, so each one authorizes
+        exactly one first write. Omitting the header does not give you an
+        unconditional write — the provider answers 403, which looks exactly like
+        a broken credential from where you stand. A second write to the same URL
+        answers 412.
+      </p>
+      <p>
+        <strong>You cannot choose a key or a bucket, and there is no endpoint
+        that lists your objects.</strong> The server generates the key; no
+        request model here has a field for one. Keep the
+        <code>object_id</code> you are given at upload time — it is how you
+        complete, download and delete, and nothing will enumerate it for you.
+      </p>
+      <p>
+        A <code>404</code> from an object endpoint means absent, not yours, not
+        yet complete, or already deleted. It is deliberately one answer for all
+        four, so it is not a signal that you have found something.
       </p>
     </aside>
 

@@ -541,22 +541,53 @@ def test_the_storage_service_publishes_no_route_yet() -> None:
     )
 
 
-def test_the_storage_service_starts_in_no_session_this_release_deploys() -> None:
-    """Inert by profile, and measured rather than assumed.
+def test_the_storage_service_is_startable_and_everything_a_start_needs_exists() -> None:
+    """The successor this test's own previous form asked for.
 
-    `project-runtime.sh` selects `--profile session${n}` for n up to
-    --through-session, so a session7 profile is unreachable while CURRENT_SESSION
-    is 6. This is what makes the entry safe to land with its secret declarations
-    rather than with its code.
+    Until Run 9 this asserted `CURRENT_SESSION < 7` and said, in its failure
+    message, that *"the run that moves CURRENT_SESSION owns replacing it with a
+    proof that the service comes up"*. Run 9 moved it, so this is that
+    replacement -- a temporary recording giving way to the thing it was holding
+    a place for, rather than a passing test being weakened.
+
+    **What a `session7` profile being reachable now means.** `project-runtime.sh`
+    selects `--profile session${n}` for n up to `--through-session`, so the
+    storage container was unreachable while the gate session was 6 and no
+    deployment has ever started one. From here on a deploy will try to, and a
+    start needs three things that exist only if this passes: the profile itself,
+    the entry in `POST_BOOTSTRAP_SERVICES`, and the three secrets its consumer
+    is granted.
+
+    **This is stricter than what it replaces**, which asserted a number was
+    below 7. It cannot say the container *comes up* -- that needs a host, and it
+    is `tests/deployment/test_session7_storage.py`'s, which has never run.
     """
-    from agentic_postgres import CURRENT_SESSION
+    from agentic_postgres import CURRENT_SESSION, runtime_override
 
     model = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
-    assert model["services"]["storage"]["profiles"] == ["session7"]
-    assert CURRENT_SESSION < 7, (
-        "CURRENT_SESSION has reached 7, so the storage service is now startable. This test "
-        "recorded that it was not; the run that moves CURRENT_SESSION owns replacing it "
-        "with a proof that the service comes up"
+    service = model["services"]["storage"]
+
+    assert service["profiles"] == ["session7"]
+    assert CURRENT_SESSION >= 7, (
+        "the storage profile is session7 and the gate session is below it, so the "
+        "service is unreachable. Run 9 moved CURRENT_SESSION to 7; if it has moved "
+        "back, this proof and every Session 7 claim describe a surface no deploy starts"
+    )
+    assert runtime_override.STORAGE_SERVICE in runtime_override.POST_BOOTSTRAP_SERVICES, (
+        "the storage service is startable and is not held until after the bootstrap "
+        "plane has run, so it would come up before its database role has a credential"
+    )
+
+    contract = secrets_contract.load_secret_contract(CONTRACT)
+    granted = {
+        secret["name"]
+        for secret in contract["secrets"]
+        for consumer in secret.get("consumers", ())
+        if consumer.get("service") == runtime_override.STORAGE_SERVICE
+    }
+    assert {"storage_service_password", "r2_access_key_id", "r2_secret_access_key"} <= granted, (
+        f"the storage consumer is granted {sorted(granted)}; a start needs all three, "
+        "and a container missing one fails closed at the provider rather than at boot"
     )
 
 

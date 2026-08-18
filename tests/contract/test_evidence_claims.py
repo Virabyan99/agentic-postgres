@@ -765,6 +765,16 @@ CLAIM_INTRODUCED_IN = {
     "admin_authorization": 6,
     "token_non_resurrection": 6,
     "project_isolation": 6,
+    "object_ownership": 7,
+    "object_keys": 7,
+    "presigned_url_containment": 7,
+    "object_completion": 7,
+    "tombstone_ordering": 7,
+    "cleanup_convergence": 7,
+    "storage_authorization": 7,
+    "storage_credentials": 7,
+    "storage_isolation": 7,
+    "public_storage_boundary": 7,
 }
 
 

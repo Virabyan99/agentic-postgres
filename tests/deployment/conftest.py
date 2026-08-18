@@ -1406,6 +1406,11 @@ APP_PROBE_PASSWORD = "correct-horse-battery-staple-7412"  # noqa: S105
 #: subject the registry holds.
 SECOND_APP_PROBE_USERNAME = "apg-acceptance-probe-second"
 
+#: The storage-capable pair. Distinct usernames, because they are distinct
+#: subjects with distinct scopes and both may exist at once.
+STORAGE_PROBE_USERNAME = "apg-acceptance-storage-probe"
+SECOND_STORAGE_PROBE_USERNAME = "apg-acceptance-storage-probe-two"
+
 
 @dataclasses.dataclass(frozen=True)
 class ProbeSubject:
@@ -1460,18 +1465,34 @@ def second_app_probe_subject(
     )
 
 
+#: What an ordinary probe subject holds unless a caller asks for something else.
+#:
+#: Deliberately NOT widened to include `objects:*` when Session 7 needed a
+#: storage-capable subject. Two subjects rather than one, because a single
+#: widened subject would make it impossible to prove the negative that matters
+#: most on this surface: that a registered, authenticated caller **without**
+#: `objects:write` is refused. A fixture that can only demonstrate success
+#: cannot demonstrate a boundary.
+DEFAULT_PROBE_SCOPES: tuple[str, ...] = ("notes:read", "tasks:read")
+
+#: The storage surface's scopes (ADR 0100). Human-only: `$defs/agent_scope` does
+#: not admit them, so no agent token can carry them however it is minted.
+STORAGE_PROBE_SCOPES: tuple[str, ...] = ("objects:read", "objects:write")
+
+
 def _registered_subject(
     project_a: dict[str, Any],
     psql: Callable[..., tuple[int, str, str]],
     username: str,
     display_name: str,
+    scopes: tuple[str, ...] = DEFAULT_PROBE_SCOPES,
 ) -> Any:
     """Create one subject through the product's own function, and remove it."""
     from agentic_postgres import service_source
 
     hashing = service_source.load("hashing")
     role_name = project_a["database"]["roles"]["authenticated"]
-    scopes = sorted(["notes:read", "tasks:read"])
+    scopes = tuple(sorted(scopes))
     stored = hashing.Hasher().hash(APP_PROBE_PASSWORD)
 
     # Deleted first rather than after: a previous run that died between the
@@ -1506,6 +1527,22 @@ def _registered_subject(
             role=project_a["database"]["roles"]["object_owner"],
             claim=user_id,
         )
+        # **The storage plane is a foreign key, and it is ON DELETE RESTRICT.**
+        #
+        # Migration 0014 chose RESTRICT over CASCADE deliberately: deleting a
+        # subject who still owns objects would orphan bytes at the provider that
+        # nothing would ever collect. So the subject below cannot be deleted
+        # while it owns a row, and the assertion that it was deleted would fire
+        # with a foreign-key violation rather than a missing subject -- found
+        # while writing Session 7's proofs, before a host run met it.
+        #
+        # `_collect_owned_objects` is what makes the teardown honest rather than
+        # convenient: it does not delete the rows out from under the provider.
+        # It ages them, tombstones them and runs the product's own cleanup, so
+        # the bytes go before the metadata does. Deleting the rows directly
+        # would leave exactly the orphan RESTRICT exists to prevent -- in the
+        # fixture written to test the plane that prevents it.
+        _collect_owned_objects(project_a, psql, user_id)
         psql(project_a, f"DELETE FROM app_private.users WHERE username = '{username}';")
         _, remaining, _ = psql(
             project_a,
@@ -1515,6 +1552,137 @@ def _registered_subject(
             f"the probe subject {username!r} survived teardown ({remaining} rows); it is "
             "a subject with a known password in a deployed identity registry"
         )
+
+
+def _collect_owned_objects(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    user_id: str,
+) -> None:
+    """Remove one subject's objects, bytes first, through the product's cleanup.
+
+    Three steps, and the order is the whole content:
+
+    1. **Age them.** ADR 0111 will not collect an object whose presigned upload
+       URL could still be honoured, and a freshly created intent has its whole
+       upload TTL left. `intent_expires_at` is moved into the past as the object
+       owner -- the same thing `ttl=-60` does in the plane tests, and not a
+       bypass of any decision under test: what is under test is the claim
+       predicate, and this only ages the data it reads.
+    2. **Tombstone them**, through `storage_tombstone`, so they enter the queue
+       the way an ordinary delete would.
+    3. **Sweep**, through `bin/storage-admin.sh cleanup --yes`, which deletes at
+       the provider and only then records completion.
+
+    Skipped without complaint when the storage service is not running: a Session
+    2-6 gate has no storage container and its probe subjects own no objects, so
+    a teardown that insisted would break every earlier session's proofs.
+    """
+    code, owned, _ = psql(
+        project_a,
+        f"SELECT count(*) FROM app_private.storage_objects WHERE owner_id = '{user_id}';",
+        role=project_a["database"]["roles"]["object_owner"],
+    )
+    if code != 0 or not owned or owned == "0":
+        return
+
+    owner_role = project_a["database"]["roles"]["object_owner"]
+    psql(
+        project_a,
+        "UPDATE app_private.storage_objects "
+        "SET intent_expires_at = now() - interval '1 day' "
+        f"WHERE owner_id = '{user_id}';",
+        role=owner_role,
+    )
+    psql(
+        project_a,
+        "SELECT app_private.storage_tombstone(id, owner_id) "
+        f"FROM app_private.storage_objects WHERE owner_id = '{user_id}';",
+        role=owner_role,
+    )
+
+    outputs = os.environ.get("APG_PROJECT_A_OUTPUTS", "")
+    if outputs:
+        subprocess.run(
+            [
+                str(REPO_ROOT / "bin" / "storage-admin.sh"),
+                "--outputs",
+                outputs,
+                "cleanup",
+                "--yes",
+                "--limit",
+                "500",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=600,
+        )
+
+    # Whatever the sweep could not finish is reported rather than forced. A
+    # DELETE here would strand bytes at the provider, which is the one outcome
+    # this whole plane is built to avoid -- so the fixture leaves the row, the
+    # subject deletion fails loudly, and an operator finds out.
+    _, left, _ = psql(
+        project_a,
+        "SELECT count(*) FROM app_private.storage_objects "
+        f"WHERE owner_id = '{user_id}' AND cleanup_completed_at IS NULL;",
+        role=owner_role,
+    )
+    assert left == "0", (
+        f"{left} of the probe subject's objects were not collected, so the bytes are "
+        "still at the provider. The rows are deliberately NOT deleted here: removing "
+        "them would orphan those bytes, which is exactly what migration 0014's "
+        "ON DELETE RESTRICT exists to prevent"
+    )
+    psql(
+        project_a,
+        f"DELETE FROM app_private.storage_objects WHERE owner_id = '{user_id}';",
+        role=owner_role,
+    )
+
+
+@pytest.fixture(scope="module")
+def storage_probe_subject(
+    project_a: dict[str, Any], psql: Callable[..., tuple[int, str, str]]
+) -> Any:
+    """A subject that may actually use the storage surface.
+
+    `app_probe_subject` holds `notes:read` and `tasks:read`, and its docstring
+    explains that the write proofs still work because **nothing in the data
+    plane reads scope**. Storage is the first surface where that stops being
+    true: `require_scope(principal, OBJECTS_WRITE)` is checked on every write
+    endpoint and `OBJECTS_READ` on the download, so the existing probe would be
+    refused 403 by every storage proof -- and a suite of 403s would look exactly
+    like a working boundary.
+    """
+    yield from _registered_subject(
+        project_a,
+        psql,
+        STORAGE_PROBE_USERNAME,
+        "Acceptance probe (storage)",
+        scopes=STORAGE_PROBE_SCOPES,
+    )
+
+
+@pytest.fixture(scope="module")
+def second_storage_probe_subject(
+    project_a: dict[str, Any], psql: Callable[..., tuple[int, str, str]]
+) -> Any:
+    """A second storage-capable subject, for the cross-owner proofs.
+
+    Both hold the same scopes on purpose. STO-OWN-001 is about **ownership**,
+    not authorization: if the second subject were refused for want of a scope,
+    the proof would pass while measuring the scope check rather than the
+    owner filter, and would keep passing if the owner filter were removed.
+    """
+    yield from _registered_subject(
+        project_a,
+        psql,
+        SECOND_STORAGE_PROBE_USERNAME,
+        "Acceptance probe (storage, second owner)",
+        scopes=STORAGE_PROBE_SCOPES,
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1590,6 +1758,213 @@ def second_owner_session(
         role=second_app_probe_subject.role_name,
         scopes=second_app_probe_subject.scopes,
     )
+
+
+@pytest.fixture(scope="module")
+def storage_owner_session(
+    project_a: dict[str, Any],
+    storage_probe_subject: Any,
+    app_login: Callable[..., Any],
+) -> OwnerSession:
+    """A storage-capable subject's session, obtained through `POST /auth/login`.
+
+    Through the login route rather than minted, for ADR 0095's reason: a
+    bootstrap token names no subject, and migration 0013's hook compares the
+    subject against `app_private.users` over five equalities including
+    `credential_version`, `authz_version` and an exact scope array. A derived
+    token satisfies none of them, and the ten proofs that used one all returned
+    AP401 the first time a host gate ran after 0013 (D298).
+    """
+    answer = app_login(project_a, storage_probe_subject.username, storage_probe_subject.password)
+    assert answer.status == 200, (
+        f"the storage probe subject could not log in ({answer.status}: {answer.body[:200]})"
+    )
+    issued = json.loads(answer.body)
+    return OwnerSession(
+        user_id=storage_probe_subject.user_id,
+        token=issued["access_token"],
+        role=storage_probe_subject.role_name,
+        scopes=storage_probe_subject.scopes,
+    )
+
+
+@pytest.fixture(scope="module")
+def second_storage_owner_session(
+    project_a: dict[str, Any],
+    second_storage_probe_subject: Any,
+    app_login: Callable[..., Any],
+) -> OwnerSession:
+    """A second storage-capable subject's session. See `second_storage_probe_subject`."""
+    answer = app_login(
+        project_a, second_storage_probe_subject.username, second_storage_probe_subject.password
+    )
+    assert answer.status == 200, (
+        f"the second storage probe subject could not log in ({answer.status})"
+    )
+    issued = json.loads(answer.body)
+    return OwnerSession(
+        user_id=second_storage_probe_subject.user_id,
+        token=issued["access_token"],
+        role=second_storage_probe_subject.role_name,
+        scopes=second_storage_probe_subject.scopes,
+    )
+
+
+@pytest.fixture(scope="module")
+def agent_session(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+) -> Any:
+    """A real agent and a token the deployment issued for it.
+
+    Created through `app_private.auth_create_agent` -- the same function
+    `POST /admin/agents` calls -- rather than through the endpoint, so a proof
+    about agents does not become conditional on the endpoint that makes them.
+
+    **Its scopes are agent scopes and cannot include `objects:*`.** ADR 0100
+    left `$defs/agent_scope` unwidened precisely so object storage is human-only,
+    so this fixture cannot construct the token it is used to refuse. That is the
+    point: the refusal proved with it is a property of the vocabulary and of the
+    endpoint's scope check together, not of one agent's configuration.
+    """
+    from agentic_postgres import service_source
+
+    hashing = service_source.load("hashing")
+    secret = "agent-probe-secret-8fa1c33d0b7e"  # noqa: S105
+    name = "apg-acceptance-storage-agent"
+    role_name = project_a["database"]["roles"]["agent"]
+
+    psql(project_a, f"DELETE FROM app_private.agents WHERE name = '{name}';")
+    code, agent_id, error = psql(
+        project_a,
+        "SELECT app_private.auth_create_agent("
+        f"'{name}', 'Storage refusal probe', '{role_name}', "
+        "ARRAY['notes:read']::text[], NULL, "
+        f"'{hashing.Hasher().hash(secret)}');",
+    )
+    if code != 0 or not agent_id:
+        pytest.skip(f"could not create the probe agent: {error}")
+
+    try:
+        answer = api_call(
+            f"{app_base(project_a)}/auth/agent-token",
+            method="POST",
+            body={"agent_id": agent_id, "secret": secret},
+        )
+        assert answer.status == 200, (
+            f"the probe agent could not obtain a token ({answer.status}: "
+            f"{answer.body[:200]}). Without one, the refusal below would be a refusal "
+            "of a malformed request rather than of an agent"
+        )
+        issued = json.loads(answer.body)
+        yield OwnerSession(
+            user_id=agent_id,
+            token=issued["access_token"],
+            role=role_name,
+            scopes=("notes:read",),
+        )
+    finally:
+        psql(project_a, f"DELETE FROM app_private.agents WHERE name = '{name}';")
+
+
+@pytest.fixture(scope="module")
+def completed_object(
+    project_a: dict[str, Any],
+    app_base: Callable[[dict[str, Any]], str],
+    api_call: Callable[..., Any],
+) -> Callable[..., str]:
+    """One object taken all the way to `available`, through the product's own path.
+
+    Intent, then a real PUT to the presigned URL with the headers the response
+    names, then completion. **The PUT is the part that cannot be faked**: the
+    URL is signed over `If-None-Match: *`, so a caller that omits the header
+    gets 403 rather than an unconditional write (measured, Run 5), and
+    completion asks the provider how many bytes actually arrived.
+
+    Written as a factory rather than a fixture value so a test can have two of
+    them, and so the subject is the caller's choice -- a cross-owner proof needs
+    objects belonging to different people.
+    """
+    import urllib.error
+    import urllib.request
+
+    def make(session: Any) -> str:
+        base = f"{app_base(project_a)}{_storage_suffix()}"
+        created = api_call(
+            f"{base}/upload-intents",
+            method="POST",
+            token=session.token,
+            body={"declared_bytes": 11, "content_type": "text/plain"},
+        )
+        assert created.status == 201, (
+            f"could not create an upload intent ({created.status}: {created.body[:200]})"
+        )
+        intent = json.loads(created.body)
+
+        request = urllib.request.Request(  # noqa: S310
+            intent["upload_url"], data=b"hello world", method="PUT"
+        )
+        for header, value in (intent.get("required_headers") or {}).items():
+            request.add_header(header, value)
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
+                assert response.status in (200, 201), response.status
+        except urllib.error.HTTPError as error:
+            pytest.fail(
+                f"the presigned PUT was refused with {error.code}. The URL is not "
+                "reproduced here: it is a bearer credential"
+            )
+
+        finished = api_call(
+            f"{base}/upload-intents/{intent['object_id']}/complete",
+            method="POST",
+            token=session.token,
+            body={},
+        )
+        assert finished.status == 200, (
+            f"completion failed ({finished.status}: {finished.body[:200]})"
+        )
+        return str(intent["object_id"])
+
+    return make
+
+
+def _storage_suffix() -> str:
+    from agentic_postgres import naming
+
+    return naming.STORAGE_PATH_SUFFIX
+
+
+@pytest.fixture(scope="session")
+def storage_admin_command() -> Callable[..., Any]:
+    """Run one `bin/storage-admin.sh` verb against project A.
+
+    The command rather than a reimplementation of it, for ADR 0093's reason
+    turned around: what these proofs measure is the operator surface, so a test
+    that talked to the container directly would prove the container works and
+    say nothing about the command an operator runs.
+    """
+    outputs = os.environ.get("APG_PROJECT_A_OUTPUTS", "")
+
+    def run(*arguments: str) -> Any:
+        if not outputs:
+            pytest.skip("APG_PROJECT_A_OUTPUTS is not set")
+        return subprocess.run(
+            [
+                str(REPO_ROOT / "bin" / "storage-admin.sh"),
+                "--outputs",
+                outputs,
+                *arguments,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=900,
+        )
+
+    return run
 
 
 @pytest.fixture(scope="session")

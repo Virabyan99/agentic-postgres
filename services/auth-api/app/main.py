@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
-from app import db, keys, routes, storage_client, storage_routes
+from app import db, keys, openapi_docs, routes, storage_client, storage_routes
 from app import settings as settings_module
 from app.hashing import BoundedHasher
 from app.profile import HASH_CONCURRENCY
@@ -197,6 +197,23 @@ def create_app(mode: str | None = None) -> FastAPI:
         application.include_router(storage_routes.router)
     else:
         application.include_router(routes.router)
+
+    # The document this application publishes, with FastAPI's unreachable `422`
+    # removed (Run 9). Overridden here rather than in `bin/app-contract.py` so
+    # that there is exactly one document: a prune applied only at capture time
+    # would mean `create_app(mode).openapi()` and the committed snapshot
+    # described different surfaces, and every test that read the first would be
+    # measuring something nobody serves.
+    #
+    # `openapi_url=None` above, so this is never served -- it is read by the
+    # contract command and by the tests. The reference page is a reviewed
+    # snapshot, not a live capture (ADR 0069).
+    generated = application.openapi
+
+    def openapi() -> dict[str, Any]:
+        return openapi_docs.prune_unreachable_validation_errors(generated(), application.routes)
+
+    application.openapi = openapi  # type: ignore[method-assign]
     return application
 
 

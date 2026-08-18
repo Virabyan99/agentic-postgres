@@ -50,6 +50,8 @@ from app.models import (
     AuthorizationFailedResponse,
     InvalidRequestResponse,
     MalformedRequestResponse,
+    ObjectStateConflictResponse,
+    ObjectUnavailableResponse,
 )
 
 #: The failures the routes share, phrased the way `errors.py` phrases them: one
@@ -81,6 +83,46 @@ INVALID: dict[str, Any] = {
         "so the reason is returned."
     ),
 }
+
+#: The two the storage surface adds.
+UNAVAILABLE: dict[str, Any] = {
+    "model": ObjectUnavailableResponse,
+    "description": (
+        "Absent, another subject's, still pending, or tombstoned -- one answer for all "
+        "four (STO-OWN-001), and for a provider failure too. An answer that told them "
+        "apart would make an object id an existence oracle, and object ids travel in URLs."
+    ),
+}
+CONFLICT: dict[str, Any] = {
+    "model": ObjectStateConflictResponse,
+    "description": (
+        "The caller's own object cannot make this transition. Naming the state is safe "
+        "only because this answer is unreachable unless the row matched on owner id; "
+        "every non-owned case is the 404 above."
+    ),
+}
+
+
+def created(description: str, model: type[BaseModel] | None = None) -> dict[str, Any]:
+    """A 201. Separate from `ok` so a route cannot silently publish the wrong one.
+
+    Until Run 9 the upload-intent route published `200` for a response it sends
+    as `201`, because FastAPI defaults to 200 for a handler returning a bare
+    `Response` and nothing had ever compared the document to the surface.
+    """
+    fragment: dict[str, Any] = {"description": description}
+    if model is not None:
+        fragment["model"] = model
+    return fragment
+
+
+def no_content(description: str) -> dict[str, Any]:
+    """A 204, which by definition has no body and therefore no model.
+
+    Passing a model here would publish a body for a response that must not have
+    one -- and FastAPI would happily document it.
+    """
+    return {"description": description}
 
 
 def ok(description: str, model: type[BaseModel] | None = None) -> dict[str, Any]:
@@ -114,3 +156,73 @@ def described(
     if request_model is not None:
         fragment["requestBody"] = body(request_model)
     return fragment
+
+
+def prune_unreachable_validation_errors(document: dict[str, Any], routes: Any) -> dict[str, Any]:
+    """Drop the `422` FastAPI adds to a route that cannot produce one.
+
+    **FastAPI adds a `422` to every operation with a parameter**, whether or not
+    any input on that route can fail its validation. `DELETE /objects/{object_id}`
+    takes one `str` path parameter, which accepts every string, so FastAPI's
+    validation layer never rejects anything -- and the route's own `_object_id`
+    refuses a non-uuid as `MalformedRequest`, which is a **400** in the house
+    shape. The published `422 HTTPValidationError` was therefore a response the
+    service cannot emit, in a shape it never produces.
+
+    That is ADR 0060's complaint exactly: a document advertising what the
+    surface does not do. It is worth removing rather than tolerating, because
+    the auth surface only avoided it by coincidence -- every auth route with a
+    path parameter happens to declare a real 422, which *replaces* FastAPI's.
+
+    **The rule is derived, not listed.** An operation keeps its 422 when its
+    route declared one, and loses it otherwise. So a route that gains a genuine
+    `InvalidRequest` path keeps its documentation by declaring it, and no list
+    here has to be kept in step with the routes -- which is the second-authority
+    failure this repository keeps paying for (D177).
+    """
+    declared: set[tuple[str, str]] = set()
+    for route in routes:
+        path = getattr(route, "path", None)
+        methods = getattr(route, "methods", None) or ()
+        responses = getattr(route, "responses", None) or {}
+        if path is None:
+            continue
+        if 422 in responses or "422" in responses:
+            for method in methods:
+                declared.add((path, method.lower()))
+
+    for path, operations in (document.get("paths") or {}).items():
+        for method, operation in operations.items():
+            responses = operation.get("responses") or {}
+            if "422" in responses and (path, method.lower()) not in declared:
+                del responses["422"]
+
+    # `HTTPValidationError` and `ValidationError` are only ever referenced by
+    # those responses, so a components block still carrying them after the prune
+    # would publish two schemas nothing points at. Removed only when genuinely
+    # unreferenced -- checked against the serialized document rather than
+    # assumed, because assuming it is how a dangling `$ref` gets published.
+    import json as _json
+
+    # To a FIXED POINT, and that is not tidiness. `HTTPValidationError`
+    # REFERENCES `ValidationError`, so a single pass computed against one
+    # snapshot of the document removes the first and then finds the second still
+    # referenced -- by the schema it has just deleted. The first version of this
+    # did exactly that and left an orphaned `ValidationError` in the published
+    # components, pointed at by nothing.
+    schemas = (document.get("components") or {}).get("schemas") or {}
+    removable = ("HTTPValidationError", "ValidationError")
+    while True:
+        body = _json.dumps(document)
+        dropped = [
+            name
+            for name in removable
+            if name in schemas and f'"#/components/schemas/{name}"' not in body
+        ]
+        if not dropped:
+            break
+        for name in dropped:
+            del schemas[name]
+    if not schemas:
+        (document.get("components") or {}).pop("schemas", None)
+    return document

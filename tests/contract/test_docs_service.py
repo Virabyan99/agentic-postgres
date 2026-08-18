@@ -379,14 +379,133 @@ def test_the_application_page_does_not_repeat_the_rest_surfaces_warning() -> Non
     definitions, so it advertises what the service implements -- and a page that
     copied the warning across would be describing a surface it is not
     describing, which is the failure `index.html`'s own note names.
+
+    **Rewritten in Run 9, and it is stricter rather than weaker (ADR 0112).**
+    This asserted `"403" not in note`, using the status code as a proxy for the
+    REST warning. The proxy stopped being valid the moment the page gained the
+    storage half: the upload note has to say that a provider answers **403** to a
+    request that omits `If-None-Match`, which is a fact about R2 and has nothing
+    to do with `follow-privileges`.
+
+    A proxy that has acquired a false positive is not a test to relax -- it is a
+    test to replace with the thing it was standing for. The REST warning's
+    fingerprint is the three uppercase verbs and the phrase naming where the
+    document comes from, and both are checked here. That catches a verbatim copy
+    exactly as the old form did, and is not fooled by an unrelated status code.
     """
     note = APP_PAGE.read_text(encoding="utf-8")
     note = note[note.index('id="apg-surface-note"') :]
-    assert "403" not in note, "the application page repeats the REST surface's warning"
+    for verb in ("DELETE", "PATCH", "POST"):
+        assert verb not in note, (
+            f"the application page carries the REST surface's {verb} warning. That "
+            "warning is about a document generated from database privileges; this "
+            "one is generated from route definitions"
+        )
+    assert "follow-privileges" not in note
+    assert "database privileges" not in note.replace("not\n        from database privileges", "")
     assert "role" in note and "scope" in note, (
         "the application page says nothing about the one rule underneath its whole "
         "surface: a client never submits a role or a scope"
     )
+
+
+def _surface_note(page: Path) -> str:
+    """The page's surface note, as one line of prose.
+
+    **Whitespace-normalised, and the mutation battery is why.** The note is HTML
+    wrapped at 80 columns, so a sentence a reader sees as
+    "there is no endpoint that lists your objects" is
+    `"no endpoint\\n        that lists your objects"` in the file. A substring
+    search for the sentence therefore never matches -- and
+    `test_the_application_page_does_not_promise_a_listing` was written with an
+    `or`, so the clause that could never be true was masked by the one that
+    happened to be.
+
+    That is worse than a weak assertion: it is an assertion whose subject does
+    not exist in the text being searched, passing for a reason unrelated to what
+    it claims. Every prose check in this module goes through here.
+    """
+    body = page.read_text(encoding="utf-8")
+    note = body[body.index('id="apg-surface-note"') :]
+    return " ".join(note.split())
+
+
+def test_the_application_page_describes_the_storage_half_it_now_shows() -> None:
+    """Run 9 put a second surface on this page. The note has to have moved too.
+
+    The aggregate document gained thirteen operations where it had nine, and the
+    four new ones carry rules a reader cannot infer from a schema: a presigned
+    URL is a bearer credential, **a delete does not revoke one already issued**,
+    an upload URL must be sent `If-None-Match: *` or the provider answers 403,
+    and one `404` covers absent, foreign, pending and deleted alike.
+
+    None of that is visible in the OpenAPI document, and the non-revocation is
+    the one a reader would otherwise assume the other way round. A page showing
+    endpoints whose rules it does not state is the failure `index.html`'s own
+    note names, pointed at the half this page gained.
+    """
+    note = _surface_note(APP_PAGE)
+
+    assert "bearer credential" in note, (
+        "the page shows endpoints that return presigned URLs and never says what one is"
+    )
+    assert "does not revoke a download URL that has already been issued" in note, (
+        "the page does not say that deleting an object leaves an already-issued "
+        "download URL working. That is the one rule a reader will assume the "
+        "other way round"
+    )
+    assert "If-None-Match" in note and "403" not in note.split("If-None-Match")[0], (
+        "the page does not name the header an upload URL is signed over"
+    )
+    assert "expires_in" in note, "the page names no bound on the exposure"
+
+
+def test_the_application_page_does_not_promise_a_listing() -> None:
+    """There is no list endpoint, and the page must not imply one.
+
+    The vertical slice proves operations by known id; a list endpoint needs
+    pagination, ordering, filtering and its own review. A reader who assumes one
+    exists will lose objects, because nothing else will enumerate an
+    `object_id` they did not keep.
+
+    **`and`, not `or`, and the mutation battery is why.** This joined the two
+    clauses with `or`, and deleting either statement from the page left it
+    green -- a test over two distinct facts that can only detect losing *both*.
+    They are two facts: that no endpoint lists objects, and that the caller must
+    therefore keep the id it is given. A reader who is told the first and not
+    the second still loses objects.
+    """
+    note = _surface_note(APP_PAGE)
+    assert "no endpoint that lists your objects" in note, (
+        "the page does not say there is no listing endpoint"
+    )
+    assert "nothing will enumerate" in note, (
+        "the page does not tell the caller to keep the object_id it is given, which "
+        "is the consequence of there being no listing endpoint"
+    )
+
+
+def test_the_two_pages_still_describe_two_different_surfaces() -> None:
+    """The control for the test above, and it is not decoration.
+
+    The storage note added the string `403` to this page, and
+    `test_the_application_page_does_not_repeat_the_rest_surfaces_warning`
+    asserts the REST warning is absent by checking for exactly that. The two
+    could pass while meaning opposite things, so this pins the distinction on
+    the WORDS that carry it rather than on a status code that now appears on
+    both pages for unrelated reasons.
+    """
+    app_note = APP_PAGE.read_text(encoding="utf-8")
+    app_note = app_note[app_note.index('id="apg-surface-note"') :]
+    rest_note = PAGE.read_text(encoding="utf-8")
+    rest_note = rest_note[rest_note.index('id="apg-surface-note"') :]
+
+    assert "database privileges" in rest_note
+    assert "PATCH" not in app_note, (
+        "the application page repeats the REST document's verb warning, which is "
+        "about a document generated from database privileges and is not true here"
+    )
+    assert "follow-privileges" not in app_note
 
 
 # ---------------------------------------------------------------------------

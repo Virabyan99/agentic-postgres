@@ -161,6 +161,42 @@ class InvalidRequestResponse(BaseModel):
     message: str
 
 
+# The two the storage surface adds. They live here rather than in
+# `storage_models.py` for the reason the comment above this block gives:
+# `errors.py` returns the literals and it is shared by both routers, so the
+# schemas belong beside the other four that describe its output. A storage-only
+# copy would be a second authority on a body the auth service can also return.
+
+
+class ObjectUnavailableResponse(BaseModel):
+    """Returned when the object is absent, another subject's, or not downloadable.
+
+    **All four causes are this one answer** (`STO-OWN-001`): absent, foreign,
+    still pending, and tombstoned. So is a provider failure -- a caller told
+    `AccessDenied` would learn this deployment's credential scope, so it gets
+    the same 404 the ownership filter gives.
+
+    There is nothing to branch on and nothing else will be added. An answer that
+    distinguished absent from foreign would make an object id an existence
+    oracle, and object ids travel in URLs.
+    """
+
+    error: Literal["object_unavailable"]
+
+
+class ObjectStateConflictResponse(BaseModel):
+    """Returned when the caller's own object cannot make the requested transition.
+
+    Carries `state`, and doing so is safe for one specific reason: this answer
+    is unreachable unless the database matched the row **on owner id**. Every
+    non-owned case comes back indistinguishable from absent and becomes a 404
+    instead, so naming the state tells the caller only about an object it owns.
+    """
+
+    error: Literal["object_state_conflict"]
+    state: str
+
+
 class AgentTokenRequest(_Strict):
     """An agent presents an id and the secret it was shown once.
 

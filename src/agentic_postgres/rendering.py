@@ -72,7 +72,7 @@ SNAPSHOT_FILENAME = "openapi.json"
 #: command needs no host, because FastAPI generates the document from this
 #: checkout rather than from a running server; the review step is the same, and
 #: what is copied here is the approval rather than a fresh generation.
-CANONICAL_APP_OPENAPI = REPO_ROOT / "contracts" / "auth-openapi.canonical.json"
+CANONICAL_APP_OPENAPI = REPO_ROOT / "contracts" / "app-openapi.canonical.json"
 APP_SNAPSHOT_FILENAME = "app-openapi.json"
 
 #: World-readable, and the only rendered file that is. Every other file here is

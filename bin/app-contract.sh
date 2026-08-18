@@ -30,7 +30,7 @@ readonly ROOT_DIR
 usage() {
   cat <<'USAGE'
 Usage: bin/app-contract.sh --check
-       bin/app-contract.sh --update > contracts/auth-openapi.canonical.json
+       bin/app-contract.sh --update > contracts/app-openapi.canonical.json
 
   --check    Compare. Never writes.
   --update   Stream a candidate to standard output. Redirect it yourself.

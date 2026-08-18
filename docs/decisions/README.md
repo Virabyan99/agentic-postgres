@@ -175,3 +175,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0109](0109-the-cors-middleware-is-a-label-and-it-instructs-a-browser-rather-than-controlling-access.md) | The CORS middleware is a label, and it instructs a browser rather than controlling access | 7 | Accepted |
 | [0110](0110-the-bucket-administering-credential-is-not-an-s3-credential.md) | The bucket-administering credential is not an S3 credential | 7 | Accepted |
 | [0111](0111-an-object-is-collectable-only-once-nothing-can-still-write-to-its-key.md) | An object is collectable only once nothing can still write to its key | 7 | Accepted |
+| [0112](0112-the-application-reference-is-one-document-and-it-describes-the-surface.md) | The application reference is one document, and it describes the surface | 7 | Accepted |

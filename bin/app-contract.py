@@ -22,6 +22,22 @@ compares byte for byte, so a snapshot edited by hand fails rather than being
 served. That is the same guard `api-contract.py` carries and for the same
 reason: a document nobody can reproduce is a document nobody can review again.
 
+**It is an AGGREGATE, and that is Run 9's change.** The application surface is
+served by two containers from one image (ADR 0101): `auth` answers under
+`{api.public_base_path}/app` and `storage` under the same path plus
+`naming.STORAGE_PATH_SUFFIX`. A visitor sees one API, so the reference has to be
+one document -- and until this run it was the auth half alone, which is why
+nothing had ever looked at what the storage half published.
+
+Looking at it found three things, all fixed in `storage_routes.py` rather than
+papered over here: every operation was documented `200` including the one that
+answers 201 and the one that answers 204, no failure response was documented at
+all, and a `422` was published in FastAPI's `HTTPValidationError` shape that
+this service never emits. `openapi_docs.py` exists to prevent exactly that and
+its docstring says so; it had been applied to the auth router and not to this
+one. *When a decision is implemented, ask which of its callers got the
+implementation* (D333).
+
 Exit codes (runbook section 2 convention):
   0  the committed snapshot matches what this checkout generates
   2  invalid operator input
@@ -47,7 +63,7 @@ sys.path.insert(0, str(REPO_ROOT / "services" / "auth-api"))
 #: The reviewed document. Named here and read by `rendering.py`, which copies it
 #: into every project's rendered directory -- one authority for the path, so a
 #: capture and a deploy cannot name two files.
-SNAPSHOT_PATH = REPO_ROOT / "contracts" / "auth-openapi.canonical.json"
+SNAPSHOT_PATH = REPO_ROOT / "contracts" / "app-openapi.canonical.json"
 
 EXIT_INPUT = 2
 EXIT_PREREQUISITE = 3
@@ -55,15 +71,92 @@ EXIT_MISSING = 5
 EXIT_DISAGREES = 6
 
 
+#: The aggregate's title. The two applications share a FastAPI `title` naming
+#: only the auth service, which is right for each container and wrong for the
+#: document a visitor reads: the surface it describes is the application API,
+#: of which auth is half.
+AGGREGATE_TITLE = "Agentic Postgres application API"
+
+
+class ContractError(RuntimeError):
+    """The two halves cannot be merged. Never resolved silently."""
+
+
+def _merge(auth: dict, storage: dict, *, storage_prefix: str) -> dict:
+    """One document from the two applications one image runs.
+
+    **The prefix is read, never spelled.** `naming.STORAGE_PATH_SUFFIX` is the
+    single authority for where the storage surface sits under the application
+    path -- the same constant the router's rule and its strip-prefix middleware
+    are built from. A literal `"/storage"` here would be a second derivation of
+    a published route, which is D177: the documentation route was derived twice,
+    the two disagreed, and the copy carrying a comment saying it was kept in
+    step was the one that had not drifted.
+
+    **A collision is an error, not a merge.** Both halves import `errors.py`, so
+    four response schemas appear in both -- byte-identical today, and this
+    asserts that rather than trusting it. If two schemas of one name ever differ,
+    the merged document would describe one of them and serve the other, and
+    whichever half was merged second would silently win. That failure would be
+    invisible in review: the document would be valid, complete and wrong about
+    one surface.
+    """
+    merged: dict = {
+        "openapi": auth["openapi"],
+        "info": {**auth.get("info", {}), "title": AGGREGATE_TITLE},
+        "paths": {},
+        "components": {"schemas": {}},
+    }
+
+    if auth.get("openapi") != storage.get("openapi"):
+        raise ContractError(
+            f"the two halves declare different OpenAPI versions: "
+            f"{auth.get('openapi')} and {storage.get('openapi')}"
+        )
+
+    for path, operations in (auth.get("paths") or {}).items():
+        merged["paths"][path] = operations
+
+    for path, operations in (storage.get("paths") or {}).items():
+        published = f"{storage_prefix}{path}"
+        if published in merged["paths"]:
+            # Unreachable today and asserted anyway: a collision here would mean
+            # the edge routes one published path to two containers, and the
+            # document would describe whichever half merged last.
+            raise ContractError(f"{published} is served by both halves of the application surface")
+        merged["paths"][published] = operations
+
+    for half, document in (("auth", auth), ("storage", storage)):
+        for name, schema in ((document.get("components") or {}).get("schemas") or {}).items():
+            existing = merged["components"]["schemas"].get(name)
+            if existing is not None and existing != schema:
+                raise ContractError(
+                    f"the {half} half defines a different {name!r} from the other half. "
+                    "Merging would publish one and serve the other. Give one of them a "
+                    "distinct name rather than letting the merge pick."
+                )
+            merged["components"]["schemas"][name] = schema
+
+    return merged
+
+
 def generate() -> bytes:
     """The document this checkout produces, serialized deterministically.
 
-    `sort_keys` and a fixed indent, because the committed artefact is compared
-    byte for byte and Python's dict order is not something to rest that on.
+    Both halves come from `create_app`, which is the function the container
+    runs -- so this is the surface the release serves rather than a description
+    of it. `sort_keys` and a fixed indent, because the committed artefact is
+    compared byte for byte and Python's dict order is not something to rest that
+    on.
     """
+    from agentic_postgres import naming
     from app.main import create_app
 
-    document = create_app("auth").openapi()
+    document = _merge(
+        create_app("auth").openapi(),
+        create_app("storage").openapi(),
+        storage_prefix=naming.STORAGE_PATH_SUFFIX,
+    )
     return json.dumps(document, indent=2, sort_keys=True).encode("utf-8") + b"\n"
 
 
@@ -95,6 +188,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return EXIT_PREREQUISITE
+    except ContractError as error:
+        print(f"app-contract: {error}", file=sys.stderr)
+        return EXIT_DISAGREES
 
     if arguments.update:
         # Streamed, never written. A capture run with elevated privilege would
@@ -107,7 +203,7 @@ def main(argv: list[str] | None = None) -> int:
     if not SNAPSHOT_PATH.is_file():
         print(
             f"app-contract: no approved snapshot at {SNAPSHOT_PATH}. Capture one with "
-            "`bin/app-contract.sh --update > contracts/auth-openapi.canonical.json`, "
+            "`bin/app-contract.sh --update > contracts/app-openapi.canonical.json`, "
             "read the diff, and commit it.",
             file=sys.stderr,
         )

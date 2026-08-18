@@ -23,7 +23,7 @@ from uuid import UUID
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
-from app import errors
+from app import errors, openapi_docs
 from app import scopes as scope_map
 
 # The strict body reader, imported rather than reimplemented. It applies the
@@ -36,7 +36,13 @@ from app import scopes as scope_map
 from app.routes import _body as read_body
 from app.service import AuthService
 from app.storage_client import StorageError
-from app.storage_models import CompleteUploadRequest, UploadIntentRequest
+from app.storage_models import (
+    CompletedObjectResponse,
+    CompleteUploadRequest,
+    DownloadGrantResponse,
+    UploadIntentRequest,
+    UploadIntentResponse,
+)
 
 router = APIRouter()
 
@@ -125,7 +131,117 @@ async def _guard(handler) -> Response:
         return errors.object_unavailable()
 
 
-@router.post("/upload-intents")
+# ---------------------------------------------------------------------------
+# What the published reference says about this surface
+# ---------------------------------------------------------------------------
+#
+# **This block is Run 9's, and its absence was a real defect.** Run 6 built these
+# four routes with bare `Request`/`Response` signatures and no `responses=`, so
+# the document FastAPI generated said each one returns `200` with an
+# unspecified body and nothing else -- for operations that answer 201, 204, 401,
+# 403, 404, 409 and 422. It also published a `422` shaped as FastAPI's own
+# `HTTPValidationError`, which this service never emits: a malformed object id
+# is `MalformedRequest` and comes back 400 in the house shape.
+#
+# `openapi_docs.py` exists precisely to prevent that and says so in its own
+# docstring. It was written for the auth router and never applied here. *When a
+# decision is implemented, ask which of its callers got the implementation*
+# (D333) -- and nothing noticed for three runs, because the storage half of the
+# document was not aggregated into anything until `app-contract` was taught to.
+#
+# `responses=` REPLACES and `openapi_extra` deep-merges, measured in Session 6
+# and recorded in `openapi_docs.py`. The replacement is what removes FastAPI's
+# `HTTPValidationError`, so every status below goes through `responses=`.
+
+DOC_UPLOAD_INTENT = openapi_docs.described(
+    summary="Reserve an object and mint a first-write upload URL",
+    description=(
+        "The server generates the object id and the key. There is no field for either "
+        "in the request model and no code path by which a client-supplied key could "
+        "reach a presign (STO-KEY-001).\n\n"
+        "`upload_url` is a bearer credential with a short life. Send it the "
+        "`required_headers` exactly: the URL is signed over `If-None-Match: *`, so "
+        "omitting the header yields 403 from the provider rather than an unconditional "
+        "write, and a second PUT to the same key yields 412."
+    ),
+    request_model=UploadIntentRequest,
+)
+RESP_UPLOAD_INTENT = {
+    201: openapi_docs.created(
+        "Reserved. The object is `pending` until it is completed.", UploadIntentResponse
+    ),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_COMPLETE = openapi_docs.described(
+    summary="Verify the uploaded bytes and make the object available",
+    description=(
+        "Asks the provider how many bytes actually arrived, then compare-and-sets. "
+        "Idempotent: a repeated call on an already-available object returns the same "
+        "200 rather than a conflict.\n\n"
+        "The subject is re-authenticated **after** the provider answers and before "
+        "anything is written, so a subject disabled while the bytes were in flight is "
+        "refused rather than completing an upload on a revoked identity."
+    ),
+    request_model=CompleteUploadRequest,
+)
+RESP_COMPLETE = {
+    200: openapi_docs.ok("Verified and available.", CompletedObjectResponse),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    404: openapi_docs.UNAVAILABLE,
+    409: openapi_docs.CONFLICT,
+    422: openapi_docs.INVALID,
+}
+
+DOC_DOWNLOAD_URL = openapi_docs.described(
+    summary="Mint a short-lived download URL for an object you own",
+    description=(
+        "Owned and available only.\n\n"
+        "**Issuing this is an authorization decision made now, and a later delete does "
+        "not revoke it.** Nothing in this system can withdraw a presigned URL; the "
+        "residual is bounded by `expires_in`, which is why the download TTL is "
+        "configured shorter than the upload's."
+    ),
+)
+RESP_DOWNLOAD_URL = {
+    200: openapi_docs.ok("A short-lived GET.", DownloadGrantResponse),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    404: openapi_docs.UNAVAILABLE,
+}
+
+DOC_DELETE = openapi_docs.described(
+    summary="Tombstone an object",
+    description=(
+        "Answers 204 for an object that was moved, for one already tombstoned, for one "
+        "that never existed and for another subject's alike. Not a 404 on absence: the "
+        "caller's intent is satisfied either way, and answering differently would make "
+        "DELETE non-idempotent for the owner and turn it into an existence oracle.\n\n"
+        "The bytes are removed by a later cleanup pass, not by this call. An object "
+        "whose upload URL is still live is not collected until it expires, because a "
+        "tombstone cannot revoke a presigned URL."
+    ),
+)
+RESP_DELETE = {
+    204: openapi_docs.no_content("Tombstoned, or already was, or never existed."),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+}
+
+
+@router.post(
+    "/upload-intents",
+    status_code=201,
+    openapi_extra=DOC_UPLOAD_INTENT,
+    responses=RESP_UPLOAD_INTENT,
+)
 async def create_upload_intent(request: Request) -> Response:
     """Reserve an id and a key, and return a first-write URL.
 
@@ -166,7 +282,11 @@ async def create_upload_intent(request: Request) -> Response:
     return await _guard(run)
 
 
-@router.post("/upload-intents/{object_id}/complete")
+@router.post(
+    "/upload-intents/{object_id}/complete",
+    openapi_extra=DOC_COMPLETE,
+    responses=RESP_COMPLETE,
+)
 async def complete_upload(request: Request, object_id: str) -> Response:
     """Verify against the provider, then compare-and-set.
 
@@ -225,7 +345,11 @@ async def complete_upload(request: Request, object_id: str) -> Response:
     return await _guard(run)
 
 
-@router.get("/objects/{object_id}/download-url")
+@router.get(
+    "/objects/{object_id}/download-url",
+    openapi_extra=DOC_DOWNLOAD_URL,
+    responses=RESP_DOWNLOAD_URL,
+)
 async def download_url(request: Request, object_id: str) -> Response:
     """A short-lived GET for an object this subject owns.
 
@@ -254,7 +378,12 @@ async def download_url(request: Request, object_id: str) -> Response:
     return await _guard(run)
 
 
-@router.delete("/objects/{object_id}")
+@router.delete(
+    "/objects/{object_id}",
+    status_code=204,
+    openapi_extra=DOC_DELETE,
+    responses=RESP_DELETE,
+)
 async def delete_object(request: Request, object_id: str) -> Response:
     """Tombstone, and answer identically whatever was there.
 

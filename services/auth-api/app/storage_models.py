@@ -14,6 +14,8 @@ handler can be edited to read something the model would have rejected.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 #: The longest content type this surface will record. RFC 6838 bounds a type and
@@ -58,3 +60,74 @@ class CompleteUploadRequest(_Strict):
     of being ignored. A client trying to declare its own verified size is
     exactly the request this surface must not quietly accept.
     """
+
+
+# ---------------------------------------------------------------------------
+# What the routes return
+# ---------------------------------------------------------------------------
+#
+# **Descriptive only, and never bound as a `response_model`.** `openapi_docs`'s
+# docstring records why: FastAPI would filter and re-serialize every response
+# through the model, and the route would no longer be returning what it built.
+# These exist so the published document says what the surface does -- which,
+# until Run 9, it did not: FastAPI generated a single `200` for each of these
+# four operations from their bare `Response` signatures, so the reference
+# advertised `200` for a 201 and for a 204, documented none of the failures, and
+# published a `422` in FastAPI's own `HTTPValidationError` shape that this
+# service never emits.
+#
+# That is the exact failure `openapi_docs.py`'s docstring describes and exists
+# to prevent. It was written for the auth router in Session 6 and the storage
+# router shipped without it in Run 6 -- *when a decision is implemented, ask
+# which of its callers got the implementation* (D333).
+#
+# **What none of them carries**: a bucket, an object key, an ETag, a checksum, a
+# provider request id, or any sign of another subject's existence.
+
+
+class UploadIntentResponse(BaseModel):
+    """What a caller gets to perform the upload, and nothing more.
+
+    `upload_url` is a bearer credential with a short life -- anyone holding it
+    can perform the PUT it authorizes. It is returned once and stored nowhere.
+
+    `required_headers` is named rather than assumed. The URL is signed over
+    `If-None-Match: *`, so a client that omits the header does not get an
+    unconditional write -- it gets **403 SignatureDoesNotMatch** (measured, Run
+    5), which is indistinguishable from a broken credential from where the
+    client stands. Publishing the header is what makes the condition usable.
+    """
+
+    object_id: str
+    upload_url: str
+    expires_in: int
+    max_bytes: int
+    required_headers: dict[str, str]
+
+
+class CompletedObjectResponse(BaseModel):
+    """The object is available, and `size_bytes` is the provider's count.
+
+    Not the client's `declared_bytes`. The two are separate fields in the row
+    precisely because completion exists to detect that they disagree, and this
+    reports the one that was verified.
+    """
+
+    object_id: str
+    state: Literal["available"]
+    size_bytes: int
+
+
+class DownloadGrantResponse(BaseModel):
+    """A short-lived GET, and an authorization decision made at issue time.
+
+    **It is not revoked by a later tombstone.** Nothing in this system can
+    withdraw a presigned URL; the residual is bounded by `expires_in`, which is
+    why the download TTL is configured shorter than the upload's. The reference
+    says so plainly rather than implying a revocation that does not exist.
+    """
+
+    download_url: str
+    expires_in: int
+    content_type: str | None
+    size_bytes: int | None

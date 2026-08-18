@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 111 requirements**
+**P0 — 117 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -178,9 +178,15 @@ Priorities:
 | `SEC-KEY-001` | 6 | Verifying services hold public material only. The property is now per-service rather than global: the auth service IS an issuer and must hold its own key at 0400, while every other running container holds none and the bootstrap issuer's key stays in the root plane. The key set is compared in four readings -- the deployed document, what the issuer publishes, what the deploy wrote, and the bytes inside the PostgREST container -- because a JWKS replaced at a stable path leaves a running verifier holding the old inode (D278). |
 | `SEC-KEY-002` | 6 | Prepare, acknowledge, promote, retire: promotion is blocked until every verifier has acknowledged the prepared public generation, and retirement may not run before the deadline. The transition itself is NOT exercised in Session 6 and that is a decision (ADR 0088): two live issuers fill a two-key ceiling, and the transition between them is the first rotation the machinery exists for. What the live proofs assert is everything that holds without starting one -- the deployed key state satisfies the model's own validator, no rotation is in flight, and the acknowledgement record is null rather than empty. |
 | `SEC-REV-002` | 6 | Non-resurrection. Disable then re-enable, an authorization change then reverted, and a password change then reverted all leave a previously issued token refused. The re-enable case is the isolating one: role, scopes and status all end identical to what the token carries, so the only thing that can refuse it is `authz_version` -- Run 8's M5 showed the obvious construction stays green with that comparison deleted. A distinct ID from SEC-REV-001, which is Session 9's and is about denial through MCP (ADR 0089). |
-| `STO-KEY-001` | 7 | Object keys are generated server-side; client keys are rejected. |
-| `STO-OWN-001` | 7 | A user cannot obtain a download URL for another user's object. |
-| `STO-URL-001` | 7 | A presigned URL never reaches a log or the audit table. |
+| `DEP-ISO-007` | 7 | Two projects have distinct buckets, distinct object prefixes and distinct R2 credentials. Compared by digest, because credential-digest reports a SHA-256 precisely so a proof can assert two credentials differ without either existing outside a container. |
+| `STO-AGENT-001` | 7 | Object storage is human-only (ADR 0100). An agent token is refused at every endpoint, and so is a registered human without the object scopes -- the second arm being what proves the successful proofs succeed because of the scope rather than because nothing is checked. |
+| `STO-CRED-001` | 7 | The mounted credential reaches its own bucket and the operator surface has no bucket-administering verb to attempt (ADR 0110). Run 5 measured the refusals with the real token; the separation is now structural rather than scoped. |
+| `STO-KEY-001` | 7 | Object keys are generated server-side and client keys are refused rather than ignored. The generated key matches the derived format (ADR 0102) and appears in no response body. |
+| `STO-OWN-001` | 7 | A user cannot obtain a download URL for another user's object, and the refusal is indistinguishable from an id that never existed. The positive arm is not decoration: Run 6's mutation battery survived because every download proof asserted a refusal, so denying everybody left them all green. |
+| `STO-PUBLIC-001` | 7 | From off-host, every storage endpoint refuses an anonymous caller with 401 and never 404 -- authentication precedes the ownership filter, so an anonymous prober cannot distinguish a real object id from an invented one. The container's own port is not publicly reachable, and the published path is the derived one. Measured with 443 asserted open and the route asserted answering first, because a negative from an instrument that can see nothing is not a boundary. A separate id from SEC-API-001 rather than a widening of it: a claim is measured in exactly one environment (ADR 0045) and widening would move a Session 5 claim into Session 7 through max() (ADR 0089). |
+| `STO-SECRET-001` | 7 | The storage runtime holds no signing key and the auth runtime holds no R2 credential, read from inside each container rather than from the generation directory. Per-consumer materialization is what makes this a property of the filesystem rather than of anyone's discipline. |
+| `STO-TOMB-001` | 7 | A committed tombstone precedes every later grant, and DELETE answers identically for moved, already-tombstoned and never-existed. What it does not claim is revocation of a URL already issued: nothing in this system can withdraw a presigned URL. |
+| `STO-URL-001` | 7 | Neither a presigned URL's signature nor an object key reaches any sink: both service logs, both container inspections, the journal, or the deployed document. A canary created by the proof itself, so a hit is a leak rather than a coincidence. |
 | `AGT-BUDGET-001` | 8 | Row and response-size budgets are enforced server-side. |
 | `AGT-DRIFT-001` | 8 | Adding an API operation does not expose an agent capability without an explicit capabilities.yaml change. |
 | `AGT-READ-001` | 8 | An agent read through MCP equals the equivalent PostgREST result. |
@@ -204,12 +210,14 @@ Priorities:
 | `DEP-REMOVE-001` | 12 | Removing one project does not affect another. |
 | `DX-001` | 12 | A developer who did not build the primitive completes the documented path without source edits or undocumented commands. |
 
-**P1 — 4 requirements**
+**P1 — 6 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
 | `DBX-004` | 4 | Node and Python drivers round-trip a query through the pooler. |
-| `STO-COMPLETE-001` | 7 | Only objects verified against storage become downloadable. |
+| `STO-BOUND-001` | 7 | An upload declaring more than the deployment's published bound is refused, and one at the bound is accepted. The limit is read from the deployed document rather than restated, so the proof cannot pass against a differently configured deployment. |
+| `STO-CLEAN-001` | 7 | The cleanup sweep collects a tombstoned object whose write window has closed and records completion only after the provider has been asked. The late-writer arm is proved offline against a real cluster, where the deadline can be moved without the proof arranging the condition it observes. |
+| `STO-COMPLETE-001` | 7 | Only an object verified against the provider becomes downloadable, and a retried completion is a 200 rather than a conflict. Idempotence is a separate arm because migration 0014's CAS was idempotent as a function and not as a path through it (D349). |
 | `REC-WAL-001` | 10 | A WAL archiving failure produces a visible non-zero signal. |
 | `OPS-LOG-001` | 11 | One request ID propagates across ingress, API, agent, and audit records. |
 
