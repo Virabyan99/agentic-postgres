@@ -505,3 +505,63 @@ def test_the_environment_entry_point_asks_for_storage_mode(monkeypatch):
         run(storage_cleanup.sweep_from_environment(limit=1, lease_seconds=60))
 
     assert modes == ["storage"]
+
+
+def test_the_sweep_fits_inside_the_reserved_connections(monkeypatch):
+    """**The test that would have caught D388.**
+
+    The sweep runs inside the storage container (ADR 0093), beside the serving
+    process and as the same role. `storage_service` holds
+    `pool_size + STORAGE_RESERVED_CONNECTIONS`, so a sweep that opened
+    `pool_size` spent the budget twice and the cluster answered `FATAL: too many
+    connections for role` -- which the first host gate found, and which nothing
+    offline could: a connection limit only bites when two processes hold
+    connections at once.
+
+    The width is captured from the REAL entry point rather than read off the
+    constant. `SWEEP_POOL_SIZE == 1` compared against itself would be a test of
+    two constants with the code between them unexercised, which is Run 7's M8
+    and D386's shape.
+    """
+    import contextlib
+    import types
+
+    from agentic_postgres.config import STORAGE_RESERVED_CONNECTIONS
+    from app import db, storage_cleanup, storage_client
+    from app import settings as settings_module
+
+    sizes: list[int] = []
+
+    def capture(conninfo, size):
+        sizes.append(size)
+        raise RuntimeError("stop here")
+
+    # A pool_size deliberately unlike 1, so a sweep that passed the serving
+    # process's width is visible as that number rather than as a coincidence.
+    monkeypatch.setattr(
+        settings_module,
+        "load",
+        lambda *, mode: types.SimpleNamespace(conninfo="", pool_size=9),
+    )
+    monkeypatch.setattr(db, "build_pool", capture)
+    monkeypatch.setattr(db, "pool_lifespan", lambda pool: contextlib.nullcontext())
+    monkeypatch.setattr(storage_client, "load_config", lambda: types.SimpleNamespace())
+    monkeypatch.setattr(storage_client, "R2Adapter", lambda config: object())
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        run(storage_cleanup.sweep_from_environment(limit=1, lease_seconds=60))
+
+    assert sizes == [storage_cleanup.SWEEP_POOL_SIZE], (
+        f"the sweep opened a pool of {sizes}, not SWEEP_POOL_SIZE. It runs beside the "
+        "serving process as the same role, so its width is charged against the same "
+        "CONNECTION LIMIT"
+    )
+    assert sizes[0] != 9, (
+        "the sweep opened the SERVING process's pool width, which is D388 exactly: "
+        "pool_size twice against a limit of pool_size + reserved"
+    )
+    assert storage_cleanup.SWEEP_POOL_SIZE <= STORAGE_RESERVED_CONNECTIONS, (
+        f"the sweep asks for {storage_cleanup.SWEEP_POOL_SIZE} connections but only "
+        f"{STORAGE_RESERVED_CONNECTIONS} are reserved beyond the serving pool, so a "
+        "sweep running beside a full pool cannot connect"
+    )

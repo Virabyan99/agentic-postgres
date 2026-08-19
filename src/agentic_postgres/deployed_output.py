@@ -370,6 +370,27 @@ def build_deployed_document(
             **(transports or {}),
             "observed": dict(database_observed),
         },
+        # Version 11's storage settings, carried from the render (D389).
+        #
+        # `routes.storage` was already here and this block was not, so a deployed
+        # document announced the route and published none of the bounds that
+        # route enforces. `rendering.py` resolves `max_upload_bytes` and the two
+        # TTLs against `STORAGE_DEFAULTS` *there*, and says in place that it does
+        # so because "the document is the one thing every plane reads"
+        # (ADR 0002) -- and then the document every plane actually reads did not
+        # carry them.
+        #
+        # Found by STO-BOUND-001 on the first host gate. It reads the bound from
+        # the deployed document rather than from a constant of its own, exactly
+        # as it should, and found nothing to measure. Neither example manifest
+        # could have caught it: both set `max_upload_bytes` explicitly, so the
+        # RENDERED document carries the field either way, and nothing compared
+        # the rendered block with the deployed one (D332's shape).
+        #
+        # Carried whole rather than key by key, so that v11's schema is not
+        # duplicated into a second list to keep in step -- which is the shape
+        # that produced this row.
+        "storage": dict(rendered["storage"]),
         "template_version": rendered["template_version"],
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }

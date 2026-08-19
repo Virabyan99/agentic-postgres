@@ -68,6 +68,20 @@ from app.storage_client import StorageError
 #: control is the same PUT before expiry returning 200.
 WRITE_GRACE_SECONDS = 60
 
+#: How wide the sweep's own pool is, and it is deliberately **one** (D388).
+#:
+#: The sweep runs inside the storage container (ADR 0093), beside the serving
+#: process and as the same role. `storage_service` holds
+#: `pool_size + STORAGE_RESERVED_CONNECTIONS`, and those reserved connections are
+#: the startup-and-recovery overlap by their own definition -- not a second
+#: worker's pool. Opening `pool_size` here spent the budget twice and the cluster
+#: answered `FATAL: too many connections for role`.
+#:
+#: A named constant rather than a literal so that
+#: `test_the_sweep_fits_inside_the_reserved_connections` can bind to it: a test
+#: asserting `1 == 1` against a literal in the same file would measure nothing.
+SWEEP_POOL_SIZE = 1
+
 
 def lease_margin_seconds() -> int:
     """How long before the lease expires the worker stops taking on more deletes.
@@ -251,6 +265,21 @@ async def sweep_from_environment(*, limit: int, lease_seconds: int) -> SweepRepo
     The pool is opened and closed around the single sweep. A cleanup pass is not
     a long-lived service and holding connections from ADR 0099's budget between
     passes would charge the deployment for a worker that is not running.
+
+    **And it is ONE connection wide, not `settings.pool_size`** (D388). The
+    paragraph above reasoned about duration and said nothing about width, and
+    both spend the same budget: this process runs *beside* the serving process
+    and as the same role, so a pool of `pool_size` here meant `pool_size` twice
+    against a `CONNECTION LIMIT` of `pool_size + STORAGE_RESERVED_CONNECTIONS`.
+    The first host gate found it as `FATAL: too many connections for role`, and
+    only a host could: a connection limit bites when two processes hold
+    connections at once, which needs a deployed container with a sweep running
+    beside it. Those reserved connections were never the sweep's to spend --
+    their own comment calls them the startup-and-recovery overlap.
+
+    One is not a compromise. `sweep` is a sequential `for` loop over the claimed
+    batch with `await` inside and **no `gather`, `create_task` or `TaskGroup`**,
+    so one connection is all it can use however wide the pool is opened.
     """
     from app import db, storage_client
     from app import settings as settings_module
@@ -261,7 +290,7 @@ async def sweep_from_environment(*, limit: int, lease_seconds: int) -> SweepRepo
     config = storage_client.load_config()
     adapter = R2Adapter(config)
 
-    pool = db.build_pool(settings.conninfo, size=settings.pool_size)
+    pool = db.build_pool(settings.conninfo, size=SWEEP_POOL_SIZE)
     async with db.pool_lifespan(pool):
         return await sweep(
             StorageRepository(pool),

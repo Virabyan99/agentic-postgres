@@ -1834,7 +1834,16 @@ def agent_session(
     hashing = service_source.load("hashing")
     secret = "agent-probe-secret-8fa1c33d0b7e"  # noqa: S105
     name = "apg-acceptance-storage-agent"
-    role_name = project_a["database"]["roles"]["agent"]
+    # `agent_writer`, not `agent`: there has never been a role by that name.
+    # `naming.ROLE_SUFFIXES` derives `agent_reader` and `agent_writer`, and has
+    # since Session 3 -- so this fixture raised `KeyError: 'agent'` the first
+    # time it ever executed, which was Session 7's first host gate, because it
+    # is `live_host` and nothing offline builds it (D390).
+    #
+    # The WRITER of the two, deliberately: the refusal is worth more against the
+    # agent role that can write than against the one that cannot. Both ceilings
+    # carry `notes:read`, so the scope requested below is valid for either.
+    role_name = project_a["database"]["roles"]["agent_writer"]
 
     psql(project_a, f"DELETE FROM app_private.agents WHERE name = '{name}';")
     code, agent_id, error = psql(

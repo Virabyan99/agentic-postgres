@@ -197,6 +197,48 @@ def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     assert document["project"]["key"] == KEY
 
 
+def test_the_deployed_document_carries_the_storage_settings(rendered: dict) -> None:
+    """**The test that would have caught D389.**
+
+    Version 11 put the storage bounds in the rendered document, and the deployed
+    branch of the schema forbade them -- no property, `additionalProperties`
+    false -- so a deployment published `routes.storage` and none of the bounds
+    that route enforces. The first host gate found it through STO-BOUND-001,
+    which reads `max_upload_bytes` from the deployed document rather than from a
+    constant of its own, and found nothing to measure.
+
+    Compared as a whole rather than member by member. A test naming the fields it
+    expects would need editing whenever the block gains one, and would pass while
+    the new one was dropped -- which is the failure it exists to catch.
+    """
+    document = build(rendered)
+
+    assert document["storage"] == rendered["storage"], (
+        "the deployed document must carry the rendered storage block unchanged: it is "
+        "where the runtime reads the bounds it enforces (ADR 0002), and the rendered "
+        "document is not what any plane reads"
+    )
+
+
+def test_the_deployed_document_publishes_a_bound_a_proof_can_measure(rendered: dict) -> None:
+    """STO-BOUND-001's precondition, asserted where it is cheap to assert.
+
+    The host proof failed with "the deployed document publishes no
+    storage.max_upload_bytes, so there is no bound here to measure" -- a true
+    statement about a broken document, and an expensive way to learn it, six
+    minutes into a gate that needs a deployed host. The same fact is checkable
+    here in milliseconds.
+    """
+    storage = build(rendered)["storage"]
+
+    assert storage.get("max_upload_bytes"), (
+        "no storage.max_upload_bytes in the deployed document, so STO-BOUND-001 has no "
+        "bound to measure against"
+    )
+    assert storage["upload_url_ttl_seconds"] > 0
+    assert storage["download_url_ttl_seconds"] > 0
+
+
 def test_the_health_status_is_observed_and_not_carried_over(rendered: dict) -> None:
     """The rendered value is `planned`; it must not survive into a deployment."""
     assert rendered["routes"]["health"]["status"] == "planned"

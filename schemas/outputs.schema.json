@@ -244,62 +244,7 @@
           }
         },
         "storage": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "enabled",
-            "bucket",
-            "prefix",
-            "upload_url_ttl_seconds",
-            "download_url_ttl_seconds",
-            "max_upload_bytes",
-            "allowed_cors_origins"
-          ],
-          "description": "Version 11 resolved the manifest's storage bounds into this block. The runtime reads them from HERE and never from the manifest, which is ADR 0002 applied to four numbers: this document is the one thing every plane reads, and a service re-reading the manifest would be a second authority for a bound the deploy was checked against. `bucket` and `prefix` were already this shape -- the manifest's values are overrides of a `naming` derivation, not inputs to one. There is no readiness claim here: whether the provider actually answers is `routes.storage`'s status on the deployed branch (D326), because a second convergence mechanism would need its own tests and its own failure modes beside one that is already proved on two projects.",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "bucket": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
-            },
-            "prefix": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "pattern": "^[^/].*/$",
-              "description": "The object key's first half, and `naming` is its single authority (ADR 0102). The second half -- `v1/<uuid4>` -- is generated per upload intent by `services/auth-api/app/object_keys.py`, which is the only place the two are ever concatenated. Nothing else spells `objects/`."
-            },
-            "upload_url_ttl_seconds": {
-              "type": "integer",
-              "minimum": 60,
-              "maximum": 3600
-            },
-            "download_url_ttl_seconds": {
-              "type": "integer",
-              "minimum": 60,
-              "maximum": 3600
-            },
-            "max_upload_bytes": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 5368709120
-            },
-            "allowed_cors_origins": {
-              "type": "array",
-              "uniqueItems": true,
-              "maxItems": 8,
-              "items": {
-                "$ref": "#/$defs/httpsOrigin"
-              },
-              "description": "The ONE origin list for storage (D323). The edge middleware and the bucket's own CORS policy are two renderings of this array, tied together by a test -- two lists would be two policies that agree until one of them is edited."
-            }
-          }
+          "$ref": "#/$defs/storageSettings"
         },
         "backup": {
           "type": "object",
@@ -373,7 +318,8 @@
         "runtime",
         "database",
         "template_version",
-        "observed_at"
+        "observed_at",
+        "storage"
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
@@ -704,6 +650,9 @@
         },
         "observed_at": {
           "$ref": "#/$defs/timestamp"
+        },
+        "storage": {
+          "$ref": "#/$defs/storageSettings"
         }
       }
     },
@@ -1788,6 +1737,64 @@
       "type": "integer",
       "minimum": 1,
       "description": "How many cluster connections the REST service commits to: its declared `api.rest.pool_size` plus the reservations `config.postgrest_connection_budget` adds. Published because the bootstrap plane reads only this document and cannot otherwise see a manifest figure, which is the half of D161's arithmetic that had nowhere to come from. The *application's* limit is deliberately absent: it is what the live server has left after this and the administration reserve, and a rendered document naming it would be publishing a guess about a server nobody has queried (D94). Version 8, ADR 0070."
+    },
+    "storageSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "bucket",
+        "prefix",
+        "upload_url_ttl_seconds",
+        "download_url_ttl_seconds",
+        "max_upload_bytes",
+        "allowed_cors_origins"
+      ],
+      "description": "Version 11 resolved the manifest's storage bounds into this block. The runtime reads them from HERE and never from the manifest, which is ADR 0002 applied to four numbers: this document is the one thing every plane reads, and a service re-reading the manifest would be a second authority for a bound the deploy was checked against. `bucket` and `prefix` were already this shape -- the manifest's values are overrides of a `naming` derivation, not inputs to one. There is no readiness claim here: whether the provider actually answers is `routes.storage`'s status on the deployed branch (D326), because a second convergence mechanism would need its own tests and its own failure modes beside one that is already proved on two projects. Shared by BOTH document kinds since D389: the deployed branch forbade this block entirely -- no property and additionalProperties false -- so a deployment published the storage ROUTE and none of the bounds that route enforces, and STO-BOUND-001 read the deployed document for max_upload_bytes and found nothing to measure. The sentence above says the runtime reads these from here, and the document the runtime actually reads is the deployed one. One definition rather than a copy per branch, because a copy is what let the two disagree.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "bucket": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$"
+        },
+        "prefix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[^/].*/$",
+          "description": "The object key's first half, and `naming` is its single authority (ADR 0102). The second half -- `v1/<uuid4>` -- is generated per upload intent by `services/auth-api/app/object_keys.py`, which is the only place the two are ever concatenated. Nothing else spells `objects/`."
+        },
+        "upload_url_ttl_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600
+        },
+        "download_url_ttl_seconds": {
+          "type": "integer",
+          "minimum": 60,
+          "maximum": 3600
+        },
+        "max_upload_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5368709120
+        },
+        "allowed_cors_origins": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/httpsOrigin"
+          },
+          "description": "The ONE origin list for storage (D323). The edge middleware and the bucket's own CORS policy are two renderings of this array, tied together by a test -- two lists would be two policies that agree until one of them is edited."
+        }
+      }
     }
   }
 }
