@@ -1498,7 +1498,25 @@ def _registered_subject(
     # Deleted first rather than after: a previous run that died between the
     # INSERT and its teardown leaves a row, and `users_username_normalised_key`
     # would then refuse the create with a message about a unique index.
-    psql(project_a, f"DELETE FROM app_private.users WHERE username = '{username}';")
+    #
+    # **And the result is checked** (D391). `storage_objects.owner_id` is
+    # `ON DELETE RESTRICT` (D371), so a subject that still owns uncollected
+    # objects cannot be deleted -- and this statement's failure used to be
+    # discarded, leaving the create to fail on the unique index instead. The
+    # third host gate reported twelve errors saying `duplicate key value
+    # violates unique constraint` when the real cause was ten objects the
+    # previous run's sweep could not collect. The comment above already
+    # described this scenario, and then the guard against it threw its answer
+    # away: **a guard whose result is unchecked is a comment.**
+    code, _, error = psql(
+        project_a, f"DELETE FROM app_private.users WHERE username = '{username}';"
+    )
+    assert code == 0, (
+        f"the probe subject {username!r} exists and could not be removed: {error}. "
+        "The likely cause is objects it still owns -- storage_objects.owner_id is "
+        "ON DELETE RESTRICT, so they must be tombstoned and swept before the subject "
+        "can go. `bin/storage-admin.sh --outputs <deployed> cleanup --yes` does it"
+    )
 
     array = ", ".join(f"'{scope}'" for scope in scopes)
     code, user_id, error = psql(
@@ -1816,6 +1834,7 @@ def agent_session(
     psql: Callable[..., tuple[int, str, str]],
     api_call: Callable[..., Any],
     app_base: Callable[[dict[str, Any]], str],
+    storage_probe_subject: Any,
 ) -> Any:
     """A real agent and a token the deployment issued for it.
 
@@ -1828,6 +1847,22 @@ def agent_session(
     so this fixture cannot construct the token it is used to refuse. That is the
     point: the refusal proved with it is a property of the vocabulary and of the
     endpoint's scope check together, not of one agent's configuration.
+
+    **Owned by the STORAGE probe subject, deliberately** (D392). Migration 0011
+    makes `agents.owner_id` `NOT NULL REFERENCES app_private.users (id)` --
+    "non-human subjects, owned by a human one" -- and this fixture passed `NULL`,
+    which is what it failed on once D390's role name let it reach the statement.
+    Owning it by the human who *can* use storage makes the refusal strictly
+    stronger: an agent whose owner holds `objects:read` and `objects:write` is
+    still refused, so what governs is the agent's own scopes rather than its
+    owner's.
+
+    Taking the subject as a fixture argument also fixes the teardown ORDER, which
+    is not incidental. The reference has no `ON DELETE` clause, so it is
+    `NO ACTION`: an agent outliving its owner blocks that owner's deletion the
+    way ten uncollected objects did in D391. pytest tears a fixture down before
+    the ones it depends on, so the agent goes first by construction rather than
+    by a comment asking someone to keep the order.
     """
     from agentic_postgres import service_source
 
@@ -1850,7 +1885,7 @@ def agent_session(
         project_a,
         "SELECT app_private.auth_create_agent("
         f"'{name}', 'Storage refusal probe', '{role_name}', "
-        "ARRAY['notes:read']::text[], NULL, "
+        f"ARRAY['notes:read']::text[], '{storage_probe_subject.user_id}', "
         f"'{hashing.Hasher().hash(secret)}');",
     )
     if code != 0 or not agent_id:
