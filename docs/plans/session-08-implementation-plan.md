@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D416.**
+**Next free number after this table is D419.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -69,6 +69,9 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D413** | §4.6, §4.3: an internal pre-provisioned bearer profile, documented as not standards-conformant. | **Right, and the honesty is the valuable part.** But the runbook states it in prose only; nothing in the deployment carries it. | The deployed document publishes the protocol revision and `authorization_spec_conformant: false` as **fields**, and the contract test asserts the document says what the docs say. | **D274 is the precedent**: `/docs/rest` was proved at 401 and 200 for four runs and had never rendered, because nothing requested the script its own markup named. A claim that lives only in prose is a claim nobody checks. | — |
 | **D414** | CLAUDE.md §2's status block: *"`CURRENT_SESSION` 7 — Session 8's first code run moves it to 8."* | **Moving it in Run 1 turns the gate red, and not for the reason D410 predicts.** `CURRENT_SESSION` is the gate session, and `test_no_requirement_at_or_before_the_gate_session_remains_future` refuses any registry entry targeted at or before it that still points at a `future` marker. **Five do** — `AGT-READ-001`, `AGT-SQL-001`, `AGT-SCOPE-001`, `AGT-DRIFT-001`, `AGT-BUDGET-001`, all `target_session: 8`, all pointing at `tests/integration/test_future_mcp.py`. Session 7 hit the same coupling and answered it the same way: Run 9 moved the constant **and** activated eleven entries in one commit. | **It moves in Run 7**, with the `session8` Compose profile, and **only after Run 6 has replaced the five placeholders**. Not Run 1. `AGENT_PLANE_SESSION = 8` is defined now and deliberately sits above `CURRENT_SESSION`, so `--through-session` cannot reach the agent plane and no observation branch exists to run. | The handoff's sentence is a tidy-up instruction for a constant that is not a tidy-up (D410 says so from the deploy side; this is the same constant refusing from the gate side). Moving it early would have produced a red gate in Run 1 whose cause is five tests Run 6 owns — and the tempting repair is to relax the registry policy, which is D300's shape on the one control that keeps a placeholder from passing for a proof. | — |
 | **D415** | — (found during Run 1). | **Three single-step migration tests asserted `migrated["schema_version"] == CURRENT_VERSION`.** The v10→v11 step's own result was compared against *the release's current version*, which held only while v11 was current. The v9 test already carried a comment saying this had happened before and had been fixed there; the same shape survived in three neighbours. | **A single step's result is asserted as a literal; only the end of a chain compares against `CURRENT_VERSION`.** All three re-derived, not relaxed: the v11 assertion stays and a v12 assertion is added beside it, so both the step and the endpoint are checked. | A test that compares a function's output to a constant which moves *with* the function is a test that cannot fail for the reason it was written — and it degrades silently, one version at a time. It is the *"test comparing two constants"* shape (Session 7 Run 7 M8), arriving through a name rather than a literal. | — |
+| **D416** | D400: two passing tests say the agent roles are Session 9's, and Session 8 re-derives them. | **There were four copies of the enumeration, not two tests.** `AUTHENTICATOR_REQUEST_ROLES` was created in Session 6 Run 9 *precisely so that the proof could read it instead of restating it* -- its own docstring says so, and says the restatement is what reported the product's deliberate `project_admin` grant as a violation on the first host gate (D301). The fix reached `role_statements`, which **grants**. It never reached `check_violations`, which **verifies** and still carried the list as a literal -- twice, once for the memberships and once for a two-name forbidden set. `tests/contract/test_bootstrap_statements.py` carried a fourth. | All three copies deleted. Both loops in `check_violations` read the constant; the forbidden set is its **complement over the project's own roles**; the test reads the constant and keeps one independent anchor -- `agent_writer` is named, with ADR 0116 behind it, because a set derived entirely from the product cannot refuse a bad edit to the product (D300). | **§6 question 5, in the file that records the last time it was asked here.** The two-name literal is the part worth noticing: activating one agent role would have left the other as the only forbidden membership, and `app_runtime`, `auth_service` and `storage_service` were forbidden by nothing at all. | 0116 |
+| **D417** | — (measured during Run 2). | **A human token naming the agent role was refused by `permission denied for function auth_claims_are_current`, not by `AP401`.** The first draft granted the new agent comparison helper to the agent role alone, reasoning that a human request never reaches the agent branch. The reasoning is right; the conclusion was wrong. A token's `role` claim decides which role PostgREST becomes and `token_use` decides which branch the hook takes -- **independent claims, so every combination is a reachable request**. | Both comparison helpers granted to **all five** request roles, which is the rule 0013 already states for its own: *"the comparison helper, to every role that runs the hook."* Both refusals are then the hook's own `AP401` on a tuple comparison, for every principal at every door. | **D393 exactly, arriving through a missing GRANT rather than a missing row.** Correct outcome, false reason, boundary standing on a privilege nobody chose -- and a 42501 reaches the caller as a different failure from every other refusal the hook issues, so a client cannot treat "your token is stale" as one outcome. Found on the first run of the rig, not by review. | 0117 |
+| **D418** | The plan's Run 2: *"one named read report RPC"*, and AGT-READ-001 compares an agent read against "the equivalent PostgREST result". | **The equivalent request is `permission denied`, and it must stay that way.** The rig argued for granting `owner_activity_report` to `authenticated` so the comparison would have a human half. But a read RPC a human may call is a **fifth human operation**, and **ADR 0003's example domain is frozen** -- four operations, amended once by ADR 0048 for one additive column. | The report stays agent-only. The equivalence is proved against the **row surface** instead: the agent's counts must equal the rows the same principal reads through `api.notes` and `api.tasks`. Measured equal both ways (`2 2 1 1`), with a second owner reading `1 1 1 0` as the control that neither number is a constant. | **The proof moved, not the product.** It is also the stronger comparison: two functions can be wrong in the same direction, and a count that disagrees with the rows it counts cannot be. A test's convenience is not a reason to widen a frozen surface. | 0118 |
 
 ---
 
@@ -204,7 +207,7 @@ the control test genuinely read the mutated value. That is a false kill caught i
 the direction D386 warns about, and the repair was the control, not the test.
 **A mutation whose control also fails is not evidence, whatever the target did.**
 
-### Run 2 — Migration 0018, the agent read plane
+### Run 2 — Migration 0018, the agent read plane — **Done.**
 
 - Activate `agent_reader` — bootstrap plane, not the migration plane (D102) —
   and **re-derive** the two assertions D400 names, exactly rather than loosely.
@@ -216,6 +219,58 @@ the direction D386 warns about, and the repair was the control, not the test.
 - Grants to the agent-reader role, explicit `REVOKE … FROM PUBLIC` beside every
   `CREATE FUNCTION` (D57, re-measured as D262), and `RESET ROLE` **below** the
   privileges block (D285).
+
+**What was measured.** A rig on the locked image: all **eighteen** migrations
+applied as `migration_user` over TCP — dbmate's route, not `psql -U postgres` on
+the socket, which is the superuser route that let 0012 pass four sessions of
+green proofs while being unappliable (D285) — and **every request made by
+connecting as the authenticator and issuing `SET ROLE`**, which is PostgREST's.
+A privilege refusal measured as a superuser measures nothing (ADR 0065/0066).
+
+**23 arms, 23 as designed**, interleaved with controls. The agent read plane
+works end to end: the hook establishes the **owner** as `app.user_id` and the
+agent as `app.agent_id`; the agent reads `a1,a2` and not a second owner's `b1`;
+its report says `2 2 1 1` and so do the rows it can read, and so does what its
+owner reads with a human token, while a different owner reads `1 1 1 0`. Five
+refusals — stale `authz_version`, `credential_version` 1, a human role, a
+narrowed scope set, an unknown agent — all `AP401`, with the unmutated request
+still serving as the control. **No policy was changed and none needed to be.**
+
+**Three findings, and two of them changed the design.**
+
+**D417** — the rig's first run refused a human token naming the agent role with
+`permission denied for function auth_claims_are_current` instead of `AP401`. The
+first draft had granted the new helper to the agent role alone, reasoning that a
+human never reaches the agent branch. `role` and `token_use` are **independent**
+claims, so every combination of role and branch is a reachable request. Both
+helpers now go to all five request roles. **D393 through a missing grant.**
+
+**D418** — the rig then argued for granting the report to `authenticated`, so
+AGT-READ-001 would have a human half to compare against. **ADR 0003's domain is
+frozen**, and a read RPC a human may call is a fifth operation. The proof moved
+instead, to the row surface — the stronger comparison of the two.
+
+**D416** — `AUTHENTICATOR_REQUEST_ROLES` exists so the proof reads the
+enumeration instead of restating it, and there were **four** restatements:
+two in `check_violations`, one in the bootstrap test module, and a two-name
+forbidden literal that would have left `app_runtime`, `auth_service` and
+`storage_service` forbidden by nothing.
+
+**What was built.** ADR 0116, 0117, 0118. Migration **0018**, frozen. The hook's
+fifth definition — **zero statement lines removed from 0013's, twenty-one
+added**, asserted mechanically rather than claimed (D270).
+`agent_claims_are_current` returning the owner. `api.mcp_agent_context()`
+(definer, no argument) and `api.owner_activity_report()` (**invoker**, reading
+the `api` views so counting rows does not widen 0004's boundary). A new
+`agent_rpcs` section in the reviewed surface contract, with `published_objects`
+beside `declared_objects` because those stopped being the same question.
+
+**The battery: 15 mutations, 15 killed, every one `FAILED` rather than `ERROR`,
+each control green in the same invocation.** And the controls earned their place
+a second time: M2 first reported as a survivor because both branch tests share
+one extractor, so removing the marker reddened the control too. The extractor
+gained a real failure message and the control was swapped — **a mutation whose
+control also fails is not evidence, whatever the target did.**
 
 ### Run 3 — The capability compiler
 

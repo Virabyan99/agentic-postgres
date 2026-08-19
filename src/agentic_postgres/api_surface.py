@@ -50,6 +50,12 @@ REQUIRED_FORBIDDEN_SCHEMAS = frozenset({"public", "app", "app_private", "extensi
 RELATION_METHODS = frozenset({"GET", "HEAD"})
 RPC_METHODS = frozenset({"POST"})
 
+#: An agent-plane function is STABLE and takes nothing, so PostgREST serves it
+#: both ways whether or not anybody wanted it to (ADR 0118). Both are listed
+#: because "reachable two ways" is the fact a reviewer needs; the argument list
+#: is what makes the GET harmless, and `validate_surface` requires it empty.
+AGENT_RPC_METHODS = frozenset({"GET", "POST"})
+
 #: Characters that cannot appear in any identifier the schema accepts, listed so
 #: the refusal names the thing it refuses. A wildcard is the interesting one:
 #: `columns: ["*"]` is the shape of contract that describes everything and
@@ -57,6 +63,7 @@ RPC_METHODS = frozenset({"POST"})
 _WILDCARD = re.compile(r"[*%?]")
 
 __all__ = [
+    "AGENT_RPC_METHODS",
     "CONTRACT_PATH",
     "RELATION_METHODS",
     "REQUIRED_FORBIDDEN_SCHEMAS",
@@ -67,6 +74,7 @@ __all__ = [
     "declared_objects",
     "declared_types",
     "load_surface",
+    "published_objects",
     "validate_surface",
 ]
 
@@ -146,7 +154,29 @@ def validate_surface(document: dict[str, Any]) -> None:
                 "and the database"
             )
 
-    # 4. No wildcard anywhere. The identifier pattern already forbids one, so
+    # 4. An agent-plane function takes nothing (ADR 0118). The schema states it
+    #    as `maxItems: 0`; this states the rule the bound is an instance of, so a
+    #    later widening has to change something with a reason beside it. An
+    #    argument here reaches a query string -- PostgREST serves a stable
+    #    function over GET as well as POST -- and a caller-supplied value makes
+    #    the tool's operation a runtime choice, which docs/capability-plan.md
+    #    places outside the product.
+    for name, entry in document["agent_rpcs"].items():
+        if entry["arguments"]:
+            raise SurfaceError(
+                f"agent_rpcs {name!r} declares arguments {entry['arguments']}. PostgREST "
+                "serves a stable function over GET as well as POST, so an argument here "
+                "reaches the query string -- and a caller-supplied value makes the tool's "
+                "operation a runtime choice"
+            )
+        extra = set(entry["methods"]) - AGENT_RPC_METHODS
+        if extra:
+            raise SurfaceError(
+                f"agent_rpcs {name!r} declares {sorted(extra)}, which is not how PostgREST "
+                "serves a stable argument-free function"
+            )
+
+    # 5. No wildcard anywhere. The identifier pattern already forbids one, so
     #    this is the guard on the guard -- and it is the rule worth stating,
     #    because a contract that describes everything constrains nothing.
     for pointer, value in _strings(document):
@@ -172,7 +202,12 @@ def _refuse_name_collisions(document: dict[str, Any]) -> None:
     same namespace: `CREATE TYPE api.tasks` fails against the view of that name,
     so a contract declaring both would describe a catalog that cannot exist.
     """
-    labels = {"relations": "a relation", "rpcs": "an RPC", "enums": "an enum type"}
+    labels = {
+        "relations": "a relation",
+        "rpcs": "an RPC",
+        "agent_rpcs": "an agent-plane RPC",
+        "enums": "an enum type",
+    }
     seen: dict[str, str] = {}
     for kind, label in labels.items():
         for name in document[kind]:
@@ -209,6 +244,27 @@ def declared_objects(document: dict[str, Any]) -> set[str]:
     `API-CONTRACT-001` name objects the same way. A comparison whose two sides
     spell the same object differently reports a difference that is not one, and
     the repair for that is always to loosen the comparison.
+    """
+    schema = document["exposed_schema"]
+    return {
+        f"{schema}.{name}"
+        for name in (*document["relations"], *document["rpcs"], *document["agent_rpcs"])
+    }
+
+
+def published_objects(document: dict[str, Any]) -> set[str]:
+    """The subset that the generated OpenAPI document is expected to name.
+
+    :func:`declared_objects` answers "what may exist in the exposed schema" and
+    this answers "what may be advertised", and Session 8 is where those stopped
+    being the same question (ADR 0118). The agent plane's functions exist, are
+    reachable over HTTP by one role, and are deliberately absent from the
+    document because `api_documentation` holds no `EXECUTE` on them.
+
+    Two functions rather than a flag, because the two sets are compared against
+    different artefacts -- the catalog on one side and the served document on
+    the other -- and a single set with a filter at each call site is how one of
+    the call sites eventually gets the filter wrong.
     """
     schema = document["exposed_schema"]
     return {f"{schema}.{name}" for name in (*document["relations"], *document["rpcs"])}

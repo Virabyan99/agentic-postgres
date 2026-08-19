@@ -5,7 +5,7 @@
   "description": "The hand-written half of ADR 0050: every relation, column, function and method the `api` schema is allowed to expose, named exactly. It is compared against the PostgreSQL catalog and against the generated OpenAPI document in both directions, so an object present in the database and absent here is a release failure even when its grants keep it out of OpenAPI -- because the next grant change publishes it. It is deliberately NOT generated: a contract derived from the thing it constrains cannot refuse it. It is also project-neutral, because the example domain is (ADR 0003, amended by ADR 0048): one contract describes every project that serves it, and a per-project extension is a reviewed delta rather than a second file. additionalProperties is false at every level, and every string is either a bare identifier or a member of a closed enumeration -- which is how 'the contract contains no SQL' is a property of the schema rather than a rule somebody remembers.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "contract_id", "exposed_schema", "enums", "relations", "rpcs", "forbidden_schemas"],
+  "required": ["schema_version", "contract_id", "exposed_schema", "enums", "relations", "rpcs", "agent_rpcs", "forbidden_schemas"],
   "properties": {
     "schema_version": { "type": "integer", "enum": [1] },
     "contract_id": {
@@ -35,6 +35,12 @@
       "minProperties": 1,
       "additionalProperties": { "$ref": "#/$defs/rpc" },
       "propertyNames": { "$ref": "#/$defs/identifier" }
+    },
+    "agent_rpcs": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/agentRpc" },
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "description": "Functions in the exposed schema that the agent plane may invoke and the published document does not name (ADR 0118). They are here because ADR 0050's invariant is that nothing exists in `api` which this file does not name -- an object kept out of OpenAPI by a grant is still reachable over HTTP, and the next grant change publishes it. `minProperties` is deliberately absent, unlike `relations` and `rpcs`: a release with no agent plane is a real state and was every release before Session 8. What keeps this section honest is not the schema but `api_surface.py`: no arguments, no name shared with `rpcs`, and every name absent from the approved snapshot."
     },
     "forbidden_schemas": {
       "type": "array",
@@ -112,6 +118,27 @@
           "uniqueItems": true,
           "items": { "$ref": "#/$defs/identifier" },
           "description": "The PostgreSQL parameter names, exactly. Not a friendlier spelling of them: PostgREST maps JSON body keys onto parameter names, so these strings are the wire format. An empty list is legal and means a function that takes nothing."
+        }
+      }
+    },
+    "agentRpc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["methods", "arguments"],
+      "description": "An agent-plane read function (ADR 0118). Structurally close to `rpc` and different in the two ways that matter, both of which follow from one fact: it is STABLE and takes nothing.",
+      "properties": {
+        "methods": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["GET", "POST"] },
+          "description": "Both, and this is a statement about PostgREST rather than a preference: it serves `GET /rpc/...` for a STABLE function whether or not anybody wanted it to, so a list naming only POST would describe a surface that is not the served one. `rpcs` forbids GET because it puts arguments into a query string and into every log and cache in between -- and the empty argument list below is exactly what makes that objection inapplicable here. Requiring both rather than permitting either is deliberate: 'this function is reachable two ways' is the fact a reviewer needs, and an entry naming one of them would let the other go unexamined."
+        },
+        "arguments": {
+          "type": "array",
+          "maxItems": 0,
+          "description": "Empty, and required to be. An agent-plane function that took an argument would be reachable over GET with that argument in the URL, which is the disclosure `rpcs` forbids GET to prevent; and one that took a caller-supplied value would be a tool whose operation is selected at runtime, which docs/capability-plan.md places outside the product. The bound is here rather than in a reviewer's head because `maxItems: 0` is the whole rule."
         }
       }
     }

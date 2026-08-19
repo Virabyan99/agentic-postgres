@@ -201,6 +201,22 @@
       "template": "templates/0017-storage-verifier-subject-state.sql",
       "template_sha256": "89689156a717403ca6c183763e3d5bcee94ce678c54a8e66d9b2ba04603d1d79",
       "version": "20260819120017"
+    },
+    {
+      "canonical_render_sha256": "d07f9c75fcfb829fc755bd143b7c76b6e2072f1ef49a9870dc9b4951168673b7",
+      "name": "agent_read_plane",
+      "placeholders": [
+        "agent_reader",
+        "anon",
+        "api_documentation",
+        "api_documentation_name",
+        "authenticated",
+        "object_owner",
+        "project_admin"
+      ],
+      "template": "templates/0018-agent-read-plane.sql",
+      "template_sha256": "d3e1f31636e0d97e164a00c5547fc485841e38d7d6e5f5d7916540cb59697237",
+      "version": "20260819120018"
     }
   ],
   "schema_version": 1

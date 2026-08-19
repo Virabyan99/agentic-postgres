@@ -22,13 +22,14 @@ says something exact, and that is what this asserts.
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, api_surface, config
+from agentic_postgres import REPO_ROOT, api_surface, config, openapi_normalize
 from agentic_postgres.rendering import ACCEPTANCE_PROBE_FUNCTION
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
@@ -141,7 +142,23 @@ def test_every_declared_object_is_schema_qualified_once(surface: dict[str, Any])
         "api.tasks",
         "api.create_note",
         "api.update_task_status",
+        # ADR 0118. `declared_objects` answers "what may exist in the exposed
+        # schema", and these two do exist there -- reachable over HTTP by the
+        # agent role, and kept out of the generated document only by a grant.
+        # `published_objects` is the other question and omits them.
+        "api.mcp_agent_context",
+        "api.owner_activity_report",
     }
+    assert api_surface.published_objects(surface) == {
+        "api.notes",
+        "api.tasks",
+        "api.create_note",
+        "api.update_task_status",
+    }
+    assert api_surface.published_objects(surface) < api_surface.declared_objects(surface), (
+        "the published set is not a proper subset of the declared set, which means "
+        "either the agent plane vanished or something advertised is not reviewed"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +302,23 @@ def test_the_declared_types_are_separate_from_the_declared_objects(
         "api.tasks",
         "api.create_note",
         "api.update_task_status",
+        # ADR 0118. `declared_objects` answers "what may exist in the exposed
+        # schema", and these two do exist there -- reachable over HTTP by the
+        # agent role, and kept out of the generated document only by a grant.
+        # `published_objects` is the other question and omits them.
+        "api.mcp_agent_context",
+        "api.owner_activity_report",
     }
+    assert api_surface.published_objects(surface) == {
+        "api.notes",
+        "api.tasks",
+        "api.create_note",
+        "api.update_task_status",
+    }
+    assert api_surface.published_objects(surface) < api_surface.declared_objects(surface), (
+        "the published set is not a proper subset of the declared set, which means "
+        "either the agent plane vanished or something advertised is not reviewed"
+    )
 
 
 def test_a_contract_with_no_enums_is_refused(tmp_path: Path, mutable: dict) -> None:
@@ -423,3 +456,71 @@ def test_the_acceptance_probe_is_not_on_the_reviewed_surface() -> None:
             f"the approved snapshot names {ACCEPTANCE_PROBE_FUNCTION}; a capture was "
             "taken while the probe existed, and was then approved"
         )
+
+
+# ---------------------------------------------------------------------------
+# The agent plane is reviewed and unpublished (ADR 0118)
+# ---------------------------------------------------------------------------
+
+
+def test_no_agent_plane_function_is_published() -> None:
+    """**The rule with teeth**, and it reads the generated artefact.
+
+    ADR 0118 keeps `mcp_agent_context` and `owner_activity_report` out of the
+    published OpenAPI document by withholding `EXECUTE` from
+    `api_documentation` -- `openapi-mode = follow-privileges` builds the
+    document as that role. That is a grant, and a grant is one line.
+
+    Everything else asserting this reads the migration, which is the intention.
+    **D274 is why that is not enough**: `/docs/rest` was proved at 401 and 200
+    for four runs and had never rendered, because nothing requested the script
+    its own markup named. So this asserts the property of the artefact -- the
+    approved snapshot -- rather than of the file that hopes to produce it.
+
+    Goes red if: `api_documentation` is granted EXECUTE on either function and a
+    capture is then approved; or an agent-plane name is moved into `rpcs:` while
+    still in `agent_rpcs:`.
+    """
+    surface = api_surface.load_surface()
+    agent_names = set(surface["agent_rpcs"])
+    assert agent_names, "the agent_rpcs section is empty; this test would assert nothing"
+
+    assert not agent_names & set(surface["rpcs"]), (
+        f"{sorted(agent_names & set(surface['rpcs']))} is in both rpcs and agent_rpcs. One "
+        "list is the published surface and the other is deliberately not"
+    )
+
+    snapshot = REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json"
+    if not snapshot.is_file():
+        pytest.skip("no approved snapshot to check against")
+
+    published = openapi_normalize.declared_objects(json.loads(snapshot.read_text("utf-8")))
+    assert published, "the snapshot publishes nothing; this comparison would be vacuous"
+    leaked = sorted(name for name in agent_names if f"rpc/{name}" in published)
+    assert not leaked, (
+        f"the approved snapshot publishes {leaked}, which the reviewed contract lists as "
+        "agent-plane functions. Either a grant to api_documentation was added and a "
+        "capture approved, or the contract moved a name and the document did not"
+    )
+
+
+def test_the_published_set_is_exactly_what_the_snapshot_names() -> None:
+    """The other direction, and the reason `published_objects` exists.
+
+    `declared_objects` answers "what may exist in the exposed schema" and
+    `published_objects` answers "what may be advertised". Session 8 is where
+    those stopped being the same question, and a single accessor with a filter
+    at each call site is how one of the call sites eventually gets it wrong.
+    """
+    surface = api_surface.load_surface()
+    snapshot = REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json"
+    if not snapshot.is_file():
+        pytest.skip("no approved snapshot to check against")
+
+    published = openapi_normalize.declared_objects(json.loads(snapshot.read_text("utf-8")))
+    expected = {name.split(".", 1)[1] for name in api_surface.published_objects(surface)}
+    served = {name.removeprefix("rpc/") for name in published}
+    assert served == expected, (
+        f"the snapshot names {sorted(served)} and the reviewed published surface names "
+        f"{sorted(expected)}"
+    )

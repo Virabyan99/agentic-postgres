@@ -22,6 +22,7 @@ can be present, report success, and establish nothing.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -30,7 +31,26 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import deployed_output
+from agentic_postgres import REPO_ROOT, deployed_output
+
+
+def _bootstrap_module() -> Any:
+    """`bin/postgres-bootstrap.py`, loaded by path.
+
+    The product's own enumeration of which roles the authenticator may become is
+    a module constant there, and this reads it rather than restating it: a copy
+    is what reported the product's deliberate `project_admin` grant as a
+    violation on the first host gate (D301), and by Session 8 Run 2 there were
+    four copies of that list in the repository.
+    """
+    specification = importlib.util.spec_from_file_location(
+        "apg_postgres_bootstrap", REPO_ROOT / "bin" / "postgres-bootstrap.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
 
 # ruff: noqa: S608
 #
@@ -285,18 +305,54 @@ def test_a_role_that_makes_no_request_cannot_address_the_private_schema(
     """Migration 0008 opened `app_private` to the roles PostgREST impersonates,
     and to those only (ADR 0052).
 
-    The agent roles are Session 9's. They are not granted to the authenticator,
-    so no token can name them, and a USAGE grant to a role that can never make a
-    request would widen the private schema to buy nothing. This is the half of
-    the old assertion that is unchanged, and it is what keeps the grant bounded
-    rather than general.
+    **Re-derived in Session 8 Run 2, not relaxed** (ADR 0116, ADR 0096). This
+    used to loop over `("agent_reader", "agent_writer")` and assert both were
+    refused, on the ground that *"the agent roles are Session 9's"*. Session 8
+    activates `agent_reader`: migration 0018 grants it `USAGE` because the
+    pre-request hook runs after the role switch and `EXECUTE` requires schema
+    `USAGE`, and the bootstrap plane grants the authenticator a membership so a
+    token can name the role at all.
+
+    So the assertion becomes the rule the old list was an instance of: **the
+    roles holding `USAGE` on the private schema are exactly the roles that run
+    the hook, plus the services that administer what lives there**. Read from
+    the product's own enumeration rather than written down, so `agent_writer`
+    still fails -- it is still not a request role -- and so does a *sixth* role
+    that acquires the grant without acquiring a membership, which a two-name list
+    could never have caught.
+
+    The subset form -- `granted ⊇ expected` -- is refused. It would have made
+    this pass with no edit at all, and would pass the next accidental grant
+    forever. **D300 is this exact temptation and it arrived three times in one
+    session.**
     """
-    for role in ("agent_reader", "agent_writer"):
-        observed = sql(
-            project_a,
-            f"SELECT has_schema_privilege('{roles[role]}', 'app_private', 'USAGE');",
-        )
-        assert observed == "f", f"{role} holds USAGE on app_private"
+    bootstrap = _bootstrap_module()
+    request_roles = set(bootstrap.AUTHENTICATOR_REQUEST_ROLES)
+
+    holders = {
+        role
+        for role, name in roles.items()
+        if sql(project_a, f"SELECT has_schema_privilege('{name}', 'app_private', 'USAGE');") == "t"
+    }
+
+    # The roles that reach `app_private` for a reason other than running the
+    # hook: `auth_service` (0011) and `storage_service` (0014) administer what
+    # lives there, `object_owner` owns the schema, and `migration_user` assumes
+    # the owner to apply migrations. Named rather than folded into the request
+    # set, because "runs the pre-request hook" and "administers the identity
+    # registry" are different reasons for the same grant, and one set would stop
+    # distinguishing them.
+    services = {"auth_service", "storage_service", "object_owner", "migration_user"}
+    assert holders - services == request_roles, (
+        f"the roles holding USAGE on app_private are {sorted(holders - services)}; the "
+        f"roles that run the pre-request hook are {sorted(request_roles)}. A grant to a "
+        "role that cannot make a request widens the private schema to buy nothing, and "
+        "a request role without it fails in db-pre-request on every call it makes"
+    )
+    assert "agent_writer" not in holders, (
+        "agent_writer holds USAGE on app_private. Session 9 activates the write role, "
+        "and until an ADR moves it this grant buys nothing and widens the schema"
+    )
 
 
 def test_a_request_role_reaches_one_private_function_and_no_private_data(

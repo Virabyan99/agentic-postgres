@@ -68,6 +68,36 @@ rpcs:
     methods: [POST]
     arguments: [p_task_id, p_expected_status, p_new_status]
 
+# The agent plane's own functions (ADR 0118). Reviewed here, because ADR 0050's
+# invariant is that nothing exists in `api` which this file does not name --
+# and deliberately NOT published, because `api_documentation` holds no EXECUTE on
+# either and `openapi-mode = follow-privileges` reads the document as that role.
+#
+# Three rules `api_surface.py` enforces and JSON Schema cannot: an entry takes no
+# arguments; a name here may not also appear in `rpcs:`; and every name here must
+# be ABSENT from the approved OpenAPI snapshot. The third is the one with teeth
+# -- it is checked against the generated artefact rather than against the
+# intention, which is D274's whole lesson.
+#
+# `methods` lists GET as well as POST, and that is a statement about PostgREST
+# rather than a preference: it serves `GET /rpc/...` for a STABLE function. The
+# reason `rpcs:` forbids GET is that it puts arguments into a query string and
+# into every log and cache between the caller and the database -- so the
+# no-arguments rule above is exactly what makes GET harmless here.
+agent_rpcs:
+  # The calling agent's own context. No argument, so it cannot describe anybody
+  # else; zero rows for a caller that is not an agent (ADR 0117).
+  mcp_agent_context:
+    methods: [GET, POST]
+    arguments: []
+  # `run_report`'s one named backing operation (docs/capability-plan.md).
+  # SECURITY INVOKER, so the caller's own RLS bounds the counts. Agent-only:
+  # granting it to `authenticated` would be a fifth human operation, and
+  # ADR 0003's example domain is frozen.
+  owner_activity_report:
+    methods: [GET, POST]
+    arguments: []
+
 # Never published, under any grant. These four are the ones a misconfigured
 # `db-schemas` or a `db-extra-search-path` left at its default would actually
 # reach -- `public` is the default, `app` holds the base tables the views exist

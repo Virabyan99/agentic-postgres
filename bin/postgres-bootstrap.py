@@ -58,7 +58,24 @@ IDENTITY_FIELDS = ("project_key", "database_name", "compose_project_name", "inst
 #:
 #: The membership carries `ADMIN FALSE, INHERIT FALSE, SET TRUE` in every case;
 #: see `role_statements` for what each option is load-bearing for.
-AUTHENTICATOR_REQUEST_ROLES = ("anon", "authenticated", "api_documentation", "project_admin")
+#:
+#: `agent_reader` joined in Session 8 Run 2 (ADR 0116). It is the membership that
+#: makes an agent token assumable at all: without it PostgREST's `SET ROLE` fails
+#: and every agent request is refused before the hook it would have run. Adding
+#: it is the whole of "activating the role" -- migration 0018 grants the
+#: privileges, and this decides whether any token can name it.
+#:
+#: **`agent_writer` is still absent, and its absence is now DERIVED rather than
+#: listed.** `check_violations` reads this tuple and refuses every project role
+#: outside it, so Session 9's activation moves one line here and a *fourth*
+#: unexpected membership still fails.
+AUTHENTICATOR_REQUEST_ROLES = (
+    "anon",
+    "authenticated",
+    "api_documentation",
+    "project_admin",
+    "agent_reader",
+)
 
 
 def await_cluster(container: str, database: str, *, attempts: int = 60, delay: float = 2.0) -> None:
@@ -503,11 +520,26 @@ def check_violations(container: str, database: str, document: dict[str, Any]) ->
     # `inherit_option = true`, which would give the authenticator every request
     # role's reach merely by connecting.
     #
-    # The agent roles are checked for ABSENCE in the same pass. That refusal is
-    # what makes an agent token fail at role switching, and a membership added
+    # Every role NOT in that tuple is checked for ABSENCE in the same pass, as a
+    # set difference rather than as a list. That refusal is what makes a token
+    # naming an unactivated role fail at role switching, and a membership added
     # by accident would turn a tested property into a silently open path.
+    #
+    # **Both loops read `AUTHENTICATOR_REQUEST_ROLES`, and until Session 8 Run 2
+    # neither did.** The constant was created in Session 6 Run 9 for exactly this
+    # -- its own docstring says so, and says that the copy was what reported the
+    # product's deliberate `project_admin` grant as a violation on the first host
+    # gate (D301, ADR 0096). The fix reached `role_statements`, which grants, and
+    # never reached `check_violations`, which verifies. **A decision implemented
+    # everywhere except the place that consumes it** -- CLAUDE.md section 6,
+    # question 5, in the file that records the last time it was asked here.
+    #
+    # The absence half was a two-name literal, `("agent_reader", "agent_writer")`.
+    # Activating one of them would have left the other as the only forbidden
+    # role, and a *third* accidental membership -- `app_runtime`, `auth_service`,
+    # `storage_service`, `object_owner` -- was never forbidden by anything.
     authenticator_literal = literal(roles["postgrest_authenticator"])
-    for request_role in ("anon", "authenticated", "api_documentation", "project_admin"):
+    for request_role in AUTHENTICATOR_REQUEST_ROLES:
         granted = query(
             container,
             database,
@@ -524,22 +556,32 @@ def check_violations(container: str, database: str, document: dict[str, Any]) ->
                 f"is '{granted}', expected 'false false true' (admin, inherit, set)"
             )
 
-    for agent_role in ("agent_reader", "agent_writer"):
+    # The complement, derived from the project's own role set. `object_owner` is
+    # excluded because `migration_user`'s membership of it is a different
+    # relation, checked above; every other declared role must be unreachable to
+    # the authenticator, whether or not anybody thought to name it.
+    forbidden = sorted(
+        key
+        for key in roles
+        if key not in AUTHENTICATOR_REQUEST_ROLES
+        and key not in {"postgrest_authenticator", "object_owner"}
+    )
+    for role_key in forbidden:
         granted = query(
             container,
             database,
             "SELECT coalesce(string_agg('present', ','), 'absent') "  # noqa: S608
             "FROM pg_auth_members m "
             f"JOIN pg_roles granted ON granted.oid = m.roleid "
-            f"AND granted.rolname = {literal(roles[agent_role])} "
+            f"AND granted.rolname = {literal(roles[role_key])} "
             "JOIN pg_roles member ON member.oid = m.member "
             f"AND member.rolname = {authenticator_literal};",
         )
         if granted != "absent":
             violations.append(
                 f"{roles['postgrest_authenticator']} holds a membership of "
-                f"{roles[agent_role]}, which Session 9 leaves ungranted on purpose: "
-                "an agent token must fail at role switching"
+                f"{roles[role_key]}, which this release does not activate: a token "
+                "naming it must fail at role switching"
             )
 
     # The migration plane cannot connect without both. A role with LOGIN and a

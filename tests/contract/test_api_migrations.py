@@ -31,9 +31,16 @@ CONVERGENCE = "templates/0007-api-surface-convergence.sql"
 REQUEST_PLANE = "templates/0008-http-request-plane.sql"
 DOCUMENTATION_ROLE = "templates/0009-documentation-role.sql"
 STATEMENT_TIMEOUT = "templates/0010-request-statement-timeout.sql"
-#: Session 6 Run 9. The fourth migration to define the hook, and therefore
-#: the effective one: it adds the comparison against current state.
+#: Session 6 Run 9. The fourth migration to define the hook: it adds the
+#: comparison against current state.
 AGENT_PLANE = "templates/0013-agent-plane-and-current-state-hook.sql"
+
+#: Session 8 Run 2. The FIFTH migration to define the hook, and therefore the
+#: effective one: it adds the `token_use` branch that establishes an agent's
+#: owner (ADR 0117). Written from 0013's body rather than from memory of it
+#: (D270) -- `test_the_agent_branch_is_0013s_body_plus_a_branch` is what holds
+#: that, mechanically, rather than the comment claiming it.
+AGENT_READ_PLANE = "templates/0018-agent-read-plane.sql"
 
 _CREATE_VIEW = re.compile(r"CREATE VIEW api\.(\w+)\b.*?AS\s+SELECT\s+(.*?)\s+FROM\b", re.DOTALL)
 _DROP_VIEW = re.compile(r"DROP VIEW api\.(\w+)")
@@ -160,7 +167,18 @@ def test_the_reader_is_not_vacuous(final_surface: dict[str, Any]) -> None:
     the one this file exists to avoid producing itself.
     """
     assert set(final_surface["views"]) == {"notes", "tasks"}, final_surface["views"]
-    assert set(final_surface["functions"]) == {"create_note", "update_task_status"}
+    # Four functions in `api` since Session 8 Run 2: the two published write
+    # RPCs, and the two agent-plane read functions migration 0018 adds
+    # (ADR 0118). Written out rather than read from the contract, deliberately --
+    # this is the test that proves the reader found something, so comparing it
+    # against the document every other test compares against would let an empty
+    # scrape agree with an empty contract.
+    assert set(final_surface["functions"]) == {
+        "create_note",
+        "update_task_status",
+        "mcp_agent_context",
+        "owner_activity_report",
+    }
     assert set(final_surface["enums"]) == {"task_status"}
     assert all(final_surface["views"].values())
     assert final_surface["enums"]["task_status"]
@@ -193,9 +211,23 @@ def test_the_write_surface_is_the_reviewed_rpcs(
     ADR 0003 argued at length that operation 4 is a narrow status transition
     rather than a second create, and Session 3 shipped a second create. This is
     the assertion that would have failed for two sessions.
+
+    **Both sections, since Session 8 Run 2.** The migrations create four
+    functions in `api`, and ADR 0050's invariant is that the reviewed contract
+    names every one of them -- the two published RPCs under `rpcs` and the two
+    agent-plane reads under `agent_rpcs` (ADR 0118). The union is what the
+    catalog holds; the split is which of them the document may advertise, and
+    `test_no_agent_plane_function_is_published` is where that half is asserted.
+    A comparison against `rpcs` alone would now fail for a correct release,
+    and the repair for that is always to loosen the comparison.
     """
-    assert set(final_surface["functions"]) == set(surface["rpcs"])
+    reviewed = set(surface["rpcs"]) | set(surface["agent_rpcs"])
+    assert set(final_surface["functions"]) == reviewed
     assert "create_task" not in final_surface["functions"]
+    assert not set(surface["rpcs"]) & set(surface["agent_rpcs"]), (
+        "a function is named in both rpcs and agent_rpcs; one list is the published "
+        "surface and the other is deliberately not, so a name in both is a contradiction"
+    )
 
 
 def test_every_rpc_parameter_is_the_reviewed_parameter(
@@ -384,19 +416,56 @@ def test_the_retired_function_loses_its_grants_before_it_is_dropped() -> None:
 
 
 def test_every_new_function_revokes_public_before_it_grants(
-    final_surface: dict[str, Any],
+    final_surface: dict[str, Any], manifest: dict[str, Any]
 ) -> None:
     """What actually carries SEC-DEFAULT-001 on the locked image (D57).
 
     And Run 5 measured a second consequence: `openapi-mode = follow-privileges`
     follows a PUBLIC grant too, so a function left with PostgreSQL's default
     EXECUTE is advertised in the document an anonymous caller receives.
+
+    **Over every migration, in applied order, since Session 8 Run 2.** It used
+    to read migration 0007 alone while looping over every function in `api` --
+    which held only while 0007 happened to be where all of them were granted.
+    Migration 0018 adds two more and the loop raised `ValueError: substring not
+    found`: a test failing because its subject moved rather than because the
+    property did.
+
+    The property is an ORDERING, and it spans files. PUBLIC must lose `EXECUTE`
+    **no later than the first grant of that function**, wherever each happens.
+    A later migration that adds a grantee needs no revoke of its own -- 0009
+    grants `create_note` to the documentation role and 0007 already owns that
+    revoke, which is D337's reasoning -- and demanding one would have failed a
+    correct release. What is refused is a grant that arrives while PUBLIC still
+    holds `EXECUTE`, which is the window an anonymous caller could use and the
+    window `follow-privileges` would advertise.
+
+    Strictly stronger than the single-file form: it now sees a function granted
+    in one migration and revoked in a later one, which is the same defect spread
+    across two files and was invisible before.
     """
-    body = statements(CONVERGENCE)
-    for name in final_surface["functions"]:
-        revoke = body.index(f"REVOKE ALL ON FUNCTION api.{name}")
-        grant = body.index(f"GRANT EXECUTE ON FUNCTION api.{name}")
-        assert revoke < grant, name
+    revoked: set[str] = set()
+    granted: set[str] = set()
+    for entry in manifest["migrations"]:
+        body = statements(entry["template"])
+        for name in final_surface["functions"]:
+            revoke = body.find(f"REVOKE ALL ON FUNCTION api.{name}")
+            grant = body.find(f"GRANT EXECUTE ON FUNCTION api.{name}")
+            if grant != -1:
+                within = revoke != -1 and revoke < grant
+                assert name in revoked or within, (
+                    f"{entry['template']} grants api.{name} while PUBLIC still holds "
+                    "EXECUTE. A function is EXECUTABLE BY PUBLIC the moment it exists "
+                    "(D57), and follow-privileges advertises it to an anonymous caller"
+                )
+                granted.add(name)
+            if revoke != -1:
+                revoked.add(name)
+
+    assert granted == set(final_surface["functions"]), (
+        f"no migration grants EXECUTE on {sorted(set(final_surface['functions']) - granted)}, "
+        "so it exists in the exposed schema and no role can call it"
+    )
 
 
 @pytest.mark.parametrize(
@@ -540,8 +609,14 @@ def test_the_effective_hook_is_the_last_migration_that_defines_it(
         for entry in manifest["migrations"]
         if HOOK_DEFINITION in statements(entry["template"])
     ]
-    assert defining == [REQUEST_PLANE, DOCUMENTATION_ROLE, STATEMENT_TIMEOUT, AGENT_PLANE]
-    assert effective_hook_template(manifest) == AGENT_PLANE
+    assert defining == [
+        REQUEST_PLANE,
+        DOCUMENTATION_ROLE,
+        STATEMENT_TIMEOUT,
+        AGENT_PLANE,
+        AGENT_READ_PLANE,
+    ]
+    assert effective_hook_template(manifest) == AGENT_READ_PLANE
 
 
 def test_the_documentation_role_is_refused_a_request_identity(
@@ -752,3 +827,306 @@ def test_the_timeout_lookup_matches_the_role_the_request_became(
     lookup = lookup[: lookup.index("LIMIT 1")]
     assert "current_user::text" in lookup
     assert "session_user" not in lookup
+
+
+# ---------------------------------------------------------------------------
+# Migration 0018 -- the agent read plane (Session 8, ADR 0116/0117/0118)
+# ---------------------------------------------------------------------------
+
+
+def _hook_statement_lines(template: str) -> list[str]:
+    """The hook definition's STATEMENTS, comments stripped.
+
+    Comments are prose and move legitimately. What must not move is the code,
+    so the comparison below is over the lines that execute.
+    """
+    body = TEMPLATES.joinpath(template.removeprefix("templates/")).read_text("utf-8")
+    start = body.index(HOOK_DEFINITION)
+    end = body.index("END $fn$;", start) + len("END $fn$;")
+    return [
+        line.rstrip()
+        for line in body[start:end].splitlines()
+        if line.strip() and not line.strip().startswith("--")
+    ]
+
+
+def _agent_branch(body: str) -> str:
+    """The agent branch, ending where the human branch begins.
+
+    NOT at the first `END IF;`: that one closes the nested credential_version
+    check, and slicing there returns a fragment containing neither the
+    comparison call nor the two `set_config` statements -- so every assertion
+    below would fail against a correct migration, which is how a test ends up
+    loosened to make it pass.
+    """
+    marker = "IF token_use = 'agent' THEN"
+    assert marker in body, (
+        "the effective hook has no `token_use` branch. Either the agent plane was removed, "
+        "or the discriminator moved -- and if it moved to `current_user` that is D393's "
+        "mechanism, a boundary standing on a correlation between the authenticator's "
+        "memberships and the two subject registries"
+    )
+    start = body.index(marker)
+    end = body.index("IF NOT app_private.auth_claims_are_current", start)
+    return body[start:end]
+
+
+def _collapsed(name: str) -> str:
+    """One template's statements with runs of whitespace collapsed.
+
+    The grant lists wrap across lines, so a search for `GRANT EXECUTE ON
+    FUNCTION <name>` finds nothing in the raw text and finds it here. Collapsing
+    is safe for these assertions: they look for identifiers and role
+    placeholders, none of which contains a newline.
+    """
+    return " ".join(statements(name).split())
+
+
+def test_the_agent_branch_is_0013s_body_plus_a_branch() -> None:
+    """**D270, asserted mechanically rather than claimed in a comment.**
+
+    `postgrest_pre_request` is defined in five migrations and only the last one
+    runs. A redefinition assembled from an older body silently deletes
+    everything the versions between added -- here, 0010's statement-timeout
+    carry, 0009's documentation-role clause and 0013's current-state comparison.
+    All three would still be present in the FILE that introduced them, and every
+    test reading that file would stay green while no request executed it.
+
+    So this compares 0018's hook against 0013's, line by line, and asserts that
+    **nothing was removed**. A comment saying "written from 0013's body" is
+    exactly the kind of claim D267 warns about: the next reader cannot tell it
+    from the ones that are true.
+
+    Goes red if: any statement line of 0013's hook is absent from 0018's; or
+    0018 stops adding a branch at all, which would make it a pointless
+    redefinition of a body that already ran.
+    """
+    import difflib
+
+    old = _hook_statement_lines(AGENT_PLANE)
+    new = _hook_statement_lines(AGENT_READ_PLANE)
+
+    removed = [
+        line[1:]
+        for line in difflib.unified_diff(old, new, lineterm="", n=0)
+        if line.startswith("-") and not line.startswith("---")
+    ]
+    assert not removed, (
+        f"0018's hook drops {len(removed)} statement line(s) 0013's had: {removed[:5]}. "
+        "Only the last definition runs, so a line dropped here is a line deleted from "
+        "the deployment (D270)"
+    )
+    assert len(new) > len(old), (
+        "0018 redefines the hook and adds nothing, which is a replacement of a body "
+        "that already ran"
+    )
+
+
+def test_the_agent_branch_discriminates_on_the_token_use_claim(
+    manifest: dict[str, Any],
+) -> None:
+    """ADR 0117: `token_use`, not the physical role.
+
+    Branching on `current_user` would work today, because the authenticator's
+    memberships happen to line up with the two registries -- and **that is the
+    mechanism D393 was**, a boundary standing on a correlation that changes
+    silently the day it stops holding. `token_use` is the only claim in the
+    token minted to discriminate.
+
+    The `credential_version` check is asserted with it because the two are one
+    decision: D397 made `0` a value rather than an absence so that "not a human"
+    could be READ, and a branch that did not check it would be trusting the
+    convention instead.
+    """
+    body = statements(effective_hook_template(manifest))
+    branch = _agent_branch(body)
+
+    assert "claims ->> 'token_use'" in body, "the hook never reads the discriminating claim"
+    assert "credential_version <> 0" in branch, (
+        "the agent branch does not check the credential_version convention, so a token "
+        "claiming to be an agent while carrying a human's version is accepted (D397)"
+    )
+    assert "agent_claims_are_current" in branch
+    assert "current_user" not in branch, (
+        "the agent branch reads the physical role. Role and token_use are independent "
+        "claims, so a boundary on the role is a boundary on a correlation (D393)"
+    )
+
+
+def test_an_agent_request_establishes_its_owner_and_not_itself(
+    manifest: dict[str, Any],
+) -> None:
+    """ADR 0117, and the assertion the whole read plane rests on.
+
+    Every RLS policy in 0003 keys on `app.user_id`. An agent that established
+    its own `sub` there would see nothing -- no note is owned by an agent -- and
+    every tool would return zero rows while every test passed. `app.agent_id` is
+    set beside it and no policy reads it: it says WHICH principal asked, and is
+    deliberately not an authorization input.
+    """
+    body = statements(effective_hook_template(manifest))
+    branch = _agent_branch(body)
+
+    assert "set_config('app.user_id', agent_owner::text, true)" in branch, (
+        "the agent branch does not establish the OWNER as app.user_id, so the policies "
+        "in 0003 -- which key on exactly that GUC -- return nothing for every agent"
+    )
+    assert "set_config('app.agent_id', subject, true)" in branch
+    assert "set_config('app.user_id', subject, true)" not in branch, (
+        "the agent branch establishes the AGENT as the RLS principal. No row is owned "
+        "by an agent, so this reads as a working plane that returns nothing"
+    )
+
+
+def test_the_agent_comparison_matches_the_whole_claim_tuple() -> None:
+    """0013's rule, applied to the agent helper (ADR 0117).
+
+    A function answering "what are agent X's scopes" would let anything that
+    reaches the hook enumerate every agent's authority, and the hook is not
+    something a request can decline to run. Matching on the whole tuple makes a
+    probe cost a correct guess of all four values.
+
+    `status = 'active'` is asserted separately because it is the one that makes
+    a disabled agent stop on its NEXT request rather than at its token's expiry.
+    """
+    body = statements(AGENT_READ_PLANE)
+    start = body.index("CREATE FUNCTION app_private.agent_claims_are_current")
+    definition = body[start : body.index("$fn$;", start)]
+
+    for predicate in (
+        "a.id            = p_agent_id",
+        "a.status        = 'active'",
+        "a.role_name     = p_role_name",
+        "a.authz_version = p_authz_version",
+        "a.scopes        = p_scopes",
+    ):
+        assert predicate in definition, f"the agent comparison does not match on {predicate!r}"
+    assert "SECURITY DEFINER" in definition
+    assert "SET search_path = pg_catalog, pg_temp" in definition, (
+        "a definer function with an unpinned search_path is shadowable by any caller "
+        "that can create a temporary object (D263)"
+    )
+
+
+def test_the_report_is_an_invoker_and_the_context_is_a_definer() -> None:
+    """The two functions differ in the one attribute that decides what they see.
+
+    `owner_activity_report` is SECURITY INVOKER, so the caller's own RLS bounds
+    the counts and the function needs no policy of its own. A definer report
+    would count every owner's rows and hand back totals the caller has no right
+    to -- and it would look identical from outside until a second owner existed.
+
+    `mcp_agent_context` is SECURITY DEFINER because `app_private.agents` is
+    unreachable by every request role and stays that way (ADR 0052): the agent
+    role gets EXECUTE on the function and no privilege on the table behind it.
+    """
+    body = statements(AGENT_READ_PLANE)
+
+    report_start = body.index("CREATE FUNCTION api.owner_activity_report")
+    report = body[report_start : body.index("$fn$;", report_start)]
+    assert "SECURITY INVOKER" in report
+    assert "SECURITY DEFINER" not in report, (
+        "the report is a definer, so it counts every owner's rows regardless of who "
+        "asked -- and looks correct until a second owner exists"
+    )
+    assert "app.notes" not in report and "app.tasks" not in report, (
+        "the report reads the base tables, which needs USAGE on schema `app` -- the "
+        "grant 0004 withholds so that a security_invoker view works and direct access "
+        "does not. Counting rows must not widen that boundary"
+    )
+
+    context_start = body.index("CREATE FUNCTION api.mcp_agent_context")
+    context = body[context_start : body.index("$fn$;", context_start)]
+    assert "SECURITY DEFINER" in context
+    assert "mcp_agent_context()" in body, "the context function takes an argument"
+    assert "current_setting('app.agent_id', true)" in context, (
+        "the context function does not read the request's own agent, so it either "
+        "takes a subject from somewhere else or describes nobody"
+    )
+
+
+def test_the_agent_role_gets_what_it_needs_to_run_the_hook() -> None:
+    """ADR 0116: activating a role is a grant list, and an incomplete one fails closed.
+
+    `EXECUTE` requires schema `USAGE`, and the hook runs AFTER the role switch
+    (measured in 0008), so it runs as the agent role. Without both, every agent
+    request fails in `db-pre-request` -- which is D381's shape: a role declared
+    a request role in four places and handed no way to run the one function
+    every request runs.
+
+    **Both comparison helpers, to all five roles.** `role` and `token_use` are
+    independent claims, so every combination of physical role and hook branch is
+    reachable by a request. Measured on the locked image: a human token naming
+    the agent role was refused with `permission denied for function
+    auth_claims_are_current` rather than `AP401` -- correct outcome, false
+    reason, which is D393 arriving through a missing grant.
+    """
+    body = _collapsed(AGENT_READ_PLANE)
+    assert "GRANT USAGE ON SCHEMA app_private TO {{agent_reader}}" in body
+
+    for function in (
+        "app_private.postgrest_pre_request()",
+        "app_private.agent_claims_are_current(uuid, text, text[], integer)",
+    ):
+        start = body.index(f"GRANT EXECUTE ON FUNCTION {function}")
+        grant = body[start : body.index(";", start)]
+        for role in ("anon", "authenticated", "api_documentation", "project_admin", "agent_reader"):
+            assert f"{{{{{role}}}}}" in grant, (
+                f"{function} is not granted to {role}. Every role that runs the hook can "
+                "reach both branches, because role and token_use are independent claims"
+            )
+
+    human_helper = (
+        "GRANT EXECUTE ON FUNCTION "
+        "app_private.auth_claims_are_current(uuid, text, text[], integer, integer)"
+    )
+    start = body.index(human_helper)
+    assert "{{agent_reader}}" in body[start : body.index(";", start)], (
+        "0013's human comparison helper is not extended to the agent role, so a human "
+        "token naming that role is refused by a missing GRANT rather than by the hook"
+    )
+
+
+def test_the_agent_functions_are_not_granted_to_the_documentation_role() -> None:
+    """ADR 0118, and it is the grant that decides publication.
+
+    `openapi-mode = follow-privileges` builds the document as
+    `api_documentation`, so withholding EXECUTE is the whole mechanism keeping
+    the agent plane out of the human REST document. A grant added here would
+    publish both functions and nothing else would say so --
+    `test_no_agent_plane_function_is_published` is the other half, and it reads
+    the generated artefact rather than this file.
+    """
+    body = _collapsed(AGENT_READ_PLANE)
+    for function in ("api.mcp_agent_context()", "api.owner_activity_report()"):
+        start = body.index(f"GRANT EXECUTE ON FUNCTION {function}")
+        grant = body[start : body.index(";", start)]
+        assert "{{api_documentation}}" not in grant, (
+            f"{function} is granted to the documentation role, which publishes it in the "
+            "document follow-privileges builds as that role (ADR 0118)"
+        )
+        assert "{{agent_reader}}" in grant
+
+    report_start = body.index("GRANT EXECUTE ON FUNCTION api.owner_activity_report()")
+    assert "{{authenticated}}" not in body[report_start : body.index(";", report_start)], (
+        "the report is granted to `authenticated`, which makes it a fifth human "
+        "operation -- and ADR 0003's example domain is frozen"
+    )
+
+
+def test_the_reset_role_is_below_the_privileges_block() -> None:
+    """D285, and it took a live project down in Session 6.
+
+    `REVOKE` and `GRANT EXECUTE ON FUNCTION` both require ownership. A
+    `RESET ROLE` above them runs both as the CONNECTED role, which on a host is
+    `migration_user` -- and that role owns nothing.
+
+    Every offline rig that applies migrations as `psql -U postgres` misses this,
+    because a superuser bypasses the ownership check entirely. This reads the
+    text; `test_every_released_migration_applies_as_the_migration_user` is what
+    executes it as the right role.
+    """
+    body = statements(AGENT_READ_PLANE)
+    assert body.index("RESET ROLE") > body.index("REVOKE ALL ON FUNCTION")
+    assert body.index("RESET ROLE") > body.rindex("GRANT EXECUTE ON FUNCTION")
+    assert body.index("SET LOCAL ROLE") < body.index("CREATE FUNCTION")

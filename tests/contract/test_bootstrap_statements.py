@@ -315,9 +315,19 @@ def test_a_document_naming_no_timeouts_asks_the_catalog_nothing(
 # ---------------------------------------------------------------------------
 
 
-#: The roles the authenticator may become. Session 6 Run 9 adds the fourth
-#: (D266); the two agent roles are deliberately not here.
-REQUEST_ROLES = ("anon", "authenticated", "api_documentation", "project_admin")
+#: The role Session 9 owns, and the one fact here that is NOT read from the
+#: product (ADR 0116).
+#:
+#: Everything else about the membership set is now derived from
+#: `bootstrap.AUTHENTICATOR_REQUEST_ROLES`, because a copy is what let the last
+#: two changes through -- this module carried a fourth one until Session 8 Run 2,
+#: alongside the two `check_violations` carried, alongside the constant that
+#: exists to stop exactly this (D301). But a set derived entirely from the
+#: product's own constant cannot refuse a bad edit to that constant, which is
+#: D300's warning. So one name stays written down, with an ADR behind it: adding
+#: `agent_writer` to the authenticator's memberships is Session 9's decision and
+#: fails here until an ADR moves this line.
+SESSION_NINE_ROLE = "agent_writer"
 
 
 def _authenticator_grants(statements: list[str], roles: dict[str, str]) -> dict[str, str]:
@@ -341,34 +351,70 @@ def test_the_authenticator_is_granted_every_request_role_and_no_other(
     The catalogue verifier reads them back, but its rig answers the membership
     question from a fake -- so adding `agent_reader` to the loop that BUILDS the
     grants left the whole suite green. This reads the statements themselves.
+
+    **Against the product's own enumeration, since Session 8 Run 2.** It used to
+    compare them against a copy of the list kept here, which is the same defect
+    D301 records and which had by then been made four times: the constant, two
+    literals in `check_violations`, and this one. What the comparison still buys
+    with the copy gone is real -- the builder can emit one grant fewer than the
+    constant has entries, or emit a role name that is not the derived one, and
+    both fail here. What it can no longer catch is a bad edit to the constant
+    itself, which is why `test_the_session_nine_role_is_not_activated` exists
+    beside it and names a role rather than deriving one.
     """
     roles = document["database"]["roles"]
     granted = _authenticator_grants(bootstrap.build_statements(document, INSTANCE_UUID), roles)
+    expected = set(bootstrap.AUTHENTICATOR_REQUEST_ROLES)
 
-    assert set(granted) == set(REQUEST_ROLES), (
-        f"the authenticator is granted {sorted(granted)}; the request roles are "
-        f"{sorted(REQUEST_ROLES)}"
+    assert set(granted) == expected, (
+        f"the authenticator is granted {sorted(granted)}; "
+        f"AUTHENTICATOR_REQUEST_ROLES names {sorted(expected)}"
+    )
+
+    # The complement, over the project's own declared roles. `object_owner` is
+    # excluded because `migration_user`'s membership of it is a different
+    # relation with its own assertion. Derived rather than listed, so a role
+    # this release does not activate is refused whether or not anybody thought
+    # to name it -- the two-name literal this replaced would have left
+    # `app_runtime`, `auth_service` and `storage_service` forbidden by nothing.
+    forbidden = {
+        key for key in roles if key not in expected | {"postgrest_authenticator", "object_owner"}
+    }
+    leaked = sorted(forbidden & set(granted))
+    assert not leaked, (
+        f"the authenticator is granted {leaked}, which this release does not activate. "
+        "A token naming one of them must fail at SET ROLE"
     )
 
 
-def test_no_agent_role_is_granted_to_the_authenticator(
-    bootstrap: Any, document: dict[str, Any]
-) -> None:
-    """The absence an agent token's refusal depends on.
+def test_the_session_nine_role_is_not_activated(bootstrap: Any, document: dict[str, Any]) -> None:
+    """The one membership fact this module states rather than derives (ADR 0116).
+
+    `agent_reader` is activated in Session 8 and `agent_writer` is not. Every
+    other assertion about the membership set now reads
+    `AUTHENTICATOR_REQUEST_ROLES`, which means a bad edit to that constant would
+    be invisible to all of them -- D300's warning, and the reason this test does
+    not derive its subject.
 
     PostgREST fails at `SET ROLE` before `db-pre-request` runs, which is why no
-    agent-specific pre-request error code exists. A membership added by accident
-    would turn a tested property into a silently open path, and the only thing
-    that would notice is this.
+    agent-specific pre-request error code exists: until Session 9 grants this
+    membership, a token naming the writer role is refused before any hook.
+
+    Goes red if: `agent_writer` joins `AUTHENTICATOR_REQUEST_ROLES`; or the
+    statement builder emits a grant for it by some other route. Either is
+    Session 9's decision and needs an ADR, which is what moves this line.
     """
     roles = document["database"]["roles"]
     granted = _authenticator_grants(bootstrap.build_statements(document, INSTANCE_UUID), roles)
 
-    for agent_role in ("agent_reader", "agent_writer"):
-        assert agent_role not in granted, (
-            f"{agent_role} is granted to the authenticator; Session 9 of the product "
-            "activates agent access, and until then the refusal is the property"
-        )
+    assert SESSION_NINE_ROLE not in bootstrap.AUTHENTICATOR_REQUEST_ROLES, (
+        f"{SESSION_NINE_ROLE} is in AUTHENTICATOR_REQUEST_ROLES. Activating the write "
+        "role is Session 9's decision (ADR 0116) and needs an ADR of its own"
+    )
+    assert SESSION_NINE_ROLE not in granted, (
+        f"{SESSION_NINE_ROLE} is granted to the authenticator by a route that does not "
+        "go through AUTHENTICATOR_REQUEST_ROLES, which is worse than the grant itself"
+    )
 
 
 def test_every_request_role_grant_carries_the_three_options(

@@ -179,3 +179,6 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0113](0113-a-verifier-that-issues-nothing-reads-its-key-set-from-the-rendered-file.md) | A verifier that issues nothing reads its key set from the rendered file | 7 | Accepted |
 | [0114](0114-the-application-api-accepts-only-access-tokens.md) | The application API accepts only access tokens | 7 | Accepted |
 | [0115](0115-the-agent-plane-accepts-only-agent-tokens.md) | The agent plane accepts only agent tokens | 8 | Accepted |
+| [0116](0116-session-8-activates-the-agent-reader-role.md) | Session 8 activates the agent-reader role | 8 | Accepted |
+| [0117](0117-an-agent-request-runs-under-its-owners-identity.md) | An agent request runs under its owner's identity | 8 | Accepted |
+| [0118](0118-the-agent-planes-rpcs-are-reviewed-and-unpublished.md) | The agent plane's RPCs are reviewed and unpublished | 8 | Accepted |
