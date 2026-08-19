@@ -1508,6 +1508,27 @@ def _registered_subject(
     # previous run's sweep could not collect. The comment above already
     # described this scenario, and then the guard against it threw its answer
     # away: **a guard whose result is unchecked is a comment.**
+    # A previous run that died BEFORE its teardown finished leaves rows this
+    # delete cannot get past, so the recovery runs here rather than being left
+    # to an operator with a psql prompt.
+    #
+    # The teardown does clear them -- but only after an assertion, and a run
+    # whose sweep failed dies ON that assertion and never reaches the DELETE
+    # below it. That is exactly what happened: ten objects went uncollected
+    # (D388), the teardown stopped, a later sweep set `cleanup_completed_at`,
+    # and ten collected-but-undeleted rows were left holding the subject
+    # hostage through `ON DELETE RESTRICT`. Setup had no path back.
+    #
+    # `_collect_owned_objects` is reused rather than a bare DELETE: it ages,
+    # tombstones and sweeps through the PRODUCT's own cleanup, so a row whose
+    # bytes are still at the provider is collected rather than orphaned. Rows
+    # already collected cost it nothing.
+    code, existing_id, _ = psql(
+        project_a, f"SELECT id FROM app_private.users WHERE username = '{username}';"
+    )
+    if code == 0 and existing_id:
+        _collect_owned_objects(project_a, psql, existing_id)
+
     code, _, error = psql(
         project_a, f"DELETE FROM app_private.users WHERE username = '{username}';"
     )

@@ -1069,40 +1069,6 @@ Rewritten to grant `USAGE ON SCHEMA app_private` — which storage already holds
 it fails at the assertion with **`permission denied for function
 auth_user_state`, the exact string the host produced.**
 
-### Run 14 — The fixture layers, and a guard that threw its answer away
-
-**Done.** The third host gate returned **185 passed, 0 failed, 12 errors** — every
-remaining item a proof that could not *start*, which is a better failure than one
-that runs and disagrees.
-
-**D388's fix proved itself on live objects first.** With `SWEEP_POOL_SIZE = 1`
-deployed, `storage-admin.sh cleanup --yes` collected the ten objects the previous
-run's sweep could not: **claimed 10, deleted 10, finished 10, failed 0, abandoned
-0** — the cleanup plane's first successful end-to-end run anywhere, deleting at
-R2 and finishing in the database from inside its connection budget.
-
-**D391.** Those ten objects were also the cause of the twelve errors, by a route
-the error message hid completely. `_registered_subject` deletes the probe subject
-before creating it, precisely so a half-finished previous run cannot block the
-next — and discarded the DELETE's result. `storage_objects.owner_id` is
-`ON DELETE RESTRICT`, so the delete was refused, and the create then failed on
-the unique index with a message about a **duplicate username**. The result is now
-checked, and the assertion names the restriction and the command that clears it.
-
-**D392.** With D390's role name fixed, `agent_session` reached the next statement
-and stopped: it passed `NULL` for `p_owner_id`, and migration 0011 makes
-`agents.owner_id` `NOT NULL REFERENCES app_private.users (id)`. The agent is now
-owned by the **storage** probe subject, which makes the refusal stronger rather
-than merely valid: an agent whose owner holds `objects:read` and `objects:write`
-is still refused, so what governs is the agent's own scopes, not its owner's.
-Taken as a fixture argument rather than a lookup, which fixes the teardown order
-by construction — the reference is `NO ACTION`, so an agent outliving its owner
-would block that owner's deletion exactly as the ten objects just did.
-
-**Both fixes are `live_host` and unverified beyond lint and collection.** Nothing
-offline builds these fixtures, which is the condition that hid D390 and D392 in
-the first place, and the next gate is their first execution.
-
 ### Run 13 — Three defects the second host gate found
 
 **Done.** The gate went from **13 failed + 1 error** to **2 failed + 2 errors**,
@@ -1138,6 +1104,68 @@ cannot be dropped silently), and the sweep's width is captured from the **real**
 entry point and asserted against `STORAGE_RESERVED_CONNECTIONS` — with a
 `pool_size` of 9 in the fake, so a sweep taking the serving width shows up as
 that number rather than as a coincidence.
+
+### Run 14 — The fixture layers, and a guard that threw its answer away
+
+**Done.** The third host gate returned **185 passed, 0 failed, 12 errors** — every
+remaining item a proof that could not *start*, which is a better failure than one
+that runs and disagrees.
+
+**D388's fix proved itself on live objects first.** With `SWEEP_POOL_SIZE = 1`
+deployed, `storage-admin.sh cleanup --yes` collected the ten objects the previous
+run's sweep could not: **claimed 10, deleted 10, finished 10, failed 0, abandoned
+0** — the cleanup plane's first successful end-to-end run anywhere, deleting at
+R2 and finishing in the database from inside its connection budget.
+
+**D391.** Those ten objects were also the cause of the twelve errors, by a route
+the error message hid completely. `_registered_subject` deletes the probe subject
+before creating it, precisely so a half-finished previous run cannot block the
+next — and discarded the DELETE's result. `storage_objects.owner_id` is
+`ON DELETE RESTRICT`, so the delete was refused, and the create then failed on
+the unique index with a message about a **duplicate username**. The result is now
+checked, and the assertion names the restriction and the command that clears it.
+
+**D392.** With D390's role name fixed, `agent_session` reached the next statement
+and stopped: it passed `NULL` for `p_owner_id`, and migration 0011 makes
+`agents.owner_id` `NOT NULL REFERENCES app_private.users (id)`. The agent is now
+owned by the **storage** probe subject, which makes the refusal stronger rather
+than merely valid: an agent whose owner holds `objects:read` and `objects:write`
+is still refused, so what governs is the agent's own scopes, not its owner's.
+Taken as a fixture argument rather than a lookup, which fixes the teardown order
+by construction — the reference is `NO ACTION`, so an agent outliving its owner
+would block that owner's deletion exactly as the ten objects just did.
+
+**Both fixes are `live_host` and unverified beyond lint and collection.** Nothing
+offline builds these fixtures, which is the condition that hid D390 and D392 in
+the first place, and the next gate is their first execution.
+
+### Run 15 — The recovery path setup never had
+
+**Done.** The fourth host gate reported the same twelve errors plus one, and
+this time with the truth in the message rather than a duplicate-username
+misdirection — D391's assertion doing its job: *"violates RESTRICT setting of
+foreign key constraint storage_objects_owner_id_fkey"*.
+
+**The teardown does delete those rows — after an assertion, and the run whose
+sweep failed died ON that assertion and never reached the DELETE below it.** Ten
+objects went uncollected (D388), the teardown stopped there, a later sweep set
+`cleanup_completed_at` on all ten, and ten collected-but-undeleted rows were left
+holding the subject through `ON DELETE RESTRICT`. **Setup had no path back from
+that state**: it only ever tried to delete the user, which the constraint
+refuses, so every subsequent run failed on state no run could clear.
+
+`_registered_subject` now recovers before it deletes: if the subject exists, it
+runs `_collect_owned_objects` first — the same age, tombstone, sweep and delete
+the teardown uses, **through the product's own cleanup**, so a row whose bytes
+are still at the provider is collected rather than orphaned, and a row already
+collected costs nothing. A bare `DELETE FROM storage_objects` would have been
+shorter and would strand bytes, which is the single outcome this plane exists to
+prevent.
+
+**Session 7 was planned as ten runs.** Runs 11–15 are all consequences of the
+host trip, which is what the trip is for: five build runs against ten defects
+(D381, D385, D388, D389, D390, D391, D392) plus five process and documentation
+rows. Session 6's first trip found nine.
 
 ---
 
