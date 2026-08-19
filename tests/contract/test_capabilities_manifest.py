@@ -13,7 +13,7 @@ from typing import Any
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, config
+from agentic_postgres import REPO_ROOT, capability_compiler, config
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -57,33 +57,99 @@ def write_capability() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_example_manifest_is_valid_and_empty() -> None:
+def test_the_example_manifest_is_the_reviewed_agent_surface() -> None:
+    """**It asserted `== {"schema_version": 1, "capabilities": []}` until Run 3.**
+
+    Empty was the correct answer through Session 7 and it was not an oversight:
+    no live backing API contract existed to validate an entry against. Session 5
+    shipped the reviewed surface and the approved snapshot, and Session 8 Run 3
+    is what compiles against them.
+
+    What replaces the equality is not a looser check. Five capabilities, four
+    tools, every one enabled and every one resolved against the reviewed contract
+    by `capability_compiler` -- a stronger statement than "the list is empty",
+    and one that fails if a sixth appears without review.
+    """
     document = config.load_capabilities_manifest(EXAMPLE)
-    assert document == {"schema_version": 1, "capabilities": []}
+    assert document["schema_version"] == 1
+    assert {entry["name"] for entry in document["capabilities"]} == {
+        "list_resources",
+        "describe_resource",
+        "query_notes",
+        "query_tasks",
+        "run_report",
+    }
+    assert all(entry["enabled"] for entry in document["capabilities"])
 
 
-def test_empty_default_is_the_contract() -> None:
-    """Zero enabled capabilities is the correct Session 1 state, not an oversight."""
-    assert config.load_capabilities_manifest(EXAMPLE)["capabilities"] == []
+def test_the_two_query_authorizations_are_separate_entries() -> None:
+    """ADR 0120, at the manifest rather than at the compiled contract.
+
+    `query_notes` and `query_tasks` are two authorizations behind one tool, and
+    the reason they are two is that `required_scopes` is a CONJUNCTION: one entry
+    naming both scopes would refuse an agent holding either, which is the
+    opposite of what "notes:read or tasks:read" means.
+    """
+    document = config.load_capabilities_manifest(EXAMPLE)
+    entries = {entry["name"]: entry for entry in document["capabilities"]}
+
+    assert entries["query_notes"]["tool"] == "query_resource"
+    assert entries["query_tasks"]["tool"] == "query_resource"
+    assert entries["query_notes"]["required_scopes"] == ["notes:read"]
+    assert entries["query_tasks"]["required_scopes"] == ["tasks:read"]
+    assert sorted(entries["run_report"]["required_scopes"]) == ["notes:read", "tasks:read"]
+    for name in ("list_resources", "describe_resource", "run_report"):
+        assert entries[name].get("tool", name) == name
 
 
 # ---------------------------------------------------------------------------
-# Enabling requires a live backing contract
+# Enabling is validated by the compiler, not refused here
 # ---------------------------------------------------------------------------
 
 
-def test_enabled_capability_fails_without_a_live_contract(tmp_path: Path) -> None:
-    capability = read_capability() | {"enabled": True}
-    with pytest.raises(config.CapabilityContractError, match="no live API contract"):
-        check(tmp_path, {"schema_version": 1, "capabilities": [capability]})
+def test_a_metadata_capability_may_not_declare_a_backend(tmp_path: Path) -> None:
+    """ADR 0120: the schema forbids the fields; the runtime does not merely ignore them.
+
+    A metadata tool answers from the deployed lock. Given a `resource` and a
+    `columns` list it would carry a description of a query nobody makes, and the
+    next reader could not tell those values from the ones that are real -- D267's
+    rule about a fabricated measurement in a comment, applied to a manifest.
+    """
+    metadata = {
+        "name": "list_resources",
+        "kind": "metadata",
+        "enabled": True,
+        "required_scopes": ["meta:read"],
+        "operation": {"source": "lock", "operation_id": "lock.resources.list"},
+    }
+    assert check(tmp_path, {"schema_version": 1, "capabilities": [metadata]})
+
+    for field, value in (("resource", "notes"), ("columns", ["id"]), ("max_rows", 10)):
+        with pytest.raises(config.ManifestError):
+            check(tmp_path, {"schema_version": 1, "capabilities": [metadata | {field: value}]})
 
 
-def test_enabled_capability_error_is_distinguishable_from_bad_input(tmp_path: Path) -> None:
-    """It maps to exit 5 (contract failure), not exit 2 (invalid input)."""
-    capability = write_capability() | {"enabled": True}
-    with pytest.raises(config.CapabilityContractError) as excinfo:
-        check(tmp_path, {"schema_version": 1, "capabilities": [capability]})
-    assert isinstance(excinfo.value, config.ManifestError)
+def test_a_tool_name_may_not_collide_with_another_capability_name(tmp_path: Path) -> None:
+    """One entry's grouping must not silently rename another (ADR 0120)."""
+    first = read_capability() | {"name": "query_notes", "tool": "run_report", "enabled": True}
+    second = read_capability() | {"name": "run_report", "enabled": True}
+    with pytest.raises(config.ManifestError, match="another capability"):
+        check(tmp_path, {"schema_version": 1, "capabilities": [first, second]})
+
+
+def test_the_contract_error_is_still_distinguishable_from_bad_input() -> None:
+    """It maps to exit 5 (contract failure), not exit 2 (invalid input).
+
+    The blanket refusal of `enabled: true` is gone; this class is not. It is what
+    `capability_compiler` raises for a capability the reviewed surface does not
+    permit, and the distinction it carries was always the point of having it --
+    the class outlives the check that first used it.
+    """
+    assert issubclass(config.CapabilityContractError, config.ManifestError)
+    assert issubclass(capability_compiler.CompilerError, config.CapabilityContractError), (
+        "the compiler's refusal is not a contract failure, so a manifest asserting an "
+        "operation nothing serves would exit 2 (invalid input) rather than 5"
+    )
 
 
 def test_disabled_capability_entry_is_allowed(tmp_path: Path) -> None:

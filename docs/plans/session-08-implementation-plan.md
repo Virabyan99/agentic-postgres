@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D419.**
+**Next free number after this table is D423.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -72,6 +72,10 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D416** | D400: two passing tests say the agent roles are Session 9's, and Session 8 re-derives them. | **There were four copies of the enumeration, not two tests.** `AUTHENTICATOR_REQUEST_ROLES` was created in Session 6 Run 9 *precisely so that the proof could read it instead of restating it* -- its own docstring says so, and says the restatement is what reported the product's deliberate `project_admin` grant as a violation on the first host gate (D301). The fix reached `role_statements`, which **grants**. It never reached `check_violations`, which **verifies** and still carried the list as a literal -- twice, once for the memberships and once for a two-name forbidden set. `tests/contract/test_bootstrap_statements.py` carried a fourth. | All three copies deleted. Both loops in `check_violations` read the constant; the forbidden set is its **complement over the project's own roles**; the test reads the constant and keeps one independent anchor -- `agent_writer` is named, with ADR 0116 behind it, because a set derived entirely from the product cannot refuse a bad edit to the product (D300). | **§6 question 5, in the file that records the last time it was asked here.** The two-name literal is the part worth noticing: activating one agent role would have left the other as the only forbidden membership, and `app_runtime`, `auth_service` and `storage_service` were forbidden by nothing at all. | 0116 |
 | **D417** | — (measured during Run 2). | **A human token naming the agent role was refused by `permission denied for function auth_claims_are_current`, not by `AP401`.** The first draft granted the new agent comparison helper to the agent role alone, reasoning that a human request never reaches the agent branch. The reasoning is right; the conclusion was wrong. A token's `role` claim decides which role PostgREST becomes and `token_use` decides which branch the hook takes -- **independent claims, so every combination is a reachable request**. | Both comparison helpers granted to **all five** request roles, which is the rule 0013 already states for its own: *"the comparison helper, to every role that runs the hook."* Both refusals are then the hook's own `AP401` on a tuple comparison, for every principal at every door. | **D393 exactly, arriving through a missing GRANT rather than a missing row.** Correct outcome, false reason, boundary standing on a privilege nobody chose -- and a 42501 reaches the caller as a different failure from every other refusal the hook issues, so a client cannot treat "your token is stale" as one outcome. Found on the first run of the rig, not by review. | 0117 |
 | **D418** | The plan's Run 2: *"one named read report RPC"*, and AGT-READ-001 compares an agent read against "the equivalent PostgREST result". | **The equivalent request is `permission denied`, and it must stay that way.** The rig argued for granting `owner_activity_report` to `authenticated` so the comparison would have a human half. But a read RPC a human may call is a **fifth human operation**, and **ADR 0003's example domain is frozen** -- four operations, amended once by ADR 0048 for one additive column. | The report stays agent-only. The equivalence is proved against the **row surface** instead: the agent's counts must equal the rows the same principal reads through `api.notes` and `api.tasks`. Measured equal both ways (`2 2 1 1`), with a second owner reading `1 1 1 0` as the control that neither number is a constant. | **The proof moved, not the product.** It is also the stronger comparison: two functions can be wrong in the same direction, and a count that disagrees with the rows it counts cannot be. A test's convenience is not a reason to widen a frozen surface. | 0118 |
+| **D419** | The capability plan, rule 3: *"It references exactly one pre-existing operation by ID."* `capabilities.schema.json` requires `operation.operation_id`. | **The live PostgREST publishes no `operationId` anywhere.** Measured against a running service on the locked image, captured through a documentation-role token because `follow-privileges` builds the document as the role of the request: Swagger **2.0**, where the field is optional, and every operation without one. The committed snapshot shows the same, but a normalized capture is evidence about `openapi_normalize`, not about PostgREST -- which is why this was measured live. | The id is **derived**, `<object>.<method>` with `/` written as `.`, by one function that is the single authority for the spelling. Capabilities resolve against the **reviewed surface contract**, not the served document; the document is then read as a cross-check in both directions. | The rule is right about what a capability must not contain and wrong about what the source provides. Carrying `method` and `path` instead would be honest, change a member's meaning (a v2 bump under D403) and put a **path** in the manifest -- which the same sentence forbids. | 0119 |
+| **D420** | — (found during Run 3). | **`config.load_capabilities_manifest` refused *every* `enabled: true` capability**, with the message *"no live API contract exists to validate it against in this session"*. That was true when it was written and **stopped being true in Session 5**, which shipped `contracts/postgrest-api-surface.yaml` and the approved OpenAPI snapshot. It survived three sessions because nothing ever enabled a capability, so the guard's stated condition and its behaviour never had to agree. | The blanket refusal is removed and the validation moves to `capability_compiler`, which needs two documents `load_capabilities_manifest` is not given. `CapabilityContractError` survives and `CompilerError` now **subclasses** it, so the exit-5 distinction the class was created for moves with the check. | A guard whose stated condition is false is worse than no guard: it reads as a live control and is a comment. It is the mirror of **D391** -- there, a guard whose result was discarded; here, a guard whose reason had expired. Neither is visible while nothing exercises it. | — |
+| **D421** | — (found during Run 3, by reading the compiler's own output). | **A flat `discovery_scopes` list cannot distinguish "any of" from "all of".** `query_resource` is `notes:read` OR `tasks:read`; `run_report` is `notes:read` AND `tasks:read`. Flattened, **both are the same two strings** -- so an agent holding only `notes:read` would be shown `run_report` in discovery and refused when it called. | `discovery_scope_sets`: a disjunction of conjunctions. One set per backing capability; the tool is discoverable when the caller holds every scope in **any one** set. | Found by reading the compiled artefact rather than by a failing test, which is the only way this class shows up: both spellings validate, both look right, and the difference is invisible until an agent holds exactly half of what a tool needs. **A tool list that advertises what it will refuse is a tool list that lies.** | 0120 |
+| **D422** | — (found by the full suite, during Run 3). | **`CFG-013` is a P0 requirement whose description became false.** It read *"the capability surface is empty by default, cannot be enabled without a live backing contract, and cannot express SQL or a raw query"*, and two of its three clauses stopped being true the moment five capabilities were enabled. `test_every_registered_node_id_is_collectible` caught the renamed node ids; **nothing would have caught the stale description** — D175 records that as a review rule with no test behind it. | The node ids move and the description is rewritten to the property the old one was an instance of: the surface is **exactly the reviewed set**, compiled against a live backing contract rather than trusted, unable to declare a backend it does not reach, and unable to express SQL. A compiler node id joins the three manifest ones, so the "live backing contract" clause points at the thing that now enforces it. | **Not a weakening, and the distinction is the whole of ADR 0096.** "Nothing is enabled" proved less than "exactly the reviewed set is enabled, each resolved against the reviewed contract" — the second refuses a sixth capability and the first never had to. A P0 description may not be relaxed; this one is replaced by a stricter statement of the same property, which is what the README permits and what ADR 0119/0120 authorise. | 0119 |
 
 ---
 
@@ -272,7 +276,7 @@ one extractor, so removing the marker reddened the control too. The extractor
 gained a real failure message and the control was swapped — **a mutation whose
 control also fails is not evidence, whatever the target did.**
 
-### Run 3 — The capability compiler
+### Run 3 — The capability compiler — **Done.**
 
 - Capture the live PostgREST OpenAPI through the documentation token, normalise,
   and **compare against the approved snapshot**. Drift fails.
@@ -282,6 +286,44 @@ control also fails is not evidence, whatever the target did.**
   hashes.
 - The compiler may **read** OpenAPI and may never **infer** a capability from it
   (AGT-DRIFT-001).
+
+**What was measured.** A live PostgREST on the locked image, against a cluster
+carrying all eighteen migrations, configured as `compose.yaml` configures it, and
+captured **through a documentation-role token** — because `follow-privileges`
+builds the document as the role of the request, and an anonymous capture would
+describe `anon`'s surface, which is nothing. **10 measurements, 10 as designed.**
+
+**The live document publishes no `operationId` anywhere** (D419). Swagger 2.0,
+where the field is optional, and every operation without one. The committed
+snapshot said the same, but it is a *normalized* capture — evidence about
+`openapi_normalize`, not about PostgREST — which is why this was measured live.
+
+**And ADR 0118 now holds against the artefact rather than the intention.**
+`rpc/mcp_agent_context` and `rpc/owner_activity_report` are absent from the
+document built as `api_documentation`; all four published objects are present as
+the control. Run 2 asserted that from the migration text and the approved
+snapshot. This is the running service agreeing.
+
+**What was built.** ADR 0119 and 0120. Five capabilities in
+`capabilities.example.yaml` behind **four tools**, with `tool`, `kind: metadata`
+and `source: lock` extending v1 — nothing renamed, nothing removed, so no bump
+(D403). `capability_compiler`, pure over its arguments. `bin/mcp-contract.sh`
+with `compile`/`check`/`lock`, and **no writer in the check path** (ADR 0050).
+The canonical contract, committed and project-neutral.
+
+**Two findings.** **D420** — `load_capabilities_manifest` refused *every*
+enabled capability with a reason that **expired in Session 5**, and survived
+three sessions because nothing ever enabled one. **D421** — a flat
+`discovery_scopes` list cannot tell "any of" from "all of", so `run_report` would
+have been advertised to an agent holding half its scopes; found by reading the
+compiler's own output, which is the only way that class shows up.
+
+**The battery: 11 mutations, 11 killed**, every one `FAILED` rather than `ERROR`,
+each control green in the same invocation. M1 is the one that matters: the
+compiler is made to enumerate the reviewed surface, and **AGT-DRIFT-001** dies —
+which is the test written the only way that means anything, by *adding a real
+operation to both the contract and the snapshot* and asserting the compiled
+bytes do not move.
 
 ### Run 4 — The runtime and the fourth verifier
 

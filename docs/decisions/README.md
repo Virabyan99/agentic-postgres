@@ -182,3 +182,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0116](0116-session-8-activates-the-agent-reader-role.md) | Session 8 activates the agent-reader role | 8 | Accepted |
 | [0117](0117-an-agent-request-runs-under-its-owners-identity.md) | An agent request runs under its owner's identity | 8 | Accepted |
 | [0118](0118-the-agent-planes-rpcs-are-reviewed-and-unpublished.md) | The agent plane's RPCs are reviewed and unpublished | 8 | Accepted |
+| [0119](0119-an-operation-id-is-derived-because-postgrest-publishes-none.md) | An operation id is derived, because PostgREST publishes none | 8 | Accepted |
+| [0120](0120-a-tool-may-be-backed-by-more-than-one-capability.md) | A tool may be backed by more than one capability | 8 | Accepted |

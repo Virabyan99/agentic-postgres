@@ -1,21 +1,188 @@
 # Agent-visible capability surface.
 #
-# Empty is the correct Session 1 state, and it is not a placeholder. No
-# capability may be enabled because no live backing API contract exists yet to
-# validate one against -- an entry with `enabled: true` fails rendering with
-# exit 5 rather than being accepted on trust.
+# **Empty was the correct state through Session 7**, and it was not a
+# placeholder: no live backing API contract existed to validate an entry
+# against, so `enabled: true` failed with exit 5 rather than being accepted on
+# trust. Session 5 shipped the reviewed surface contract and the approved
+# OpenAPI snapshot, and Session 8 Run 3 is what compiles against them.
 #
 # This file is separate from project.yaml on purpose: growing the API must not
 # automatically grow what an agent can reach. Adding a REST endpoint or an RPC
-# changes nothing here until someone edits this file.
+# changes nothing here until someone edits this file, and `AGT-DRIFT-001` is the
+# proof of it.
 #
 # It may never contain SQL, SQL fragments, raw PostgREST query strings,
 # arbitrary paths, runtime-selected operation names, or ad-hoc columns. The
 # schema enforces that structurally; see schemas/capabilities.schema.json,
 # which is also the sole authority for the approved scope vocabulary.
 #
-# Planned tools and their owning sessions are recorded in
-# docs/capability-plan.md, not here.
+# **Five capabilities, four tools** (ADR 0120). A capability is the
+# authorization unit -- one (resource, verb), which is what `required_scopes`
+# bounds -- and a tool is a name an agent calls. `query_notes` and `query_tasks`
+# are two authorizations behind the one tool `query_resource`, which is what
+# docs/capability-plan.md means by "notes:read or tasks:read": one entry naming
+# both scopes would demand BOTH, and refuse an agent holding either.
+#
+# Every `operation_id` is DERIVED, `<object>.<method>` (ADR 0119). It is not
+# copied from the served document, because the live PostgREST publishes no
+# operationId anywhere -- measured on the locked image against a running
+# service. The compiler resolves each one against
+# contracts/postgrest-api-surface.yaml, which is the reviewed authority, and
+# cross-checks the published half against the approved OpenAPI snapshot.
+#
+# Session 9's two write capabilities are in docs/capability-plan.md and
+# deliberately not here.
 
 schema_version: 1
-capabilities: []
+
+capabilities:
+  # --- The two metadata tools ------------------------------------------------
+  #
+  # `kind: metadata` and `source: lock`: these answer from the deployed
+  # capability lock and reach no backend at all. The schema FORBIDS them a
+  # resource, a column list and a row ceiling, because a query they never make
+  # has no columns and no ceiling -- and inventing some would read exactly like
+  # a real backing.
+  - name: list_resources
+    description: >-
+      The resources this deployment's agent surface can query, and the scope
+      each one needs. Read from the deployed lock; reaches no database.
+    kind: metadata
+    enabled: true
+    required_scopes: [meta:read]
+    operation:
+      source: lock
+      operation_id: lock.resources.list
+    timeout_ms: 1000
+    audit:
+      redact: []
+
+  - name: describe_resource
+    description: >-
+      One resource's frozen columns, permitted filters and permitted ordering,
+      exactly as the lock froze them. Read from the deployed lock.
+    kind: metadata
+    enabled: true
+    required_scopes: [meta:read]
+    operation:
+      source: lock
+      operation_id: lock.resources.describe
+    timeout_ms: 1000
+    audit:
+      redact: []
+
+  # --- The two query authorizations, behind one tool -------------------------
+  #
+  # `columns` is the frozen allowlist and it is deliberately the reviewed view's
+  # column list rather than a narrower one chosen here: the view is what
+  # contracts/postgrest-api-surface.yaml already reviews, and a second list
+  # maintained here would be a second authority over one surface. `owner_id` is
+  # included for the reason the reviewed contract includes it -- the view is
+  # security-invoker over a FORCE-RLS table, so it discloses to a caller only
+  # the owner id that caller already presented.
+  - name: query_notes
+    tool: query_resource
+    description: The caller's own notes, filtered and ordered within frozen bounds.
+    kind: read
+    enabled: true
+    required_scopes: [notes:read]
+    operation:
+      source: postgrest
+      operation_id: notes.get
+    resource: notes
+    columns: [id, owner_id, title, content, created_at, updated_at]
+    filters:
+      - column: id
+        operators: [eq, in]
+      - column: title
+        operators: [eq, neq]
+      - column: created_at
+        operators: [lt, lte, gt, gte]
+      - column: updated_at
+        operators: [lt, lte, gt, gte]
+    order_by:
+      - column: created_at
+        direction: desc
+      - column: created_at
+        direction: asc
+      - column: updated_at
+        direction: desc
+      - column: title
+        direction: asc
+    max_rows: 200
+    timeout_ms: 5000
+    audit:
+      redact: []
+
+  - name: query_tasks
+    tool: query_resource
+    description: The caller's own tasks, filtered and ordered within frozen bounds.
+    kind: read
+    enabled: true
+    required_scopes: [tasks:read]
+    operation:
+      source: postgrest
+      operation_id: tasks.get
+    resource: tasks
+    columns: [id, owner_id, note_id, title, description, status, created_at, updated_at]
+    filters:
+      - column: id
+        operators: [eq, in]
+      - column: note_id
+        operators: [eq, in, is_null]
+      - column: status
+        operators: [eq, neq, in]
+      - column: created_at
+        operators: [lt, lte, gt, gte]
+      - column: updated_at
+        operators: [lt, lte, gt, gte]
+    order_by:
+      - column: created_at
+        direction: desc
+      - column: created_at
+        direction: asc
+      - column: updated_at
+        direction: desc
+      - column: status
+        direction: asc
+    max_rows: 200
+    timeout_ms: 5000
+    audit:
+      redact: []
+
+  # --- The one named report --------------------------------------------------
+  #
+  # Both scopes, and here the conjunction is what is meant: the report counts
+  # notes AND tasks in one row, so an agent holding only one of them would be
+  # handed a number it is not authorized to see. `max_rows: 1` is the function's
+  # actual shape -- it returns exactly one row -- rather than a bound chosen to
+  # look safe.
+  #
+  # `rpc.owner_activity_report.post`: the function is STABLE and argument-free,
+  # so PostgREST serves it over GET too (ADR 0118). POST is named because that
+  # is what the runtime will use, and because a GET on an RPC is the habit the
+  # published `rpcs` section already refuses.
+  - name: run_report
+    description: >-
+      The caller's own activity, counted under the caller's own RLS: notes and
+      tasks totals, tasks by status, and the two most recent update times.
+    kind: read
+    enabled: true
+    required_scopes: [notes:read, tasks:read]
+    operation:
+      source: postgrest
+      operation_id: rpc.owner_activity_report.post
+    resource: owner_activity_report
+    columns:
+      - notes_total
+      - tasks_total
+      - tasks_pending
+      - tasks_in_progress
+      - tasks_completed
+      - tasks_cancelled
+      - latest_note_at
+      - latest_task_at
+    max_rows: 1
+    timeout_ms: 5000
+    audit:
+      redact: []

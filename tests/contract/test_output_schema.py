@@ -371,8 +371,33 @@ def test_template_version_comes_from_the_version_file(alpha: dict[str, Any]) -> 
     assert alpha["template_version"] == (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
-def test_capabilities_default_to_none_enabled(alpha: dict[str, Any]) -> None:
-    assert alpha["capabilities"]["enabled"] == []
+def test_the_rendered_document_records_the_enabled_capabilities(alpha: dict[str, Any]) -> None:
+    """It read `== []` through Session 7, and that was the honest answer then.
+
+    No capability could be enabled because no live backing contract existed to
+    validate one against. Session 8 Run 3 compiles against the reviewed surface
+    and the approved OpenAPI snapshot, so five are enabled and the document
+    records them.
+
+    **Capability names, not tool names** (ADR 0120). The rendered document is a
+    record of the manifest, and the manifest's unit is the capability -- five of
+    them behind four tools. A document listing tools would be a second, lossier
+    spelling of the same fact, and the one place `query_notes` and `query_tasks`
+    become indistinguishable is the one place their separate scopes stop being
+    visible.
+
+    Read from the manifest rather than written out here, so the assertion is
+    "the document records what the manifest enables" rather than a list that has
+    to be edited whenever the manifest is.
+    """
+    manifest = config.load_capabilities_manifest(REPO_ROOT / "capabilities.example.yaml")
+    expected = sorted(entry["name"] for entry in manifest["capabilities"] if entry["enabled"])
+    assert expected, "no capability is enabled; this comparison would be vacuous"
+    assert alpha["capabilities"]["enabled"] == expected
+    assert "query_notes" in expected and "query_tasks" in expected, (
+        "the two query authorizations are the reason this records capabilities rather "
+        "than tools; if they merged, their separate scopes merged with them"
+    )
 
 
 def test_all_thirteen_roles_are_present(alpha: dict[str, Any]) -> None:

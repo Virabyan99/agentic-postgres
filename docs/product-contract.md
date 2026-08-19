@@ -104,7 +104,7 @@ Priorities:
 | `CFG-010` | 1 | A publicly exposed pooler is not a supported profile: pooled_public must be false and its allowlist empty, and the refusal names the supported path. See ADR 0040. |
 | `CFG-011` | 1 | Route trees may not collide with a reserved route or with each other, and overlap is decided segment-wise rather than by string prefix. |
 | `CFG-012` | 1 | Two similar projects render fully disjoint identities, compared over parsed semantic fields rather than by duplicate-string search. |
-| `CFG-013` | 1 | The capability surface is empty by default, cannot be enabled without a live backing contract, and cannot express SQL or a raw query. |
+| `CFG-013` | 1 | The capability surface is exactly the reviewed set and no more, is compiled against a live backing contract rather than trusted, cannot declare a backend it does not reach, and cannot express SQL or a raw query. |
 | `CFG-014` | 1 | Container images are pinned to immutable digests for one declared platform, Python dependencies are hash-locked, and drift is detected offline. |
 | `CFG-015` | 1 | The Compose model renders the exact resource names published in outputs.json, cannot be overridden by inherited environment variables, and refuses to start a container in Session 1. |
 | `DX-002` | 1 | Operator commands document themselves, obey the exit-code convention, work from any directory, and never print the environment. |

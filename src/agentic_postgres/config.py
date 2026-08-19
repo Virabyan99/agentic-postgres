@@ -1201,11 +1201,35 @@ def load_capabilities_manifest(path: Path) -> dict[str, Any]:
     if duplicates:
         raise ManifestError(f"duplicate capability names: {sorted(duplicates)}")
 
+    # The blanket refusal of `enabled: true` is GONE, and its removal is the
+    # decision worth recording (D420, ADR 0119).
+    #
+    # It read: "enabled, but no live API contract exists to validate it against
+    # in this session". That was true when it was written and stopped being true
+    # in **Session 5**, which shipped `contracts/postgrest-api-surface.yaml` and
+    # the approved OpenAPI snapshot. Nothing noticed for three sessions because
+    # nothing ever enabled a capability, so the guard's stated condition and its
+    # behaviour never had to agree.
+    #
+    # What replaces it is not a weaker check but a check somewhere else:
+    # `capability_compiler` resolves every enabled capability against the
+    # reviewed contract and cross-checks it against the approved snapshot, and
+    # refuses the ones this ever refused -- an operation nothing serves, a column
+    # nothing publishes, a tool with two authorization models. That validation
+    # needs two documents this function is not given, which is why it does not
+    # live here. `CapabilityContractError` is unchanged and still maps to exit 5.
+    #
+    # What stays here is the rule that needs only this file: a capability's
+    # `tool` may not collide with another capability's `name`, or one entry's
+    # grouping silently renames another (ADR 0120).
+    named = {entry["name"] for entry in capabilities}
     for entry in capabilities:
-        if entry.get("enabled"):
-            raise CapabilityContractError(
-                f"capability {entry['name']!r} is enabled, but no live API contract "
-                "exists to validate it against in this session"
+        tool = entry.get("tool")
+        if tool is not None and tool != entry["name"] and tool in named:
+            raise ManifestError(
+                f"capability {entry['name']!r} declares tool {tool!r}, which is also another "
+                "capability's name. A tool name that collides with a capability name makes "
+                "one entry's grouping silently rename another"
             )
 
     return document

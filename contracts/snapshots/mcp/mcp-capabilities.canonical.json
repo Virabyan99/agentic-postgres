@@ -1,0 +1,266 @@
+{
+  "capability_count": 5,
+  "contract_id": "notes-tasks-agent-v1",
+  "schema_version": 1,
+  "tool_count": 4,
+  "tools": [
+    {
+      "descriptions": [
+        "One resource's frozen columns, permitted filters and permitted ordering, exactly as the lock froze them. Read from the deployed lock."
+      ],
+      "discovery_scope_sets": [
+        [
+          "meta:read"
+        ]
+      ],
+      "kind": "metadata",
+      "name": "describe_resource",
+      "operation_ids": [
+        "lock.resources.describe"
+      ],
+      "reads": "lock",
+      "source": "lock",
+      "timeout_ms": 1000
+    },
+    {
+      "descriptions": [
+        "The resources this deployment's agent surface can query, and the scope each one needs. Read from the deployed lock; reaches no database."
+      ],
+      "discovery_scope_sets": [
+        [
+          "meta:read"
+        ]
+      ],
+      "kind": "metadata",
+      "name": "list_resources",
+      "operation_ids": [
+        "lock.resources.list"
+      ],
+      "reads": "lock",
+      "source": "lock",
+      "timeout_ms": 1000
+    },
+    {
+      "descriptions": [
+        "The caller's own notes, filtered and ordered within frozen bounds.",
+        "The caller's own tasks, filtered and ordered within frozen bounds."
+      ],
+      "discovery_scope_sets": [
+        [
+          "notes:read"
+        ],
+        [
+          "tasks:read"
+        ]
+      ],
+      "kind": "read",
+      "max_rows": 200,
+      "name": "query_resource",
+      "resources": [
+        {
+          "capability": "query_notes",
+          "columns": [
+            "id",
+            "owner_id",
+            "title",
+            "content",
+            "created_at",
+            "updated_at"
+          ],
+          "filters": [
+            {
+              "column": "created_at",
+              "operators": [
+                "gt",
+                "gte",
+                "lt",
+                "lte"
+              ]
+            },
+            {
+              "column": "id",
+              "operators": [
+                "eq",
+                "in"
+              ]
+            },
+            {
+              "column": "title",
+              "operators": [
+                "eq",
+                "neq"
+              ]
+            },
+            {
+              "column": "updated_at",
+              "operators": [
+                "gt",
+                "gte",
+                "lt",
+                "lte"
+              ]
+            }
+          ],
+          "max_rows": 200,
+          "name": "notes",
+          "operation": {
+            "method": "get",
+            "operation_id": "notes.get",
+            "path": "/notes"
+          },
+          "order_by": [
+            {
+              "column": "created_at",
+              "direction": "desc"
+            },
+            {
+              "column": "created_at",
+              "direction": "asc"
+            },
+            {
+              "column": "updated_at",
+              "direction": "desc"
+            },
+            {
+              "column": "title",
+              "direction": "asc"
+            }
+          ],
+          "required_scopes": [
+            "notes:read"
+          ]
+        },
+        {
+          "capability": "query_tasks",
+          "columns": [
+            "id",
+            "owner_id",
+            "note_id",
+            "title",
+            "description",
+            "status",
+            "created_at",
+            "updated_at"
+          ],
+          "filters": [
+            {
+              "column": "created_at",
+              "operators": [
+                "gt",
+                "gte",
+                "lt",
+                "lte"
+              ]
+            },
+            {
+              "column": "id",
+              "operators": [
+                "eq",
+                "in"
+              ]
+            },
+            {
+              "column": "note_id",
+              "operators": [
+                "eq",
+                "in",
+                "is_null"
+              ]
+            },
+            {
+              "column": "status",
+              "operators": [
+                "eq",
+                "in",
+                "neq"
+              ]
+            },
+            {
+              "column": "updated_at",
+              "operators": [
+                "gt",
+                "gte",
+                "lt",
+                "lte"
+              ]
+            }
+          ],
+          "max_rows": 200,
+          "name": "tasks",
+          "operation": {
+            "method": "get",
+            "operation_id": "tasks.get",
+            "path": "/tasks"
+          },
+          "order_by": [
+            {
+              "column": "created_at",
+              "direction": "desc"
+            },
+            {
+              "column": "created_at",
+              "direction": "asc"
+            },
+            {
+              "column": "updated_at",
+              "direction": "desc"
+            },
+            {
+              "column": "status",
+              "direction": "asc"
+            }
+          ],
+          "required_scopes": [
+            "tasks:read"
+          ]
+        }
+      ],
+      "source": "postgrest",
+      "timeout_ms": 5000
+    },
+    {
+      "descriptions": [
+        "The caller's own activity, counted under the caller's own RLS: notes and tasks totals, tasks by status, and the two most recent update times."
+      ],
+      "discovery_scope_sets": [
+        [
+          "notes:read",
+          "tasks:read"
+        ]
+      ],
+      "kind": "read",
+      "max_rows": 1,
+      "name": "run_report",
+      "resources": [
+        {
+          "capability": "run_report",
+          "columns": [
+            "notes_total",
+            "tasks_total",
+            "tasks_pending",
+            "tasks_in_progress",
+            "tasks_completed",
+            "tasks_cancelled",
+            "latest_note_at",
+            "latest_task_at"
+          ],
+          "filters": [],
+          "max_rows": 1,
+          "name": "owner_activity_report",
+          "operation": {
+            "method": "post",
+            "operation_id": "rpc.owner_activity_report.post",
+            "path": "/rpc/owner_activity_report"
+          },
+          "order_by": [],
+          "required_scopes": [
+            "notes:read",
+            "tasks:read"
+          ]
+        }
+      ],
+      "source": "postgrest",
+      "timeout_ms": 5000
+    }
+  ]
+}

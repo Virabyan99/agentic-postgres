@@ -70,12 +70,18 @@
         "name": {
           "type": "string",
           "pattern": "^[a-z][a-z0-9_]{2,47}$",
-          "description": "Stable MCP tool name."
+          "description": "The capability's stable name, and the MCP tool name unless `tool` says otherwise (ADR 0120). A capability is the AUTHORIZATION unit -- one (resource, verb), which is what required_scopes bounds -- and a tool is a name an agent calls. Those were the same thing until Session 8, when query_resource needed two resources behind one name. Unique across the manifest, enforced by config.load_capabilities_manifest."
+        },
+        "tool": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{2,47}$",
+          "description": "The MCP tool this capability is exposed through. Absent means the tool is this capability's own `name`, which is every case but one. Present, it groups capabilities: `query_notes` and `query_tasks` both declare `query_resource`, so one tool carries two frozen resources with a SEPARATE scope requirement each (ADR 0120). That is what the capability plan's \"notes:read or tasks:read\" means, and it is unrepresentable in a single entry -- required_scopes is a conjunction, so one entry naming both would refuse an agent holding either. Capabilities sharing a tool must agree on `kind` and `operation.source`; the compiler refuses them otherwise, because one name with two authorization models is two tools wearing one label."
         },
         "description": { "type": "string", "maxLength": 500 },
         "kind": {
           "type": "string",
-          "enum": ["read", "write"]
+          "enum": ["read", "write", "metadata"],
+          "description": "`read` reaches a backend and returns rows; `write` reaches one and changes rows; `metadata` reaches NOTHING and answers from the deployed capability lock (ADR 0120). The third member exists because `list_resources` and `describe_resource` would otherwise have to declare a resource, columns and max_rows describing a query they never make -- values invented to satisfy a schema, which the next reader cannot tell from the real ones (D267). A metadata capability is FORBIDDEN those fields by the allOf below, so \"this tool cannot reach a backend\" is a property of the manifest rather than of the runtime's good behaviour."
         },
         "enabled": {
           "type": "boolean",
@@ -95,11 +101,13 @@
           "properties": {
             "source": {
               "type": "string",
-              "enum": ["postgrest", "fastapi"]
+              "enum": ["postgrest", "fastapi", "lock"],
+              "description": "Where the backing operation lives. `lock` is the deployed capability lock itself and is the only source a `metadata` capability may name -- it is not a service, holds no credential and answers no query."
             },
             "operation_id": {
               "type": "string",
-              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$"
+              "pattern": "^[A-Za-z][A-Za-z0-9_.-]{0,127}$",
+              "description": "One operation, named by a DERIVED identifier (ADR 0119): `<object>.<method>`, with `/` written as `.` because the pattern permits neither `/` nor `:`. So `notes.get` and `rpc.create_note.post`. Derived rather than copied, because the live PostgREST publishes no operationId at all -- measured on the locked image: Swagger 2.0, every operation without one. capability_compiler.derive_operation_id is the single authority for the spelling, and the compiler resolves every id against the REVIEWED SURFACE CONTRACT rather than against the served document: the contract is hand-written and can disagree with the catalog (ADR 0050), while the document is an observation. Never a path, never a query string, never a name chosen at request time."
             }
           }
         },
@@ -208,6 +216,25 @@
             "required": ["kind"]
           },
           "then": { "required": ["max_affected_rows", "idempotent"] }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "metadata" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                { "required": ["resource"] },
+                { "required": ["columns"] },
+                { "required": ["filters"] },
+                { "required": ["order_by"] },
+                { "required": ["max_rows"] },
+                { "required": ["max_affected_rows"] }
+              ]
+            }
+          },
+          "description": "A metadata capability answers from the deployed lock and reaches no backend, so every field describing one is FORBIDDEN rather than merely unrequired (ADR 0120). Stated as a refusal because the alternative is a manifest carrying a resource and a column list for a query nobody makes, which reads exactly like a real backing and is the shape D267 refuses in a comment."
         }
       ]
     }
