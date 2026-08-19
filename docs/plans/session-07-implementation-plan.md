@@ -94,7 +94,7 @@ found *during* implementation is appended with the next free number.
 | **D326** | §22.1: deployment records `storage_credentials_required`, publishes no route, and prints a resume command. | The product already has a shape for this and it is **not** a special deployment state: **D230's two-stage convergence**. `routes.app` records `unavailable` with the operator command printed, and the deploy **exits 0**; a redeploy after the missing input exists observes and publishes it. `published_route` drops the URL when the status is not `ready`, so an unpublished route names nothing. | `routes.storage` follows `routes.app` exactly: `unavailable` until the credential validates, the command printed, exit 0, and `ready` on the redeploy that observes it. | A second convergence mechanism would need its own tests, its own operator documentation and its own failure modes, beside one that is deployed and proved on two projects. | — |
 
 **Rows are added during implementation.** Next free number after the tables below
-is **D393**.
+is **D394**.
 
 ### Found during Run 1
 
@@ -322,6 +322,7 @@ every definition is used.*
 | # | Predicted / assumed | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
 | **D376** | Operator guide §2: the buckets are created **in the Cloudflare dashboard**, by hand, once per project key. | The session had **Cloudflare MCP tools bound to the operator's own account** (`ddfa208f…`), and the operator chose that route. Measured rather than assumed: `r2_bucket_create` takes **only a name** — there is no jurisdiction parameter, so it commits silently to `default`; and **no MCP tool issues an R2 API token**, so §3 remains a dashboard step regardless of how the bucket was made. | The buckets were created over MCP and then **read back the way §4 item 1 says the bootstrap must**: account, name, jurisdiction, creation time and public-access state. Both are `jurisdiction: default`, `location: EEUR`, managed `r2.dev` domain **`enabled: false`**, no custom domains. The token half is unchanged and remains the operator's. | The guide's rule is *ownership continuity*, not which button was pressed, and continuity here is proved by construction: the pre-creation listing showed six buckets with **neither derived name among them**, and both creation timestamps fall inside this run. The route was worth writing down because the dashboard offers a jurisdiction and this API cannot set one — a jurisdictional bucket is reachable only through its own endpoint, and nothing in the MCP path would have said so. | — |
+| **D393** | STO-AGENT-001: an agent token must be refused by the storage surface at the **scope check**, 403, because `objects:*` is human-only and `$defs/agent_scope` was left unwidened (ADR 0100). | **It is refused at 401, and until Run 16 that was an accident.** `TOKEN_USES` is `("access", "agent")` and `verify_claims` accepts both, so an agent token passes signature and claims; then `sub` is an **agent id**, `repository.state` reads `auth_user_state`, which knows only humans, and the miss produces `AuthenticationFailed("the subject no longer exists")`. Right outcome, **false reason** — the agent exists — and a security boundary resting on which table a row lives in. Measured on the host with a real agent token, owned by a subject holding `objects:read` and `objects:write`: `POST /upload-intents` → **401**. | **ADR 0114.** The API accepts `token_use: "access"` and refuses anything else **before any subject lookup**. The status stays 401 and the proof asserts 401: this runtime cannot check an agent against the record — ADR 0095's comparison has no agent half — so 403 would claim an authentication it never performed. | **Rejected: change the proof to expect 401 and leave the product.** It was the cheapest option and it would have left the property standing on a missing row — teach `authenticate` about agents for any later purpose and the API silently starts accepting them, with every test still green. The proof now measures a **declared** boundary rather than an incidental one, which is more than it measured when it expected 403. Also rejected: teaching storage to authenticate agents so the 403 could happen, which would need `auth_lookup_agent`, a grant to `storage_service` and an agent-aware human-only service — privilege added to reach a refusal already reached. | 0114 |
 | **D392** | With D390's role name corrected, `agent_session` reaches the next statement and stops there. | **It passes `NULL` for `p_owner_id`, and `app_private.agents.owner_id` is `uuid NOT NULL REFERENCES app_private.users (id)`** — migration 0011's own comment: *"Non-human subjects, owned by a human one."* The fixture skips with `null value in column "owner_id" ... violates not-null constraint`, and the twelve storage proofs that depend on it error. | **Run 14**: the agent is owned by a real subject. Note the second-order constraint before choosing which — the reference has no `ON DELETE` clause, so it is `NO ACTION`, and an agent owned by a probe subject **blocks that subject's deletion** exactly as `storage_objects.owner_id` does (D371). The owner and the teardown order have to be decided together. | **D288 → D289 → D291 in one fixture**, and the third time this session that fixing one layer exposed the next: the role name was wrong, and behind it the ownership argument was wrong, and neither could be seen until the one before it was fixed. Each was invisible because `agent_session` is `live_host` and had **never executed** until Run 10's gate — the open item D211–D214 names, still unbuilt. | — |
 | **D391** | The probe-subject fixture deletes the subject before creating it, so a previous run that died mid-way cannot block the next one: *"a previous run that died between the INSERT and its teardown leaves a row, and `users_username_normalised_key` would then refuse the create"*. | **The DELETE is issued and its result is never checked**, and `storage_objects.owner_id` is `ON DELETE RESTRICT` (D371) — so a subject that owns uncollected objects **cannot be deleted**, the DELETE fails silently, and the create then fails on the unique index with a message about a duplicate username. That is what the third host gate reported: twelve errors, all `duplicate key value violates unique constraint "users_username_normalised_key"`, with the real cause being **ten objects left uncollected by the previous run's sweep** — D388's residue. | Recorded. The rows are collectable once the sweep works, which D388's fix makes true. The fixture's silent DELETE deserves a result check, so the next occurrence names the restriction rather than the symptom. | **The reported error names the wrong constraint entirely.** An operator reading "duplicate username" would look for a stale user row and find one they cannot delete, with nothing saying why. The fixture already knows the failure mode — its comment describes exactly this scenario — and then discards the return value of the statement that prevents it. **A guard whose result is unchecked is a comment.** | — |
 | **D390** | The `agent_session` fixture builds "a real agent and a token the deployment issued for it", to prove an agent token cannot reach the storage surface (ADR 0100). | **It names a role that has never existed.** `conftest.py:1837` is `project_a["database"]["roles"]["agent"]`, and `naming.ROLE_SUFFIXES` has no `agent` — it has **`agent_reader`** and **`agent_writer`**, and has since Session 3. `KeyError: 'agent'` at fixture setup, so the proof never ran and reported an ERROR rather than a refusal. | **Run 13**: `agent_writer`, deliberately the more capable of the two — the refusal is worth more against the agent role that can write than against the one that cannot. | **A fixture that has never executed is indistinguishable from one that works**, and this one is `live_host`, so its first execution was this gate. The suite was green with a `KeyError` sitting in a fixture body the whole time. This is D211–D214's family — *nothing knows which proofs have never executed* — and it is the open item no session has built, now cited for the fifth session running. | — |
@@ -1162,10 +1163,37 @@ collected costs nothing. A bare `DELETE FROM storage_objects` would have been
 shorter and would strand bytes, which is the single outcome this plane exists to
 prevent.
 
-**Session 7 was planned as ten runs.** Runs 11–15 are all consequences of the
-host trip, which is what the trip is for: five build runs against ten defects
-(D381, D385, D388, D389, D390, D391, D392) plus five process and documentation
-rows. Session 6's first trip found nine.
+### Run 16 — The refusal that was an accident
+
+**Done.** The fifth host gate returned **197 passed, 1 failed, 0 errors** — the
+twelve blocked proofs ran to their assertions for the first time anywhere and
+passed, and the one failure was not plumbing.
+
+**D393 / ADR 0114.** STO-AGENT-001 expected 403 from the scope check and got
+**401**. The refusal was real and its reason was false: an agent's `sub` is an
+agent id, `auth_user_state` knows only humans, and the miss produced *"the
+subject no longer exists"* about an agent that exists. A security boundary
+resting on which table a row lives in.
+
+The API now refuses `token_use: "agent"` **explicitly, before any subject
+lookup**, and the status stays 401 because this runtime cannot check an agent
+against the record — ADR 0095's comparison has no agent half, and 403 would
+claim an authentication that never happened.
+
+**The cheap fix was rejected on purpose**: changing the proof to expect 401 and
+leaving the product would have kept the property standing on a missing row, and
+the day anything taught `authenticate` about agents the API would have begun
+accepting them with every test still green.
+
+`test_an_agent_token_is_refused_before_any_subject_lookup` asserts the thing
+that matters — the repository is **never consulted**, through a stub that raises
+if it is — with an access token as the control through the same service and the
+same key, differing only in `token_use`.
+
+**Session 7 was planned as ten runs.** Runs 11–16 are all consequences of the
+host trip, which is what the trip is for: six build runs against eight product
+and fixture defects (D381, D385, D388, D389, D390, D391, D392, D393) plus nine
+process and documentation rows. Session 6's first trip found nine.
 
 ---
 

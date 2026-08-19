@@ -424,12 +424,26 @@ def test_an_agent_token_cannot_reach_the_storage_surface(
 
     Object storage is human-only, so `objects:read` and `objects:write` are in
     the human classes and in no agent class. An agent token therefore cannot
-    carry them however it is minted -- which makes this a 403 at the scope check
-    rather than a rule somebody remembers.
+    carry them however it is minted.
 
     Asserted by *request* rather than by reading the vocabulary: a test over
     `scope_registry` would prove the schema and say nothing about whether the
     endpoint consults it.
+
+    **401, not the 403 this expected until Run 16 — and that is a decision, not
+    an accommodation (ADR 0114, D393).** The refusal was expected at the scope
+    check. On the host it arrives earlier, and the first version of that was an
+    accident: an agent's `sub` is an agent id, `auth_user_state` knows only
+    humans, so the lookup found nothing and the API answered 401 "the subject no
+    longer exists" — the right outcome for a false reason, resting on which
+    table a row happens to live in.
+
+    The API now refuses `token_use: "agent"` **explicitly, before any subject
+    lookup**, and 401 is the honest status: this runtime cannot check an agent
+    against the record — ADR 0095's comparison has no agent half — so a 403
+    would claim an authentication it never performed. What this proof measures
+    is therefore a declared boundary rather than an incidental one, which is
+    strictly more than it measured before.
     """
     base = storage_base(app_base, project_a)
 
@@ -440,9 +454,10 @@ def test_an_agent_token_cannot_reach_the_storage_surface(
     ):
         body = {"declared_bytes": PROBE_BYTES} if method == "POST" else None
         answer = api_call(f"{base}{path}", method=method, token=agent_session.token, body=body)
-        assert answer.status == 403, (
+        assert answer.status == 401, (
             f"an agent token reached {method} {path} with {answer.status}; the storage "
-            "surface is human-only and the refusal must be the scope check"
+            "surface is human-only and an agent token must be refused on its token_use, "
+            "before any subject is looked up (ADR 0114)"
         )
 
 

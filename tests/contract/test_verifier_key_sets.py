@@ -16,18 +16,45 @@ and against the *rendered* artefacts, not against a second list.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import pytest
+from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from tests.contract.test_runtime_override import NAMES, RENDERED
 
 from agentic_postgres import jwt_keys, runtime_override
+from app import claims, keys
+from app import service as service_module
 from app import settings as settings_module
+from app.errors import AuthenticationFailed
+from app.repository import Credential
 from app.service import AuthService
 from app.tokens import LocalKeySet
+
+ISSUER = "https://example.test/api/app/auth"
+AUDIENCE = "urn:agentic-postgres:example:dev"
+ROLE_NAME = "apg_example_dev_authenticated"
+
+
+def _signing_key_file() -> Path:
+    """A real RSA private key on disk, which is what `load_signing_key` reads."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    handle = tempfile.NamedTemporaryFile(suffix=".pem", delete=False)
+    handle.write(pem)
+    handle.close()
+    return Path(handle.name)
+
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -130,6 +157,78 @@ def test_a_verifier_only_runtime_refuses_to_issue(tmp_path: Path) -> None:
     # from the claim contract, not a secret -- the same noqa `service.py` carries.)
     with pytest.raises(RuntimeError, match="holds no signing key"):
         service.issue(object(), token_use="access")  # type: ignore[arg-type]  # noqa: S106
+
+
+def test_an_agent_token_is_refused_before_any_subject_lookup() -> None:
+    """**The test that would have caught D393**, and ADR 0114's whole content.
+
+    An agent token was refused already — but only because its `sub` is an agent
+    id and `auth_user_state` knows humans, so the lookup found nothing and the
+    caller got 401 "the subject no longer exists". Correct outcome, false reason,
+    and a boundary standing on which table a row lives in: teach `authenticate`
+    about agents for any purpose and this API silently starts accepting them.
+
+    So the assertion is not merely that it refuses. It is that the **repository
+    is never consulted** — the refusal is a declaration, not a side effect of a
+    missing row. The stub raises if touched.
+    """
+    signing_key = keys.load_signing_key(_signing_key_file())
+
+    class Untouchable:
+        """A repository that fails the test if the refusal reaches it."""
+
+        async def state(self, user_id):
+            raise AssertionError(
+                "authenticate looked a subject up for an agent token; the refusal is "
+                "supposed to happen on token_use, before the lookup (ADR 0114)"
+            )
+
+    service = AuthService(
+        repository=Untouchable(),  # type: ignore[arg-type]
+        hasher=object(),  # type: ignore[arg-type]
+        signing_key=signing_key,
+        key_set=LocalKeySet.load(json.dumps(signing_key.jwks()).encode("utf-8")),
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        role_suffixes={ROLE_NAME: "authenticated"},
+    )
+
+    credential = Credential(
+        user_id=uuid4(),
+        role_name=ROLE_NAME,
+        scopes=["notes:read"],
+        status="active",
+        credential_version=1,
+        authz_version=1,
+        password_hash=None,
+    )
+    # Minted by the product's own issuer, so this is the token the deployment
+    # really hands out rather than one this test assembled.
+    agent = service.issue(credential, token_use="agent")  # noqa: S106
+    access = service.issue(credential, token_use="access")  # noqa: S106
+
+    with pytest.raises(AuthenticationFailed, match="token_use"):
+        asyncio.run(service.authenticate(f"Bearer {agent.token}"))
+
+    # The control: the SAME service, the same key, the same subject, and only
+    # `token_use` different -- so the refusal above is about that claim and not
+    # about anything else this token carries. It reaches the repository, which
+    # is what the stub proves by raising.
+    with pytest.raises(AssertionError, match="looked a subject up"):
+        asyncio.run(service.authenticate(f"Bearer {access.token}"))
+
+
+def test_the_accepted_token_use_is_one_of_the_issued_vocabulary() -> None:
+    """A value outside `TOKEN_USES` would refuse every token, including humans'.
+
+    Two constants compared would be a weak test on its own; it earns its place
+    because the one above proves the constant is what `authenticate` consults.
+    """
+    assert service_module.ACCEPTED_TOKEN_USE in claims.TOKEN_USES
+    assert "agent" in claims.TOKEN_USES, (
+        "agent tokens are still issued for PostgREST; ADR 0114 refuses them HERE, "
+        "it does not remove them from the vocabulary"
+    )
 
 
 # -- the settings contract ------------------------------------------------

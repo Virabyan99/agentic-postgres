@@ -32,6 +32,23 @@ from app.tokens import LocalKeySet, MalformedToken, pre_parse
 #: for `TOKEN_TTL_SECONDS + CLOCK_SKEW_SECONDS` -- 930, not 900 (D241).
 TOKEN_TTL_SECONDS = claim_contract.MAX_TTL_SECONDS
 
+#: The one `token_use` this API authenticates (ADR 0114).
+#:
+#: `claims.TOKEN_USES` is `("access", "agent")` and both are real: this
+#: deployment issues both, and `POST /auth/agent-token` is not going away. An
+#: agent token is for **PostgREST**, where role membership refuses it at
+#: `SET ROLE`; this API is human-only in both of ADR 0101's modes.
+#:
+#: Named rather than written inline so the refusal below and
+#: `test_an_agent_token_is_refused_before_any_subject_lookup` bind to one value.
+#: Session 8's agent surface must state its own answer here rather than inherit
+#: this one.
+#:
+#: (S105 matches on the NAME. "access" is a `token_use` discriminator from the
+#: claim contract and is published in every token this service issues; the same
+#: noqa sits on `issue`'s call sites for the same reason.)
+ACCEPTED_TOKEN_USE = "access"  # noqa: S105
+
 
 @dataclass(frozen=True, slots=True)
 class IssuedToken:
@@ -242,6 +259,29 @@ class AuthService:
             )
         except claim_contract.ClaimError as exc:
             raise AuthenticationFailed(f"claim contract: {exc}") from exc
+
+        # Only an ACCESS token reaches this API, and it is refused here rather
+        # than by the shape of the tables below (ADR 0114).
+        #
+        # `TOKEN_USES` carries `"agent"` too, correctly: this deployment issues
+        # both, and `POST /auth/agent-token` exists. An agent token is for
+        # PostgREST, where role membership refuses it at `SET ROLE`. Nothing was
+        # ever meant to present one here.
+        #
+        # Before it did, this refused anyway -- an agent's `sub` is an agent id,
+        # `auth_user_state` knows only humans, and the lookup below returned
+        # nothing, so the caller got 401 "the subject no longer exists". Correct
+        # outcome, false reason: the agent exists. A boundary that holds because
+        # of which table a row is in is not a boundary anybody chose, and it
+        # would silently change the day `authenticate` learned about agents.
+        #
+        # 401 and not 403: this runtime cannot check an agent against the record
+        # -- that comparison is ADR 0095's whole model and it has no agent half
+        # -- so a 403 would claim an authentication that never happened.
+        if verified["token_use"] != ACCEPTED_TOKEN_USE:
+            raise AuthenticationFailed(
+                f"token_use {verified['token_use']!r} is not accepted by this API"
+            )
 
         try:
             user_id = UUID(verified["sub"])
