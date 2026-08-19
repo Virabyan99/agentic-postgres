@@ -88,6 +88,11 @@ def cluster() -> Any:
     database = document["database"]["name"]
     name = f"apg-auth-reach-{secrets.token_hex(4)}"
     auth_password = secrets.token_hex(24)
+    # The SECOND service role that reaches this access plane (ADR 0098). Storage
+    # verifies the tokens auth issues, so it runs the same `authenticate` and
+    # calls the same state function -- which is how D385 happened, and why this
+    # fixture credentials both roles rather than only the one it was built for.
+    storage_password = secrets.token_hex(24)
     migration_password = secrets.token_hex(24)
 
     started = _docker(
@@ -151,12 +156,14 @@ def cluster() -> Any:
         # a comment noting the product does not -- which is exactly how D288
         # stayed invisible for four runs.
         bootstrap.apply_credential(name, database, roles["auth_service"], auth_password)
+        bootstrap.apply_credential(name, database, roles["storage_service"], storage_password)
 
         yield {
             "name": name,
             "database": database,
             "roles": roles,
             "auth_password": auth_password,
+            "storage_password": storage_password,
         }
     finally:
         _docker("rm", "-f", name, timeout=60)
@@ -167,6 +174,21 @@ def as_auth(cluster: dict[str, Any], sql: str) -> subprocess.CompletedProcess[st
     return _docker(
         "exec", "-i", "-e", f"PGPASSWORD={cluster['auth_password']}", cluster["name"],
         "psql", "-U", cluster["roles"]["auth_service"], "-h", "127.0.0.1",
+        "-d", cluster["database"], "-qtA", "-v", "ON_ERROR_STOP=1", stdin=sql,
+    )  # fmt: skip
+
+
+def as_storage(cluster: dict[str, Any], sql: str) -> subprocess.CompletedProcess[str]:
+    """One statement, over TCP, as the STORAGE service's own role.
+
+    The identity is the point of the helper (ADR 0065/0066): a proof that reaches
+    the right end state by a route the product does not take proves the end state
+    is reachable, not that the product reaches it. D385 was invisible to every
+    offline test precisely because none of them authenticated as this role.
+    """
+    return _docker(
+        "exec", "-i", "-e", f"PGPASSWORD={cluster['storage_password']}", cluster["name"],
+        "psql", "-U", cluster["roles"]["storage_service"], "-h", "127.0.0.1",
         "-d", cluster["database"], "-qtA", "-v", "ON_ERROR_STOP=1", stdin=sql,
     )  # fmt: skip
 
@@ -255,3 +277,95 @@ def test_the_bootstrap_administrator_function_is_not_reachable_by_the_service(
         "is reachable from an HTTP request"
     )
     assert "permission denied" in result.stderr.lower(), result.stderr.strip()[:200]
+
+
+# ---------------------------------------------------------------------------
+# The storage service is the SECOND role that reaches this plane (ADR 0098).
+#
+# D385: it verifies the tokens auth issues, so it runs the same
+# `AuthService.authenticate`, including ADR 0095's current-state comparison --
+# and 0012 granted that comparison to the auth role alone. On the first host run
+# every authenticated storage request answered a plain-text 500,
+# `permission denied for function auth_user_state`, and thirteen deployment
+# proofs failed with that one cause. Migration 0017 is the grant.
+
+
+def test_the_storage_role_can_execute_the_state_function_it_verifies_with(
+    cluster: dict[str, Any],
+) -> None:
+    """**The test that would have caught D385**, and 0017 is what makes it pass.
+
+    Named rather than scanned, for the reason the auth twin above gives: the
+    point is that the function the SERVICE calls is executable, and a scan would
+    pass just as happily on a set that had drifted away from the code.
+
+    `authenticate` calls exactly one repository method -- `state(user_id)` -- so
+    this single probe is the whole of storage's reach into the access plane. The
+    argument finds nothing, so this measures authorization rather than data.
+    """
+    result = as_storage(
+        cluster,
+        "SELECT count(*) FROM app_private.auth_user_state("
+        "'00000000-0000-0000-0000-000000000000'::uuid);",
+    )
+    assert result.returncode == 0, (
+        "the storage service's role cannot execute app_private.auth_user_state, which its "
+        f"own `authenticate` calls on EVERY request: {result.stderr.strip()[:300]}. "
+        "Without it the surface answers 500 to every authenticated caller (D385)"
+    )
+
+
+def test_the_storage_role_cannot_administer_identities(cluster: dict[str, Any]) -> None:
+    """The control, and it is what makes the grant above mean something.
+
+    0017 grants ONE function. The auth role holds eleven here, including the
+    ones that mint subjects and set passwords, and a storage runtime verifies
+    tokens rather than administering the people who hold them. Granting the set
+    would have been the convenient fix and would hand a storage compromise the
+    ability to create and re-authorize identities.
+    """
+    forbidden = {
+        "auth_create_user": (
+            "SELECT app_private.auth_create_user("
+            "'probe', 'Probe', 'role', ARRAY['notes:read']::text[], 'hash');"
+        ),
+        "auth_set_password": (
+            "SELECT app_private.auth_set_password("
+            "'00000000-0000-0000-0000-000000000000'::uuid, 'hash');"
+        ),
+        "auth_bootstrap_administrator": (
+            "SELECT app_private.auth_bootstrap_administrator("
+            "'probe', 'Probe', 'role', ARRAY['notes:read']::text[], 'hash');"
+        ),
+        "auth_list_users": "SELECT count(*) FROM app_private.auth_list_users();",
+    }
+
+    reachable = []
+    for label, sql in forbidden.items():
+        result = as_storage(cluster, sql)
+        if result.returncode == 0 or "permission denied" not in result.stderr.lower():
+            reachable.append(label)
+
+    assert not reachable, (
+        f"the storage service's role can reach {reachable} in the identity plane. It is a "
+        "token VERIFIER: one read of a subject's current state, and nothing that changes a "
+        "subject or enumerates them"
+    )
+
+
+def test_the_storage_role_cannot_reach_the_identity_tables_directly(
+    cluster: dict[str, Any],
+) -> None:
+    """The same control the auth role gets, for the same reason.
+
+    A role that could read the tables would pass the probe above while the
+    SECURITY DEFINER function did nothing for it, and the grant 0017 spends its
+    whole length on would be decoration.
+    """
+    for table in ("users", "user_credentials", "agents", "agent_credentials"):
+        result = as_storage(cluster, f"SELECT count(*) FROM app_private.{table};")
+        assert result.returncode != 0, (
+            f"the storage service's role can read app_private.{table} directly. Its reach "
+            "into this plane is one SECURITY DEFINER function and nothing else"
+        )
+        assert "permission denied" in result.stderr.lower(), result.stderr.strip()[:200]

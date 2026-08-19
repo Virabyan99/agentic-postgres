@@ -190,6 +190,17 @@
       "template": "templates/0016-storage-cleanup-write-window.sql",
       "template_sha256": "d22f03f841e11e08d63384b30c4cc6d32618783cf184bc0f0390fd5e4fb9d2b0",
       "version": "20260818120016"
+    },
+    {
+      "canonical_render_sha256": "4e46adfdcfd4afb9c062bbb60e02010e8a284a57053af1e72dcf1cbd2298d37c",
+      "name": "storage_verifier_subject_state",
+      "placeholders": [
+        "object_owner",
+        "storage_service"
+      ],
+      "template": "templates/0017-storage-verifier-subject-state.sql",
+      "template_sha256": "89689156a717403ca6c183763e3d5bcee94ce678c54a8e66d9b2ba04603d1d79",
+      "version": "20260819120017"
     }
   ],
   "schema_version": 1
