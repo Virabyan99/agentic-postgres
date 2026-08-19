@@ -475,6 +475,8 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
         storage_settings=storage_settings_for(migrated),
     )
     assert migrated["schema_version"] == 11
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -629,7 +631,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 11"):
+    with pytest.raises(MigrationError, match="already version 12"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -658,7 +660,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1 through 10"):
+    with pytest.raises(MigrationError, match="only versions 1 through 11"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -859,6 +861,8 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
         storage_settings=storage_settings_for(migrated),
     )
     assert migrated["schema_version"] == 11
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1045,6 +1049,8 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
         storage_settings=storage_settings_for(migrated),
     )
     assert migrated["schema_version"] == 11
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1175,6 +1181,8 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
         storage_settings=storage_settings_for(migrated),
     )
     assert migrated["schema_version"] == 11
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1316,6 +1324,8 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
         storage_settings=storage_settings_for(migrated),
     )
     assert migrated["schema_version"] == 11
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1648,6 +1658,7 @@ def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]
         storage_route_url=storage_route_url_for(migrated),
         storage_settings=storage_settings_for(migrated),
     )
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1822,6 +1833,7 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
         storage_route_url=storage_route_url_for(migrated),
         storage_settings=storage_settings_for(migrated),
     )
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
     config.validate_against_schema(migrated, "outputs.schema.json")
 
     without = {
@@ -1876,6 +1888,7 @@ def test_the_v9_fixture_is_a_real_render_at_version_9(v9_fixture: dict[str, Any]
         storage_route_url=storage_route_url_for(migrated),
         storage_settings=storage_settings_for(migrated),
     )
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1995,6 +2008,15 @@ def test_the_v10_fixture_is_a_real_render_at_version_10(v10_fixture: dict[str, A
         config.validate_against_schema(v10_fixture, "outputs.schema.json")
 
     migrated = output_migrations.migrate_v10_to_v11(v10_fixture, **v11_arguments(v10_fixture))
+    assert migrated["schema_version"] == 11
+    # Version 11 is no longer current either, so a v10 fixture reaches a valid
+    # document only through the v12 step as well. Written as a literal above and
+    # the constant below for the reason the v9 test states in place: the step's
+    # own result is a fact about that function, and the chain's endpoint is a
+    # fact about this release. Spelling both `CURRENT_VERSION` is how this
+    # assertion stopped meaning anything the last time a version was added, and
+    # it is why this line had to be edited rather than merely re-run.
+    migrated = output_migrations.migrate_v11_to_v12(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 

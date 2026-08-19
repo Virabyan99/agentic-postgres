@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 11
+CURRENT_VERSION = 12
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -238,8 +238,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}:
-        raise MigrationError(f"only versions 1 through 10 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
+        raise MigrationError(f"only versions 1 through 11 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -269,13 +269,16 @@ def migrate_rendered(
     if detect_version(document) == 9:
         document = migrate_v9_to_v10(document, auth_connection_budget=auth_connection_budget)
 
-    return migrate_v10_to_v11(
-        document,
-        storage_connection_budget=storage_connection_budget,
-        pooler_pool_size=pooler_pool_size,
-        storage_route_url=storage_route_url,
-        storage_settings=storage_settings,
-    )
+    if detect_version(document) == 10:
+        document = migrate_v10_to_v11(
+            document,
+            storage_connection_budget=storage_connection_budget,
+            pooler_pool_size=pooler_pool_size,
+            storage_route_url=storage_route_url,
+            storage_settings=storage_settings,
+        )
+
+    return migrate_v11_to_v12(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -957,6 +960,54 @@ def migrate_v10_to_v11(
     return migrated
 
 
+def migrate_v11_to_v12(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 12 ``rendered`` document derived from a version 11 one.
+
+    The second step that adds nothing, and it adds nothing for a *different*
+    reason from `migrate_v4_to_v5` -- which is worth saying, because the two
+    look identical and only one of them would stay right if the branches moved.
+
+    Version 5 added deployed-only fields that a rendered document must never
+    grow. Version 12 adds `routes.mcp`'s **status** and an `mcp` observation
+    block, and the rendered branch has carried `routes.mcp` as a bare URL since
+    version 1 (D395). So there is nothing to add here not because the fields are
+    forbidden but because the URL is **already present**: a v11 rendered document
+    that lacks `routes.mcp` is not a v11 rendered document, and this refuses it
+    rather than repairing it.
+
+    That refusal is this step's whole substance. D395 is the record of what
+    happens when one branch names a route and the other does not, and a migrator
+    that quietly inserted the URL would produce a v12 document whose `routes.mcp`
+    was invented here rather than derived by `naming` -- a second derivation for
+    a name ADR 0002 allows one of, arriving through the module that exists for
+    documents whose inputs are gone.
+    """
+    version = detect_version(document)
+    if version == 12:
+        raise MigrationError("document is already version 12; migration would be a no-op")
+    if version != 11:
+        raise MigrationError(f"only version 11 can be migrated to 12, got {version}")
+
+    require_kind(document, "rendered")
+
+    routes = document.get("routes", {})
+    if "mcp" not in routes:
+        raise MigrationError(
+            "routes.mcp is missing; every rendered document since version 1 names the "
+            "agent-plane URL, so a document without it is not a version 11 rendered one. "
+            "Inserting it here would be a second derivation of a name `naming` owns"
+        )
+    if "storage_connection_budget" not in document.get("database", {}):
+        raise MigrationError(
+            "database carries no storage_connection_budget, so this document predates "
+            "version 11 and cannot be a version 11 one"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["schema_version"] = 12
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -985,5 +1036,6 @@ __all__ = [
     "migrate_v8_to_v9",
     "migrate_v9_to_v10",
     "migrate_v10_to_v11",
+    "migrate_v11_to_v12",
     "require_kind",
 ]

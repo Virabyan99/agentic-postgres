@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D414.**
+**Next free number after this table is D416.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -67,6 +67,8 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D411** | §19.2: inspect the container to prove what it holds. | **The locked PostgREST image is distroless** and `docker exec … cat` exits 127 (D305); the storage image is hardened the same way — read-only rootfs, uid 65532, no package manager. | Container-side reads use `docker cp`, measured with a control. Operator commands that need service logic run **inside** the service's container (ADR 0093). | **D305 was found only because D299's fix let execution reach the next line.** One unrun proof hides the next, which Session 7 then demonstrated four times over. | — |
 | **D412** | §4.29: read telemetry is structured but not durable audit. | Correct, and the boundary needs stating against something real: `mcp_audit_service` is in `naming.ROLE_SUFFIXES` and has been since Session 3, unactivated. | Session 8 writes **no** durable audit record and does not activate `mcp_audit_service`. Telemetry is logs, and the logs are subject to the same canary scan Session 7 built for URLs and keys. | A role that exists and is not activated is a promise the next session keeps. Activating it here to "get ahead" would put an audit identity in production before the record it writes has been designed — which is Session 9's, with its own fail-closed contract. | — |
 | **D413** | §4.6, §4.3: an internal pre-provisioned bearer profile, documented as not standards-conformant. | **Right, and the honesty is the valuable part.** But the runbook states it in prose only; nothing in the deployment carries it. | The deployed document publishes the protocol revision and `authorization_spec_conformant: false` as **fields**, and the contract test asserts the document says what the docs say. | **D274 is the precedent**: `/docs/rest` was proved at 401 and 200 for four runs and had never rendered, because nothing requested the script its own markup named. A claim that lives only in prose is a claim nobody checks. | — |
+| **D414** | CLAUDE.md §2's status block: *"`CURRENT_SESSION` 7 — Session 8's first code run moves it to 8."* | **Moving it in Run 1 turns the gate red, and not for the reason D410 predicts.** `CURRENT_SESSION` is the gate session, and `test_no_requirement_at_or_before_the_gate_session_remains_future` refuses any registry entry targeted at or before it that still points at a `future` marker. **Five do** — `AGT-READ-001`, `AGT-SQL-001`, `AGT-SCOPE-001`, `AGT-DRIFT-001`, `AGT-BUDGET-001`, all `target_session: 8`, all pointing at `tests/integration/test_future_mcp.py`. Session 7 hit the same coupling and answered it the same way: Run 9 moved the constant **and** activated eleven entries in one commit. | **It moves in Run 7**, with the `session8` Compose profile, and **only after Run 6 has replaced the five placeholders**. Not Run 1. `AGENT_PLANE_SESSION = 8` is defined now and deliberately sits above `CURRENT_SESSION`, so `--through-session` cannot reach the agent plane and no observation branch exists to run. | The handoff's sentence is a tidy-up instruction for a constant that is not a tidy-up (D410 says so from the deploy side; this is the same constant refusing from the gate side). Moving it early would have produced a red gate in Run 1 whose cause is five tests Run 6 owns — and the tempting repair is to relax the registry policy, which is D300's shape on the one control that keeps a placeholder from passing for a proof. | — |
+| **D415** | — (found during Run 1). | **Three single-step migration tests asserted `migrated["schema_version"] == CURRENT_VERSION`.** The v10→v11 step's own result was compared against *the release's current version*, which held only while v11 was current. The v9 test already carried a comment saying this had happened before and had been fixed there; the same shape survived in three neighbours. | **A single step's result is asserted as a literal; only the end of a chain compares against `CURRENT_VERSION`.** All three re-derived, not relaxed: the v11 assertion stays and a v12 assertion is added beside it, so both the step and the endpoint are checked. | A test that compares a function's output to a constant which moves *with* the function is a test that cannot fail for the reason it was written — and it degrades silently, one version at a time. It is the *"test comparing two constants"* shape (Session 7 Run 7 M8), arriving through a name rather than a literal. | — |
 
 ---
 
@@ -154,7 +156,7 @@ measurement decides something with alternatives, implement, then **try to break
 the tests** with a mutation battery whose failures are fatal (D269) and which
 asserts *how* each mutation failed (D386).
 
-### Run 1 — The route, the document, and the two boundaries
+### Run 1 — The route, the document, and the two boundaries — **Done.**
 
 - **`routes.mcp` into the deployed document** (D395), with the rendered/deployed
   route sets compared as sets.
@@ -162,6 +164,45 @@ asserts *how* each mutation failed (D386).
 - **The ADR from D396**: what `token_use` the MCP surface accepts, and the
   mirror refusal at the application API restated rather than assumed.
 - The connection budget's considered zero, asserted (D407).
+
+**What was measured.** A rig in `/tmp` minting an agent token through
+`AuthService.agent_token` — the path `POST /auth/agent-token` takes, hasher and
+repository included — with a human token from the same service and the same
+signing key as the **control**, and a negative control run first (one expectation
+inverted → `DIVERGES`, exit 1, so the rig can tell success from failure).
+
+The result is ADR 0115's "What was measured" table, and the finding that matters
+is not any single claim: **the two token classes are structurally identical.**
+Same issuer, same audience, same twelve claims, same key set. `token_use` is
+`agent` against `access`, `sub` is the agent id, `credential_version` is **0**,
+there is **no `agent_id` claim** — D396 and D397 both confirmed as written. A
+surface that does not read `token_use` is defended by nothing else in the token,
+which is why ADR 0115 exists rather than being left implicit.
+
+**D395 confirmed from the repository**, not only from the host: the deployed
+branch of `schemas/outputs.schema.json` required six routes and declared six,
+`mcp` among neither, while the rendered branch has required it since version 1.
+
+**What was built.** ADR 0115. Outputs **v12** — `routes.mcp` as a
+`publishedRoute` and a `$defs/deployedMcp` block in `deployedApi`'s shape
+(protocol revision, `authorization_spec_conformant`, `accepted_token_use`, the
+canonical-contract and lock digests, the tool count), `MCP_NOT_PUBLISHED`, the
+`mcp`/`routes.mcp` coherence rule beside the `api`/`routes.rest` one, and
+`migrate_v11_to_v12`. `AGENT_PLANE_SESSION = 8` in the deploy path, above
+`CURRENT_SESSION` on purpose (D414).
+
+**The battery: 7 mutations, 7 killed, every one `FAILED` rather than `ERROR`,
+each with its control green in the same invocation.** M1 the deployed branch
+stops requiring `routes.mcp`; M2 `build_deployed_document` drops it from its key
+list — *D395's literal state*; M3 the application API accepts `agent`; M4 the
+schema permits either token use; M5 `MCP_NOT_PUBLISHED` loses a member; M6 the
+agent plane acquires a budget term; M7 the deployed block publishes a pool size.
+
+**And the controls earned their place.** The first run reported M3 and M7 as
+survivors — both targets had died, but their *controls* had gone red too, because
+the control test genuinely read the mutated value. That is a false kill caught in
+the direction D386 warns about, and the repair was the control, not the test.
+**A mutation whose control also fails is not evidence, whatever the target did.**
 
 ### Run 2 — Migration 0018, the agent read plane
 

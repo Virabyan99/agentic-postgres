@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/outputs.schema.json",
   "title": "Agentic Postgres generated outputs",
-  "description": "The automation contract, version 5. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. Version 4 added `database.access_profiles`, three ways to reach the two transports (ADR 0041), and closed the endpoint conditional so that an `available` endpoint must actually carry a host, a port, a password-free URL and a secret reference. Version 5 is entirely on the deployed branch (ADR 0053): `routes` gains `rest` and `docs` as status-carrying objects beside `health`, a new `api` block records what the published surface actually serves, `jwt` appears for the first time carrying public metadata only, and `database.observed` gains the `instance_uuid` the port registry is keyed by. See docs/decisions/0012-output-document-kinds.md, docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md, docs/decisions/0041-two-transports-three-access-profiles.md, docs/decisions/0051-the-bootstrap-issuer-is-temporary-and-carries-its-own-expiry.md and docs/decisions/0053-outputs-version-5.md.",
+  "description": "The automation contract, version 5. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. Version 4 added `database.access_profiles`, three ways to reach the two transports (ADR 0041), and closed the endpoint conditional so that an `available` endpoint must actually carry a host, a port, a password-free URL and a secret reference. Version 5 is entirely on the deployed branch (ADR 0053): `routes` gains `rest` and `docs` as status-carrying objects beside `health`, a new `api` block records what the published surface actually serves, `jwt` appears for the first time carrying public metadata only, and `database.observed` gains the `instance_uuid` the port registry is keyed by. Version 12 is Session 8's, and it is entirely on the deployed branch: `routes.mcp` -- named by the rendered branch since version 1 and never published here (D395) -- and an `mcp` block carrying the protocol revision, the authorization profile's honest non-conformance, the accepted token use (ADR 0115) and the capability lock's identity. Chosen ONCE from the session's whole surface rather than a run at a time, because D255 and D308 are the record of the alternative. See docs/decisions/0012-output-document-kinds.md, docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md, docs/decisions/0041-two-transports-three-access-profiles.md, docs/decisions/0051-the-bootstrap-issuer-is-temporary-and-carries-its-own-expiry.md, docs/decisions/0053-outputs-version-5.md and docs/decisions/0115-the-agent-plane-accepts-only-agent-tokens.md.",
   "type": "object",
   "oneOf": [
     {
@@ -35,7 +35,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            11
+            12
           ]
         },
         "document_kind": {
@@ -319,14 +319,15 @@
         "database",
         "template_version",
         "observed_at",
-        "storage"
+        "storage",
+        "mcp"
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            11
+            12
           ]
         },
         "document_kind": {
@@ -445,9 +446,10 @@
             "docs",
             "app",
             "app_docs",
-            "storage"
+            "storage",
+            "mcp"
           ],
-          "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them. Version 11 added `storage`.",
+          "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them. Version 11 added `storage`. Version 12 added `mcp` -- which the RENDERED branch has named since version 1 and this one had never carried (D395). That is D389's shape exactly, in a second place: a route published in the document a manifest produces and absent from the document every plane reads. It is caught here before a host trip rather than by one. The two branches' route sets are compared AS SETS by a contract test, so the next route added to one and forgotten in the other fails offline.",
           "properties": {
             "health": {
               "type": "object",
@@ -487,6 +489,10 @@
             "storage": {
               "$ref": "#/$defs/publishedRoute",
               "description": "Version 11. The object-storage surface, and it follows `app` exactly (D326, D230's two-stage convergence): `unavailable` with a null URL until the R2 credential validates, the operator command printed, the deploy exiting 0, and `ready` on the redeploy that observes it. A dedicated `storage_credentials_required` deployment state was considered and refused for `app`'s reason -- `publishedRoute` already expresses this and every reader already understands it, while a second convergence mechanism would need its own tests, its own operator documentation and its own failure modes beside one that is deployed and proved on two projects."
+            },
+            "mcp": {
+              "$ref": "#/$defs/publishedRoute",
+              "description": "Version 12, and it follows `app` and `storage` exactly (D326's two-stage convergence): `unavailable` with a null URL until the agent plane is deployed and something answers on the route, `ready` on the deploy that observes it. The rendered branch has named this URL since version 1 and nothing has ever published its readiness -- D395. What the status is NOT is a claim about the MCP runtime's own protocol: that lives in `mcp`, beside `api`, and the two are bound by the same coherence rule `api` and `routes.rest` are (`_refuse_incoherent_publication`)."
             }
           }
         },
@@ -653,6 +659,9 @@
         },
         "storage": {
           "$ref": "#/$defs/storageSettings"
+        },
+        "mcp": {
+          "$ref": "#/$defs/deployedMcp"
         }
       }
     },
@@ -1254,6 +1263,148 @@
           },
           "project_openapi_sha256": {
             "$ref": "#/$defs/sha256"
+          }
+        }
+      }
+    },
+    "deployedMcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "protocol_revision",
+        "authorization_spec_conformant",
+        "accepted_token_use",
+        "capability_contract_sha256",
+        "capability_lock_sha256",
+        "tool_count"
+      ],
+      "description": "What the published agent plane actually serves, version 12. Deliberately `deployedApi`'s shape rather than a new one: a status that forces every other member null, checksums that name the two artefacts a reader would otherwise have to guess were the same one, and no direct service address -- the MCP runtime's container port is a runtime detail and a published one is a way around the edge. What is NOT here is a connection budget, and its absence is the record: the MCP runtime holds no database credential, so it takes no share of ADR 0099's division (D407). A considered zero is written down the same way a cost is, because otherwise the next reader cannot tell it from an oversight -- which is what D309 was. Nothing here is a bound the runtime enforces: rows, elapsed time and affected rows are per-capability fields of the capability lock, whose identity is `capability_lock_sha256`, and publishing a second copy of them here would be two authorities for one number.",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "ready",
+            "unavailable"
+          ],
+          "description": "`unavailable` is the state of every project deployed through a session before 8, and of a session-8 project whose agent plane did not come up. It forces every other member null, so a partially-filled block cannot be published as an observation."
+        },
+        "protocol_revision": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The MCP protocol revision the deployed runtime actually negotiated, read FROM the runtime and never from a document that hoped for one. The revision changes on a schedule nobody here controls, so it is an observation with a date shape rather than an enum this repository would have to chase. The pattern is a shape and not a claim about which revisions exist."
+        },
+        "authorization_spec_conformant": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether the agent plane's bearer profile conforms to the MCP authorization specification. It does not, and saying so is the point (D413): this deployment pre-provisions an internal bearer, and the honest record of that belongs in the document every plane reads rather than in prose in a runbook. A claim that lives only in prose is a claim nobody checks -- D274, where `/docs/rest` was proved at 401 and 200 for four runs and had never rendered."
+        },
+        "accepted_token_use": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "agent"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The one `token_use` this surface accepts (ADR 0115), published as a field for D413's reason. The enum has one member and is not the union of `claims.TOKEN_USES`: `access` is what the APPLICATION API accepts (ADR 0114), and a schema that permitted either here would validate a deployment that had quietly changed its mind. The two surfaces are mirror images and a test asserts the two constants differ."
+        },
+        "capability_contract_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "contracts/snapshots/mcp/mcp-capabilities.canonical.json -- the project-neutral compiled capability contract two projects share, in `api_surface_sha256`'s role."
+        },
+        "capability_lock_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The DEPLOYED lock, resolving this project's own paths -- the artefact the runtime obeys. Distinct from the canonical contract by construction, and recorded so that 'the runtime serves what was reviewed' can be a comparison rather than an assertion. A lock built from an unreviewed OpenAPI capture is a capability surface nobody approved, which is the failure `capabilities.yaml` exists to prevent."
+        },
+        "tool_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 64,
+          "description": "How many tools the deployed lock registers. Published rather than left to the lock's digest because a digest says two things differ and never says how: a lock that grew a fifth tool and a lock whose description was reworded are the same event to a checksum. The bound is not the count Session 8 expects -- that is a contract test's business -- it is the range beyond which a number is a bug rather than a surface."
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "unavailable"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "protocol_revision": {
+            "type": "null"
+          },
+          "authorization_spec_conformant": {
+            "type": "null"
+          },
+          "accepted_token_use": {
+            "type": "null"
+          },
+          "capability_contract_sha256": {
+            "type": "null"
+          },
+          "capability_lock_sha256": {
+            "type": "null"
+          },
+          "tool_count": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "protocol_revision": {
+            "type": "string"
+          },
+          "authorization_spec_conformant": {
+            "type": "boolean"
+          },
+          "accepted_token_use": {
+            "type": "string"
+          },
+          "capability_contract_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "capability_lock_sha256": {
+            "$ref": "#/$defs/sha256"
+          },
+          "tool_count": {
+            "type": "integer"
           }
         }
       }

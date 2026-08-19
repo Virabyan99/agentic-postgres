@@ -164,8 +164,14 @@ def build(rendered: dict, **overrides):
         # the Cloudflare step run for it -- which is all of them until Session 7
         # reaches a host.
         "storage_status": "unavailable",
+        # Version 12, unpublished by default for the plainest reason of all: no
+        # deployment anywhere publishes an agent plane yet, so `unavailable` with
+        # `MCP_NOT_PUBLISHED` beside it is what every project on every host
+        # records until Session 8's Run 7 gives it something to observe.
+        "mcp_status": "unavailable",
         "api": deployed_output.API_NOT_PUBLISHED,
         "jwt": deployed_output.JWT_NOT_PUBLISHED,
+        "mcp": deployed_output.MCP_NOT_PUBLISHED,
         # Required with no default in the builder, for the reason
         # `database_observed` is: a default would let a caller that deployed a
         # subset publish a document claiming the whole of it, and the systemd
@@ -193,8 +199,44 @@ def published(rendered: dict, **overrides):
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 11
+    assert document["schema_version"] == 12
     assert document["project"]["key"] == KEY
+
+
+def test_the_deployed_document_publishes_every_route_the_render_names(rendered: dict) -> None:
+    """**The test that would have caught D395**, and would have caught D389.
+
+    `routes.mcp` was in the RENDERED document from version 1 and in no DEPLOYED
+    one until version 12. Eleven schema versions, two deployed projects, and a
+    route every rendered document named and no deployed document mentioned --
+    invisible because `build_deployed_document` assembles `routes` from an
+    explicit key list, and a key list that is missing an entry looks exactly like
+    a key list that is complete.
+
+    **Compared as SETS, and that is the whole design of this test.** Every
+    alternative fails in the same way:
+
+    * A test naming the six routes it expects passes forever once written, and
+      the seventh route is added to one branch only -- which is what happened.
+    * A test asserting `deployed >= rendered` turns "publishes every route" into
+      "publishes at least the ones I remembered", D300's exact shape.
+    * A test comparing field by field never reaches a field that is absent from
+      both sides of its own loop.
+
+    Set equality is the only form where a route added to either branch and
+    forgotten in the other fails, in either direction, without this test being
+    edited. `health` is in both sets: its shape differs between the branches --
+    an object here, an object there, a bare URL for the others -- and this
+    compares names, not shapes.
+    """
+    document = build(rendered)
+
+    assert set(document["routes"]) == set(rendered["routes"]), (
+        "the rendered and deployed documents name different route sets. The rendered "
+        "document is what a manifest produces and the deployed one is what every plane "
+        "reads (ADR 0002); a route in one and not the other is either an address nobody "
+        "can find a status for (D395) or a status for an address nothing derives"
+    )
 
 
 def test_the_deployed_document_carries_the_storage_settings(rendered: dict) -> None:

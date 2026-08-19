@@ -811,6 +811,42 @@ def test_the_published_division_leaves_the_pooler_its_pool(
     )
 
 
+def test_both_branches_of_the_schema_require_the_same_route_set() -> None:
+    """**D395 at its source**, one level above the document that exposed it.
+
+    `routes.mcp` was required by the rendered branch and forbidden by the
+    deployed one -- `additionalProperties: false` with no property -- for eleven
+    schema versions. D389 was the same defect in the storage block, and the fix
+    there was to make both branches reference **one** `$def`. That is not
+    available here: a rendered route is a bare URL and a deployed one is a
+    `publishedRoute` carrying a status, so the two branches genuinely differ in
+    shape. What they must not differ in is *which routes exist*.
+
+    So the comparison is on the required NAMES, as sets -- the only property both
+    branches can share while their value shapes diverge. A route added to either
+    branch and forgotten in the other fails here, in either direction, without
+    this test being edited.
+    """
+    schema = json.loads((REPO_ROOT / "schemas" / "outputs.schema.json").read_text("utf-8"))
+    branches = {
+        kind: set(schema["$defs"][kind]["properties"]["routes"]["required"])
+        for kind in ("renderedDocument", "deployedDocument")
+    }
+    assert branches["renderedDocument"] == branches["deployedDocument"], (
+        f"the rendered branch requires {sorted(branches['renderedDocument'])} and the "
+        f"deployed branch requires {sorted(branches['deployedDocument'])}. The rendered "
+        "document names what a deployment would create and the deployed one is what "
+        "every plane reads; a route in one and not the other is D395"
+    )
+    for kind, required in branches.items():
+        declared = set(schema["$defs"][kind]["properties"]["routes"]["properties"])
+        assert required == declared, (
+            f"{kind} requires {sorted(required)} and declares {sorted(declared)}. An "
+            "optional route is one a document may omit, and every reader here treats a "
+            "missing route as a route that does not exist"
+        )
+
+
 @pytest.mark.parametrize("manifest", ["project.example.yaml", "project.second.example.yaml"])
 def test_the_storage_route_is_published_and_is_the_derived_one(
     rendered: dict[str, Path], manifest: str

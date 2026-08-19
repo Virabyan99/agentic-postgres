@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -106,6 +106,29 @@ JWT_NOT_PUBLISHED: dict[str, Any] = {
     "verifier_acknowledgements": None,
 }
 
+#: The agent plane of a deployment that publishes no MCP surface.
+#:
+#: Version 12, and it is `API_NOT_PUBLISHED`'s counterpart for the same reason:
+#: every project deployed through a session before 8 is in this state, and so is
+#: a session-8 project whose agent plane did not come up. Six nulls assembled by
+#: hand at a call site would eventually be five.
+#:
+#: `authorization_spec_conformant` is null here rather than `false`, and the
+#: distinction is the honest one. This deployment's bearer profile is not
+#: standards-conformant and the deployed block says so (D413) -- but only once
+#: there IS a profile. `false` beside `status: unavailable` would report a
+#: measurement of a surface that is not running, which is the substitution
+#: `NOT_OBSERVED` exists to refuse.
+MCP_NOT_PUBLISHED: dict[str, Any] = {
+    "status": "unavailable",
+    "protocol_revision": None,
+    "authorization_spec_conformant": None,
+    "accepted_token_use": None,
+    "capability_contract_sha256": None,
+    "capability_lock_sha256": None,
+    "tool_count": None,
+}
+
 #: A route that this deployment does not publish. `health` is deliberately not
 #: expressible this way: its URL is the same string for every project at every
 #: session, so nulling it would delete an address rather than withhold a claim.
@@ -114,6 +137,7 @@ ROUTE_NOT_PUBLISHED: dict[str, Any] = {"status": "unavailable", "url": None}
 __all__ = [
     "API_NOT_PUBLISHED",
     "JWT_NOT_PUBLISHED",
+    "MCP_NOT_PUBLISHED",
     "NOT_OBSERVED",
     "PROJECT_STATE_ROOT",
     "RENDERED_ROOT",
@@ -247,8 +271,10 @@ def build_deployed_document(
     app_status: str,
     app_docs_status: str,
     storage_status: str,
+    mcp_status: str,
     api: dict[str, Any],
     jwt: dict[str, Any],
+    mcp: dict[str, Any],
     database_observed: dict[str, Any],
     deployed_through_session: int,
 ) -> dict[str, Any]:
@@ -274,6 +300,16 @@ def build_deployed_document(
     honest values for a deployment that publishes no API are
     :data:`API_NOT_PUBLISHED` and :data:`JWT_NOT_PUBLISHED`, named so that
     "nothing was published" cannot be spelled two ways.
+
+    `mcp_status` and `mcp` are version 12's, and they do not default either --
+    for that reason and for one more. The rendered branch has named `routes.mcp`
+    since version 1 and this branch had never carried it (D395), so every
+    deployment on every host has published an agent-plane route nobody could
+    read a status for. A default would have let that continue silently through
+    the one release that fixes it: the caller that measured nothing would
+    produce a document indistinguishable from the caller that measured
+    `unavailable`. :data:`MCP_NOT_PUBLISHED` is the honest value and it is
+    spelled once.
     """
     if rendered.get("document_kind") != "rendered":
         raise ManifestError(
@@ -347,6 +383,16 @@ def build_deployed_document(
             # would let a deploy that observed nothing produce a document
             # indistinguishable from one that did.
             "storage": published_route(rendered["routes"]["storage"], storage_status),
+            # Version 12, and it follows `app` and `storage` exactly (D326).
+            #
+            # The URL comes from the render, which is its one derivation -- and
+            # it has come from there since version 1, which is the whole of
+            # D395: `routes.mcp` was in the RENDERED document and absent from
+            # the DEPLOYED one, so `deployed_output.py`'s explicit key list
+            # published five routes out of six. That is D389 in a second place,
+            # and it was found by comparing the two route sets AS SETS rather
+            # than field by field, before a host trip could find it instead.
+            "mcp": published_route(rendered["routes"]["mcp"], mcp_status),
         },
         "api": dict(api),
         "jwt": dict(jwt),
@@ -391,6 +437,20 @@ def build_deployed_document(
         # duplicated into a second list to keep in step -- which is the shape
         # that produced this row.
         "storage": dict(rendered["storage"]),
+        # Version 12's agent plane, in `api`'s role and deliberately in `api`'s
+        # shape: what the surface serves, observed, with a status that forces
+        # every other member null.
+        #
+        # There is no `mcp` block on the RENDERED branch, and the asymmetry is
+        # the decision. `storage` is shared by both branches because its members
+        # are bounds a manifest resolves and a runtime enforces; every member
+        # here is either an observation of a running process (the protocol
+        # revision), a digest of an artefact a deploy produces (the lock), or a
+        # constant of the release (the accepted token use, ADR 0115). None of
+        # them is a thing a manifest decides, so there is nothing for a rendered
+        # branch to say -- and a rendered branch that said it anyway would be a
+        # second authority for a value only a deployment can know.
+        "mcp": dict(mcp),
         "template_version": rendered["template_version"],
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
@@ -487,6 +547,11 @@ def _refuse_incoherent_publication(document: dict[str, Any]) -> None:
     **The active key must be one of the keys verifiers accept.** Otherwise
     every token this issuer mints is rejected by every verifier that trusts this
     document, and nothing in the shape of the document says so.
+
+    **Version 12 applies the first rule again, to `mcp` and `routes.mcp`.** Not
+    generalised into a loop over pairs: the two relations are the same sentence
+    about two surfaces, and a table driving them would be one place to forget to
+    add the third. Written out, a missing pair is a missing paragraph.
     """
     api = document.get("api", {})
     routes = document.get("routes", {})
@@ -496,6 +561,15 @@ def _refuse_incoherent_publication(document: dict[str, Any]) -> None:
             f"{routes.get('rest', {}).get('status')!r}. An API surface is served over a "
             "route; a document that publishes the first without the second describes "
             "something no request can reach"
+        )
+
+    mcp = document.get("mcp", {})
+    if mcp.get("status") == "ready" and routes.get("mcp", {}).get("status") != "ready":
+        raise ManifestError(
+            "mcp.status is 'ready' while routes.mcp is "
+            f"{routes.get('mcp', {}).get('status')!r}. An agent plane is served over a "
+            "route; a document that publishes the first without the second describes "
+            "a tool surface no agent can reach"
         )
 
     jwt = document.get("jwt", {})

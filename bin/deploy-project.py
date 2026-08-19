@@ -104,6 +104,23 @@ APP_PLANE_SESSION = 6
 #: container that was never selected is a timeout.
 STORAGE_PLANE_SESSION = 7
 
+#: The session that starts the MCP runtime, and with it the agent-plane route.
+#: The same shape the three constants above carry.
+#:
+#: **It is above `CURRENT_SESSION`, and that is deliberate in Run 1.** Nothing
+#: selects an `mcp` container yet -- Session 8's Run 7 adds the Compose entry and
+#: its `session8` profile -- so `--through-session` cannot legally reach this
+#: number and the branch below cannot run. What Run 1 fixes is the *document*:
+#: `routes.mcp` has been in every rendered document since version 1 and in no
+#: deployed one (D395), and closing that gap needs no container. It needs the
+#: deployed branch to carry the field, and the honest status for a deployment
+#: that publishes nothing is `unavailable`.
+#:
+#: There is deliberately no `observe_mcp` beside `observe_storage` yet. A polling
+#: loop against a container no profile selects is not a measurement; it is a
+#: timeout with a status attached.
+AGENT_PLANE_SESSION = 8
+
 #: The reviewed OpenAPI snapshot, mirroring `bin/api-contract.py`'s own
 #: constant. `test_the_deploy_and_the_contract_command_name_one_snapshot`
 #: asserts the two agree -- a deploy recording the digest of one file while
@@ -1377,8 +1394,15 @@ def main(argv: list[str] | None = None) -> int:
     # the value for one that does and whose active generation carries no R2
     # credential (D326).
     storage_status = "unavailable"
+    # Version 12's, and Session 8 Run 1's. `unavailable` for every deployment
+    # today: `AGENT_PLANE_SESSION` is above `CURRENT_SESSION`, so no deploy can
+    # ask for the agent plane and none observes it. What changed in Run 1 is that
+    # the deployed document now SAYS so -- for eleven versions it said nothing at
+    # all about a route its rendered half had always named (D395).
+    mcp_status = "unavailable"
     jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
     api_block = dict(deployed_output.API_NOT_PUBLISHED)
+    mcp_block = dict(deployed_output.MCP_NOT_PUBLISHED)
 
     if arguments.through_session >= REST_PLANE_SESSION:
         jwt_block = observe_jwt(
@@ -1561,8 +1585,18 @@ def main(argv: list[str] | None = None) -> int:
         # `publishedRoute` forces a null URL for it, so an unpublished storage
         # surface names no address.
         storage_status=storage_status,
+        # Version 12. `unavailable` until an MCP runtime answers on the route
+        # (D326's shape, a third time) -- and until Run 7 there is nothing to
+        # answer. `publishedRoute` forces a null URL for it, so an unpublished
+        # agent plane names no address.
+        mcp_status=mcp_status,
         api=api_block,
         jwt=jwt_block,
+        # Version 12, in `api_block`'s role: what the agent plane serves, or
+        # `MCP_NOT_PUBLISHED` when it serves nothing. Passed explicitly rather
+        # than defaulted, so a deploy that measured nothing cannot produce a
+        # document indistinguishable from one that did.
+        mcp=mcp_block,
         # Measured above when this deploy started a cluster, and `NOT_OBSERVED`
         # when it did not. A session-2 deployment interrogates nothing, and the
         # honest record of that is four nulls rather than an empty object a

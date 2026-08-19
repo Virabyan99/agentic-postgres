@@ -178,3 +178,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0112](0112-the-application-reference-is-one-document-and-it-describes-the-surface.md) | The application reference is one document, and it describes the surface | 7 | Accepted |
 | [0113](0113-a-verifier-that-issues-nothing-reads-its-key-set-from-the-rendered-file.md) | A verifier that issues nothing reads its key set from the rendered file | 7 | Accepted |
 | [0114](0114-the-application-api-accepts-only-access-tokens.md) | The application API accepts only access tokens | 7 | Accepted |
+| [0115](0115-the-agent-plane-accepts-only-agent-tokens.md) | The agent plane accepts only agent tokens | 8 | Accepted |
