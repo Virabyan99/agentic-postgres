@@ -1269,6 +1269,23 @@ services:
       # side lives in the override.
       APG_JWKS_FILE: /etc/mcp/jwks.json
       APG_LISTEN_PORT: '8080'
+      # Where the agent plane asks who its caller is (ADR 0125). **An HTTP
+      # address, and it is not a credential of any kind** -- compare
+      # `PGRST_DB_URI` in the `postgrest` service above, which is a
+      # `postgres://` URL naming the authenticator role. The two spellings sit
+      # in one file and mean opposite things, so `settings.load_mcp` parses this
+      # one and refuses anything carrying userinfo.
+      #
+      # The request that goes to it carries the CALLER's own bearer token and
+      # nothing of this runtime's, because this runtime has nothing: no signing
+      # key, no database credential, no service identity. That absence is what
+      # makes a confused deputy unconstructible here rather than merely
+      # unwritten.
+      #
+      # Derived by `naming`/`rendering` and handed over finished (ADR 0002,
+      # ADR 0106's rule for the storage endpoint applied here): the image never
+      # assembles an address.
+      APG_POSTGREST_URL: ${MCP_POSTGREST_URL:?required}
     # **No healthcheck, and that is deferred rather than forgotten (D429).**
     #
     # Run 7 owns this service's health surface -- the plan says so in as many

@@ -625,9 +625,39 @@ def test_the_dockerfile_names_no_version_of_its_own() -> None:
 # ---------------------------------------------------------------------------
 
 
-#: Names that would let this service fetch its own trust anchor. `PyJWKClient`
-#: takes a URI; the rest are the transports it would use.
-NETWORK_NAMES = frozenset({"PyJWKClient", "urllib", "httpx", "requests", "aiohttp", "socket"})
+#: The one name that IS a network JWKS client. Banned outright, everywhere.
+#:
+#: `PyJWKClient` takes a URI and fetches. A verifier holding one has a trust
+#: anchor decided by whatever answered the request, which is the thing ADR 0088's
+#: rotation model cannot survive.
+JWKS_CLIENT_NAME = "PyJWKClient"
+
+#: Every transport this service could reach the network with.
+#:
+#: **`boto3` is in this set from Session 8 Run 5, and its absence was the hole**
+#: (ADR 0124). The previous spelling banned five names and admitted boto3 --
+#: through which `storage_client.py` has been calling `head_object` and
+#: `delete_object` for a whole session. A guard that names transports and misses
+#: the one actually in use is a filesystem fact standing in for a logic test,
+#: which is D277's shape and CLAUDE.md §6's pattern.
+TRANSPORT_NAMES = frozenset(
+    {"urllib", "httpx", "requests", "aiohttp", "socket", "boto3", "botocore", "http"}
+)
+
+#: The modules permitted to name a transport, and which one, and why.
+#:
+#: A row is a reviewed act. The old blanket ban was reaching for exactly this and
+#: could not express it, so it refused the wrong things and admitted the rest.
+TRANSPORT_ALLOWLIST: dict[str, frozenset[str]] = {
+    # The R2 adapter: presigning and the object lifecycle (ADR 0093, ADR 0107).
+    "app/storage_client.py": frozenset({"boto3", "botocore"}),
+    # The agent plane's one call upstream, carrying the CALLER's own token
+    # (ADR 0125). It resolves `api.mcp_agent_context` and nothing else.
+    "app/mcp_upstream.py": frozenset({"urllib"}),
+}
+
+#: How a key set may be built. Both are local reads; neither can reach a network.
+KEY_SET_CONSTRUCTORS = frozenset({"load", "from_path"})
 
 
 def _referenced_names(source: str) -> set[str]:
@@ -667,13 +697,88 @@ def test_the_service_never_constructs_a_network_jwks_client() -> None:
     Asserted against the source rather than against behaviour, because an
     import nobody calls today is an import somebody calls next session, and by
     then the reason will be a comment nobody reads.
+
+    **Narrowed to its own subject in Session 8 Run 5 (ADR 0124), and the two
+    tests below carry the rest.** This one used to ban five transports as a
+    proxy for the property, which refused a PostgREST call that has nothing to do
+    with key material and admitted the boto3 the service was already using.
+    """
+    offenders = [
+        str(path.relative_to(REPO_ROOT))
+        for path in sorted(SERVICE_ROOT.rglob("*.py"))
+        if JWKS_CLIENT_NAME in _referenced_names(path.read_text(encoding="utf-8"))
+    ]
+    assert not offenders, f"{offenders} construct a network JWKS client"
+
+
+def test_every_transport_in_the_service_is_declared_with_a_reason() -> None:
+    """No module reaches the network unless ADR 0124's allowlist says which.
+
+    **Replaces the blanket ban, and is stricter than it** (CLAUDE.md §5). The
+    old version refused five names anywhere; this refuses EIGHT -- boto3 and
+    botocore among them -- everywhere except in the modules that declare them.
+    `storage_client.py` has been making real R2 round trips through boto3 since
+    Session 7 and the old guard reported the tree clean.
+
+    A module may name only the transport its row grants it, so a second one
+    appearing in a declared module fails here too.
     """
     offenders: list[str] = []
     for path in sorted(SERVICE_ROOT.rglob("*.py")):
-        used = _referenced_names(path.read_text(encoding="utf-8")) & NETWORK_NAMES
-        if used:
-            offenders.append(f"{path.relative_to(REPO_ROOT)} uses {sorted(used)}")
+        relative = path.relative_to(SERVICE_ROOT).as_posix()
+        used = _referenced_names(path.read_text(encoding="utf-8")) & TRANSPORT_NAMES
+        permitted = TRANSPORT_ALLOWLIST.get(relative, frozenset())
+        undeclared = used - permitted
+        if undeclared:
+            offenders.append(f"{relative} names {sorted(undeclared)}, which no row grants it")
     assert not offenders, offenders
+
+
+def test_the_allowlist_describes_modules_that_exist_and_use_what_they_declare() -> None:
+    """A row for a deleted module, or for a transport nobody imports, is a lie.
+
+    The failure this prevents is the quiet one: a row outliving its module reads
+    as a considered exemption and grants nothing, so the next reader believes the
+    list is current. It is the same reasoning D211-D214 record about proofs that
+    have never executed.
+    """
+    for relative, transports in sorted(TRANSPORT_ALLOWLIST.items()):
+        path = SERVICE_ROOT / relative
+        assert path.is_file(), f"{relative} is allowlisted and does not exist"
+        used = _referenced_names(path.read_text(encoding="utf-8")) & TRANSPORT_NAMES
+        assert used == transports, (
+            f"{relative} declares {sorted(transports)} and names {sorted(used)}"
+        )
+
+
+def test_a_key_set_is_only_ever_built_from_a_local_read() -> None:
+    """The property the transport ban was a proxy for, asserted directly.
+
+    Every `LocalKeySet` in this service comes from `load` or `from_path`, and
+    both take bytes that were read locally -- a mounted file (ADR 0113) or the
+    issuer's own signing key. Nothing constructs one from a response.
+
+    The old guard inferred this from the absence of a transport, which is why it
+    could be satisfied by importing a different one. This asks the question the
+    docstring above has always been about.
+    """
+    constructions: list[str] = []
+    for path in sorted(SERVICE_ROOT.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if not isinstance(node.func.value, ast.Name):
+                continue
+            if node.func.value.id != "LocalKeySet":
+                continue
+            constructions.append(f"{path.relative_to(SERVICE_ROOT).as_posix()}:{node.func.attr}")
+
+    assert constructions, "no LocalKeySet is constructed anywhere -- this test measures nothing"
+    unexpected = [
+        entry for entry in constructions if entry.rsplit(":", 1)[1] not in KEY_SET_CONSTRUCTORS
+    ]
+    assert not unexpected, f"a key set is built by something other than a local read: {unexpected}"
 
 
 def test_that_scan_can_tell_code_from_prose() -> None:
@@ -689,6 +794,13 @@ def test_that_scan_can_tell_code_from_prose() -> None:
     assert "PyJWKClient" in _referenced_names("client = jwt.PyJWKClient(uri)")
     assert "PyJWKClient" not in _referenced_names('"""Never use PyJWKClient."""')
     assert "PyJWKClient" not in _referenced_names('x = "PyJWKClient"')
+
+    # ADR 0124's addition, and the arm that would have caught the hole: the
+    # scan must see boto3 as a transport, in both spellings, or the allowlist
+    # above grants an exemption nothing was ever checking.
+    assert "boto3" in _referenced_names("import boto3") & TRANSPORT_NAMES
+    assert "boto3" in _referenced_names("client = boto3.client('s3')") & TRANSPORT_NAMES
+    assert not _referenced_names('"""We use boto3 here."""') & TRANSPORT_NAMES
 
     # And it really is present in the source that the test above passes on.
     text = (SERVICE_ROOT / "app" / "tokens.py").read_text(encoding="utf-8")

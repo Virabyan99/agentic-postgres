@@ -65,6 +65,31 @@ def _required_int(name: str, *, minimum: int = 1) -> int:
     return value
 
 
+def _required_http_url(name: str) -> str:
+    """A required `http://` or `https://` URL, with no credential in it.
+
+    Parsed rather than trusted, for the reason every other setting here is: a
+    value that arrived as `postgres://user:pass@...` would put a credential into
+    an environment variable and then into `docker inspect` (D60) -- and a value
+    that arrived as a bare hostname would be concatenated into a request path
+    and reach a different service entirely.
+
+    The userinfo check is not theoretical. `PGRST_DB_URI` in the same deployment
+    IS a `postgres://` URL with an authenticator role in it, so the two spellings
+    sit metres apart in `compose.yaml`, and the failure of confusing them is a
+    request that succeeds against the wrong thing.
+    """
+    value = _required(name)
+    if not value.startswith(("http://", "https://")):
+        raise MissingSetting(f"{name} must be an http:// or https:// URL")
+    authority = value.split("://", 1)[1].split("/", 1)[0]
+    if "@" in authority:
+        raise MissingSetting(f"{name} carries userinfo; a credential must not travel in a URL")
+    if not authority:
+        raise MissingSetting(f"{name} names no host")
+    return value
+
+
 def _required_role_names(name: str) -> dict[str, str]:
     """The suffix -> derived-name map, parsed strictly.
 
@@ -172,6 +197,19 @@ class McpSettings:
     #: this is the boundary where it would happen again.
     jwks_file: Path
     listen_port: int
+    #: Where the agent plane asks who its caller is (ADR 0125).
+    #:
+    #: A URL rather than a host and a port, because the agent plane never
+    #: assembles an address -- the same rule ADR 0106 states for the storage
+    #: endpoint. `naming`/`rendering` derive it and hand it over finished, so
+    #: there is one authority for how PostgREST is addressed and this image is
+    #: not it (ADR 0002).
+    #:
+    #: This is **not** a database credential and does not make the agent plane a
+    #: claimant on ADR 0099's connection budget: the request is HTTP, it carries
+    #: the CALLER's token, and the connection it costs is PostgREST's own -- one
+    #: already counted in the api share of 13.
+    postgrest_url: str
 
 
 def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
@@ -208,6 +246,7 @@ def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
         audience=_required("APG_JWT_AUDIENCE"),
         jwks_file=Path(_required("APG_JWKS_FILE")),
         listen_port=_required_int("APG_LISTEN_PORT"),
+        postgrest_url=_required_http_url("APG_POSTGREST_URL"),
     )
 
 
@@ -360,6 +399,10 @@ MCP_VARIABLES: tuple[str, ...] = (
     "APG_JWT_AUDIENCE",
     "APG_JWKS_FILE",
     "APG_LISTEN_PORT",
+    # Session 8 Run 5. Where the agent plane asks who its caller is (ADR 0125).
+    # An HTTP address, not a conninfo: the request carries the CALLER's token
+    # and this runtime still holds no database credential.
+    "APG_POSTGREST_URL",
 )
 
 #: The variable each mode must NOT be given. Stated as a set rather than left

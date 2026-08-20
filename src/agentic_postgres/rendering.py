@@ -35,6 +35,7 @@ from agentic_postgres import (
     config,
     deployed_output,
     naming,
+    runtime_override,
     scope_registry,
     secrets_contract,
     template_version,
@@ -582,11 +583,17 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "STORAGE_UPLOAD_URL_TTL_SECONDS",
     "STORAGE_DOWNLOAD_URL_TTL_SECONDS",
     "STORAGE_MAX_UPLOAD_BYTES",
-    # Session 8, Run 4. The agent plane's ONLY rendered value, and the length of
-    # this list is worth noticing against the nine above it: no role name, no
-    # pool size, no credential path, no endpoint. It holds none of those things
-    # (ADR 0121, D407), so there is nothing to render.
+    # Session 8, Runs 4 and 5. The agent plane's two rendered values, and the
+    # length of this list is worth noticing against the nine above it: no role
+    # name, no pool size, no credential path. It holds none of those things
+    # (ADR 0121, D407).
+    #
+    # `MCP_POSTGREST_URL` is an *address*, not a credential -- the request it is
+    # used for carries the caller's own token (ADR 0125). It is derived here
+    # rather than assembled in the image, which is ADR 0002's rule and the same
+    # one ADR 0106 states for the storage endpoint.
     "MCP_MEMORY_LIMIT",
+    "MCP_POSTGREST_URL",
     # Session 7, Run 7. The published route, in the same two shapes the
     # application route uses one line-block above: a *path* a router rule
     # matches on, and three *names* `runtime_override.py` renders into label
@@ -922,6 +929,25 @@ def build_compose_env(
         # known would be the wrong half of the promise. When Run 8 measures it,
         # promoting it is a small change; un-publishing a manifest field is not.
         "MCP_MEMORY_LIMIT": f"{MCP_MEMORY_LIMIT_MB}m",
+        # Session 8, Run 5. The agent plane's upstream (ADR 0125).
+        #
+        # The Compose service name and container port, which is how every
+        # service on the `internal` network addresses another -- the same two
+        # constants `runtime_override` uses to point a Traefik router at this
+        # backend, so a change to either moves both readers together rather than
+        # leaving one pointing at nothing.
+        #
+        # **`http`, and inside the internal network only.** There is no TLS on
+        # this hop and that is the deployment's shape rather than an oversight:
+        # `internal: true` means the network has no route off the host, the two
+        # containers are the only members that matter, and terminating TLS
+        # between them would need a certificate authority this project does not
+        # have and a rotation nobody would run. What travels on it is the
+        # caller's own token, which is already a bearer credential over a link
+        # the edge terminated TLS for.
+        "MCP_POSTGREST_URL": (
+            f"http://{POSTGREST_SERVICE_HOST}:{runtime_override.REST_SERVICE_PORT}"
+        ),
         # Through `naming`, and unconditionally -- not from `identity`, whose
         # storage fields are None when the service is disabled because a
         # rendered document must not name a bucket for a service that is off.

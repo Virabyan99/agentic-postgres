@@ -311,6 +311,10 @@ def _mcp_environment(**extra: str) -> dict[str, str]:
         "APG_JWT_AUDIENCE": AUDIENCE,
         "APG_JWKS_FILE": "/etc/mcp/jwks.json",
         "APG_LISTEN_PORT": "8080",
+        # Session 8 Run 5: the agent plane's upstream (ADR 0125). An HTTP
+        # address, not a credential -- `test_mcp_authorization.py` is where the
+        # difference is asserted.
+        "APG_POSTGREST_URL": "http://postgrest:3000",
     }
     environment.update(extra)
     return environment

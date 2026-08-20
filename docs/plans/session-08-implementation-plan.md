@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D431.**
+**Next free number after this table is D436.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -84,6 +84,11 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D428** | Outputs v12, written in Run 1: *"the MCP protocol revision the deployed runtime actually **negotiated**, read FROM the runtime"*. | **A negotiated revision is a fact about the CLIENT.** Measured against a running FastMCP 3.4.0: an `initialize` asking for `2025-11-25` is answered `2025-11-25`; the control arm asking for `2025-03-26` is answered **`2025-03-26`**. A field filled from one handshake records the version of the probe that measured it. `DEFAULT_NEGOTIATED_VERSION` is the neighbouring trap -- `2025-03-26`, what an unversioned caller gets, two revisions below the ceiling. | The field is the **highest revision the runtime implements**, read from `mcp.types.LATEST_PROTOCOL_VERSION` at startup and never written down here. The schema's description is corrected in place. No version bump: the member's shape and nullability are unchanged, only what it means. | The second half of Run 1's sentence -- *never from a document that hoped for one* -- was right, and the first half named the wrong quantity. **Nothing in the deployment pipeline may fill this by asking the server**, which is the opposite of what the old description invited. | 0123 |
 | **D429** | §12/§19: the MCP container has its own health routes, and every other application service here carries a Compose healthcheck. | **`services/auth-api/` may contain no network client at all.** `test_the_service_never_constructs_a_network_jwks_client` forbids `PyJWKClient`, `urllib`, `httpx`, `requests`, `aiohttp` and `socket` anywhere under that tree, by AST, with a control proving it tells code from prose. A liveness probe written as `app/mcp_health.py` is refused by it -- correctly. **The guard is nevertheless escaped by the existing pattern**: the auth service's `HEALTHCHECK` performs an HTTP request from an inline `python -c` string in the Dockerfile, which no AST scan of `.py` files can see. | **Run 4 ships the `mcp` service with no healthcheck, and says so where the entry is.** The reasoning the probe would have encoded is written there for Run 7, which the plan already gives the health surface: a 401 proves the process serves and the verifier is mounted, and **a 200 is a failure** because it means the boundary is gone. Nothing starts this container before Run 7 in any case. | Weakening a P0 guard to fit a liveness probe is the wrong trade, and the honest alternative to a hacky one-liner is to leave the surface to the run that owns it. The escape hatch is recorded rather than used: a guard satisfied by moving code into a string is **D277's shape** -- there, an AST scan satisfied by dead code -- and whether it should scan the import graph instead is a decision, not a tidy-up. | -- |
 | **D430** | --- (met while implementing ADR 0122.) | **A `@dataclass` cannot be defined in a `bin/` command module.** `tests/contract/test_rotate_signing_key.py` loads the command with `spec_from_file_location` + `exec_module` and never registers it in `sys.modules`; `dataclasses` looks the defining module up by name while processing annotations, so the class raises `AttributeError: 'NoneType' object has no attribute '__dict__'` **at import, inside the test rather than the command**. | `Verifier` is a `NamedTuple`, which needs no such lookup, and the constraint is written at the class rather than in a commit message. | The failure names neither dataclasses nor the loader, and it appears only under the test harness -- so the command runs fine by hand and the suite goes red. Recorded because the next person to reach for a dataclass in a `bin/` command will meet it, and because a five-minute diagnosis is worth one sentence. | -- |
+| **D431** | D429 deferred the question: `test_the_service_never_constructs_a_network_jwks_client` forbids `urllib`, `httpx`, `requests`, `aiohttp` and `socket` anywhere under `services/auth-api/`. | **Run 5 cannot defer it** — the agent plane's whole job is an HTTP call to `mcp_agent_context`. And the guard turns out to be **both too wide and too narrow**: `storage_client.py` has been making real R2 round trips (`head_object`, `delete_object`) through **boto3** for a whole session, and boto3 is not one of the five names. The guard's docstring is about a *network JWKS client*; its implementation is a list of transport spellings. | Replaced by **three** stricter checks (ADR 0124). `PyJWKClient` stays banned outright. A key set may be built **only** by `LocalKeySet.load`/`from_path`, asserted directly rather than inferred from the absence of a transport. And every transport — now **eight** names including boto3 and botocore — is refused except in a module that declares it in an allowlist with a reason. Two rows today. | **D277's shape**: an AST scan asking whether a *name* is mentioned is satisfied by importing a different one, exactly as one asking whether a function is mentioned was satisfied by dead code. A filesystem fact standing in for a logic test — CLAUDE.md §6's pattern, produced by a test written to enforce §6. The replacement **fails for a case the old one passed** (boto3 in an undeclared module), so it is a net tightening rather than an exemption. | 0124 |
+| **D432** | Migration 0018's comment on `api.mcp_agent_context`: *"Zero rows when the caller is not an agent — a question with no answer rather than an error."* | **Over HTTP that branch is unreachable for a stale or unknown agent.** Measured against a live PostgREST on the locked digest with all eighteen migrations applied: an agent token naming an agent that does not exist is refused by the **pre-request hook** with `401 PT401 / AP401: the request identity is no longer current`, and the function is never entered. The comment is true of the function and false of the surface. | **Exactly one row is a context; zero rows is a refusal.** The client does not treat an empty array as "not an agent" — a 200 with no rows would mean something the product does not produce, and continuing would hand a tool an agent with **no scopes and no owner**. | The tempting reading is the dangerous one, because the comment invites it and the branch would then be untested by construction. It is the same class as **D420**: a guard whose stated condition and whose behaviour never had to agree, because nothing exercised it. | 0125 |
+| **D433** | §4.9–4.11 treats "FastMCP forwards the bearer token to PostgREST" as the whole of the authorization design. | **Two of the measured refusals do not say what a reader would assume.** An anonymous request is refused **401 with a body of `42501 permission denied for function mcp_agent_context`** — a *privilege* error carrying an authentication status. A human `access` token is refused **403**, also on `42501`, by a missing GRANT rather than by the `token_use` branch. So neither the status nor the body identifies the cause, and the three 401s measured (`PT401` stale identity, `PGRST301` bad key, `42501` no privilege) are indistinguishable by status. | **No upstream status or error code is relayed.** A refusal carries a short machine reason for this process's own telemetry and nothing for a response body (ADR 0097). A test asserts that `42501`, `permission denied` and the function's name are all absent from what the refusal carries. | **D417 from the other side.** There, a human token naming the agent role was refused by a missing GRANT rather than by the hook — correct outcome, false reason. Here the same shape would let the runtime report "your token is invalid" for what is actually a privilege boundary, to a caller who is in no position to act on either. | 0125 |
+| **D434** | — (found by Run 5's mutation battery, N3.) | **The `HTTPError` branch of `resolve_agent_context` had never executed in any test.** The test recorder returned a 403 as an ordinary response object, which `urlopen` never does — it raises `HTTPError` for every 4xx and 5xx. So the assertions about refusal content were reaching the *other* branch, and a mutation that relayed PostgREST's error text to the caller **survived**. | The recorder raises `HTTPError` for any status ≥ 400, which is what urllib does. The branch every real refusal takes is now the branch the test exercises. | **D211–D214's family, inside a fixture.** A proof that has never executed in the configuration that ships, and nothing in a green suite says so. It is also what the battery is *for*: the test read correct, the product was correct, and the path between them was not the one production uses (ADR 0065's question, asked of a fixture). | — |
+| **D435** | — (found while writing Run 5's battery.) | **Two survivors were the mutation's fault, not the test's, and each hid a real gap.** N7 replaced the middleware body but still wrote through the `ContextVar`, so the mechanism it meant to break was still intact. N12 admitted the `postgres://` scheme, but the only `postgres://` case in the test carried **userinfo**, so a *different* rule refused it and the scheme rule was never isolated. | N7 swaps the mechanism itself — the `ContextVar` for a module-level holder — which is the thing measured to leak 11 of 12 concurrent requests. N12 gains a `postgres://postgres:5432/db` case with no userinfo, so **each rule has a case only it can refuse**. | **CLAUDE.md §1's rule, met twice in one battery**: when an arm survives, the repair may be the mutation rather than the assertion, and deciding which requires reading what actually ran. A battery that had recorded "2 survivors, weak tests" would have produced two false findings and left the real gap — a validator rule with no isolating case — in place. | — |
 
 ---
 
@@ -411,14 +416,76 @@ die.
 
 Suite **3563 passed, 261 skipped**.
 
-### Run 5 — The authorization path
+### Run 5 — The authorization path — **Done.**
 
-- Per-request middleware forwards the **original** token to
-  `mcp_agent_context` before discovery or execution.
-- Cached for one HTTP request, keyed by a non-reversible fingerprint, never
-  across requests, tokens, workers, or expiry.
-- No confused deputy: no service token, no re-signing, no injected role or
-  subject header.
+**What was measured, against a live PostgREST and a running FastMCP.**
+
+**The RPC, on the locked digest with all eighteen migrations applied and real
+RS256 tokens.** Nine arms, every one with a control. An agent token resolves its
+own context at **200**, as a JSON **array of one object** carrying `agent_id,
+role_name, scopes, authz_version, owner_id` — and `owner_id` is the agent's
+owner, which is ADR 0117 answering over HTTP rather than in SQL. Three arms
+changed the design:
+
+* **D432** — migration 0018's comment says the function returns *"zero rows when
+  the caller is not an agent"*. Over HTTP that branch is **unreachable**: the
+  pre-request hook refuses an unknown agent with `401 PT401 / AP401` and the
+  function is never entered. So zero rows is a **refusal**, not an empty
+  context; treating it as "not an agent" would hand a tool an agent with no
+  scopes and no owner, from a state the product does not produce.
+* **D433** — an anonymous request is refused **401 with a body of `42501
+  permission denied`**, and a human `access` token **403** on the same SQLSTATE.
+  Neither status nor body identifies the cause, and the three measured 401s
+  (`PT401`, `PGRST301`, `42501`) are indistinguishable. So **no upstream status
+  or code is relayed**; a refusal says nothing (ADR 0097). D417 from the other
+  side.
+* The forged-signature and human-token arms are the controls that make the rest
+  mean something: `PGRST301` and `403` respectively, not a blanket refusal.
+
+**The framework's ordering, from a running server.** An unauthenticated request
+is answered **401 with no middleware hook reached at all** — so ADR 0115's
+"refused before any lookup" is structural rather than something this run's code
+enforces. `on_request` fires **once per HTTP request**, before both
+`on_list_tools` and `on_call_tool`, and reaches the **raw compact token**.
+
+**The cache, measured against the obvious wrong answer.** Twelve concurrent
+requests with twelve different tokens, both implementations running at once:
+
+    ContextVar, reset in a `finally`    0 of 12 saw another caller's context
+    CONTROL -- a module-level dict     11 of 12 saw another caller's context
+
+and the control is **correct on every sequential request**, which is why the
+concurrency arm exists. A suite without it passes the broken implementation.
+
+**What was built.** ADR 0124 and 0125. `mcp_upstream.py` — one RPC, the caller's
+own token in `Authorization` and **no header naming a principal**, with the
+response contract as a pure function so every refusal branch is reachable
+without a socket. `mcp_authorization.py` — resolution in `on_request`, held in a
+`ContextVar` keyed by a **SHA-256 fingerprint** so that a value outliving its
+request becomes a *miss* rather than a *leak*, reset in a `finally`.
+`McpSettings.postgrest_url`, parsed rather than trusted: `postgres://` and
+userinfo are both refused, because `PGRST_DB_URI` is a conninfo naming a role and
+sits metres away in the same file.
+
+**D431 is the row to read.** Run 4 deferred the transport guard (D429) and Run 5
+could not. Measured: `test_the_service_never_constructs_a_network_jwks_client`
+banned five transport names and **admitted the boto3 `storage_client.py` has been
+making real R2 round trips with for a whole session**. It was too wide and too
+narrow at once — D277's shape. Replaced by three checks that are **strictly
+stronger**: `PyJWKClient` banned outright, key sets provably built only from a
+local read, and every transport (now eight names, boto3 included) refused outside
+a declared allowlist row. It fails for a case the old one passed.
+
+**The battery: 17 mutations, 17 killed**, each `FAILED` rather than `ERROR` with
+its control green in the same invocation, and the harness re-checked against an
+import-time break and an uncovered change so that `KILLED` still means something.
+**Three arms survived the first run and two of the three were the mutation's
+fault** (D435) — a mechanism swap that still wrote through the real one, and a
+validator case that a *different* rule refused. The third was a genuine defect in
+the tests: **D434**, the `HTTPError` branch every real refusal takes had never
+executed, because the recorder returned a 403 the way `urlopen` never does.
+
+Suite **3597 passed, 261 skipped**.
 
 ### Run 6 — The PostgREST adapter and the four tools
 

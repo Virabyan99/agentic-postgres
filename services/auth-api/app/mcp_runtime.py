@@ -32,6 +32,7 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 
 from app import settings as settings_module
 from app.claims import ClaimError, verify_claims
+from app.mcp_authorization import AgentContextMiddleware
 from app.tokens import LocalKeySet, MalformedToken, pre_parse
 
 if TYPE_CHECKING:  # pragma: no cover -- import-time typing only
@@ -230,7 +231,7 @@ class AgentTokenVerifier:
         )
 
 
-def build_server(verifier: AgentTokenVerifier, *, project_key: str) -> Any:
+def build_server(verifier: AgentTokenVerifier, *, project_key: str, postgrest_url: str) -> Any:
     """The FastMCP server, with no tools registered.
 
     Run 6 registers exactly four, from the compiled capability lock. Until then
@@ -238,12 +239,19 @@ def build_server(verifier: AgentTokenVerifier, *, project_key: str) -> Any:
     true -- as against a placeholder, which would be a discovery response that
     lies. D421 is the standing lesson about a tool list that advertises what it
     will refuse.
+
+    **The authorization middleware is here from Run 5, before any tool exists**,
+    and that order is deliberate. It resolves the caller's context on the way in
+    (ADR 0125), so a tool added in Run 6 cannot be written against a request that
+    has no context: there is no such request. A middleware added afterwards would
+    have to be remembered by every tool author, which is the shape of D333.
     """
     from fastmcp import FastMCP
 
     return FastMCP(
         name=f"agentic-postgres/{project_key}",
         auth=verifier,
+        middleware=[AgentContextMiddleware(postgrest_url)],
         # Details of an internal failure are not an agent's to read (ADR 0097).
         mask_error_details=True,
     )
@@ -266,5 +274,11 @@ def create_mcp_app() -> Starlette:
     server = build_server(
         AgentTokenVerifier(key_set, issuer=settings.issuer, audience=settings.audience),
         project_key=settings.project_key,
+        postgrest_url=settings.postgrest_url,
     )
-    return server.http_app(path="/mcp")
+    # `stateless_http`, so one HTTP request is one complete exchange. It is what
+    # makes "cached for one HTTP request" a statement about a boundary the
+    # transport draws rather than about a session this runtime would have to
+    # keep, and a session store is state the agent plane deliberately has none
+    # of (ADR 0125).
+    return server.http_app(path="/mcp", stateless_http=True)

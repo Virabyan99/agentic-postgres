@@ -187,3 +187,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0121](0121-the-agent-plane-is-a-third-mode-of-the-one-application-image.md) | The agent plane is a third mode of the one application image | 8 | Accepted |
 | [0122](0122-the-verifier-roster-is-a-table-and-every-verifier-is-in-it.md) | The verifier roster is a table, and every verifier is in it | 8 | Accepted |
 | [0123](0123-the-published-protocol-revision-is-the-highest-the-runtime-implements.md) | The published protocol revision is the highest the runtime implements | 8 | Accepted |
+| [0124](0124-the-transport-guard-is-about-the-trust-anchor-not-the-transport.md) | The transport guard is about the trust anchor, not the transport | 8 | Accepted |
+| [0125](0125-the-agent-plane-forwards-the-callers-own-token-and-resolves-context-once.md) | The agent plane forwards the caller's own token, and resolves context once | 8 | Accepted |
