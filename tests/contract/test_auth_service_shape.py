@@ -651,9 +651,14 @@ TRANSPORT_NAMES = frozenset(
 TRANSPORT_ALLOWLIST: dict[str, frozenset[str]] = {
     # The R2 adapter: presigning and the object lifecycle (ADR 0093, ADR 0107).
     "app/storage_client.py": frozenset({"boto3", "botocore"}),
-    # The agent plane's one call upstream, carrying the CALLER's own token
-    # (ADR 0125). It resolves `api.mcp_agent_context` and nothing else.
+    # The agent plane's one call upstream and its read executor, both
+    # carrying the CALLER's own token (ADR 0125, ADR 0127).
     "app/mcp_upstream.py": frozenset({"urllib"}),
+    # `urllib.parse` ONLY, for percent-encoding. This module builds a query
+    # string and never sends one -- the scan sees the top-level package, so
+    # the row is required, and the assertion below is what keeps it honest:
+    # a module declared here may not name `urlopen` or `Request`.
+    "app/mcp_query.py": frozenset({"urllib"}),
 }
 
 #: How a key set may be built. Both are local reads; neither can reach a network.
@@ -748,6 +753,19 @@ def test_the_allowlist_describes_modules_that_exist_and_use_what_they_declare() 
         used = _referenced_names(path.read_text(encoding="utf-8")) & TRANSPORT_NAMES
         assert used == transports, (
             f"{relative} declares {sorted(transports)} and names {sorted(used)}"
+        )
+
+    # `urllib` covers both `urllib.parse` (encoding) and `urllib.request`
+    # (sending), and only two modules may send. Asserted separately because the
+    # package name alone cannot tell them apart -- and a query builder that grew
+    # a `urlopen` would otherwise be covered by its own row.
+    senders = {"app/mcp_upstream.py"}
+    for relative in sorted(TRANSPORT_ALLOWLIST):
+        names = _referenced_names((SERVICE_ROOT / relative).read_text(encoding="utf-8"))
+        if relative in senders:
+            continue
+        assert not names & {"urlopen", "Request", "urlretrieve"}, (
+            f"{relative} is allowlisted for encoding and names a sender"
         )
 
 

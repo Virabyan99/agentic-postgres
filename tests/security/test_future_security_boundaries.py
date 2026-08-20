@@ -137,11 +137,6 @@ def test_tool_parameters_cannot_override_identity_or_scope() -> None:
     unimplemented(9, "agent_id, role, and scope come from claims, never parameters")
 
 
-@pytest.mark.future(session=8, requirement="SEC-INJ-001")
-def test_injection_strings_remain_data() -> None:
-    unimplemented(8, "a SQL payload in a filter value does not change query structure")
-
-
 # ---------------------------------------------------------------------------
 # Session 2 — activated
 #

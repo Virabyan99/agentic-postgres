@@ -26,7 +26,7 @@ from pathlib import Path
 #: -- and nothing had. A deploy from here on will try to, which means the two R2
 #: secrets have to exist at the provider first. That is Run 10's sequence and
 #: `docs/session-07-operator-guide.md` is the order to follow.
-CURRENT_SESSION = 7
+CURRENT_SESSION = 8
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

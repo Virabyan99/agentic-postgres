@@ -1286,6 +1286,15 @@ services:
       # ADR 0106's rule for the storage endpoint applied here): the image never
       # assembles an address.
       APG_POSTGREST_URL: ${MCP_POSTGREST_URL:?required}
+      # The compiled capability lock for THIS project (ADR 0127), mounted
+      # read-only by `runtime_override.py` from the rendered directory -- the
+      # same mechanism the key set uses, and for the same reason: the host side
+      # is a per-project absolute path and this model stays project-neutral.
+      #
+      # `bin/deploy-project.py` writes it with `bin/mcp-contract.sh lock`. A
+      # mount whose file nothing produces is D381 exactly, so the producer and
+      # the consumer arrive in the same run.
+      APG_MCP_LOCK_FILE: /etc/mcp/capability-lock.json
     # **No healthcheck, and that is deferred rather than forgotten (D429).**
     #
     # Run 7 owns this service's health surface -- the plan says so in as many

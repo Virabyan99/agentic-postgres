@@ -210,6 +210,13 @@ class McpSettings:
     #: the CALLER's token, and the connection it costs is PostgREST's own -- one
     #: already counted in the api share of 13.
     postgrest_url: str
+    #: The deployed capability lock (ADR 0127).
+    #:
+    #: Required, and read once at startup. A runtime without it serves no tools
+    #: at all, so starting without one would be a container that looks deployed
+    #: and answers every discovery with an empty list -- D381's shape applied to
+    #: a capability surface rather than to a key set.
+    capability_lock_file: Path
 
 
 def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
@@ -247,6 +254,7 @@ def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
         jwks_file=Path(_required("APG_JWKS_FILE")),
         listen_port=_required_int("APG_LISTEN_PORT"),
         postgrest_url=_required_http_url("APG_POSTGREST_URL"),
+        capability_lock_file=Path(_required("APG_MCP_LOCK_FILE")),
     )
 
 
@@ -403,6 +411,9 @@ MCP_VARIABLES: tuple[str, ...] = (
     # An HTTP address, not a conninfo: the request carries the CALLER's token
     # and this runtime still holds no database credential.
     "APG_POSTGREST_URL",
+    # Session 8 Run 6. The compiled capability lock this project serves
+    # (ADR 0127). A file, mounted read-only, exactly as the key set is.
+    "APG_MCP_LOCK_FILE",
 )
 
 #: The variable each mode must NOT be given. Stated as a set rather than left

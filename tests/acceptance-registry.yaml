@@ -1307,45 +1307,91 @@
   priority: P0
   target_session: 8
   test_nodeids:
-    - tests/integration/test_future_mcp.py::test_mcp_read_equals_the_postgrest_result
-  description: An agent read through MCP equals the equivalent PostgREST result.
+    - tests/contract/test_mcp_tools.py::test_the_adapter_returns_what_the_upstream_returned
+    - tests/contract/test_mcp_tools.py::test_the_caller_token_is_what_the_adapter_forwards
+  description: >-
+    An agent read through MCP returns exactly the rows the identical PostgREST
+    request returns for the same principal, because the adapter forwards the
+    caller's own token and adds no filtering of its own. Stated as the property
+    rather than as a comparison against a human's result, which D418 established
+    is `permission denied` and must stay so: the report is agent-only, and a
+    second opinion about which rows an owner may see would disagree with the
+    database's the moment a policy moved.
 
 - id: AGT-SQL-001
   priority: P0
   target_session: 8
   test_nodeids:
-    - tests/integration/test_future_mcp.py::test_no_tool_accepts_sql_or_a_raw_query_string
-  description: No agent input accepts SQL, a SQL fragment, or a raw query string.
+    - tests/contract/test_mcp_tools.py::test_no_tool_input_accepts_sql_a_fragment_or_a_query_string
+    - tests/contract/test_mcp_tools.py::test_the_path_and_method_come_from_the_lock_and_never_from_a_caller
+    - tests/contract/test_mcp_tools.py::test_a_filter_the_lock_does_not_permit_is_refused
+    - tests/contract/test_mcp_tools.py::test_the_permitted_filters_are_accepted_by_the_same_function
+    - tests/contract/test_mcp_tools.py::test_the_in_list_escape_is_the_measured_one_and_not_the_sql_one
+    - tests/contract/test_mcp_tools.py::test_an_unordered_page_is_not_reachable
+  description: >-
+    No agent input accepts SQL, a SQL fragment, a raw query string, a path or a
+    runtime-selected operation. Every part of an upstream request except the
+    caller's values comes from the deployed lock, and each value is escaped for
+    the one position it occupies -- percent-encoded as a scalar, and
+    backslash-escaped and quoted as an `in` member, which is the rule measured
+    against the locked PostgREST rather than the one convention suggests.
 
 - id: AGT-SCOPE-001
   priority: P0
   target_session: 8
   test_nodeids:
-    - tests/integration/test_future_mcp.py::test_tool_discovery_respects_scopes
-  description: Tool discovery is filtered by the caller's scopes.
+    - tests/contract/test_mcp_tools.py::test_discovery_shows_only_what_the_callers_scopes_permit
+    - tests/contract/test_mcp_tools.py::test_a_resource_the_caller_cannot_reach_is_refused_not_merely_hidden
+    - tests/contract/test_mcp_tools.py::test_the_scope_sets_are_a_disjunction_of_conjunctions
+  description: >-
+    Tool discovery is filtered by the caller's scopes, and a resource a caller
+    cannot reach is refused when called rather than merely hidden from the list.
+    The scope sets are a disjunction of conjunctions (D421), so a tool requiring
+    two scopes is not advertised to a caller holding one.
 
 - id: AGT-DRIFT-001
   priority: P0
   target_session: 8
   test_nodeids:
-    - tests/integration/test_future_mcp.py::test_new_api_operation_does_not_become_agent_visible
+    - tests/contract/test_capability_compiler.py::test_a_new_api_operation_exposes_no_capability
   description: >-
     Adding an API operation does not expose an agent capability without an
-    explicit capabilities.yaml change.
+    explicit capabilities.yaml change. Written the only way that means anything:
+    a real operation is added to BOTH the reviewed surface and the approved
+    OpenAPI snapshot, and the compiled bytes are asserted not to move.
 
 - id: AGT-BUDGET-001
   priority: P0
   target_session: 8
   test_nodeids:
-    - tests/integration/test_future_mcp.py::test_response_row_and_byte_budgets_are_enforced
-  description: Row and response-size budgets are enforced server-side.
+    - tests/contract/test_mcp_tools.py::test_the_row_ceiling_is_the_locks_and_a_caller_can_only_lower_it
+    - tests/contract/test_mcp_tools.py::test_the_byte_ceiling_is_independent_of_the_row_ceiling
+    - tests/contract/test_mcp_tools.py::test_a_result_inside_both_budgets_is_returned
+    - tests/contract/test_mcp_tools.py::test_more_rows_than_the_ceiling_are_refused_rather_than_truncated
+  description: >-
+    Row and response-size budgets are enforced server-side and are independent
+    numbers: the row ceiling is the lock's and a caller's limit can only lower
+    it, and the byte ceiling is not expressible by a caller at all. A result
+    exceeding either is refused rather than truncated, because a truncated page
+    that does not say so is a wrong answer. Elapsed time and concurrency are
+    Run 8's and are deliberately not claimed here.
 
 - id: SEC-INJ-001
   priority: P0
   target_session: 8
   test_nodeids:
-    - tests/security/test_future_security_boundaries.py::test_injection_strings_remain_data
-  description: An injection payload stays data and does not alter query structure.
+    - tests/security/test_session8_agent_injection.py::test_a_payload_in_a_filter_value_does_not_change_the_request_structure
+    - tests/security/test_session8_agent_injection.py::test_a_payload_in_an_in_list_member_does_not_escape_the_list
+    - tests/security/test_session8_agent_injection.py::test_a_payload_in_a_COLUMN_position_is_refused_rather_than_escaped
+    - tests/security/test_session8_agent_injection.py::test_the_operator_position_is_a_closed_enum
+    - tests/security/test_session8_agent_injection.py::test_a_benign_value_still_produces_a_working_filter
+  description: >-
+    An injection payload stays data and does not alter query structure. Asserted
+    from the attacker's side, with full control of every input a caller supplies:
+    a value cannot introduce a parameter, a fragment or a second list member; a
+    column and an operator are refused against the lock's allowlist rather than
+    escaped, because an identifier has no safe encoding. The control arm proves
+    a benign value still produces a working filter.
 
 # ---------------------------------------------------------------------------
 # Session 9 — agent writes, audit, revocation

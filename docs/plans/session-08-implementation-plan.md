@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D436.**
+**Next free number after this table is D441.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -89,6 +89,11 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D433** | §4.9–4.11 treats "FastMCP forwards the bearer token to PostgREST" as the whole of the authorization design. | **Two of the measured refusals do not say what a reader would assume.** An anonymous request is refused **401 with a body of `42501 permission denied for function mcp_agent_context`** — a *privilege* error carrying an authentication status. A human `access` token is refused **403**, also on `42501`, by a missing GRANT rather than by the `token_use` branch. So neither the status nor the body identifies the cause, and the three 401s measured (`PT401` stale identity, `PGRST301` bad key, `42501` no privilege) are indistinguishable by status. | **No upstream status or error code is relayed.** A refusal carries a short machine reason for this process's own telemetry and nothing for a response body (ADR 0097). A test asserts that `42501`, `permission denied` and the function's name are all absent from what the refusal carries. | **D417 from the other side.** There, a human token naming the agent role was refused by a missing GRANT rather than by the hook — correct outcome, false reason. Here the same shape would let the runtime report "your token is invalid" for what is actually a privilege boundary, to a caller who is in no position to act on either. | 0125 |
 | **D434** | — (found by Run 5's mutation battery, N3.) | **The `HTTPError` branch of `resolve_agent_context` had never executed in any test.** The test recorder returned a 403 as an ordinary response object, which `urlopen` never does — it raises `HTTPError` for every 4xx and 5xx. So the assertions about refusal content were reaching the *other* branch, and a mutation that relayed PostgREST's error text to the caller **survived**. | The recorder raises `HTTPError` for any status ≥ 400, which is what urllib does. The branch every real refusal takes is now the branch the test exercises. | **D211–D214's family, inside a fixture.** A proof that has never executed in the configuration that ships, and nothing in a green suite says so. It is also what the battery is *for*: the test read correct, the product was correct, and the path between them was not the one production uses (ADR 0065's question, asked of a fixture). | — |
 | **D435** | — (found while writing Run 5's battery.) | **Two survivors were the mutation's fault, not the test's, and each hid a real gap.** N7 replaced the middleware body but still wrote through the `ContextVar`, so the mechanism it meant to break was still intact. N12 admitted the `postgres://` scheme, but the only `postgres://` case in the test carried **userinfo**, so a *different* rule refused it and the scheme rule was never isolated. | N7 swaps the mechanism itself — the `ContextVar` for a module-level holder — which is the thing measured to leak 11 of 12 concurrent requests. N12 gains a `postgres://postgres:5432/db` case with no userinfo, so **each rule has a case only it can refuse**. | **CLAUDE.md §1's rule, met twice in one battery**: when an arm survives, the repair may be the mutation rather than the assertion, and deciding which requires reading what actually ran. A battery that had recorded "2 survivors, weak tests" would have produced two false findings and left the real gap — a validator rule with no isolating case — in place. | — |
+| **D436** | `capability_compiler.compile_lock`: *"`upstream` is the ONE address the runtime may call — Run 6's fixed upstream."* | **The runtime cannot call it.** `bin/mcp-contract.sh lock` fills `upstream` from the deployed document's `routes.rest`, which is the project's **public** URL — `https://<domain>/api/rest`, behind Traefik and TLS. The agent plane runs on the `internal` Compose network, declared `internal: true` (*"no route off the host"*), where the address that resolves is `http://postgrest:3000` — the one Run 5 already dials and measured working. | **The runtime dials `APG_POSTGREST_URL`; the lock's `upstream` is the surface's published identity and nothing dials it** (ADR 0126). The field keeps its value and gains a corrected meaning: it says *which API surface this contract describes*, which is what makes two projects' locks distinguishable. A test asserts no request is built from it. | **D389's shape**: there, outputs v11 put the storage bounds in the rendered document while the deployed branch forbade them, and the runtime read the deployed one. Here a compiled artefact declares an address the consumer cannot use. Both are correct-looking URLs and only one resolves, so the separation has to be asserted rather than remembered. | 0126 |
+| **D437** | AGT-SQL-001: *no SQL, no fragment, no raw query string, no path, no runtime-selected operation.* | **Stated as absences it is satisfied by any code nobody has written badly yet.** The real hazard is narrower and is not SQL injection: PostgREST takes filters as `column=operator.value` in the query string, so a caller's *value* carrying `&` becomes a second parameter. Measured, with a control that CAN fail — `title=neq.<value>`, value `zzz&limit=1`: **percent-encoded → 3 rows** (one literal), **unencoded → 1 row** (a filter AND a limit). The first version of this measurement proved nothing: both arms returned zero, one because the value matched nothing and one because **RLS already excluded the injected owner**. | A construction rule instead of a list of absences (ADR 0127): every part of the request except the caller's values comes from the lock, and each value is escaped **for the position it occupies**. Columns, operators and orderings are checked against the lock's frozen sets before a request is built, so an invalid call costs no upstream request. | Two arms agreeing for different reasons is not a control, and Session 8 has now paid for that twice (D435 is the other). The re-measured arm is what makes the encoding claim mean anything. | 0127 |
+| **D438** | — (measured while building the adapter.) | **Percent-encoding does not remove a comma from `in.(…)` list syntax, and the SQL quote convention is wrong.** PostgREST decodes the query string *before* it parses the list. Measured against the locked image: `in.(weird,title)` → **0 rows** (silently split); `in.(weird%2Ctitle)` → **0 rows**; `in.("weird,title")` → **1 row**. And inside a quoted member an embedded quote needs a **backslash**: the doubled quote SQL uses → **0 rows**, `\"` → **1 row**. | Members are backslash-escaped (`\\` then `\"`), quoted, then percent-encoded. Verified against **eight** awkward values — comma, quote, backslash, trailing backslash, both, close-paren, dot, plain — each compared with the same row fetched by `eq.`, which needs no list syntax; **eight of eight agree**, and an absent value returns nothing. Then re-verified end to end by firing the **product's own builder** at the live service. | **Both wrong answers fail by matching nothing**, which reads as an empty result rather than an error — the worst failure mode available in a filter. A careful implementer would have reached for `%2C` first and for doubled quotes second, and neither would have raised anything. | 0127 |
+| **D439** | D414: the five `AGT-*` placeholders move in **Run 6**, and `CURRENT_SESSION` moves in **Run 7**. | **That split is not executable, and the count is six.** `test_every_later_requirement_has_a_placeholder` requires a placeholder for every requirement with `target_session > gate_session`; `test_no_requirement_at_or_before_the_gate_session_remains_future` forbids one for `target_session <= gate_session`. They are exact mirrors, so replacing the placeholders while `CURRENT_SESSION` is 7 reddens the first, and moving the constant first reddens the second. **`SEC-INJ-001` also targets session 8** and was not in D414's list of five. | **Run 6 does both, in one commit**, with all six requirements repointed at real tests — which is exactly what Session 7 Run 9 did for the same coupling. Run 7 keeps the publish work: the route, its precedence, and the health surface. | The handoff's instruction was written from the gate side only and would have produced a red commit whichever half went first. Undercounting by one is the smaller half: `SEC-INJ-001` sits in a different file under a different prefix, and D414 enumerated the `AGT-*` ones by name. | — |
+| **D440** | ADR 0124's transport allowlist, written in Run 5 with two rows. | **A third module needed one, and not because it reaches the network.** `mcp_query.py` imports `urllib.parse` to percent-encode, and the AST scan sees the top-level package `urllib` — the same name `urllib.request` presents. The allowlist could not tell an encoder from a sender. | The row is added with the reason stated, **and the test is tightened**: a module in the allowlist that is not one of the declared *senders* may not name `urlopen`, `Request` or `urlretrieve`. So a query builder that grew a sender is refused by its own row rather than covered by it. | The alternative was to drop `urllib` from the transport set, which would have removed the guard from the one module that does send. Naming the package and then distinguishing the callable is stricter than either half alone — and it is the same correction ADR 0124 made to the guard it replaced. | — |
 
 ---
 
@@ -487,18 +492,77 @@ executed, because the recorder returned a 403 the way `urlopen` never does.
 
 Suite **3597 passed, 261 skipped**.
 
-### Run 6 — The PostgREST adapter and the four tools
+### Run 6 — The PostgREST adapter and the four tools — **Done.**
 
-- A fixed upstream, a header allowlist, and encoded query construction — never
-  string concatenation of a caller value.
-- `list_resources`, `describe_resource` from the **lock only**: no live OpenAPI,
-  no database.
-- `query_resource`: structured input, frozen columns, typed operators, AND-only,
-  explicit ordering. **No SQL, no fragment, no raw query string, no path, no
-  runtime-selected operation** (AGT-SQL-001).
-- `run_report`: one named RPC.
-- Exactly four tools registered, names asserted lexicographically, schemas hashed
-  against the canonical contract.
+**What was measured.** Four rigs against a live PostgREST on the locked digest,
+eighteen migrations applied, **two owners and two agents** throughout so that a
+working filter could never be confused with an empty result.
+
+The operator spellings, `select=`, `order=`, `limit=`, and the 400 an unknown
+column gets. Then the two findings that changed the code:
+
+* **D437** — the injection arm. `title=neq.<value>` with value `zzz&limit=1`:
+  **percent-encoded → 3 rows**, **unencoded → 1 row**. The first version of this
+  measurement proved nothing — both arms returned zero, one because the value
+  matched nothing and one because **RLS already excluded the injected owner**.
+  Two arms agreeing for different reasons is not a control.
+* **D438** — the in-list rule, and **both obvious answers are wrong**.
+  `in.(weird%2Ctitle)` → **0 rows**: percent-encoding does not remove a comma
+  from list syntax, because PostgREST decodes before it parses. And the SQL
+  convention for an embedded quote → **0 rows**; a **backslash** escape → 1.
+  Verified across eight awkward values against the same rows fetched by `eq.`,
+  then re-verified end to end by firing **the product's own builder** at the
+  live service: 6 of 6, with the other owner's agent returning different counts
+  on every arm.
+
+Both wrong answers fail by matching **nothing**, which reads as an empty result
+rather than an error. That is why the escape rule is a test and not a comment.
+
+**What was built.** ADR 0126 and 0127. `mcp_lock.py` — the deployed lock, read
+once at startup and validated strictly, because it decides which columns a
+caller may name and which operation is reached. `mcp_query.py` — the
+construction rule AGT-SQL-001 reduces to: the operation is chosen **by name from
+the lock**, columns/operators/orderings are checked against frozen sets before a
+request is built, and values are escaped **by position**. `mcp_tools.py` — the
+four tools, two answering from the lock alone and two reaching PostgREST with the
+caller's own token, plus **two independent budgets**: the lock's row ceiling,
+which a caller may only lower, and a serialized-byte ceiling a caller cannot
+express at all.
+
+**D436 is the row to read.** Run 3's compiler calls the lock's `upstream` *"the
+ONE address the runtime may call"*, and it is the project's **public**
+`routes.rest` — unreachable from the `internal` network the agent plane runs on.
+The runtime dials the internal address Run 5 established; the lock's `upstream`
+is the surface's published identity, and a test asserts nothing dials it. D389's
+shape, in a compiled artefact.
+
+**D439: the placeholder replacement and `CURRENT_SESSION` cannot be split.**
+D414 assigned the five `AGT-*` placeholders to Run 6 and the constant to Run 7.
+`test_every_later_requirement_has_a_placeholder` and
+`test_no_requirement_at_or_before_the_gate_session_remains_future` are exact
+mirrors on the gate session, so whichever half moved first would go red. **And
+the count is six** — `SEC-INJ-001` also targets session 8 and was not in D414's
+list. Run 6 therefore moves **`CURRENT_SESSION` to 8** in the same commit as all
+six replacements, which is what Session 7 Run 9 did for the same coupling. Run 7
+keeps the publish work.
+
+`SEC-INJ-001` gets its own security module, asserting the property from the
+attacker's side: given full control of every input, the request's **structure**
+does not move, and a column or an operator is refused against the lock rather
+than escaped — because an identifier has no safe encoding.
+
+**D440** — ADR 0124's allowlist needed a third row for a module that does **not**
+reach the network: `mcp_query` imports `urllib.parse` to encode, and the scan
+sees the same top-level package a sender presents. The row is added and the test
+tightened, so an allowlisted encoder that grew a `urlopen` is refused by its own
+row.
+
+**The battery: 17 mutations, 17 killed**, each `FAILED` rather than `ERROR` with
+its control green in the same invocation. O2 is the one to read — it swaps the
+measured backslash escape for the SQL convention, which is the mistake this run
+came closest to shipping.
+
+Suite **3662 passed, 255 skipped**.
 
 ### Run 7 — Publish
 

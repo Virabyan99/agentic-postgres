@@ -1,8 +1,15 @@
-"""Agent capability surface, owned by Sessions 8 and 9.
+"""Agent capability surface still owned by Session 9.
 
-`AGT-SQL-001` is the load-bearing one. The product's central claim is that an
-agent has no path to arbitrary SQL under any authentication, and that claim is
-only worth what this test proves.
+**Session 8's five placeholders are gone**, replaced in Run 6 by real tests:
+`AGT-SQL-001`, `AGT-SCOPE-001`, `AGT-READ-001` and `AGT-BUDGET-001` live in
+`tests/contract/test_mcp_tools.py`, and `AGT-DRIFT-001` has been in
+`tests/contract/test_capability_compiler.py` since Run 3. The registry points at
+those, which is what lets `CURRENT_SESSION` move to 8 in Run 7 without reddening
+the gate (D414).
+
+What remains here is Session 9's: the write plane and the durable audit record.
+`AGT-SQL-001` used to be described as the load-bearing one in this file, and it
+still is -- it has simply moved to a module that can prove it.
 """
 
 from __future__ import annotations
@@ -14,31 +21,6 @@ pytestmark = [pytest.mark.p0, pytest.mark.integration]
 
 def unimplemented(session: int, what: str) -> None:
     pytest.fail(f"Replace this placeholder with the Session {session} implementation: {what}")
-
-
-@pytest.mark.future(session=8, requirement="AGT-READ-001")
-def test_mcp_read_equals_the_postgrest_result() -> None:
-    unimplemented(8, "the same identity gets identical RLS-constrained rows both ways")
-
-
-@pytest.mark.future(session=8, requirement="AGT-SQL-001")
-def test_no_tool_accepts_sql_or_a_raw_query_string() -> None:
-    unimplemented(8, "every input is structured; no SQL, fragment, or query string")
-
-
-@pytest.mark.future(session=8, requirement="AGT-SCOPE-001")
-def test_tool_discovery_respects_scopes() -> None:
-    unimplemented(8, "an agent cannot see a tool its scopes do not permit")
-
-
-@pytest.mark.future(session=8, requirement="AGT-DRIFT-001")
-def test_new_api_operation_does_not_become_agent_visible() -> None:
-    unimplemented(8, "adding an endpoint changes nothing without a capabilities.yaml edit")
-
-
-@pytest.mark.future(session=8, requirement="AGT-BUDGET-001")
-def test_response_row_and_byte_budgets_are_enforced() -> None:
-    unimplemented(8, "server-side limits hold regardless of client input")
 
 
 @pytest.mark.future(session=9, requirement="AGT-WRITE-001")

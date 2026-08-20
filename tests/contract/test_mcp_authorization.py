@@ -272,6 +272,7 @@ def test_the_upstream_url_is_an_address_and_never_a_credential() -> None:
         "APG_JWKS_FILE": "/etc/mcp/jwks.json",
         "APG_LISTEN_PORT": "8080",
         "APG_POSTGREST_URL": "http://postgrest:3000",
+        "APG_MCP_LOCK_FILE": "/etc/mcp/capability-lock.json",
     }
 
     assert settings_module.load_mcp(base).postgrest_url == "http://postgrest:3000"

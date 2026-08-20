@@ -33,6 +33,7 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 from app import settings as settings_module
 from app.claims import ClaimError, verify_claims
 from app.mcp_authorization import AgentContextMiddleware
+from app.mcp_lock import load_lock
 from app.tokens import LocalKeySet, MalformedToken, pre_parse
 
 if TYPE_CHECKING:  # pragma: no cover -- import-time typing only
@@ -231,7 +232,13 @@ class AgentTokenVerifier:
         )
 
 
-def build_server(verifier: AgentTokenVerifier, *, project_key: str, postgrest_url: str) -> Any:
+def build_server(
+    verifier: AgentTokenVerifier,
+    *,
+    project_key: str,
+    postgrest_url: str,
+    lock: Any | None = None,
+) -> Any:
     """The FastMCP server, with no tools registered.
 
     Run 6 registers exactly four, from the compiled capability lock. Until then
@@ -248,13 +255,18 @@ def build_server(verifier: AgentTokenVerifier, *, project_key: str, postgrest_ur
     """
     from fastmcp import FastMCP
 
-    return FastMCP(
+    server = FastMCP(
         name=f"agentic-postgres/{project_key}",
         auth=verifier,
         middleware=[AgentContextMiddleware(postgrest_url)],
         # Details of an internal failure are not an agent's to read (ADR 0097).
         mask_error_details=True,
     )
+    if lock is not None:
+        from app.mcp_tools import register
+
+        register(server, lock, base_url=postgrest_url)
+    return server
 
 
 def create_mcp_app() -> Starlette:
@@ -271,10 +283,16 @@ def create_mcp_app() -> Starlette:
     """
     settings = settings_module.load_mcp()
     key_set = LocalKeySet.from_path(settings.jwks_file)
+    # The lock is loaded BEFORE the server is built, so a lock this runtime
+    # cannot parse fails the start rather than producing a server with no tools.
+    # An agent plane answering discovery with an empty list is a surface nobody
+    # can tell from a correctly-empty one.
+    lock = load_lock(settings.capability_lock_file)
     server = build_server(
         AgentTokenVerifier(key_set, issuer=settings.issuer, audience=settings.audience),
         project_key=settings.project_key,
         postgrest_url=settings.postgrest_url,
+        lock=lock,
     )
     # `stateless_http`, so one HTTP request is one complete exchange. It is what
     # makes "cached for one HTTP request" a statement about a boundary the

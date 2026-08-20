@@ -198,15 +198,22 @@ def test_the_runtime_reads_the_same_rendered_artefact_the_other_verifiers_read(
     mounts = override["services"][runtime_override.MCP_SERVICE]["volumes"]
 
     assert mounts == [
-        f"{RENDERED}/{runtime_override.JWKS_FILENAME}:{runtime_override.MCP_JWKS_CONTAINER_PATH}:ro"
+        f"{RENDERED}/{runtime_override.JWKS_FILENAME}"
+        f":{runtime_override.MCP_JWKS_CONTAINER_PATH}:ro",
+        f"{RENDERED}/{runtime_override.MCP_LOCK_FILENAME}"
+        f":{runtime_override.MCP_LOCK_CONTAINER_PATH}:ro",
     ]
 
+    # The KEY SET must be the same artefact the REST verifier reads. The
+    # capability lock is the agent plane's own and PostgREST has no opinion
+    # about it, so only the first mount is compared against PostgREST's.
     postgrest = override["services"][runtime_override.REST_SERVICE]["volumes"]
-    host_sides = {mount.split(":", 1)[0] for mount in mounts + postgrest}
-    assert host_sides == {f"{RENDERED}/{runtime_override.JWKS_FILENAME}"}, (
+    key_sets = {mount.split(":", 1)[0] for mount in [mounts[0], *postgrest]}
+    assert key_sets == {f"{RENDERED}/{runtime_override.JWKS_FILENAME}"}, (
         "the agent plane must read the SAME rendered file the REST verifier reads, "
         "not a copy of it (D264)"
     )
+    assert all(mount.endswith(":ro") for mount in mounts)
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +322,8 @@ def _mcp_environment(**extra: str) -> dict[str, str]:
         # address, not a credential -- `test_mcp_authorization.py` is where the
         # difference is asserted.
         "APG_POSTGREST_URL": "http://postgrest:3000",
+        # Session 8 Run 6: the compiled capability lock (ADR 0127).
+        "APG_MCP_LOCK_FILE": "/etc/mcp/capability-lock.json",
     }
     environment.update(extra)
     return environment

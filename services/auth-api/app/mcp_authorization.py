@@ -47,9 +47,18 @@ _CURRENT: contextvars.ContextVar[_Held | None] = contextvars.ContextVar(
 
 @dataclass(frozen=True, slots=True)
 class _Held:
-    """A context and the fingerprint of the token it was resolved for."""
+    """A context, the token it was resolved for, and that token's fingerprint.
+
+    The token is carried because Run 6's tools forward it: the same compact
+    string the caller presented goes upstream for the read, exactly as it did
+    for the context lookup (ADR 0125). Holding it here rather than re-reading it
+    from the framework inside each tool keeps one answer per request to the
+    question "who is calling" -- and the fingerprint beside it is what proves the
+    two halves belong together.
+    """
 
     fingerprint: str
+    token: str
     context: AgentContext
 
 
@@ -82,8 +91,29 @@ def current_agent_context() -> AgentContext:
     return held.context
 
 
+def current_token() -> str:
+    """The compact token this request presented, for forwarding upstream.
+
+    Read from the same held value the context came from, and guarded by the
+    fingerprint: a token whose digest does not match the one the context was
+    resolved for is refused rather than forwarded, which is the check that turns
+    a held value outliving its request into a refusal instead of one caller's
+    read running as another.
+    """
+    held = _CURRENT.get()
+    if held is None:
+        raise UpstreamRefusal("no agent context was resolved for this request")
+    if fingerprint(held.token) != held.fingerprint:  # pragma: no cover -- corruption only
+        raise UpstreamRefusal("the held token does not match its fingerprint")
+    return held.token
+
+
 def _resolve(base_url: str, token: str) -> _Held:
-    return _Held(fingerprint=fingerprint(token), context=resolve_agent_context(base_url, token))
+    return _Held(
+        fingerprint=fingerprint(token),
+        token=token,
+        context=resolve_agent_context(base_url, token),
+    )
 
 
 class AgentContextMiddleware:

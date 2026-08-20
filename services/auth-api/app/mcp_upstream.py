@@ -42,11 +42,18 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
-#: The RPC this module calls, and the only one. Named as a constant because
-#: `mcp_upstream` is not a general PostgREST client and must not become one:
-#: Run 6's tools reach the read surface through their own adapter, with a
-#: header allowlist and encoded query construction, and a module that already
-#: knew how to POST anywhere would be the obvious place to put them.
+#: The context RPC, named as a constant so no caller can select it.
+#:
+#: Run 5's note here said this module "is not a general PostgREST client and must
+#: not become one", with Run 6's tools reaching the read surface through their
+#: own adapter. **Run 6 put the executor here instead**, and the reason is ADR
+#: 0124: a second module with a transport would be a third allowlist row, and
+#: two places that build HTTP requests to the same upstream are two places to
+#: review and one of them will drift. This module is the single transport to
+#: PostgREST. What keeps it from being a *general* client is not its size: it is
+#: that `execute` accepts an `UpstreamRequest` built by `mcp_query` from the
+#: lock, and there is no code path here that takes a path or a method from a
+#: caller.
 AGENT_CONTEXT_PATH = "/rpc/mcp_agent_context"
 
 #: The singular representation. Measured (M2): PostgREST answers a
@@ -206,3 +213,65 @@ def resolve_agent_context(base_url: str, token: str) -> AgentContext:
         # The upstream is unreachable. A refusal, not a degraded mode: there is
         # no cached identity to fall back to, deliberately (ADR 0125).
         raise UpstreamRefusal(f"upstream unreachable: {type(error).__name__}") from error
+
+
+def execute(base_url: str, token: str, request: Any) -> list[dict[str, Any]]:
+    """Run one built request and return its rows.
+
+    `request` is an `mcp_query.UpstreamRequest`, whose every member came from the
+    lock or was escaped for the position it occupies (ADR 0127). **Nothing here
+    accepts a path, a method or a query from a caller** — that is what keeps a
+    single transport module from being a general client.
+
+    The headers are `mcp_query.FORWARDED_HEADERS` and nothing else. A caller's
+    `Prefer` would change the response shape and cost (`count=exact`,
+    `return=representation`); a caller's `Range` would move the window past the
+    lock's `max_rows`. None of them is forwarded, and neither is `Accept`.
+
+    The rows are returned as PostgREST sent them, which is the point: the RLS
+    that constrains a row constrains this result, and this process adds no
+    filtering of its own that could disagree with the database's.
+    """
+    from app.mcp_query import FORWARDED_HEADERS
+
+    headers = {"Authorization": f"Bearer {token}", "Accept": ARRAY_ACCEPT}
+    if set(headers) != set(FORWARDED_HEADERS):  # pragma: no cover -- a guard on the pair
+        raise UpstreamRefusal("the forwarded header set and the allowlist disagree")
+
+    built = urllib.request.Request(  # noqa: S310 -- a derived internal URL, path from the lock
+        f"{base_url.rstrip('/')}{request.target}",
+        data=b"{}" if request.method == "post" else None,
+        headers={
+            **headers,
+            **({"Content-Type": "application/json"} if request.method == "post" else {}),
+        },
+        method=request.method.upper(),
+    )
+    try:
+        with urllib.request.urlopen(  # noqa: S310
+            built, timeout=max(request.timeout_ms, 1) / 1000
+        ) as response:
+            return _rows(int(response.status), response.read())
+    except urllib.error.HTTPError as error:
+        error.read()
+        raise UpstreamRefusal(f"upstream refused with status {error.code}") from error
+    except OSError as error:
+        raise UpstreamRefusal(f"upstream unreachable: {type(error).__name__}") from error
+
+
+def _rows(status: int, body: bytes) -> list[dict[str, Any]]:
+    """A row array, or a refusal. The same strictness `parse_agent_context` uses.
+
+    A non-200 is a refusal that names no upstream code, for D433's reason: a 401
+    here can be a bad signature, a stale identity or a missing privilege, and
+    the three are indistinguishable by status.
+    """
+    if status != 200:
+        raise UpstreamRefusal(f"upstream refused with status {status}")
+    try:
+        document = json.loads(body)
+    except ValueError as error:
+        raise UpstreamRefusal(f"upstream body is not JSON: {error}") from error
+    if not isinstance(document, list) or not all(isinstance(row, dict) for row in document):
+        raise UpstreamRefusal("upstream body is not an array of rows")
+    return document

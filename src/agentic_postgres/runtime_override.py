@@ -178,6 +178,15 @@ STORAGE_JWKS_CONTAINER_PATH = "/etc/storage/jwks.json"
 #: predicted: the list had never moved for STORAGE either. See ADR 0122.
 MCP_JWKS_CONTAINER_PATH = "/etc/mcp/jwks.json"
 
+#: The compiled capability lock, and where the agent plane reads it.
+#:
+#: Rendered per project by `bin/mcp-contract.sh lock` during the deploy, into the
+#: same directory the key set is rendered into, and mounted read-only here. The
+#: container path is fixed so `compose.yaml` can name it while staying
+#: project-neutral (ADR 0127).
+MCP_LOCK_FILENAME = "mcp-capability-lock.json"
+MCP_LOCK_CONTAINER_PATH = "/etc/mcp/capability-lock.json"
+
 #: Container paths a sensitive-named environment key may reference (ADR 0064).
 #:
 #: `PGRST_JWT_SECRET` is refused by ADR 0008's denylist -- it ends in `_secret`
@@ -225,6 +234,8 @@ __all__ = [
     "JWKS_CONTAINER_PATH",
     "JWKS_FILENAME",
     "MCP_JWKS_CONTAINER_PATH",
+    "MCP_LOCK_CONTAINER_PATH",
+    "MCP_LOCK_FILENAME",
     "MCP_SERVICE",
     "MCP_SERVICE_PORT",
     "MIGRATIONS_MOUNT",
@@ -515,7 +526,12 @@ def build_override(
             # nothing to verify with, and the gap was invisible until a
             # container started somewhere real.
             MCP_SERVICE: {
-                "volumes": [f"{rendered_directory}/{JWKS_FILENAME}:{MCP_JWKS_CONTAINER_PATH}:ro"],
+                "volumes": [
+                    f"{rendered_directory}/{JWKS_FILENAME}:{MCP_JWKS_CONTAINER_PATH}:ro",
+                    # Run 6. The compiled capability lock -- the whole of what
+                    # this deployment's four tools serve (ADR 0127).
+                    f"{rendered_directory}/{MCP_LOCK_FILENAME}:{MCP_LOCK_CONTAINER_PATH}:ro",
+                ],
             },
         }
     }

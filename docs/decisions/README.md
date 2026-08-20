@@ -189,3 +189,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0123](0123-the-published-protocol-revision-is-the-highest-the-runtime-implements.md) | The published protocol revision is the highest the runtime implements | 8 | Accepted |
 | [0124](0124-the-transport-guard-is-about-the-trust-anchor-not-the-transport.md) | The transport guard is about the trust anchor, not the transport | 8 | Accepted |
 | [0125](0125-the-agent-plane-forwards-the-callers-own-token-and-resolves-context-once.md) | The agent plane forwards the caller's own token, and resolves context once | 8 | Accepted |
+| [0126](0126-the-runtime-dials-the-internal-upstream-and-the-lock-names-the-public-surface.md) | The runtime dials the internal upstream; the lock names the public surface | 8 | Accepted |
+| [0127](0127-a-caller-value-is-a-value-and-the-request-is-built-from-the-lock.md) | A caller value is a value, and the request is built from the lock | 8 | Accepted |

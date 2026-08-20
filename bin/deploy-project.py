@@ -1311,6 +1311,40 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("  no JWKS: this session runs no service that verifies a token")
 
+    # Session 8, Run 6. The compiled capability lock, into the same rendered
+    # directory the key set went to, from where `runtime_override.py` mounts it
+    # read-only (ADR 0127).
+    #
+    # **Written in the run that consumes it.** A mount whose file nothing
+    # produces is D381 exactly -- storage was declared the third verifier in
+    # four places and handed no key set, and the gap was invisible until a
+    # container started somewhere real. The producer and the consumer arrive
+    # together or neither does.
+    #
+    # `--outputs` is the document THIS deploy is about to write, so the lock is
+    # compiled last, from the rendered outputs rather than from the previous
+    # deploy's. The upstream it records is that document's public `routes.rest`,
+    # which names the API surface the capabilities were compiled against and is
+    # NOT what the runtime dials (ADR 0126).
+    if arguments.through_session >= AGENT_PLANE_SESSION:
+        lock_path = deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME
+        compiled = run(
+            str(release / "bin" / "mcp-contract.sh"),
+            "lock",
+            "--outputs",
+            str(deployed_output.deployed_path(key)),
+        )
+        if compiled.returncode != 0:
+            fail(
+                EXIT_VALIDATION,
+                f"the capability lock could not be compiled:\n{compiled.stderr}",
+            )
+        lock_path.write_text(compiled.stdout, encoding="utf-8")
+        lock_path.chmod(0o444)
+        print(f"  capability lock  {lock_path}")
+    else:
+        print("  no capability lock: this session runs no agent plane")
+
     # The two cluster planes, in the only order they work in: roles, the
     # identity sentinel and pgvector exist before a migration can reference
     # them, and `migration_user` cannot authenticate until bootstrap has given
