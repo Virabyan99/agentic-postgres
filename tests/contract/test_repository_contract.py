@@ -45,7 +45,12 @@ REQUIRED_PATHS = (
     "migrations/.gitkeep",
     "services/auth-api/.gitkeep",
     "services/docs/.gitkeep",
-    "services/mcp/.gitkeep",
+    # `services/mcp/.gitkeep` stood here from Session 1 until Session 8 Run 4,
+    # and is gone with its directory (ADR 0121). The agent plane is a third
+    # `APP_MODE` of the one application image, because a second service
+    # directory could not import `LocalKeySet`, the strict request parser or the
+    # error vocabulary -- and a directory that cannot hold the code is a
+    # directory that will eventually hold a second copy of it.
     "docs/acceptance-matrix.md",
     "docs/api-operations.md",
     "docs/api-surface.md",

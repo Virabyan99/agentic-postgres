@@ -184,3 +184,6 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0118](0118-the-agent-planes-rpcs-are-reviewed-and-unpublished.md) | The agent plane's RPCs are reviewed and unpublished | 8 | Accepted |
 | [0119](0119-an-operation-id-is-derived-because-postgrest-publishes-none.md) | An operation id is derived, because PostgREST publishes none | 8 | Accepted |
 | [0120](0120-a-tool-may-be-backed-by-more-than-one-capability.md) | A tool may be backed by more than one capability | 8 | Accepted |
+| [0121](0121-the-agent-plane-is-a-third-mode-of-the-one-application-image.md) | The agent plane is a third mode of the one application image | 8 | Accepted |
+| [0122](0122-the-verifier-roster-is-a-table-and-every-verifier-is-in-it.md) | The verifier roster is a table, and every verifier is in it | 8 | Accepted |
+| [0123](0123-the-published-protocol-revision-is-the-highest-the-runtime-implements.md) | The published protocol revision is the highest the runtime implements | 8 | Accepted |

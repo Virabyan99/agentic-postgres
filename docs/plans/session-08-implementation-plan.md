@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D423.**
+**Next free number after this table is D431.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -76,6 +76,14 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D420** | — (found during Run 3). | **`config.load_capabilities_manifest` refused *every* `enabled: true` capability**, with the message *"no live API contract exists to validate it against in this session"*. That was true when it was written and **stopped being true in Session 5**, which shipped `contracts/postgrest-api-surface.yaml` and the approved OpenAPI snapshot. It survived three sessions because nothing ever enabled a capability, so the guard's stated condition and its behaviour never had to agree. | The blanket refusal is removed and the validation moves to `capability_compiler`, which needs two documents `load_capabilities_manifest` is not given. `CapabilityContractError` survives and `CompilerError` now **subclasses** it, so the exit-5 distinction the class was created for moves with the check. | A guard whose stated condition is false is worse than no guard: it reads as a live control and is a comment. It is the mirror of **D391** -- there, a guard whose result was discarded; here, a guard whose reason had expired. Neither is visible while nothing exercises it. | — |
 | **D421** | — (found during Run 3, by reading the compiler's own output). | **A flat `discovery_scopes` list cannot distinguish "any of" from "all of".** `query_resource` is `notes:read` OR `tasks:read`; `run_report` is `notes:read` AND `tasks:read`. Flattened, **both are the same two strings** -- so an agent holding only `notes:read` would be shown `run_report` in discovery and refused when it called. | `discovery_scope_sets`: a disjunction of conjunctions. One set per backing capability; the tool is discoverable when the caller holds every scope in **any one** set. | Found by reading the compiled artefact rather than by a failing test, which is the only way this class shows up: both spellings validate, both look right, and the difference is invisible until an agent holds exactly half of what a tool needs. **A tool list that advertises what it will refuse is a tool list that lies.** | 0120 |
 | **D422** | — (found by the full suite, during Run 3). | **`CFG-013` is a P0 requirement whose description became false.** It read *"the capability surface is empty by default, cannot be enabled without a live backing contract, and cannot express SQL or a raw query"*, and two of its three clauses stopped being true the moment five capabilities were enabled. `test_every_registered_node_id_is_collectible` caught the renamed node ids; **nothing would have caught the stale description** — D175 records that as a review rule with no test behind it. | The node ids move and the description is rewritten to the property the old one was an instance of: the surface is **exactly the reviewed set**, compiled against a live backing contract rather than trusted, unable to declare a backend it does not reach, and unable to express SQL. A compiler node id joins the three manifest ones, so the "live backing contract" clause points at the thing that now enforces it. | **Not a weakening, and the distinction is the whole of ADR 0096.** "Nothing is enabled" proved less than "exactly the reviewed set is enabled, each resolved against the reviewed contract" — the second refuses a sixth capability and the first never had to. A P0 description may not be relaxed; this one is replaced by a stricter statement of the same property, which is what the README permits and what ADR 0119/0120 authorise. | 0119 |
+| **D423** | §4.2: pin FastMCP **3.4.5**. D406 predicted at plan time that the number was asserted rather than observed. | **3.4.5 exists** -- D406's prediction is corrected, not confirmed. What is wrong is the repository's own entry: `FASTMCP_VERSION` has read **2.14.1** since Session 1 and **installs cleanly and then fails to import** against the locked `python:3.12-slim`, with `ModuleNotFoundError: No module named 'pydantic_settings'`. Cause, read rather than guessed: fastmcp 2.14.1 declares `mcp>=1.24.0` with no ceiling, pip resolves **mcp 2.0.0**, and that major dropped a transitive dependency fastmcp imports directly and never declared. Constrained to `mcp<2` it imports. Control: `fastmcp==999.999.999` is refused by the same command. | The entry moves to a version that has been **run**, and the Dockerfile's trailing import control names `fastmcp` and `mcp`. Locked with `--update --packages-only`, which moved one package and carried all **ten image digests forward unchanged** -- verified by diff, so D321's `pgvector:pg18` cannot travel in an MCP run. | **D201 with the defect finally arriving.** `SCALAR_VERSION` named a release that never existed for four sessions because nothing built from it; this named a release that *did* exist and stopped working, through nobody's change here. A lock verifies what it can dereference, and dereferencing is not importing -- which is **ADR 0083's distinction, second instance**. | 0121 |
+| **D424** | §4.2 treats the FastMCP version as a free choice. | **It is bounded by FastAPI, and the boundary was bisected.** `fastmcp-slim[server]` moved to `starlette>=1.0.1` at **3.4.1**; `fastapi==0.121.2` requires `starlette<0.50.0,>=0.40.0`. Measured one arm per patch release: 3.4.0 resolves, 3.4.1 through 3.4.7 are each `ResolutionImpossible`. Controls: `3.4.7 + pydantic==1.10.0` -> CONFLICT, `3.4.5` alone -> OK. 3.4.0 then installed **for real**, not `--dry-run`, beside the entire pinned set: everything imports, `pip check` clean, mcp 1.29.0 and starlette 0.49.3. | **3.4.0**, pinned as a measured ceiling with the reason at the lock entry. Adopting `latest` would mean bumping fastapi to **0.141.1** -- twenty minor releases, on the service that hashes passwords and signs tokens -- inside a run about the agent plane. | The ceiling is what makes **ADR 0121's one-image model possible at all**: 3.4.1 would force a second image for the agent plane, and a second image cannot import `LocalKeySet`. So the number is load-bearing rather than current, and raising it is a decision about ADR 0101 rather than a dependency refresh. Bumping FastAPI instead is **D321's mistake with a different package**. | 0121 |
+| **D425** | D409, and ADR 0113's own Consequences section: *"Storage joins the recreate list ... There are now three."* | **It never joined.** `bin/rotate-signing-key.py` still read `VERIFIERS = (runtime_override.REST_SERVICE,)` -- **one of three** -- with a Session 6 comment saying *"one today ... and Session 9 adds agent-facing verifiers"*, which was true when written and is the sentence that made the omission look intended. `promote_rotation` blocks until every name in that tuple has acknowledged, so a rotation would have switched the signing key while the storage container still held the retired set. Every test in the module iterates `for verifier in command.VERIFIERS`, so none of them could see it. | The roster becomes a **table**, one row per verifier carrying service and container path, with storage and mcp in it. Two tests, deliberately: a sweep DERIVED from `compose.yaml` (every service given `APG_JWKS_FILE`, plus PostgREST) that catches the *next* verifier, and a literal anchor naming storage and mcp that a bad edit to the product cannot move. | **D333's question for the sixth time, and the first time the unimplemented half is an ADR's own stated consequence.** The symptom would have been **D276's**: 401 on every token from one surface, invisible until something asked both. And the tests being derived entirely from the constant is **D300/D416** again -- a set derived from the product cannot refuse a bad edit to the product. | 0122 |
+| **D426** | `VERIFIER_JWKS_PATH = runtime_override.JWKS_CONTAINER_PATH`, guarded by `test_the_key_set_is_read_where_the_container_reads_it`. | **One constant, three paths.** PostgREST reads `/etc/postgrest/jwks.json`, storage `/etc/storage/jwks.json`, and the agent plane now `/etc/mcp/jwks.json`. The guard asserted one constant equals one constant and passed throughout. | The path comes from the roster row. `VERIFIER_JWKS_PATH` is **deleted rather than generalised**, and a test asserts the attribute is gone -- a single name for a per-verifier value is the defect, not its spelling. The replacement asserts the map service -> path and that no two verifiers share one. | **CLAUDE.md §6: a test comparing two constants is not testing the thing between them.** Session 7 Run 7's M8 found the same shape with both constants holding the same number; here they held the same *string* for one of three readers. | 0122 |
+| **D427** | `loaded_digest` reads a verifier's key set with `docker exec <container> cat <path>`. | **It cannot, in the image of the only verifier the roster held.** Measured against the locked images on Docker 29.5.2: `postgrest:v14.16` has neither `cat` nor `sh` -- both exit **127**, *"executable file not found in $PATH"* -- while `docker cp` on the same image exits 0. Control: the locked `python:3.12-slim` has both. So `acknowledge` raises `EXIT_STATE` for PostgREST and **promotion can never be unblocked**. | `docker cp` streamed to stdout, with the single archive member extracted so the digest is of the FILE rather than of the tar. Built by `read_command`, a pure function, so the shape is assertable offline instead of an AST dump being searched for `'exec'`. | **D305 and D411, arriving in the one command that most needed them.** It also gives the standing open item a measured cause: *"the rotation window -- the only thing keeping two Session 5 claims red"* has been carried three sessions, and its second phase could not complete. Whether `docker cp` finishes the sequence is a **live-host** claim this session does not assert. | 0122 |
+| **D428** | Outputs v12, written in Run 1: *"the MCP protocol revision the deployed runtime actually **negotiated**, read FROM the runtime"*. | **A negotiated revision is a fact about the CLIENT.** Measured against a running FastMCP 3.4.0: an `initialize` asking for `2025-11-25` is answered `2025-11-25`; the control arm asking for `2025-03-26` is answered **`2025-03-26`**. A field filled from one handshake records the version of the probe that measured it. `DEFAULT_NEGOTIATED_VERSION` is the neighbouring trap -- `2025-03-26`, what an unversioned caller gets, two revisions below the ceiling. | The field is the **highest revision the runtime implements**, read from `mcp.types.LATEST_PROTOCOL_VERSION` at startup and never written down here. The schema's description is corrected in place. No version bump: the member's shape and nullability are unchanged, only what it means. | The second half of Run 1's sentence -- *never from a document that hoped for one* -- was right, and the first half named the wrong quantity. **Nothing in the deployment pipeline may fill this by asking the server**, which is the opposite of what the old description invited. | 0123 |
+| **D429** | §12/§19: the MCP container has its own health routes, and every other application service here carries a Compose healthcheck. | **`services/auth-api/` may contain no network client at all.** `test_the_service_never_constructs_a_network_jwks_client` forbids `PyJWKClient`, `urllib`, `httpx`, `requests`, `aiohttp` and `socket` anywhere under that tree, by AST, with a control proving it tells code from prose. A liveness probe written as `app/mcp_health.py` is refused by it -- correctly. **The guard is nevertheless escaped by the existing pattern**: the auth service's `HEALTHCHECK` performs an HTTP request from an inline `python -c` string in the Dockerfile, which no AST scan of `.py` files can see. | **Run 4 ships the `mcp` service with no healthcheck, and says so where the entry is.** The reasoning the probe would have encoded is written there for Run 7, which the plan already gives the health surface: a 401 proves the process serves and the verifier is mounted, and **a 200 is a failure** because it means the boundary is gone. Nothing starts this container before Run 7 in any case. | Weakening a P0 guard to fit a liveness probe is the wrong trade, and the honest alternative to a hacky one-liner is to leave the surface to the run that owns it. The escape hatch is recorded rather than used: a guard satisfied by moving code into a string is **D277's shape** -- there, an AST scan satisfied by dead code -- and whether it should scan the import graph instead is a decision, not a tidy-up. | -- |
+| **D430** | --- (met while implementing ADR 0122.) | **A `@dataclass` cannot be defined in a `bin/` command module.** `tests/contract/test_rotate_signing_key.py` loads the command with `spec_from_file_location` + `exec_module` and never registers it in `sys.modules`; `dataclasses` looks the defining module up by name while processing annotations, so the class raises `AttributeError: 'NoneType' object has no attribute '__dict__'` **at import, inside the test rather than the command**. | `Verifier` is a `NamedTuple`, which needs no such lookup, and the constraint is written at the class rather than in a commit message. | The failure names neither dataclasses nor the loader, and it appears only under the test harness -- so the command runs fine by hand and the suite goes red. Recorded because the next person to reach for a dataclass in a `bin/` command will meet it, and because a five-minute diagnosis is worth one sentence. | -- |
 
 ---
 
@@ -325,15 +333,83 @@ which is the test written the only way that means anything, by *adding a real
 operation to both the contract and the snapshot* and asserting the compiled
 bytes do not move.
 
-### Run 4 — The runtime and the fourth verifier
+### Run 4 — The runtime and the fourth verifier — **Done.**
 
-- Measure FastMCP, then lock with `--packages-only` (D406).
-- The image, hardened like storage: read-only rootfs, uid 65532, no shell.
-- Mount the rendered `jwks.json` by ADR 0113's mechanism; MCP is the **fourth**
-  verifier, so ADR 0088's recreate list and `SEC-KEY-002`'s readings both move
-  (D409).
-- The token verifier: the strict contract, `token_use: "agent"`, `sub` as the
-  agent id, exact scopes, positive `authz_version`.
+**What was measured, and every arm had a control.**
+
+**FastMCP, against the locked `python:3.12-slim` digest on Docker 29.5.2.** The
+runbook's **3.4.5 exists** — D406 predicted a fabricated number and was wrong
+about that. What was wrong is this repository's own entry: **2.14.1, locked since
+Session 1, installs and does not import** (`ModuleNotFoundError: No module named
+'pydantic_settings'`), because it declares `mcp>=1.24.0` with no ceiling, pip
+resolves mcp 2.0.0, and that major dropped a dependency fastmcp imports directly
+and never declared (**D423**). And the adoptable version is **bounded by
+FastAPI**: `fastmcp-slim[server]` moved to `starlette>=1.0.1` at 3.4.1 while
+`fastapi==0.121.2` requires `starlette<0.50.0`. Bisected, one arm per patch
+release — **3.4.0 resolves, 3.4.1 through 3.4.7 do not** (**D424**). 3.4.0 then
+installed for real beside the whole pinned set: every package imports, `pip
+check` clean. Locked with `--update --packages-only`, and the diff confirms it
+moved **one package and carried all ten image digests forward unchanged**.
+
+**The framework's own surface, from a RUNNING server.** `verify_token(token:
+str) -> AccessToken | None` is handed the raw compact token, which is what Run 5
+forwards. No header → 401, bad token → 401, good token → 200. And the finding
+that mattered: a server asked to `initialize` at `2025-03-26` **answers
+`2025-03-26`**, so a *negotiated* protocol revision is a fact about the client
+(**D428**, ADR 0123). Also measured, and it turns `authorization_spec_conformant`
+from prose into an observation: a 401 from a bare `TokenVerifier` carries **no
+`WWW-Authenticate` challenge**, which RFC 9728 requires.
+
+**D409 was the bullet to check, and the answer was worse than it predicted.**
+ADR 0088's recreate list had never moved for the **third** verifier either.
+`bin/rotate-signing-key.py` still read `VERIFIERS = (REST_SERVICE,)` — one of
+three — while ADR 0113's own Consequences section says *"storage joins the
+recreate list"*. A rotation would have promoted as soon as PostgREST
+acknowledged, with storage still on the retired set: **D276's symptom** (D425).
+Underneath it, two more: one `VERIFIER_JWKS_PATH` for verifiers that read three
+different paths (**D426**), and `docker exec … cat` as the read mechanism when
+the locked PostgREST image is **distroless and exits 127** for both `cat` and
+`sh` — so `acknowledge` could never unblock a promotion (**D427**). That last one
+gives the three-session-old rotation-window open item a measured cause.
+
+**What was built.** ADR 0121, 0122 and 0123. The agent plane as a **third
+`APP_MODE` of the one image** — one build context, because a second service
+directory could not import `LocalKeySet` and the fourth verifier acquiring a
+second key-set parser is exactly how D381 happened to the third.
+`app/mcp_runtime.py`: the key set from the rendered file by path, and an
+`AgentTokenVerifier` whose `jwt.decode` arguments and option flags are
+`AuthService.authenticate`'s line for line. `McpSettings` and `load_mcp`, which
+**refuse to start** when handed a signing key or any database setting — making
+D407's zero share of the connection budget a decision rather than an oversight.
+The `mcp` Compose service, hardened as storage is, `profiles: [session8]`, and
+deliberately **absent from `POST_BOOTSTRAP_SERVICES`** (D410). The verifier
+roster as a table, with all three verifiers and their own paths.
+
+**No tools are registered**, and that is Run 6's. A placeholder would be a
+discovery response that lies, which is D421's lesson.
+
+**What Run 4 did NOT ship, and why.** The `mcp` service carries **no
+healthcheck** (**D429**). The probe was written and removed:
+`test_the_service_never_constructs_a_network_jwks_client` forbids every network
+name under `services/auth-api/`, correctly, and weakening a P0 guard to fit a
+liveness check is the wrong trade. Run 7 owns the health surface and the
+reasoning is left at the Compose entry for it. Recorded in the same row: that
+guard is **escaped by an inline `python -c` in the Dockerfile**, which is D277's
+shape and a decision somebody should take deliberately. `MCP_MEMORY_LIMIT` is a
+rendered constant at 384 MiB, **inherited and not measured**, flagged as such at
+the constant — ADR 0082 is the shape the measurement takes and **Run 8 owns
+budgets**.
+
+**The battery: 12 mutations, 12 killed**, every one `FAILED` rather than `ERROR`,
+each control green in the same invocation. **And the battery was itself
+controlled** — two self-check arms confirmed it reports `ERRORED` for an
+import-time break and `SURVIVED` for an uncovered change, because a battery that
+has only ever printed KILLED has not shown it can print anything else (D386).
+M9 is the one to read: it deletes the storage row from the roster, reproducing
+the Session 7 defect exactly, and the derived sweep and the literal anchor both
+die.
+
+Suite **3563 passed, 261 skipped**.
 
 ### Run 5 — The authorization path
 

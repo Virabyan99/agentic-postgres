@@ -20,11 +20,18 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-#: The two modes one image runs (ADR 0101). Required, never defaulted: an image
-#: that picked a mode by omission would start the wrong service with a
-#: correct-looking configuration, which is ADR 0055's reasoning applied to
-#: behaviour rather than to a value.
-APP_MODES: frozenset[str] = frozenset({"auth", "storage"})
+#: The three modes one image runs (ADR 0101, extended by ADR 0121). Required,
+#: never defaulted: an image that picked a mode by omission would start the
+#: wrong service with a correct-looking configuration, which is ADR 0055's
+#: reasoning applied to behaviour rather than to a value.
+#:
+#: `mcp` is Session 8's, and it is the first mode that reads NO database
+#: settings at all. It is a mode of this image rather than a second service
+#: directory for the reason `compose.yaml` gives at `storage`: a second
+#: directory could not import `LocalKeySet`, the strict request parser or the
+#: error vocabulary -- and the fourth verifier getting a second key-set parser
+#: is how D381 happened to the third.
+APP_MODES: frozenset[str] = frozenset({"auth", "storage", "mcp"})
 
 
 class MissingSetting(RuntimeError):
@@ -136,6 +143,74 @@ class Settings:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class McpSettings:
+    """The agent plane's environment, and what it does NOT contain is the point.
+
+    A separate type rather than `Settings` with six optional fields, because the
+    database members of `Settings` are not "unused here" -- they are **forbidden
+    here** (ADR 0121, D407). The MCP runtime holds no database credential, which
+    is why it takes no share of ADR 0099's connection budget, and a dataclass
+    whose `database_role` was merely `None` would make that zero an accident
+    rather than a decision: the next person to need a connection would find a
+    field waiting for a value.
+
+    So there is no `conninfo` property here, no pool size and no passfile. The
+    only way to add one is to add it, in front of a reviewer, with the budget
+    arithmetic to answer for.
+    """
+
+    project_key: str
+    environment: str
+    issuer: str
+    audience: str
+    #: Required, not optional. MCP is the FOURTH verifier (ADR 0113, ADR 0122)
+    #: and issues nothing, so this is its only source of key material. A
+    #: verifier with no key set refuses every token, and a container that starts
+    #: and refuses everything is worse than one that does not start -- it looks
+    #: deployed. That sentence is D381's epitaph and it is repeated here because
+    #: this is the boundary where it would happen again.
+    jwks_file: Path
+    listen_port: int
+
+
+def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
+    """Read the agent plane's environment, or raise.
+
+    Split from `load` rather than folded into it because the two return
+    different shapes and share no database settings at all. What they DO share
+    is the discipline: every setting required, none defaulted, and the variables
+    a mode must not receive refused rather than ignored.
+    """
+    if environ is not None:
+        previous = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(environ)
+        try:
+            return load_mcp()
+        finally:
+            os.environ.clear()
+            os.environ.update(previous)
+
+    for name in FORBIDDEN_VARIABLES["mcp"]:
+        if os.environ.get(name):
+            raise MissingSetting(
+                f"{name} is set in mcp mode. The agent plane verifies tokens and reaches "
+                "PostgREST over HTTP as the caller; it holds no signing key and no database "
+                "credential, and its zero share of the connection budget is a decision "
+                "(ADR 0121, D407) rather than an omission"
+            )
+
+    return McpSettings(
+        project_key=_required("APG_PROJECT_KEY"),
+        environment=_required("APG_PROJECT_ENVIRONMENT"),
+        issuer=_required("APG_JWT_ISSUER"),
+        audience=_required("APG_JWT_AUDIENCE"),
+        jwks_file=Path(_required("APG_JWKS_FILE")),
+        listen_port=_required_int("APG_LISTEN_PORT"),
+    )
+
+
 def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settings:
     """Read the environment, or raise.
 
@@ -163,6 +238,17 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
 
     if mode not in APP_MODES:
         raise MissingSetting(f"APP_MODE must be one of {sorted(APP_MODES)}, not {mode!r}")
+
+    if mode == "mcp":
+        # Refused rather than handled, because every field below it is a
+        # database setting the agent plane must not have (ADR 0121). Falling
+        # through would take the `else` branch and demand a SIGNING KEY of the
+        # one runtime furthest from being an issuer -- a wrong answer that looks
+        # like a configuration mistake.
+        raise MissingSetting(
+            "mcp mode has no database settings and is loaded by load_mcp(); "
+            "Settings is the auth and storage shape"
+        )
 
     if mode == "storage":
         # Absent, not ignored. A storage container holding a signing key is a
@@ -255,6 +341,27 @@ STORAGE_VARIABLES: tuple[str, ...] = (
     "APG_STORAGE_MAX_UPLOAD_BYTES",
 )
 
+#: Session 8. What the agent plane reads, and it is SHARED_VARIABLES minus every
+#: database setting rather than plus anything (ADR 0121). Six entries, and the
+#: six that are absent -- `APG_DATABASE_HOST`, `_PORT`, `_NAME`, `_ROLE`,
+#: `_PASSFILE` and `APG_POOL_SIZE` -- are the list that matters: they are in
+#: `FORBIDDEN_VARIABLES["mcp"]` below, so their absence is enforced rather than
+#: observed.
+#:
+#: `APG_ROLE_NAMES` is absent too, and for a different reason: it exists so the
+#: issuer can put a derived role name in a token it MINTS. The agent plane mints
+#: nothing and forwards the caller's own token (D407), so a role map here would
+#: be a setting nobody reads -- which is how a value stops being checked and
+#: starts being believed.
+MCP_VARIABLES: tuple[str, ...] = (
+    "APG_PROJECT_KEY",
+    "APG_PROJECT_ENVIRONMENT",
+    "APG_JWT_ISSUER",
+    "APG_JWT_AUDIENCE",
+    "APG_JWKS_FILE",
+    "APG_LISTEN_PORT",
+)
+
 #: The variable each mode must NOT be given. Stated as a set rather than left
 #: implicit, because "storage has no signing key" is only a property if
 #: something checks it -- and what checks it is `load`, which refuses to start.
@@ -263,4 +370,19 @@ FORBIDDEN_VARIABLES: dict[str, tuple[str, ...]] = {
     # refused rather than ignored (ADR 0113).
     "auth": ("APG_JWKS_FILE",),
     "storage": ("APG_SIGNING_KEY_FILE",),
+    # The longest list, and every entry is load-bearing. A signing key would
+    # make a verifier into an undeclared issuer (ADR 0098); a database setting
+    # would make ADR 0099's considered zero into an oversight (D407). D309 was
+    # the opposite mistake -- a service added with no term in the budget -- and
+    # the only difference between a considered zero and an oversight is whether
+    # something refuses to start.
+    "mcp": (
+        "APG_SIGNING_KEY_FILE",
+        "APG_DATABASE_HOST",
+        "APG_DATABASE_PORT",
+        "APG_DATABASE_NAME",
+        "APG_DATABASE_ROLE",
+        "APG_DATABASE_PASSFILE",
+        "APG_POOL_SIZE",
+    ),
 }

@@ -15,6 +15,7 @@ ARG BOTO3_VERSION
 ARG BOTOCORE_VERSION
 ARG CRYPTOGRAPHY_VERSION
 ARG FASTAPI_VERSION
+ARG FASTMCP_VERSION
 ARG PSYCOPG_POOL_VERSION
 ARG PSYCOPG_VERSION
 ARG PYDANTIC_SETTINGS_VERSION
@@ -53,6 +54,16 @@ RUN set -eu; \
 # The trailing import is the build's own control: every one of these installing
 # is not the same claim as every one of them importing, which is precisely what
 # `psycopg` alone demonstrated.
+#
+# Session 8 added `fastmcp` for the agent plane's mode (ADR 0121), and it is the
+# second package to prove that control earns its place. Measured against this
+# base image: the version this repository had locked since Session 1 -- 2.14.1,
+# never built from -- installs cleanly and then raises `ModuleNotFoundError: No
+# module named 'pydantic_settings'` on import, because it declares `mcp>=1.24.0`
+# with no ceiling, pip resolves the 2.0 major, and that major dropped a
+# transitive dependency fastmcp imports directly and never declared. `mcp` is
+# named in the import list beside it for the same reason: it is the distribution
+# that actually moved.
 RUN set -eu; \
     pip install --no-cache-dir --no-compile \
       "argon2-cffi==${ARGON2_CFFI_VERSION}" \
@@ -65,8 +76,9 @@ RUN set -eu; \
       "pyjwt==${PYJWT_VERSION}" \
       "uvicorn==${UVICORN_VERSION}" \
       "boto3==${BOTO3_VERSION}" \
-      "botocore==${BOTOCORE_VERSION}"; \
-    python -c "import argon2, boto3, botocore, fastapi, jwt, psycopg, psycopg_pool, pydantic, uvicorn"
+      "botocore==${BOTOCORE_VERSION}" \
+      "fastmcp==${FASTMCP_VERSION}"; \
+    python -c "import argon2, boto3, botocore, fastapi, fastmcp, jwt, mcp, psycopg, psycopg_pool, pydantic, uvicorn"
 
 WORKDIR /app
 COPY app /app/app

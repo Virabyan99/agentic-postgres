@@ -63,6 +63,22 @@ AUTH_SERVICE_PORT = 8080
 STORAGE_SERVICE = "storage"
 STORAGE_SERVICE_PORT = 8080
 
+#: Session 8's agent plane, and the port it binds.
+#:
+#: The same image again, in a third mode (ADR 0121), for the reason the second
+#: one exists: a separate service directory could not import `LocalKeySet`, and
+#: the fourth verifier acquiring a second key-set parser is how D381 happened to
+#: the third. A separate Compose SERVICE, though, because it holds a different
+#: set of credentials -- which is to say none at all. It authenticates as
+#: nobody, carries no passfile, and forwards the caller's own token.
+#:
+#: That is why it is **deliberately absent from `POST_BOOTSTRAP_SERVICES`**
+#: below, and the absence is the half worth reading: every other application
+#: service is in that tuple because it logs in as a role the bootstrap plane
+#: must activate first. This one has no role to activate (D410).
+MCP_SERVICE = "mcp"
+MCP_SERVICE_PORT = 8080
+
 #: Services that cannot start until the bootstrap plane has activated the role
 #: they authenticate as (ADR 0063).
 #:
@@ -97,6 +113,15 @@ STORAGE_SERVICE_PORT = 8080
 #: so it fails in exactly the shape described above -- and adding a service to
 #: `compose.yaml` while leaving this list alone is the mistake the paragraph
 #: above exists to prevent, which makes "later" the wrong answer.
+#: `mcp` does NOT join, in Session 8 Run 4, and this sentence is the record of
+#: the decision rather than of an omission (D410). It holds no database
+#: credential at all: `settings.load_mcp` refuses to start if handed one, so
+#: there is no role for the bootstrap plane to activate and nothing for it to
+#: wait on. Its zero share of ADR 0099's connection budget is the same fact
+#: seen from the other side (D407). If a later session gives the agent plane a
+#: database identity, this tuple is the first thing that has to move -- and the
+#: reason it would have to is written here, where somebody adding one is
+#: already standing.
 POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE, AUTH_SERVICE, STORAGE_SERVICE)
 
 #: Session 5's documentation service, the port `serve.py` binds, and the
@@ -138,6 +163,20 @@ JWKS_CONTAINER_PATH = "/etc/postgrest/jwks.json"
 #: verification material of any kind -- so its first start on any host raised
 #: `AttributeError: 'NoneType' object has no attribute 'jwks'` and exited 3.
 STORAGE_JWKS_CONTAINER_PATH = "/etc/storage/jwks.json"
+
+#: And where the SAME file is mounted for the agent plane (ADR 0113, ADR 0121).
+#:
+#: **One artefact, four verifiers, three container paths.** PostgREST reads it
+#: through `PGRST_JWT_SECRET`; storage and MCP each read it with
+#: `LocalKeySet.from_path`, at their own path, because each mode's convention
+#: differs and the file does not. The auth service is the fourth reader of the
+#: key set and is not a verifier of it -- it is the issuer, and derives its own
+#: set from the private half it signs with (ADR 0098).
+#:
+#: The plan predicted this constant would be the moment to check that ADR 0088's
+#: recreate list moved with it (D409). It was, and the answer was worse than
+#: predicted: the list had never moved for STORAGE either. See ADR 0122.
+MCP_JWKS_CONTAINER_PATH = "/etc/mcp/jwks.json"
 
 #: Container paths a sensitive-named environment key may reference (ADR 0064).
 #:
@@ -185,6 +224,9 @@ __all__ = [
     "DATABASE_SERVICE_PORT",
     "JWKS_CONTAINER_PATH",
     "JWKS_FILENAME",
+    "MCP_JWKS_CONTAINER_PATH",
+    "MCP_SERVICE",
+    "MCP_SERVICE_PORT",
     "MIGRATIONS_MOUNT",
     "MIGRATION_SERVICE",
     "POOLER_SERVICE",
@@ -457,6 +499,23 @@ def build_override(
                 "volumes": [
                     f"{rendered_directory}/{JWKS_FILENAME}:{STORAGE_JWKS_CONTAINER_PATH}:ro"
                 ],
+            },
+            # Session 8 Run 4. The agent plane, and the entry exists for exactly
+            # one reason: **the fourth verifier's key set** (ADR 0113, ADR 0121).
+            #
+            # No labels. The router is Run 7's, for the reason `storage` gives
+            # above -- a label set that published `/mcp` before anything
+            # answered it would route to a container that 404s, and Traefik's
+            # own 404 is indistinguishable from a routed one except by a 19-byte
+            # body (D186, D187, D353).
+            #
+            # D381 is the whole of why this mount is written in the same run
+            # that declares the verifier rather than in the run that publishes
+            # it. Storage was named the third verifier in four places and handed
+            # nothing to verify with, and the gap was invisible until a
+            # container started somewhere real.
+            MCP_SERVICE: {
+                "volumes": [f"{rendered_directory}/{JWKS_FILENAME}:{MCP_JWKS_CONTAINER_PATH}:ro"],
             },
         }
     }

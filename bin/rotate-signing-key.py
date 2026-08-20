@@ -52,12 +52,15 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import subprocess
 import sys
+import tarfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import NamedTuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
@@ -69,19 +72,80 @@ EXIT_PREREQUISITE = 3
 EXIT_STATE = 5
 EXIT_REFUSED = 6
 
-#: The verifiers this project has, as consumer names.
-#:
-#: One today, and it is a list because promotion is blocked on *every* one of
-#: them: a check written against a single name reads as though it could never
-#: have been plural, and Session 9 adds agent-facing verifiers.
-#:
-#: The auth service is deliberately NOT here. It is the issuer; it holds the
-#: private key and does not verify anyone else's tokens, so an acknowledgement
-#: from it would be the issuer agreeing with itself.
-VERIFIERS: tuple[str, ...] = (runtime_override.REST_SERVICE,)
 
-#: Where each verifier reads the key set, inside its own container.
-VERIFIER_JWKS_PATH = runtime_override.JWKS_CONTAINER_PATH
+class Verifier(NamedTuple):
+    """One service that reads the published key set, and where it reads it.
+
+    A row rather than a name, because the two things that differ between
+    verifiers are the service and the path -- and a single `VERIFIER_JWKS_PATH`
+    constant beside a list of names is what let the second verifier be
+    inspectable at the first one's path (ADR 0122).
+
+    `NamedTuple` and **not** `@dataclass`, which is a constraint of this file
+    rather than a preference. The contract tests load this module with
+    `spec_from_file_location` + `exec_module` and never register it in
+    `sys.modules`; `dataclasses` looks the defining module up by name while
+    processing annotations, so a dataclass here raises `AttributeError:
+    'NoneType' object has no attribute '__dict__'` at import -- in the test, not
+    in the command. Measured while writing this, and recorded because the next
+    person to reach for a dataclass in a `bin/` command will meet it too.
+    """
+
+    service: str
+    jwks_path: str
+
+
+#: The verifiers this project has (ADR 0122).
+#:
+#: **Three, and until Session 8 Run 4 this tuple said one.** That is the entry
+#: worth reading before adding to it. Session 7 made storage the third verifier
+#: -- in ADR 0098, in `compose.yaml`, in `settings.py`, in `main.py` and in ADR
+#: 0113's own Consequences section, which states in so many words that "storage
+#: joins the recreate list" -- and this line did not move. The comment that used
+#: to sit here said "one today ... and Session 9 adds agent-facing verifiers",
+#: which was true when written and became the sentence that made the omission
+#: look intended.
+#:
+#: What it cost, had a rotation been run: `promote` unblocks as soon as every
+#: name here has acknowledged. With PostgREST alone listed, promotion would
+#: switch the signing key while the storage container still held the retired
+#: set -- and every token would be refused by one surface and served by the
+#: other. That is D276's symptom exactly, and blocking it is the entire purpose
+#: of the refusal `promote_rotation` implements.
+#:
+#: The auth service is deliberately NOT here, and this remains the one thing the
+#: old comment had right. It is the issuer; it holds the private key and derives
+#: its verification set from the half it signs with (ADR 0098), so an
+#: acknowledgement from it would be the issuer agreeing with itself.
+#:
+#: `mcp` is Session 8's fourth verifier (ADR 0121). It is listed from the run
+#: that builds it rather than from the run that publishes it, because "add it
+#: when it starts" is the reasoning that produced the storage gap.
+VERIFIERS: tuple[Verifier, ...] = (
+    Verifier(
+        service=runtime_override.REST_SERVICE,
+        jwks_path=runtime_override.JWKS_CONTAINER_PATH,
+    ),
+    Verifier(
+        service=runtime_override.STORAGE_SERVICE,
+        jwks_path=runtime_override.STORAGE_JWKS_CONTAINER_PATH,
+    ),
+    Verifier(
+        service=runtime_override.MCP_SERVICE,
+        jwks_path=runtime_override.MCP_JWKS_CONTAINER_PATH,
+    ),
+)
+
+
+def consumer_names() -> list[str]:
+    """The roster as `jwt_keys` spells it: consumer names.
+
+    Derived from `VERIFIERS` rather than written a second time, which is the
+    whole reason the omission this function replaces could exist -- a second
+    spelling of a list is a second place for it to be short by one.
+    """
+    return [verifier.service for verifier in VERIFIERS]
+
 
 #: The overlap a promotion allows for, in seconds.
 #:
@@ -180,16 +244,39 @@ def container_for(project_key: str, service: str) -> str:
     return names[0]
 
 
-def loaded_digest(container: str) -> str:
-    """The sha256 of the key set as this container holds it.
+def read_command(container: str, jwks_path: str) -> list[str]:
+    """The command that reads one container's copy of the key set.
 
-    `cat` inside the container, not a read of the host path. The two differ
+    Built by a pure function so the shape is assertable offline. `-` streams the
+    archive to stdout, which is what keeps this a read with no temporary file to
+    clean up or to leave a key set lying in.
+    """
+    return ["docker", "cp", f"{container}:{jwks_path}", "-"]
+
+
+def loaded_digest(container: str, jwks_path: str) -> str:
+    """The sha256 of the key set as THIS container holds it, at ITS path.
+
+    A read of the container's filesystem, not of the host path. The two differ
     exactly when it matters: a replaced file leaves the container bound to the
     previous inode, so the host shows the new set and the process is verifying
     against the old one.
+
+    **`docker cp`, not `docker exec … cat`,** and that is a correction rather
+    than a preference (ADR 0122). Measured against the locked images: the
+    PostgREST image is distroless and has neither `cat` nor `sh` -- both exit
+    **127**, *"executable file not found in $PATH"* -- while `docker cp` on the
+    same image exits 0. The control is the `python:3.12-slim` the other two
+    verifiers run, where both binaries are present. So the previous
+    implementation could not read the digest of the only verifier it knew about,
+    and `acknowledge` could never unblock a promotion (D305, D411, D427).
+
+    `docker cp` streams a tar archive, so the member is extracted here. The
+    digest is of the FILE's bytes, which is what `published_digest` is a digest
+    of -- hashing the archive would be a stable, plausible, wrong number.
     """
     result = subprocess.run(
-        ["docker", "exec", container, "cat", VERIFIER_JWKS_PATH],
+        read_command(container, jwks_path),
         capture_output=True,
         check=False,
         timeout=60,
@@ -197,10 +284,33 @@ def loaded_digest(container: str) -> str:
     if result.returncode != 0:
         raise OperatorError(
             EXIT_STATE,
-            f"{container} could not read {VERIFIER_JWKS_PATH}: "
+            f"{container} could not read {jwks_path}: "
             f"{result.stderr.decode('utf-8', 'replace').strip()}",
         )
-    return hashlib.sha256(result.stdout).hexdigest()
+    return hashlib.sha256(_only_member(result.stdout, container, jwks_path)).hexdigest()
+
+
+def _only_member(archive: bytes, container: str, jwks_path: str) -> bytes:
+    """The single file inside a `docker cp` stream.
+
+    Refuses anything other than exactly one regular file. A directory, or two
+    members, means the path named something other than the key set -- and
+    hashing the first member of a surprise would produce a digest that simply
+    never matches, which reads as "this verifier is behind" rather than as "this
+    command was pointed at the wrong thing".
+    """
+    with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
+        members = [member for member in bundle.getmembers() if member.isfile()]
+        if len(members) != 1:
+            raise OperatorError(
+                EXIT_STATE,
+                f"{container}:{jwks_path} is not a single file "
+                f"({len(members)} regular files in the copy)",
+            )
+        extracted = bundle.extractfile(members[0])
+        if extracted is None:  # pragma: no cover -- isfile() has already excluded this
+            raise OperatorError(EXIT_STATE, f"{container}:{jwks_path} could not be read")
+        return extracted.read()
 
 
 def published_digest(document: dict) -> str:
@@ -247,16 +357,16 @@ def describe(document: dict, state: dict) -> None:
         print("acknowledged  nothing has been asked")
         return
     behind = jwt_keys.unacknowledged(
-        state, consumers=list(VERIFIERS), jwks_sha256=published_digest(document)
+        state, consumers=consumer_names(), jwks_sha256=published_digest(document)
     )
     for verifier in VERIFIERS:
-        held = acknowledgements.get(verifier)
+        held = acknowledgements.get(verifier.service)
         if held is None:
-            print(f"  {verifier:12s} has not acknowledged")
+            print(f"  {verifier.service:12s} has not acknowledged")
         elif held == published_digest(document):
-            print(f"  {verifier:12s} holds the published set")
+            print(f"  {verifier.service:12s} holds the published set")
         else:
-            print(f"  {verifier:12s} holds {held[:16]}…, which is NOT the published set")
+            print(f"  {verifier.service:12s} holds {held[:16]}…, which is NOT the published set")
     if behind:
         print(f"promotion     BLOCKED on {behind}")
     else:
@@ -266,11 +376,13 @@ def describe(document: dict, state: dict) -> None:
 def acknowledge(arguments, path: Path, document: dict, state: dict) -> dict:
     published = published_digest(document)
     for verifier in VERIFIERS:
-        container = container_for(document["project"]["key"], verifier)
-        digest = loaded_digest(container)
-        state = jwt_keys.record_acknowledgement(state, consumer=verifier, jwks_sha256=digest)
+        container = container_for(document["project"]["key"], verifier.service)
+        digest = loaded_digest(container, verifier.jwks_path)
+        state = jwt_keys.record_acknowledgement(
+            state, consumer=verifier.service, jwks_sha256=digest
+        )
         if digest == published:
-            print(f"  {verifier}: holds the published set ({digest[:16]}…)")
+            print(f"  {verifier.service}: holds the published set ({digest[:16]}…)")
         else:
             # Recorded anyway, and this is deliberate. The record is what the
             # verifier HAS, not what it should have -- a step that refused to
@@ -278,7 +390,8 @@ def acknowledge(arguments, path: Path, document: dict, state: dict) -> dict:
             # where the truth is "this one is behind", and `promote` compares.
             session = document["deployed_through_session"]
             print(
-                f"  {verifier}: holds {digest[:16]}…, the published set is {published[:16]}…\n"
+                f"  {verifier.service}: holds {digest[:16]}…, "
+                f"the published set is {published[:16]}…\n"
                 f"    this verifier has NOT picked up the current key set. Recreate it:\n"
                 f"    sudo bin/project-runtime.sh --host host.yaml"
                 f" --project-key {document['project']['key']}"
@@ -304,7 +417,7 @@ def promote(arguments, path: Path, document: dict, state: dict) -> dict:
     return jwt_keys.promote_rotation(
         state,
         incoming_kid=incoming[0],
-        consumers=list(VERIFIERS),
+        consumers=consumer_names(),
         jwks_sha256=published_digest(document),
         now=datetime.now(UTC),
         max_token_ttl_seconds=MAX_TOKEN_TTL_SECONDS,

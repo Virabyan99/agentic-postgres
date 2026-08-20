@@ -1299,7 +1299,7 @@
               "type": "null"
             }
           ],
-          "description": "The MCP protocol revision the deployed runtime actually negotiated, read FROM the runtime and never from a document that hoped for one. The revision changes on a schedule nobody here controls, so it is an observation with a date shape rather than an enum this repository would have to chase. The pattern is a shape and not a claim about which revisions exist."
+          "description": "The highest MCP protocol revision the deployed runtime IMPLEMENTS, read from the framework's own constant and never from a document that hoped for one. It read `negotiated` until Session 8 Run 4 measured what that word buys: a server handed an `initialize` for an older revision answers with that older revision, so a negotiated value is a fact about the CLIENT and would move when the probe moved while the deployment did not (ADR 0123, D428). `DEFAULT_NEGOTIATED_VERSION` is the neighbouring trap -- what an unversioned caller receives, two revisions below what this runtime speaks. The revision changes on a schedule nobody here controls, so it is an observation with a date shape rather than an enum this repository would have to chase. The pattern is a shape and not a claim about which revisions exist."
         },
         "authorization_spec_conformant": {
           "type": [

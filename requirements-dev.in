@@ -83,3 +83,26 @@ uvicorn==0.50.2
 # choice inside a range is made by whoever runs the resolver, on the day.
 boto3==1.43.72
 botocore==1.43.72
+
+# ---------------------------------------------------------------------------
+# Session 8, Run 4. The agent plane's framework, here for the reason the two
+# blocks above are: `tests/contract/test_mcp_runtime.py` builds a real
+# `AccessToken` and drives a real `TokenVerifier`, and a mocked FastMCP would be
+# a test about the mock (ADR 0065, arriving again).
+#
+# 3.4.0 and not `latest`, and the ceiling is MEASURED rather than cautious.
+# `fastmcp-slim[server]` moved to `starlette>=1.0.1` at 3.4.1, and fastapi
+# 0.121.2 -- the version the auth service is built and run against -- requires
+# `starlette<0.50.0,>=0.40.0`. Every 3.4.x from 3.4.1 up is a
+# `ResolutionImpossible` against this file's own fastapi pin; 3.4.0 resolves,
+# imports, and leaves `pip check` clean beside every package above. Adopting a
+# later one would mean bumping fastapi to 0.141.1 inside a run about MCP, which
+# is D321's mistake with a different package. ADR 0121 has the arms and the
+# controls.
+#
+# Pinned to versions.in.yaml like everything above it, and
+# `test_the_development_environment_installs_the_locked_service_versions`
+# asserts the two agree -- which matters more here than anywhere else in this
+# file, because the number is load-bearing for ADR 0121's one-image model rather
+# than merely current.
+fastmcp==3.4.0

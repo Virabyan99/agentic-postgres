@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from agentic_postgres import REPO_ROOT, jwt_keys, runtime_override
 
@@ -87,22 +88,92 @@ def prepared_document() -> dict:
 def test_the_verifiers_are_the_services_that_verify_and_not_the_issuer(command: Any) -> None:
     """The auth service holds the private key. An acknowledgement from it would
     be the issuer agreeing with itself, which is the exact shape of a check that
-    cannot fail."""
-    assert runtime_override.REST_SERVICE in command.VERIFIERS
-    assert runtime_override.AUTH_SERVICE not in command.VERIFIERS
+    cannot fail.
+
+    **Replaced by a stricter test in Session 8 Run 4 (ADR 0122.)** The previous
+    version asserted only that PostgREST was in the roster and auth was not, and
+    it passed for a whole session while the roster was missing STORAGE -- a
+    verifier ADR 0113 declared and this command never learned about. Naming the
+    two that must be there and the one that must not is what the old assertion
+    lacked, and it is the anchor a product-derived sweep cannot provide (D416).
+    """
+    named = {verifier.service for verifier in command.VERIFIERS}
+
+    assert runtime_override.REST_SERVICE in named
+    assert runtime_override.STORAGE_SERVICE in named, (
+        "storage reads the rendered key set (ADR 0113) and promotion must block on it"
+    )
+    assert runtime_override.MCP_SERVICE in named, (
+        "the agent plane is the fourth verifier (ADR 0121)"
+    )
+    assert runtime_override.AUTH_SERVICE not in named
+
+
+def test_every_runtime_given_a_key_set_appears_in_the_roster(command: Any) -> None:
+    """The sweep, DERIVED from the product, so it catches the NEXT verifier.
+
+    Written beside the literal anchor above rather than instead of it, which is
+    D416's rule: a set derived entirely from the product cannot refuse a bad
+    edit to the product, and a set restated by hand cannot notice an addition.
+    Both are needed and each covers the other's blind spot.
+
+    The source of truth is `compose.yaml`: any service handed `APG_JWKS_FILE` is
+    by definition a runtime that verifies with a key set it did not sign, which
+    is exactly the population ADR 0088's recreate rule is about. PostgREST is
+    added because it reads the same file through `PGRST_JWT_SECRET` rather than
+    through this variable.
+    """
+    model = yaml.safe_load((REPO_ROOT / "compose.yaml").read_text(encoding="utf-8"))
+    verifying = {
+        name
+        for name, service in model["services"].items()
+        if "APG_JWKS_FILE" in (service.get("environment") or {})
+    } | {runtime_override.REST_SERVICE}
+
+    assert verifying == {verifier.service for verifier in command.VERIFIERS}, (
+        "a runtime is configured with a key set and is absent from the roster promotion "
+        "blocks on -- which is precisely how storage went a session unnoticed"
+    )
 
 
 def test_the_verifiers_are_named_as_a_sequence_rather_than_one_string(command: Any) -> None:
-    """A single name reads as though it could never have been plural, and
-    Session 9 adds agent-facing verifiers."""
+    """A single name reads as though it could never have been plural."""
     assert isinstance(command.VERIFIERS, tuple)
-    assert command.VERIFIERS
+    assert len(command.VERIFIERS) >= 3
 
 
-def test_the_key_set_is_read_where_the_container_reads_it(command: Any) -> None:
-    """One constant, so the path a verifier is configured with and the path this
-    command inspects cannot drift."""
-    assert command.VERIFIER_JWKS_PATH == runtime_override.JWKS_CONTAINER_PATH
+def test_the_key_set_is_read_where_EACH_container_reads_it(command: Any) -> None:
+    """The path comes from the row, not from one constant (ADR 0122).
+
+    **Replaced by a stricter test in Session 8 Run 4.** The previous version
+    asserted `VERIFIER_JWKS_PATH == JWKS_CONTAINER_PATH` -- two constants
+    compared to each other, which is CLAUDE.md §6's "a test comparing two
+    constants is not testing the thing between them". It passed while being
+    blind to storage's `/etc/storage/jwks.json`, so the command would have
+    inspected a second verifier at the first one's path.
+
+    This asserts the relation instead: every row's path is the one that
+    verifier's own container is configured with.
+    """
+    assert not hasattr(command, "VERIFIER_JWKS_PATH"), (
+        "a single path constant is the defect ADR 0122 removed"
+    )
+
+    expected = {
+        runtime_override.REST_SERVICE: runtime_override.JWKS_CONTAINER_PATH,
+        runtime_override.STORAGE_SERVICE: runtime_override.STORAGE_JWKS_CONTAINER_PATH,
+        runtime_override.MCP_SERVICE: runtime_override.MCP_JWKS_CONTAINER_PATH,
+    }
+
+    assert {v.service: v.jwks_path for v in command.VERIFIERS} == expected
+    assert len(set(expected.values())) == len(expected), (
+        "two verifiers sharing a container path would make one of them unreadable"
+    )
+
+
+def test_the_consumer_names_are_derived_from_the_roster(command: Any) -> None:
+    """One spelling of the list. A second is a second place to be short by one."""
+    assert command.consumer_names() == [v.service for v in command.VERIFIERS]
 
 
 def test_the_overlap_allows_for_the_verifiers_measured_leeway(command: Any) -> None:
@@ -121,11 +192,27 @@ def test_the_overlap_allows_for_the_verifiers_measured_leeway(command: Any) -> N
 def test_the_digest_is_read_from_inside_the_container(command: Any) -> None:
     """Asserted on the source, because this is the property the whole step is.
 
-    A `docker exec ... cat` reads what the process has. A read of the host path
+    A read of the CONTAINER reads what the process has. A read of the host path
     reads what the deploy wrote, and after an atomic replace those are two
     different files -- so a command written the second way would report every
     verifier as current no matter what it held.
+
+    **Replaced by a stricter test in Session 8 Run 4 (ADR 0122).** The previous
+    version asserted `docker exec`, which was the right property named through
+    the wrong mechanism: the locked PostgREST image is distroless and has
+    neither `cat` nor `sh` -- both exit 127 -- so `acknowledge` could not read
+    the digest of the only verifier the roster then held, and promotion could
+    never be unblocked (D305, D411, D427). `docker cp` works on that image and
+    is measured to. The command is now asserted through `read_command`, a pure
+    function, so the shape is checked rather than an AST dump searched.
     """
+    assert command.read_command("c1", "/etc/mcp/jwks.json") == [
+        "docker",
+        "cp",
+        "c1:/etc/mcp/jwks.json",
+        "-",
+    ]
+
     tree = ast.parse(COMMAND.read_text(encoding="utf-8"))
     function = next(
         node
@@ -133,8 +220,8 @@ def test_the_digest_is_read_from_inside_the_container(command: Any) -> None:
         if isinstance(node, ast.FunctionDef) and node.name == "loaded_digest"
     )
     body = ast.dump(function)
-    assert "'docker'" in body and "'exec'" in body, (
-        "the digest is not read from inside the container"
+    assert "'exec'" not in body, (
+        "`docker exec` cannot read a distroless verifier's key set; it exits 127"
     )
     assert "read_bytes" not in body and "read_text" not in body, (
         "the digest is read from the host's copy of the key set, which after an atomic "
@@ -195,7 +282,9 @@ def test_promotion_proceeds_once_every_verifier_has_acknowledged(command: Any) -
     prepared = prepared_document()
     state = command.key_state(prepared)
     for verifier in command.VERIFIERS:
-        state = jwt_keys.record_acknowledgement(state, consumer=verifier, jwks_sha256=PUBLISHED)
+        state = jwt_keys.record_acknowledgement(
+            state, consumer=verifier.service, jwks_sha256=PUBLISHED
+        )
 
     promoted = command.promote(
         None, Path("unused"), {**prepared, "jwt": {**prepared["jwt"]}}, state
@@ -215,7 +304,9 @@ def test_an_acknowledgement_of_the_wrong_digest_does_not_unblock_promotion(comma
     prepared = prepared_document()
     state = command.key_state(prepared)
     for verifier in command.VERIFIERS:
-        state = jwt_keys.record_acknowledgement(state, consumer=verifier, jwks_sha256="d" * 64)
+        state = jwt_keys.record_acknowledgement(
+            state, consumer=verifier.service, jwks_sha256="d" * 64
+        )
 
     with pytest.raises(jwt_keys.JwkError, match="have not acknowledged"):
         command.promote(None, Path("unused"), prepared, state)
@@ -225,7 +316,9 @@ def test_a_promoted_rotation_cannot_be_abandoned(command: Any) -> None:
     prepared = prepared_document()
     state = command.key_state(prepared)
     for verifier in command.VERIFIERS:
-        state = jwt_keys.record_acknowledgement(state, consumer=verifier, jwks_sha256=PUBLISHED)
+        state = jwt_keys.record_acknowledgement(
+            state, consumer=verifier.service, jwks_sha256=PUBLISHED
+        )
     promoted = command.promote(None, Path("unused"), prepared, state)
 
     with pytest.raises(jwt_keys.JwkError, match="complete it forward"):

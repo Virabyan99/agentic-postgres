@@ -582,6 +582,11 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "STORAGE_UPLOAD_URL_TTL_SECONDS",
     "STORAGE_DOWNLOAD_URL_TTL_SECONDS",
     "STORAGE_MAX_UPLOAD_BYTES",
+    # Session 8, Run 4. The agent plane's ONLY rendered value, and the length of
+    # this list is worth noticing against the nine above it: no role name, no
+    # pool size, no credential path, no endpoint. It holds none of those things
+    # (ADR 0121, D407), so there is nothing to render.
+    "MCP_MEMORY_LIMIT",
     # Session 7, Run 7. The published route, in the same two shapes the
     # application route uses one line-block above: a *path* a router rule
     # matches on, and three *names* `runtime_override.py` renders into label
@@ -619,6 +624,26 @@ PGBOUNCER_LISTEN_PORT = 6432
 #: test be fixed by selecting session pooling, which the plan forbids in so many
 #: words; the consequences of transaction mode are documented instead.
 PGBOUNCER_POOL_MODE = "transaction"
+
+#: Session 8, Run 4. The agent plane's memory ceiling, in MiB.
+#:
+#: **Inherited, not measured**, and stated that way for the reason `config` uses
+#: for storage's identical 384: this repository's defect pattern is a value that
+#: looked measured and was not, and a number nobody flags as provisional is a
+#: number the next reader treats as evidence.
+#:
+#: It is the application API's figure, taken because the agent plane runs the
+#: same interpreter and the same base image. That is a reason to expect the same
+#: ORDER of magnitude and not a measurement of anything. What is different here
+#: cuts both ways and neither direction is known: no connection pool and no
+#: Argon2id hasher, so less resident by construction -- against a framework this
+#: process is the first to load, whose footprint has never been profiled.
+#:
+#: ADR 0082 is the shape the measurement must take (one profile per process,
+#: with a no-work control, because `ru_maxrss` is a high-water mark that reports
+#: the same plausible number for every row). It cannot be taken before Run 6 has
+#: four registered tools to exercise. **Run 8 owns budgets and owns this.**
+MCP_MEMORY_LIMIT_MB = 384
 
 #: The pooler's admin identity. Not a database role: PgBouncer's admin console
 #: is a virtual database the daemon answers itself.
@@ -881,6 +906,22 @@ def build_compose_env(
         # Lowercase `m`, Docker's byte suffix, as POSTGRES_MEMORY_LIMIT and
         # AUTH_MEMORY_LIMIT are. The number is provisional and `config` says so.
         "STORAGE_MEMORY_LIMIT": "{}m".format(storage_settings["memory_limit_mb"]),
+        # Session 8, Run 4. A CONSTANT rather than a manifest field, which is a
+        # smaller promise than `STORAGE_MEMORY_LIMIT` above and deliberately so.
+        #
+        # The number is `MCP_MEMORY_LIMIT_MB` and it is **inherited, not
+        # measured** -- said here for the reason `config` says it of storage's
+        # 384: this repository's defect pattern is a value that looked measured
+        # and was not. ADR 0082 is the shape the measurement has to take, and it
+        # cannot be taken until Run 6 has four tools to profile. **Run 8 owns
+        # budgets** and owns this one.
+        #
+        # Not a manifest field yet, because a manifest field is a published
+        # contract with an outputs member and a schema bump behind it, and
+        # committing to one before the shape of the agent plane's budget is
+        # known would be the wrong half of the promise. When Run 8 measures it,
+        # promoting it is a small change; un-publishing a manifest field is not.
+        "MCP_MEMORY_LIMIT": f"{MCP_MEMORY_LIMIT_MB}m",
         # Through `naming`, and unconditionally -- not from `identity`, whose
         # storage fields are None when the service is disabled because a
         # rendered document must not name a bucket for a service that is off.

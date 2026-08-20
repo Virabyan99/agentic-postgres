@@ -802,6 +802,7 @@ services:
         BOTOCORE_VERSION: ${BOTOCORE_VERSION:?required}
         CRYPTOGRAPHY_VERSION: ${CRYPTOGRAPHY_VERSION:?required}
         FASTAPI_VERSION: ${FASTAPI_VERSION:?required}
+        FASTMCP_VERSION: ${FASTMCP_VERSION:?required}
         PSYCOPG_VERSION: ${PSYCOPG_VERSION:?required}
         PSYCOPG_POOL_VERSION: ${PSYCOPG_POOL_VERSION:?required}
         PYDANTIC_VERSION: ${PYDANTIC_VERSION:?required}
@@ -1092,6 +1093,7 @@ services:
         BOTOCORE_VERSION: ${BOTOCORE_VERSION:?required}
         CRYPTOGRAPHY_VERSION: ${CRYPTOGRAPHY_VERSION:?required}
         FASTAPI_VERSION: ${FASTAPI_VERSION:?required}
+        FASTMCP_VERSION: ${FASTMCP_VERSION:?required}
         PSYCOPG_VERSION: ${PSYCOPG_VERSION:?required}
         PSYCOPG_POOL_VERSION: ${PSYCOPG_POOL_VERSION:?required}
         PYDANTIC_VERSION: ${PYDANTIC_VERSION:?required}
@@ -1178,6 +1180,117 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    networks:
+      - internal
+      - edge
+
+
+  # Session 8's agent plane. The SAME IMAGE again, in a third mode selected by
+  # `APP_MODE` (ADR 0101, extended by ADR 0121) -- one build context, because a
+  # second service directory could not import `LocalKeySet`, and the FOURTH
+  # verifier acquiring a second key-set parser is precisely how D381 happened to
+  # the third.
+  #
+  # **This container holds no credential of any kind, and that is the entry's
+  # most important property.** No `APG_SIGNING_KEY_FILE`: it is a verifier and
+  # never an issuer (ADR 0098). No `APG_DATABASE_*`, no `APG_POOL_SIZE`, no
+  # passfile and no `secrets:` block at all -- so it takes **no share of ADR
+  # 0099's connection budget**, and that zero is a decision rather than an
+  # oversight (D407). `settings.load_mcp` refuses to start if any of them is
+  # present, which is what makes the paragraph above a property instead of a
+  # comment. D309 was the opposite mistake and the discipline is the same one.
+  #
+  # No `depends_on: postgres` either, for the same reason: nothing here opens a
+  # connection. It is also absent from `POST_BOOTSTRAP_SERVICES`, because it
+  # authenticates as no role the bootstrap plane must activate (D410).
+  #
+  # No Traefik router labels. The route at `/mcp` is Run 7's -- publishing it
+  # before the four tools answer would route to a surface that has none, and
+  # `PathPrefix(/mcp)` is a STRING prefix that also matches `/mcpx` (D162,
+  # D408). The identity labels are here so the edge's scope filter and the
+  # project's own tooling can see the container.
+  #
+  # `profiles: [session8]` and CURRENT_SESSION is 7, so nothing starts this yet.
+  # Moving that constant arms this profile on the next deploy of any project and
+  # is therefore a deliberate step in Run 7, not a tidy-up (D410, D414).
+  mcp:
+    build:
+      context: ./services/auth-api
+      args:
+        BASE_IMAGE: ${PYTHON_RUNTIME_IMAGE:?required}
+        ARGON2_CFFI_VERSION: ${ARGON2_CFFI_VERSION:?required}
+        BOTO3_VERSION: ${BOTO3_VERSION:?required}
+        BOTOCORE_VERSION: ${BOTOCORE_VERSION:?required}
+        CRYPTOGRAPHY_VERSION: ${CRYPTOGRAPHY_VERSION:?required}
+        FASTAPI_VERSION: ${FASTAPI_VERSION:?required}
+        FASTMCP_VERSION: ${FASTMCP_VERSION:?required}
+        PSYCOPG_VERSION: ${PSYCOPG_VERSION:?required}
+        PSYCOPG_POOL_VERSION: ${PSYCOPG_POOL_VERSION:?required}
+        PYDANTIC_VERSION: ${PYDANTIC_VERSION:?required}
+        PYDANTIC_SETTINGS_VERSION: ${PYDANTIC_SETTINGS_VERSION:?required}
+        PYJWT_VERSION: ${PYJWT_VERSION:?required}
+        UVICORN_VERSION: ${UVICORN_VERSION:?required}
+    profiles:
+      - session8
+    restart: on-failure:5
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+    user: 65532:65532
+    read_only: true
+    # A block sequence, not a flow sequence: `[/tmp:rw,mode=0700,...]` is valid
+    # YAML and parses as FOUR mount paths, which `compose config` cannot catch
+    # because four strings are as valid as one (D287).
+    tmpfs:
+      - /tmp:rw,mode=0700,uid=65532,gid=65532
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    mem_limit: ${MCP_MEMORY_LIMIT:?required}
+    environment:
+      APP_MODE: mcp
+      APG_PROJECT_KEY: ${PROJECT_KEY:?required}
+      APG_PROJECT_ENVIRONMENT: ${PROJECT_ENVIRONMENT:?required}
+      # It verifies the tokens `auth` issues, so it shares the issuer and the
+      # audience -- and accepts only `token_use: "agent"` (ADR 0115), which is
+      # the runtime's rule rather than a variable, because a surface whose
+      # accepted token use could be changed by an environment variable is a
+      # surface whose boundary is an operator's typo away.
+      APG_JWT_ISSUER: ${JWT_ISSUER:?required}
+      APG_JWT_AUDIENCE: ${JWT_AUDIENCE:?required}
+      # What it verifies WITH (ADR 0113), and the line D381 is about. The
+      # rendered JWKS -- the SAME file postgrest and storage read, not a copy --
+      # is mounted read-only by `runtime_override.py`. The container path is
+      # fixed here so this model stays project-neutral; the per-project host
+      # side lives in the override.
+      APG_JWKS_FILE: /etc/mcp/jwks.json
+      APG_LISTEN_PORT: '8080'
+    # **No healthcheck, and that is deferred rather than forgotten (D429).**
+    #
+    # Run 7 owns this service's health surface -- the plan says so in as many
+    # words: "private unauthenticated health; readiness tokenless and inventing
+    # no private dependency endpoint". Run 4 declining to invent one is the
+    # point: the agent plane has no dependency to ask about, so the only honest
+    # signal available today is that an unauthenticated POST to `/mcp` is
+    # REFUSED. A 401 proves the process serves and that the token verifier is
+    # mounted in front of it; a 200 would mean the boundary is gone, so any
+    # status other than 401 -- including success -- has to fail the check.
+    #
+    # That check was written as `app/mcp_health.py` and removed again, because
+    # `test_the_service_never_constructs_a_network_jwks_client` forbids `urllib`,
+    # `httpx`, `requests`, `aiohttp` and `socket` anywhere under
+    # `services/auth-api/`, and it is right to: a verifier that can fetch its own
+    # trust anchor is a verifier whose anchor is whatever answered. Weakening a
+    # P0 guard to fit a liveness probe is the wrong trade, so the probe waits for
+    # the run that owns the surface. The reasoning above is left here so Run 7
+    # inherits it rather than re-deriving it.
+    #
+    # Nothing starts this container before Run 7 in any case: `profiles:
+    # [session8]` and CURRENT_SESSION is 7.
     networks:
       - internal
       - edge

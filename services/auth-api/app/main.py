@@ -152,29 +152,45 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
         yield
 
 
-def create_app(mode: str | None = None) -> FastAPI:
+def create_app(mode: str | None = None) -> Any:
     """Build the application. A function, not a module-level object.
 
     A module-level `app = FastAPI()` runs at import, which means importing the
     module for a unit test starts building the thing under test. This is also
     what lets `tests/contract/` import `main.py` without a database.
 
-    **`mode` decides which router is mounted, and that is where ADR 0101's two
-    modes become real.** One image, two services, and the only moment the
-    boundary can be enforced is application construction: after this function
-    returns, the surface is whatever was mounted. An auth process with the
-    storage router attached would serve `/upload-intents` on a port nothing
-    published and nothing tested.
+    **`mode` decides which surface is built, and that is where ADR 0101's modes
+    become real.** One image, three services, and the only moment the boundary
+    can be enforced is application construction: after this function returns,
+    the surface is whatever was mounted. An auth process with the storage router
+    attached would serve `/upload-intents` on a port nothing published and
+    nothing tested.
 
     Required rather than defaulted, from `APP_MODE`, for ADR 0055's reasoning
     applied to behaviour: a default would start the wrong service with a
     correct-looking configuration.
+
+    The return type is `Any` rather than `FastAPI` because ADR 0121's third mode
+    returns a Starlette application built by FastMCP. One factory rather than a
+    second entrypoint: the image's `ENTRYPOINT` names this function, so a mode
+    with its own factory would be a second way in that `APP_MODE` does not
+    guard -- and "the mode decides the surface" would stop being true of the
+    place that says so.
     """
     resolved = mode if mode is not None else os.environ.get("APP_MODE", "")
     if resolved not in settings_module.APP_MODES:
         raise settings_module.MissingSetting(
             f"APP_MODE must be one of {sorted(settings_module.APP_MODES)}, not {resolved!r}"
         )
+
+    if resolved == "mcp":
+        # Returned before any of the below, because none of it applies: no
+        # pool, so no `lifespan`; no router, so no health routes on a FastAPI
+        # object that would never open a connection to report readiness about.
+        # The agent plane's own liveness is its container healthcheck.
+        from app.mcp_runtime import create_mcp_app
+
+        return create_mcp_app()
 
     application = FastAPI(
         title="Agentic Postgres auth",
