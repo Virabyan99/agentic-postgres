@@ -659,6 +659,12 @@ TRANSPORT_ALLOWLIST: dict[str, frozenset[str]] = {
     # the row is required, and the assertion below is what keeps it honest:
     # a module declared here may not name `urlopen` or `Request`.
     "app/mcp_query.py": frozenset({"urllib"}),
+    # The agent plane's container-local health probe (ADR 0128). A loopback
+    # GET to a route no Traefik router publishes, run by the container's own
+    # healthcheck. Run 4 wrote this module and deleted it rather than weaken
+    # the guard this allowlist replaced (D429); the row is what it was
+    # waiting for.
+    "app/mcp_health.py": frozenset({"urllib"}),
 }
 
 #: How a key set may be built. Both are local reads; neither can reach a network.
@@ -759,7 +765,7 @@ def test_the_allowlist_describes_modules_that_exist_and_use_what_they_declare() 
     # (sending), and only two modules may send. Asserted separately because the
     # package name alone cannot tell them apart -- and a query builder that grew
     # a `urlopen` would otherwise be covered by its own row.
-    senders = {"app/mcp_upstream.py"}
+    senders = {"app/mcp_upstream.py", "app/mcp_health.py"}
     for relative in sorted(TRANSPORT_ALLOWLIST):
         names = _referenced_names((SERVICE_ROOT / relative).read_text(encoding="utf-8"))
         if relative in senders:

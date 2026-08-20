@@ -27,7 +27,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import jwt
 import pytest
@@ -422,3 +422,119 @@ def test_the_published_revision_is_not_the_default_negotiated_one() -> None:
 def test_the_agent_plane_declares_its_bearer_profile_non_conformant() -> None:
     """D413: the honesty is the valuable part, and it is a FIELD not prose."""
     assert mcp_runtime.AUTHORIZATION_SPEC_CONFORMANT is False
+
+
+# ---------------------------------------------------------------------------
+# Run 7: readiness, and the probe that reads it
+# ---------------------------------------------------------------------------
+
+
+def _readiness(*, lock: Any, key_set: Any) -> tuple[int, dict[str, Any]]:
+    """Drive the readiness route the assembled app serves, without a socket."""
+    import asyncio
+
+    from starlette.routing import Route
+
+    class _Server:
+        def __init__(self) -> None:
+            self.routes: list[Any] = []
+
+        def custom_route(self, path: str, methods: list[str]) -> Any:
+            def decorate(handler: Any) -> Any:
+                self.routes.append(Route(path, handler, methods=methods))
+                return handler
+
+            return decorate
+
+    server = _Server()
+    mcp_runtime._register_health(server, lock=lock, key_set=key_set)
+    handler = next(
+        route.endpoint for route in server.routes if route.path == mcp_runtime.HEALTH_READY_PATH
+    )
+    response = asyncio.run(handler(None))
+    return response.status_code, json.loads(bytes(response.body).decode("utf-8"))
+
+
+class _Keys:
+    keys: ClassVar[dict[str, Any]] = {"kid": {}}
+
+
+def test_readiness_reports_what_startup_established(tmp_path: Path) -> None:
+    """It calls nothing (ADR 0128). This runtime has no dependency to probe."""
+    status, body = _readiness(lock=object(), key_set=_Keys())
+
+    assert status == 200
+    assert body["status"] == "ready"
+    assert sorted(body["holds"]) == ["capability_lock", "key_set"]
+
+
+def test_readiness_refuses_without_the_capability_lock() -> None:
+    """**503, and it names which artefact.**
+
+    A container serving with no lock would answer every discovery with an empty
+    list, which nothing can distinguish from a correctly-empty one. The route is
+    private, so the reader is an operator -- ADR 0097's silence is about what an
+    unauthenticated CALLER may learn.
+    """
+    status, body = _readiness(lock=None, key_set=_Keys())
+
+    assert status == 503
+    assert body["missing"] == ["capability_lock"]
+
+
+def test_readiness_refuses_without_a_key_set() -> None:
+    """The other artefact, so neither is load-bearing alone."""
+
+    class _Empty:
+        keys: ClassVar[dict[str, Any]] = {}
+
+    status, body = _readiness(lock=object(), key_set=_Empty())
+
+    assert status == 503
+    assert body["missing"] == ["key_set"]
+
+
+def test_the_health_probe_passes_only_on_a_ready_container() -> None:
+    """The probe's verdict, over every status the route can answer.
+
+    **503 must not pass.** It is the runtime's own answer when an artefact is
+    missing, and a healthcheck that accepted it would keep a container in
+    service precisely when it cannot serve.
+    """
+    from app import mcp_health
+
+    assert mcp_health.EXPECTED_STATUS == 200
+
+    verdicts = {}
+    original = mcp_health.probe
+    try:
+        for status in (200, 503, 404, 500):
+            mcp_health.probe = lambda *_, status=status, **__: status  # type: ignore[assignment]
+            verdicts[status] = mcp_health.main()
+    finally:
+        mcp_health.probe = original  # type: ignore[assignment]
+
+    assert verdicts == {200: 0, 503: 1, 404: 1, 500: 1}
+
+
+def test_the_health_probe_reports_an_unreachable_process_as_unhealthy() -> None:
+    """A process that cannot be reached is not ready."""
+    from app import mcp_health
+
+    original = mcp_health.probe
+    try:
+
+        def refuse(*args: Any, **kwargs: Any) -> int:
+            raise ConnectionRefusedError
+
+        mcp_health.probe = refuse  # type: ignore[assignment]
+        assert mcp_health.main() == 1
+    finally:
+        mcp_health.probe = original  # type: ignore[assignment]
+
+
+def test_the_probe_asks_the_readiness_route_the_runtime_serves() -> None:
+    """One path, not two spellings (D264)."""
+    from app import mcp_health
+
+    assert mcp_health.PROBE_URL.endswith(mcp_runtime.HEALTH_READY_PATH)

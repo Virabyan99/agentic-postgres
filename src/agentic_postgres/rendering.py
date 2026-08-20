@@ -594,6 +594,14 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # one ADR 0106 states for the storage endpoint.
     "MCP_MEMORY_LIMIT",
     "MCP_POSTGREST_URL",
+    # Session 8, Run 7. The published route (ADR 0128). A TOP-LEVEL path,
+    # unlike every other application route: nothing else in this deployment
+    # matches it, so its precedence is uncontested rather than won by
+    # construction. What it shares with the others is the two-matcher form,
+    # because `PathPrefix` is a string prefix and `/mcp` would otherwise
+    # answer `/mcpx` (D162, D408).
+    "API_MCP_PATH",
+    "MCP_ROUTER_NAME",
     # Session 7, Run 7. The published route, in the same two shapes the
     # application route uses one line-block above: a *path* a router rule
     # matches on, and three *names* `runtime_override.py` renders into label
@@ -945,6 +953,8 @@ def build_compose_env(
         # have and a rotation nobody would run. What travels on it is the
         # caller's own token, which is already a bearer credential over a link
         # the edge terminated TLS for.
+        "API_MCP_PATH": identity.route_mcp_path,
+        "MCP_ROUTER_NAME": identity.mcp_router,
         "MCP_POSTGREST_URL": (
             f"http://{POSTGREST_SERVICE_HOST}:{runtime_override.REST_SERVICE_PORT}"
         ),

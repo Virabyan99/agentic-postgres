@@ -408,6 +408,27 @@ def storage_router_name(key: str) -> str:
     return traefik_name(f"apg-{key}-storage", context="traefik_router_storage")
 
 
+def mcp_router_name(key: str) -> str:
+    """The router and service name for one project's agent plane.
+
+    **A top-level route, and that is what makes it different from `storage`.**
+    `/mcp` lies inside nothing, so no other rule in this deployment matches it
+    and its precedence is uncontested -- derived from the rule's length like
+    every other, and asserted by a test that interpolates every rule rather than
+    by reasoning about them (ADR 0108, ADR 0128).
+
+    The sibling problem is still real and is answered the same way. `PathPrefix`
+    is a string prefix (D162), so `PathPrefix(`/mcp`)` alone would answer
+    `/mcpx`; the two-matcher form does not. What differs from the storage route
+    is where a sibling LANDS: `/api/app/storagex` is caught by the parent
+    application router and gets the auth service's 404, while `/mcpx` matches
+    nothing at all and gets **Traefik's own** 404 -- a 19-byte body with no
+    `RouterName` (D186, D187, D353). The boundary proof reads which, never the
+    status code.
+    """
+    return traefik_name(f"apg-{key}-mcp", context="traefik_router_mcp")
+
+
 def storage_stripprefix_middleware_name(key: str) -> str:
     """The storage route's strip-prefix middleware.
 
@@ -654,6 +675,11 @@ class ProjectIdentity:
     route_rest: str = ""
     route_app: str = ""
     route_mcp: str = ""
+    #: The published path alone, for the router rule and for the boundary
+    #: proof. Carried beside the URL because a label needs the path and a
+    #: document reader needs the address, and slicing one out of the other at
+    #: a call site is a second derivation of a value this module owns.
+    route_mcp_path: str = ""
     route_docs: str = ""
     #: Session 2's public health probe. Under the platform-reserved `/__apg`
     #: prefix rather than `/health`, because `/health` is a path an application
@@ -722,6 +748,7 @@ class ProjectIdentity:
     #: router (measured). The CORS middleware is a label rather than a
     #: file-provider document (ADR 0109).
     storage_router: str = ""
+    mcp_router: str = ""
     storage_stripprefix_middleware: str = ""
     storage_buffering_middleware: str = ""
     storage_cors_middleware: str = ""
@@ -786,6 +813,7 @@ def derive(
         route_storage=(f"https://{domain}{api_base_path}{APP_PATH_SUFFIX}{STORAGE_PATH_SUFFIX}"),
         route_storage_path=f"{api_base_path}{APP_PATH_SUFFIX}{STORAGE_PATH_SUFFIX}",
         route_mcp=f"https://{domain}{mcp_base_path}",
+        route_mcp_path=mcp_base_path,
         # The page, not the root above it (ADR 0061).
         route_docs=f"https://{domain}{DOCS_PAGE_PATH}",
         route_docs_path=DOCS_PAGE_PATH,
@@ -804,6 +832,7 @@ def derive(
         app_buffering_middleware=app_buffering_middleware_name(key),
         app_docs_router=app_docs_router_name(key),
         storage_router=storage_router_name(key),
+        mcp_router=mcp_router_name(key),
         storage_stripprefix_middleware=storage_stripprefix_middleware_name(key),
         storage_buffering_middleware=storage_buffering_middleware_name(key),
         storage_cors_middleware=storage_cors_middleware_name(key),

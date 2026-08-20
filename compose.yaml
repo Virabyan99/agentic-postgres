@@ -1295,28 +1295,30 @@ services:
       # mount whose file nothing produces is D381 exactly, so the producer and
       # the consumer arrive in the same run.
       APG_MCP_LOCK_FILE: /etc/mcp/capability-lock.json
-    # **No healthcheck, and that is deferred rather than forgotten (D429).**
+    # Run 7's, and the module Run 4 deferred (D429) now exists: ADR 0124's
+    # allowlist gave the probe a row with a reason, which is what it was waiting
+    # for.
     #
-    # Run 7 owns this service's health surface -- the plan says so in as many
-    # words: "private unauthenticated health; readiness tokenless and inventing
-    # no private dependency endpoint". Run 4 declining to invent one is the
-    # point: the agent plane has no dependency to ask about, so the only honest
-    # signal available today is that an unauthenticated POST to `/mcp` is
-    # REFUSED. A 401 proves the process serves and that the token verifier is
-    # mounted in front of it; a 200 would mean the boundary is gone, so any
-    # status other than 401 -- including success -- has to fail the check.
+    # It asks `/health/ready`, which reports only what STARTUP established --
+    # the key set and the capability lock are both loaded -- and calls nothing
+    # (ADR 0128). This runtime holds no credential and opens no connection, so
+    # it has no dependency of its own to probe, and a readiness answer that
+    # reached PostgREST would take this container out of service for a fault
+    # that is not its own.
     #
-    # That check was written as `app/mcp_health.py` and removed again, because
-    # `test_the_service_never_constructs_a_network_jwks_client` forbids `urllib`,
-    # `httpx`, `requests`, `aiohttp` and `socket` anywhere under
-    # `services/auth-api/`, and it is right to: a verifier that can fetch its own
-    # trust anchor is a verifier whose anchor is whatever answered. Weakening a
-    # P0 guard to fit a liveness probe is the wrong trade, so the probe waits for
-    # the run that owns the surface. The reasoning above is left here so Run 7
-    # inherits it rather than re-deriving it.
-    #
-    # Nothing starts this container before Run 7 in any case: `profiles:
-    # [session8]` and CURRENT_SESSION is 7.
+    # Neither health route is published. No Traefik router names them, so they
+    # are private by the absence of a route rather than by a guard, and the
+    # public health answer stays `__apg/healthz` (D231).
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -m
+        - app.mcp_health
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
       - internal
       - edge

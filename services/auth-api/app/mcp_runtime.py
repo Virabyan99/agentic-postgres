@@ -28,12 +28,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from fastmcp.server.auth import TokenVerifier as _TokenVerifier
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 from app import settings as settings_module
 from app.claims import ClaimError, verify_claims
 from app.mcp_authorization import AgentContextMiddleware
 from app.mcp_lock import load_lock
+from app.mcp_origin import RefuseBrowserOrigins
 from app.tokens import LocalKeySet, MalformedToken, pre_parse
 
 if TYPE_CHECKING:  # pragma: no cover -- import-time typing only
@@ -79,6 +81,20 @@ PROTOCOL_REVISION = LATEST_PROTOCOL_VERSION
 #: rather than in prose a runbook nobody diffs. D274 is the precedent: a claim
 #: that lives only in prose is a claim nobody checks.
 AUTHORIZATION_SPEC_CONFORMANT = False
+
+#: The path this runtime serves the MCP endpoint at, INSIDE the container.
+#:
+#: The same string the edge publishes, because the router strips nothing (ADR
+#: 0128) -- measured, because a `custom_route` mounts at the application root
+#: rather than under this path, so `/mcp/health/live` is a 404 and `/health/live`
+#: is not. `runtime_override` derives the published path from the manifest and
+#: `naming.py` owns it; this constant is what the image serves, and a test
+#: asserts the two agree rather than either one being copied.
+MCP_ROUTE_PATH = "/mcp"
+
+#: The container-local health paths. Served, and published by nothing.
+HEALTH_LIVE_PATH = "/health/live"
+HEALTH_READY_PATH = "/health/ready"
 
 __all__ = [
     "ACCEPTED_TOKEN_USE",
@@ -137,14 +153,22 @@ def verify_agent_claims(
     return verified
 
 
-class AgentTokenVerifier:
+class AgentTokenVerifier(_TokenVerifier):
     """FastMCP's `TokenVerifier`, holding the rendered key set and nothing else.
 
-    Structurally typed against the framework rather than subclassing it: the
-    protocol is one coroutine, `verify_token(token: str) -> AccessToken | None`,
-    measured against the locked version. Constructing this class therefore
-    requires no framework import, so the refusal branches are testable without
-    one -- and the framework's own object is built only on the accepting path.
+    **It subclasses the framework's class, and Run 4's decision not to was
+    wrong** (D444). The docstring here used to say it was "structurally typed
+    against the framework rather than subclassing it: the protocol is one
+    coroutine". The protocol is not one coroutine. `http_app` calls
+    `auth.get_middleware()` while assembling the application, and
+    `AuthProvider` also supplies `get_routes`, `get_well_known_routes` and
+    `set_mcp_path` -- so a duck-typed object raised `AttributeError` the first
+    time anything built the app.
+
+    Nothing caught it, because nothing had ever built the app: every test
+    constructed this class and called `verify_token` directly. **That is D381's
+    shape** -- a runtime declared in code, assembled nowhere, and correct-looking
+    until the first real start. Run 7's rig is what executed the assembly.
 
     **Every refusal returns `None`**, which the framework renders as a 401 with
     no detail. That is ADR 0097's split applied at the outermost door: a
@@ -154,6 +178,7 @@ class AgentTokenVerifier:
     """
 
     def __init__(self, key_set: LocalKeySet, *, issuer: str, audience: str) -> None:
+        super().__init__()
         self._key_set = key_set
         self._issuer = issuer
         self._audience = audience
@@ -239,13 +264,18 @@ def build_server(
     postgrest_url: str,
     lock: Any | None = None,
 ) -> Any:
-    """The FastMCP server, with no tools registered.
+    """The FastMCP server, its four tools, and its private health routes.
 
-    Run 6 registers exactly four, from the compiled capability lock. Until then
-    an agent that authenticates successfully is told there are none, which is
-    true -- as against a placeholder, which would be a discovery response that
-    lies. D421 is the standing lesson about a tool list that advertises what it
-    will refuse.
+    Run 6 registers exactly four tools from the compiled capability lock. Called
+    without one -- which only a test does -- the server has none, which is true,
+    as against a placeholder that would be a discovery response that lies.
+
+    **The health routes are served here and published nowhere** (ADR 0128).
+    Measured against the pinned framework: a `custom_route` mounts at the
+    application ROOT rather than under `path=`, and is **not** behind the token
+    verifier, with the control that matters alongside it -- `/mcp` still answers
+    an unauthenticated caller 401. So "health answered" cannot be read as
+    "authentication is off".
 
     **The authorization middleware is here from Run 5, before any tool exists**,
     and that order is deliberate. It resolves the caller's context on the way in
@@ -266,7 +296,50 @@ def build_server(
         from app.mcp_tools import register
 
         register(server, lock, base_url=postgrest_url)
+
+    _register_health(server, lock=lock, key_set=verifier.key_set)
     return server
+
+
+def _register_health(server: Any, *, lock: Any, key_set: Any) -> None:
+    """Liveness and readiness, container-local and unauthenticated (ADR 0128).
+
+    **Readiness reports only what startup established** and calls nothing. This
+    runtime holds no credential and opens no connection, so it has no dependency
+    of its own to probe -- and a readiness answer that reached PostgREST would
+    take this container out of service for a fault that is not its own. What it
+    can honestly say is that the key set and the capability lock are both loaded,
+    which is the whole of what this process needs to serve a request.
+
+    Neither route is published. No Traefik router names them, so they are
+    reachable only from inside the internal network, and the public answer to
+    "is this project up" stays `__apg/healthz` (D231).
+    """
+    from starlette.responses import JSONResponse
+
+    @server.custom_route("/health/live", methods=["GET"])
+    async def live(request: Any) -> Any:
+        """The event loop is running. Touches nothing else, on purpose."""
+        del request
+        return JSONResponse({"status": "live"})
+
+    @server.custom_route("/health/ready", methods=["GET"])
+    async def ready(request: Any) -> Any:
+        """Both startup artefacts are held. Invents no dependency endpoint."""
+        del request
+        holdings = {
+            "key_set": key_set is not None and bool(getattr(key_set, "keys", None)),
+            "capability_lock": lock is not None,
+        }
+        if all(holdings.values()):
+            return JSONResponse({"status": "ready", "holds": sorted(holdings)})
+        # 503, and it names WHICH artefact is missing -- this route is private,
+        # so the reader is an operator rather than a caller, and ADR 0097's
+        # silence is about what an unauthenticated CALLER may learn.
+        return JSONResponse(
+            {"status": "unready", "missing": sorted(k for k, v in holdings.items() if not v)},
+            status_code=503,
+        )
 
 
 def create_mcp_app() -> Starlette:
@@ -299,4 +372,17 @@ def create_mcp_app() -> Starlette:
     # transport draws rather than about a session this runtime would have to
     # keep, and a session store is state the agent plane deliberately has none
     # of (ADR 0125).
-    return server.http_app(path="/mcp", stateless_http=True)
+    #
+    # The published path is `/mcp` and the router strips NOTHING (ADR 0128), so
+    # the path served here and the path published at the edge are the same
+    # string. The health routes mount at the root beside it and no router names
+    # them.
+    application = server.http_app(path=MCP_ROUTE_PATH, stateless_http=True)
+
+    # Outermost, so a browser request is refused before anything reads a body or
+    # builds a request object (ADR 0128). Wrapped around the finished app rather
+    # than passed as FastMCP `middleware=`, because that list is the MCP-message
+    # middleware chain -- it runs after the transport has already accepted the
+    # request, which is too late for a check whose value is that the request
+    # costs nothing.
+    return RefuseBrowserOrigins(application)

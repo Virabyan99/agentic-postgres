@@ -41,6 +41,7 @@ STORAGE_ROUTER = "apg-alpha-dev-storage"
 STORAGE_BUFFERING = "apg-alpha-dev-storage-buffering"
 STORAGE_STRIPPREFIX = "apg-alpha-dev-storage-stripprefix"
 STORAGE_CORS = "apg-alpha-dev-storage-cors"
+MCP_ROUTER = "apg-alpha-dev-mcp"
 RENDERED = "/var/lib/agentic-postgres/rendered/alpha-dev"
 
 #: Every derived name the override renders into a label key. Collected here so a
@@ -62,6 +63,7 @@ NAMES = {
     "storage_buffering_middleware_name": STORAGE_BUFFERING,
     "storage_stripprefix_middleware_name": STORAGE_STRIPPREFIX,
     "storage_cors_middleware_name": STORAGE_CORS,
+    "mcp_router_name": MCP_ROUTER,
 }
 
 

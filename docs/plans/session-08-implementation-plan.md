@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D441.**
+**Next free number after this table is D446.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -94,6 +94,11 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D438** | — (measured while building the adapter.) | **Percent-encoding does not remove a comma from `in.(…)` list syntax, and the SQL quote convention is wrong.** PostgREST decodes the query string *before* it parses the list. Measured against the locked image: `in.(weird,title)` → **0 rows** (silently split); `in.(weird%2Ctitle)` → **0 rows**; `in.("weird,title")` → **1 row**. And inside a quoted member an embedded quote needs a **backslash**: the doubled quote SQL uses → **0 rows**, `\"` → **1 row**. | Members are backslash-escaped (`\\` then `\"`), quoted, then percent-encoded. Verified against **eight** awkward values — comma, quote, backslash, trailing backslash, both, close-paren, dot, plain — each compared with the same row fetched by `eq.`, which needs no list syntax; **eight of eight agree**, and an absent value returns nothing. Then re-verified end to end by firing the **product's own builder** at the live service. | **Both wrong answers fail by matching nothing**, which reads as an empty result rather than an error — the worst failure mode available in a filter. A careful implementer would have reached for `%2C` first and for doubled quotes second, and neither would have raised anything. | 0127 |
 | **D439** | D414: the five `AGT-*` placeholders move in **Run 6**, and `CURRENT_SESSION` moves in **Run 7**. | **That split is not executable, and the count is six.** `test_every_later_requirement_has_a_placeholder` requires a placeholder for every requirement with `target_session > gate_session`; `test_no_requirement_at_or_before_the_gate_session_remains_future` forbids one for `target_session <= gate_session`. They are exact mirrors, so replacing the placeholders while `CURRENT_SESSION` is 7 reddens the first, and moving the constant first reddens the second. **`SEC-INJ-001` also targets session 8** and was not in D414's list of five. | **Run 6 does both, in one commit**, with all six requirements repointed at real tests — which is exactly what Session 7 Run 9 did for the same coupling. Run 7 keeps the publish work: the route, its precedence, and the health surface. | The handoff's instruction was written from the gate side only and would have produced a red commit whichever half went first. Undercounting by one is the smaller half: `SEC-INJ-001` sits in a different file under a different prefix, and D414 enumerated the `AGT-*` ones by name. | — |
 | **D440** | ADR 0124's transport allowlist, written in Run 5 with two rows. | **A third module needed one, and not because it reaches the network.** `mcp_query.py` imports `urllib.parse` to percent-encode, and the AST scan sees the top-level package `urllib` — the same name `urllib.request` presents. The allowlist could not tell an encoder from a sender. | The row is added with the reason stated, **and the test is tightened**: a module in the allowlist that is not one of the declared *senders* may not name `urlopen`, `Request` or `urlretrieve`. So a query builder that grew a sender is refused by its own row rather than covered by it. | The alternative was to drop `urllib` from the transport set, which would have removed the guard from the one module that does send. Naming the package and then distinguishing the callable is stricter than either half alone — and it is the same correction ADR 0124 made to the guard it replaced. | — |
+| **D441** | Run 7's plan: *"Host/Origin protection"*, as though it were a setting. | **The pinned framework does not have it.** Measured at fastmcp **3.4.0** — ADR 0121's ceiling, because 3.4.1 cannot share a process with this repository's FastAPI: `http_app` takes `path, middleware, json_response, stateless_http, transport, event_store, retry_interval` and **`host_origin_protection`, `allowed_hosts` and `allowed_origins` are all absent**. They arrive at 3.4.7. And the runtime does nothing about either today: a request with `Origin: https://evil.test` and a valid token is **processed and answered 200**; a `Host: evil.test` is likewise 200. What stops a browser is the **405** on preflight, which is the absence of a CORS middleware rather than anything the runtime does. | **Origin is refused by our own ASGI middleware, and not by an allowlist — any `Origin` at all** (ADR 0128). No legitimate client of an agent API is a browser, so the header's presence is the signal; it is stricter than a list, needs no configuration, and has nothing to drift from. **Host stays Traefik's**: the router's `Host()` clause is derived from the domain `naming.py` owns, and a second check inside the image would need that domain as a setting. | A protection that lives only in the edge configuration is one the runtime cannot state, and D274's lesson is that a claim nobody checks is a claim nobody has. A test asserts the framework still lacks its own version, so a future bump makes keeping both a real choice rather than a duplicate nobody noticed. | 0128 |
+| **D442** | — (measured while designing the route.) | **A `custom_route` mounts at the application ROOT, not under `http_app(path=…)`, and is not behind the token verifier.** Read from the route table the framework builds: `/mcp`, `/health/live`, `/health/ready`, and `GET /mcp/health/live` is a **404**. The health routes answer **200 without a token**, with the control alongside — `POST /mcp` without one is still **401**. | The router publishes `/mcp` and **strips nothing**, because the served path and the published path are then the same string. Health is **private by the absence of a route**: no Traefik router names it, so it is reachable only from inside the internal network, and the public health answer stays `__apg/healthz` (D231). | Had a strip been added by habit — every other application route has one — the edge would have forwarded `/` to a service that answers 404 there, which at the edge is indistinguishable from a missing route (D186, D187). The unauthenticated-health arm means nothing without the 401 control beside it: together they say the routes are open **and** authentication is on. | 0128 |
+| **D443** | D408: *"`/mcpx` must reach a different backend, and which service answered is read from the response."* | **There is no different backend.** `/mcp` is **top-level**, unlike `/api/app/storage`, so a sibling matches no router at all and gets **Traefik's own** 404 — a 19-byte body carrying no `RouterName` — rather than another service's. The prediction assumed the storage shape, where a parent router catches the sibling. | The two-matcher rule is unchanged and still necessary (`PathPrefix` is a string prefix, D162). What changes is what the proof looks for: **the absence of a `RouterName`**, not the presence of a different one. Offline, every rule in the override is interpolated with real values and evaluated against `/mcp`; exactly one router matches. | The distinction matters because the two 404s are indistinguishable by status and by body length is how they are told apart (D353). A proof written for the storage shape would have looked for a service that never answers and reported a boundary it had not tested. | 0128 |
+| **D444** | Run 4's `AgentTokenVerifier`: *"Structurally typed against the framework rather than subclassing it: the protocol is one coroutine."* | **The protocol is not one coroutine, and nothing had ever built the application.** `http_app` calls `auth.get_middleware()` while assembling, and `AuthProvider` also supplies `get_routes`, `get_well_known_routes` and `set_mcp_path`. A duck-typed verifier raises `AttributeError: 'AgentTokenVerifier' object has no attribute 'get_middleware'` — **on the first real start, anywhere**. Every test since Run 4 constructed the class and called `verify_token` directly, so `build_server(...).http_app(...)` was never executed by anything. | `AgentTokenVerifier` subclasses the framework's `TokenVerifier`. A test now **assembles the real application** and asserts its route table — `/mcp` plus the two health paths — and a second names all four contract methods, so a refactor back to duck typing fails offline rather than on a host. | **D381 exactly, and in the same session that wrote D381 into four ADRs.** A runtime declared in code, assembled nowhere, correct-looking until the first start. It survived Runs 4, 5 and 6 — three green batteries and 3,662 passing tests — because the seam nobody crossed was *construction*, not behaviour. §6 question 2: has it run at all, in this environment, since the thing it measures last changed? | — |
+| **D445** | — (found by an existing guard, during Run 7.) | **The deploy tried to import the agent runtime to read its published constants.** `observe_mcp` needs `PROTOCOL_REVISION`, `AUTHORIZATION_SPEC_CONFORMANT` and `ACCEPTED_TOKEN_USE` for the document, and the first version loaded `services/auth-api/app/mcp_runtime.py` from the release by path. That module imports `fastmcp`, `mcp.types` and the service package — **none of which exist on the host** — so it would have raised `ModuleNotFoundError` at deploy time, in the command where it costs most. | The constants are asked of the **running container**: `docker exec … python -c` importing the module that container is actually serving from (ADR 0093). The block stays `unavailable` when the container cannot answer, rather than being filled with a guess. | **`test_no_operator_command_puts_a_service_directory_on_the_path` caught it before the suite did**, and its message names the fix: *“reach the service's logic through a container instead”*. It is D292's guard doing exactly the job it was written for, one session later — and the answer is stronger than the mistake, because what the document publishes is now what the process answering requests holds rather than what the release says it should (D413). | — |
 
 ---
 
@@ -564,16 +569,58 @@ came closest to shipping.
 
 Suite **3662 passed, 255 skipped**.
 
-### Run 7 — Publish
+### Run 7 — Publish — **Done.**
 
-- The route in ADR 0108's frozen form, precedence **derived**, `/mcpx` proved to
-  reach a different backend by which service answered (D408).
-- `profiles: [session8]`, absent from `POST_BOOTSTRAP_SERVICES` (D410).
-- Host/Origin protection; browser CORS off by default.
-- Private unauthenticated health; readiness tokenless and inventing no private
-  dependency endpoint.
-- The two-stage convergence `routes.app` and `routes.storage` both use: first
-  deploy `unavailable`, redeploy `ready` (D326).
+**What was measured, and three of the four bullets turned out to be decisions
+rather than settings.**
+
+**D441** — the plan asks for Host/Origin protection. At the pinned fastmcp
+**3.4.0**, `http_app` has no `host_origin_protection`, `allowed_hosts` or
+`allowed_origins`; they arrive at 3.4.7, above ADR 0121's measured ceiling. And
+the runtime does nothing about either: a cross-origin request with a valid token
+is **answered 200**, and so is one with `Host: evil.test`. What stops a browser
+today is the **405** on preflight — the absence of a CORS middleware, which is a
+property of the edge rather than of this process.
+
+**D442** — a `custom_route` mounts at the application **root**, not under
+`http_app(path=…)`, and is **not** behind the verifier. Route table: `/mcp`,
+`/health/live`, `/health/ready`; `GET /mcp/health/live` is a 404. Health answers
+**200 without a token**, with the control that makes it mean something —
+`POST /mcp` without one is still **401**.
+
+**D443** — D408 predicted `/mcpx` would reach a different backend. It reaches
+**none**: `/mcp` is top-level, so a sibling matches no router and gets Traefik's
+own 404. The prediction assumed the storage shape, where a parent catches the
+sibling.
+
+**D444 is the one to read, and it is D381 again.** `AgentTokenVerifier` was
+"structurally typed against the framework rather than subclassing it: the
+protocol is one coroutine". It is not: `http_app` calls `auth.get_middleware()`
+while assembling. A duck-typed verifier raises `AttributeError` **on the first
+real start anywhere** — and it survived Runs 4, 5 and 6, three green batteries
+and 3,662 passing tests, because **nothing had ever built the application.**
+Every test constructed the verifier and called `verify_token` directly. The seam
+nobody crossed was construction, not behaviour.
+
+**What was built.** ADR 0128. The router: one published path in ADR 0108's
+two-matcher form, **stripping nothing** — because the container serves `/mcp` at
+its own root, so the published and served paths are one string and a strip would
+forward `/` to a 404. No CORS and no buffering, each absent for a stated reason.
+Health served and published by nothing, **private by the absence of a route**,
+with readiness reporting only what startup established — the key set and the
+capability lock are loaded — and calling nothing, because this runtime has no
+dependency of its own to probe. `RefuseBrowserOrigins`, an ASGI middleware
+outside everything, refusing **any** request carrying an `Origin`. The health
+probe module Run 4 deleted rather than weaken a guard (D429) is back as ADR
+0124's third allowlist row. And `observe_mcp`, publishing `routes.mcp` and the
+`mcp` block on the two-stage convergence `routes.app` and `routes.storage` both
+use (D326).
+
+**The battery: 12 mutations, 12 killed.** P9 is the one that matters: it reverts
+the verifier to duck typing, and the assembly test dies — the test that did not
+exist until this run.
+
+Suite **3684 passed, 255 skipped**.
 
 ### Run 8 — Budgets, errors, telemetry
 

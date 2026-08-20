@@ -313,6 +313,7 @@ def build_override(
     storage_buffering_middleware_name: str,
     storage_stripprefix_middleware_name: str,
     storage_cors_middleware_name: str,
+    mcp_router_name: str,
     publications: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
@@ -526,6 +527,10 @@ def build_override(
             # nothing to verify with, and the gap was invisible until a
             # container started somewhere real.
             MCP_SERVICE: {
+                "labels": _mcp_labels(
+                    https_entrypoint=https_entrypoint,
+                    mcp_router_name=mcp_router_name,
+                ),
                 "volumes": [
                     f"{rendered_directory}/{JWKS_FILENAME}:{MCP_JWKS_CONTAINER_PATH}:ro",
                     # Run 6. The compiled capability lock -- the whole of what
@@ -856,6 +861,58 @@ def _storage_labels(
     }
 
 
+def _mcp_labels(*, https_entrypoint: str, mcp_router_name: str) -> dict[str, str]:
+    """The agent plane's router: one published path, and nothing stripped.
+
+    **No `stripprefix`, and that is measured rather than economical.** The
+    application serves the MCP endpoint at `/mcp` on its own root -- read back
+    from the route table FastMCP builds -- so the published path and the served
+    path are the same string. A strip would forward `/` to a service that
+    answers 404 there.
+
+    **The two-matcher rule, for D162's reason.** `PathPrefix` is a string prefix,
+    so `PathPrefix(`/mcp`)` alone answers `/mcpx`. The `Path()` half is what
+    serves the endpoint itself, and the `PathPrefix(`/mcp/`)` half is what keeps
+    a sub-path inside the surface without letting a sibling in.
+
+    **A sibling lands somewhere different here than it does under `storage`.**
+    `/api/app/storagex` is caught by the PARENT application router and gets the
+    auth service's 404. `/mcp` is top-level, so `/mcpx` matches no router at all
+    and gets **Traefik's own** 404 -- a 19-byte body carrying no `RouterName`
+    (D186, D187, D353). The boundary proof reads which service answered.
+
+    **No CORS middleware and no buffering.** No CORS because this is not a
+    browser API and ADR 0128 refuses any request carrying an `Origin` at the
+    runtime; attaching one would advertise a cross-origin flow that is
+    deliberately impossible (ADR 0109). No buffering because the agent plane
+    reads and the bodies are JSON-RPC envelopes, not uploads -- and the response
+    ceiling it does need is a serialized-byte budget the runtime enforces after
+    the read, which a request-body limit cannot express.
+
+    **Health is absent from this label set on purpose** (ADR 0128). The
+    container serves `/health/live` and `/health/ready` at its root and no router
+    publishes them, so they are private by the absence of a route rather than by
+    a guard. The public health answer stays `__apg/healthz` (D231).
+    """
+    router = f"traefik.http.routers.{mcp_router_name}"
+    service = f"traefik.http.services.{mcp_router_name}"
+    path = "${API_MCP_PATH:?required}"
+    return {
+        "traefik.enable": "true",
+        f"{router}.rule": (
+            f"Host(`${{PROJECT_DOMAIN:?required}}`) && (Path(`{path}`) || PathPrefix(`{path}/`))"
+        ),
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        # The baseline chain alone: response headers and the platform's own
+        # policy. No strip, no CORS, no buffering -- each absent for a reason
+        # written in the docstring above rather than by omission.
+        f"{router}.middlewares": "${BASELINE_MIDDLEWARE_CHAIN:?required}",
+        f"{router}.service": mcp_router_name,
+        f"{service}.loadbalancer.server.port": str(MCP_SERVICE_PORT),
+    }
+
+
 def _rest_labels(
     *,
     https_entrypoint: str,
@@ -942,6 +999,7 @@ def render_override(
     storage_buffering_middleware_name: str,
     storage_stripprefix_middleware_name: str,
     storage_cors_middleware_name: str,
+    mcp_router_name: str,
     publications: dict[str, Any] | None = None,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
@@ -963,6 +1021,7 @@ def render_override(
         storage_buffering_middleware_name=storage_buffering_middleware_name,
         storage_stripprefix_middleware_name=storage_stripprefix_middleware_name,
         storage_cors_middleware_name=storage_cors_middleware_name,
+        mcp_router_name=mcp_router_name,
         publications=publications,
     )
     header = (

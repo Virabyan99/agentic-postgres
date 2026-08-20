@@ -307,6 +307,7 @@ OVERRIDE_NAME_KEYS: dict[str, str] = {
     "storage_buffering_middleware_name": "STORAGE_BUFFERING_MIDDLEWARE_NAME",
     "storage_stripprefix_middleware_name": "STORAGE_STRIPPREFIX_MIDDLEWARE_NAME",
     "storage_cors_middleware_name": "STORAGE_CORS_MIDDLEWARE_NAME",
+    "mcp_router_name": "MCP_ROUTER_NAME",
 }
 
 
@@ -856,6 +857,128 @@ def observe_storage(url: str, *, credentialed: bool) -> str:
         return "ready"
     print(f"  the storage route answered {status or '(nothing)'} rather than 401")
     return "unavailable"
+
+
+def observe_mcp(url: str, *, lock_path: Path, project_key: str) -> tuple[str, dict[str, Any]]:
+    """`ready` when the agent plane **refuses** an unauthenticated caller.
+
+    `observe_storage`'s shape and D326's: a status field, `unavailable` until the
+    surface answers, and the deploy exits 0 either way.
+
+    **The probe is a 401 from an unauthenticated POST**, and it proves more than
+    a 200 anywhere could. That the router matched at all -- `/mcp` is top-level,
+    so a miss is Traefik's own 404, a 19-byte body carrying no `RouterName`
+    (D186, D187, D353). That nothing was stripped, since the container serves
+    `/mcp` at its own root and a strip would forward `/` to a 404. That the
+    process is up. And that the token verifier is mounted in front of it: a
+    **200 here would mean the boundary is gone**, so any status other than 401 --
+    including success -- leaves the route unavailable.
+
+    The block's fields come from the LOCK and from the runtime's own constants,
+    never from this file: `protocol_revision` is the framework's (ADR 0123), and
+    the two checksums identify the artefacts a reader would otherwise have to
+    guess were the same one.
+    """
+    block = dict(deployed_output.MCP_NOT_PUBLISHED)
+
+    result = run(
+        "curl", "-ksS", "-o", "/dev/null", "-w", "%{http_code}",
+        "--max-time", "10",
+        "-X", "POST",
+        "-H", "Content-Type: application/json",
+        "-d", "{}",
+        url,
+    )  # fmt: skip
+    status = result.stdout.strip()
+    if status != "401":
+        print(f"  the agent plane answered {status or '(nothing)'} rather than 401")
+        return "unavailable", block
+
+    if not lock_path.is_file():
+        print(f"  no capability lock at {lock_path}; routes.mcp stays unavailable")
+        return "unavailable", block
+
+    try:
+        lock = json.loads(lock_path.read_text(encoding="utf-8"))
+    except ValueError as error:
+        print(f"  the capability lock is unreadable ({error}); routes.mcp stays unavailable")
+        return "unavailable", block
+
+    # Asked of the container, never loaded here (D445, ADR 0093). What the
+    # document publishes is then what the process answering requests holds.
+    container = mcp_container(project_key)
+    if container is None:
+        print("  no single running agent-plane container; routes.mcp stays unavailable")
+        return "unavailable", block
+    reported = agent_plane_constants(container)
+    if reported is None:
+        return "unavailable", block
+    revision, conformant, accepted = reported
+    block = {
+        "status": "ready",
+        "protocol_revision": revision,
+        "authorization_spec_conformant": conformant,
+        "accepted_token_use": accepted,
+        "capability_contract_sha256": lock.get("canonical_sha256"),
+        "capability_lock_sha256": hashlib.sha256(lock_path.read_bytes()).hexdigest(),
+        "tool_count": lock.get("tool_count"),
+    }
+    return "ready", block
+
+
+#: What the agent plane is asked, inside its own container, to report about
+#: itself. One line, importing the runtime module that container is serving from.
+AGENT_PLANE_PROBE = (
+    "import json, app.mcp_runtime as m; "
+    "print(json.dumps([m.PROTOCOL_REVISION, m.AUTHORIZATION_SPEC_CONFORMANT, "
+    "m.ACCEPTED_TOKEN_USE]))"
+)
+
+
+def agent_plane_constants(container: str) -> tuple[str, bool, str] | None:
+    """The runtime's own published constants, read from the RUNNING container.
+
+    **Not from the release**, and the difference is not stylistic. `mcp_runtime`
+    imports `fastmcp`, `mcp.types` and the service package, none of which exist
+    on the host -- so loading it here would raise `ModuleNotFoundError` at deploy
+    time, which is D292 in the command where it costs most. The first version of
+    this function did exactly that, and
+    `test_no_operator_command_puts_a_service_directory_on_the_path` refused it
+    (D445).
+
+    Reaching the service's logic through its container is ADR 0093's rule, and
+    the answer is stronger than reading the release: what the document publishes
+    is what the process answering requests actually holds (D413).
+
+    `None` when the container cannot answer, so the caller leaves the block
+    unpublished rather than filling it with a guess.
+    """
+    result = run("docker", "exec", "-i", container, "python", "-c", AGENT_PLANE_PROBE)
+    if result.returncode != 0:
+        print(f"  the agent plane could not report its constants: {result.stderr.strip()[:160]}")
+        return None
+    try:
+        revision, conformant, accepted = json.loads(result.stdout)
+    except (ValueError, TypeError) as error:
+        print(f"  the agent plane's report is unreadable ({error})")
+        return None
+    return str(revision), bool(conformant), str(accepted)
+
+
+def mcp_container(project_key: str) -> str | None:
+    """The running agent-plane container for one project, found by label.
+
+    Found rather than predicted: `naming` predicts Compose's container name and
+    the model deliberately does not enforce it with `container_name:` (D55).
+    """
+    result = run(
+        "docker", "ps",
+        "--filter", f"label=apg.project.key={project_key}",
+        "--filter", f"label=com.docker.compose.service={runtime_override.MCP_SERVICE}",
+        "--format", "{{.Names}}",
+    )  # fmt: skip
+    names = [line for line in result.stdout.splitlines() if line.strip()]
+    return names[0] if len(names) == 1 else None
 
 
 def observe_tls(host: dict[str, Any], domain: str) -> dict[str, Any]:
@@ -1428,11 +1551,12 @@ def main(argv: list[str] | None = None) -> int:
     # the value for one that does and whose active generation carries no R2
     # credential (D326).
     storage_status = "unavailable"
-    # Version 12's, and Session 8 Run 1's. `unavailable` for every deployment
-    # today: `AGENT_PLANE_SESSION` is above `CURRENT_SESSION`, so no deploy can
-    # ask for the agent plane and none observes it. What changed in Run 1 is that
-    # the deployed document now SAYS so -- for eleven versions it said nothing at
-    # all about a route its rendered half had always named (D395).
+    # Version 12's, and Session 8 Run 7's. `unavailable` for a deployment
+    # through a session that does not select the `mcp` container, and for one
+    # that does and whose route has not converged yet -- which is the first
+    # deploy of any project, because the router is created by the same run that
+    # starts the service (D326's two-stage shape, as `routes.app` and
+    # `routes.storage` both use).
     mcp_status = "unavailable"
     jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
     api_block = dict(deployed_output.API_NOT_PUBLISHED)
@@ -1544,6 +1668,23 @@ def main(argv: list[str] | None = None) -> int:
                 "    see docs/session-07-operator-guide.md for the provider steps\n\n"
                 "  A project awaiting its storage credential is not a failed deploy (D326)."
             )
+
+    # The agent plane, observed the way `routes.app` and `routes.storage` are.
+    #
+    # **Two stages, and the first deploy of any project sees the first.** The
+    # router is created by the same run that starts the container, so the edge
+    # has not attached the backend when this first runs -- the route settles on
+    # the redeploy, and `await_observation` is what gives it the window rather
+    # than a sleep (D326).
+    if arguments.through_session >= AGENT_PLANE_SESSION:
+        mcp_status, mcp_block = observation.await_observation(
+            lambda: observe_mcp(
+                rendered["routes"]["mcp"],
+                lock_path=(deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME),
+                project_key=key,
+            ),
+            lambda observed: observed[0] == "ready",
+        )
 
     # The transports, read out of the host's own allocation registry rather than
     # assumed from the fact that a pooler is running. `active` and nothing less
