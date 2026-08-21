@@ -119,6 +119,24 @@ observes a route that is now attached and publishes `ready`.
 
 ---
 
+## 3.1 What has already been done for you
+
+Steps 0, 1, 2 and 5 are **complete**. They need no `sudo`, so they were run over
+SSH as `op` rather than waiting for a terminal:
+
+| Step | State |
+|---|---|
+| 1. Transport | Host is at **`42db9e4`**, clean tree, on `main` |
+| 2. Venv sync | **fastmcp 3.4.0**, protocol `2025-11-25` — imports confirmed |
+| 0. Re-render | **All four** projects at **v12** (D462) |
+| 5. Offline gates | `session-01-check` **PASSED** (3474 passed, 143 skipped, 0 identity collisions); `session-08-check --mode offline` **PASSED** |
+
+**What is left is steps 3, 4 and 6 — every one of them `sudo`.** Plus one
+`install` so the external half can read the deployed documents. §4 gives them in
+order; nothing else in this guide needs a human.
+
+---
+
 ## 4. The Run 9 host sequence, in order
 
 Everything Session 8 built is written and **the agent plane has never started
@@ -126,20 +144,34 @@ anywhere**. Session 6's first host trip found nine defects; Session 7's found
 eight product defects and ten process rows, every one invisible to a green
 offline suite. **Expect this trip to find things.** That is what it is for.
 
-**0. Re-render the fixtures — ON THE HOST, after transport (D383).**
+**0. Re-render — ON THE HOST, after transport, and ALL FOUR projects (D383,
+D462).**
 
 ```bash
 ./deploy.sh --project project.example.yaml        --capabilities capabilities.example.yaml --render-only
 ./deploy.sh --project project.second.example.yaml --capabilities capabilities.example.yaml --render-only
+./deploy.sh --project project.alpha.yaml          --capabilities capabilities.yaml         --render-only
+./deploy.sh --project project.beta.yaml           --capabilities capabilities.yaml         --render-only
 ```
 
-`.generated/*` is gitignored, so rendered fixtures are **not in the transport
-bundle**: every machine keeps its own, and the host's were last written by
+`.generated/*` is gitignored, so rendered output is **not in the transport
+bundle**: every machine keeps its own, and the host's was last written by
 whatever release it ran before. Session 7's Run 10 followed the older wording —
 "re-render before leaving the workstation" — and the host gate refused at exit 6
 naming both fixtures at v10 against code rendering v11. The gate was doing its
-job. Neither root nor a running project is needed; `--render-only` runs in a bare
-checkout. Run it **after** step 1.
+job.
+
+> **The last two lines are D462, and they were learned by leaving them out.**
+> With only the fixtures re-rendered, `bin/session-01-check.sh` exited **5** at
+> its evidence step: *"these projects were rendered by an older release:
+> alpha-dev (v11), beta-dev (v11)"*. That step compares **every** rendered
+> project, and the host carries `alpha-dev` and `beta-dev` from real deploys —
+> which the example manifests do not touch. `rendered_fixtures.py` reported
+> `current` throughout, correctly: it only knows about the two example keys.
+
+Neither root nor a running project is needed; `--render-only` runs in a bare
+checkout and touches nothing in `/etc`, `/var/lib` or any container. Run it
+**after** step 1.
 
 **1. Transport.**
 
@@ -204,12 +236,19 @@ print(d['schema_version'], d['routes']['mcp'], d['mcp'])"
 You want `12`, a `ready` route with a URL, and an `mcp` block carrying a
 `protocol_revision`. Repeat for beta.
 
-**5. The offline gate, on the host.**
+**5. The offline gate, on the host.** Neither needs root.
 
 ```bash
 bin/session-01-check.sh
 bin/session-08-check.sh --mode offline
 ```
+
+> **`op` cannot reach the Docker daemon**, and both gates handle it rather than
+> failing. `docker compose config` is client-side, so every model still
+> resolves; what is *not* determined is step 7's second half — whether a project
+> container is running — and `session-01-check` says so in as many words rather
+> than passing quietly (ADR 0018). It is proved by
+> `sudo bin/session-02-check.sh --mode host`.
 
 **6. The host gate.** At a terminal, as a human, with the flags in the command —
 `--help` prints it with the sentinel path derived rather than typed:

@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D462.**
+**Next free number after this table is D463.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -115,6 +115,7 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D459** | `tests/contract/test_session_seven_gate_modes.py`, whose `test_the_gate_resolves_claims_for_its_own_session` exists to catch a session number left behind by a copy. | **The module was itself in the wrong session.** It carries `SESSION = 6`, left behind when it was copied from Session 6's, and the one test that reads it — `test_both_environments_carry_a_claim` — therefore asserted a property of **Session 6** inside a module about the Session 7 gate. Claims are cumulative, so it passed on Session 4's inherited `transport_boundary` **whether or not Session 7 had an external claim at all**. Measured: `claims_for_mode('external', 6)` is non-empty for every session from 4 onward. | The constant is corrected to 7, with the reason at its definition. Session 8's module asserts the session's **own** claims, from a table written out rather than derived from `claims_for_mode` — which would be the mechanism checking itself. | **A test that cannot fail for the thing it names**, in the file written to catch exactly that failure one layer down. "This mode carries a claim" is true from Session 4 onward and is not a property of any later session; the assertion had to name which claims before it measured anything. | — |
 | **D460** | §5 Run 9: *"The MCP tool catalog, generated from the lock, and a page that **fetches its own assets** (D274)."* | **The catalog is not a page, and forcing it into the one surface that serves pages would be worse than not.** The documentation service renders **OpenAPI** documents through Scalar; a capability lock is not an OpenAPI document, and publishing one there needs a third Traefik router and a renderer for a format Scalar does not read. What the deployment already publishes about its agent surface is machine-readable and asserted: the `mcp` block's protocol revision, accepted token use, contract digest and tool count. | `docs/mcp-tool-catalog.md`, generated from the committed canonical contract by `bin/render-mcp-catalog.py`, with `--check` in the **Session 1 gate**. D274's instruction is obeyed in the form that applies: the document names tools, scopes, ceilings, ADRs and divergence numbers, and **every one of them is resolved against the authority that owns it** — with a control per scan. | D274's lesson is not about HTML. It is *the proof asked for the artifact's URL and never for what the artifact then asks for*. A catalog citing an ADR that does not exist is the same defect wearing different clothes: a document that reads correct and is not, offered to a reader who cannot check it. | — |
 | **D461** | — (found by the arm that exists to check the checker.) | **The drift message raised while reporting drift.** `render-mcp-catalog.py --check` printed `{CATALOG.relative_to(REPO_ROOT)}`, and `relative_to` **raises `ValueError`** for a path outside the repository. The only caller that reaches it is the guard-the-guard test, which perturbs the catalog at a temporary path — so the branch that reports a failure turned into a traceback that hid it. | A `shown()` helper that falls back to the absolute path. Four call sites, one function. | **The guard-the-guard arm found a defect in the guard**, which is what it is for and the first time in this repository that it has. A diagnostic is code: it has a failure path, and its failure path runs precisely when something is already wrong. D391 is the same family — a guard whose result was discarded — arriving here as a guard whose *message* could not be printed. | — |
+| **D462** | The Session 7 guide's step 0, carried into Session 8's: *"Re-render the fixtures — ON THE HOST, after transport (D383)"*, with the two **example** manifests. | **That is half of what `.generated/` holds.** Run on the host at `42db9e4`, with both fixtures freshly re-rendered at v12, `bin/session-01-check.sh` exited **5** at step 8: *"these projects were rendered by an older release: alpha-dev (v11), beta-dev (v11)"*. The evidence step compares **every** rendered project — and the host also carries `.generated/alpha-dev` and `.generated/beta-dev` from real deploys, which the example manifests do not touch. A collision count over two schema versions compares different documents, so the refusal is right. | Step 0 re-renders **four** projects: the two example fixtures and the two real ones, with `project.alpha.yaml`/`project.beta.yaml` and `capabilities.yaml`. All four are `--render-only`, all four need **no root**, and all four reached v12. `session-01-check` then passed on the host. | **D383 said where to re-render and not what.** The fixture guard (`rendered_fixtures.py`) only knows about the two example keys, so it reported `current` while two other rendered projects sat a version behind — the guard was right about its own question and silent about the one the gate asks. A second finding rode along: `op` **cannot reach the Docker daemon**, so step 7's *"no project container is running"* half is not proved by an operator-run gate. The gate says so in as many words rather than passing quietly (ADR 0018), which is the behaviour to keep. | — |
 
 ---
 
@@ -789,11 +790,23 @@ before either had a mode in the git index.
 
 Battery **15 of 15 killed**. Suite **3776 passed, 271 skipped**.
 
-**What the trip still has to do**, in the guide's order: transport, **sync the
-host venv** (fastmcp is new — D384, D297), apply migration 0018 as
-`migration_user`, **deploy twice**, then the three gate runs and the merge.
-Outputs moves **v11 → v12** on this trip, so the redeploy is a prerequisite of
-the gate rather than a consequence of it.
+**The trip has started, and everything non-privileged is done.** The host is at
+`42db9e4` on a clean tree; its venv is synced (**fastmcp 3.4.0**, protocol
+`2025-11-25`); all four projects in `.generated/` are re-rendered at **v12**;
+`bin/session-08-check.sh --mode offline` **passed** there and so did
+`bin/session-01-check.sh` — 3474 passed, 143 skipped, four rendered projects,
+zero identity collisions.
+
+**D462 came out of doing it.** Step 0 named the two example fixtures, and the
+Session 1 gate's evidence step reads **every** rendered project: `alpha-dev` and
+`beta-dev` were still at v11 and the gate exited 5 saying so. Step 0 now
+re-renders four.
+
+**What is left needs `sudo`, and therefore a human at a terminal**: migration
+0018 as `migration_user`, the two deploys at `--through-session 8` (**twice**,
+D326), `--mode host`, and one `install -o op` so the deployed documents can be
+read off-host. The **external** half needs neither root nor a TTY and is the
+assistant's.
 
 ---
 
