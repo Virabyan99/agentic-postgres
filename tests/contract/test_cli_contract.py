@@ -72,6 +72,7 @@ SHELL_COMMANDS = (
     "bin/session-05-check.sh",
     "bin/session-06-check.sh",
     "bin/session-07-check.sh",
+    "bin/session-08-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
 )
@@ -93,6 +94,7 @@ PYTHON_COMMANDS = (
     "bin/migrate.py",
     "bin/postgres-bootstrap.py",
     "bin/render-acceptance-matrix.py",
+    "bin/render-mcp-catalog.py",
     "bin/render-config.py",
     "bin/render-jwks.py",
     "bin/render-secret-override.py",

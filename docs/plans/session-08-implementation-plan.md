@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D457.**
+**Next free number after this table is D462.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -110,6 +110,11 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D454** | — (the second surviving arm.) | **Nothing in this repository had ever called `mcp_tools.register()`.** The arm making a metadata tool take a concurrency slot survived, because the rule — the two metadata tools answer from the lock and take no slot — lived in `bounded`'s docstring and in **no assertion at all**. Every tool test calls the module function the registration wraps; `test_mcp_route` asserts the registered *names* and never a registered *callable*. | A test calls `register()` against a recording registry and observes the semaphore from inside the work, with a **control**: the same rig, the same semaphore, a tool that does reach upstream, asserted to be holding a slot. Without the control, "the semaphore is full" is satisfied by a semaphore nothing touches. | **D444 and D450's family, third instance**, and the first one found by a surviving mutation rather than by a start. The seam is always the same: the wrapper between this repository's functions and the framework's, which unit tests reach around by design. | — |
 | **D455** | `test_environment_gates.consumed_variables`, whose own comment says it looks for *"`os.environ["APG_…"]` anywhere in the body"*. | **It matches any subscript at all whose key is an `APG_`-prefixed literal.** A settings test that builds a LOCAL dict of eight strings and then does `del environment["APG_MCP_MAX_CONCURRENT_READS"]` was reported as consuming a live environment it never touches — an offline test, failing a guard about skipping versus erroring on a host. | **The scan is not narrowed.** Narrowing a currently-passing guard is a weakening and needs an ADR (§5), and this run does not own that decision. The test is rewritten instead: the incomplete environment is the constant and the complete one is built from it, which removes the subscript and reads better anyway. | The guard is **wider than its own comment**, which is this repository's standing defect in the mirror — a check whose evidence exceeds its stated scope produces false positives, and a false positive is how a guard stops being read. Worth an ADR-shaped decision by whichever session next touches the file; recorded here rather than fixed in passing. | — |
 | **D456** | CLAUDE.md's open items: *"`MCP_MEMORY_LIMIT` is 384 MiB, inherited and not measured … ADR 0082 is the shape the measurement takes and it needs Run 6's four tools to profile. **Run 8 owns budgets.**"* | **Measured, and the obvious follow-up turned out to be a guard that cannot fail.** ADR 0082's rig with a zero-import control: the loaded runtime is **69.2 MiB** resident — `mcp.types` alone is 25 of them and `fastmcp` on top adds **0.6** — and one concurrent read at the byte ceiling costs **1.8 MiB**, linear to ten, against a zero-read control at 0.0. So `floor(share) = 128 + share x 4`, **148 MiB** at the default share. The mirror of `_validate_auth_memory` was then checked rather than written: `api.rest.pool_size` is capped at **100** by the schema, so the largest floor a valid manifest can ask for is **328** against a limit of 384 — **no document the schema admits could fail it.** | The limit stays 384 and stops being inherited: it is a choice with a measured floor and 2.6x headroom (**ADR 0131**). **No validator is written**, and the refusal is the decision. What replaces it is a test that reads the schema's own maximum: raise that bound past 128 and it goes red, naming the choice. | **A guard that cannot go red is §6's pattern with the polarity reversed** — not a value that looked measured and was not, but a check that would look enforced and enforce nothing (D277, D391). And the direction NOT taken is the load-bearing one: lowering the limit to the floor would free 256–384 MiB across two projects on a swapless host, and the profile is of the *interpreter*, not the container — **no `mcp` container has started anywhere.** Run 9's trip is where that number comes from. | 0131 |
+| **D457** | §2: *"What Session 8 adds to the acceptance registry: **Nothing.** … Replace the placeholders; keep the IDs and their descriptions."* And §7: *"Host and external halves are written separately and merged."* | **Both cannot be true, and the model says which.** Run 6 replaced the five placeholders with CONTRACT tests, correctly — they are contract properties. Measured, with a control: all six Session 8 requirements carry **no environment marker**, and a claim over two of them is refused *"has no live proof: every test it names runs in a checkout, so no deployment is being measured"*. The control, `object_ownership`, resolves to `host`. **Session 8 had six requirements and could make no claim at all**; its gate would have had two modes and nothing to say in either. | **ADR 0132.** Four requirements gain **live proofs rather than twins** — the guarantee did not change, only where it is measured, and a second id would be one guarantee with two names (D47). Four **new** ids carry guarantees that are about a deployment and did not exist offline: `AGT-PLANE-001`, `AGT-TOKEN-001`, `AGT-CRED-001` (host) and `AGT-PUBLIC-001` (external). Eight claims. **`AGT-DRIFT-001` is deliberately in none of them**, because its guarantee is a property of the compiler and is complete in a checkout — D331's precedent, where two Session 7 claims were refused by the model and stayed out. | A plan can be internally inconsistent in a way no single sentence reveals, and this one was: §2 is right about the ids and §7 is right about the halves, and nothing connected them. **The control is what makes the answer usable** — without it, "every arm refused" is equally well explained by a rig that resolves nothing. | 0132 |
+| **D458** | — (nothing had ever sent the assembled application a request over a socket.) | **Three facts about the wire, none of them the obvious answer.** Measured against the real application served by uvicorn, with controls. (1) Every reply is **`text/event-stream`**, SSE-framed as `event: message\r\ndata: {…}`, *even for a single JSON-RPC result* — `json.loads(body)` raises on a perfectly good answer. (2) `Accept: application/json` alone is answered **406**, `"Client must accept both application/json and text/event-stream"`. (3) In `stateless_http` mode **no handshake is required**: a bare `tools/call` with no `initialize` answers 200, and no `Mcp-Session-Id` is issued. Separately: the `scope` claim is an **array of strings**, not the space-delimited OAuth form — a hand-minted probe token carrying the string is refused with a message about shape, which reads as an authentication failure. | `mcp_rpc` in the deployment module sends both media types and parses the SSE frame, and the module's docstring carries the table. The external probe asserts **401 specifically**, and says in its own message that a 406 would mean it never reached authentication. | **406 is not 401**, and that is the whole row. A boundary proof written the obvious way — post JSON, read JSON — is refused by **content negotiation** before authentication runs, and a test asserting "an anonymous caller is refused" would go green having measured the media-type header. Run 7 asserted the application's route TABLE; this is the layer above it, and D444 is what an unexercised assembly costs one level down. | — |
+| **D459** | `tests/contract/test_session_seven_gate_modes.py`, whose `test_the_gate_resolves_claims_for_its_own_session` exists to catch a session number left behind by a copy. | **The module was itself in the wrong session.** It carries `SESSION = 6`, left behind when it was copied from Session 6's, and the one test that reads it — `test_both_environments_carry_a_claim` — therefore asserted a property of **Session 6** inside a module about the Session 7 gate. Claims are cumulative, so it passed on Session 4's inherited `transport_boundary` **whether or not Session 7 had an external claim at all**. Measured: `claims_for_mode('external', 6)` is non-empty for every session from 4 onward. | The constant is corrected to 7, with the reason at its definition. Session 8's module asserts the session's **own** claims, from a table written out rather than derived from `claims_for_mode` — which would be the mechanism checking itself. | **A test that cannot fail for the thing it names**, in the file written to catch exactly that failure one layer down. "This mode carries a claim" is true from Session 4 onward and is not a property of any later session; the assertion had to name which claims before it measured anything. | — |
+| **D460** | §5 Run 9: *"The MCP tool catalog, generated from the lock, and a page that **fetches its own assets** (D274)."* | **The catalog is not a page, and forcing it into the one surface that serves pages would be worse than not.** The documentation service renders **OpenAPI** documents through Scalar; a capability lock is not an OpenAPI document, and publishing one there needs a third Traefik router and a renderer for a format Scalar does not read. What the deployment already publishes about its agent surface is machine-readable and asserted: the `mcp` block's protocol revision, accepted token use, contract digest and tool count. | `docs/mcp-tool-catalog.md`, generated from the committed canonical contract by `bin/render-mcp-catalog.py`, with `--check` in the **Session 1 gate**. D274's instruction is obeyed in the form that applies: the document names tools, scopes, ceilings, ADRs and divergence numbers, and **every one of them is resolved against the authority that owns it** — with a control per scan. | D274's lesson is not about HTML. It is *the proof asked for the artifact's URL and never for what the artifact then asks for*. A catalog citing an ADR that does not exist is the same defect wearing different clothes: a document that reads correct and is not, offered to a reader who cannot check it. | — |
+| **D461** | — (found by the arm that exists to check the checker.) | **The drift message raised while reporting drift.** `render-mcp-catalog.py --check` printed `{CATALOG.relative_to(REPO_ROOT)}`, and `relative_to` **raises `ValueError`** for a path outside the repository. The only caller that reaches it is the guard-the-guard test, which perturbs the catalog at a temporary path — so the branch that reports a failure turned into a traceback that hid it. | A `shown()` helper that falls back to the absolute path. Four call sites, one function. | **The guard-the-guard arm found a defect in the guard**, which is what it is for and the first time in this repository that it has. A diagnostic is code: it has a failure path, and its failure path runs precisely when something is already wrong. D391 is the same family — a guard whose result was discarded — arriving here as a guard whose *message* could not be printed. | — |
 
 ---
 
@@ -719,13 +724,76 @@ Run 9's to take. The floor battery killed **4 of 4**.
 
 Suite **3718 passed, 255 skipped**.
 
-### Run 9 — The contract, the docs, the evidence
+### Run 9 — The contract, the docs, the evidence — **Done, except the trip.**
 
-- The MCP tool catalog, generated from the lock, and a page that **fetches its
-  own assets** (D274).
-- `bin/session-08-check.sh`, three modes, every flag in the usage command (D404).
-- The claims, the registry replacements, the evidence.
-- Then the host trip, and **plan for it to find things**.
+**Everything that can be built off-host is built. The host trip is not done**,
+because it cannot be: `sudo` needs a TTY and a human at a terminal. §4 of
+`docs/session-08-operator-guide.md` is the sequence, written to be worked through
+in order.
+
+**D457 is the row to read, and it is about this plan.** §2 says Session 8 adds
+**nothing** to the registry; §7 says the evidence has two halves. Measured with a
+control before anything was written: all six Session 8 requirements carry **no
+environment marker**, a claim over two of them is refused *"has no live proof"*,
+and the control resolves to `host`. **Session 8 had six requirements and could
+make no claim at all.** **ADR 0132** is the answer: four requirements gain live
+proofs rather than twins, four new ids carry the guarantees that are about a
+deployment, and `AGT-DRIFT-001` is deliberately in no claim because its guarantee
+is complete in a checkout (D331's precedent).
+
+**Eight claims** — seven host, one external. `public_agent_boundary` is what
+makes Session 8's external mode load-bearing rather than ceremonial, and the
+reason is sharper than Session 7's: the agent plane's health routes answer **200
+on the container's own socket** and are private by the *absence* of a router, so
+a scan run on the host would report them reachable and conclude a working
+boundary was broken.
+
+**D458 is the measurement the live proofs rest on**, and nothing had ever sent
+the assembled application a request over a socket. Every reply is **SSE-framed**,
+even a single JSON-RPC result; `Accept: application/json` alone is answered
+**406**; and in stateless mode **no handshake is required** — a bare `tools/call`
+answers 200. **406 is not 401**: a boundary proof written the obvious way is
+refused by content negotiation before authentication runs, and would go green
+having measured a media-type header.
+
+**`bin/session-08-check.sh`**, three modes, in Session 7's shape with every flag
+a claim depends on **in** the documented command (D404, D213). Three new
+refusals — `--project`, `--capability-lock` and `--agent-token` — because each is
+something an operator might reasonably expect an agent-plane gate to take, and
+the answer to each is that it does not work that way. And one precondition:
+`check_agent_plane_is_published` refuses a document whose `routes.mcp` is not
+`ready`, naming D326's two-stage convergence, so one message replaces forty
+tracebacks.
+
+**D459 came out of writing the Session 8 gate's contract module**: the Session 7
+one carries `SESSION = 6`, left behind by the copy, so the test written to catch
+a session number left behind by a copy **was itself in the wrong session** and
+passed on Session 4's inherited claim regardless.
+
+**The catalog is `docs/mcp-tool-catalog.md`, generated from the committed
+contract**, with `--check` in the Session 1 gate. It is **not** a served page and
+D460 says why: Scalar renders OpenAPI and a capability lock is not one. D274's
+instruction is obeyed in the form that applies — every tool, scope, ceiling, ADR
+and divergence number the document names is resolved against the authority that
+owns it, each scan with a control. **D461** is what one of those controls found:
+the drift message called `relative_to` and **raised while reporting drift**.
+
+**And two existing guards caught this run's own code, which is worth recording
+because one of them had never fired.** `test_every_test_declares_the_environment
+_it_consumes` found that the cross-project refusal takes the `project_b` fixture
+while its module declared only `APG_LIVE_HOST` and `APG_PROJECT_A_OUTPUTS` — so
+on a host with one project deployed it would have raised `KeyError` at fixture
+setup **instead of skipping**. That is the exact five-test failure the guard was
+written for, arriving on schedule. `test_cli_contract` caught both new commands
+before either had a mode in the git index.
+
+Battery **15 of 15 killed**. Suite **3776 passed, 271 skipped**.
+
+**What the trip still has to do**, in the guide's order: transport, **sync the
+host venv** (fastmcp is new — D384, D297), apply migration 0018 as
+`migration_user`, **deploy twice**, then the three gate runs and the merge.
+Outputs moves **v11 → v12** on this trip, so the redeploy is a prerequisite of
+the gate rather than a consequence of it.
 
 ---
 

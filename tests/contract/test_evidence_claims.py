@@ -775,6 +775,14 @@ CLAIM_INTRODUCED_IN = {
     "storage_credentials": 7,
     "storage_isolation": 7,
     "public_storage_boundary": 7,
+    "agent_reads": 8,
+    "agent_query_construction": 8,
+    "agent_scopes": 8,
+    "agent_budgets": 8,
+    "agent_surface": 8,
+    "agent_authentication": 8,
+    "agent_credentials": 8,
+    "public_agent_boundary": 8,
 }
 
 

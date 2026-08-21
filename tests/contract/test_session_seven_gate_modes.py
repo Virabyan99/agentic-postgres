@@ -62,7 +62,14 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 SCRIPT = REPO_ROOT / "bin" / "session-07-check.sh"
 SESSION_PREVIOUS = REPO_ROOT / "bin" / "session-05-check.sh"
 
-SESSION = 6
+#: **7, and it was 6 until Run 9 of Session 8** (D459). The constant was left
+#: behind when this module was copied from Session 6's, so the one test that
+#: reads it, `test_both_environments_carry_a_claim` -- asserted a property of
+#: Session 6 inside a module about the Session 7 gate. Claims are cumulative, so
+#: it passed on Session 4's inherited `transport_boundary` whether or not
+#: Session 7 had an external claim at all: the test written to check that a gate
+#: names its own session was itself in the wrong session.
+SESSION = 7
 
 
 def run(*args: str) -> subprocess.CompletedProcess[str]:

@@ -183,6 +183,11 @@ step "6. Generated documentation is current"
 # self-healed here would dirty the tree it just required be clean.
 "$(python_bin)" bin/render-acceptance-matrix.py --check
 "$(python_bin)" bin/render-config.py --bounds-doc --check
+# Session 8, Run 9. The MCP tool catalog is generated from the committed
+# capability contract, so a tool, a scope or a ceiling that moved in the
+# contract and not in the catalog is drift a reader would never notice --
+# and the catalog is what a person reads to decide what to grant an agent.
+"$(python_bin)" bin/render-mcp-catalog.py --check
 
 # ---------------------------------------------------------------------------
 step "7. Compose validates and no project container is running"

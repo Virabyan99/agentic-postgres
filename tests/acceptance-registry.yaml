@@ -1309,6 +1309,7 @@
   test_nodeids:
     - tests/contract/test_mcp_tools.py::test_the_adapter_returns_what_the_upstream_returned
     - tests/contract/test_mcp_tools.py::test_the_caller_token_is_what_the_adapter_forwards
+    - tests/deployment/test_session8_agent_plane.py::test_an_agent_read_returns_what_the_identical_postgrest_request_returns
   description: >-
     An agent read through MCP returns exactly the rows the identical PostgREST
     request returns for the same principal, because the adapter forwards the
@@ -1343,6 +1344,7 @@
     - tests/contract/test_mcp_tools.py::test_discovery_shows_only_what_the_callers_scopes_permit
     - tests/contract/test_mcp_tools.py::test_a_resource_the_caller_cannot_reach_is_refused_not_merely_hidden
     - tests/contract/test_mcp_tools.py::test_the_scope_sets_are_a_disjunction_of_conjunctions
+    - tests/deployment/test_session8_agent_plane.py::test_discovery_against_the_deployed_plane_is_filtered_by_the_agents_scopes
   description: >-
     Tool discovery is filtered by the caller's scopes, and a resource a caller
     cannot reach is refused when called rather than merely hidden from the list.
@@ -1368,13 +1370,20 @@
     - tests/contract/test_mcp_tools.py::test_the_byte_ceiling_is_independent_of_the_row_ceiling
     - tests/contract/test_mcp_tools.py::test_a_result_inside_both_budgets_is_returned
     - tests/contract/test_mcp_tools.py::test_more_rows_than_the_ceiling_are_refused_rather_than_truncated
+    - tests/contract/test_mcp_budgets.py::test_the_four_budgets_are_bounded_by_four_different_things
+    - tests/contract/test_mcp_budgets.py::test_the_semaphore_bounds_how_many_run_at_once
+    - tests/contract/test_mcp_budgets.py::test_a_slot_is_returned_when_the_body_raises
+    - tests/deployment/test_session8_agent_plane.py::test_the_deployed_locks_row_ceiling_bounds_a_live_read
   description: >-
-    Row and response-size budgets are enforced server-side and are independent
-    numbers: the row ceiling is the lock's and a caller's limit can only lower
-    it, and the byte ceiling is not expressible by a caller at all. A result
-    exceeding either is refused rather than truncated, because a truncated page
-    that does not say so is a wrong answer. Elapsed time and concurrency are
-    Run 8's and are deliberately not claimed here.
+    Four budgets are enforced server-side and are bounded by four different
+    mechanisms: rows by the lock's ceiling, which a caller's limit may only
+    lower; serialized bytes by a runtime constant a caller cannot express at
+    all; elapsed time by the tool's own timeout; and concurrency by a semaphore
+    sized as a share of PostgREST's pool. A result exceeding a budget is refused
+    rather than truncated, because a truncated page that does not say so is a
+    wrong answer. Widened from two budgets to four in Run 9 (ADR 0132): Run 8
+    built the other two, and a description that outlives its node ids is D175's
+    failure mode in the one file that is supposed to be authoritative.
 
 - id: SEC-INJ-001
   priority: P0
@@ -1385,6 +1394,7 @@
     - tests/security/test_session8_agent_injection.py::test_a_payload_in_a_COLUMN_position_is_refused_rather_than_escaped
     - tests/security/test_session8_agent_injection.py::test_the_operator_position_is_a_closed_enum
     - tests/security/test_session8_agent_injection.py::test_a_benign_value_still_produces_a_working_filter
+    - tests/deployment/test_session8_agent_plane.py::test_an_injection_payload_against_the_deployed_plane_stays_a_value
   description: >-
     An injection payload stays data and does not alter query structure. Asserted
     from the attacker's side, with full control of every input a caller supplies:
@@ -1392,6 +1402,75 @@
     column and an operator are refused against the lock's allowlist rather than
     escaped, because an identifier has no safe encoding. The control arm proves
     a benign value still produces a working filter.
+
+# ADR 0132. Four guarantees that are about a DEPLOYMENT and did not exist
+# offline, so they are new ids rather than widenings. Every one targets session
+# 8 and only session 8: `claim_session` is a max(), so a single older id mixed in
+# would either drag the claim into an earlier session's evidence or hide it from
+# this gate -- and both failures are silent (ADR 0089, D279).
+#
+# **Not one of these has ever executed.** No deployment has started an MCP
+# container anywhere.
+
+- id: AGT-PLANE-001
+  priority: P0
+  target_session: 8
+  test_nodeids:
+    - tests/deployment/test_session8_agent_plane.py::test_the_deployed_document_publishes_the_route_the_container_serves
+    - tests/deployment/test_session8_agent_plane.py::test_the_readiness_route_is_private_by_the_absence_of_a_route
+    - tests/deployment/test_session8_agent_plane.py::test_a_cross_origin_request_is_refused_at_the_plane
+  description: >-
+    The agent plane is published at exactly one path, the deployed document says
+    so, and the four tools it serves are the four the contract names. Its health
+    surface is private by the ABSENCE of a route rather than by a check -- both
+    paths answer 200 on the container's own socket and sit outside the verifier
+    (D442) -- and a request carrying any Origin is refused by this repository's
+    own middleware, because the pinned framework has none (D441, ADR 0128).
+
+- id: AGT-TOKEN-001
+  priority: P0
+  target_session: 8
+  test_nodeids:
+    - tests/deployment/test_session8_agent_plane.py::test_an_agent_token_is_accepted_where_a_human_access_token_is_not
+    - tests/deployment/test_session8_agent_plane.py::test_an_anonymous_request_is_refused
+    - tests/deployment/test_session8_agent_plane.py::test_a_token_this_deployment_did_not_sign_is_refused
+  description: >-
+    The agent plane accepts only `token_use: "agent"` and refuses before any
+    lookup (ADR 0115), which is ADR 0114's mirror. Proved with two REAL tokens
+    this deployment signed for subjects its registry holds, differing only in
+    `token_use`, so the refusal is a property of the discriminator rather than of
+    two arbitrary strings -- D417 is the standing reminder that a refusal can
+    come from a missing GRANT and look identical.
+
+- id: AGT-CRED-001
+  priority: P0
+  target_session: 8
+  test_nodeids:
+    - tests/deployment/test_session8_agent_plane.py::test_the_agent_plane_holds_no_database_credential_and_no_signing_key
+    - tests/deployment/test_session8_agent_plane.py::test_the_agent_plane_opens_no_connection_to_the_cluster
+  description: >-
+    The MCP container holds no database credential and no signing material, read
+    off the RUNNING container rather than off the model that produced it -- D389
+    is a session lost to a value being right in the rendered document and
+    forbidden in the deployed one. Its share of the connection budget is zero
+    (D407) and that is asserted after a real read, so the plane has done the work
+    that would open a connection if it were ever going to.
+
+- id: AGT-PUBLIC-001
+  priority: P0
+  target_session: 8
+  test_nodeids:
+    - tests/external/test_session8_public_agent.py::test_the_agent_plane_answers_from_off_host_and_refuses_an_anonymous_caller
+    - tests/external/test_session8_public_agent.py::test_the_health_routes_are_not_reachable_from_the_public_internet
+    - tests/external/test_session8_public_agent.py::test_the_agent_planes_own_port_is_not_published
+  description: >-
+    What a stranger reaches of the agent plane, measured from a network that is
+    not the deployment host. The route answers and refuses an anonymous caller
+    401 without naming a tool; the health paths -- which answer 200 on the
+    container's socket and are behind no verifier -- are not reachable at all;
+    and the container's own port is not published. A separate id from
+    SEC-API-001 for the reason STO-PUBLIC-001 was: widening a Session 5 id would
+    withdraw a Session 5 claim from Session 5's evidence (ADR 0132).
 
 # ---------------------------------------------------------------------------
 # Session 9 — agent writes, audit, revocation

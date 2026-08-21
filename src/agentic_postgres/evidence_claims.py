@@ -227,6 +227,44 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # The one Session 7 claim measured from off-host, which is what makes the
     # gate's external mode meaningful for this session rather than ceremonial.
     "public_storage_boundary": ("STO-PUBLIC-001",),
+    # Session 8 adds eight, and ADR 0132 is the decision behind their shape.
+    #
+    # Run 6 replaced five placeholders with CONTRACT tests, which was right --
+    # they are contract properties -- and left the session with no claim it could
+    # make. Measured before anything was written: every node id the six Session 8
+    # requirements named carried no environment marker, and a claim over two of
+    # them was refused *"has no live proof: every test it names runs in a
+    # checkout"*. The control was `object_ownership`, which resolves to `host`.
+    #
+    # So four requirements gained live proofs rather than twins -- the guarantee
+    # did not change, only where it is measured -- and four new ids carry
+    # guarantees that are about a deployment and did not exist offline.
+    #
+    # `agent_query_construction` carries two ids for the reason
+    # `object_completion` does: *no caller input becomes syntax* is ONE guarantee
+    # measured from two sides, the builder's and the attacker's.
+    #
+    # **`AGT-DRIFT-001` is deliberately absent.** Its guarantee is a property of
+    # the compiler and is complete in a checkout, so under ADR 0045 it is not a
+    # claim. D331 is the precedent and it is exactly this situation: Session 7's
+    # Run 1 wrote `connection_budget_division` and `storage_scope_class`, the
+    # model refused both, and they stayed out as ordinary suite properties rather
+    # than being given a host arm to qualify them.
+    #
+    # **Every one of these reports `not_run` until a host trip.** No deployment
+    # has started an MCP container anywhere. D282 wrote this sentence one run
+    # before Session 6's trip found nine defects; a claim that has never been
+    # measured must not be mistaken for one that passed.
+    "agent_reads": ("AGT-READ-001",),
+    "agent_query_construction": ("AGT-SQL-001", "SEC-INJ-001"),
+    "agent_scopes": ("AGT-SCOPE-001",),
+    "agent_budgets": ("AGT-BUDGET-001",),
+    "agent_surface": ("AGT-PLANE-001",),
+    "agent_authentication": ("AGT-TOKEN-001",),
+    "agent_credentials": ("AGT-CRED-001",),
+    # The one measured from off-host, and the reason Session 8's external mode
+    # is not ceremonial.
+    "public_agent_boundary": ("AGT-PUBLIC-001",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().
