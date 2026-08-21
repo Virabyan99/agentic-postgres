@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D456.**
+**Next free number after this table is D457.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -109,6 +109,7 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D453** | — (a surviving arm, diagnosed rather than assumed.) | **A test that reads `.generated/` cannot detect a change to the renderer that produced it.** The arm mutating `MCP_MAX_CONCURRENT_READS`'s derivation survived: the test reads both fixtures' rendered `compose.env`, which is a build artefact refreshed by hand, so the mutated renderer never ran. And the guard that protects those fixtures compares **`schema_version` alone** — which a Compose variable can be added or changed without moving. `rendered_fixtures.py`'s own docstring says exactly this; this is the first arm that needed it to be false. | A second test renders **in process**, with two pool sizes that disagree so a constant cannot satisfy both. Both tests are kept and neither replaces the other: one proves the value reached a rendered artefact, the other proves the renderer derives it. | **The survivor's repair was the test, not the mutation** — but only reading what actually ran could say which. This is D212's stale artefact, in the one place the repository had already written down that its staleness check would not catch it. | — |
 | **D454** | — (the second surviving arm.) | **Nothing in this repository had ever called `mcp_tools.register()`.** The arm making a metadata tool take a concurrency slot survived, because the rule — the two metadata tools answer from the lock and take no slot — lived in `bounded`'s docstring and in **no assertion at all**. Every tool test calls the module function the registration wraps; `test_mcp_route` asserts the registered *names* and never a registered *callable*. | A test calls `register()` against a recording registry and observes the semaphore from inside the work, with a **control**: the same rig, the same semaphore, a tool that does reach upstream, asserted to be holding a slot. Without the control, "the semaphore is full" is satisfied by a semaphore nothing touches. | **D444 and D450's family, third instance**, and the first one found by a surviving mutation rather than by a start. The seam is always the same: the wrapper between this repository's functions and the framework's, which unit tests reach around by design. | — |
 | **D455** | `test_environment_gates.consumed_variables`, whose own comment says it looks for *"`os.environ["APG_…"]` anywhere in the body"*. | **It matches any subscript at all whose key is an `APG_`-prefixed literal.** A settings test that builds a LOCAL dict of eight strings and then does `del environment["APG_MCP_MAX_CONCURRENT_READS"]` was reported as consuming a live environment it never touches — an offline test, failing a guard about skipping versus erroring on a host. | **The scan is not narrowed.** Narrowing a currently-passing guard is a weakening and needs an ADR (§5), and this run does not own that decision. The test is rewritten instead: the incomplete environment is the constant and the complete one is built from it, which removes the subscript and reads better anyway. | The guard is **wider than its own comment**, which is this repository's standing defect in the mirror — a check whose evidence exceeds its stated scope produces false positives, and a false positive is how a guard stops being read. Worth an ADR-shaped decision by whichever session next touches the file; recorded here rather than fixed in passing. | — |
+| **D456** | CLAUDE.md's open items: *"`MCP_MEMORY_LIMIT` is 384 MiB, inherited and not measured … ADR 0082 is the shape the measurement takes and it needs Run 6's four tools to profile. **Run 8 owns budgets.**"* | **Measured, and the obvious follow-up turned out to be a guard that cannot fail.** ADR 0082's rig with a zero-import control: the loaded runtime is **69.2 MiB** resident — `mcp.types` alone is 25 of them and `fastmcp` on top adds **0.6** — and one concurrent read at the byte ceiling costs **1.8 MiB**, linear to ten, against a zero-read control at 0.0. So `floor(share) = 128 + share x 4`, **148 MiB** at the default share. The mirror of `_validate_auth_memory` was then checked rather than written: `api.rest.pool_size` is capped at **100** by the schema, so the largest floor a valid manifest can ask for is **328** against a limit of 384 — **no document the schema admits could fail it.** | The limit stays 384 and stops being inherited: it is a choice with a measured floor and 2.6x headroom (**ADR 0131**). **No validator is written**, and the refusal is the decision. What replaces it is a test that reads the schema's own maximum: raise that bound past 128 and it goes red, naming the choice. | **A guard that cannot go red is §6's pattern with the polarity reversed** — not a value that looked measured and was not, but a check that would look enforced and enforce nothing (D277, D391). And the direction NOT taken is the load-bearing one: lowering the limit to the floor would free 256–384 MiB across two projects on a swapless host, and the profile is of the *interpreter*, not the container — **no `mcp` container has started anywhere.** Run 9's trip is where that number comes from. | 0131 |
 
 ---
 
@@ -700,7 +701,23 @@ rather than a fix: `test_environment_gates` flags any subscript whose key is an
 dict** was reported as consuming a live environment. Narrowing that guard is a
 weakening and needs an ADR; the test is rewritten instead.
 
-Suite **3716 passed, 255 skipped**.
+**And the run closes its own oldest open item** (D456). `MCP_MEMORY_LIMIT_MB` had
+been 384 and unmeasured since Run 4, flagged as Run 8's. Measured with ADR 0082's
+rig and a zero-import control: the loaded runtime is **69.2 MiB** — `mcp.types`
+is 25 of them and `fastmcp` on top adds **0.6**, which is the opposite of the
+intuition — and one read at the byte ceiling costs **1.8 MiB**, linear to ten.
+`floor(share) = 128 + share x 4`, so **148 MiB** at the default share.
+
+**The validator that would have enforced it was checked instead of written, and
+could not fail**: the schema caps `api.rest.pool_size` at 100, so the largest
+floor a valid manifest can ask for is 328 against a limit of 384. A guard that
+cannot go red is §6's pattern reversed, so **ADR 0131 declines to write one** and
+puts the relation in a test that reads the schema's own maximum. The limit stays
+384 and stops being inherited. Lowering it would free 256–384 MiB across two
+projects — and the profile is of the interpreter, not the container, so that is
+Run 9's to take. The floor battery killed **4 of 4**.
+
+Suite **3718 passed, 255 skipped**.
 
 ### Run 9 — The contract, the docs, the evidence
 

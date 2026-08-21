@@ -647,24 +647,26 @@ PGBOUNCER_LISTEN_PORT = 6432
 #: words; the consequences of transaction mode are documented instead.
 PGBOUNCER_POOL_MODE = "transaction"
 
-#: Session 8, Run 4. The agent plane's memory ceiling, in MiB.
+#: Session 8, Run 4; **measured in Run 8** (ADR 0131, D456).
 #:
-#: **Inherited, not measured**, and stated that way for the reason `config` uses
-#: for storage's identical 384: this repository's defect pattern is a value that
-#: looked measured and was not, and a number nobody flags as provisional is a
-#: number the next reader treats as evidence.
+#: The agent plane's memory ceiling, in MiB. It was the application API's figure,
+#: inherited and flagged as unmeasured for four runs. It is now a **choice with a
+#: floor under it**, and the floor is a function of the two budgets ADR 0129 set:
 #:
-#: It is the application API's figure, taken because the agent plane runs the
-#: same interpreter and the same base image. That is a reason to expect the same
-#: ORDER of magnitude and not a measurement of anything. What is different here
-#: cuts both ways and neither direction is known: no connection pool and no
-#: Argon2id hasher, so less resident by construction -- against a framework this
-#: process is the first to load, whose footprint has never been profiled.
+#:     floor(share) = 128 + share x 4   -- mcp_budgets.memory_floor_mb
+#:                  = 148 MiB at the default share of 5
 #:
-#: ADR 0082 is the shape the measurement must take (one profile per process,
-#: with a no-work control, because `ru_maxrss` is a high-water mark that reports
-#: the same plausible number for every row). It cannot be taken before Run 6 has
-#: four registered tools to exercise. **Run 8 owns budgets and owns this.**
+#: Measured with ADR 0082's rig -- one fresh interpreter per arm, because
+#: `ru_maxrss` is a high-water mark, and a control that imports nothing. The
+#: fully loaded runtime is **69.2 MiB** resident and one concurrent read at the
+#: byte ceiling costs **1.8 MiB** on top, linear to ten. Both are charged high,
+#: 128 and 4, because this profiles the *interpreter* and **no `mcp` container
+#: has started anywhere yet**.
+#:
+#: 384 is 2.6x the floor at the default share, and it stays: lowering a limit on
+#: the strength of an off-container profile is the direction that costs an OOM
+#: kill rather than a redeploy, on a host with no swap. **Run 9's host trip is
+#: where the container's own figure comes from.**
 MCP_MEMORY_LIMIT_MB = 384
 
 #: The pooler's admin identity. Not a database role: PgBouncer's admin console

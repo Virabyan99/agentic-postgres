@@ -39,10 +39,16 @@ from tests.contract.rendered_fixtures import (
     needs_rendered_fixtures,
 )
 
-from agentic_postgres import config, naming, rendering
+from agentic_postgres import REPO_ROOT, config, naming, rendering
 from app import mcp_errors, mcp_telemetry, mcp_tools
 from app import settings as settings_module
-from app.mcp_budgets import DEFAULT_MAX_CONCURRENT_READS, ReadSlots
+from app.mcp_budgets import (
+    DEFAULT_MAX_CONCURRENT_READS,
+    PER_READ_MB,
+    PROCESS_OVERHEAD_MB,
+    ReadSlots,
+    memory_floor_mb,
+)
 from app.mcp_errors import CALLER_FACING_TOKENS, AgentVisible, as_tool_error
 from app.mcp_telemetry import RECORD_FIELDS, Timed
 
@@ -311,6 +317,46 @@ def test_the_four_budgets_are_bounded_by_four_different_things() -> None:
     # elapsed time -- the lock's `timeout_ms`, converted to the seconds the
     # framework takes, and belonging to neither of the other three.
     assert mcp_tools.MAX_SERIALIZED_BYTES != resource.max_rows
+
+
+def test_the_memory_limit_clears_the_floor_at_every_share_the_schema_permits() -> None:
+    """**ADR 0131.** The relation, checked against the schema's own bound.
+
+    This is what replaces the manifest validator, and the reason there is none:
+    `api.rest.pool_size` is capped by `project.schema.json`, the share is half of
+    it, so the largest floor any valid document can ask for is below the limit --
+    a validator could not fail for anything the schema admits, and a guard that
+    cannot go red is this repository's defect pattern pointing the other way.
+
+    The cap is **read from the schema**, not restated. Raise it past 128 and this
+    test fails, naming the choice that has become live: raise the limit, or write
+    the validator that is now worth writing.
+    """
+    schema = json.loads((REPO_ROOT / "schemas" / "project.schema.json").read_text(encoding="utf-8"))
+    largest_pool = schema["$defs"]["restService"]["properties"]["pool_size"]["maximum"]
+
+    for pool in (1, 10, largest_pool):
+        share = max(1, pool // 2)
+        floor = memory_floor_mb(share)
+        assert rendering.MCP_MEMORY_LIMIT_MB >= floor, (
+            f"a pool of {pool} derives a share of {share}, whose floor is {floor} MiB "
+            f"against a limit of {rendering.MCP_MEMORY_LIMIT_MB}. Raise the limit, or "
+            "the relation now needs the manifest validator ADR 0131 declined to write"
+        )
+
+    assert memory_floor_mb(DEFAULT_MAX_CONCURRENT_READS) == 148
+
+
+def test_the_floor_moves_with_concurrency_rather_than_being_a_constant() -> None:
+    """A floor that ignored the share would be the inherited number again.
+
+    The CONTROL is the third assertion: a floor of zero reads is still the
+    process overhead, so "it moves" is not satisfied by a function that is simply
+    proportional to its argument and forgets the constant term.
+    """
+    assert memory_floor_mb(2) - memory_floor_mb(1) == PER_READ_MB
+    assert memory_floor_mb(10) > memory_floor_mb(1)
+    assert memory_floor_mb(0) == PROCESS_OVERHEAD_MB
 
 
 # ---------------------------------------------------------------------------

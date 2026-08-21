@@ -194,3 +194,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0128](0128-the-agent-plane-publishes-one-path-and-its-health-is-private-by-absence.md) | The agent plane publishes one path, and its health is private by absence | 8 | Accepted |
 | [0129](0129-the-four-budgets-are-bounded-independently-and-concurrency-is-a-share-of-the-pool.md) | The four budgets are bounded independently, and concurrency is a share of the pool | 8 | Accepted |
 | [0130](0130-a-refusal-reaches-the-caller-only-through-tool-error.md) | A refusal reaches the caller only through ToolError | 8 | Accepted |
+| [0131](0131-the-agent-plane-memory-limit-is-a-choice-with-a-measured-floor.md) | The agent plane's memory limit is a choice with a measured floor, and it gets no validator | 8 | Accepted |

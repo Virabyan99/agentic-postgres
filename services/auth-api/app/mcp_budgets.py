@@ -89,3 +89,61 @@ class ReadSlots:
         """Slots not currently held. For telemetry and tests, never for a caller."""
         semaphore = self._semaphore
         return self._limit if semaphore is None else semaphore._value
+
+
+# ---------------------------------------------------------------------------
+# the fifth bound: memory (ADR 0131)
+# ---------------------------------------------------------------------------
+
+#: What this process costs resident before it serves anything, in MiB.
+#:
+#: **Measured, and charged above the measurement.** ADR 0082's rig -- one fresh
+#: interpreter per arm, because `ru_maxrss` is a high-water mark, and a control
+#: that imports nothing and moves the figure by 0.0:
+#:
+#:     CONTROL -- nothing imported        12.1 MiB
+#:     + jwt and cryptography             29.0
+#:     + mcp.types                        54.3      <- the cost is HERE
+#:     + fastmcp                          54.9      <- and not here
+#:     + the agent plane's nine modules   69.2
+#:
+#: The protocol library costs 25 MiB and the server framework on top of it costs
+#: 0.6, which is the opposite of the intuition and is why the table is in the
+#: comment. 128 is charged against the measured 69.2 (1.85x) -- higher than ADR
+#: 0082's 1.58x for the auth service, because that was a process the deployment
+#: had been running for two sessions and **no `mcp` container has started
+#: anywhere**. This is the interpreter, not the container.
+PROCESS_OVERHEAD_MB = 128
+
+#: What one concurrent read at the byte ceiling costs on top, in MiB.
+#:
+#: Measured through the real path -- socket bytes, `json.loads`, the byte budget,
+#: `json.dumps` -- with N responses held live at once and a zero-read control:
+#:
+#:     CONTROL -- 0 reads   0.0 MiB
+#:     1                    1.8
+#:     2                    3.3
+#:     5                    8.8
+#:     10                  17.8
+#:
+#: Linear, at ~1.8 MiB for a 0.87 MiB response: roughly twice its own bytes,
+#: because the parsed rows and the serialized string are both resident while it
+#: is produced. **Deriving this from `MAX_SERIALIZED_BYTES` alone would have
+#: understated it by that factor**, and nothing about the ceiling implies it.
+PER_READ_MB = 4
+
+
+def memory_floor_mb(max_concurrent_reads: int) -> int:
+    """The smallest container limit that can hold that many reads at once.
+
+    One function so the number in a comment, the number in a test and the number
+    in `docs/` are one number -- ADR 0002's rule applied to arithmetic, and the
+    reason `auth_memory_floor_mb` exists next door.
+
+    **Nothing validates a manifest against this, deliberately** (ADR 0131).
+    `api.rest.pool_size` is capped at 100 by the schema and the share is half of
+    it, so the largest floor any valid document can ask for is 328 MiB against a
+    limit of 384: a validator here could not fail. A guard that cannot go red is
+    the defect this repository keeps producing, pointing the other way.
+    """
+    return PROCESS_OVERHEAD_MB + max_concurrent_reads * PER_READ_MB
