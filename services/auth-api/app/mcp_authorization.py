@@ -32,6 +32,8 @@ import hashlib
 from dataclasses import dataclass
 from typing import Any
 
+from fastmcp.server.middleware import Middleware as _Middleware
+
 from app.mcp_upstream import AgentContext, UpstreamRefusal, resolve_agent_context
 
 #: The resolved context for the request currently being served, or `None`.
@@ -116,12 +118,26 @@ def _resolve(base_url: str, token: str) -> _Held:
     )
 
 
-class AgentContextMiddleware:
+class AgentContextMiddleware(_Middleware):
     """Resolves the caller's context once, on the way in.
 
-    Structurally typed against FastMCP's `Middleware` rather than subclassing
-    it, for the reason `AgentTokenVerifier` is: the refusal branches stay
-    testable without constructing a framework object.
+    **It subclasses the framework's `Middleware`, and Run 5's decision not to
+    was wrong** (D450). This docstring used to say it was "structurally typed
+    against FastMCP's `Middleware` rather than subclassing it, for the reason
+    `AgentTokenVerifier` is" -- and that reason was already wrong when it was
+    written: the framework's pipeline does not duck-type a middleware, so a
+    plain class raised `'AgentContextMiddleware' object is not callable` the
+    first time a request reached it.
+
+    Nothing caught it because nothing had ever run a request through the
+    pipeline: every test called `on_request` directly. **That is D444's family,
+    and its second instance** -- Run 7 found the verifier and this one survived,
+    because the seam nobody crossed was the same seam.
+
+    What survives of the original reasoning is narrower than it claimed: the
+    refusal branches here are still reachable without a framework object,
+    because `_resolve` and `current_agent_context` are module functions. That is
+    a property of how the logic is split, not of how the class is typed.
 
     **`on_request`, not `on_call_tool`.** Measured: `on_request` fires exactly
     once per HTTP request and before both `on_list_tools` and `on_call_tool`, so
@@ -137,6 +153,7 @@ class AgentContextMiddleware:
     """
 
     def __init__(self, base_url: str) -> None:
+        super().__init__()
         self._base_url = base_url
 
     async def on_request(self, context: Any, call_next: Any) -> Any:

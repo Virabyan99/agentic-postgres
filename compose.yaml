@@ -1295,6 +1295,13 @@ services:
       # mount whose file nothing produces is D381 exactly, so the producer and
       # the consumer arrive in the same run.
       APG_MCP_LOCK_FILE: /etc/mcp/capability-lock.json
+      # How many upstream reads may be in flight at once (ADR 0129).
+      # Derived from `api.rest.pool_size`, because what it bounds is this
+      # plane's claim on **PostgREST's** connection pool -- which it shares
+      # with human callers, and which an unbounded agent plane could take
+      # all of. Measured before the bound existed: eight overlapping tool
+      # calls ran eight bodies at once.
+      APG_MCP_MAX_CONCURRENT_READS: ${MCP_MAX_CONCURRENT_READS:?required}
     # Run 7's, and the module Run 4 deferred (D429) now exists: ADR 0124's
     # allowlist gave the probe a row with a reason, which is what it was waiting
     # for.

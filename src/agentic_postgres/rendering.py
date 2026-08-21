@@ -594,6 +594,13 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # one ADR 0106 states for the storage endpoint.
     "MCP_MEMORY_LIMIT",
     "MCP_POSTGREST_URL",
+    # Session 8, Run 8. How many upstream reads the agent plane may have in
+    # flight (ADR 0129). **Derived from PostgREST's pool**, because that is
+    # what it protects: the agent plane holds no database credential and no
+    # share of ADR 0099's budget (D407), but each read it makes occupies one
+    # of PostgREST's connections while it runs, and that pool is shared with
+    # human callers.
+    "MCP_MAX_CONCURRENT_READS",
     # Session 8, Run 7. The published route (ADR 0128). A TOP-LEVEL path,
     # unlike every other application route: nothing else in this deployment
     # matches it, so its precedence is uncontested rather than won by
@@ -953,6 +960,14 @@ def build_compose_env(
         # have and a rotation nobody would run. What travels on it is the
         # caller's own token, which is already a bearer credential over a link
         # the edge terminated TLS for.
+        # Half the REST pool, floor one (ADR 0129). A manifest that shrinks
+        # the pool shrinks the agent plane's share with it, which is ADR
+        # 0070's rule -- a division rather than independent grants -- applied
+        # one level out. **The RATIO is a choice and is flagged as one**;
+        # what is measured is that the two numbers must move together, and
+        # deriving is what makes that true rather than a coincidence two
+        # constants maintain until somebody edits one (D264).
+        "MCP_MAX_CONCURRENT_READS": str(max(1, int(rest["pool_size"]) // 2)),
         "API_MCP_PATH": identity.route_mcp_path,
         "MCP_ROUTER_NAME": identity.mcp_router,
         "MCP_POSTGREST_URL": (

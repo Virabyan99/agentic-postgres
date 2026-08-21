@@ -324,6 +324,8 @@ def _mcp_environment(**extra: str) -> dict[str, str]:
         "APG_POSTGREST_URL": "http://postgrest:3000",
         # Session 8 Run 6: the compiled capability lock (ADR 0127).
         "APG_MCP_LOCK_FILE": "/etc/mcp/capability-lock.json",
+        # Session 8 Run 8: the concurrency share (ADR 0129).
+        "APG_MCP_MAX_CONCURRENT_READS": "5",
     }
     environment.update(extra)
     return environment

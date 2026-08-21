@@ -28,12 +28,24 @@ scope.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
 from app.mcp_authorization import current_agent_context
+from app.mcp_budgets import DEFAULT_MAX_CONCURRENT_READS, ReadSlots
+from app.mcp_errors import (
+    BUDGET_EXCEEDED,
+    INPUT_NOT_PERMITTED,
+    RESOURCE_UNKNOWN,
+    SCOPE_NOT_HELD,
+    STRUCTURAL_REFUSAL,
+    AgentVisible,
+    as_tool_error,
+)
 from app.mcp_lock import CapabilityLock, LockError, Resource
 from app.mcp_query import Filter, QueryRefusal, build_request
+from app.mcp_telemetry import Timed
 from app.mcp_upstream import UpstreamRefusal, execute
 
 #: The names, in the order `mcp_lock.EXPECTED_TOOL_NAMES` asserts.
@@ -58,12 +70,18 @@ MAX_SERIALIZED_BYTES = 1048576
 
 
 class ToolRefusal(Exception):
-    """The caller may not do this, and the message names the INPUT.
+    """A STRUCTURAL refusal: the caller is told nothing (ADR 0097, ADR 0130).
 
-    Never the schema, never the upstream's status, never a row count it did not
-    receive (ADR 0097). "you do not hold tasks:read" is a statement about the
-    request; "column notes.secret does not exist" is a statement about the
-    database.
+    Raised as a plain exception on purpose. `mask_error_details=True` replaces
+    its message with the framework's opaque string, which is the right amount
+    for an upstream refusal whose three measured causes -- a bad signature, a
+    stale identity, a missing privilege -- are indistinguishable by status
+    (D433). Relaying one would be a guess dressed as a diagnosis.
+
+    **A refusal the caller may ACT on is `AgentVisible` instead**, and it reaches
+    them because `ToolError` bypasses the mask. Run 6 raised everything through
+    this type, so its carefully-worded input messages were replaced before they
+    left the process -- written, reviewed, tested, and invisible (D448).
     """
 
 
@@ -78,13 +96,19 @@ def _resource_for(lock: CapabilityLock, tool: str, name: str) -> Resource:
     except LockError as error:
         # The lock's own message names tools and resources, which are public
         # facts about this surface -- the caller could have got them from
-        # `list_resources`. It is safe to relay and useful to.
-        raise ToolRefusal(str(error)) from error
+        # `list_resources`. Safe to relay, and useful to.
+        raise AgentVisible(RESOURCE_UNKNOWN, str(error)) from error
 
     held = _scopes()
     missing = [scope for scope in resource.required_scopes if scope not in held]
     if missing:
-        raise ToolRefusal(f"this resource requires {sorted(resource.required_scopes)}")
+        # The scopes it NEEDS, not the ones it holds. The first is a fact about
+        # this surface the caller could read from `describe_resource`; the second
+        # would be this process telling a caller about its own token, which it
+        # already has and which a log should not repeat back.
+        raise AgentVisible(
+            SCOPE_NOT_HELD, f"this resource requires {sorted(resource.required_scopes)}"
+        )
     return resource
 
 
@@ -168,12 +192,15 @@ def query_resource(
             limit=limit,
         )
     except QueryRefusal as error:
-        raise ToolRefusal(str(error)) from error
+        # An input the lock does not permit. The caller can fix this, and
+        # `mcp_query` already writes the message to name the INPUT and never the
+        # schema -- so it is exactly what may be relayed.
+        raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
 
     try:
         rows = execute(base_url, token, request)
     except UpstreamRefusal as error:
-        raise ToolRefusal("the read could not be completed") from error
+        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
 
     result = {"resource": found.name, "row_count": len(rows), "rows": rows}
     return _within_budget(result, found.max_rows)
@@ -190,13 +217,19 @@ def _within_budget(result: dict[str, Any], max_rows: int) -> dict[str, Any]:
     """
     rows = result["rows"]
     if len(rows) > max_rows:
-        raise ToolRefusal(f"the upstream returned {len(rows)} rows above the {max_rows} ceiling")
+        # Structural: the upstream returned more than the lock permits, which is
+        # a fault in the deployment rather than in the request. Nothing the
+        # caller did produced it and nothing it can do fixes it.
+        raise ToolRefusal(STRUCTURAL_REFUSAL)
 
     serialized = len(json.dumps(result, separators=(",", ":")).encode("utf-8"))
     if serialized > MAX_SERIALIZED_BYTES:
-        raise ToolRefusal(
+        # Caller-visible, and the advice is the point: this is the one budget a
+        # caller can stay inside by asking differently.
+        raise AgentVisible(
+            BUDGET_EXCEEDED,
             f"the result is {serialized} bytes, above the {MAX_SERIALIZED_BYTES} ceiling; "
-            "ask for fewer columns or fewer rows"
+            "ask for fewer columns or fewer rows",
         )
     return result
 
@@ -214,24 +247,24 @@ def run_report(lock: CapabilityLock, *, base_url: str, token: str) -> dict[str, 
     """
     tool = lock.tool("run_report")
     if len(tool.resources) != 1:
-        raise ToolRefusal("the lock does not name exactly one report")
+        raise ToolRefusal(STRUCTURAL_REFUSAL)
     found = _resource_for(lock, "run_report", tool.resources[0].name)
 
     try:
         request = build_request(found, timeout_ms=tool.timeout_ms)
     except QueryRefusal as error:
-        raise ToolRefusal(str(error)) from error
+        raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
 
     try:
         rows = execute(base_url, token, request)
     except UpstreamRefusal as error:
-        raise ToolRefusal("the report could not be completed") from error
+        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
 
     if len(rows) != 1:
         # The report is one row by construction. Anything else is a surface that
         # has changed underneath the lock, and reporting the first row would be
-        # reporting a number nobody bounded.
-        raise ToolRefusal("the report did not return exactly one row")
+        # reporting a number nobody bounded. Structural: not the caller's doing.
+        raise ToolRefusal(STRUCTURAL_REFUSAL)
     return rows[0]
 
 
@@ -243,17 +276,21 @@ def _filter(entry: Any) -> Filter:
     permission check is `build_filter`'s, against the lock.
     """
     if not isinstance(entry, dict):
-        raise ToolRefusal("a filter is an object with column, operator and value")
+        raise AgentVisible(
+            INPUT_NOT_PERMITTED, "a filter is an object with column, operator and value"
+        )
     for required in ("column", "operator"):
         if not isinstance(entry.get(required), str) or not entry[required]:
-            raise ToolRefusal(f"a filter needs a non-empty {required}")
+            raise AgentVisible(INPUT_NOT_PERMITTED, f"a filter needs a non-empty {required}")
     unknown = set(entry) - {"column", "operator", "value"}
     if unknown:
-        raise ToolRefusal(f"a filter has no {sorted(unknown)} member")
+        raise AgentVisible(INPUT_NOT_PERMITTED, f"a filter has no {sorted(unknown)} member")
     return Filter(column=entry["column"], operator=entry["operator"], value=entry.get("value"))
 
 
-def register(server: Any, lock: CapabilityLock, *, base_url: str) -> tuple[str, ...]:
+def register(
+    server: Any, lock: CapabilityLock, *, base_url: str, slots: ReadSlots | None = None
+) -> tuple[str, ...]:
     """Register exactly the four tools and return their names.
 
     The names are returned rather than assumed so a test can compare them with
@@ -265,6 +302,59 @@ def register(server: Any, lock: CapabilityLock, *, base_url: str) -> tuple[str, 
     is backed by a `ContextVar` that is reset in a `finally` (ADR 0125).
     """
     from app.mcp_authorization import current_token
+
+    read_slots = slots if slots is not None else ReadSlots(DEFAULT_MAX_CONCURRENT_READS)
+
+    async def bounded(tool: str, resource: str | None, work: Any) -> dict[str, Any]:
+        """One boundary for every tool call: measure, bound, translate.
+
+        **Three jobs in one place**, and the alternative is three decorators
+        every future tool author has to remember -- which is D333's shape.
+
+        *Measure.* One telemetry record per call, carrying ids and counts and no
+        caller values (ADR 0130).
+
+        *Bound.* The concurrency semaphore is held only around work that reaches
+        upstream; the two metadata tools answer from the lock and take no slot,
+        because a bound that queued them would make discovery contend with reads
+        for no reason (ADR 0129).
+
+        *Translate.* `AgentVisible` becomes a `ToolError`, which is the one type
+        the framework lets past `mask_error_details`. Everything else stays a
+        plain exception and is masked -- so a refusal is silent unless somebody
+        chose otherwise.
+        """
+        with Timed(tool, resource=resource) as timed:
+            try:
+                context = current_agent_context()
+                timed.principal(agent_id=context.agent_id, owner_id=context.owner_id)
+            except Exception:
+                timed.principal(agent_id=None, owner_id=None)
+
+            try:
+                if resource is None:
+                    # Metadata: the lock is in memory, so this is a dict lookup
+                    # and belongs on the loop. No slot, no thread.
+                    result = work()
+                else:
+                    # **A thread, and it is not an optimisation** (D451). The
+                    # upstream read is blocking urllib, and calling it on the
+                    # event loop serialises the WHOLE process -- every other
+                    # request, and the health routes with them. Measured: with
+                    # the call on the loop, six overlapping reads peaked at ONE
+                    # concurrent, so the semaphore never saw contention and the
+                    # bound it appears to apply was unreachable.
+                    async with read_slots:
+                        result = await asyncio.to_thread(work)
+            except AgentVisible as visible:
+                timed.refused()
+                raise as_tool_error(visible) from visible
+            except ToolRefusal:
+                timed.refused()
+                raise
+
+            timed.served(result.get("row_count") if isinstance(result, dict) else None)
+            return result
 
     def seconds(name: str) -> float:
         """The lock's per-tool timeout, in the unit the framework takes.
@@ -281,19 +371,21 @@ def register(server: Any, lock: CapabilityLock, *, base_url: str) -> tuple[str, 
     # names would silently become `list_resources_tool` and the contract would
     # be wrong in the one place a client reads it.
     @server.tool(name="list_resources", timeout=seconds("list_resources"))
-    def _list_resources() -> dict[str, Any]:
+    async def _list_resources() -> dict[str, Any]:
         """The resources this deployment's agent surface can query, and the
         scope each one needs. Read from the deployed lock; reaches no database."""
-        return list_resources(lock)
+        return await bounded("list_resources", None, lambda: list_resources(lock))
 
     @server.tool(name="describe_resource", timeout=seconds("describe_resource"))
-    def _describe_resource(tool: str, resource: str) -> dict[str, Any]:
+    async def _describe_resource(tool: str, resource: str) -> dict[str, Any]:
         """One resource's frozen columns, permitted filters and permitted
         ordering, exactly as the lock froze them. Read from the deployed lock."""
-        return describe_resource(lock, tool=tool, resource=resource)
+        return await bounded(
+            "describe_resource", None, lambda: describe_resource(lock, tool=tool, resource=resource)
+        )
 
     @server.tool(name="query_resource", timeout=seconds("query_resource"))
-    def _query_resource(
+    async def _query_resource(
         resource: str,
         columns: list[str] | None = None,
         filters: list[dict[str, Any]] | None = None,
@@ -306,21 +398,29 @@ def register(server: Any, lock: CapabilityLock, *, base_url: str) -> tuple[str, 
         not an order string: the permitted orderings are frozen, and choosing
         one by index is not the same feature as writing one.
         """
-        return query_resource(
-            lock,
-            base_url=base_url,
-            token=current_token(),
-            resource=resource,
-            columns=columns,
-            filters=filters,
-            order_by=order_by,
-            limit=limit,
+        return await bounded(
+            "query_resource",
+            resource,
+            lambda: query_resource(
+                lock,
+                base_url=base_url,
+                token=current_token(),
+                resource=resource,
+                columns=columns,
+                filters=filters,
+                order_by=order_by,
+                limit=limit,
+            ),
         )
 
     @server.tool(name="run_report", timeout=seconds("run_report"))
-    def _run_report() -> dict[str, Any]:
+    async def _run_report() -> dict[str, Any]:
         """The caller's own activity, counted under the caller's own RLS: notes
         and tasks totals, tasks by status, and the two most recent update times."""
-        return run_report(lock, base_url=base_url, token=current_token())
+        return await bounded(
+            "run_report",
+            "owner_activity_report",
+            lambda: run_report(lock, base_url=base_url, token=current_token()),
+        )
 
     return TOOL_NAMES

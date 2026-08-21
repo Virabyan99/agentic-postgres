@@ -263,6 +263,7 @@ def build_server(
     project_key: str,
     postgrest_url: str,
     lock: Any | None = None,
+    max_concurrent_reads: int | None = None,
 ) -> Any:
     """The FastMCP server, its four tools, and its private health routes.
 
@@ -293,9 +294,19 @@ def build_server(
         mask_error_details=True,
     )
     if lock is not None:
+        from app.mcp_budgets import DEFAULT_MAX_CONCURRENT_READS, ReadSlots
         from app.mcp_tools import register
 
-        register(server, lock, base_url=postgrest_url)
+        register(
+            server,
+            lock,
+            base_url=postgrest_url,
+            slots=ReadSlots(
+                max_concurrent_reads
+                if max_concurrent_reads is not None
+                else DEFAULT_MAX_CONCURRENT_READS
+            ),
+        )
 
     _register_health(server, lock=lock, key_set=verifier.key_set)
     return server
@@ -366,6 +377,7 @@ def create_mcp_app() -> Starlette:
         project_key=settings.project_key,
         postgrest_url=settings.postgrest_url,
         lock=lock,
+        max_concurrent_reads=settings.max_concurrent_reads,
     )
     # `stateless_http`, so one HTTP request is one complete exchange. It is what
     # makes "cached for one HTTP request" a statement about a boundary the

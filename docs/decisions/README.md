@@ -192,3 +192,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0126](0126-the-runtime-dials-the-internal-upstream-and-the-lock-names-the-public-surface.md) | The runtime dials the internal upstream; the lock names the public surface | 8 | Accepted |
 | [0127](0127-a-caller-value-is-a-value-and-the-request-is-built-from-the-lock.md) | A caller value is a value, and the request is built from the lock | 8 | Accepted |
 | [0128](0128-the-agent-plane-publishes-one-path-and-its-health-is-private-by-absence.md) | The agent plane publishes one path, and its health is private by absence | 8 | Accepted |
+| [0129](0129-the-four-budgets-are-bounded-independently-and-concurrency-is-a-share-of-the-pool.md) | The four budgets are bounded independently, and concurrency is a share of the pool | 8 | Accepted |
+| [0130](0130-a-refusal-reaches-the-caller-only-through-tool-error.md) | A refusal reaches the caller only through ToolError | 8 | Accepted |

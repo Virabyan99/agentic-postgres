@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 
 from app import mcp_authorization, mcp_tools
+from app.mcp_errors import AgentVisible
 from app.mcp_lock import (
     EXPECTED_TOOL_NAMES,
     CapabilityLock,
@@ -268,6 +269,79 @@ def test_discovery_shows_only_what_the_callers_scopes_permit(monkeypatch: Any) -
     assert list_resources(lock)["resources"] == []
 
 
+class _Registry:
+    """The least a `register()` call needs: a decorator that keeps the function.
+
+    Standing in for the framework's server on purpose. The real one is exercised
+    by `test_mcp_route`, which asserts the registered NAMES; what is needed here
+    is the registered *callable*, and reaching it through the framework's tool
+    manager would test the framework's accessors rather than this repository's
+    registration.
+    """
+
+    def __init__(self) -> None:
+        self.tools: dict[str, Any] = {}
+
+    def tool(self, *, name: str, timeout: float | None = None) -> Any:
+        def keep(function: Any) -> Any:
+            self.tools[name] = function
+            return function
+
+        return keep
+
+
+def test_a_metadata_tool_takes_no_concurrency_slot_and_a_read_does(monkeypatch: Any) -> None:
+    """**ADR 0129**, asserted through `register()` rather than around it (D454).
+
+    The rule -- the two metadata tools answer from the lock and take no slot --
+    lived in `bounded`'s docstring and in nothing else, because **no test in this
+    repository had ever called `register()`**. Every tool test calls the module
+    function the registration wraps, so the wrapper was the seam nobody crossed:
+    D444 and D450's family, found this time by a surviving mutation rather than
+    by a start.
+
+    **The control is the second half**, and it is what makes the first half a
+    measurement: the same rig, the same semaphore, a tool that DOES reach
+    upstream, and it must be seen holding a slot. Without it, an assertion that
+    the metadata path leaves the semaphore full is satisfied by a semaphore
+    nothing ever touches.
+    """
+    import asyncio
+
+    from app.mcp_budgets import ReadSlots
+
+    lock = _lock(NOTES)
+    slots = ReadSlots(2)
+    seen: dict[str, int] = {}
+
+    _with_scopes(monkeypatch, "meta:read", "notes:read")
+    monkeypatch.setattr(mcp_authorization, "current_token", lambda: "t")
+
+    def watching(label: str, payload: dict[str, Any]) -> Any:
+        def work(*_: Any, **__: Any) -> dict[str, Any]:
+            seen[label] = slots.available
+            return payload
+
+        return work
+
+    monkeypatch.setattr(mcp_tools, "list_resources", watching("meta", {"resources": []}))
+    monkeypatch.setattr(
+        mcp_tools,
+        "query_resource",
+        watching("read", {"resource": "notes", "row_count": 0, "rows": []}),
+    )
+
+    registry = _Registry()
+    assert mcp_tools.register(registry, lock, base_url=BASE, slots=slots) == mcp_tools.TOOL_NAMES
+    assert set(registry.tools) == set(mcp_tools.TOOL_NAMES)
+
+    asyncio.run(registry.tools["list_resources"]())
+    assert seen["meta"] == slots.limit, "a metadata tool must not queue behind a read"
+
+    asyncio.run(registry.tools["query_resource"](resource="notes"))
+    assert seen["read"] == slots.limit - 1, "the CONTROL: a read must be seen holding a slot"
+
+
 def test_a_resource_the_caller_cannot_reach_is_refused_not_merely_hidden(
     monkeypatch: Any,
 ) -> None:
@@ -275,9 +349,11 @@ def test_a_resource_the_caller_cannot_reach_is_refused_not_merely_hidden(
     lock = _lock()
     _with_scopes(monkeypatch, "meta:read")
 
-    with pytest.raises(ToolRefusal, match="requires"):
+    # AgentVisible now: a scope refusal is something the caller can act on,
+    # so it reaches them through ToolError rather than being masked (ADR 0130).
+    with pytest.raises(AgentVisible, match="requires"):
         describe_resource(lock, tool="query_resource", resource="notes")
-    with pytest.raises(ToolRefusal, match="requires"):
+    with pytest.raises(AgentVisible, match="requires"):
         query_resource(lock, base_url=BASE, token="t", resource="notes")  # noqa: S106
 
 
@@ -323,7 +399,9 @@ def test_the_byte_ceiling_is_independent_of_the_row_ceiling(monkeypatch: Any) ->
         lambda *_, **__: [{"content": "x" * 900_000} for _ in range(2)],
     )
 
-    with pytest.raises(ToolRefusal, match="ceiling"):
+    # Caller-visible: this is the one budget a caller can stay inside by
+    # asking differently, so the advice is worth relaying (ADR 0130).
+    with pytest.raises(AgentVisible, match="ceiling"):
         query_resource(lock, base_url=BASE, token="t", resource="notes")  # noqa: S106
 
 
@@ -346,7 +424,10 @@ def test_more_rows_than_the_ceiling_are_refused_rather_than_truncated(
     _with_scopes(monkeypatch, "notes:read")
     monkeypatch.setattr(mcp_tools, "execute", lambda *_, **__: [{"t": 1}] * 201)
 
-    with pytest.raises(ToolRefusal, match="ceiling"):
+    # STRUCTURAL: the upstream returned more than the lock permits, which is a
+    # fault in the deployment rather than in the request. Nothing the caller did
+    # produced it, so it is masked (ADR 0130).
+    with pytest.raises(ToolRefusal):
         query_resource(lock, base_url=BASE, token="t", resource="notes")  # noqa: S106
 
 

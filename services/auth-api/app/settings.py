@@ -217,6 +217,14 @@ class McpSettings:
     #: and answers every discovery with an empty list -- D381's shape applied to
     #: a capability surface rather than to a key set.
     capability_lock_file: Path
+    #: How many upstream reads may be in flight at once (ADR 0129).
+    #:
+    #: Rendered from `api.rest.pool_size`, and required rather than
+    #: defaulted: a runtime that fell back to a constant would be a second
+    #: authority for a division `config` owns, and the symptom of the wrong
+    #: number is a REST API that starves under agent load rather than an
+    #: error anybody sees.
+    max_concurrent_reads: int
 
 
 def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
@@ -255,6 +263,7 @@ def load_mcp(environ: dict[str, str] | None = None) -> McpSettings:
         listen_port=_required_int("APG_LISTEN_PORT"),
         postgrest_url=_required_http_url("APG_POSTGREST_URL"),
         capability_lock_file=Path(_required("APG_MCP_LOCK_FILE")),
+        max_concurrent_reads=_required_int("APG_MCP_MAX_CONCURRENT_READS"),
     )
 
 
@@ -414,6 +423,8 @@ MCP_VARIABLES: tuple[str, ...] = (
     # Session 8 Run 6. The compiled capability lock this project serves
     # (ADR 0127). A file, mounted read-only, exactly as the key set is.
     "APG_MCP_LOCK_FILE",
+    # Session 8 Run 8. The concurrency share (ADR 0129).
+    "APG_MCP_MAX_CONCURRENT_READS",
 )
 
 #: The variable each mode must NOT be given. Stated as a set rather than left

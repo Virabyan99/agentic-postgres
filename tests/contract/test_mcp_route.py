@@ -418,3 +418,125 @@ def test_the_pinned_framework_has_no_host_or_origin_protection_of_its_own() -> N
 
     parameters = set(inspect.signature(FastMCP.http_app).parameters)
     assert not parameters & {"host_origin_protection", "allowed_hosts", "allowed_origins"}
+
+
+def test_every_agent_plane_object_the_framework_wires_is_a_framework_type() -> None:
+    """**The test that would have caught D444 and D450 together.**
+
+    Two objects are handed to the framework to wire: the verifier and the
+    middleware. Both were written "structurally typed rather than subclassing",
+    and **both were wrong** -- the verifier raised `AttributeError` on
+    `get_middleware()` at assembly, and the middleware raised
+    `'AgentContextMiddleware' object is not callable` on the first request
+    through the pipeline.
+
+    Run 7 found the first and this one survived, because the seam nobody crossed
+    was the same seam: a unit test that calls `verify_token` or `on_request`
+    directly never asks the framework to accept the object.
+
+    Asserted as a pair, so a third wired object added later has an obvious place
+    to be listed.
+    """
+    from fastmcp.server.auth import TokenVerifier
+    from fastmcp.server.middleware import Middleware
+
+    from app.mcp_authorization import AgentContextMiddleware
+    from app.mcp_runtime import AgentTokenVerifier
+
+    assert issubclass(AgentTokenVerifier, TokenVerifier)
+    assert issubclass(AgentContextMiddleware, Middleware)
+
+
+def test_a_request_reaches_a_tool_through_the_real_middleware_pipeline(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """The seam itself, exercised (D450).
+
+    Not `middleware.on_request(...)` -- the framework's own pipeline, reached by
+    calling a registered tool. This is the arrangement that raised "object is not
+    callable" for three runs while every unit test passed.
+    """
+    import asyncio
+
+    from app import mcp_authorization, mcp_tools
+    from app.mcp_upstream import AgentContext
+
+    monkeypatch.setattr(
+        mcp_authorization,
+        "resolve_agent_context",
+        lambda base_url, token: AgentContext(
+            agent_id="agent-1",
+            role_name="r",
+            scopes=("meta:read", "notes:read"),
+            authz_version=1,
+            owner_id="owner-1",
+        ),
+    )
+    monkeypatch.setattr(mcp_tools, "execute", lambda *_, **__: [{"title": "alpha"}])
+
+    server = _built_server(tmp_path)
+    tools = asyncio.run(server.list_tools())
+
+    assert sorted(tool.name for tool in tools) == [
+        "describe_resource",
+        "list_resources",
+        "query_resource",
+        "run_report",
+    ]
+
+
+def _built_server(tmp_path: Any) -> Any:
+    """The real server object, with the lock and both wired components."""
+    import json
+
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from agentic_postgres import jwt_keys
+    from app.mcp_lock import load_lock
+    from app.mcp_runtime import AgentTokenVerifier, build_server
+    from app.tokens import LocalKeySet
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    numbers = key.public_key().public_numbers()
+    document = jwt_keys.build_jwks(
+        [jwt_keys.public_jwk(modulus_hex=format(numbers.n, "X"), exponent=numbers.e)]
+    )
+    jwks = tmp_path / "jwks.json"
+    jwks.write_bytes(json.dumps(document, indent=2, sort_keys=True).encode("utf-8") + b"\n")
+
+    lock_path = tmp_path / "lock.json"
+    lock_path.write_text(json.dumps(_minimal_lock()), encoding="utf-8")
+
+    return build_server(
+        AgentTokenVerifier(LocalKeySet.from_path(jwks), issuer="https://i.test", audience="urn:a"),
+        project_key="probe-dev",
+        postgrest_url="http://postgrest:3000",
+        lock=load_lock(lock_path),
+        max_concurrent_reads=2,
+    )
+
+
+def test_the_blocking_upstream_read_does_not_run_on_the_event_loop() -> None:
+    """**D451.** A blocking call on the loop serialises the whole process.
+
+    `execute` is blocking urllib. Awaiting it directly would stop every other
+    request -- and the health routes with them -- for the duration of one slow
+    read, and it would make the concurrency bound unreachable: measured, six
+    overlapping reads peaked at ONE concurrent, so the semaphore never saw
+    contention and appeared to work.
+
+    Asserted on the source, because the behaviour it prevents needs a loop under
+    load to observe and the property is a single call.
+    """
+    import ast
+    from pathlib import Path as _Path
+
+    from app import mcp_tools
+
+    tree = ast.parse(_Path(mcp_tools.__file__).read_text(encoding="utf-8"))
+    threaded = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "to_thread"
+    ]
+    assert threaded, "the blocking upstream read is not moved off the event loop"

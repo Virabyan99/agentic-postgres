@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D446.**
+**Next free number after this table is D456.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -99,6 +99,16 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D443** | D408: *"`/mcpx` must reach a different backend, and which service answered is read from the response."* | **There is no different backend.** `/mcp` is **top-level**, unlike `/api/app/storage`, so a sibling matches no router at all and gets **Traefik's own** 404 — a 19-byte body carrying no `RouterName` — rather than another service's. The prediction assumed the storage shape, where a parent router catches the sibling. | The two-matcher rule is unchanged and still necessary (`PathPrefix` is a string prefix, D162). What changes is what the proof looks for: **the absence of a `RouterName`**, not the presence of a different one. Offline, every rule in the override is interpolated with real values and evaluated against `/mcp`; exactly one router matches. | The distinction matters because the two 404s are indistinguishable by status and by body length is how they are told apart (D353). A proof written for the storage shape would have looked for a service that never answers and reported a boundary it had not tested. | 0128 |
 | **D444** | Run 4's `AgentTokenVerifier`: *"Structurally typed against the framework rather than subclassing it: the protocol is one coroutine."* | **The protocol is not one coroutine, and nothing had ever built the application.** `http_app` calls `auth.get_middleware()` while assembling, and `AuthProvider` also supplies `get_routes`, `get_well_known_routes` and `set_mcp_path`. A duck-typed verifier raises `AttributeError: 'AgentTokenVerifier' object has no attribute 'get_middleware'` — **on the first real start, anywhere**. Every test since Run 4 constructed the class and called `verify_token` directly, so `build_server(...).http_app(...)` was never executed by anything. | `AgentTokenVerifier` subclasses the framework's `TokenVerifier`. A test now **assembles the real application** and asserts its route table — `/mcp` plus the two health paths — and a second names all four contract methods, so a refactor back to duck typing fails offline rather than on a host. | **D381 exactly, and in the same session that wrote D381 into four ADRs.** A runtime declared in code, assembled nowhere, correct-looking until the first start. It survived Runs 4, 5 and 6 — three green batteries and 3,662 passing tests — because the seam nobody crossed was *construction*, not behaviour. §6 question 2: has it run at all, in this environment, since the thing it measures last changed? | — |
 | **D445** | — (found by an existing guard, during Run 7.) | **The deploy tried to import the agent runtime to read its published constants.** `observe_mcp` needs `PROTOCOL_REVISION`, `AUTHORIZATION_SPEC_CONFORMANT` and `ACCEPTED_TOKEN_USE` for the document, and the first version loaded `services/auth-api/app/mcp_runtime.py` from the release by path. That module imports `fastmcp`, `mcp.types` and the service package — **none of which exist on the host** — so it would have raised `ModuleNotFoundError` at deploy time, in the command where it costs most. | The constants are asked of the **running container**: `docker exec … python -c` importing the module that container is actually serving from (ADR 0093). The block stays `unavailable` when the container cannot answer, rather than being filled with a guess. | **`test_no_operator_command_puts_a_service_directory_on_the_path` caught it before the suite did**, and its message names the fix: *“reach the service's logic through a container instead”*. It is D292's guard doing exactly the job it was written for, one session later — and the answer is stronger than the mistake, because what the document publishes is now what the process answering requests holds rather than what the release says it should (D413). | — |
+| **D446** | Run 8's plan: *"rows, elapsed time, concurrency and serialized bytes bounded independently"*, as four things to build. | **Two were already built, one was already bounded by the framework, and one did not exist at all.** Run 6 delivered rows and bytes. Elapsed time: measured, a tool body sleeping **5 s** under a 1 s timeout returns at **1.10 s**, `isError=True`, against a control sleeping 0.05 s that returns at 0.09 s — so `@server.tool(timeout=…)`, which Run 6 wired from the lock's `timeout_ms` **without measuring that it bounds anything**, does. Concurrency: eight overlapping tool calls ran **eight bodies at once**. | Three bounds are recorded as already-holding with the measurement behind each, and **concurrency is the one Run 8 adds** — an `asyncio.Semaphore` around the upstream read. | A budget nobody measured is a line in a config file. Run 6's timeout was correct and unproved, which is the better half of the two outcomes here — but the difference between "correct" and "proved" is the whole of §6 question 1, and the concurrency arm is what it looks like when the answer is *nothing would have to break*. | 0129 |
+| **D447** | — (a number the plan does not give.) | **The agent plane's concurrency bound is not about the agent plane.** It holds no database credential and no share of ADR 0099's budget (D407) — but each read occupies one of **PostgREST's** connections while it runs, and that pool is shared with human callers. An unbounded agent plane cannot exhaust the cluster; it can exhaust the API. | `MCP_MAX_CONCURRENT_READS` is **rendered from `api.rest.pool_size`**, at half, floor one — so a manifest that shrinks the pool shrinks the agent plane's share with it. The runtime **requires** it rather than defaulting, because a fallback constant would be a second authority for a division `config` owns. | ADR 0070's rule — a division rather than a set of independent grants — applied one level out. **The ratio is a choice and is flagged as one**; what is measured is that the two numbers must move together, and deriving is what makes that true rather than a coincidence two constants maintain until somebody edits one (D264). | 0129 |
+| **D448** | Run 6's `ToolRefusal` messages, written to name the INPUT and never the schema, and Run 4's `mask_error_details=True`. | **They cancel.** Measured against a masked server with an unmasked control: a plain exception's message is replaced by `"Error calling tool 'query_resource'"`, while a `ToolError` carrying the same text **passes through the mask unchanged**. So every one of Run 6's carefully-worded input refusals — written, reviewed, tested — reached **nobody**. | Two vocabularies (ADR 0130). `AgentVisible` for what an authenticated caller can act on, raised as `ToolError` at the boundary and reaching them; a plain `ToolRefusal` for everything structural, masked. **The mask stays on**, which is what makes a new refusal silent by default and telling a caller something the act that needs a decision. | **D274's shape**: a claim that lives only where nobody reads it. The tests asserted the message text and passed, because they called the function rather than the surface — the same seam as D444, one layer up. And `ToolError` turning out to be the framework's own name for ADR 0097's second half is the pleasant half of the finding. | 0130 |
+| **D449** | — (a worry checked before it was written down as a control.) | **A logged traceback does not carry caller data, and the first guess said it did.** The draft of ADR 0130 claimed rich tracebacks render frame locals, which would put a caller's filter operand in the log. Measured: `show_locals` is **never set** anywhere in the framework's logging setup, so `RichHandler`'s default of `False` applies and a panel shows this repository's own source lines and nothing of the request. | The ADR states the measurement instead of the guess, and says plainly that the property **rests on a framework default this repository does not pin**. It is in the open items rather than claimed as a control the runtime enforces. What the runtime does enforce is narrower and its own: an unclassified failure logs the exception's **type** and never its message. | Writing a control for a premise that is false would have been worse than not writing one: it reads as protection and protects against nothing. **Never write a measurement you did not run** (D267) applies to the reason for a control as much as to a version number. | 0130 |
+| **D450** | Run 5's `AgentContextMiddleware`: *"Structurally typed against FastMCP's `Middleware` rather than subclassing it, for the reason `AgentTokenVerifier` is."* | **D444 had a second instance, and Run 7 did not find it.** The framework's pipeline does not duck-type a middleware: the first request through it raises `'AgentContextMiddleware' object is not callable`. Nothing caught it because every test called `on_request` directly — the same seam that hid the verifier for three runs, in the module written one run later, **citing the verifier as its precedent**. | It subclasses `Middleware`. And the test is written as a **pair**: every object the framework is asked to wire is asserted to be a framework type, so a third one added later has an obvious place to be listed rather than a third discovery. | The reasoning was copied from a decision that was already wrong, which is how one defect becomes two. **Run 7's fix was the verifier alone**, because the test it added asserted the assembly rather than the pipeline — a request had still never reached a tool. | — |
+| **D451** | — (found by executing the assembled runtime, Run 8's rig.) | **The upstream read runs on the event loop, so the concurrency bound was unreachable.** `execute` is blocking `urllib`; Run 8 made the tools `async def` and awaited it directly. Measured against six overlapping real requests with a bound of two: **peak 1 concurrent**. The semaphore never saw contention — it *appeared* to work, and every other request in the process, health routes included, was serialised behind each read. | The read is moved to `asyncio.to_thread`. Re-measured: **peak 2 of 2**, the bound. Metadata tools stay on the loop and take no slot, because the lock is in memory and a bound that queued discovery would make it contend with reads for nothing. | **A bound that cannot be reached passes every test written against it**, and the arm that caught this is the one that fires real overlapping HTTP requests rather than awaiting a coroutine. It is also the sharper half of D446: the concurrency budget was added *and* was inert, which is a worse state than not having it — the number in the document would have been a promise nothing kept. | 0129 |
+| **D452** | CLAUDE.md §1: a mutation battery must **assert HOW each mutation failed**, because pytest distinguishes `FAILED` from `ERROR` and a battery reading neither reports `KILLED` for a mutation that broke the fixture (D386). | **There is a third outcome, and it is neither.** The Q2 arm leaks a semaphore slot; the test that catches it then **blocks forever** on the next `acquire()`. The battery printed nothing, produced no verdict for any later arm, and had to be killed — and the `SIGTERM` skipped the restore `finally`, leaving a mutated file in the working tree. | The test bounds its own wait (`async with asyncio.timeout(2)`), so a leaked slot fails in two seconds with a message rather than hanging. **The restore is verified by `filecmp` after every run**, and this one was repaired by copy from the snapshot rather than by `git checkout` — the files under test are uncommitted. | D386 is the false *kill* and D269 the false *survivor*; this is the **no verdict at all**, and it is the only one of the three that can also damage the tree. A battery arm whose failure mode is a hang is not a slow test: it is an arm that reports nothing about itself or anything after it. **Every arm asserting a resource is released needs a bounded wait.** | — |
+| **D453** | — (a surviving arm, diagnosed rather than assumed.) | **A test that reads `.generated/` cannot detect a change to the renderer that produced it.** The arm mutating `MCP_MAX_CONCURRENT_READS`'s derivation survived: the test reads both fixtures' rendered `compose.env`, which is a build artefact refreshed by hand, so the mutated renderer never ran. And the guard that protects those fixtures compares **`schema_version` alone** — which a Compose variable can be added or changed without moving. `rendered_fixtures.py`'s own docstring says exactly this; this is the first arm that needed it to be false. | A second test renders **in process**, with two pool sizes that disagree so a constant cannot satisfy both. Both tests are kept and neither replaces the other: one proves the value reached a rendered artefact, the other proves the renderer derives it. | **The survivor's repair was the test, not the mutation** — but only reading what actually ran could say which. This is D212's stale artefact, in the one place the repository had already written down that its staleness check would not catch it. | — |
+| **D454** | — (the second surviving arm.) | **Nothing in this repository had ever called `mcp_tools.register()`.** The arm making a metadata tool take a concurrency slot survived, because the rule — the two metadata tools answer from the lock and take no slot — lived in `bounded`'s docstring and in **no assertion at all**. Every tool test calls the module function the registration wraps; `test_mcp_route` asserts the registered *names* and never a registered *callable*. | A test calls `register()` against a recording registry and observes the semaphore from inside the work, with a **control**: the same rig, the same semaphore, a tool that does reach upstream, asserted to be holding a slot. Without the control, "the semaphore is full" is satisfied by a semaphore nothing touches. | **D444 and D450's family, third instance**, and the first one found by a surviving mutation rather than by a start. The seam is always the same: the wrapper between this repository's functions and the framework's, which unit tests reach around by design. | — |
+| **D455** | `test_environment_gates.consumed_variables`, whose own comment says it looks for *"`os.environ["APG_…"]` anywhere in the body"*. | **It matches any subscript at all whose key is an `APG_`-prefixed literal.** A settings test that builds a LOCAL dict of eight strings and then does `del environment["APG_MCP_MAX_CONCURRENT_READS"]` was reported as consuming a live environment it never touches — an offline test, failing a guard about skipping versus erroring on a host. | **The scan is not narrowed.** Narrowing a currently-passing guard is a weakening and needs an ADR (§5), and this run does not own that decision. The test is rewritten instead: the incomplete environment is the constant and the complete one is built from it, which removes the subscript and reads better anyway. | The guard is **wider than its own comment**, which is this repository's standing defect in the mirror — a check whose evidence exceeds its stated scope produces false positives, and a false positive is how a guard stops being read. Worth an ADR-shaped decision by whichever session next touches the file; recorded here rather than fixed in passing. | — |
 
 ---
 
@@ -622,15 +632,75 @@ exist until this run.
 
 Suite **3684 passed, 255 skipped**.
 
-### Run 8 — Budgets, errors, telemetry
+### Run 8 — Budgets, errors, telemetry — **Done.**
 
-- Rows, elapsed time, concurrency and serialized bytes bounded **independently**.
-- The error registry, in `errors.py`'s shape and ADR 0097's split: structural
-  refusals say nothing; an authenticated caller may be told a state.
-- Structured read telemetry, no durable audit, `mcp_audit_service` untouched
-  (D412).
-- The canary scan Session 7 built, extended: **no token, no key, no URL** in any
-  sink.
+**Of the four budgets, three were already there and one was missing** (D446).
+Measured: a tool body sleeping **5 s** under a 1 s timeout returns at **1.10 s**
+against a 0.09 s control, so `@server.tool(timeout=…)` — wired by Run 6 from the
+lock's `timeout_ms` without anybody measuring it — does bound elapsed time. And
+eight overlapping tool calls ran **eight bodies at once**: no concurrency bound
+of any kind.
+
+**The concurrency bound is not about this process** (D447). The agent plane holds
+no database credential, but each read occupies one of **PostgREST's** connections
+while it runs, and that pool is shared with human callers. So
+`MCP_MAX_CONCURRENT_READS` is rendered from `api.rest.pool_size` at half — a
+division, ADR 0070's rule one level out — and the runtime requires it rather than
+defaulting to a constant that would be a second authority for it.
+
+**D448 is the error finding, and it is D274's shape.** Run 6's refusal messages
+and Run 4's `mask_error_details=True` cancel: measured, a plain exception's
+message is replaced by `"Error calling tool 'query_resource'"`, while a
+`ToolError` carrying the same text passes through unchanged. So every carefully
+worded input refusal reached **nobody**. Two vocabularies now (ADR 0130):
+`AgentVisible` for what an authenticated caller can act on, masked
+`ToolRefusal` for everything structural — and the mask stays on, so a new refusal
+is silent by default.
+
+**D451 is the sharpest row.** Run 8 made the tools `async def` and awaited the
+blocking upstream read directly, so it ran **on the event loop**: six overlapping
+requests against a bound of two peaked at **one** concurrent. The semaphore never
+saw contention, the bound *appeared* to work, and every other request in the
+process was serialised behind each read. Moved to `asyncio.to_thread`,
+re-measured at **2 of 2**. A budget that cannot be reached passes every test
+written against it.
+
+**D450 is D444's second instance**, and Run 7 did not find it.
+`AgentContextMiddleware` was duck-typed too — *citing the verifier as its
+precedent* — and the framework's pipeline raised `'AgentContextMiddleware' object
+is not callable` on the first request through it. Every test called `on_request`
+directly. The replacement test is a **pair**: every object the framework is asked
+to wire is asserted to be a framework type.
+
+**D449 is a control that was not written**, because the premise turned out false.
+The draft ADR claimed rich tracebacks render frame locals; measured,
+`show_locals` is never set, so the default `False` applies and a panel carries
+this repository's own source lines and nothing of the request. The ADR states the
+measurement, and says plainly that the property rests on a framework default
+nothing here pins.
+
+**Telemetry**: one structured record per call — tool, resource, outcome, row
+count, elapsed ms, and the agent and owner ids. **No token, no fingerprint, no
+URL, no caller value.** Durable nowhere, and `mcp_audit_service` untouched
+(D412). The canary gains its offline half: an AST scan asserting no sink call in
+the agent plane is handed a token, with a control that proves the scan finds one
+when it is there.
+
+**The battery: 17 of 17 killed** — and the last two took a second pass.
+**Both survivors were missing arms rather than weak assertions** (D453, D454):
+one read a rendered artefact the mutation does not rebuild, the other called the
+module function the registration wraps, because **nothing in this repository had
+ever called `register()`**. A third row came out of the battery itself: a leaked
+semaphore slot makes its test **hang**, which is neither `FAILED` nor `ERROR` and
+leaves no verdict for any later arm (**D452**).
+
+**D455 came from the suite rather than the battery**, and is left as a finding
+rather than a fix: `test_environment_gates` flags any subscript whose key is an
+`APG_`-prefixed literal, so an offline settings test doing `del` on a **local
+dict** was reported as consuming a live environment. Narrowing that guard is a
+weakening and needs an ADR; the test is rewritten instead.
+
+Suite **3716 passed, 255 skipped**.
 
 ### Run 9 — The contract, the docs, the evidence
 
