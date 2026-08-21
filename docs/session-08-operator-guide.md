@@ -206,15 +206,31 @@ read like defects.
 **3. Apply migration 0018, as `migration_user`.**
 
 ```bash
-sudo bin/migrate.sh --outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json up
-sudo bin/migrate.sh --outputs /etc/agentic-postgres/projects/beta-dev/outputs.json up
+sudo bin/migrate.sh --project project.alpha.yaml status   # read-only, look first
+sudo bin/migrate.sh --project project.alpha.yaml up
+sudo bin/migrate.sh --project project.beta.yaml  up
 ```
 
-Never as a superuser: a superuser bypasses the ownership check that made
-migrations 0012 and 0013 fail on a real cluster (D285). 0018 adds the agent read
-plane — the pre-request hook's fifth definition, `api.mcp_agent_context()` and
+**`--project`, naming the manifest — not `--outputs`.** This page said
+`--outputs` until the flag was read off `--help`; there is no such flag and the
+command would have failed at the first thing an operator typed with root.
+`--runtime` is the flag that reads the installed rendered document.
+
+`status` first: it lists applied and pending migrations and reads only. You want
+to see **0018 pending and nothing else**.
+
+Never as a superuser: one bypasses the ownership check that made migrations 0012
+and 0013 fail on a real cluster (D285). 0018 adds the agent read plane — the
+pre-request hook's fifth definition, `api.mcp_agent_context()` and
 `api.owner_activity_report()`, granted to `agent_reader` alone. **No RLS policy
 moves** (ADR 0117).
+
+> **Nothing else has to be re-run first.** `--through-session` expects a
+> provisioned host and does not bring up the edge, bootstrap providers or
+> materialize secrets — and Session 8 needs none of them: the `mcp` service
+> declares **no `secrets:` block**, so there is no new generation to materialize.
+> The key set it reads is the rendered `jwks.json` the other three verifiers
+> already read (ADR 0113).
 
 **4. Deploy — twice, both projects.**
 
