@@ -48,11 +48,19 @@ LOGGER = logging.getLogger("apg.mcp")
 #: Every field a record may contain. Enumerated rather than left to whatever a
 #: call site passes, so that adding one is an edit a reviewer sees -- and so the
 #: canary test can assert the set rather than grep for what it fears.
+#:
+#: `request_id` joined in Session 9 Run 6 (ADR 0141). **It is not a caller
+#: value**: the agent plane mints it, once per HTTP request, and nothing reads
+#: one off an inbound header -- so the canary's list is unchanged and this field
+#: cannot carry a token, a URL or anything a caller chose. What it buys is the
+#: join between a telemetry line and the durable audit record, which are
+#: otherwise two accounts of one call with nothing in common but a timestamp.
 RECORD_FIELDS = (
     "agent_id",
     "elapsed_ms",
     "outcome",
     "owner_id",
+    "request_id",
     "resource",
     "row_count",
     "tool",
@@ -77,6 +85,7 @@ class ReadRecord:
     owner_id: str | None
     row_count: int | None
     elapsed_ms: int
+    request_id: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         record = {
@@ -85,6 +94,7 @@ class ReadRecord:
             "outcome": self.outcome,
             "agent_id": self.agent_id,
             "owner_id": self.owner_id,
+            "request_id": self.request_id,
             "row_count": self.row_count,
             "elapsed_ms": self.elapsed_ms,
         }
@@ -104,13 +114,20 @@ class Timed:
     a decorator would have to guess which exceptions mean `refused`.
     """
 
-    def __init__(self, tool: str, *, resource: str | None = None) -> None:
+    def __init__(
+        self, tool: str, *, resource: str | None = None, request_id: str | None = None
+    ) -> None:
         self.tool = tool
         self.resource = resource
         self.outcome = OUTCOME_FAILED
         self.row_count: int | None = None
         self.agent_id: str | None = None
         self.owner_id: str | None = None
+        # Defaulted to `None` rather than required, because a `Timed` is
+        # constructible outside a request -- every test of this module does it,
+        # and so would any future non-tool caller. `None` reads as "no request
+        # scope", which is what it is.
+        self.request_id = request_id
         self._started = 0.0
 
     def __enter__(self) -> Timed:
@@ -148,5 +165,15 @@ class Timed:
             agent_id=self.agent_id,
             owner_id=self.owner_id,
             row_count=self.row_count,
-            elapsed_ms=int((time.monotonic() - self._started) * 1000),
+            elapsed_ms=self.elapsed_ms(),
+            request_id=self.request_id,
         ).as_dict()
+
+    def elapsed_ms(self) -> int:
+        """How long this call has taken so far, in milliseconds.
+
+        Public because the audit record's `complete` needs the same number the
+        telemetry line carries, and computing it twice from two clocks is how
+        one call acquires two durations that disagree.
+        """
+        return int((time.monotonic() - self._started) * 1000)

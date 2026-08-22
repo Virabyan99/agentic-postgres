@@ -31,6 +31,7 @@ from typing import Any
 import pytest
 
 from app import mcp_authorization, mcp_tools
+from app.mcp_audit import AuditRefusal
 from app.mcp_errors import ROW_NOT_FOUND, WRITE_CONFLICT, AgentVisible
 from app.mcp_lock import (
     EXPECTED_TOOL_NAMES,
@@ -58,6 +59,13 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 BASE = "http://postgrest:3000"
 OWNER = "aaaaaaaa-0000-4000-8000-000000000001"
+
+#: The id the agent plane would have minted for this request (ADR 0141).
+#:
+#: A fixed value in tests, and `uuid4()` in production. Fixed here so an
+#: assertion can name it: a test that generated its own could only assert "some
+#: id was forwarded", which is satisfied by forwarding the wrong one.
+REQUEST_ID = "7f3a1c20-0000-4000-8000-0000000000aa"
 
 NOTES = Resource(
     name="notes",
@@ -407,6 +415,13 @@ def test_a_metadata_tool_takes_no_slot_and_a_read_and_a_write_both_do(
         watching("write", {"tool": "create_note", "row_count": 1, "row": {}}),
     )
 
+    # Since Run 6 an audited tool opens a record before its work, and a write
+    # whose record cannot be opened does not happen (ADR 0141). Stubbed, so the
+    # slot assertions below measure the semaphore rather than the audit path.
+    monkeypatch.setattr(mcp_authorization, "current_request_id", lambda: REQUEST_ID)
+    monkeypatch.setattr(mcp_tools, "audit_begin", lambda *_, **__: "audit-1")
+    monkeypatch.setattr(mcp_tools, "audit_complete", lambda *_, **__: True)
+
     registry = _Registry()
     assert mcp_tools.register(registry, lock, base_url=BASE, slots=slots) == mcp_tools.TOOL_NAMES
     assert set(registry.tools) == set(mcp_tools.TOOL_NAMES)
@@ -436,7 +451,7 @@ def test_a_resource_the_caller_cannot_reach_is_refused_not_merely_hidden(
     with pytest.raises(AgentVisible, match="requires"):
         describe_resource(lock, tool="query_resource", resource="notes")
     with pytest.raises(AgentVisible, match="requires"):
-        query_resource(lock, base_url=BASE, token="t", resource="notes")  # noqa: S106
+        query_resource(lock, base_url=BASE, token="t", request_id=REQUEST_ID, resource="notes")  # noqa: S106
 
 
 def test_the_scope_sets_are_a_disjunction_of_conjunctions() -> None:
@@ -484,7 +499,7 @@ def test_the_byte_ceiling_is_independent_of_the_row_ceiling(monkeypatch: Any) ->
     # Caller-visible: this is the one budget a caller can stay inside by
     # asking differently, so the advice is worth relaying (ADR 0130).
     with pytest.raises(AgentVisible, match="ceiling"):
-        query_resource(lock, base_url=BASE, token="t", resource="notes")  # noqa: S106
+        query_resource(lock, base_url=BASE, token="t", request_id=REQUEST_ID, resource="notes")  # noqa: S106
 
 
 def test_a_result_inside_both_budgets_is_returned(monkeypatch: Any) -> None:
@@ -493,7 +508,7 @@ def test_a_result_inside_both_budgets_is_returned(monkeypatch: Any) -> None:
     _with_scopes(monkeypatch, "notes:read")
     monkeypatch.setattr(mcp_tools, "execute", lambda *_, **__: [{"title": "alpha"}])
 
-    result = query_resource(lock, base_url=BASE, token="t", resource="notes")  # noqa: S106
+    result = query_resource(lock, base_url=BASE, token="t", request_id=REQUEST_ID, resource="notes")  # noqa: S106
 
     assert result == {"resource": "notes", "row_count": 1, "rows": [{"title": "alpha"}]}
 
@@ -510,7 +525,7 @@ def test_more_rows_than_the_ceiling_are_refused_rather_than_truncated(
     # fault in the deployment rather than in the request. Nothing the caller did
     # produced it, so it is masked (ADR 0130).
     with pytest.raises(ToolRefusal):
-        query_resource(lock, base_url=BASE, token="t", resource="notes")  # noqa: S106
+        query_resource(lock, base_url=BASE, token="t", request_id=REQUEST_ID, resource="notes")  # noqa: S106
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +550,7 @@ def test_the_adapter_returns_what_the_upstream_returned(monkeypatch: Any) -> Non
     upstream_rows = [{"title": "alpha"}, {"title": "beta"}, {"title": "weird,title"}]
     monkeypatch.setattr(mcp_tools, "execute", lambda *_, **__: list(upstream_rows))
 
-    result = query_resource(lock, base_url=BASE, token="t", resource="notes")  # noqa: S106
+    result = query_resource(lock, base_url=BASE, token="t", request_id=REQUEST_ID, resource="notes")  # noqa: S106
 
     assert result["rows"] == upstream_rows
     assert result["row_count"] == len(upstream_rows)
@@ -547,13 +562,22 @@ def test_the_caller_token_is_what_the_adapter_forwards(monkeypatch: Any) -> None
     _with_scopes(monkeypatch, "notes:read")
     seen: dict[str, Any] = {}
 
-    def capture(base_url: str, token: str, request: Any) -> list[dict[str, Any]]:
+    def capture(
+        base_url: str, token: str, request: Any, *, request_id: str
+    ) -> list[dict[str, Any]]:
         seen["base_url"] = base_url
         seen["token"] = token
+        seen["request_id"] = request_id
         return []
 
     monkeypatch.setattr(mcp_tools, "execute", capture)
-    query_resource(lock, base_url=BASE, token="the.caller.token", resource="notes")  # noqa: S106
+    query_resource(
+        lock,
+        base_url=BASE,
+        token="the.caller.token",  # noqa: S106
+        request_id=REQUEST_ID,
+        resource="notes",
+    )
 
     assert seen["token"] == "the.caller.token"  # noqa: S105 -- the forwarded value, asserted
     assert seen["base_url"] == BASE
@@ -963,7 +987,7 @@ def test_a_committed_write_returns_its_one_row(monkeypatch: Any) -> None:
     hands back one row."""
     _upstream_answers(monkeypatch, 200, b'{"id": "x", "title": "t"}')
 
-    rows = execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+    rows = execute_write(BASE, "tok", _write_request(), max_affected_rows=1, request_id=REQUEST_ID)
     assert rows == [{"id": "x", "title": "t"}]
 
 
@@ -973,7 +997,7 @@ def test_the_bound_is_checked_against_the_response_never_trusted(monkeypatch: An
     _upstream_answers(monkeypatch, 200, b'[{"id": "1"}, {"id": "2"}]')
 
     with pytest.raises(UpstreamRefusal, match="underneath the lock"):
-        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1, request_id=REQUEST_ID)
 
 
 def test_the_cas_conflict_reaches_the_caller_as_a_token(monkeypatch: Any) -> None:
@@ -988,7 +1012,7 @@ def test_the_cas_conflict_reaches_the_caller_as_a_token(monkeypatch: Any) -> Non
     )
 
     with pytest.raises(AgentVisible) as caught:
-        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1, request_id=REQUEST_ID)
     assert caught.value.token == WRITE_CONFLICT
     assert "AP409" not in str(caught.value)
     assert "expected state" in caught.value.detail
@@ -1001,12 +1025,12 @@ def test_a_missing_row_and_a_missing_function_are_not_the_same_404(monkeypatch: 
     read, the second is a structural fault and stays masked."""
     _upstream_answers(monkeypatch, 404, b'{"code":"PT404","message":"AP404: no such task"}')
     with pytest.raises(AgentVisible) as caught:
-        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1, request_id=REQUEST_ID)
     assert caught.value.token == ROW_NOT_FOUND
 
     _upstream_answers(monkeypatch, 404, b'{"code":"PGRST202","message":"Could not find"}')
     with pytest.raises(UpstreamRefusal):
-        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1, request_id=REQUEST_ID)
 
 
 @pytest.mark.parametrize(
@@ -1025,7 +1049,7 @@ def test_every_unmapped_refusal_stays_masked(monkeypatch: Any, status: int, body
     _upstream_answers(monkeypatch, status, body)
 
     with pytest.raises(UpstreamRefusal) as caught:
-        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1, request_id=REQUEST_ID)
     assert "enum" not in str(caught.value)
     assert "task_status" not in str(caught.value)
 
@@ -1044,7 +1068,7 @@ def test_the_write_body_is_what_the_transport_sends(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", record)
     request = _write_request()
-    execute_write(BASE, "tok", request, max_affected_rows=1)
+    execute_write(BASE, "tok", request, max_affected_rows=1, request_id=REQUEST_ID)
 
     assert seen["data"] == request.body
     assert seen["content_type"] == "application/json"
@@ -1055,17 +1079,45 @@ def test_the_write_body_is_what_the_transport_sends(monkeypatch: Any) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _registered(monkeypatch: Any, *scopes: str) -> tuple[Any, Any]:
-    """`register()` run against the six-tool lock, with a caller holding `scopes`."""
+def _registered(
+    monkeypatch: Any, *scopes: str, audit: bool = True
+) -> tuple[Any, Any, list[dict[str, Any]]]:
+    """`register()` run against the six-tool lock, with a caller holding `scopes`.
+
+    **The audit calls are stubbed by default, and the stub RECORDS** (ADR 0141).
+    Since Run 6 every read and write opens a record before its work and closes it
+    after, so a rig that left the audit path reaching a fake `base_url` would
+    make every write fail closed -- correctly, and for a reason unrelated to what
+    each test measures. The returned list is what the record-keeper would have
+    been told, in order.
+
+    `audit=False` leaves the real calls in place, which is how the fail-closed
+    arms make the audit path fail for real rather than by assertion.
+    """
     from app.mcp_budgets import ReadSlots
 
     lock = _lock(NOTES)
     _with_scopes(monkeypatch, *scopes)
     monkeypatch.setattr(mcp_authorization, "current_token", lambda: "the.callers.token")
+    monkeypatch.setattr(mcp_authorization, "current_request_id", lambda: REQUEST_ID)
+
+    recorded: list[dict[str, Any]] = []
+    if audit:
+
+        def began(base_url: str, token: str, **kwargs: Any) -> str:
+            recorded.append({"phase": "begin", "base_url": base_url, "token": token, **kwargs})
+            return "audit-1"
+
+        def completed(base_url: str, token: str, **kwargs: Any) -> bool:
+            recorded.append({"phase": "complete", "base_url": base_url, "token": token, **kwargs})
+            return True
+
+        monkeypatch.setattr(mcp_tools, "audit_begin", began)
+        monkeypatch.setattr(mcp_tools, "audit_complete", completed)
 
     registry = _Registry()
     mcp_tools.register(registry, lock, base_url=BASE, slots=ReadSlots(2))
-    return lock, registry
+    return lock, registry, recorded
 
 
 def test_a_write_tool_exposes_the_locks_own_argument_names_in_order() -> None:
@@ -1110,10 +1162,12 @@ def test_a_write_reaches_the_operation_the_lock_names_with_the_callers_token(
     """
     import asyncio
 
-    _, registry = _registered(monkeypatch, "notes:write")
+    _, registry, _recorded = _registered(monkeypatch, "notes:write")
     seen: dict[str, Any] = {}
 
-    def capture(base_url: str, token: str, request: Any, *, max_affected_rows: int) -> Any:
+    def capture(
+        base_url: str, token: str, request: Any, *, max_affected_rows: int, request_id: str
+    ) -> Any:
         seen.update(
             base_url=base_url,
             token=token,
@@ -1121,6 +1175,7 @@ def test_a_write_reaches_the_operation_the_lock_names_with_the_callers_token(
             method=request.method,
             body=json.loads(request.body),
             bound=max_affected_rows,
+            request_id=request_id,
         )
         return [{"id": "note-1", "title": "t"}]
 
@@ -1150,7 +1205,7 @@ def test_a_write_the_caller_holds_no_scope_for_is_refused_before_any_dial(
 
     from fastmcp.exceptions import ToolError
 
-    _, registry = _registered(monkeypatch, "meta:read", "notes:read", "tasks:read")
+    _, registry, _recorded = _registered(monkeypatch, "meta:read", "notes:read", "tasks:read")
 
     def unreachable(*_: Any, **__: Any) -> Any:
         raise AssertionError("a write was dialled for a caller holding no write scope")
@@ -1183,7 +1238,7 @@ def test_holding_one_write_scope_does_not_carry_the_other(monkeypatch: Any) -> N
 
     from fastmcp.exceptions import ToolError
 
-    _, registry = _registered(monkeypatch, "notes:write")
+    _, registry, _recorded = _registered(monkeypatch, "notes:write")
     monkeypatch.setattr(mcp_tools, "execute_write", lambda *_, **__: [{"id": "x"}])
 
     served = asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
@@ -1212,7 +1267,7 @@ def test_a_write_result_is_byte_bounded_like_a_read(monkeypatch: Any) -> None:
 
     from fastmcp.exceptions import ToolError
 
-    _, registry = _registered(monkeypatch, "notes:write")
+    _, registry, _recorded = _registered(monkeypatch, "notes:write")
     monkeypatch.setattr(mcp_tools, "execute_write", lambda *_, **__: [{"content": "x" * 2_000_000}])
 
     with pytest.raises(ToolError, match="ceiling"):
@@ -1234,7 +1289,7 @@ def test_a_translated_write_refusal_reaches_the_caller_through_the_tool(
 
     from fastmcp.exceptions import ToolError
 
-    _, registry = _registered(monkeypatch, "tasks:write")
+    _, registry, _recorded = _registered(monkeypatch, "tasks:write")
 
     def conflicted(*_: Any, **__: Any) -> Any:
         raise AgentVisible(WRITE_CONFLICT, "the row is not in the expected state")
@@ -1266,13 +1321,14 @@ def test_a_write_argument_the_lock_does_not_declare_is_refused(monkeypatch: Any)
     the module function rather than relying on Python's own `TypeError` to be the
     boundary.
     """
-    lock, _ = _registered(monkeypatch, "notes:write")
+    lock, _registry, _recorded = _registered(monkeypatch, "notes:write")
 
     with pytest.raises(AgentVisible, match="p_owner_id"):
         mcp_tools.invoke_write(
             lock,
             base_url=BASE,
             token="t",  # noqa: S106 -- a placeholder, not a credential
+            request_id=REQUEST_ID,
             tool="create_note",
             arguments={"p_title": "t", "p_content": "c", "p_owner_id": "someone-else"},
         )
@@ -1283,7 +1339,7 @@ def test_a_write_whose_response_is_not_one_row_is_a_loud_structural_fault(
 ) -> None:
     """D487: both writes are `RETURNS <composite>`, so zero rows is a shape that
     changed underneath the lock — and the write has already committed."""
-    lock, _ = _registered(monkeypatch, "notes:write")
+    lock, _registry, _recorded = _registered(monkeypatch, "notes:write")
     monkeypatch.setattr(mcp_tools, "execute_write", lambda *_, **__: [])
 
     with pytest.raises(ToolRefusal):
@@ -1291,6 +1347,7 @@ def test_a_write_whose_response_is_not_one_row_is_a_loud_structural_fault(
             lock,
             base_url=BASE,
             token="t",  # noqa: S106 -- a placeholder, not a credential
+            request_id=REQUEST_ID,
             tool="create_note",
             arguments={"p_title": "t", "p_content": "c"},
         )
@@ -1380,7 +1437,7 @@ def test_hiding_a_name_does_not_refuse_the_call_and_that_is_why_both_exist(
     lock = _lock(NOTES)
     assert "create_note" not in _visible_to(monkeypatch, lock, "meta:read", "notes:read")
 
-    _, registry = _registered(monkeypatch, "meta:read", "notes:read")
+    _, registry, _recorded = _registered(monkeypatch, "meta:read", "notes:read")
     monkeypatch.setattr(
         mcp_tools, "execute_write", lambda *_, **__: pytest.fail("the hidden write was dialled")
     )
@@ -1448,3 +1505,462 @@ def test_discovery_with_no_resolved_context_refuses_rather_than_listing() -> Non
 
     with pytest.raises(UpstreamRefusal):
         asyncio.run(ToolVisibilityMiddleware(_lock(NOTES)).on_list_tools(None, call_next))
+
+
+def _raising(error: Exception) -> Any:
+    """A stub that raises. Named, so a call site reads as an arrangement."""
+
+    def refuse(*_: Any, **__: Any) -> Any:
+        raise error
+
+    return refuse
+
+
+# ---------------------------------------------------------------------------
+# the request id, and the audit lifecycle (Session 9 Run 6 — ADR 0141, D477)
+# ---------------------------------------------------------------------------
+
+
+def test_the_request_id_reaches_every_upstream_request_of_one_call(monkeypatch: Any) -> None:
+    """**D477's propagation, asserted on the wire rather than described.**
+
+    One tool call is four upstream requests -- context, begin, the write,
+    complete -- and this asserts the id on the three the tool itself makes. The
+    context lookup's own header is asserted next door in
+    `test_no_header_names_a_principal`, which is where the enumerated header set
+    lives.
+
+    A FIXED id rather than a generated one, so the assertion can name it: a test
+    that minted its own could only say "some id was forwarded", which is
+    satisfied by forwarding the wrong one.
+    """
+    import asyncio
+
+    _, registry, recorded = _registered(monkeypatch, "notes:write")
+    dialled: dict[str, Any] = {}
+
+    def capture(base_url: str, token: str, request: Any, **kwargs: Any) -> Any:
+        dialled["request_id"] = kwargs["request_id"]
+        return [{"id": "note-1"}]
+
+    monkeypatch.setattr(mcp_tools, "execute_write", capture)
+    asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+
+    assert dialled["request_id"] == REQUEST_ID, "the write did not carry the request id"
+    assert [entry["phase"] for entry in recorded] == ["begin", "complete"]
+    assert {entry["request_id"] for entry in recorded} == {REQUEST_ID}, (
+        "both audit calls must carry the SAME id as the write, or the record and the "
+        "work it describes cannot be joined"
+    )
+
+
+def test_the_forwarded_header_set_and_its_guard_moved_together() -> None:
+    """**D477, and the reason this is a test rather than a comment.**
+
+    `FORWARDED_HEADERS` grew from two to three in Run 6 and `_dial`'s equality
+    guard reads it. A widened allowlist whose checker did not move is D300's
+    shape -- four times paid for now -- and both of Session 8's allowlist
+    failures (D468) were RIGHT to fail.
+
+    Asserted as an equality against what `_dial` actually builds, so a fourth
+    header added to one side and not the other fails here.
+    """
+    from app.mcp_query import FORWARDED_HEADERS, REQUEST_ID_HEADER
+
+    assert REQUEST_ID_HEADER in FORWARDED_HEADERS
+    assert set(FORWARDED_HEADERS) == {"Authorization", "Accept", "X-Request-Id"}
+
+    guard = Path(mcp_tools.__file__).parent / "mcp_upstream.py"
+    text = guard.read_text(encoding="utf-8")
+    assert "set(headers) != set(FORWARDED_HEADERS)" in text, (
+        "the guard is no longer an equality against the allowlist; a subset check is "
+        "exactly the repair D300 forbids"
+    )
+
+
+def test_the_dialled_request_actually_carries_the_header(monkeypatch: Any) -> None:
+    """The header on the wire, not the constant in the module (D274's lesson).
+
+    `FORWARDED_HEADERS` naming a header proves nothing about what `_dial` sends;
+    this reads the built `urllib` request. The negative half is the control: a
+    header the allowlist does NOT name must be absent, so a `_dial` that
+    forwarded everything would fail here.
+    """
+    from app import mcp_upstream
+
+    seen: dict[str, Any] = {}
+
+    def record(request: Any, timeout: float = 0) -> Any:
+        seen["headers"] = {name.lower() for name in request.headers}
+        seen["value"] = request.get_header("X-request-id")
+        return _Response(200, b'{"id": "x"}')
+
+    monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", record)
+    execute_write(BASE, "tok", _write_request(), max_affected_rows=1, request_id=REQUEST_ID)
+
+    assert seen["value"] == REQUEST_ID
+    assert seen["headers"] == {"authorization", "accept", "x-request-id", "content-type"}
+    assert "prefer" not in seen["headers"], (
+        "THE CONTROL: a header the allowlist does not name must be absent, or the "
+        "assertion above is satisfied by a transport that forwards everything"
+    )
+
+
+def test_a_telemetry_record_carries_the_request_id_and_still_no_caller_value(
+    caplog: Any,
+) -> None:
+    """`RECORD_FIELDS` grew by one, and the canary's list did not (ADR 0141).
+
+    A request id is this process's own mint -- `uuid4`, never read off an
+    inbound header -- so it cannot carry a token, a URL or a caller's value. The
+    canary constraints are re-asserted here beside the new field rather than
+    only in `test_mcp_budgets`, because the field was added in this run.
+    """
+    import logging
+
+    from app.mcp_telemetry import RECORD_FIELDS, Timed
+
+    assert "request_id" in RECORD_FIELDS
+    assert not {"token", "url", "filters", "rows", "value"} & set(RECORD_FIELDS)
+
+    with caplog.at_level(logging.INFO, logger="apg.mcp"):
+        with Timed("create_note", request_id=REQUEST_ID) as timed:
+            timed.principal(agent_id="agent-1", owner_id=OWNER)
+            timed.served(row_count=1)
+
+    emitted = "\n".join(record.getMessage() for record in caplog.records)
+    assert REQUEST_ID in emitted
+    assert "CANARY" not in emitted
+
+
+def test_the_record_is_opened_before_the_work_and_closed_after(monkeypatch: Any) -> None:
+    """Begin, work, complete — in that order, and the order is the point.
+
+    A record opened after the work could not describe a call that never
+    returned, and a record closed before it could not carry the outcome.
+    """
+    import asyncio
+
+    _, registry, recorded = _registered(monkeypatch, "notes:write")
+    order: list[str] = []
+
+    def began(*_: Any, **kwargs: Any) -> str:
+        order.append("begin")
+        recorded.append({"phase": "begin", **kwargs})
+        return "audit-1"
+
+    def worked(*_: Any, **__: Any) -> dict[str, Any]:
+        order.append("work")
+        return {"tool": "create_note", "row_count": 1, "row": {}}
+
+    def completed(*_: Any, **kwargs: Any) -> bool:
+        order.append("complete")
+        recorded.append({"phase": "complete", **kwargs})
+        return True
+
+    monkeypatch.setattr(mcp_tools, "audit_begin", began)
+    monkeypatch.setattr(mcp_tools, "invoke_write", worked)
+    monkeypatch.setattr(mcp_tools, "audit_complete", completed)
+
+    asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+
+    assert order == ["begin", "work", "complete"]
+    closing = next(entry for entry in recorded if entry["phase"] == "complete")
+    assert closing["outcome"] == "served"
+    assert closing["row_count"] == 1
+    assert closing["audit_id"] == "audit-1"
+    assert isinstance(closing["elapsed_ms"], int)
+
+
+def test_the_records_parameters_are_redacted_per_the_lock(monkeypatch: Any) -> None:
+    """**D479's orphan, consumed at last.** `audit.redact` was required by the
+    schema, carried by every capability, and read by nothing.
+
+    `create_note` declares `["p_content"]`; `update_task_status` declares
+    nothing. **Both arms, because either alone is satisfied by the wrong
+    implementation** — a redactor that blanked everything would pass the first,
+    and one that blanked nothing would pass the second.
+
+    The KEY survives and only the value is replaced: a record showing
+    `p_content: "[redacted]"` says the caller supplied one, and a record with no
+    `p_content` says nothing at all.
+    """
+    import asyncio
+
+    from app.mcp_audit import REDACTED
+
+    _, registry, recorded = _registered(monkeypatch, "notes:write", "tasks:write")
+    monkeypatch.setattr(mcp_tools, "invoke_write", lambda *_, **__: {"row_count": 1, "row": {}})
+
+    asyncio.run(registry.tools["create_note"](p_title="the title", p_content="SECRET BODY"))
+    written = next(entry for entry in recorded if entry["phase"] == "begin")["parameters"]
+
+    assert written["p_title"] == "the title", "an unredacted parameter is recorded verbatim"
+    assert written["p_content"] == REDACTED
+    assert "p_content" in written, "the key stays; only the value goes"
+
+    recorded.clear()
+    asyncio.run(
+        registry.tools["update_task_status"](
+            p_task_id="task-1", p_expected_status="todo", p_new_status="done"
+        )
+    )
+    written = next(entry for entry in recorded if entry["phase"] == "begin")["parameters"]
+
+    assert written == {
+        "p_task_id": "task-1",
+        "p_expected_status": "todo",
+        "p_new_status": "done",
+    }, "THE CONTROL: this tool redacts nothing, so a blanket redactor fails here"
+
+
+def test_a_denied_call_is_recorded_as_refused(monkeypatch: Any) -> None:
+    """**AGT-AUDIT-001's denied arm**, and why begin comes before the scope check.
+
+    Checking scopes first would be cheaper and would lose exactly this record.
+    The call is refused, and the refusal is durable.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    _, registry, recorded = _registered(monkeypatch, "meta:read", "notes:read")
+    monkeypatch.setattr(
+        mcp_tools, "execute_write", lambda *_, **__: pytest.fail("a denied write was dialled")
+    )
+
+    with pytest.raises(ToolError, match="notes:write"):
+        asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+
+    assert [entry["phase"] for entry in recorded] == ["begin", "complete"], (
+        "a denied call must open AND close a record; a call refused before begin leaves "
+        "no trace of having been attempted"
+    )
+    assert recorded[-1]["outcome"] == "refused"
+
+
+def test_a_write_whose_record_cannot_be_opened_does_not_happen(monkeypatch: Any) -> None:
+    """**AGT-AUDITFAIL-001**, and half of ADR 0141.
+
+    `audit=False`, so the real audit path runs against a `base_url` nothing
+    answers -- the failure is real rather than asserted. The write executor is
+    replaced by one that fails the test if it is reached, so "did not happen"
+    is proved by the absence of the dial rather than by the shape of the error.
+    """
+    import asyncio
+
+    _, registry, _recorded = _registered(monkeypatch, "notes:write", audit=False)
+    monkeypatch.setattr(
+        mcp_tools, "audit_begin", _raising(AuditRefusal("the audit table is unreachable"))
+    )
+    monkeypatch.setattr(
+        mcp_tools,
+        "execute_write",
+        lambda *_, **__: pytest.fail("an unauditable write reached the database"),
+    )
+
+    with pytest.raises(ToolRefusal):
+        asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+
+
+def test_a_read_whose_record_cannot_be_opened_still_answers(monkeypatch: Any) -> None:
+    """**The other half of ADR 0141, and the asymmetry is the decision** (D483).
+
+    Failing a read closed would couple every agent read's availability to the
+    audit table. This is the CONTROL for the test above in the strongest sense:
+    the same failure, the same rig, the opposite outcome — so neither result can
+    be explained by the audit stub simply not working.
+    """
+    import asyncio
+
+    _, registry, _recorded = _registered(monkeypatch, "meta:read", "notes:read", audit=False)
+    monkeypatch.setattr(
+        mcp_tools, "audit_begin", _raising(AuditRefusal("the audit table is unreachable"))
+    )
+    monkeypatch.setattr(
+        mcp_tools,
+        "query_resource",
+        lambda *_, **__: {"resource": "notes", "row_count": 0, "rows": []},
+    )
+
+    answered = asyncio.run(registry.tools["query_resource"](resource="notes"))
+
+    assert answered["row_count"] == 0, "a read must survive an audit table it cannot reach"
+
+
+def test_a_failing_complete_never_changes_the_outcome(monkeypatch: Any) -> None:
+    """The work has already happened (ADR 0141).
+
+    A committed write cannot be un-committed by a bookkeeping failure, and
+    reporting a failure that did not occur would make the record less true. Both
+    failure modes are exercised: the call raising, and it returning `false` --
+    which rig6 measured as a 200, not an error.
+    """
+    import asyncio
+
+    _, registry, _recorded = _registered(monkeypatch, "notes:write")
+    monkeypatch.setattr(
+        mcp_tools,
+        "invoke_write",
+        lambda *_, **__: {"tool": "create_note", "row_count": 1, "row": {}},
+    )
+
+    monkeypatch.setattr(
+        mcp_tools, "audit_complete", _raising(AuditRefusal("could not close the record"))
+    )
+    assert asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))["row_count"] == 1
+
+    monkeypatch.setattr(mcp_tools, "audit_complete", lambda *_, **__: False)
+    assert asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))["row_count"] == 1
+
+
+def test_a_metadata_tool_opens_no_record_at_all(monkeypatch: Any) -> None:
+    """**ADR 0141's third clause**, and it is a decision rather than an omission.
+
+    Auditing `list_resources` would turn a dictionary lookup into two network
+    round trips and make discovery depend on the audit table -- undoing the
+    reason ADR 0129 gives them no concurrency slot. The read arm beside it is
+    the control: the same rig, an audited kind, and a record does appear.
+    """
+    import asyncio
+
+    _, registry, recorded = _registered(monkeypatch, "meta:read", "notes:read")
+    monkeypatch.setattr(mcp_tools, "list_resources", lambda *_, **__: {"resources": []})
+    monkeypatch.setattr(
+        mcp_tools,
+        "query_resource",
+        lambda *_, **__: {"resource": "notes", "row_count": 0, "rows": []},
+    )
+
+    asyncio.run(registry.tools["list_resources"]())
+    assert recorded == [], f"a metadata tool opened a record: {recorded}"
+
+    asyncio.run(registry.tools["query_resource"](resource="notes"))
+    assert [entry["phase"] for entry in recorded] == ["begin", "complete"], (
+        "THE CONTROL: a read must be audited, or the assertion above is satisfied by an "
+        "audit path that never runs for anything"
+    )
+
+
+def test_the_audit_calls_go_to_the_two_named_rpcs_and_nowhere_else(monkeypatch: Any) -> None:
+    """`mcp_audit` names its paths as constants and takes none from a caller.
+
+    The same property `mcp_upstream.AGENT_CONTEXT_PATH` has and for the same
+    reason: these are not tools, no capability names them, and there is no code
+    path here that could be steered to another function.
+    """
+    from app import mcp_audit
+
+    seen: list[str] = []
+
+    def dial(base_url: str, token: str, request: Any, *, request_id: str) -> tuple[int, bytes]:
+        seen.append(request.target)
+        return 200, b'"audit-1"' if request.path == mcp_audit.AUDIT_BEGIN_PATH else b"true"
+
+    monkeypatch.setattr(mcp_audit, "_dial", dial)
+
+    mcp_audit.begin(BASE, "tok", tool="create_note", request_id=REQUEST_ID, parameters={})
+    mcp_audit.complete(
+        BASE,
+        "tok",
+        audit_id="audit-1",
+        outcome="served",
+        request_id=REQUEST_ID,
+        elapsed_ms=3,
+        row_count=1,
+    )
+
+    assert seen == ["/rpc/agent_audit_begin", "/rpc/agent_audit_complete"]
+
+    signature = set(mcp_audit.begin.__code__.co_varnames[: mcp_audit.begin.__code__.co_argcount])
+    assert not signature & {"path", "url", "method", "operation_id"}
+
+
+def test_the_audit_responses_are_parsed_as_the_measured_shapes(monkeypatch: Any) -> None:
+    """rig6: a non-SETOF SCALAR renders as a bare JSON scalar, not an object.
+
+    `RETURNS uuid` is a JSON **string** and `RETURNS boolean` is a bare
+    `true`/`false`. **Run 4's rig measured composites and is not evidence for
+    this** — three return shapes, three renderings — so the parser is asserted
+    against the shape that was actually measured, and against the two it was
+    not.
+    """
+    from app import mcp_audit
+
+    def answering(status: int, body: bytes) -> Any:
+        def dial(*_: Any, **__: Any) -> tuple[int, bytes]:
+            return status, body
+
+        return dial
+
+    monkeypatch.setattr(
+        mcp_audit, "_dial", answering(200, b'"c8c13a67-cee5-43e2-b1e7-07b17460215f"')
+    )
+    assert (
+        mcp_audit.begin(BASE, "t", tool="create_note", request_id=REQUEST_ID, parameters={})
+        == "c8c13a67-cee5-43e2-b1e7-07b17460215f"
+    )
+
+    # The two shapes it is NOT. An object is what a composite return renders as
+    # and an array is what a SETOF does; both would be a function whose shape
+    # changed underneath this code.
+    for wrong in (b'{"id": "x"}', b'["c8c13a67-cee5-43e2-b1e7-07b17460215f"]'):
+        monkeypatch.setattr(mcp_audit, "_dial", answering(200, wrong))
+        with pytest.raises(mcp_audit.AuditRefusal, match="not a record id"):
+            mcp_audit.begin(BASE, "t", tool="create_note", request_id=REQUEST_ID, parameters={})
+
+    for body, expected in ((b"true", True), (b"false", False)):
+        monkeypatch.setattr(mcp_audit, "_dial", answering(200, body))
+        assert (
+            mcp_audit.complete(
+                BASE,
+                "t",
+                audit_id="a",
+                outcome="served",
+                request_id=REQUEST_ID,
+                elapsed_ms=1,
+                row_count=1,
+            )
+            is expected
+        )
+
+
+def test_an_audit_refusal_names_no_upstream_code(monkeypatch: Any) -> None:
+    """Nothing an audit call says is the caller's to act on (ADR 0141).
+
+    Unlike a write refusal (ADR 0139), there is no vocabulary to translate: every
+    outcome here is "the record was kept" or "it was not". The 422 body carries
+    `PT422` and the message names the enum's own values; neither may reach a
+    caller, and neither does — the exception's text is this module's.
+    """
+    from app import mcp_audit
+
+    def dial(*_: Any, **__: Any) -> tuple[int, bytes]:
+        return 422, b'{"code":"PT422","message":"AP422: an outcome is served, refused or failed"}'
+
+    monkeypatch.setattr(mcp_audit, "_dial", dial)
+
+    with pytest.raises(mcp_audit.AuditRefusal) as caught:
+        mcp_audit.complete(
+            BASE,
+            "t",
+            audit_id="a",
+            outcome="committed",
+            request_id=REQUEST_ID,
+            elapsed_ms=1,
+            row_count=1,
+        )
+    assert "PT422" not in str(caught.value)
+    assert "AP422" not in str(caught.value)
+
+
+def test_redaction_does_not_invent_a_parameter_the_caller_never_sent() -> None:
+    """A record must not imply an argument was passed when it was not."""
+    from app.mcp_audit import REDACTED, redact
+
+    assert redact({"p_title": "t"}, ("p_content",)) == {"p_title": "t"}
+    assert redact({"p_title": "t", "p_content": "body"}, ("p_content",)) == {
+        "p_title": "t",
+        "p_content": REDACTED,
+    }
+    assert redact({}, ("p_content",)) == {}

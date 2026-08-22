@@ -46,6 +46,10 @@ import asyncio
 import json
 from typing import Any
 
+from app.mcp_audit import AuditRefusal
+from app.mcp_audit import begin as audit_begin
+from app.mcp_audit import complete as audit_complete
+from app.mcp_audit import redact as audit_redact
 from app.mcp_authorization import current_agent_context
 from app.mcp_budgets import DEFAULT_MAX_CONCURRENT_READS, ReadSlots
 from app.mcp_errors import (
@@ -59,8 +63,44 @@ from app.mcp_errors import (
 )
 from app.mcp_lock import CapabilityLock, LockError, Resource, WriteSpec
 from app.mcp_query import Filter, QueryRefusal, build_request, build_write_request
-from app.mcp_telemetry import Timed
+from app.mcp_telemetry import (
+    LOGGER,
+    OUTCOME_FAILED,
+    OUTCOME_REFUSED,
+    OUTCOME_SERVED,
+    Timed,
+)
 from app.mcp_upstream import UpstreamRefusal, execute, execute_write
+
+#: The three tool kinds, and what each one implies. **One vocabulary, three
+#: named consequences** (ADR 0141).
+#:
+#: **This is deliberately not D495's mistake repeated.** There, one value
+#: (`resource is None`) was carrying two ideas by ACCIDENT of representation,
+#: and they agreed only until the first tool separated them. Here the
+#: classification is the one the reviewed contract already makes -- it is the
+#: lock's own `kind`, checked against `EXPECTED_KINDS` at load -- and each
+#: consequence is written down beside its reason rather than inferred from a
+#: shape that happens to correlate.
+KIND_METADATA = "metadata"
+KIND_READ = "read"
+KIND_WRITE = "write"
+
+#: Which kinds reach PostgREST, and therefore take a concurrency slot and a
+#: thread (ADR 0129, D451, D495). Metadata answers from the lock in memory.
+UPSTREAM_KINDS = (KIND_READ, KIND_WRITE)
+
+#: Which kinds are audited (ADR 0141). **The same two, and it is a decision
+#: rather than a consequence**: auditing the metadata tools would turn a
+#: dictionary lookup into two network round trips and make discovery depend on
+#: the audit table's availability, undoing the reason they take no slot.
+AUDITED_KINDS = (KIND_READ, KIND_WRITE)
+
+#: Which kinds do not happen when their record cannot be opened (ADR 0141,
+#: D483). **A write only.** Failing a read closed would couple every agent
+#: read's availability to the audit table and add a mandatory round trip to a
+#: path that already pays one for its context.
+FAIL_CLOSED_KINDS = (KIND_WRITE,)
 
 #: The names `register()` registers, written out rather than imported from
 #: `mcp_lock`.
@@ -227,6 +267,7 @@ def query_resource(
     *,
     base_url: str,
     token: str,
+    request_id: str,
     resource: str,
     columns: list[str] | None = None,
     filters: list[dict[str, Any]] | None = None,
@@ -258,7 +299,7 @@ def query_resource(
         raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
 
     try:
-        rows = execute(base_url, token, request)
+        rows = execute(base_url, token, request, request_id=request_id)
     except UpstreamRefusal as error:
         raise ToolRefusal(STRUCTURAL_REFUSAL) from error
 
@@ -307,7 +348,9 @@ def _within_byte_budget(result: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def run_report(lock: CapabilityLock, *, base_url: str, token: str) -> dict[str, Any]:
+def run_report(
+    lock: CapabilityLock, *, base_url: str, token: str, request_id: str
+) -> dict[str, Any]:
     """The caller's own activity, counted under the caller's own RLS.
 
     One named RPC, chosen from the lock and not by the caller: this tool takes no
@@ -329,7 +372,7 @@ def run_report(lock: CapabilityLock, *, base_url: str, token: str) -> dict[str, 
         raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
 
     try:
-        rows = execute(base_url, token, request)
+        rows = execute(base_url, token, request, request_id=request_id)
     except UpstreamRefusal as error:
         raise ToolRefusal(STRUCTURAL_REFUSAL) from error
 
@@ -346,6 +389,7 @@ def invoke_write(
     *,
     base_url: str,
     token: str,
+    request_id: str,
     tool: str,
     arguments: dict[str, Any],
 ) -> dict[str, Any]:
@@ -381,7 +425,13 @@ def invoke_write(
         raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
 
     try:
-        rows = execute_write(base_url, token, request, max_affected_rows=spec.max_affected_rows)
+        rows = execute_write(
+            base_url,
+            token,
+            request,
+            max_affected_rows=spec.max_affected_rows,
+            request_id=request_id,
+        )
     except UpstreamRefusal as error:
         raise ToolRefusal(STRUCTURAL_REFUSAL) from error
 
@@ -426,17 +476,17 @@ def register(
     request. Nothing here holds a token between requests: `current_agent_context`
     is backed by a `ContextVar` that is reset in a `finally` (ADR 0125).
     """
-    from app.mcp_authorization import current_token
+    from app.mcp_authorization import current_request_id, current_token
 
     read_slots = slots if slots is not None else ReadSlots(DEFAULT_MAX_CONCURRENT_READS)
 
     async def bounded(
-        tool: str, resource: str | None, work: Any, *, upstream: bool
+        tool: str, resource: str | None, work: Any, *, kind: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
-        """One boundary for every tool call: measure, bound, translate.
+        """One boundary for every tool call: measure, bound, translate, record.
 
-        **Three jobs in one place**, and the alternative is three decorators
-        every future tool author has to remember -- which is D333's shape.
+        **Four jobs in one place**, and the alternative is four decorators every
+        future tool author has to remember -- which is D333's shape.
 
         *Measure.* One telemetry record per call, carrying ids and counts and no
         caller values (ADR 0130).
@@ -451,26 +501,68 @@ def register(
         plain exception and is masked -- so a refusal is silent unless somebody
         chose otherwise.
 
-        **`upstream` is a separate argument, and it used to be `resource is
-        None`** (D495). One value was carrying two ideas -- *"names no resource
-        in the telemetry record"* and *"does not reach upstream, so takes no
-        slot"* -- which agreed for as long as every upstream tool had a resource.
-        A write has neither: it is one-to-one with its operation, so there is no
-        resource to name, and it reaches PostgREST, so it must take a slot.
-        Inferring the second from the first would have registered both writes as
-        unbounded work on the event loop, which is D451 restored by accident and
-        D463's shape exactly -- one name, two meanings, correct until the day
-        they part.
+        *Record.* Begin before the work, complete after, with the outcome, the
+        elapsed milliseconds, the row count and the caller's parameters redacted
+        per the lock (ADR 0141, D479).
+
+        **`kind` replaced Run 5's `upstream` boolean**, and it is one vocabulary
+        with three NAMED consequences rather than one flag carrying three ideas
+        -- `UPSTREAM_KINDS`, `AUDITED_KINDS` and `FAIL_CLOSED_KINDS`, each with
+        its reason at the definition. D495's defect was an *accidental*
+        correlation (`resource is None`); this is the lock's own classification,
+        already checked against `EXPECTED_KINDS` at load.
+
+        **The order is begin, then the work, then complete** -- and the scope
+        check lives inside the work, deliberately. A call refused for a missing
+        scope has therefore already opened its record, and `complete` closes it
+        as `refused`. Checking scopes first would be cheaper and would lose
+        exactly the denial record `AGT-AUDIT-001` names.
+
+        **A write whose `begin` fails does not happen; a read's proceeds**
+        (ADR 0141). And a failing `complete` never fails the call: the work has
+        happened, a committed write cannot be un-committed by a bookkeeping
+        failure, and reporting a failure that did not occur would make the
+        record less true rather than more.
         """
         with Timed(tool, resource=resource) as timed:
+            audit_id: str | None = None
+            token: str | None = None
             try:
                 context = current_agent_context()
                 timed.principal(agent_id=context.agent_id, owner_id=context.owner_id)
+                timed.request_id = current_request_id()
+                token = current_token()
             except Exception:
                 timed.principal(agent_id=None, owner_id=None)
 
+            if kind in AUDITED_KINDS and token is not None and timed.request_id is not None:
+                try:
+                    audit_id = await asyncio.to_thread(
+                        audit_begin,
+                        base_url,
+                        token,
+                        tool=tool,
+                        request_id=timed.request_id,
+                        parameters=audit_redact(arguments, lock.tool(tool).audit_redact),
+                    )
+                except (AuditRefusal, UpstreamRefusal) as error:
+                    if kind in FAIL_CLOSED_KINDS:
+                        # The record is the point for a write: a change nothing
+                        # describes is the one thing this table exists to
+                        # prevent. Structural, so the caller is told nothing --
+                        # an unauditable write is this deployment's fault.
+                        timed.refused()
+                        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
+                    # A read carries on. Its availability does not depend on the
+                    # audit table, and the failure is not silent -- it lands in
+                    # telemetry as the record below.
+                    LOGGER.warning(
+                        "apg.mcp.audit %s",
+                        json.dumps({"tool": tool, "phase": "begin", "error": type(error).__name__}),
+                    )
+
             try:
-                if not upstream:
+                if kind not in UPSTREAM_KINDS:
                     # Metadata: the lock is in memory, so this is a dict lookup
                     # and belongs on the loop. No slot, no thread.
                     result = work()
@@ -486,13 +578,68 @@ def register(
                         result = await asyncio.to_thread(work)
             except AgentVisible as visible:
                 timed.refused()
+                await _close(timed, audit_id, token, OUTCOME_REFUSED, None)
                 raise as_tool_error(visible) from visible
             except ToolRefusal:
                 timed.refused()
+                await _close(timed, audit_id, token, OUTCOME_REFUSED, None)
+                raise
+            except Exception:
+                # Unclassified: the record says `failed` rather than being left
+                # open forever. `Timed` logs the exception TYPE and never its
+                # message, which is where a caller's value would be if one ever
+                # reached one.
+                await _close(timed, audit_id, token, OUTCOME_FAILED, None)
                 raise
 
-            timed.served(result.get("row_count") if isinstance(result, dict) else None)
+            row_count = result.get("row_count") if isinstance(result, dict) else None
+            timed.served(row_count)
+            await _close(timed, audit_id, token, OUTCOME_SERVED, row_count)
             return result
+
+    async def _close(
+        timed: Timed,
+        audit_id: str | None,
+        token: str | None,
+        outcome: str,
+        row_count: int | None,
+    ) -> None:
+        """Close the record, and never let closing it change the outcome.
+
+        Every failure here is swallowed into telemetry (ADR 0141). The work has
+        already happened by the time this runs; raising would report a failure
+        that did not occur, and for a write it would report one about a change
+        that is already committed.
+        """
+        if audit_id is None or token is None:
+            return
+        try:
+            closed = await asyncio.to_thread(
+                audit_complete,
+                base_url,
+                token,
+                audit_id=audit_id,
+                outcome=outcome,
+                request_id=timed.request_id or "",
+                elapsed_ms=timed.elapsed_ms(),
+                row_count=row_count,
+            )
+        except (AuditRefusal, UpstreamRefusal) as error:
+            LOGGER.warning(
+                "apg.mcp.audit %s",
+                json.dumps(
+                    {"tool": timed.tool, "phase": "complete", "error": type(error).__name__}
+                ),
+            )
+            return
+        if not closed:
+            # `false` means no STARTED record of this agent's has that id --
+            # already closed, or never opened. A fact worth a line, and not a
+            # transport failure (rig6: 200 false, never an error).
+            LOGGER.warning(
+                "apg.mcp.audit %s",
+                json.dumps({"tool": timed.tool, "phase": "complete", "closed": False}),
+            )
 
     def seconds(name: str) -> float:
         """The lock's per-tool timeout, in the unit the framework takes.
@@ -512,7 +659,13 @@ def register(
     async def _list_resources() -> dict[str, Any]:
         """The resources this deployment's agent surface can query, and the
         scope each one needs. Read from the deployed lock; reaches no database."""
-        return await bounded("list_resources", None, lambda: list_resources(lock), upstream=False)
+        return await bounded(
+            "list_resources",
+            None,
+            lambda: list_resources(lock),
+            kind=KIND_METADATA,
+            arguments={},
+        )
 
     @server.tool(name="describe_resource", timeout=seconds("describe_resource"))
     async def _describe_resource(tool: str, resource: str) -> dict[str, Any]:
@@ -522,7 +675,8 @@ def register(
             "describe_resource",
             None,
             lambda: describe_resource(lock, tool=tool, resource=resource),
-            upstream=False,
+            kind=KIND_METADATA,
+            arguments={"tool": tool, "resource": resource},
         )
 
     @server.tool(name="query_resource", timeout=seconds("query_resource"))
@@ -546,13 +700,25 @@ def register(
                 lock,
                 base_url=base_url,
                 token=current_token(),
+                request_id=current_request_id(),
                 resource=resource,
                 columns=columns,
                 filters=filters,
                 order_by=order_by,
                 limit=limit,
             ),
-            upstream=True,
+            kind=KIND_READ,
+            # **The audit record carries what telemetry deliberately does not**
+            # (ADR 0141): a filter operand is a caller value, forbidden in a
+            # telemetry line and exactly what a record-keeper needs. The two
+            # artefacts have different readers and different homes.
+            arguments={
+                "resource": resource,
+                "columns": columns,
+                "filters": filters,
+                "order_by": order_by,
+                "limit": limit,
+            },
         )
 
     @server.tool(name="run_report", timeout=seconds("run_report"))
@@ -562,8 +728,14 @@ def register(
         return await bounded(
             "run_report",
             "owner_activity_report",
-            lambda: run_report(lock, base_url=base_url, token=current_token()),
-            upstream=True,
+            lambda: run_report(
+                lock,
+                base_url=base_url,
+                token=current_token(),
+                request_id=current_request_id(),
+            ),
+            kind=KIND_READ,
+            arguments={},
         )
 
     # The two writes. **Their parameters are the lock's declared argument names**
@@ -590,10 +762,14 @@ def register(
                 lock,
                 base_url=base_url,
                 token=current_token(),
+                request_id=current_request_id(),
                 tool="create_note",
                 arguments={"p_title": p_title, "p_content": p_content},
             ),
-            upstream=True,
+            kind=KIND_WRITE,
+            # `p_content` is redacted from the record by the lock's
+            # `audit_redact` (D479) -- the key stays, the value does not.
+            arguments={"p_title": p_title, "p_content": p_content},
         )
 
     @server.tool(name="update_task_status", timeout=seconds("update_task_status"))
@@ -614,6 +790,7 @@ def register(
                 lock,
                 base_url=base_url,
                 token=current_token(),
+                request_id=current_request_id(),
                 tool="update_task_status",
                 arguments={
                     "p_task_id": p_task_id,
@@ -621,7 +798,14 @@ def register(
                     "p_new_status": p_new_status,
                 },
             ),
-            upstream=True,
+            kind=KIND_WRITE,
+            # Nothing redacted: a task id and two status literals are the
+            # transition itself, which is what the record is for.
+            arguments={
+                "p_task_id": p_task_id,
+                "p_expected_status": p_expected_status,
+                "p_new_status": p_new_status,
+            },
         )
 
     return TOOL_NAMES

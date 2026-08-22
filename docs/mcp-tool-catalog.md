@@ -169,16 +169,31 @@ however it is minted (ADR 0100). An agent token presented to the storage surface
 is refused, and that refusal is a property of the vocabulary rather than of one
 agent's configuration.
 
-**No durable audit from the runtime yet.** The record itself now exists:
-migration 0019 ships `app_private.agent_audit` and the two definer functions
-that write it as the caller (ADR 0135) — released, and applied on no cluster.
-The runtime's begin/complete calls around a write, and the fail-closed contract
-for a write whose record cannot be written, are Session 9's remaining runs.
-What runs today is telemetry: one structured record per tool call, carrying the
-tool, the resource, the outcome, the row count, the elapsed milliseconds and
-the agent and owner ids — and **no token, no fingerprint, no URL and no caller
-value**. Telemetry answers "what happened" for an operator watching a running
-deployment; an audit record answers it for a record-keeper, months later, with
-a contract about what happens when it cannot be written. They are not the same
-artefact (ADR 0130, D412). And nothing prunes the audit record — retention is
-undecided, and it is Session 10's inbox.
+**A durable audit record, and what it does NOT cover.** Every read and write is
+recorded: `api.agent_audit_begin` before the work and `api.agent_audit_complete`
+after, both `SECURITY DEFINER` and both taking **no principal** — the agent and
+its owner come from the GUCs the pre-request hook set (ADR 0135). A write whose
+record cannot be opened **does not happen**; a read's still answers, and the
+asymmetry is a decision rather than an oversight (ADR 0141). **The two metadata
+tools are not audited at all**: they reach no backend, and auditing them would
+make discovery depend on the audit table.
+
+Parameters are stored, **redacted per the contract's `audit_redact`** — a note's
+body is not kept, its title is. That is the opposite of what telemetry carries:
+one structured log line per call with the tool, resource, outcome, row count,
+elapsed milliseconds, request id and the agent and owner ids, and **no token, no
+fingerprint, no URL and no caller value**. Telemetry answers "what happened" for
+an operator watching a running deployment; the record answers it for a
+record-keeper, months later. They are not the same artefact (ADR 0130, D412).
+
+**Two records per write, from two routes, and both are needed.** The agent plane
+writes one; the write RPC writes another inside the write's own transaction. A
+denied call never reaches the database and has only the first; a caller reaching
+PostgREST directly never reaches MCP and has only the second. **Only the
+database's can say `committed`** — a row written in the transaction it describes
+goes with it when that transaction aborts (D489).
+
+**A request id spans MCP → PostgREST → the record**, minted per HTTP request and
+forwarded on every upstream call. It does **not** span ingress — that is
+`OPS-LOG-001`, Session 11's — and the database-written row carries none (D500).
+Nothing prunes the record: retention is undecided and is Session 10's inbox.

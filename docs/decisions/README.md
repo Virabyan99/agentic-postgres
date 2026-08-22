@@ -204,3 +204,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0138](0138-the-write-agents-ceiling-gains-meta-read.md) | A write agent may hold meta:read | 9 | Accepted |
 | [0139](0139-a-write-refusal-is-translated-from-the-products-errcode-never-relayed.md) | A write refusal is translated from the product's own errcode, never relayed | 9 | Accepted |
 | [0140](0140-discovery-filters-tool-names-and-hiding-a-name-is-not-a-boundary.md) | Discovery filters tool names, and hiding a name is not a boundary | 9 | Accepted |
+| [0141](0141-a-write-fails-closed-on-its-audit-record-and-a-read-does-not.md) | A write fails closed on its audit record, and a read does not | 9 | Accepted |

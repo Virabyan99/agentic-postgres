@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import contextvars
 import hashlib
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -50,19 +51,27 @@ _CURRENT: contextvars.ContextVar[_Held | None] = contextvars.ContextVar(
 
 @dataclass(frozen=True, slots=True)
 class _Held:
-    """A context, the token it was resolved for, and that token's fingerprint.
+    """A context, the token it was resolved for, that token's fingerprint, and
+    the request id.
 
-    The token is carried because Run 6's tools forward it: the same compact
-    string the caller presented goes upstream for the read, exactly as it did
-    for the context lookup (ADR 0125). Holding it here rather than re-reading it
-    from the framework inside each tool keeps one answer per request to the
-    question "who is calling" -- and the fingerprint beside it is what proves the
-    two halves belong together.
+    The token is carried because the tools forward it: the same compact string
+    the caller presented goes upstream for the read, exactly as it did for the
+    context lookup (ADR 0125). Holding it here rather than re-reading it from
+    the framework inside each tool keeps one answer per request to the question
+    "who is calling" -- and the fingerprint beside it is what proves the two
+    halves belong together.
+
+    `request_id` rides here for the same reason and with the same lifetime
+    (ADR 0141): one id per HTTP request, minted before anything is dialled, so
+    the context lookup carries it too. It is this process's own mint and never a
+    caller value -- nothing reads a request id off an inbound header, because an
+    id a caller chose would let two agents' records collide on purpose.
     """
 
     fingerprint: str
     token: str
     context: AgentContext
+    request_id: str
 
 
 def fingerprint(token: str) -> str:
@@ -111,11 +120,33 @@ def current_token() -> str:
     return held.token
 
 
+def current_request_id() -> str:
+    """The id minted for this request, for forwarding and for the audit record.
+
+    Raises rather than returning `None`, for `current_agent_context`'s reason: a
+    tool that carried on with an id of `None` would write a record nothing can
+    correlate and forward a header naming nothing, and both would look like
+    working code.
+    """
+    held = _CURRENT.get()
+    if held is None:
+        raise UpstreamRefusal("no request id was minted for this request")
+    return held.request_id
+
+
 def _resolve(base_url: str, token: str) -> _Held:
+    """Mint the id, then resolve the context WITH it.
+
+    The order is the point (ADR 0141): the context lookup is the first of the
+    three or four upstream requests one tool call makes, and an id minted after
+    it would leave that request uncorrelated with the rest of its own request.
+    """
+    request_id = str(uuid.uuid4())
     return _Held(
         fingerprint=fingerprint(token),
         token=token,
-        context=resolve_agent_context(base_url, token),
+        context=resolve_agent_context(base_url, token, request_id=request_id),
+        request_id=request_id,
     )
 
 

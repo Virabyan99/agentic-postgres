@@ -496,7 +496,7 @@ def _pipeline_roster(tmp_path: Any, monkeypatch: Any, *scopes: str) -> list[str]
     monkeypatch.setattr(
         mcp_authorization,
         "resolve_agent_context",
-        lambda base_url, token: AgentContext(
+        lambda base_url, token, request_id: AgentContext(
             agent_id="agent-1",
             role_name="r",
             scopes=tuple(scopes),

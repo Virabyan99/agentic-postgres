@@ -94,6 +94,9 @@ is confirmed, corrected or replaced during implementation, and anything found
 | **D495** | — (found during Run 5, wiring the first tool that reaches upstream and names no resource). | **`bounded()`'s `resource is None` was carrying two ideas**, and they had agreed for as long as every upstream tool had a resource: *"names no resource in the telemetry record"* and *"does not reach upstream, so takes no concurrency slot and no thread"*. A **write** has neither property together — it is one-to-one with its operation (D486), so there is no resource to name, and it dials PostgREST, so it must hold a slot. Registering both writes with the inference intact would have run them **unbounded on the event loop**, which is D451 restored by accident and invisible: the semaphore would simply never see them. | **`bounded` takes an explicit `upstream:` argument** and the four existing call sites state it. The telemetry `resource` stays `None` for a write, which is honest — `ReadRecord.resource` is already `str | None` and the `tool` field already names the operation. | **D463's shape, exactly, one session later**: `POST_BOOTSTRAP_SERVICES` meant two things, one consumer satisfied the second by accident, and the agent plane needed only the second and lost it. Here the accident was in the other direction — the inference was *correct* for every tool that existed when it was written, and a write is the first caller that separates the two. Battery arm W13 restores the inference and the write's slot assertion goes red, with the end-to-end write test green beside it (a write still *works* on the loop; it is only unbounded). | 0140 |
 | **D496** | §5 Run 5: *"moves the `live_host` four-tool assertions in `tests/deployment/test_session8_agent_plane.py` (lines asserting the four names and `tool_count == 4`) to six."* | **The two assertions stop being the same number, and only one of them is six.** `mcp.tool_count` is read from the compiled lock and is what the deployment SERVES: six. `tools/list` is now filtered per caller by Run 5's own `on_list_tools` hook, and the probe agent holds `meta:read` and `notes:read` — so its roster is **three** names. `run_report` needs `notes:read` AND `tasks:read` as a conjunction (D421) and both writes need a write scope. The plan's sentence was written before the filter existed and would have had the run assert six from a caller that can reach three. | **The document assertion moves 4 → 6; the roster assertion moves from four names to the three that caller's scopes reach**, with the reason in the docstring rather than the number alone. A new `live_host` test carries `AGT-WRITE-001`'s two halves against the deployment — the write names absent from the roster, and the call refused when made anyway. | **The plan asked for one number and the code produced two questions**, which is the good version of this row: the filter is what the same run was asked to build. Recorded rather than reconciled silently because a future reader comparing `tool_count` with a `tools/list` length would otherwise read a discrepancy where there is a decision — and because the *positive* half is what keeps the exclusion honest (a roster missing `query_resource` would satisfy every exclusion while proving nothing). | 0140 |
 | **D497** | — (found during Run 5, asking §6 question 5 of `MAX_SERIALIZED_BYTES`). | **ADR 0129's response bound had exactly one caller, and the write path was not going to be it.** `MAX_SERIALIZED_BYTES` was reachable only from inside `_within_budget`, *after* the row-count check — and a write has no row ceiling to check, so a write result would have been the one thing this process returns without a byte bound. `create_note` echoes the created row back and `content` is an unbounded `text` column, so it is not theoretical. | **The byte half is split into `_within_byte_budget` and the write path calls it.** The row half keeps its own check and calls the byte half, so a read's behaviour is unchanged and there is still one place the ceiling is written down. | **§6 question 5 — when a decision is implemented, which of its callers got it?** — asked of a budget rather than of a grant or a verifier. It cost one function split, found before the code was written rather than on a cluster, which is the cheapest place this question ever pays. Battery arm W18 removes the call and the write's ceiling test goes red with the end-to-end write green beside it. | — |
+| **D498** | — (found during Run 6, by a mutation that survived). | **The request id's PROPAGATION was proved and its UNIQUENESS was not.** Every offline test arranges a fixed id through `monkeypatch` so an assertion can name it — which is the right call, because a test that minted its own could only say "some id was forwarded", a claim satisfied by forwarding the wrong one. But it meant nothing offline ever executed `uuid.uuid4()`: replacing the mint with a constant left **every** contract test green, and the only proof that two calls differ was the live-host one, which has never run. | **A new offline test of the mint**, not a changed mutation: three requests through the real middleware, two of them reusing a TOKEN, and all three ids must differ and parse as UUIDs. The token arm matters because an id *derived* from the caller would pass a naive uniqueness check. | **D493's distinction, pointing the other way.** There a survivor was evidence about the *arm* — two equal sets, so no operator could discriminate. Here the arm was right and the coverage was absent, and telling the two apart is the whole reason a survivor gets read rather than re-rolled. Question 2 of §6 found it: *has this run at all, in this environment, since the thing it measures changed?* — and the answer for the mint was **never**. | 0141 |
+| **D499** | — (found during Run 6, by the battery's own pairing). | **Two battery arms reported a false survivor because the CONTROL called the mutated function.** A7 and A8 mutate `mcp_audit.redact`; their control was `test_redaction_does_not_invent_a_parameter_the_caller_never_sent`, which calls `redact` directly. Target and control both went red, so the pair proved the target had died and **nothing about isolation**. | **The control moved, not the assertion** — to a test that exercises `begin`/`complete` and never reaches `redact`. Both arms then killed with a green control in the same invocation. | **CLAUDE.md §1 names this rule and says Session 8 paid for it twice** — Run 1 reported two false survivors and Run 3 one, every time because the control legitimately read the mutated value. Recording it a third time because the failure is silent in the direction that matters: a false survivor reads as "the test is weak", and the reflex repair is to strengthen an assertion that was never the problem. | — |
+| **D500** | ADR 0135 and D480: the two records "answer different questions", and Run 6 "propagates a request ID through the downstream stack". | **The `database`-source row carries no `request_id`, so the two records for one MCP write cannot be joined by it.** Migration 0019's write RPCs insert `source, agent_id, owner_id, tool, outcome, row_count, completed_at` and no id — correctly, because at the time nothing minted one. Measured alongside it (rig6): **a custom request header DOES reach the database**, in `current_setting('request.headers')::jsonb` as a lowercased `x-request-id`, present when sent and absent when not. So the repair is available and is not taken here. | **The gap is recorded and left open.** The two records correlate by agent, tool and time. Closing it needs a **migration 0020** — 0019 is released, and amending a released migration is what the release control exists to prevent — so it is named in ADR 0141's consequences and in the Session 10 handoff rather than done quietly. A deployment test asserts the `database` row's `request_id` **is** NULL, so the day 0020 lands, the test that says so fails and points at its own premise. | **§6 question 5 — which of this decision's callers got it?** — asked of the id rather than of a grant. The answer is "the agent-plane record and every upstream request, but not the row PostgreSQL writes", and the honest half is that the *header measurement* makes it look cheap while the *release control* makes it a migration. D478's discipline applied forward: `OPS-LOG-001` is Session 11's and this row is what stops Session 9's evidence reading as if it closed the span. | 0141 |
 
 ---
 
@@ -499,6 +502,54 @@ refusal green.
 
 **ADR:** what fails closed and what does not, with the measurement in hand.
 
+**Done.** The id is minted in `on_request`, rides on `_Held`, is read through
+`current_request_id()` beside `current_agent_context()`, and is reset by the same
+`finally`. `RECORD_FIELDS` gained it and the canary's list did not — it is this
+plane's own mint and nothing reads one off an inbound header, so it cannot carry
+a caller value. `FORWARDED_HEADERS` went two → three **and `_dial`'s equality
+guard moved in the same commit** (D477); it stays an equality (D300).
+`mcp_audit.py` is new: two paths as module constants, `redact` (D479's orphan,
+consumed at last), and `begin`/`complete` through the one shared `_dial`.
+
+**`bounded()` gained its fourth job, and `upstream: bool` became `kind`** — one
+vocabulary with three NAMED consequences (`UPSTREAM_KINDS`, `AUDITED_KINDS`,
+`FAIL_CLOSED_KINDS`), each with its reason at the definition. That is not D495
+repeated: there the correlation was an *accident* of representation; here it is
+the lock's own classification, already checked against `EXPECTED_KINDS` at load.
+
+**Measured (rig6, PostgREST v14.16 + the pinned pgvector image, negative control
+first).** **The rig was wrong first, and instructively**: it set the agent
+identity with `ALTER ROLE rig_anon SET app.agent_id = …` and every `begin` arm
+returned `403 PT403` — **a role-level setting is applied at LOGIN**, and
+PostgREST logs in as the authenticator and switches role per request, so a
+setting on the switched-to role never applies. Moved to a pre-request hook, which
+is what production uses. Then: a non-SETOF **scalar** return is a **bare JSON
+scalar** (`RETURNS uuid` → a string; the SETOF contrast is an array) — **rig4's
+composite finding is not evidence for it**; `RETURNS boolean` is a bare
+`true`/`false` and closing an already-closed record is **200 false**, never an
+error; a defaulted `jsonb` argument may be omitted or sent as explicit `null`;
+`committed` is refused **422/PT422** and a missing identity is **403/PT403**; **a
+custom request header DOES reach the database** in
+`current_setting('request.headers')` (present when sent, absent when not); and
+three `started` rows survived the run, so each RPC call is its own transaction
+and commits before the next — D489 arriving from the other side.
+
+**Three divergences, and D498 is the one to read**: the id's propagation was
+proved and its **uniqueness was not**, because every offline test arranges a
+fixed id — a mutation replacing `uuid4()` with a constant left the whole suite
+green. **D499**: two battery arms reported a false survivor because the control
+called the mutated function — CLAUDE.md's named rule, third instance.
+**D500**: the `database` row carries no `request_id`, so the two records join by
+agent, tool and time; the header measurement makes the repair look cheap and the
+release control makes it a **migration 0020**.
+
+**ADR 0141.** New live module `tests/deployment/test_session9_agent_writes.py`
+with its own `agent_writer` fixture — the two-record proof cannot exist offline.
+Battery: **A1–A16, 16 of 16 killed** after the two repairs, every one `FAILED`
+rather than `ERROR` (D386), each with a green control in the same invocation —
+and A9/A10 are mirror arms, so the fail-closed asymmetry is proved in both
+directions rather than asserted once.
+
 ### Run 7 — The admin audit endpoint, and revocation proved rather than built
 
 - `GET /admin/…` beside `GET /admin/agents`, same four pieces — `_service` →
@@ -664,7 +715,18 @@ Session 7 and D454 in Session 8. **Ask it at every boundary this session adds.**
   still unbuilt**, and Session 8 paid again: three assertions in the first host
   gate had never run.
 - **The agent plane's round trip has never been timed against the deployment.**
-  ADR 0125's deliberate price, and this session makes it three round trips.
+  ADR 0125's deliberate price — and **Run 6 made it four for a write**: context,
+  `agent_audit_begin`, the write, `agent_audit_complete`. Three for a read; the
+  two metadata tools still make none (ADR 0141). Every one of the four holds a
+  PostgREST connection while it runs, and the concurrency bound is a share of
+  that pool (ADR 0129), so the cost is on a resource this plane already shares
+  with human callers. **Nothing has timed any of them**, and the number of them
+  is now the thing most worth timing.
+- **The `database`-source audit row carries no `request_id`** (D500). The two
+  records for one MCP write join by agent, tool and time. The repair is measured
+  and cheap-looking — rig6 showed a forwarded header reaching
+  `current_setting('request.headers')` — and is a **migration 0020**, because
+  0019 is released.
 - **`MCP_MEMORY_LIMIT` is measured for the interpreter, not the container.**
   `mcp` containers are now running and healthy, so reading their resident set is
   one command. §3 says so; nothing forces it.
@@ -693,6 +755,12 @@ Session 10 receives an activated `agent_writer`, two write tools that are
 one-to-one with reviewed operations, a durable audit record with a stated
 fail-closed contract, a request id that survives from the agent plane to the
 database, and a revocation proved through both surfaces on a live deployment.
+
+**Two things about the id are narrower than that sentence** and are written down
+here so the next reader does not have to find out: it reaches the **agent-plane**
+row and not the **database** one (D500, a migration 0020), and it spans MCP →
+PostgREST → the record and **not ingress** — that is `OPS-LOG-001`, Session 11's,
+and Session 9 does not close it (D478).
 
 Session 10 is **backup, WAL archiving, PITR and the restore drill**. It **must
 not** treat a successful backup as a proved recovery, mount or mutate the active

@@ -288,20 +288,39 @@ def test_the_prose_and_the_contract_agree_on_how_many_tools_there_are(
 def test_the_catalog_says_what_the_surface_deliberately_lacks(catalog: str) -> None:
     """A reference that lists only what exists invites the reader to assume the rest.
 
-    Deletes, storage and a runtime-written audit are each absent by decision,
-    and each is something a reader would otherwise reasonably expect an agent
-    surface with writes to have. Naming them is how the document stops being an
-    incomplete list. "No writes" left the list in Session 9 Run 3 -- and must
-    STAY gone, because a document claiming no writes above a table listing two
-    is the contradiction-in-one-document this file exists to prevent.
+    Deletes and storage are each absent by decision, and each is something a
+    reader would otherwise reasonably expect an agent surface with writes to
+    have. Naming them is how the document stops being an incomplete list.
+
+    **Two sentences have left this list, each in the run that built the thing,
+    and this test is how both were noticed.** "No writes" went in Session 9
+    Run 3; "No durable audit from the runtime" went in Run 6, which built it
+    (ADR 0141) -- and this assertion is what fired to say so. Both must STAY
+    gone: a document claiming no writes above a table listing two, or no audit
+    above a surface that records every call, is the contradiction-in-one-document
+    this file exists to prevent.
+
+    **What replaced the audit sentence is asserted too**, because a section that
+    only ever shrinks stops being a list of absences. The record's own limits --
+    the span it does not reach, and the retention nobody has decided -- are now
+    the honest remainder.
     """
     absent = catalog[catalog.index("deliberately absent") :]
-    for subject in ("No delete", "No storage", "No durable audit from the runtime"):
+    for subject in ("No delete", "No storage"):
         assert subject in absent, f"the catalog does not say {subject.lower()}"
-    assert "No writes" not in absent, (
-        "the catalog says 'No writes' while the contract carries two; the surface "
-        "gained writes in Session 9 Run 3 and the prose has to say what is absent NOW"
+
+    for gone, why in (
+        ("No writes", "the contract has carried two since Run 3"),
+        ("No durable audit from the runtime", "Run 6 built it (ADR 0141)"),
+    ):
+        assert gone not in absent, f"the catalog still says {gone!r}, and {why}"
+
+    assert "OPS-LOG-001" in absent, (
+        "the catalog does not say the request id stops short of ingress. Session 9 owns "
+        "MCP -> PostgREST -> the record and does not close Session 11's requirement "
+        "(D478); a document silent about the boundary lets a reader assume it"
     )
+    assert "prunes" in absent, "retention is still undecided and the catalog must say so"
 
 
 def test_the_write_tools_details_reach_the_catalog(generated: str, contract: dict) -> None:

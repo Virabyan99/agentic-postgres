@@ -209,7 +209,9 @@ def test_the_callers_own_token_is_what_goes_upstream(monkeypatch: Any) -> None:
     recorder = _Recorder()
     monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", recorder)
 
-    mcp_upstream.resolve_agent_context(BASE, "the.original.token")
+    mcp_upstream.resolve_agent_context(
+        BASE, "the.original.token", request_id="7f3a1c20-0000-4000-8000-0000000000aa"
+    )
 
     assert recorder.request.get_header("Authorization") == "Bearer the.original.token"
 
@@ -220,15 +222,22 @@ def test_no_header_names_a_principal(monkeypatch: Any) -> None:
     A role, a subject, an owner, or `request.jwt.claims` supplied as a header
     would let this runtime's opinion decide what the lookup sees. The headers
     are enumerated rather than spot-checked, so a new one has to be added here
-    deliberately.
+    deliberately -- **and Session 9 Run 6 is the first time one was**.
+
+    `x-request-id` joins because the context lookup is the FIRST of the three or
+    four upstream requests one tool call makes, and leaving it off would make the
+    one request ADR 0125 pays for on every call the one nothing can correlate
+    (ADR 0141). **It names no principal**: this plane MINTS it and reads one off
+    no inbound header, so it cannot carry a caller's opinion about anything --
+    which is the property being enumerated for.
     """
     recorder = _Recorder()
     monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", recorder)
 
-    mcp_upstream.resolve_agent_context(BASE, "t")
+    mcp_upstream.resolve_agent_context(BASE, "t", request_id="7f3a1c20-0000-4000-8000-0000000000aa")
 
     sent = {name.lower() for name in recorder.request.headers}
-    assert sent == {"authorization", "content-type", "accept"}
+    assert sent == {"authorization", "content-type", "accept", "x-request-id"}
 
     forbidden = {"role", "x-role", "sub", "subject", "owner", "x-postgrest-role", "prefer"}
     assert not sent & forbidden
@@ -239,7 +248,7 @@ def test_the_request_goes_to_the_one_rpc_and_names_no_other_path(monkeypatch: An
     recorder = _Recorder()
     monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", recorder)
 
-    mcp_upstream.resolve_agent_context(BASE, "t")
+    mcp_upstream.resolve_agent_context(BASE, "t", request_id="7f3a1c20-0000-4000-8000-0000000000aa")
 
     assert recorder.request.full_url == f"{BASE}/rpc/mcp_agent_context"
     assert recorder.request.get_method() == "POST"
@@ -303,7 +312,9 @@ def test_an_unreachable_upstream_is_a_refusal_and_not_a_degraded_mode(monkeypatc
     monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", refuse)
 
     with pytest.raises(UpstreamRefusal, match="unreachable"):
-        mcp_upstream.resolve_agent_context(BASE, "t")
+        mcp_upstream.resolve_agent_context(
+            BASE, "t", request_id="7f3a1c20-0000-4000-8000-0000000000aa"
+        )
 
 
 def test_a_refusal_carries_no_upstream_detail(monkeypatch: Any) -> None:
@@ -320,7 +331,9 @@ def test_a_refusal_carries_no_upstream_detail(monkeypatch: Any) -> None:
     monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", recorder)
 
     with pytest.raises(UpstreamRefusal) as raised:
-        mcp_upstream.resolve_agent_context(BASE, "t")
+        mcp_upstream.resolve_agent_context(
+            BASE, "t", request_id="7f3a1c20-0000-4000-8000-0000000000aa"
+        )
 
     assert "42501" not in raised.value.reason
     assert "mcp_agent_context" not in raised.value.reason
@@ -376,7 +389,7 @@ def _middleware(monkeypatch: Any, owner: str = OWNER) -> AgentContextMiddleware:
     monkeypatch.setattr(
         mcp_authorization,
         "resolve_agent_context",
-        lambda base_url, token: AgentContext(
+        lambda base_url, token, request_id: AgentContext(
             agent_id=AGENT,
             role_name="r",
             scopes=("meta:read",),
@@ -493,3 +506,100 @@ def test_a_held_context_is_keyed_to_the_token_that_resolved_it(monkeypatch: Any)
 
     assert held[0].fingerprint == fingerprint("tok-9")
     assert held[0].fingerprint != fingerprint("tok-8")
+
+
+# ---------------------------------------------------------------------------
+# the request id, minted here and nowhere else (Session 9 Run 6 — ADR 0141)
+# ---------------------------------------------------------------------------
+
+
+def test_each_request_is_minted_a_DIFFERENT_id(monkeypatch: Any) -> None:
+    """**The mint itself, and a surviving mutation is why this exists.**
+
+    Run 6's battery replaced `uuid4()` with a constant and **every offline test
+    survived** — because each of them arranges a fixed id through `monkeypatch`
+    so that an assertion can name it. The propagation was proved and the
+    UNIQUENESS was not, which is the shape of half this repository's defects:
+    the deployment test asserting two calls differ is live-only, so offline
+    nothing could see a plane that stamped one id on everything.
+
+    Repaired by adding this test, not by weakening the mutation (D493's
+    distinction: a survivor is evidence about the arm, and here the arm was
+    right and the coverage was absent).
+    """
+    import uuid
+
+    middleware = _middleware(monkeypatch)
+    minted: list[str] = []
+
+    async def call_next(_: Any) -> None:
+        minted.append(mcp_authorization.current_request_id())
+
+    _drive(middleware, "tok-1", call_next)
+    _drive(middleware, "tok-2", call_next)
+    _drive(middleware, "tok-1", call_next)
+
+    assert len(set(minted)) == 3, (
+        f"three requests were minted {minted}. An id shared by every call identifies "
+        "nothing -- and the third request reuses a TOKEN, so an id derived from the "
+        "caller rather than minted per request also fails here"
+    )
+    for value in minted:
+        # A uuid, because `agent_audit_begin`'s `p_request_id` is `uuid` and a
+        # string the database cannot cast is a record that never opens.
+        assert uuid.UUID(value)
+
+
+def test_the_id_does_not_outlive_its_request(monkeypatch: Any) -> None:
+    """The same lifetime as the context, and for the same reason (ADR 0125).
+
+    It rides on `_Held` and is reset by the same `finally`, so "never across
+    requests" stays a property of the mechanism rather than of anybody
+    remembering to clear up.
+    """
+    middleware = _middleware(monkeypatch)
+    seen: list[str] = []
+
+    async def call_next(_: Any) -> None:
+        seen.append(mcp_authorization.current_request_id())
+
+    _drive(middleware, "tok-1", call_next)
+    assert seen
+
+    with pytest.raises(UpstreamRefusal, match="no request id"):
+        mcp_authorization.current_request_id()
+
+
+def test_the_id_is_minted_before_the_context_is_resolved(monkeypatch: Any) -> None:
+    """The order is the point (ADR 0141).
+
+    The context lookup is the FIRST of the three or four upstream requests one
+    tool call makes. An id minted afterwards would leave the one request
+    ADR 0125 pays for on every call the one nothing can correlate — so
+    `resolve_agent_context` is handed the id rather than told about it later.
+    """
+    carried: dict[str, Any] = {}
+
+    def resolving(base_url: str, token: str, *, request_id: str) -> Any:
+        carried["request_id"] = request_id
+        return AgentContext(
+            agent_id=AGENT,
+            role_name="r",
+            scopes=("meta:read",),
+            authz_version=1,
+            owner_id=OWNER,
+        )
+
+    monkeypatch.setattr(mcp_authorization, "resolve_agent_context", resolving)
+    middleware = AgentContextMiddleware(BASE)
+    held: list[str] = []
+
+    async def call_next(_: Any) -> None:
+        held.append(mcp_authorization.current_request_id())
+
+    _drive(middleware, "tok-1", call_next)
+
+    assert carried["request_id"] == held[0], (
+        "the context lookup carried a different id from the one the request kept; the "
+        "mint must happen before the resolution, not beside it"
+    )

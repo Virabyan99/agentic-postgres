@@ -180,14 +180,21 @@ def parse_agent_context(status: int, body: bytes) -> AgentContext:
     return AgentContext.from_row(document[0])
 
 
-def resolve_agent_context(base_url: str, token: str) -> AgentContext:
+def resolve_agent_context(base_url: str, token: str, *, request_id: str) -> AgentContext:
     """Ask PostgREST who the caller is, as the caller.
 
     `token` is the **original compact token** the caller presented. It is placed
     in `Authorization` and nowhere else, and no other header names a principal:
     no role, no subject, no owner, no `request.jwt.claims`. That is ADR 0125's
     first two clauses, and they are visible in this function in their entirety.
+
+    **The id is carried here too**, because this is the FIRST of the three or
+    four upstream requests one tool call makes (ADR 0141). Leaving it off would
+    make the one request ADR 0125 pays for on every call the one nothing can
+    correlate.
     """
+    from app.mcp_query import REQUEST_ID_HEADER
+
     request = urllib.request.Request(  # noqa: S310 -- a derived internal URL, http on the internal network
         f"{base_url.rstrip('/')}{AGENT_CONTEXT_PATH}",
         data=b"{}",
@@ -195,6 +202,7 @@ def resolve_agent_context(base_url: str, token: str) -> AgentContext:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "Accept": ARRAY_ACCEPT,
+            REQUEST_ID_HEADER: request_id,
         },
         method="POST",
     )
@@ -215,7 +223,7 @@ def resolve_agent_context(base_url: str, token: str) -> AgentContext:
         raise UpstreamRefusal(f"upstream unreachable: {type(error).__name__}") from error
 
 
-def execute(base_url: str, token: str, request: Any) -> list[dict[str, Any]]:
+def execute(base_url: str, token: str, request: Any, *, request_id: str) -> list[dict[str, Any]]:
     """Run one built request and return its rows.
 
     `request` is an `mcp_query.UpstreamRequest`, whose every member came from the
@@ -232,7 +240,7 @@ def execute(base_url: str, token: str, request: Any) -> list[dict[str, Any]]:
     that constrains a row constrains this result, and this process adds no
     filtering of its own that could disagree with the database's.
     """
-    status, body = _dial(base_url, token, request)
+    status, body = _dial(base_url, token, request, request_id=request_id)
     if status != 200:
         # The body is discarded UNREAD for a read (ADR 0097, D433): PostgREST's
         # error documents name functions, codes and hints, and none of that is
@@ -242,7 +250,7 @@ def execute(base_url: str, token: str, request: Any) -> list[dict[str, Any]]:
 
 
 def execute_write(
-    base_url: str, token: str, request: Any, *, max_affected_rows: int
+    base_url: str, token: str, request: Any, *, max_affected_rows: int, request_id: str
 ) -> list[dict[str, Any]]:
     """Run one built WRITE request; return its rows or translate its refusal.
 
@@ -270,7 +278,7 @@ def execute_write(
     """
     from app.mcp_errors import write_refusal
 
-    status, body = _dial(base_url, token, request)
+    status, body = _dial(base_url, token, request, request_id=request_id)
     if status != 200:
         visible = write_refusal(_refusal_code(body))
         if visible is not None:
@@ -311,17 +319,30 @@ def _refusal_code(body: bytes) -> str:
     return code if isinstance(code, str) else ""
 
 
-def _dial(base_url: str, token: str, request: Any) -> tuple[int, bytes]:
+def _dial(base_url: str, token: str, request: Any, *, request_id: str) -> tuple[int, bytes]:
     """One HTTP exchange with the upstream, status and body, refusals included.
 
-    The transport half `execute` and `execute_write` share, so there is still
-    exactly one place a request to PostgREST is constructed (ADR 0124). The
-    body sent is the request's own (D477) -- built and serialized by
-    `mcp_query`, never composed here.
-    """
-    from app.mcp_query import FORWARDED_HEADERS
+    The transport half every caller shares, so there is still exactly one place
+    a request to PostgREST is constructed (ADR 0124). The body sent is the
+    request's own (D477) -- built and serialized by `mcp_query`, never composed
+    here.
 
-    headers = {"Authorization": f"Bearer {token}", "Accept": ARRAY_ACCEPT}
+    **`request_id` is a required keyword with no default** (ADR 0141). A default
+    would let a caller omit it silently, and "every upstream request this plane
+    makes carries an id" is precisely the guarantee -- one that a `None`
+    slipping through would break in the quietest way available.
+    """
+    from app.mcp_query import FORWARDED_HEADERS, REQUEST_ID_HEADER
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": ARRAY_ACCEPT,
+        REQUEST_ID_HEADER: request_id,
+    }
+    # **This guard moved in the same commit as the allowlist it reads** (D477).
+    # An EQUALITY on purpose: a widened allowlist whose checker did not move is
+    # D300's shape, and both of Session 8's allowlist failures (D468) were right
+    # to fail.
     if set(headers) != set(FORWARDED_HEADERS):  # pragma: no cover -- a guard on the pair
         raise UpstreamRefusal("the forwarded header set and the allowlist disagree")
 

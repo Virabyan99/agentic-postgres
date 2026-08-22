@@ -66,13 +66,32 @@ OPERATORS: dict[str, tuple[str, str]] = {
 #: emits that did not come from a caller, and it must not look like one.
 IS_NULL_OPERAND = "null"
 
-#: The only headers the adapter sends upstream (ADR 0125, ADR 0127).
+#: The header the agent plane's request id travels in (ADR 0141).
+#:
+#: **Measured (rig6), not assumed**: PostgREST puts inbound request headers in
+#: `current_setting('request.headers')::jsonb` with lowercased keys, so
+#: `x-request-id` is readable from inside a function -- present when sent and
+#: absent when not, which is the pair that makes it a measurement rather than an
+#: observation. Nothing in this repository reads it there yet: the audit record
+#: takes the id as an argument (ADR 0141), and the header is what carries it
+#: into PostgREST's own log and into reach of a later migration.
+REQUEST_ID_HEADER = "X-Request-Id"
+
+#: The only headers the adapter sends upstream (ADR 0125, ADR 0127, ADR 0141).
 #:
 #: An allowlist rather than a copy of the caller's headers. `Prefer` alone would
 #: let a caller ask for `count=exact` or `return=representation` and change the
 #: response shape and cost; `Range` would move the window past the lock's
-#: `max_rows`. Nothing a caller sends is forwarded, including `Accept`.
-FORWARDED_HEADERS = ("Authorization", "Accept")
+#: `max_rows`. Nothing a caller sends is forwarded, including `Accept` -- and
+#: including the request id, which this process MINTS rather than accepts, so an
+#: inbound header of that name is ignored and cannot make two agents' records
+#: collide.
+#:
+#: This grew from two to three in Session 9 Run 6, and `mcp_upstream._dial`'s
+#: equality guard moved in the SAME commit (D477). It stays an EQUALITY: both of
+#: Session 8's allowlist failures were right to fail, and turning one into a
+#: subset check is D300's shape.
+FORWARDED_HEADERS = ("Authorization", "Accept", REQUEST_ID_HEADER)
 
 
 class QueryRefusal(Exception):
