@@ -202,3 +202,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0136](0136-an-agent-plane-function-that-writes-takes-arguments-and-is-post-only.md) | An agent-plane function that writes takes arguments, and GET refuses it | 9 | Accepted |
 | [0137](0137-session-9-activates-the-agent-writer-role-and-the-anchor-must-not-expire.md) | Session 9 activates agent_writer, and an anchor that expires is not an anchor | 9 | Accepted |
 | [0138](0138-the-write-agents-ceiling-gains-meta-read.md) | A write agent may hold meta:read | 9 | Accepted |
+| [0139](0139-a-write-refusal-is-translated-from-the-products-errcode-never-relayed.md) | A write refusal is translated from the product's own errcode, never relayed | 9 | Accepted |

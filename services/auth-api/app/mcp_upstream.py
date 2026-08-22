@@ -232,6 +232,93 @@ def execute(base_url: str, token: str, request: Any) -> list[dict[str, Any]]:
     that constrains a row constrains this result, and this process adds no
     filtering of its own that could disagree with the database's.
     """
+    status, body = _dial(base_url, token, request)
+    if status != 200:
+        # The body is discarded UNREAD for a read (ADR 0097, D433): PostgREST's
+        # error documents name functions, codes and hints, and none of that is
+        # an agent's to receive.
+        raise UpstreamRefusal(f"upstream refused with status {status}")
+    return _rows(status, body)
+
+
+def execute_write(
+    base_url: str, token: str, request: Any, *, max_affected_rows: int
+) -> list[dict[str, Any]]:
+    """Run one built WRITE request; return its rows or translate its refusal.
+
+    Two ways this differs from `execute`, both measured (rig4, ADR 0139):
+
+    **The response is a single JSON object**, because both write RPCs are
+    `RETURNS <composite>` rather than `SETOF` -- PostgREST renders that as one
+    object where a set is an array. The object becomes a one-row list here, so
+    the bound check below is arithmetic over rows either way.
+
+    **A refused response's body is read for its `code` member and nothing
+    else.** The product's own write refusals cross HTTP as `PT` errcodes
+    (`409/PT409` for the compare-and-swap, `404/PT404` for a missing row), and
+    the STATUS cannot classify them -- a missing argument is `404 PGRST202`,
+    the same status as "no such task" with the opposite meaning. An enumerated
+    code becomes an `AgentVisible` with this repository's own sentence;
+    everything else, message and hint included, is discarded and the refusal
+    stays structural.
+
+    `max_affected_rows` is the lock's bound, checked **against the response**
+    and never trusted (D487): both current writes return exactly one row, so
+    the check firing means the function's shape changed underneath the lock --
+    a fault worth failing loudly, after the fact, because the write has already
+    committed and pretending otherwise would be a record that lies.
+    """
+    from app.mcp_errors import write_refusal
+
+    status, body = _dial(base_url, token, request)
+    if status != 200:
+        visible = write_refusal(_refusal_code(body))
+        if visible is not None:
+            raise visible
+        raise UpstreamRefusal(f"upstream refused with status {status}")
+
+    try:
+        document = json.loads(body)
+    except ValueError as error:
+        raise UpstreamRefusal(f"upstream body is not JSON: {error}") from error
+    if isinstance(document, dict):
+        rows: list[dict[str, Any]] = [document]
+    elif isinstance(document, list) and all(isinstance(row, dict) for row in document):
+        rows = document
+    else:
+        raise UpstreamRefusal("upstream body is neither a row nor an array of rows")
+
+    if len(rows) > max_affected_rows:
+        raise UpstreamRefusal(
+            f"the write affected {len(rows)} rows against a bound of {max_affected_rows}; "
+            "the operation's shape has changed underneath the lock"
+        )
+    return rows
+
+
+def _refusal_code(body: bytes) -> str:
+    """The `code` member of a refused response, or the empty string.
+
+    The one field the write path reads (ADR 0139). Anything malformed is the
+    empty string, which maps to nothing and stays masked -- a body this
+    function cannot parse must not become a body it guesses about.
+    """
+    try:
+        document = json.loads(body)
+    except ValueError:
+        return ""
+    code = document.get("code") if isinstance(document, dict) else None
+    return code if isinstance(code, str) else ""
+
+
+def _dial(base_url: str, token: str, request: Any) -> tuple[int, bytes]:
+    """One HTTP exchange with the upstream, status and body, refusals included.
+
+    The transport half `execute` and `execute_write` share, so there is still
+    exactly one place a request to PostgREST is constructed (ADR 0124). The
+    body sent is the request's own (D477) -- built and serialized by
+    `mcp_query`, never composed here.
+    """
     from app.mcp_query import FORWARDED_HEADERS
 
     headers = {"Authorization": f"Bearer {token}", "Accept": ARRAY_ACCEPT}
@@ -240,10 +327,10 @@ def execute(base_url: str, token: str, request: Any) -> list[dict[str, Any]]:
 
     built = urllib.request.Request(  # noqa: S310 -- a derived internal URL, path from the lock
         f"{base_url.rstrip('/')}{request.target}",
-        data=b"{}" if request.method == "post" else None,
+        data=request.body,
         headers={
             **headers,
-            **({"Content-Type": "application/json"} if request.method == "post" else {}),
+            **({"Content-Type": "application/json"} if request.body is not None else {}),
         },
         method=request.method.upper(),
     )
@@ -251,10 +338,9 @@ def execute(base_url: str, token: str, request: Any) -> list[dict[str, Any]]:
         with urllib.request.urlopen(  # noqa: S310
             built, timeout=max(request.timeout_ms, 1) / 1000
         ) as response:
-            return _rows(int(response.status), response.read())
+            return int(response.status), response.read()
     except urllib.error.HTTPError as error:
-        error.read()
-        raise UpstreamRefusal(f"upstream refused with status {error.code}") from error
+        return int(error.code), error.read()
     except OSError as error:
         raise UpstreamRefusal(f"upstream unreachable: {type(error).__name__}") from error
 

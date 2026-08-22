@@ -381,7 +381,7 @@ all killed** — redaction key, bound, argument order, idempotency, the three ne
 refusals, the renderer's write branch, and the repaired concurrency stub — each
 with a paired control green in the same invocation.
 
-### Run 4 — The lock and the write transport
+### Run 4 — The lock and the write transport — **Done.**
 
 - `mcp_lock.WRITE_TOOLS`; `EXPECTED_TOOL_NAMES` re-derived to six; `_tool()`'s
   two kind assertions gain a third arm; a seventh tool still fails the start
@@ -401,6 +401,38 @@ JSON body — status, shape, and what a `Prefer` header does or does not change 
 against a live service, with a control. **D438 is the standing warning**: both
 obvious answers about escaping an `in` member matched zero rows, and only
 measurement said so.
+
+**What was measured (rig4** — the locked v14.16 against the pinned pg18, arms
+mirroring 0019's shapes, negative control run first and it failed as designed):
+a non-SETOF composite RPC returns **a single JSON object** where a SETOF
+control returns an array; `Prefer: return=minimal` changes **nothing** on an
+RPC POST and `count=exact` adds only headers, so the header allowlist keeps its
+reason; **status alone cannot classify a write refusal** — a missing and an
+extra argument are both `404 PGRST202`, the same status as the product's own
+`404 PT404` with the opposite meaning; the product's PT errcodes cross HTTP as
+their status with the errcode in the body's `code`; a `22P02` message **names
+the schema's enum type**; a JSON number where the function takes text is
+coerced. **ADR 0139** is the decision the ambiguity forced: write refusals are
+**translated from the product's own enumerated errcodes** — `PT409` →
+`write_conflict`, `PT404` → `row_not_found`, `PT422` → `input_not_permitted`,
+sentences this repository's own — and everything else, `PT401` included, stays
+masked. A test compares the map's keys against the errcodes the migration
+template actually raises.
+
+**What was built.** `WRITE_TOOLS` beside the other two tuples, `EXPECTED_KINDS`
+so a lock cannot re-kind a reviewed name, `WriteSpec` parsed strictly (D470's
+shape at load: no resources, POST only, a bound ≥ 1, arguments in parameter
+order), and `Tool.audit_redact` parsed for Run 6. `UpstreamRequest.body` built
+by `mcp_query` — `build_write_request` is the write branch: a JSON argument
+document, an empty query string, names checked in both directions before the
+dial. `mcp_upstream._dial` is the one shared transport; `execute_write` parses
+the measured single-object shape, checks the bound against the response, and
+translates refusals via `mcp_errors.write_refusal`. `mcp_tools.TOOL_NAMES`
+stays the four registered tools with an exact-gap test — the gap between it and
+the roster must equal `WRITE_TOOLS` precisely, restored to equality in Run 5
+(the `live_host` four-tool assertions in `test_session8_agent_plane.py` also
+move in Run 5, with registration). Battery: **W1–W11 all killed**, each with a
+green control in the same invocation.
 
 ### Run 5 — The two write tools, and discovery that filters names
 

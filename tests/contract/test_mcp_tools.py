@@ -28,18 +28,28 @@ from typing import Any
 import pytest
 
 from app import mcp_authorization, mcp_tools
-from app.mcp_errors import AgentVisible
+from app.mcp_errors import ROW_NOT_FOUND, WRITE_CONFLICT, AgentVisible
 from app.mcp_lock import (
     EXPECTED_TOOL_NAMES,
+    METADATA_TOOLS,
+    READ_TOOLS,
+    WRITE_TOOLS,
     CapabilityLock,
     LockError,
     Operation,
     Resource,
+    WriteSpec,
     load_lock,
 )
-from app.mcp_query import Filter, QueryRefusal, build_request, quote_list_member
+from app.mcp_query import (
+    Filter,
+    QueryRefusal,
+    build_request,
+    build_write_request,
+    quote_list_member,
+)
 from app.mcp_tools import ToolRefusal, describe_resource, list_resources, query_resource
-from app.mcp_upstream import AgentContext
+from app.mcp_upstream import AgentContext, UpstreamRefusal, execute_write
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -497,15 +507,53 @@ def test_nothing_dials_the_locks_published_upstream() -> None:
 
 
 # ---------------------------------------------------------------------------
-# exactly four tools, from the lock
+# exactly six tools, from the lock (four until Session 9 Run 4 — D486)
 # ---------------------------------------------------------------------------
 
 
-def test_the_committed_lock_carries_exactly_the_four_named_tools(tmp_path: Path) -> None:
-    """A fifth tool fails at load, before registration is reached."""
-    lock = _lock()
-    assert tuple(sorted(tool.name for tool in lock.tools)) == EXPECTED_TOOL_NAMES
-    assert mcp_tools.TOOL_NAMES == EXPECTED_TOOL_NAMES
+def test_the_roster_is_six_and_the_registered_gap_is_exactly_the_writes() -> None:
+    """**Replaced the equality with an exact-gap statement, for one run (D486).**
+
+    Until Run 4 this asserted `mcp_tools.TOOL_NAMES == EXPECTED_TOOL_NAMES`.
+    Run 4 widened the lock's roster to six; Run 5 registers the two writes and
+    restores the equality. In between, the honest assertion is that the gap
+    between what `register()` serves and what the lock demands is EXACTLY the
+    write tools — an exact set, never a subset (D300), so a seventh name or a
+    renamed read still fails here.
+    """
+    assert EXPECTED_TOOL_NAMES == tuple(sorted((*METADATA_TOOLS, *READ_TOOLS, *WRITE_TOOLS)))
+    assert len(EXPECTED_TOOL_NAMES) == 6
+    assert set(EXPECTED_TOOL_NAMES) - set(mcp_tools.TOOL_NAMES) == set(WRITE_TOOLS)
+    assert set(mcp_tools.TOOL_NAMES) == set(METADATA_TOOLS) | set(READ_TOOLS)
+
+
+def _write_tool_entry(name: str) -> dict[str, Any]:
+    """One structurally valid write tool for a lock document (Run 4's shape)."""
+    scope = "notes:write" if name == "create_note" else "tasks:write"
+    arguments = (
+        ["p_title", "p_content"]
+        if name == "create_note"
+        else ["p_task_id", "p_expected_status", "p_new_status"]
+    )
+    return {
+        "name": name,
+        "kind": "write",
+        "source": "postgrest",
+        "timeout_ms": 5000,
+        "discovery_scope_sets": [[scope]],
+        "descriptions": [],
+        "resources": [],
+        "operation": {
+            "method": "post",
+            "path": f"/rpc/{name}",
+            "operation_id": f"rpc.{name}.post",
+        },
+        "arguments": arguments,
+        "required_scopes": [scope],
+        "max_affected_rows": 1,
+        "idempotent": name == "update_task_status",
+        "audit_redact": ["p_content"] if name == "create_note" else [],
+    }
 
 
 def _lock_document(*names: str) -> dict[str, Any]:
@@ -527,6 +575,9 @@ def _lock_document(*names: str) -> dict[str, Any]:
     }
     tools = []
     for name in names:
+        if name in WRITE_TOOLS:
+            tools.append(_write_tool_entry(name))
+            continue
         reads = name in ("query_resource", "run_report")
         tools.append(
             {
@@ -545,22 +596,24 @@ def _lock_document(*names: str) -> dict[str, Any]:
         "project_key": "p",
         "upstream": "https://p.test/api/rest",
         "canonical_sha256": "a" * 64,
-        "capability_count": 5,
+        "capability_count": 7,
         "tool_count": len(tools),
         "tools": tools,
     }
 
 
-def test_a_valid_four_tool_lock_loads(tmp_path: Path) -> None:
-    """**The control** for the two refusals below: the fixture is otherwise good."""
+def test_a_valid_six_tool_lock_loads(tmp_path: Path) -> None:
+    """**The control** for the refusals below: the fixture is otherwise good."""
     path = tmp_path / "lock.json"
     path.write_text(json.dumps(_lock_document(*EXPECTED_TOOL_NAMES)), encoding="utf-8")
 
     assert tuple(tool.name for tool in load_lock(path).tools) == EXPECTED_TOOL_NAMES
 
 
-def test_a_lock_with_a_fifth_tool_is_refused(tmp_path: Path) -> None:
-    """Offline, at load, rather than on a cluster."""
+def test_a_lock_with_a_seventh_tool_is_refused(tmp_path: Path) -> None:
+    """Offline, at load, rather than on a cluster — asserted AFTER the roster
+    widened, not only before (D486): the property is that the surface is
+    enumerated, and the number moving must not have loosened it."""
     path = tmp_path / "lock.json"
     document = _lock_document(*EXPECTED_TOOL_NAMES, "delete_everything")
     path.write_text(json.dumps(document), encoding="utf-8")
@@ -569,10 +622,10 @@ def test_a_lock_with_a_fifth_tool_is_refused(tmp_path: Path) -> None:
         load_lock(path)
 
 
-def test_a_lock_missing_one_of_the_four_is_refused(tmp_path: Path) -> None:
-    """The other direction: three tools is not the contract either."""
+def test_a_lock_missing_one_of_the_six_is_refused(tmp_path: Path) -> None:
+    """The other direction: a subset is not the contract either."""
     path = tmp_path / "lock.json"
-    path.write_text(json.dumps(_lock_document(*EXPECTED_TOOL_NAMES[:3])), encoding="utf-8")
+    path.write_text(json.dumps(_lock_document(*EXPECTED_TOOL_NAMES[:5])), encoding="utf-8")
 
     with pytest.raises(LockError):
         load_lock(path)
@@ -603,3 +656,325 @@ def test_the_context_is_read_and_never_resolved_by_a_tool() -> None:
     assert "resolve_agent_context" not in text
     assert "current_agent_context" in text
     assert hasattr(mcp_authorization, "current_agent_context")
+
+
+# ---------------------------------------------------------------------------
+# the write half of the lock (Session 9 Run 4 — D486, D470)
+# ---------------------------------------------------------------------------
+
+
+def _loaded(tmp_path: Path, document: dict[str, Any]) -> Any:
+    path = tmp_path / "lock.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return load_lock(path)
+
+
+def test_the_write_spec_is_parsed_in_full(tmp_path: Path) -> None:
+    """Every member of the write shape decides what a caller can do, so every
+    member is read strictly — arguments in PARAMETER ORDER, never sorted."""
+    lock = _loaded(tmp_path, _lock_document(*EXPECTED_TOOL_NAMES))
+
+    create = lock.tool("create_note")
+    assert create.write is not None
+    assert create.write.arguments == ("p_title", "p_content")
+    assert create.write.max_affected_rows == 1
+    assert create.write.idempotent is False
+    assert create.write.required_scopes == ("notes:write",)
+    assert create.write.operation.method == "post"
+    assert create.write.operation.path == "/rpc/create_note"
+    assert create.audit_redact == ("p_content",)
+    assert create.resources == ()
+
+    update = lock.tool("update_task_status")
+    assert update.write is not None
+    assert update.write.idempotent is True
+    assert update.write.arguments == ("p_task_id", "p_expected_status", "p_new_status")
+    assert update.audit_redact == ()
+
+    for name in (*METADATA_TOOLS, *READ_TOOLS):
+        assert lock.tool(name).write is None
+
+
+def test_a_write_tool_naming_a_resource_is_refused(tmp_path: Path) -> None:
+    """The third kind arm (D486): a write is one-to-one and selects nothing."""
+    document = _lock_document(*EXPECTED_TOOL_NAMES)
+    query = next(tool for tool in document["tools"] if tool["name"] == "query_resource")
+    create = next(tool for tool in document["tools"] if tool["name"] == "create_note")
+    create["resources"] = list(query["resources"])
+
+    with pytest.raises(LockError, match="must name no resource"):
+        _loaded(tmp_path, document)
+
+
+def test_a_tool_whose_kind_disagrees_with_the_roster_is_refused(tmp_path: Path) -> None:
+    """A reviewed name with a different kind is a different tool wearing it —
+    the lock cannot silently move a name between the dispatch paths."""
+    document = _lock_document(*EXPECTED_TOOL_NAMES)
+    create = next(tool for tool in document["tools"] if tool["name"] == "create_note")
+    create["kind"] = "read"
+
+    with pytest.raises(LockError, match="roster says"):
+        _loaded(tmp_path, document)
+
+
+def test_a_write_over_get_is_refused_at_load(tmp_path: Path) -> None:
+    """The compiler refuses this upstream; the lock validates as if it had not,
+    because a lock is an input rather than a teammate."""
+    document = _lock_document(*EXPECTED_TOOL_NAMES)
+    create = next(tool for tool in document["tools"] if tool["name"] == "create_note")
+    create["operation"]["method"] = "get"
+
+    with pytest.raises(LockError, match="a write is a POST"):
+        _loaded(tmp_path, document)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "why"),
+    [
+        ("max_affected_rows", 0, "a write bounded to nothing"),
+        ("idempotent", "yes", "not a boolean"),
+        ("arguments", [], "declares no arguments"),
+    ],
+)
+def test_a_degenerate_write_member_is_refused(
+    tmp_path: Path, field: str, value: Any, why: str
+) -> None:
+    document = _lock_document(*EXPECTED_TOOL_NAMES)
+    create = next(tool for tool in document["tools"] if tool["name"] == "create_note")
+    create[field] = value
+
+    with pytest.raises(LockError, match=why):
+        _loaded(tmp_path, document)
+
+
+# ---------------------------------------------------------------------------
+# the write request (Session 9 Run 4 — D477, D470, rig4)
+# ---------------------------------------------------------------------------
+
+CREATE_WRITE = WriteSpec(
+    operation=Operation(
+        method="post", path="/rpc/create_note", operation_id="rpc.create_note.post"
+    ),
+    arguments=("p_title", "p_content"),
+    required_scopes=("notes:write",),
+    max_affected_rows=1,
+    idempotent=False,
+)
+
+
+def test_a_write_request_is_a_body_and_no_query() -> None:
+    """D477's resolution: no `select`, no `limit`, no filters — everything the
+    caller says travels as the JSON argument document."""
+    request = build_write_request(
+        CREATE_WRITE, timeout_ms=5000, arguments={"p_title": "t", "p_content": "c"}
+    )
+
+    assert request.method == "post"
+    assert request.target == "/rpc/create_note"
+    assert request.query == ""
+    assert json.loads(request.body) == {"p_title": "t", "p_content": "c"}
+
+
+def test_a_caller_value_that_looks_like_syntax_stays_a_value() -> None:
+    """AGT-SQL-001 on the write path. `&limit=1` in a read filter was the
+    measured injection (3 rows vs 1); in a write it must land in the BODY as a
+    literal, with the query string untouched — there is no query string."""
+    request = build_write_request(
+        CREATE_WRITE,
+        timeout_ms=5000,
+        arguments={"p_title": "zzz&limit=1", "p_content": 'a,"b"\\'},
+    )
+
+    assert "?" not in request.target
+    assert json.loads(request.body)["p_title"] == "zzz&limit=1"
+    assert json.loads(request.body)["p_content"] == 'a,"b"\\'
+
+
+def test_an_argument_name_the_lock_does_not_declare_is_refused() -> None:
+    """A caller supplies values, never names (ADR 0127) — and measured (rig4),
+    an unknown name upstream is a `404 PGRST202`, the same status as the
+    product's own "no such task", so the refusal has to happen HERE."""
+    with pytest.raises(QueryRefusal, match="p_owner_id"):
+        build_write_request(
+            CREATE_WRITE,
+            timeout_ms=5000,
+            arguments={"p_title": "t", "p_content": "c", "p_owner_id": "x"},
+        )
+
+
+def test_a_missing_argument_is_refused_before_the_dial() -> None:
+    with pytest.raises(QueryRefusal, match="p_content"):
+        build_write_request(CREATE_WRITE, timeout_ms=5000, arguments={"p_title": "t"})
+
+
+def test_a_structured_argument_value_is_refused() -> None:
+    """Measured: PostgREST coerces a JSON number to text, so a number is honest
+    input — an object or array in a value position is not."""
+    for bad in ({"nested": 1}, ["a"], None):
+        with pytest.raises(QueryRefusal, match="string, a number or a boolean"):
+            build_write_request(
+                CREATE_WRITE, timeout_ms=5000, arguments={"p_title": bad, "p_content": "c"}
+            )
+    built = build_write_request(
+        CREATE_WRITE, timeout_ms=5000, arguments={"p_title": 7, "p_content": "c"}
+    )
+    assert json.loads(built.body)["p_title"] == 7
+
+
+def test_a_read_request_still_carries_its_own_body() -> None:
+    """The read half of D477: `execute` sends what was built, so the built
+    read must carry what `execute` used to hardcode."""
+    posted = build_request(
+        Resource(
+            name="owner_activity_report",
+            capability="run_report",
+            columns=("notes_total",),
+            filters={},
+            order_by=(),
+            max_rows=1,
+            required_scopes=("notes:read", "tasks:read"),
+            operation=Operation(
+                method="post",
+                path="/rpc/owner_activity_report",
+                operation_id="rpc.owner_activity_report.post",
+            ),
+        ),
+        timeout_ms=5000,
+    )
+    assert posted.body == b"{}"
+
+    fetched = build_request(NOTES, timeout_ms=5000)
+    assert fetched.body is None
+
+
+# ---------------------------------------------------------------------------
+# the write executor (Session 9 Run 4 — ADR 0139, D487, rig4)
+# ---------------------------------------------------------------------------
+
+
+class _Response:
+    def __init__(self, status: int, body: bytes) -> None:
+        self.status = status
+        self._body = body
+
+    def read(self) -> bytes:
+        return self._body
+
+    def __enter__(self) -> _Response:
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        return None
+
+
+def _upstream_answers(monkeypatch: Any, status: int, body: bytes) -> None:
+    import io
+    import urllib.error
+
+    from app import mcp_upstream
+
+    def answer(request: Any, timeout: float = 0) -> Any:
+        if status == 200:
+            return _Response(status, body)
+        raise urllib.error.HTTPError(request.full_url, status, "refused", None, io.BytesIO(body))
+
+    monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", answer)
+
+
+def _write_request() -> Any:
+    return build_write_request(
+        CREATE_WRITE, timeout_ms=5000, arguments={"p_title": "t", "p_content": "c"}
+    )
+
+
+def test_a_committed_write_returns_its_one_row(monkeypatch: Any) -> None:
+    """Measured (rig4): a non-SETOF composite return is a single JSON OBJECT —
+    the SETOF control was an array — so the write parse accepts one object and
+    hands back one row."""
+    _upstream_answers(monkeypatch, 200, b'{"id": "x", "title": "t"}')
+
+    rows = execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+    assert rows == [{"id": "x", "title": "t"}]
+
+
+def test_the_bound_is_checked_against_the_response_never_trusted(monkeypatch: Any) -> None:
+    """D487: both writes return exactly one row, so this firing means the
+    function's shape changed underneath the lock — a loud fault, not a clamp."""
+    _upstream_answers(monkeypatch, 200, b'[{"id": "1"}, {"id": "2"}]')
+
+    with pytest.raises(UpstreamRefusal, match="underneath the lock"):
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+
+
+def test_the_cas_conflict_reaches_the_caller_as_a_token(monkeypatch: Any) -> None:
+    """ADR 0139. Measured: the product's compare-and-swap branch arrives as
+    409/`PT409` — translated to `write_conflict` with THIS repository's
+    sentence, never the wire's."""
+    _upstream_answers(
+        monkeypatch,
+        409,
+        b'{"code":"PT409","details":null,"hint":null,'
+        b'"message":"AP409: the task is not in the expected status"}',
+    )
+
+    with pytest.raises(AgentVisible) as caught:
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+    assert caught.value.token == WRITE_CONFLICT
+    assert "AP409" not in str(caught.value)
+    assert "expected state" in caught.value.detail
+
+
+def test_a_missing_row_and_a_missing_function_are_not_the_same_404(monkeypatch: Any) -> None:
+    """**The measured ambiguity ADR 0139 rests on.** `PT404` (the row this
+    write names does not exist) and `PGRST202` (the function the request was
+    built for does not exist) are BOTH a 404 — the first is the caller's to
+    read, the second is a structural fault and stays masked."""
+    _upstream_answers(monkeypatch, 404, b'{"code":"PT404","message":"AP404: no such task"}')
+    with pytest.raises(AgentVisible) as caught:
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+    assert caught.value.token == ROW_NOT_FOUND
+
+    _upstream_answers(monkeypatch, 404, b'{"code":"PGRST202","message":"Could not find"}')
+    with pytest.raises(UpstreamRefusal):
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (400, b'{"code":"22P02","message":"invalid input value for enum task_status"}'),
+        (401, b'{"code":"PT401","message":"AP401: no request identity"}'),
+        (500, b"not json at all"),
+        (403, b'{"no_code": true}'),
+    ],
+)
+def test_every_unmapped_refusal_stays_masked(monkeypatch: Any, status: int, body: bytes) -> None:
+    """ADR 0139's boundary from the other side: a 22P02 body NAMES the schema's
+    enum type (measured), `PT401` is the authentication plane's business, and a
+    body the parser cannot read must not become one it guesses about."""
+    _upstream_answers(monkeypatch, status, body)
+
+    with pytest.raises(UpstreamRefusal) as caught:
+        execute_write(BASE, "tok", _write_request(), max_affected_rows=1)
+    assert "enum" not in str(caught.value)
+    assert "task_status" not in str(caught.value)
+
+
+def test_the_write_body_is_what_the_transport_sends(monkeypatch: Any) -> None:
+    """D477 end to end: the bytes `build_write_request` serialized are the
+    bytes on the wire, and the read path's old hardcoded `b\"{}\"` is gone."""
+    from app import mcp_upstream
+
+    seen: dict[str, Any] = {}
+
+    def record(request: Any, timeout: float = 0) -> Any:
+        seen["data"] = request.data
+        seen["content_type"] = request.get_header("Content-type")
+        return _Response(200, b'{"id": "x"}')
+
+    monkeypatch.setattr(mcp_upstream.urllib.request, "urlopen", record)
+    request = _write_request()
+    execute_write(BASE, "tok", request, max_affected_rows=1)
+
+    assert seen["data"] == request.body
+    assert seen["content_type"] == "application/json"

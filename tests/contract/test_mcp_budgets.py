@@ -411,6 +411,66 @@ def test_no_caller_facing_message_names_the_schema_or_an_upstream_status(token: 
 
 
 # ---------------------------------------------------------------------------
+# the write-refusal translation (Session 9 Run 4 — ADR 0139)
+# ---------------------------------------------------------------------------
+
+
+def test_the_enumerated_write_refusals_translate_and_nothing_else_does() -> None:
+    """The map is total over the vocabulary and refuses to guess outside it.
+
+    `PGRST202` is the arm that matters: measured (rig4), it shares status 404
+    with `PT404` and means the opposite thing — the function the request was
+    built for does not exist. Translating it would tell a caller a row is
+    missing when the fault is structural.
+    """
+    conflict = mcp_errors.write_refusal("PT409")
+    assert conflict is not None and conflict.token == mcp_errors.WRITE_CONFLICT
+
+    missing = mcp_errors.write_refusal("PT404")
+    assert missing is not None and missing.token == mcp_errors.ROW_NOT_FOUND
+
+    unchanged = mcp_errors.write_refusal("PT422")
+    assert unchanged is not None and unchanged.token == mcp_errors.INPUT_NOT_PERMITTED
+
+    for masked in ("PGRST202", "PT401", "22P02", "42501", "", "PT999"):
+        assert mcp_errors.write_refusal(masked) is None, masked
+
+
+def test_the_map_speaks_only_errcodes_the_product_actually_raises() -> None:
+    """ADR 0139's consequence, made a test: a key migration 0019 never raises
+    is dead vocabulary wearing a reviewed look.
+
+    `PT401` must be raised by the product AND absent from the map — its absence
+    is a decision (the authentication plane's business), and this arm is what
+    keeps that from silently becoming an omission when the migration moves.
+    """
+    import re
+
+    template = (
+        REPO_ROOT / "migrations" / "templates" / "0019-agent-write-and-audit-plane.sql"
+    ).read_text(encoding="utf-8")
+    raised = set(re.findall(r"ERRCODE = '(PT\d{3})'", template))
+    assert raised, "the scan found no errcodes; the template moved or the scan is broken"
+
+    mapped = set(mcp_errors.UPSTREAM_WRITE_REFUSALS)
+    assert mapped <= raised, (
+        f"the map translates {sorted(mapped - raised)}, which the product never raises"
+    )
+    assert "PT401" in raised - mapped, (
+        "PT401 must stay unmapped by decision (ADR 0139), not by the product no longer raising it"
+    )
+
+
+def test_a_translated_sentence_is_this_repositorys_not_the_wires() -> None:
+    """The upstream message is the product's today and an arbitrary string
+    after the next migration; nothing from it may survive translation."""
+    for code, (token, sentence) in mcp_errors.UPSTREAM_WRITE_REFUSALS.items():
+        assert token in CALLER_FACING_TOKENS
+        assert "AP4" not in sentence and code not in sentence
+        assert not any(character.isdigit() for character in sentence)
+
+
+# ---------------------------------------------------------------------------
 # telemetry, and the canary's list
 # ---------------------------------------------------------------------------
 

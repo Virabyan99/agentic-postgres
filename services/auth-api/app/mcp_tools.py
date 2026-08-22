@@ -48,7 +48,11 @@ from app.mcp_query import Filter, QueryRefusal, build_request
 from app.mcp_telemetry import Timed
 from app.mcp_upstream import UpstreamRefusal, execute
 
-#: The names, in the order `mcp_lock.EXPECTED_TOOL_NAMES` asserts.
+#: The names `register()` registers TODAY: the metadata and read half of the
+#: lock's roster. Run 4 widened `mcp_lock.EXPECTED_TOOL_NAMES` to six; the two
+#: `WRITE_TOOLS` are registered in Run 5, which restores the equality with the
+#: roster. Until then a test asserts the gap is EXACTLY the write tools, so any
+#: other drift between the two lists still fails.
 TOOL_NAMES = ("describe_resource", "list_resources", "query_resource", "run_report")
 
 #: The ceiling on one tool result, serialized, in bytes.

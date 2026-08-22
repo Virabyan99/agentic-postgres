@@ -42,15 +42,62 @@ INPUT_NOT_PERMITTED: Final = "input_not_permitted"
 SCOPE_NOT_HELD: Final = "scope_not_held"
 BUDGET_EXCEEDED: Final = "budget_exceeded"
 RESOURCE_UNKNOWN: Final = "resource_unknown"
+WRITE_CONFLICT: Final = "write_conflict"
+ROW_NOT_FOUND: Final = "row_not_found"
 
 #: Every token a caller can see. Enumerated so a test can assert the set, and so
 #: adding one is an edit somebody reviews rather than a string somebody types.
+#: `write_conflict` and `row_not_found` are Session 9's (ADR 0139): a
+#: compare-and-swap a caller cannot distinguish from a generic failure is not
+#: one.
 CALLER_FACING_TOKENS: Final = (
     BUDGET_EXCEEDED,
     INPUT_NOT_PERMITTED,
     RESOURCE_UNKNOWN,
+    ROW_NOT_FOUND,
     SCOPE_NOT_HELD,
+    WRITE_CONFLICT,
 )
+
+#: The product's own write-refusal vocabulary, translated (ADR 0139).
+#:
+#: The keys are the `PT` errcodes migration 0019's write RPCs raise; a test
+#: compares them against the migration template so a key the product never
+#: raises cannot sit here looking meaningful. The sentences are THIS
+#: repository's, reviewed here -- the upstream message, details and hint are
+#: discarded, because they are the product's today and an arbitrary string
+#: after the next migration (ADR 0097).
+#:
+#: **Measured, not assumed** (rig4): PostgREST maps `ERRCODE PTxxx` to HTTP
+#: status xxx with the errcode in the body's `code` member -- and status alone
+#: cannot classify a refusal, because a missing argument (`PGRST202`) and the
+#: product's "no such task" (`PT404`) are BOTH a 404. Only the body's code
+#: tells "the function you built a request for does not exist" from "the row
+#: you named does not exist".
+#:
+#: `PT401` is deliberately absent: a caller that reached a tool has already
+#: been authenticated, so a missing request identity there is a fault, not an
+#: instruction. Everything unmapped stays masked (ADR 0130).
+UPSTREAM_WRITE_REFUSALS: Final[dict[str, tuple[str, str]]] = {
+    "PT404": (ROW_NOT_FOUND, "the row this write names does not exist"),
+    "PT409": (WRITE_CONFLICT, "the row is not in the expected state; re-read and retry"),
+    "PT422": (INPUT_NOT_PERMITTED, "this transition would change nothing"),
+}
+
+
+def write_refusal(code: str) -> AgentVisible | None:
+    """The caller-visible form of one upstream write refusal, or None.
+
+    None means "not the caller's to read": the refusal stays structural and the
+    framework's mask replaces it. The mapping is total over the enumerated
+    vocabulary and refuses to guess about anything outside it.
+    """
+    translated = UPSTREAM_WRITE_REFUSALS.get(code)
+    if translated is None:
+        return None
+    token, sentence = translated
+    return AgentVisible(token, sentence)
+
 
 #: The one thing every structural refusal says, and it says nothing.
 #:

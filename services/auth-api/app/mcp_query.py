@@ -38,11 +38,12 @@ as an error -- the worst failure mode available here.
 
 from __future__ import annotations
 
+import json
 import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
-from app.mcp_lock import Resource
+from app.mcp_lock import Resource, WriteSpec
 
 #: How each contract operator is spelled on the wire, and how many operands it
 #: takes. `is_null` is the one whose wire form is not its name.
@@ -96,12 +97,20 @@ class Filter:
 
 @dataclass(frozen=True, slots=True)
 class UpstreamRequest:
-    """A fully-built request. Every member came from the lock or was escaped."""
+    """A fully-built request. Every member came from the lock or was escaped.
+
+    `body` is what the transport sends, verbatim (D477): serialized here, at
+    build time, so `execute` carries no opinion about content -- until Session
+    9 it hardcoded ``b"{}"``, which was enough for the argument-free
+    `run_report` and for nothing else. `None` means "no body", which is every
+    GET.
+    """
 
     method: str
     path: str
     query: str
     timeout_ms: int
+    body: bytes | None = None
 
     @property
     def target(self) -> str:
@@ -253,4 +262,70 @@ def build_request(
         path=resource.operation.path,
         query=query,
         timeout_ms=timeout_ms,
+        # A read that POSTs (an RPC) sends the empty argument document; the
+        # arguments a read expresses all live in the query string.
+        body=b"{}" if resource.operation.method == "post" else None,
+    )
+
+
+def build_write_request(
+    write: WriteSpec,
+    *,
+    timeout_ms: int,
+    arguments: dict[str, Any],
+) -> UpstreamRequest:
+    """The write branch of request building (D477): a body and no query.
+
+    **No `select`, no `limit`, no filters, no ordering** -- a write is
+    one-to-one with its operation and projects nothing (D470), so the query
+    string is empty and everything the caller says travels as the JSON argument
+    document.
+
+    Arguments are validated **by name against the lock's declared list**, in
+    both directions: an unknown name is refused because a caller supplies
+    values and never names (ADR 0127), and a missing name is refused because
+    PostgREST resolves a function by the names supplied -- measured (rig4): a
+    missing or extra name is a `404 PGRST202`, the same status as the product's
+    own "no such task", so the place to stop a bad argument list is HERE, where
+    the refusal can still name the input rather than the schema.
+
+    Values must be scalars. Measured: PostgREST coerces a JSON number where the
+    function takes `text` (`7` -> `"7"`), so a number is honest input; an
+    object or array in an argument position is a document where a value
+    belongs, and nothing in the reviewed surface takes one.
+    """
+    if write.operation.method != "post":  # pragma: no cover -- load_lock refuses it first
+        raise QueryRefusal(f"the lock names method {write.operation.method!r} for a write")
+
+    declared = set(write.arguments)
+    supplied = set(arguments)
+    unknown = sorted(supplied - declared)
+    if unknown:
+        raise QueryRefusal(
+            f"{unknown} are not arguments of this operation; it takes {list(write.arguments)}"
+        )
+    missing = sorted(declared - supplied)
+    if missing:
+        raise QueryRefusal(
+            f"this operation requires {missing}; a caller supplies a value for every "
+            "declared argument"
+        )
+
+    for name, value in arguments.items():
+        if not isinstance(value, (str, int, float, bool)):
+            raise QueryRefusal(
+                f"argument {name!r} must be a string, a number or a boolean, "
+                f"not {type(value).__name__}"
+            )
+
+    body = json.dumps(
+        {name: arguments[name] for name in write.arguments}, sort_keys=True, ensure_ascii=False
+    ).encode("utf-8")
+
+    return UpstreamRequest(
+        method=write.operation.method,
+        path=write.operation.path,
+        query="",
+        timeout_ms=timeout_ms,
+        body=body,
     )

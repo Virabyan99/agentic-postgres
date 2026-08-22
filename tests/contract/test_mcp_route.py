@@ -263,14 +263,41 @@ def _minimal_lock() -> dict[str, Any]:
                 "resources": [resource] if reads else [],
             }
         )
+    # The two write tools Run 4 added to the roster: load_lock refuses a lock
+    # without them, so the minimal valid lock is six tools now.
+    for name, scope, arguments in (
+        ("create_note", "notes:write", ["p_title", "p_content"]),
+        ("update_task_status", "tasks:write", ["p_task_id", "p_expected_status", "p_new_status"]),
+    ):
+        tools.append(
+            {
+                "name": name,
+                "kind": "write",
+                "source": "postgrest",
+                "timeout_ms": 5000,
+                "discovery_scope_sets": [[scope]],
+                "descriptions": [],
+                "resources": [],
+                "operation": {
+                    "method": "post",
+                    "path": f"/rpc/{name}",
+                    "operation_id": f"rpc.{name}.post",
+                },
+                "arguments": arguments,
+                "required_scopes": [scope],
+                "max_affected_rows": 1,
+                "idempotent": name == "update_task_status",
+                "audit_redact": ["p_content"] if name == "create_note" else [],
+            }
+        )
     return {
         "schema_version": 1,
         "contract_id": "x",
         "project_key": "probe-dev",
         "upstream": "https://probe.test/api/rest",
         "canonical_sha256": "a" * 64,
-        "capability_count": 5,
-        "tool_count": 4,
+        "capability_count": 7,
+        "tool_count": 6,
         "tools": tools,
     }
 

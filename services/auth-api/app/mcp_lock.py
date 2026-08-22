@@ -33,15 +33,30 @@ from typing import Any
 #: this code.
 SUPPORTED_SCHEMA_VERSION = 1
 
-#: The two tools that answer from the lock, and the two that reach PostgREST.
-#: Named rather than inferred from `kind`, so that a lock which changed a tool's
-#: kind cannot silently move it between the two paths.
+#: The two tools that answer from the lock, the two that read PostgREST, and
+#: the two that write it (Session 9 Run 4, D486). Named rather than inferred
+#: from `kind`, so that a lock which changed a tool's kind cannot silently move
+#: it between the paths -- and since Run 4 the declared kind must AGREE with
+#: the roster, so it cannot even say so.
 METADATA_TOOLS = ("describe_resource", "list_resources")
 READ_TOOLS = ("query_resource", "run_report")
+WRITE_TOOLS = ("create_note", "update_task_status")
 
-#: Exactly four, and the names in lexicographic order (ADR 0127). Asserted at
-#: load, so a lock with a fifth tool never reaches registration.
-EXPECTED_TOOL_NAMES = tuple(sorted((*METADATA_TOOLS, *READ_TOOLS)))
+#: Exactly six, and the names in lexicographic order (ADR 0127, amended by the
+#: capability plan's rows 5 and 6 arriving in Session 9). Asserted at load, so
+#: a lock with a seventh tool never reaches registration -- the number moved in
+#: Run 4 and the property did not: the surface is enumerated, not discovered.
+EXPECTED_TOOL_NAMES = tuple(sorted((*METADATA_TOOLS, *READ_TOOLS, *WRITE_TOOLS)))
+
+#: What the roster says each tool's `kind` must be. A lock that names
+#: `create_note` with `kind: read` is describing a different tool wearing a
+#: reviewed name, and refusing it at load is cheaper than discovering it at
+#: dispatch.
+EXPECTED_KINDS = {
+    **{name: "metadata" for name in METADATA_TOOLS},
+    **{name: "read" for name in READ_TOOLS},
+    **{name: "write" for name in WRITE_TOOLS},
+}
 
 
 class LockError(Exception):
@@ -83,8 +98,30 @@ class Resource:
 
 
 @dataclass(frozen=True, slots=True)
+class WriteSpec:
+    """The write half of a tool: one operation, an argument contract, a bound.
+
+    `arguments` is the reviewed contract's list in PostgreSQL parameter order —
+    the names a caller supplies values for, and the only names it may supply
+    (D470). `max_affected_rows` is carried for the executor to check **against
+    the response**, never to trust (D487).
+    """
+
+    operation: Operation
+    arguments: tuple[str, ...]
+    required_scopes: tuple[str, ...]
+    max_affected_rows: int
+    idempotent: bool
+
+
+@dataclass(frozen=True, slots=True)
 class Tool:
-    """One registered tool and the resources behind it (ADR 0120)."""
+    """One registered tool and the resources or write behind it (ADR 0120).
+
+    `audit_redact` is the lock's per-tool redaction list (D479): the parameter
+    names replaced before an audit record's parameter document is written. Run
+    6 is its consumer; it is parsed here because the lock is parsed here.
+    """
 
     name: str
     kind: str
@@ -93,6 +130,8 @@ class Tool:
     discovery_scope_sets: tuple[tuple[str, ...], ...]
     descriptions: tuple[str, ...]
     resources: tuple[Resource, ...]
+    write: WriteSpec | None = None
+    audit_redact: tuple[str, ...] = ()
 
     def discoverable_by(self, scopes: frozenset[str]) -> bool:
         """Whether a caller holding `scopes` may see this tool at all.
@@ -207,11 +246,23 @@ def _tool(entry: Any) -> Tool:
         raise LockError(f"tool {name} declares no discovery_scope_sets")
     discovery = tuple(_strings(item, f"tool {name} scope set") for item in scope_sets)
 
+    expected_kind = EXPECTED_KINDS.get(name)
+    if expected_kind is not None and kind != expected_kind:
+        raise LockError(
+            f"tool {name} declares kind {kind!r}; the roster says {expected_kind!r}. A "
+            "reviewed name with a different kind is a different tool wearing it"
+        )
+
     resources = tuple(_resource(item, name) for item in entry.get("resources", []) if True)
     if name in READ_TOOLS and not resources:
         raise LockError(f"tool {name} reads a backend and names no resource")
     if name in METADATA_TOOLS and resources:
         raise LockError(f"tool {name} answers from the lock and must name no resource")
+    # The third arm (D486): a write is one-to-one with its operation, so it
+    # selects among no resources and must carry the write shape instead.
+    if name in WRITE_TOOLS and resources:
+        raise LockError(f"tool {name} writes one operation and must name no resource")
+    write = _write(entry, name) if name in WRITE_TOOLS else None
 
     return Tool(
         name=name,
@@ -221,6 +272,49 @@ def _tool(entry: Any) -> Tool:
         discovery_scope_sets=discovery,
         descriptions=_strings(entry.get("descriptions", []), f"tool {name} descriptions"),
         resources=resources,
+        write=write,
+        audit_redact=_strings(entry.get("audit_redact", []), f"tool {name} audit_redact"),
+    )
+
+
+def _write(entry: Any, tool_name: str) -> WriteSpec:
+    """The write shape, required in full or refused (D470).
+
+    The same strictness `_resource` applies to a read: every member here
+    decides what a caller can do, so a lenient default would be a bound nobody
+    reviewed. `max_affected_rows` below 1 is a write that may change nothing it
+    can report, and an operation whose method is not `post` is a write wearing
+    a read's verb -- the compiler refuses both upstream, and the lock is
+    validated as if the compiler had not (a lock is an input, not a teammate).
+    """
+    where = f"tool {tool_name}"
+    operation = _require(entry, "operation", dict, where)
+    method = _require(operation, "method", str, f"{where}.operation").lower()
+    if method != "post":
+        raise LockError(f"{where} writes over {method.upper()}; a write is a POST")
+
+    bound = _require(entry, "max_affected_rows", int, where)
+    if bound < 1:
+        raise LockError(f"{where}.max_affected_rows is {bound}; a write bounded to nothing")
+
+    idempotent = entry.get("idempotent")
+    if not isinstance(idempotent, bool):
+        raise LockError(f"{where}.idempotent is not a boolean")
+
+    arguments = _strings(entry.get("arguments"), f"{where}.arguments")
+    if not arguments:
+        raise LockError(f"{where} declares no arguments; 0019's writes all take some")
+
+    return WriteSpec(
+        operation=Operation(
+            method=method,
+            path=_require(operation, "path", str, f"{where}.operation"),
+            operation_id=_require(operation, "operation_id", str, f"{where}.operation"),
+        ),
+        arguments=arguments,
+        required_scopes=_strings(entry.get("required_scopes"), f"{where}.required_scopes"),
+        max_affected_rows=bound,
+        idempotent=idempotent,
     )
 
 
