@@ -1,22 +1,30 @@
-"""The four tools, and there are exactly four.
+"""The six tools, and there are exactly six.
 
-`docs/capability-plan.md` has named them since Session 1 and Run 3 compiled them:
-`list_resources`, `describe_resource`, `query_resource`, `run_report`. This
-module registers them and nothing else. A fifth is refused by `mcp_lock` before
-registration is reached, and the registered names are asserted lexicographically
-against the lock.
+`docs/capability-plan.md` has named them since Session 1: `list_resources`,
+`describe_resource`, `query_resource`, `run_report`, and — since Session 9 —
+`create_note` and `update_task_status`. This module registers them and nothing
+else. A seventh is refused by `mcp_lock` before registration is reached, and the
+registered names are asserted against the lock's roster.
 
 **Two of them reach nothing.** `list_resources` and `describe_resource` answer
 from the loaded lock: no OpenAPI request, no database, no upstream call at all
 (ADR 0127). Discovery therefore describes what a human approved, which is a
 different question from what a service happens to be exposing.
 
-**Two of them reach PostgREST, as the caller.** `query_resource` and
-`run_report` build their request from the lock with `mcp_query` and send it with
-the caller's own token (ADR 0125). They never resolve the caller's context
-themselves: it is resolved once per HTTP request by
-`AgentContextMiddleware` and read with `current_agent_context()`, so there is one
-resolution per request and one place that decides what a refusal is.
+**Two of them read PostgREST, as the caller.** `query_resource` and `run_report`
+build their request from the lock with `mcp_query` and send it with the caller's
+own token (ADR 0125). They never resolve the caller's context themselves: it is
+resolved once per HTTP request by `AgentContextMiddleware` and read with
+`current_agent_context()`, so there is one resolution per request and one place
+that decides what a refusal is.
+
+**Two of them write it, one-to-one with a reviewed operation.** A write selects
+among no resources (D486): it names one operation from the lock, supplies a
+value for every argument the lock declares and no others, and is bounded to
+`max_affected_rows` — checked against the response rather than trusted (D487).
+The argument NAMES a caller uses are the lock's own, which are the reviewed
+function's parameter names, because translating them here would be a second
+naming authority for a list the contract already froze.
 
 **Scope is checked here as well as by the database**, and the two are different
 questions. The lock says which scopes a capability requires; the database says
@@ -24,6 +32,12 @@ which rows this owner may see. A caller holding `notes:read` and asking for
 tasks is refused by the first without troubling the second — and a caller
 holding both still sees only its owner's rows, because RLS does not consult a
 scope.
+
+**And the check here is the boundary, not the roster.**
+`ToolVisibilityMiddleware` hides a name a caller could not use, but a hidden
+tool is still callable by name — measured (ADR 0140, rig5 M2). So
+`_resource_for` and `_write_for` refuse at call time, and discovery filtering is
+disclosure control on top of that, never instead of it.
 """
 
 from __future__ import annotations
@@ -43,17 +57,28 @@ from app.mcp_errors import (
     AgentVisible,
     as_tool_error,
 )
-from app.mcp_lock import CapabilityLock, LockError, Resource
-from app.mcp_query import Filter, QueryRefusal, build_request
+from app.mcp_lock import CapabilityLock, LockError, Resource, WriteSpec
+from app.mcp_query import Filter, QueryRefusal, build_request, build_write_request
 from app.mcp_telemetry import Timed
-from app.mcp_upstream import UpstreamRefusal, execute
+from app.mcp_upstream import UpstreamRefusal, execute, execute_write
 
-#: The names `register()` registers TODAY: the metadata and read half of the
-#: lock's roster. Run 4 widened `mcp_lock.EXPECTED_TOOL_NAMES` to six; the two
-#: `WRITE_TOOLS` are registered in Run 5, which restores the equality with the
-#: roster. Until then a test asserts the gap is EXACTLY the write tools, so any
-#: other drift between the two lists still fails.
-TOOL_NAMES = ("describe_resource", "list_resources", "query_resource", "run_report")
+#: The names `register()` registers, written out rather than imported from
+#: `mcp_lock`.
+#:
+#: **Two lists that must agree, not one list read twice** (D486). A test asserts
+#: `TOOL_NAMES == EXPECTED_TOOL_NAMES`; aliasing the constant would make that
+#: test compare a value with itself, which is the shape §6 names -- a test
+#: between two constants is not testing the thing between them. Run 4 widened the
+#: lock's roster to six and this list stayed at four for one run, with the gap
+#: asserted exactly; Run 5 registers the writes and restores the equality.
+TOOL_NAMES = (
+    "create_note",
+    "describe_resource",
+    "list_resources",
+    "query_resource",
+    "run_report",
+    "update_task_status",
+)
 
 #: The ceiling on one tool result, serialized, in bytes.
 #:
@@ -114,6 +139,37 @@ def _resource_for(lock: CapabilityLock, tool: str, name: str) -> Resource:
             SCOPE_NOT_HELD, f"this resource requires {sorted(resource.required_scopes)}"
         )
     return resource
+
+
+def _write_for(lock: CapabilityLock, tool: str) -> WriteSpec:
+    """One write tool's operation, with the caller's scopes checked first.
+
+    **`_resource_for`'s twin, and the boundary a hidden name does not replace.**
+    `ToolVisibilityMiddleware` keeps `create_note` out of a read-only agent's
+    roster, and a caller that knows the name can still send it -- measured
+    (ADR 0140, rig5 M2). This is the check that refuses, and `AGT-WRITE-001`
+    asserts both halves separately for that reason.
+
+    A write names no resource (D486), so there is no second name to resolve: the
+    tool IS the operation, and the only question is whether this caller holds
+    what the lock says the operation requires.
+    """
+    try:
+        declared = lock.tool(tool)
+    except LockError as error:  # pragma: no cover -- load_lock refuses this first
+        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
+
+    spec = declared.write
+    if spec is None:  # pragma: no cover -- load_lock requires the write shape
+        # Structural rather than caller-visible: a registered write tool whose
+        # lock entry carries no write shape is a deployment fault, and nothing
+        # the caller did produced it.
+        raise ToolRefusal(STRUCTURAL_REFUSAL)
+
+    held = _scopes()
+    if [scope for scope in spec.required_scopes if scope not in held]:
+        raise AgentVisible(SCOPE_NOT_HELD, f"this tool requires {sorted(spec.required_scopes)}")
+    return spec
 
 
 def list_resources(lock: CapabilityLock) -> dict[str, Any]:
@@ -225,7 +281,20 @@ def _within_budget(result: dict[str, Any], max_rows: int) -> dict[str, Any]:
         # a fault in the deployment rather than in the request. Nothing the
         # caller did produced it and nothing it can do fixes it.
         raise ToolRefusal(STRUCTURAL_REFUSAL)
+    return _within_byte_budget(result)
 
+
+def _within_byte_budget(result: dict[str, Any]) -> dict[str, Any]:
+    """The byte ceiling alone, on every result this process returns.
+
+    **Split out because the write path is a caller of it** (§6 question 5: when
+    a decision is implemented, which of its callers got it?). `MAX_SERIALIZED_BYTES`
+    is ADR 0129's response bound, and it was reachable only through the row
+    check -- so a write result, which has no row ceiling to check, would have
+    been the one path returning an unbounded response. `content` is an unbounded
+    `text` column and `create_note` echoes the created row back, so the ceiling
+    is not theoretical there.
+    """
     serialized = len(json.dumps(result, separators=(",", ":")).encode("utf-8"))
     if serialized > MAX_SERIALIZED_BYTES:
         # Caller-visible, and the advice is the point: this is the one budget a
@@ -272,6 +341,58 @@ def run_report(lock: CapabilityLock, *, base_url: str, token: str) -> dict[str, 
     return rows[0]
 
 
+def invoke_write(
+    lock: CapabilityLock,
+    *,
+    base_url: str,
+    token: str,
+    tool: str,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """One reviewed write, as the caller, and the row it committed.
+
+    **The body of both write tools**, parameterised by name rather than written
+    twice: the two differ only in which operation the lock names and which
+    arguments it declares, and a second copy would be a second place to review.
+    The name is `register()`'s, from the roster -- never a caller's, which is
+    what keeps this from being the generic dispatcher ADR 0127 forbids.
+
+    The order is the point. Scopes are checked before an argument is looked at,
+    arguments are checked against the lock before a request is built, and the
+    request is built before anything is dialled -- so a refusable call costs no
+    upstream request and every refusal names the input rather than the schema.
+
+    **`execute_write`'s `AgentVisible` passes straight through.** A translated
+    `PT` refusal (ADR 0139) is the caller's to read and act on -- a
+    compare-and-swap conflict is a retry instruction -- so it is deliberately
+    not caught here beside the structural one.
+
+    The result is the one row the operation returned, byte-bounded like a read's
+    (ADR 0129). `row_count` is present because `bounded()` reads it for the
+    telemetry record, and it is the count of rows this write actually affected.
+    """
+    spec = _write_for(lock, tool)
+
+    try:
+        request = build_write_request(
+            spec, timeout_ms=lock.tool(tool).timeout_ms, arguments=arguments
+        )
+    except QueryRefusal as error:
+        raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
+
+    try:
+        rows = execute_write(base_url, token, request, max_affected_rows=spec.max_affected_rows)
+    except UpstreamRefusal as error:
+        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
+
+    if len(rows) != 1:
+        # Both reviewed writes are `RETURNS <composite>` -- exactly one row
+        # (D487). Zero is a shape that changed underneath the lock, and the
+        # write has already committed, so this is loud rather than quiet.
+        raise ToolRefusal(STRUCTURAL_REFUSAL)
+    return _within_byte_budget({"tool": tool, "row_count": len(rows), "row": rows[0]})
+
+
 def _filter(entry: Any) -> Filter:
     """One caller filter object, shaped before it is checked.
 
@@ -295,10 +416,10 @@ def _filter(entry: Any) -> Filter:
 def register(
     server: Any, lock: CapabilityLock, *, base_url: str, slots: ReadSlots | None = None
 ) -> tuple[str, ...]:
-    """Register exactly the four tools and return their names.
+    """Register exactly the six tools and return their names.
 
     The names are returned rather than assumed so a test can compare them with
-    the lock's, which is the check that a fifth tool -- or a renamed one --
+    the lock's, which is the check that a seventh tool -- or a renamed one --
     fails offline rather than on a cluster.
 
     Each closure reads the caller's token from the context resolved for this
@@ -309,7 +430,9 @@ def register(
 
     read_slots = slots if slots is not None else ReadSlots(DEFAULT_MAX_CONCURRENT_READS)
 
-    async def bounded(tool: str, resource: str | None, work: Any) -> dict[str, Any]:
+    async def bounded(
+        tool: str, resource: str | None, work: Any, *, upstream: bool
+    ) -> dict[str, Any]:
         """One boundary for every tool call: measure, bound, translate.
 
         **Three jobs in one place**, and the alternative is three decorators
@@ -327,6 +450,17 @@ def register(
         the framework lets past `mask_error_details`. Everything else stays a
         plain exception and is masked -- so a refusal is silent unless somebody
         chose otherwise.
+
+        **`upstream` is a separate argument, and it used to be `resource is
+        None`** (D495). One value was carrying two ideas -- *"names no resource
+        in the telemetry record"* and *"does not reach upstream, so takes no
+        slot"* -- which agreed for as long as every upstream tool had a resource.
+        A write has neither: it is one-to-one with its operation, so there is no
+        resource to name, and it reaches PostgREST, so it must take a slot.
+        Inferring the second from the first would have registered both writes as
+        unbounded work on the event loop, which is D451 restored by accident and
+        D463's shape exactly -- one name, two meanings, correct until the day
+        they part.
         """
         with Timed(tool, resource=resource) as timed:
             try:
@@ -336,7 +470,7 @@ def register(
                 timed.principal(agent_id=None, owner_id=None)
 
             try:
-                if resource is None:
+                if not upstream:
                     # Metadata: the lock is in memory, so this is a dict lookup
                     # and belongs on the loop. No slot, no thread.
                     result = work()
@@ -378,14 +512,17 @@ def register(
     async def _list_resources() -> dict[str, Any]:
         """The resources this deployment's agent surface can query, and the
         scope each one needs. Read from the deployed lock; reaches no database."""
-        return await bounded("list_resources", None, lambda: list_resources(lock))
+        return await bounded("list_resources", None, lambda: list_resources(lock), upstream=False)
 
     @server.tool(name="describe_resource", timeout=seconds("describe_resource"))
     async def _describe_resource(tool: str, resource: str) -> dict[str, Any]:
         """One resource's frozen columns, permitted filters and permitted
         ordering, exactly as the lock froze them. Read from the deployed lock."""
         return await bounded(
-            "describe_resource", None, lambda: describe_resource(lock, tool=tool, resource=resource)
+            "describe_resource",
+            None,
+            lambda: describe_resource(lock, tool=tool, resource=resource),
+            upstream=False,
         )
 
     @server.tool(name="query_resource", timeout=seconds("query_resource"))
@@ -415,6 +552,7 @@ def register(
                 order_by=order_by,
                 limit=limit,
             ),
+            upstream=True,
         )
 
     @server.tool(name="run_report", timeout=seconds("run_report"))
@@ -425,6 +563,65 @@ def register(
             "run_report",
             "owner_activity_report",
             lambda: run_report(lock, base_url=base_url, token=current_token()),
+            upstream=True,
+        )
+
+    # The two writes. **Their parameters are the lock's declared argument names**
+    # -- `p_title`, `p_task_id` -- rather than friendlier ones mapped here: the
+    # reviewed contract froze that list, `build_write_request` checks a caller's
+    # names against it in both directions, and a translation layer would be a
+    # second naming authority for one list. `docs/mcp-tool-catalog.md` publishes
+    # the same names from the same contract, so a caller can read them.
+    #
+    # **Every argument is required**, including the one the SQL function
+    # defaults. A caller supplies a value for every declared argument (Run 4),
+    # because PostgREST resolves a function by the names supplied and a missing
+    # one is a `404 PGRST202` -- the same status as the product's own "no such
+    # row", with the opposite meaning (rig4, ADR 0139).
+
+    @server.tool(name="create_note", timeout=seconds("create_note"))
+    async def _create_note(p_title: str, p_content: str) -> dict[str, Any]:
+        """Create one note owned by the caller's owner, and return the created
+        row. Bounded to one row; the owner is the caller's, never an argument."""
+        return await bounded(
+            "create_note",
+            None,
+            lambda: invoke_write(
+                lock,
+                base_url=base_url,
+                token=current_token(),
+                tool="create_note",
+                arguments={"p_title": p_title, "p_content": p_content},
+            ),
+            upstream=True,
+        )
+
+    @server.tool(name="update_task_status", timeout=seconds("update_task_status"))
+    async def _update_task_status(
+        p_task_id: str, p_expected_status: str, p_new_status: str
+    ) -> dict[str, Any]:
+        """Move one of the caller's owner's tasks from an expected status to a
+        new one.
+
+        A compare-and-swap: the write is refused when the expected status no
+        longer holds, and that refusal reaches the caller as `write_conflict`
+        because its next move is to re-read and retry (ADR 0139).
+        """
+        return await bounded(
+            "update_task_status",
+            None,
+            lambda: invoke_write(
+                lock,
+                base_url=base_url,
+                token=current_token(),
+                tool="update_task_status",
+                arguments={
+                    "p_task_id": p_task_id,
+                    "p_expected_status": p_expected_status,
+                    "p_new_status": p_new_status,
+                },
+            ),
+            upstream=True,
         )
 
     return TOOL_NAMES

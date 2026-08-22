@@ -33,7 +33,7 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 
 from app import settings as settings_module
 from app.claims import ClaimError, verify_claims
-from app.mcp_authorization import AgentContextMiddleware
+from app.mcp_authorization import AgentContextMiddleware, ToolVisibilityMiddleware
 from app.mcp_lock import load_lock
 from app.mcp_origin import RefuseBrowserOrigins
 from app.tokens import LocalKeySet, MalformedToken, pre_parse
@@ -265,11 +265,12 @@ def build_server(
     lock: Any | None = None,
     max_concurrent_reads: int | None = None,
 ) -> Any:
-    """The FastMCP server, its four tools, and its private health routes.
+    """The FastMCP server, its six tools, and its private health routes.
 
-    Run 6 registers exactly four tools from the compiled capability lock. Called
-    without one -- which only a test does -- the server has none, which is true,
-    as against a placeholder that would be a discovery response that lies.
+    Six tools are registered from the compiled capability lock -- four since
+    Session 8 Run 6, and the two writes since Session 9 Run 5. Called without a
+    lock -- which only a test does -- the server has none, which is true, as
+    against a placeholder that would be a discovery response that lies.
 
     **The health routes are served here and published nowhere** (ADR 0128).
     Measured against the pinned framework: a `custom_route` mounts at the
@@ -278,18 +279,29 @@ def build_server(
     an unauthenticated caller 401. So "health answered" cannot be read as
     "authentication is off".
 
-    **The authorization middleware is here from Run 5, before any tool exists**,
-    and that order is deliberate. It resolves the caller's context on the way in
-    (ADR 0125), so a tool added in Run 6 cannot be written against a request that
-    has no context: there is no such request. A middleware added afterwards would
-    have to be remembered by every tool author, which is the shape of D333.
+    **The authorization middleware is here from Session 8 Run 5, before any tool
+    existed**, and that order is deliberate. It resolves the caller's context on
+    the way in (ADR 0125), so a tool added later cannot be written against a
+    request that has no context: there is no such request. A middleware added
+    afterwards would have to be remembered by every tool author, which is the
+    shape of D333.
+
+    **The visibility middleware is second, and the order is measured** (ADR
+    0140, rig5 M3): it reads in `on_list_tools` the context the first sets in
+    `on_request`, so the first must run first. It is added only with a lock,
+    because there is nothing to filter without one and a lockless server has no
+    roster to hide.
     """
     from fastmcp import FastMCP
+
+    middleware: list[Any] = [AgentContextMiddleware(postgrest_url)]
+    if lock is not None:
+        middleware.append(ToolVisibilityMiddleware(lock))
 
     server = FastMCP(
         name=f"agentic-postgres/{project_key}",
         auth=verifier,
-        middleware=[AgentContextMiddleware(postgrest_url)],
+        middleware=middleware,
         # Details of an internal failure are not an agent's to read (ADR 0097).
         mask_error_details=True,
     )

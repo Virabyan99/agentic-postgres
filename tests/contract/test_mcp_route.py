@@ -461,35 +461,26 @@ def test_every_agent_plane_object_the_framework_wires_is_a_framework_type() -> N
     was the same seam: a unit test that calls `verify_token` or `on_request`
     directly never asks the framework to accept the object.
 
-    Asserted as a pair, so a third wired object added later has an obvious place
-    to be listed.
+    Asserted as a set, so a wired object added later has an obvious place to be
+    listed -- and Session 9 Run 5 added the third, `ToolVisibilityMiddleware`.
     """
     from fastmcp.server.auth import TokenVerifier
     from fastmcp.server.middleware import Middleware
 
-    from app.mcp_authorization import AgentContextMiddleware
+    from app.mcp_authorization import AgentContextMiddleware, ToolVisibilityMiddleware
     from app.mcp_runtime import AgentTokenVerifier
 
     assert issubclass(AgentTokenVerifier, TokenVerifier)
     assert issubclass(AgentContextMiddleware, Middleware)
+    assert issubclass(ToolVisibilityMiddleware, Middleware)
 
 
-def test_a_request_reaches_a_tool_through_the_real_middleware_pipeline(
-    tmp_path: Any, monkeypatch: Any
-) -> None:
-    """The seam itself, exercised (D450).
+def _pipeline_roster(tmp_path: Any, monkeypatch: Any, *scopes: str) -> list[str]:
+    """The names one caller sees, through the assembled server's own pipeline.
 
-    Not `middleware.on_request(...)` -- the framework's own pipeline, reached by
-    calling a registered tool. This is the arrangement that raised "object is not
-    callable" for three runs while every unit test passed.
-
-    **The token is arranged HERE** (D494). This test passed four gates without
-    arranging one, because a concurrency test in `test_mcp_authorization` was
-    leaving a fake `get_access_token` installed in the framework module for the
-    rest of the process -- so alone, the middleware correctly refused the
-    tokenless request and this test failed for the thing it never supplied. A
-    pipeline behind an authenticating middleware needs a caller, and the caller
-    is this test's to provide.
+    Measured (rig5 M4): `FastMCP.list_tools()` RUNS the middleware chain, so this
+    exercises `on_request` and `on_list_tools` together rather than measuring
+    registration and calling it discovery.
     """
     import asyncio
 
@@ -508,21 +499,66 @@ def test_a_request_reaches_a_tool_through_the_real_middleware_pipeline(
         lambda base_url, token: AgentContext(
             agent_id="agent-1",
             role_name="r",
-            scopes=("meta:read", "notes:read"),
+            scopes=tuple(scopes),
             authz_version=1,
             owner_id="owner-1",
         ),
     )
     monkeypatch.setattr(mcp_tools, "execute", lambda *_, **__: [{"title": "alpha"}])
 
-    server = _built_server(tmp_path)
-    tools = asyncio.run(server.list_tools())
+    return sorted(tool.name for tool in asyncio.run(_built_server(tmp_path).list_tools()))
 
-    assert sorted(tool.name for tool in tools) == [
+
+def test_a_request_reaches_a_tool_through_the_real_middleware_pipeline(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """The seam itself, exercised (D450).
+
+    Not `middleware.on_request(...)` -- the framework's own pipeline, reached by
+    listing the registered tools. This is the arrangement that raised "object is
+    not callable" for three runs while every unit test passed.
+
+    **The token is arranged HERE** (D494). This test passed four gates without
+    arranging one, because a concurrency test in `test_mcp_authorization` was
+    leaving a fake `get_access_token` installed in the framework module for the
+    rest of the process -- so alone, the middleware correctly refused the
+    tokenless request and this test failed for the thing it never supplied. A
+    pipeline behind an authenticating middleware needs a caller, and the caller
+    is this test's to provide.
+
+    **Six tools are registered and this caller sees four** (ADR 0140): the two
+    writes are filtered out by `ToolVisibilityMiddleware`, which reads the
+    context the first middleware resolved. That makes this the pipeline proof for
+    BOTH wired middlewares -- the second could not answer at all if the first had
+    not run.
+    """
+    seen = _pipeline_roster(tmp_path, monkeypatch, "meta:read", "notes:read")
+
+    assert seen == ["describe_resource", "list_resources", "query_resource", "run_report"]
+
+
+def test_the_assembled_pipeline_shows_a_writer_the_names_it_can_use(
+    tmp_path: Any, monkeypatch: Any
+) -> None:
+    """**The control for the filter, through the same pipeline** (ADR 0140).
+
+    Without it, the four names above are equally consistent with a plane that
+    registered four tools and with one that hides two from everybody. The same
+    server, the same lock, a caller holding the write scopes -- and all six
+    appear. `register()` returning six is asserted elsewhere; this is the seam
+    where the roster is actually built.
+    """
+    seen = _pipeline_roster(
+        tmp_path, monkeypatch, "meta:read", "notes:read", "notes:write", "tasks:write"
+    )
+
+    assert seen == [
+        "create_note",
         "describe_resource",
         "list_resources",
         "query_resource",
         "run_report",
+        "update_task_status",
     ]
 
 

@@ -2,8 +2,9 @@
 """Generate the MCP tool catalog from the committed capability contract.
 
 The catalog is what a person reads to find out what this deployment's agent
-surface offers: four tools, the scopes each needs, and for the read tools the
-frozen columns, filters and orderings behind them. It is derived from
+surface offers: every tool the contract carries, the scopes each needs, and for
+the read tools the frozen columns, filters and orderings behind them. It is
+derived from
 ``contracts/snapshots/mcp/mcp-capabilities.canonical.json`` -- the compiled,
 project-neutral contract ``bin/mcp-contract.sh`` produces and checks -- for the
 reason ``render-acceptance-matrix.py`` derives its tables from the registry: a

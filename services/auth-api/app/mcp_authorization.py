@@ -34,6 +34,7 @@ from typing import Any
 
 from fastmcp.server.middleware import Middleware as _Middleware
 
+from app.mcp_lock import CapabilityLock, LockError
 from app.mcp_upstream import AgentContext, UpstreamRefusal, resolve_agent_context
 
 #: The resolved context for the request currently being served, or `None`.
@@ -173,3 +174,50 @@ class AgentContextMiddleware(_Middleware):
             # is what makes "never across requests" a property of the mechanism
             # rather than of this function remembering to clear up.
             _CURRENT.reset(reset)
+
+
+class ToolVisibilityMiddleware(_Middleware):
+    """`tools/list`, filtered by what the caller could actually use (ADR 0140).
+
+    **`Tool.discoverable_by`'s first production caller** (D476). It was compiled
+    into the lock, asserted by two contract tests, and reached by nothing --
+    D454's family, the seam nobody crossed, and recorded as that rather than
+    repaired quietly, because the class is what predicts the next one.
+
+    **Hiding a name is not a boundary, and that is measured** (rig5 M2): a tool
+    absent from the roster is still callable by name, and it runs. So this
+    middleware is disclosure control -- it stops a roster advertising what it
+    would refuse -- and the boundary is each tool's own scope check at call
+    time. Both levels exist, both are proved separately, and neither substitutes
+    for the other.
+
+    **It reads the context and never resolves one.** `on_request` has already
+    run for this HTTP request, and `current_agent_context()` answers from the
+    `ContextVar` it set -- measured over a real HTTP transport rather than the
+    in-memory client, with a control that saw `None` when the first middleware
+    set nothing (M3). Resolving here would be a second round trip and a second
+    place deciding what a refusal is, which is the whole of ADR 0125 undone.
+
+    A registered name the lock does not carry is **hidden**, not shown: a name
+    nobody reviewed is not a name to advertise. `load_lock` makes that
+    unreachable in a deployment, and it is the fail-closed direction anyway.
+    """
+
+    def __init__(self, lock: CapabilityLock) -> None:
+        super().__init__()
+        self._lock = lock
+
+    async def on_list_tools(self, context: Any, call_next: Any) -> Any:
+        # Read BEFORE `call_next`, so a request with no context refuses
+        # discovery outright rather than building a roster and discarding it.
+        # `current_agent_context` raises, and a plain exception is masked
+        # (ADR 0130) -- a caller with no context is told nothing.
+        held = frozenset(current_agent_context().scopes)
+        return [tool for tool in await call_next(context) if self._visible(tool.name, held)]
+
+    def _visible(self, name: str, held: frozenset[str]) -> bool:
+        try:
+            declared = self._lock.tool(name)
+        except LockError:
+            return False
+        return declared.discoverable_by(held)

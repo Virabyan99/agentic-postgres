@@ -272,6 +272,15 @@ def test_the_deployed_document_publishes_the_route_the_container_serves(
     The `mcp` block is asserted beside the route because outputs v12 publishes
     both, and ADR 0123's protocol revision is a fact about the runtime that only
     a running one can supply.
+
+    **The document's `tool_count` and this caller's roster are different numbers,
+    and that is the decision rather than a discrepancy** (ADR 0140, D496). The
+    document says what the deployment SERVES -- six since Session 9 -- and
+    `tools/list` says what THIS caller may see. The probe agent holds
+    `meta:read` and `notes:read`, so it sees three names: `run_report` needs
+    `notes:read` AND `tasks:read` as a conjunction (D421), and both writes need a
+    write scope it does not hold. The Session 9 plan expected six from both and
+    was written before the filter existed.
     """
     answer = mcp_rpc(mcp_route, token=mcp_agent_session["token"], method="tools/list")
     assert answer.status == 200, f"{mcp_route} answered {answer.status}: {answer.body[:200]}"
@@ -282,8 +291,10 @@ def test_the_deployed_document_publishes_the_route_the_container_serves(
         "frames even a single JSON-RPC result as text/event-stream (D458)"
     )
     names = sorted(tool["name"] for tool in result["result"]["tools"])
-    assert names == ["describe_resource", "list_resources", "query_resource", "run_report"], (
-        f"the deployed plane serves {names}; the contract is exactly four tools (ADR 0127)"
+    assert names == ["describe_resource", "list_resources", "query_resource"], (
+        f"the deployed plane showed this agent {names}. It holds "
+        f"{mcp_agent_session['scopes']}, so the roster is the three names those scopes "
+        "reach -- an enumerated surface, filtered per caller (ADR 0127, ADR 0140)"
     )
 
     published = project_a.get("mcp") or {}
@@ -296,7 +307,11 @@ def test_the_deployed_document_publishes_the_route_the_container_serves(
         f"accepted_token_use is {published.get('accepted_token_use')!r}; ADR 0115 makes it "
         "a document FIELD rather than a sentence in a runbook (D413)"
     )
-    assert published.get("tool_count") == 4
+    assert published.get("tool_count") == 6, (
+        f"the document publishes tool_count {published.get('tool_count')!r}. This is what "
+        "the deployment SERVES and is read from the compiled lock, so it does not move "
+        "with the caller -- unlike the roster above (ADR 0140)"
+    )
 
 
 @pytest.mark.parametrize("path", ["/health/live", "/health/ready"])
@@ -591,13 +606,18 @@ def test_discovery_against_the_deployed_plane_is_filtered_by_the_agents_scopes(
     mcp_rpc: Callable[..., Any],
     mcp_agent_session: dict[str, Any],
 ) -> None:
-    """**AGT-SCOPE-001.** A tool list that advertises what it will refuse lies.
+    """**AGT-SCOPE-001**, at the RESOURCE level, and it is one of two.
 
     The deployed agent holds `meta:read` and `notes:read` and **not**
     `tasks:read`, so `run_report` -- which requires both, as a conjunction
-    (D421) -- must not appear among the resources discovery returns, while the
-    four tool NAMES still do. The two halves are different things and the proof
-    says which is which.
+    (D421) -- must not appear among the resources discovery returns.
+
+    **This test's docstring used to end "while the four tool NAMES still do",
+    and Session 9 Run 5 made that false** (ADR 0140): `run_report`'s NAME is now
+    filtered too, by `ToolVisibilityMiddleware`. The sentence is replaced rather
+    than deleted, because the distinction it drew is still the point and is now
+    proved by a stricter pair -- the name half is asserted beside it below, and a
+    resource hidden behind a name that STAYS visible is what this half measures.
     """
     answer = mcp_rpc(
         mcp_route,
@@ -617,6 +637,60 @@ def test_discovery_against_the_deployed_plane_is_filtered_by_the_agents_scopes(
         f"the agent holds {mcp_agent_session['scopes']} and was shown "
         "owner_activity_report, which requires notes:read AND tasks:read. A flat scope "
         "list cannot tell 'any of' from 'all of' (D421)"
+    )
+
+
+def test_a_read_only_agent_can_neither_discover_nor_invoke_a_write_on_the_deployment(
+    mcp_route: str,
+    mcp_rpc: Callable[..., Any],
+    mcp_agent_session: dict[str, Any],
+) -> None:
+    """**AGT-WRITE-001**, both halves, against the deployed plane (ADR 0140).
+
+    The probe agent is an `agent_reader` holding `meta:read` and `notes:read`.
+
+    **Discovery.** Neither write name appears in its `tools/list`, and
+    `query_resource` does -- the positive is what stops an empty or failed
+    roster from satisfying the exclusion, which is this repository's recorded
+    failure mode for exactly this shape.
+
+    **Invocation.** Hiding a name is measured NOT to be a boundary (rig5 M2): a
+    tool absent from the roster is still callable by name. So the call is made
+    anyway, with the name the roster refused to show, and it must be refused --
+    with the tool's required scope named, which is a fact about this surface, and
+    never the caller's own scopes back at it.
+    """
+    listed = mcp_rpc(mcp_route, token=mcp_agent_session["token"], method="tools/list")
+    assert listed.status == 200, f"tools/list failed: {listed.body[:200]}"
+    names = {tool["name"] for tool in sse_result(listed.body)["result"]["tools"]}
+
+    assert "query_resource" in names, (
+        f"the agent holds {mcp_agent_session['scopes']} and was shown {sorted(names)}; a "
+        "roster missing the tool it CAN use would satisfy the exclusions below while "
+        "proving nothing about filtering"
+    )
+    assert "create_note" not in names and "update_task_status" not in names, (
+        f"a read-only agent was shown {sorted(names)}. A write name in a reader's roster "
+        "fails AGT-WRITE-001 on its own words (D476)"
+    )
+
+    called = mcp_rpc(
+        mcp_route,
+        token=mcp_agent_session["token"],
+        method="tools/call",
+        params={"name": "create_note", "arguments": {"p_title": "t", "p_content": "c"}},
+    )
+    result = sse_result(called.body)
+    assert result is not None, f"the reply carried no SSE data line: {called.body[:200]!r}"
+    body = json.dumps(result)
+
+    assert "scope_not_held" in body, (
+        f"calling a hidden write was not refused with scope_not_held: {body[:400]}. Hiding "
+        "the name is not the boundary -- a hidden tool is still callable (rig5 M2)"
+    )
+    assert "notes:read" not in body, (
+        "the refusal repeated the caller's own scopes back to it; it names what the TOOL "
+        "requires and nothing about this token (ADR 0097)"
     )
 
 

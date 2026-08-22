@@ -1,8 +1,11 @@
-"""The four tools, the adapter, and AGT-SQL-001 (Session 8, Run 6).
+"""The six tools, the adapter, and AGT-SQL-001 (Session 8 Run 6; Session 9 Runs 4-5).
 
-**This module carries four of the five `AGT-*` requirements** that pointed at
-placeholders in `tests/integration/test_future_mcp.py` until now (D414), and the
-placeholders are gone with them.
+**This module carries four of the five Session 8 `AGT-*` requirements** that
+pointed at placeholders in `tests/integration/test_future_mcp.py` until then
+(D414), and the placeholders are gone with them. Session 9 added the write half:
+the lock's write shape and the write request in Run 4, and the two write TOOLS
+plus name-level discovery filtering in Run 5 — which is `AGT-WRITE-001`'s
+offline arm, both of its halves, at the bottom of this file.
 
 The construction rule these tests enforce was **measured against a live
 PostgREST on the locked digest**, twice, because the obvious answers were wrong:
@@ -73,8 +76,36 @@ NOTES = Resource(
 )
 
 
+CREATE_SPEC = WriteSpec(
+    operation=Operation(
+        method="post", path="/rpc/create_note", operation_id="rpc.create_note.post"
+    ),
+    arguments=("p_title", "p_content"),
+    required_scopes=("notes:write",),
+    max_affected_rows=1,
+    idempotent=False,
+)
+
+UPDATE_SPEC = WriteSpec(
+    operation=Operation(
+        method="post",
+        path="/rpc/update_task_status",
+        operation_id="rpc.update_task_status.post",
+    ),
+    arguments=("p_task_id", "p_expected_status", "p_new_status"),
+    required_scopes=("tasks:write",),
+    max_affected_rows=1,
+    idempotent=True,
+)
+
+
 def _lock(*resources: Resource) -> CapabilityLock:
-    """A lock carrying the four required tools, with `resources` under query."""
+    """A lock carrying the six required tools, with `resources` under query.
+
+    Six since Session 9 Run 5, because `register()` registers six and a fixture
+    short of one would make every registration test fail for the fixture rather
+    than for the thing it measures.
+    """
     from app.mcp_lock import Tool
 
     return CapabilityLock(
@@ -82,9 +113,30 @@ def _lock(*resources: Resource) -> CapabilityLock:
         project_key="probe-dev",
         upstream="https://probe.test/api/rest",
         canonical_sha256="a" * 64,
-        tool_count=4,
-        capability_count=5,
+        tool_count=6,
+        capability_count=7,
         tools=(
+            Tool(
+                "create_note",
+                "write",
+                "postgrest",
+                5000,
+                (("notes:write",),),
+                (),
+                (),
+                write=CREATE_SPEC,
+                audit_redact=("p_content",),
+            ),
+            Tool(
+                "update_task_status",
+                "write",
+                "postgrest",
+                5000,
+                (("tasks:write",),),
+                (),
+                (),
+                write=UPDATE_SPEC,
+            ),
             Tool("describe_resource", "metadata", "lock", 1000, (("meta:read",),), (), ()),
             Tool("list_resources", "metadata", "lock", 1000, (("meta:read",),), (), ()),
             Tool(
@@ -300,7 +352,9 @@ class _Registry:
         return keep
 
 
-def test_a_metadata_tool_takes_no_concurrency_slot_and_a_read_does(monkeypatch: Any) -> None:
+def test_a_metadata_tool_takes_no_slot_and_a_read_and_a_write_both_do(
+    monkeypatch: Any,
+) -> None:
     """**ADR 0129**, asserted through `register()` rather than around it (D454).
 
     The rule -- the two metadata tools answer from the lock and take no slot --
@@ -315,6 +369,13 @@ def test_a_metadata_tool_takes_no_concurrency_slot_and_a_read_does(monkeypatch: 
     upstream, and it must be seen holding a slot. Without it, an assertion that
     the metadata path leaves the semaphore full is satisfied by a semaphore
     nothing ever touches.
+
+    **A write is the third arm, and it is D495's proof.** `bounded` used to
+    infer "reaches upstream" from `resource is not None`, and a write has NO
+    resource -- it is one-to-one with its operation -- while reaching PostgREST.
+    Under the old inference both writes would have run unbounded on the event
+    loop, which is D451 restored by accident. The arm below is what fails if the
+    inference comes back.
     """
     import asyncio
 
@@ -324,7 +385,7 @@ def test_a_metadata_tool_takes_no_concurrency_slot_and_a_read_does(monkeypatch: 
     slots = ReadSlots(2)
     seen: dict[str, int] = {}
 
-    _with_scopes(monkeypatch, "meta:read", "notes:read")
+    _with_scopes(monkeypatch, "meta:read", "notes:read", "notes:write")
     monkeypatch.setattr(mcp_authorization, "current_token", lambda: "t")
 
     def watching(label: str, payload: dict[str, Any]) -> Any:
@@ -340,6 +401,11 @@ def test_a_metadata_tool_takes_no_concurrency_slot_and_a_read_does(monkeypatch: 
         "query_resource",
         watching("read", {"resource": "notes", "row_count": 0, "rows": []}),
     )
+    monkeypatch.setattr(
+        mcp_tools,
+        "invoke_write",
+        watching("write", {"tool": "create_note", "row_count": 1, "row": {}}),
+    )
 
     registry = _Registry()
     assert mcp_tools.register(registry, lock, base_url=BASE, slots=slots) == mcp_tools.TOOL_NAMES
@@ -347,6 +413,12 @@ def test_a_metadata_tool_takes_no_concurrency_slot_and_a_read_does(monkeypatch: 
 
     asyncio.run(registry.tools["list_resources"]())
     assert seen["meta"] == slots.limit, "a metadata tool must not queue behind a read"
+
+    asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+    assert seen["write"] == slots.limit - 1, (
+        "a write reaches upstream and must hold a slot; it names no resource, so "
+        "inferring that from `resource is None` puts it on the event loop (D495)"
+    )
 
     asyncio.run(registry.tools["query_resource"](resource="notes"))
     assert seen["read"] == slots.limit - 1, "the CONTROL: a read must be seen holding a slot"
@@ -511,20 +583,24 @@ def test_nothing_dials_the_locks_published_upstream() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_the_roster_is_six_and_the_registered_gap_is_exactly_the_writes() -> None:
-    """**Replaced the equality with an exact-gap statement, for one run (D486).**
+def test_the_registered_roster_is_the_locks_roster_and_it_is_six() -> None:
+    """**The equality, restored (D486).**
 
-    Until Run 4 this asserted `mcp_tools.TOOL_NAMES == EXPECTED_TOOL_NAMES`.
-    Run 4 widened the lock's roster to six; Run 5 registers the two writes and
-    restores the equality. In between, the honest assertion is that the gap
-    between what `register()` serves and what the lock demands is EXACTLY the
-    write tools — an exact set, never a subset (D300), so a seventh name or a
-    renamed read still fails here.
+    Run 4 widened the lock's roster to six and left `register()` at four, and for
+    exactly one run this asserted the gap was EXACTLY `WRITE_TOOLS` — an exact
+    set, never a subset (D300). Run 5 registers the two writes, so the gap is
+    empty and the honest assertion is equality again.
+
+    **Two lists, not one read twice.** `mcp_tools.TOOL_NAMES` is written out in
+    that module rather than imported from `mcp_lock`; aliasing the constant would
+    make this line compare a value with itself, which is §6's *"a test comparing
+    two constants is not testing the thing between them"* with only one constant
+    left to compare.
     """
     assert EXPECTED_TOOL_NAMES == tuple(sorted((*METADATA_TOOLS, *READ_TOOLS, *WRITE_TOOLS)))
     assert len(EXPECTED_TOOL_NAMES) == 6
-    assert set(EXPECTED_TOOL_NAMES) - set(mcp_tools.TOOL_NAMES) == set(WRITE_TOOLS)
-    assert set(mcp_tools.TOOL_NAMES) == set(METADATA_TOOLS) | set(READ_TOOLS)
+    assert mcp_tools.TOOL_NAMES == EXPECTED_TOOL_NAMES
+    assert set(WRITE_TOOLS) <= set(mcp_tools.TOOL_NAMES)
 
 
 def _write_tool_entry(name: str) -> dict[str, Any]:
@@ -751,15 +827,9 @@ def test_a_degenerate_write_member_is_refused(
 # the write request (Session 9 Run 4 — D477, D470, rig4)
 # ---------------------------------------------------------------------------
 
-CREATE_WRITE = WriteSpec(
-    operation=Operation(
-        method="post", path="/rpc/create_note", operation_id="rpc.create_note.post"
-    ),
-    arguments=("p_title", "p_content"),
-    required_scopes=("notes:write",),
-    max_affected_rows=1,
-    idempotent=False,
-)
+#: The same spec `_lock()` carries, so the request tests and the registration
+#: tests cannot drift into describing two different `create_note`s.
+CREATE_WRITE = CREATE_SPEC
 
 
 def test_a_write_request_is_a_body_and_no_query() -> None:
@@ -978,3 +1048,403 @@ def test_the_write_body_is_what_the_transport_sends(monkeypatch: Any) -> None:
 
     assert seen["data"] == request.body
     assert seen["content_type"] == "application/json"
+
+
+# ---------------------------------------------------------------------------
+# the two write TOOLS, and AGT-WRITE-001 (Session 9 Run 5 — ADR 0140, D476)
+# ---------------------------------------------------------------------------
+
+
+def _registered(monkeypatch: Any, *scopes: str) -> tuple[Any, Any]:
+    """`register()` run against the six-tool lock, with a caller holding `scopes`."""
+    from app.mcp_budgets import ReadSlots
+
+    lock = _lock(NOTES)
+    _with_scopes(monkeypatch, *scopes)
+    monkeypatch.setattr(mcp_authorization, "current_token", lambda: "the.callers.token")
+
+    registry = _Registry()
+    mcp_tools.register(registry, lock, base_url=BASE, slots=ReadSlots(2))
+    return lock, registry
+
+
+def test_a_write_tool_exposes_the_locks_own_argument_names_in_order() -> None:
+    """The reviewed contract froze the argument list, so the tool exposes it.
+
+    **A translation layer here would be a second naming authority** for one
+    list, and it would fail four steps away: `build_write_request` checks a
+    caller's names against the lock in BOTH directions, and PostgREST resolves a
+    function by the names supplied -- a renamed parameter is a `404 PGRST202`
+    upstream, the same status as the product's own "no such row" with the
+    opposite meaning (rig4).
+
+    Asserted against the signature rather than a comment, and in ORDER, because
+    parameter order is what the contract carries (D470).
+    """
+    import inspect
+
+    from app.mcp_budgets import ReadSlots
+
+    registry = _Registry()
+    mcp_tools.register(registry, _lock(NOTES), base_url=BASE, slots=ReadSlots(2))
+
+    for name, spec in (("create_note", CREATE_SPEC), ("update_task_status", UPDATE_SPEC)):
+        signature = inspect.signature(registry.tools[name])
+        assert tuple(signature.parameters) == spec.arguments, (
+            f"{name} exposes {tuple(signature.parameters)}, the lock declares {spec.arguments}"
+        )
+        for parameter in signature.parameters.values():
+            assert parameter.default is inspect.Parameter.empty, (
+                f"{name}.{parameter.name} has a default; a caller supplies a value for "
+                "every declared argument, because a missing one is a PGRST202 upstream"
+            )
+
+
+def test_a_write_reaches_the_operation_the_lock_names_with_the_callers_token(
+    monkeypatch: Any,
+) -> None:
+    """The whole write path through the registered tool, stubbed at the dial.
+
+    **The control for every refusal below.** Without an arm that succeeds, a
+    write path that refused everything would pass all of them.
+    """
+    import asyncio
+
+    _, registry = _registered(monkeypatch, "notes:write")
+    seen: dict[str, Any] = {}
+
+    def capture(base_url: str, token: str, request: Any, *, max_affected_rows: int) -> Any:
+        seen.update(
+            base_url=base_url,
+            token=token,
+            target=request.target,
+            method=request.method,
+            body=json.loads(request.body),
+            bound=max_affected_rows,
+        )
+        return [{"id": "note-1", "title": "t"}]
+
+    monkeypatch.setattr(mcp_tools, "execute_write", capture)
+    result = asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+
+    assert seen["target"] == "/rpc/create_note", "the path comes from the lock, not the caller"
+    assert seen["method"] == "post"
+    assert seen["body"] == {"p_title": "t", "p_content": "c"}
+    assert seen["bound"] == 1, "the lock's max_affected_rows, handed to the executor (D487)"
+    assert seen["token"] == "the.callers.token"  # noqa: S105 -- the forwarded value, asserted
+    assert seen["base_url"] == BASE
+    assert result == {"tool": "create_note", "row_count": 1, "row": {"id": "note-1", "title": "t"}}
+
+
+def test_a_write_the_caller_holds_no_scope_for_is_refused_before_any_dial(
+    monkeypatch: Any,
+) -> None:
+    """**AGT-WRITE-001**, the invocation half — refused, not merely hidden.
+
+    A read-only agent that knows the name and sends it anyway is refused here,
+    and nothing is dialled: the executor is replaced by one that fails the test
+    if it is reached, so "refused" cannot be satisfied by an upstream that
+    happened to say no.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    _, registry = _registered(monkeypatch, "meta:read", "notes:read", "tasks:read")
+
+    def unreachable(*_: Any, **__: Any) -> Any:
+        raise AssertionError("a write was dialled for a caller holding no write scope")
+
+    monkeypatch.setattr(mcp_tools, "execute_write", unreachable)
+
+    with pytest.raises(ToolError, match="notes:write") as created:
+        asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+    with pytest.raises(ToolError, match="tasks:write"):
+        asyncio.run(
+            registry.tools["update_task_status"](
+                p_task_id="t", p_expected_status="todo", p_new_status="done"
+            )
+        )
+
+    assert "notes:read" not in str(created.value), (
+        "the refusal names the scopes the TOOL needs, never the ones the caller holds -- "
+        "the second would be this process repeating a caller's own token back to it"
+    )
+
+
+def test_holding_one_write_scope_does_not_carry_the_other(monkeypatch: Any) -> None:
+    """`notes:write` is not `tasks:write`; the two writes are separate grants.
+
+    The control is the first half: the same caller, the same rig, and the tool it
+    DOES hold the scope for must go through. Without it this passes against a
+    write path that refuses everything.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    _, registry = _registered(monkeypatch, "notes:write")
+    monkeypatch.setattr(mcp_tools, "execute_write", lambda *_, **__: [{"id": "x"}])
+
+    served = asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+    assert served["row_count"] == 1
+
+    with pytest.raises(ToolError, match="tasks:write"):
+        asyncio.run(
+            registry.tools["update_task_status"](
+                p_task_id="t", p_expected_status="todo", p_new_status="done"
+            )
+        )
+
+
+def test_a_write_result_is_byte_bounded_like_a_read(monkeypatch: Any) -> None:
+    """§6 question 5: which of `MAX_SERIALIZED_BYTES`' callers got it? (D497)
+
+    The ceiling was reachable only through the ROW check, and a write has no row
+    ceiling -- so the write path would have been the one route returning an
+    unbounded response. `content` is an unbounded `text` column and `create_note`
+    echoes the created row back, so this is not theoretical.
+
+    Caller-visible, because it is the one budget a caller can stay inside by
+    asking differently.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    _, registry = _registered(monkeypatch, "notes:write")
+    monkeypatch.setattr(mcp_tools, "execute_write", lambda *_, **__: [{"content": "x" * 2_000_000}])
+
+    with pytest.raises(ToolError, match="ceiling"):
+        asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+
+
+def test_a_translated_write_refusal_reaches_the_caller_through_the_tool(
+    monkeypatch: Any,
+) -> None:
+    """ADR 0139 through the registered tool, not only through the executor.
+
+    `invoke_write` catches `UpstreamRefusal` and must NOT catch `AgentVisible`: a
+    compare-and-swap conflict is a retry instruction and is the caller's to read.
+    The structural arm beside it is the control -- an unmapped refusal stays
+    masked, so the first assertion is not satisfied by a path that relays
+    everything.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    _, registry = _registered(monkeypatch, "tasks:write")
+
+    def conflicted(*_: Any, **__: Any) -> Any:
+        raise AgentVisible(WRITE_CONFLICT, "the row is not in the expected state")
+
+    monkeypatch.setattr(mcp_tools, "execute_write", conflicted)
+    with pytest.raises(ToolError, match="write_conflict"):
+        asyncio.run(
+            registry.tools["update_task_status"](
+                p_task_id="t", p_expected_status="todo", p_new_status="done"
+            )
+        )
+
+    def structural(*_: Any, **__: Any) -> Any:
+        raise UpstreamRefusal("upstream refused with status 500")
+
+    monkeypatch.setattr(mcp_tools, "execute_write", structural)
+    with pytest.raises(ToolRefusal):
+        asyncio.run(
+            registry.tools["update_task_status"](
+                p_task_id="t", p_expected_status="todo", p_new_status="done"
+            )
+        )
+
+
+def test_a_write_argument_the_lock_does_not_declare_is_refused(monkeypatch: Any) -> None:
+    """The lock's argument list, enforced where a caller reaches it.
+
+    The registered signature already refuses an unknown keyword, so this asserts
+    the module function rather than relying on Python's own `TypeError` to be the
+    boundary.
+    """
+    lock, _ = _registered(monkeypatch, "notes:write")
+
+    with pytest.raises(AgentVisible, match="p_owner_id"):
+        mcp_tools.invoke_write(
+            lock,
+            base_url=BASE,
+            token="t",  # noqa: S106 -- a placeholder, not a credential
+            tool="create_note",
+            arguments={"p_title": "t", "p_content": "c", "p_owner_id": "someone-else"},
+        )
+
+
+def test_a_write_whose_response_is_not_one_row_is_a_loud_structural_fault(
+    monkeypatch: Any,
+) -> None:
+    """D487: both writes are `RETURNS <composite>`, so zero rows is a shape that
+    changed underneath the lock — and the write has already committed."""
+    lock, _ = _registered(monkeypatch, "notes:write")
+    monkeypatch.setattr(mcp_tools, "execute_write", lambda *_, **__: [])
+
+    with pytest.raises(ToolRefusal):
+        mcp_tools.invoke_write(
+            lock,
+            base_url=BASE,
+            token="t",  # noqa: S106 -- a placeholder, not a credential
+            tool="create_note",
+            arguments={"p_title": "t", "p_content": "c"},
+        )
+
+
+# ---------------------------------------------------------------------------
+# discovery filters NAMES as well as resources (Session 9 Run 5 — ADR 0140, D476)
+# ---------------------------------------------------------------------------
+
+
+class _Listed:
+    """The least of a framework tool object the visibility filter reads."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+def _visible_to(
+    monkeypatch: Any, lock: Any, *scopes: str, roster: tuple[str, ...] = ()
+) -> list[str]:
+    """The roster `on_list_tools` returns to a caller holding `scopes`.
+
+    The context is supplied by patching `current_agent_context` in the module the
+    middleware reads it from -- which is the same accessor production uses, and
+    the same one `AgentContextMiddleware` populates. Nothing here resolves a
+    context, exactly as nothing in the middleware does.
+    """
+    import asyncio
+
+    from app.mcp_authorization import ToolVisibilityMiddleware
+
+    monkeypatch.setattr(
+        mcp_authorization,
+        "current_agent_context",
+        lambda: AgentContext(
+            agent_id="agent-1",
+            role_name="apg_probe_dev_agent_writer",
+            scopes=tuple(scopes),
+            authz_version=1,
+            owner_id=OWNER,
+        ),
+    )
+
+    async def call_next(_: Any) -> Any:
+        return [_Listed(name) for name in (roster or EXPECTED_TOOL_NAMES)]
+
+    listed = asyncio.run(ToolVisibilityMiddleware(lock).on_list_tools(None, call_next))
+    return sorted(tool.name for tool in listed)
+
+
+def test_a_write_name_is_hidden_from_a_caller_without_its_scope(monkeypatch: Any) -> None:
+    """**AGT-WRITE-001**, the discovery half — and `discoverable_by`'s first
+    production caller (D476).
+
+    The reader arm and the writer arm together are what make either meaningful: a
+    filter that hid everything would pass the first alone, and one that hid
+    nothing would pass the second alone.
+    """
+    lock = _lock(NOTES)
+
+    reader = _visible_to(monkeypatch, lock, "meta:read", "notes:read")
+    assert reader == ["describe_resource", "list_resources", "query_resource"], (
+        f"a read-only agent was shown {reader}"
+    )
+
+    writer = _visible_to(monkeypatch, lock, "meta:read", "notes:write", "tasks:write")
+    assert "create_note" in writer and "update_task_status" in writer, (
+        "THE CONTROL: an agent holding both write scopes must see both names, or the "
+        "exclusion above is satisfied by a filter that hides everything"
+    )
+
+
+def test_hiding_a_name_does_not_refuse_the_call_and_that_is_why_both_exist(
+    monkeypatch: Any,
+) -> None:
+    """**The two levels are distinct, and the framework is why** (ADR 0140).
+
+    Measured on the pinned version (rig5 M2): a tool absent from `tools/list` is
+    still callable by name, and it runs. So the roster is disclosure control and
+    the scope check at call time is the boundary. A proof that asserted only the
+    hiding would describe a control the framework does not provide.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    lock = _lock(NOTES)
+    assert "create_note" not in _visible_to(monkeypatch, lock, "meta:read", "notes:read")
+
+    _, registry = _registered(monkeypatch, "meta:read", "notes:read")
+    monkeypatch.setattr(
+        mcp_tools, "execute_write", lambda *_, **__: pytest.fail("the hidden write was dialled")
+    )
+
+    with pytest.raises(ToolError, match="notes:write"):
+        asyncio.run(registry.tools["create_note"](p_title="t", p_content="c"))
+
+
+def test_a_visible_name_can_still_hide_a_resource_behind_it(monkeypatch: Any) -> None:
+    """**Both levels, in one caller.** The name filter and the resource filter are
+    different mechanisms answering different questions.
+
+    `query_resource`'s NAME is visible to an agent holding `notes:read`; the
+    `owner_activity_report` RESOURCE is not, because it needs `notes:read` AND
+    `tasks:read`, a conjunction (D421). Session 8 proved the resource half
+    against a roster that hid nothing; this proves the pair.
+    """
+    lock = _lock(NOTES)
+
+    names = _visible_to(monkeypatch, lock, "meta:read", "notes:read")
+    assert "query_resource" in names, "the name of a tool the caller CAN use is shown"
+    assert "run_report" not in names, "and the name of one it cannot use is not"
+
+    _with_scopes(monkeypatch, "meta:read", "notes:read")
+    resources = {entry["resource"] for entry in list_resources(lock)["resources"]}
+    assert resources == {"notes"}, (
+        f"the resource level is a separate filter and returned {resources}"
+    )
+
+
+def test_a_registered_name_the_lock_does_not_carry_is_hidden(monkeypatch: Any) -> None:
+    """Fail closed: a name nobody reviewed is not a name to advertise.
+
+    `load_lock` makes this unreachable in a deployment, which is exactly why the
+    branch needs a test — nothing else would ever execute it. The caller holds
+    every scope, so it cannot pass by the scope check instead.
+    """
+    shown = _visible_to(
+        monkeypatch,
+        _lock(NOTES),
+        "meta:read",
+        "notes:read",
+        "tasks:read",
+        "notes:write",
+        "tasks:write",
+        roster=("list_resources", "delete_everything"),
+    )
+
+    assert shown == ["list_resources"], f"a name absent from the lock was advertised: {shown}"
+
+
+def test_discovery_with_no_resolved_context_refuses_rather_than_listing() -> None:
+    """No context, no roster.
+
+    Refused rather than answered with an empty list, because an empty roster is a
+    statement about this caller and a refusal is not. `call_next` fails the test
+    if it is reached, so the check is proved to happen BEFORE the roster is built.
+    """
+    import asyncio
+
+    from app.mcp_authorization import ToolVisibilityMiddleware
+
+    async def call_next(_: Any) -> Any:
+        raise AssertionError("the roster was built before the context was checked")
+
+    with pytest.raises(UpstreamRefusal):
+        asyncio.run(ToolVisibilityMiddleware(_lock(NOTES)).on_list_tools(None, call_next))

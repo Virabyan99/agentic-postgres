@@ -568,8 +568,9 @@ def build_override(
                 ),
                 "volumes": [
                     f"{rendered_directory}/{JWKS_FILENAME}:{MCP_JWKS_CONTAINER_PATH}:ro",
-                    # Run 6. The compiled capability lock -- the whole of what
-                    # this deployment's four tools serve (ADR 0127).
+                    # The compiled capability lock -- the whole of what this
+                    # deployment's tools serve, and the roster they are
+                    # enumerated from (ADR 0127).
                     f"{rendered_directory}/{MCP_LOCK_FILENAME}:{MCP_LOCK_CONTAINER_PATH}:ro",
                 ],
             },

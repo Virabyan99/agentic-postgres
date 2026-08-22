@@ -26,6 +26,15 @@ bound is **1 affected row** on both, and that is the function's own shape —
 each RPC returns a single composite row, not a set — rather than a ceiling
 chosen to look safe (D487).
 
+**Six is what the deployment serves; it is not what any one caller sees.**
+`tools/list` is filtered by the caller's own scopes, so an agent holding
+`meta:read` and `notes:read` is shown three names and an agent holding both
+write scopes is shown six. The scope column below is what decides it, as a
+disjunction of conjunctions — `query_resource` needs `notes:read` **or**
+`tasks:read`, `run_report` needs both (ADR 0140, D421). **Hiding a name is not
+the boundary**: a caller that knows a hidden name can still send it, and what
+refuses the call is the same scope check, applied again when the tool runs.
+
 **A caller supplies values. It never supplies syntax.** The operation is chosen
 **by name from the lock**; columns, operators and orderings are checked against
 frozen sets *before* a request is built; and each value is escaped for the one
