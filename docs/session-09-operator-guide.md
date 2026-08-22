@@ -144,23 +144,38 @@ Both role names are in the project's `outputs.json` under `database.roles`.
 
 ### Step 1 — Transport the release
 
+**The bundle is named for the release, and that is not cosmetic** (D504). The
+generic `/tmp/apg.bundle` collides: Session 8's trip left that exact path on the
+host owned by `apg-agent`, `/tmp` is sticky, and `op` cannot overwrite a file it
+does not own. The `scp` refuses — loudly — and the *next* command in this step
+then succeeds against the stale file and checks out a **previous** release.
+
 ```bash
 # On the workstation:
-wsl bash -lc "cd ~/projects/agentic-postgres && git bundle create /tmp/apg.bundle main"
-wsl bash -lc "scp -i ~/.ssh/agentic_postgres_ed25519 /tmp/apg.bundle op@62.238.99.122:/tmp/"
+wsl bash -lc "cd ~/projects/agentic-postgres && SHA=\$(git rev-parse --short HEAD) && \
+  git bundle create /tmp/apg-\${SHA}.bundle main && echo \"bundled \${SHA}\""
+wsl bash -lc "scp -i ~/.ssh/agentic_postgres_ed25519 /tmp/apg-<sha>.bundle op@62.238.99.122:/tmp/"
 ```
 
 Then, on the host:
 
 ```bash
 cd ~op/agentic-postgres          # /home/op/agentic-postgres, NOT ~/op/...
-git fetch /tmp/apg.bundle main && git checkout -B main FETCH_HEAD
+git fetch /tmp/apg-<sha>.bundle main
+git rev-parse FETCH_HEAD         # confirm this is the sha you bundled, BEFORE the checkout
+git checkout -B main FETCH_HEAD
 ```
 
 `git fetch` then `git checkout -B`, **not** a fast-forward merge.
 
 **Read the `release <sha>` line and confirm it is the sha you fetched.** A
-skipped fetch has already produced one deploy of the previous commit.
+skipped fetch has already produced one deploy of the previous commit — and D504
+is a second road to the same place, which is why `git rev-parse FETCH_HEAD` is
+now a step of its own rather than a sentence after the fact.
+
+Old bundles are never cleaned up; nine of them are on the host. Leave them —
+`op` cannot remove the ones `apg-agent` wrote, and a per-release name means it
+never needs to.
 
 ### Step 2 — Re-render all four projects, on the host
 
