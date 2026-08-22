@@ -217,6 +217,18 @@
       "template": "templates/0018-agent-read-plane.sql",
       "template_sha256": "d3e1f31636e0d97e164a00c5547fc485841e38d7d6e5f5d7916540cb59697237",
       "version": "20260819120018"
+    },
+    {
+      "canonical_render_sha256": "947d561a1dfe0c2f4b137630d5fc01b275f97f694d9b91edb9c995bd5293ff06",
+      "name": "agent_write_and_audit_plane",
+      "placeholders": [
+        "agent_reader",
+        "agent_writer",
+        "object_owner"
+      ],
+      "template": "templates/0019-agent-write-and-audit-plane.sql",
+      "template_sha256": "32bbcb6d3a51f1fa8c18bdaa0a10534075f31352dec73d7a04cb349c95736c82",
+      "version": "20260822120019"
     }
   ],
   "schema_version": 1

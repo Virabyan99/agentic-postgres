@@ -61,7 +61,7 @@ Six columns, the house shape. The "summary says" column quotes
 is confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D489.**
+**Next free number after this table is D492.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -85,6 +85,9 @@ is confirmed, corrected or replaced during implementation, and anything found
 | **D486** | "no generic dispatcher" — four tools become six. | **"Exactly four" is asserted in five independent places**, which is the design working: `mcp_lock.METADATA_TOOLS`/`READ_TOOLS`/`EXPECTED_TOOL_NAMES` (a fifth tool fails `load_lock` before registration), `mcp_tools.TOOL_NAMES`, two contract tests in `test_mcp_tools.py`, the prose in `docs/mcp-tool-catalog.md`, and `test_mcp_catalog.py` comparing the prose to the contract. | **All of them re-derive to six, in one run**, with `WRITE_TOOLS` added beside the other two tuples so the number stays computed. **A seventh tool must still fail the start, offline**, and a test proves it after the change, not only before. | ADR 0127's "there are exactly four" was never about the number — it was about the surface being enumerated rather than discovered. Widening it by editing one of five copies and leaving four is **D416's shape**, where a constant existed precisely so the proof could read it and three restatements survived anyway. | — |
 | **D487** | "bounded side effects". | Both RPCs are `RETURNS api.notes` / `RETURNS api.tasks` — **a single composite row, not `SETOF`**. `max_affected_rows` for each is therefore **1**, and that is the function's actual shape rather than a ceiling chosen to look safe. | `max_affected_rows: 1` on both write capabilities, with the reason at the entry, and the bound checked **against the response** rather than trusted. | This is `run_report`'s `max_rows: 1` argument again, and the manifest already states it: *"the function's actual shape — it returns exactly one row — rather than a bound chosen to look safe."* A bound larger than the operation can produce is a bound that can never fire, which is a control measuring nothing. | — |
 | **D488** | — (found at plan time, reading `compose.yaml`). | Moving `CURRENT_SESSION` to 9 arms a `session9` Compose profile. **No service declares one**, because Session 9 adds no container: writes and the audit calls live in the existing `mcp` runtime, and the admin endpoint in the existing auth-api. | **No new service, no new profile, no change to `DEFERRED_SERVICES`.** The plan states it so that an empty profile is not mistaken for a missing one during the trip. | Session 7 Run 9 moved the constant and the next deploy immediately tried to start a storage container that failed closed without its secrets, so the guide had to say so **before** the step. The inverse — a constant that arms nothing — is worth the same sentence, because the operator will look for the container that did not appear. | — |
+| **D489** | — (measured during Run 1). D480 says the write RPCs append their own audit row so that a write cannot happen unaudited by any route. | **A row written inside the transaction it describes can record a COMMITTED change and nothing else.** Measured on the pinned image: a write that `RAISE`s aborts the transaction and the audit row inserted before the raise goes with it — 0 rows, against a paired positive that leaves 1. There is no arrangement of exception blocks or subtransactions that keeps it: a handler discards its savepoint just as surely as an aborting transaction does. Recording a failed write durably would need an autonomous transaction, which is a second connection, which is the credential this plane does not hold (D407). | **The table carries a `source` column and the two records are named as different artefacts.** A `database` row records what CHANGED and is the only kind that can say `committed`; an `agent_plane` row records what was ATTEMPTED and is the only kind that can say `refused` or `failed`. `agent_audit_complete` **refuses** the `committed` outcome, so the agent plane cannot label its own attempt as a change that happened. | The plan said the two records "answer different questions" and did not say this, which would have left the next reader expecting failed writes in the database record and finding none. **The paired positive is what makes the negative mean anything**: zero rows is also what a table nothing ever writes to looks like, and that is the shape D269 is about. | 0135 |
+| **D490** | Run 1: *"Both reviewed into `contracts/postgrest-api-surface.yaml`'s `agent_rpcs:` block."* | **`agent_rpcs` structurally cannot hold them.** `api_surface.py` refuses any entry declaring arguments and the schema states it as `maxItems: 0`, because *"PostgREST serves a stable function over GET as well as POST, so an argument here reaches the query string."* The audit functions cannot be argument-free — `complete` must name the record it closes. **Measured on PostgREST v14.16, and both predictions were wrong**: a GET on a VOLATILE function is **not** refused (200, argument taken from the query string), so volatility protects nothing; but a function that actually **writes** is refused **405 / `25006 cannot execute INSERT in a read-only transaction`** — D474's mechanism, arriving from the other side. | **A fourth section, `agent_write_rpcs`**, POST-only, arguments enumerated. **`agent_rpcs`' `maxItems: 0` does not move**: its reason survives the measurement intact. The new category's guarantee is explicitly narrower — the 405 prevents the **effect**, not the **disclosure**, because the argument is already in every log and cache by then — so the argument list is enumerated as the review surface and may carry no secret. | The first draft put both functions under `agent_rpcs` and deleted the check, which is **D300's shape on a boundary whose justification is still true**. Widening a rule to fit two functions it was not written for is how a boundary stops meaning anything. And the honest half is the one worth keeping: this category is weaker, it says so, and a live-host GET returning 405 is named as the proof rather than assumed. | 0136 |
+| **D491** | — (found during Run 1, by a test failing for the wrong reason). | **`test_api_migrations.py`'s `_CREATE_FUNCTION` regex silently over-matched and swallowed a whole function.** It requires `RETURNS` on its own line — `\)\s*\n\s*RETURNS` — and 0019 was first written as `) RETURNS uuid`. With `re.DOTALL` and a non-greedy group the match ran forward from `agent_audit_begin(` to `create_note`'s `RETURNS`, capturing a garbage argument list and consuming the text in which `agent_audit_complete` was defined. The reported failure was *"agent_audit_complete is missing"*, which points at the wrong file entirely. | **The migration's formatting moved, not the shared regex.** Four other functions depend on that anchor, and loosening it to accept both spellings would make the over-match permanent rather than fixing it. Verified afterwards that all four functions now parse with their **correct** argument lists, because a matching count is not the same as a correct capture. | A scanner that mis-parses rather than refusing is this project's signature defect with the failure on the wrong side. Had 0019 added **one** function instead of two, the regex would have swallowed forward, captured garbage arguments, and the count would still have matched — and only the argument comparison, which does not run for this section, could have noticed. **The near-miss is the finding**, not the formatting. | — |
 
 ---
 
@@ -181,7 +184,7 @@ the tests** with a mutation battery whose failures are fatal (D269), whose
 control is a test the mutation cannot reach, and which asserts *how* each
 mutation failed (D386).
 
-### Run 1 — Migration 0019: the audit record, and the grants `agent_writer` never got
+### Run 1 — Migration 0019: the audit record, and the grants `agent_writer` never got — **Done.**
 
 - `app_private.agent_audit`, append-only: no `UPDATE` and no `DELETE` granted to
   any request role.
@@ -212,6 +215,63 @@ Session 8 measured it again.
 **ADRs:** who writes an audit record and why the hook cannot (D473, D474);
 `mcp_audit_service` stays unactivated and this is the decision, not the deferral
 (D482).
+
+**What was measured.** Two rigs, each with its negative control run **first** —
+one expectation inverted, `DIVERGES`, exit 1 — so neither could report success
+without having been able to report failure.
+
+*The schema rig*, on the pinned `pgvector:pg18` (PostgreSQL 18.4), every request
+made as the authenticator with `SET ROLE`. **Nine arms, nine as designed.** The
+hook's `app.agent_id` **is** readable inside a VOLATILE `SECURITY DEFINER`
+function in the same transaction; an unset custom GUC reads as the **empty
+string**, not NULL, which is why every read is spelled `nullif(current_setting(…),
+'')` exactly as 0018 spells it; the definer inserts into a table the caller holds
+nothing on and whose schema it cannot USE, while the same caller doing it
+directly is **denied** with 42501 and leaves zero rows — the control without
+which the first arm would be about a table anybody can write.
+
+**And the arm that changed the design is D489**: a write that `RAISE`s loses its
+audit row. `RETURNS api.notes` commits or it does not exist, so a `database` row
+records a **committed** change and can record nothing else.
+
+*The PostgREST rig*, live on the locked v14.16 image, and **both predictions were
+wrong** (D490). A GET on a VOLATILE function is not refused — it executes and
+takes the argument from the query string, so volatility protects nothing. What
+refuses these two is that they **write**: `405` / `25006 cannot execute INSERT in
+a read-only transaction`, which is D474's mechanism arriving from the other side.
+So `agent_rpcs`' `maxItems: 0` keeps its reason and does **not** move, and the
+audit functions get a fourth contract section of their own.
+
+**What was built.** ADR 0135 and 0136. Migration **0019** — `app_private.agent_audit`
+with a `source` column separating the two records, two enums rather than CHECK
+constraints (ADR 0058, ADR 0080), `api.agent_audit_begin` and
+`api.agent_audit_complete` taking **no principal**, both write RPCs replaced with
+`CREATE OR REPLACE` on the same signature from 0007's text (D270) plus one
+conditional INSERT each, and **the grants `agent_writer` never received** —
+`grep -c agent_writer` on 0018 returns **zero**. `agent_write_rpcs` in the
+reviewed contract, its schema definition, and its validation in `api_surface.py`.
+
+**Four independent anchors noticed the two new functions** and every one was
+re-derived to an exact set rather than relaxed (D300): the two `declared_objects`
+literals, the reviewed-RPC union, and `test_the_reader_is_not_vacuous` — which
+is written out by hand precisely so an empty scrape cannot agree with an empty
+contract.
+
+**The battery: 10 mutations, 10 killed**, every one `FAILED` rather than `ERROR`,
+each control green in the same invocation, template restored byte-identical.
+**M4 is the one to read** — it removes `agent_writer`'s EXECUTE on the hook,
+restoring D475's actual defect, and the assertion dies. M3's first form was
+scored **INVALID rather than KILLED**: adding a role introduced a placeholder the
+manifest does not declare for 0019, so the renderer refused and the *fixture*
+broke. That is D386's rule catching a false kill, and the repair was the
+mutation.
+
+**And D491 is the near-miss worth reading.** The migration-surface scanner
+requires `RETURNS` on its own line; written as `) RETURNS uuid`, its non-greedy
+`DOTALL` match ran forward to `create_note` and **swallowed an entire function**,
+reporting "agent_audit_complete is missing". The formatting moved, not the shared
+regex — and the argument captures were checked afterwards, because a matching
+count is not a correct capture.
 
 ### Run 2 — Activating `agent_writer`
 

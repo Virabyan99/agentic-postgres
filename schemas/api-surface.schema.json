@@ -5,7 +5,7 @@
   "description": "The hand-written half of ADR 0050: every relation, column, function and method the `api` schema is allowed to expose, named exactly. It is compared against the PostgreSQL catalog and against the generated OpenAPI document in both directions, so an object present in the database and absent here is a release failure even when its grants keep it out of OpenAPI -- because the next grant change publishes it. It is deliberately NOT generated: a contract derived from the thing it constrains cannot refuse it. It is also project-neutral, because the example domain is (ADR 0003, amended by ADR 0048): one contract describes every project that serves it, and a per-project extension is a reviewed delta rather than a second file. additionalProperties is false at every level, and every string is either a bare identifier or a member of a closed enumeration -- which is how 'the contract contains no SQL' is a property of the schema rather than a rule somebody remembers.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "contract_id", "exposed_schema", "enums", "relations", "rpcs", "agent_rpcs", "forbidden_schemas"],
+  "required": ["schema_version", "contract_id", "exposed_schema", "enums", "relations", "rpcs", "agent_rpcs", "agent_write_rpcs", "forbidden_schemas"],
   "properties": {
     "schema_version": { "type": "integer", "enum": [1] },
     "contract_id": {
@@ -41,6 +41,12 @@
       "additionalProperties": { "$ref": "#/$defs/agentRpc" },
       "propertyNames": { "$ref": "#/$defs/identifier" },
       "description": "Functions in the exposed schema that the agent plane may invoke and the published document does not name (ADR 0118). They are here because ADR 0050's invariant is that nothing exists in `api` which this file does not name -- an object kept out of OpenAPI by a grant is still reachable over HTTP, and the next grant change publishes it. `minProperties` is deliberately absent, unlike `relations` and `rpcs`: a release with no agent plane is a real state and was every release before Session 8. What keeps this section honest is not the schema but `api_surface.py`: no arguments, no name shared with `rpcs`, and every name absent from the approved snapshot."
+    },
+    "agent_write_rpcs": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/agentWriteRpc" },
+      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "description": "Agent-plane functions that WRITE (ADR 0136). Separate from `agent_rpcs` because they take arguments, and `agent_rpcs` forbids arguments for a reason that is still true: measured on PostgREST v14.16, a GET on a function with arguments executes it and takes the argument from the query string, whether the function is STABLE or VOLATILE. What distinguishes this category is that its members write, and PostgREST runs a GET in a READ-ONLY transaction -- so the write is refused with 25006 surfaced as 405, and nothing happens. The 405 prevents the EFFECT and not the DISCLOSURE: by then the argument is already in every log and cache between the caller and the database. That is why `arguments` is enumerated rather than merely permitted -- the list is exactly what could appear in a URL, so a reviewer reads the exposure instead of inferring it, and no argument here may carry a secret, a token, a credential or another principal's identifier."
     },
     "forbidden_schemas": {
       "type": "array",
@@ -139,6 +145,28 @@
           "type": "array",
           "maxItems": 0,
           "description": "Empty, and required to be. An agent-plane function that took an argument would be reachable over GET with that argument in the URL, which is the disclosure `rpcs` forbids GET to prevent; and one that took a caller-supplied value would be a tool whose operation is selected at runtime, which docs/capability-plan.md places outside the product. The bound is here rather than in a reviewer's head because `maxItems: 0` is the whole rule."
+        }
+      }
+    },
+    "agentWriteRpc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["methods", "arguments"],
+      "description": "An agent-plane function that writes (ADR 0136). It differs from `agentRpc` in the two ways that follow from writing: it takes arguments, and GET cannot complete it.",
+      "properties": {
+        "methods": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": { "type": "string", "enum": ["POST"] },
+          "description": "POST, and only POST -- a statement about the served surface rather than a preference. GET reaches the function and the function's own write is then refused by the read-only transaction PostgREST runs a GET in (measured: 25006 as 405, no row written). An entry naming GET would describe a route that cannot complete, and one naming both would read as though GET were a supported way to call it."
+        },
+        "arguments": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" },
+          "description": "Every argument, named. Non-empty by definition -- an argument-free function belongs in `agent_rpcs`, which keeps the stronger guarantee. This list is the review surface: it is exactly what could appear in a query string if somebody GETs the endpoint, and the 405 that follows does not un-log it. No argument here may carry a secret, a token, a credential or another principal's identifier; the ones that exist carry a tool name, a request id, an outcome, two counts and a parameter document the runtime redacted before sending."
         }
       }
     }

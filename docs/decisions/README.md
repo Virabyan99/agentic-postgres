@@ -198,3 +198,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0132](0132-session-eights-requirements-gain-live-proofs-and-four-new-ids-carry-the-deployed-guarantees.md) | Session 8's requirements gain live proofs, and four new ids carry the deployed guarantees | 8 | Accepted |
 | [0133](0133-a-service-is-deferred-for-two-reasons-and-the-deploy-proves-its-mounts-exist.md) | A service is deferred for two reasons, and the deploy proves its mounts exist | 8 | Accepted |
 | [0134](0134-a-grant-assertion-reads-the-catalog-and-a-reach-assertion-sets-the-role.md) | A grant assertion reads the catalog, and a reach assertion sets the role | 8 | Accepted |
+| [0135](0135-an-audit-record-is-written-by-a-definer-function-as-the-caller.md) | An audit record is written by a definer function, as the caller, and the hook cannot write one | 9 | Accepted |
+| [0136](0136-an-agent-plane-function-that-writes-takes-arguments-and-is-post-only.md) | An agent-plane function that writes takes arguments, and GET refuses it | 9 | Accepted |

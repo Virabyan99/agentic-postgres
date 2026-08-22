@@ -167,17 +167,20 @@ def test_the_reader_is_not_vacuous(final_surface: dict[str, Any]) -> None:
     the one this file exists to avoid producing itself.
     """
     assert set(final_surface["views"]) == {"notes", "tasks"}, final_surface["views"]
-    # Four functions in `api` since Session 8 Run 2: the two published write
-    # RPCs, and the two agent-plane read functions migration 0018 adds
-    # (ADR 0118). Written out rather than read from the contract, deliberately --
-    # this is the test that proves the reader found something, so comparing it
-    # against the document every other test compares against would let an empty
-    # scrape agree with an empty contract.
+    # Six functions in `api` since Session 9 Run 1: the two published write
+    # RPCs, the two agent-plane read functions migration 0018 adds (ADR 0118),
+    # and the two audit functions 0019 adds (ADR 0135, ADR 0136). Written out
+    # rather than read from the contract, deliberately -- this is the test that
+    # proves the reader found something, so comparing it against the document
+    # every other test compares against would let an empty scrape agree with an
+    # empty contract.
     assert set(final_surface["functions"]) == {
         "create_note",
         "update_task_status",
         "mcp_agent_context",
         "owner_activity_report",
+        "agent_audit_begin",
+        "agent_audit_complete",
     }
     assert set(final_surface["enums"]) == {"task_status"}
     assert all(final_surface["views"].values())
@@ -212,22 +215,40 @@ def test_the_write_surface_is_the_reviewed_rpcs(
     rather than a second create, and Session 3 shipped a second create. This is
     the assertion that would have failed for two sessions.
 
-    **Both sections, since Session 8 Run 2.** The migrations create four
+    **Three sections, since Session 9 Run 1.** The migrations create six
     functions in `api`, and ADR 0050's invariant is that the reviewed contract
-    names every one of them -- the two published RPCs under `rpcs` and the two
-    agent-plane reads under `agent_rpcs` (ADR 0118). The union is what the
-    catalog holds; the split is which of them the document may advertise, and
+    names every one of them -- the two published RPCs under `rpcs`, the two
+    agent-plane reads under `agent_rpcs` (ADR 0118), and the two audit functions
+    under `agent_write_rpcs` (ADR 0136), which is a section of its own because
+    they write and therefore take arguments. The union is what the catalog
+    holds; the split is which of them the document may advertise, and
     `test_no_agent_plane_function_is_published` is where that half is asserted.
     A comparison against `rpcs` alone would now fail for a correct release,
     and the repair for that is always to loosen the comparison.
     """
-    reviewed = set(surface["rpcs"]) | set(surface["agent_rpcs"])
+    reviewed = set(surface["rpcs"]) | set(surface["agent_rpcs"]) | set(surface["agent_write_rpcs"])
     assert set(final_surface["functions"]) == reviewed
     assert "create_task" not in final_surface["functions"]
-    assert not set(surface["rpcs"]) & set(surface["agent_rpcs"]), (
-        "a function is named in both rpcs and agent_rpcs; one list is the published "
-        "surface and the other is deliberately not, so a name in both is a contradiction"
-    )
+
+    # Pairwise disjoint, stated as three comparisons rather than one over a
+    # union, so a name in two sections says WHICH two. A function in both
+    # `agent_rpcs` and `agent_write_rpcs` would be claiming at once that it
+    # takes nothing and that it takes arguments.
+    sections = {
+        "rpcs": set(surface["rpcs"]),
+        "agent_rpcs": set(surface["agent_rpcs"]),
+        "agent_write_rpcs": set(surface["agent_write_rpcs"]),
+    }
+    for left, right in (
+        ("rpcs", "agent_rpcs"),
+        ("rpcs", "agent_write_rpcs"),
+        ("agent_rpcs", "agent_write_rpcs"),
+    ):
+        assert not sections[left] & sections[right], (
+            f"a function is named in both {left} and {right}; the sections differ in "
+            "what may be advertised and in what may reach a query string, so a name "
+            "in two of them is a contradiction"
+        )
 
 
 def test_every_rpc_parameter_is_the_reviewed_parameter(

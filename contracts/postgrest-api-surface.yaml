@@ -98,6 +98,33 @@ agent_rpcs:
     methods: [GET, POST]
     arguments: []
 
+# The agent plane's audit functions (ADR 0135, ADR 0136). Reviewed here for the
+# same reason as `agent_rpcs` -- ADR 0050's invariant is that nothing exists in
+# `api` which this file does not name -- and in a section of their own because
+# they take arguments, which `agent_rpcs` forbids and still should.
+#
+# Measured on PostgREST v14.16, and both predictions going in were wrong: a GET
+# on a VOLATILE function executes it and takes the argument from the query
+# string, so volatility refuses nothing. What refuses these two is that they
+# WRITE, and PostgREST runs a GET in a read-only transaction -- 25006 surfaced
+# as 405, no row written. The same mechanism that stops the pre-request hook
+# keeping an audit row (D474).
+#
+# So the 405 prevents the effect and not the disclosure, and every argument is
+# listed because the list is exactly what a GET would put in a URL. None of them
+# is a secret: a tool name, a request id, an outcome, two counts, and a
+# parameter document the runtime has already redacted per the capability lock's
+# `audit.redact`. Neither function takes a principal, an owner, a role or a
+# scope -- identity comes from the GUCs the hook set, which is the whole of
+# SEC-PARAM-001.
+agent_write_rpcs:
+  agent_audit_begin:
+    methods: [POST]
+    arguments: [p_tool, p_request_id, p_parameters]
+  agent_audit_complete:
+    methods: [POST]
+    arguments: [p_audit_id, p_outcome, p_elapsed_ms, p_row_count]
+
 # Never published, under any grant. These four are the ones a misconfigured
 # `db-schemas` or a `db-extra-search-path` left at its default would actually
 # reach -- `public` is the default, `app` holds the base tables the views exist

@@ -148,6 +148,13 @@ def test_every_declared_object_is_schema_qualified_once(surface: dict[str, Any])
         # `published_objects` is the other question and omits them.
         "api.mcp_agent_context",
         "api.owner_activity_report",
+        # ADR 0136, by the same reasoning: the audit functions exist in `api`,
+        # are reachable by the two agent roles, and are absent from the document
+        # because `api_documentation` holds no EXECUTE on them. They sit in
+        # `agent_write_rpcs` rather than `agent_rpcs` because they write, and a
+        # function that writes takes arguments.
+        "api.agent_audit_begin",
+        "api.agent_audit_complete",
     }
     assert api_surface.published_objects(surface) == {
         "api.notes",
@@ -308,6 +315,13 @@ def test_the_declared_types_are_separate_from_the_declared_objects(
         # `published_objects` is the other question and omits them.
         "api.mcp_agent_context",
         "api.owner_activity_report",
+        # ADR 0136, by the same reasoning: the audit functions exist in `api`,
+        # are reachable by the two agent roles, and are absent from the document
+        # because `api_documentation` holds no EXECUTE on them. They sit in
+        # `agent_write_rpcs` rather than `agent_rpcs` because they write, and a
+        # function that writes takes arguments.
+        "api.agent_audit_begin",
+        "api.agent_audit_complete",
     }
     assert api_surface.published_objects(surface) == {
         "api.notes",

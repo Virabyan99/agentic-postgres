@@ -56,6 +56,16 @@ RPC_METHODS = frozenset({"POST"})
 #: is what makes the GET harmless, and `validate_surface` requires it empty.
 AGENT_RPC_METHODS = frozenset({"GET", "POST"})
 
+#: An agent-plane function that WRITES is POST and only POST (ADR 0136), and
+#: that is the served surface rather than a preference. Measured on PostgREST
+#: v14.16: a GET reaches a VOLATILE function and executes it -- volatility alone
+#: refuses nothing -- but a GET runs in a READ-ONLY transaction, so a function
+#: that writes is refused with 25006 surfaced as 405 and nothing happens. The
+#: same mechanism that stops the pre-request hook keeping an audit row (D474).
+#: The 405 prevents the effect and not the disclosure, which is why the argument
+#: list is enumerated rather than merely permitted.
+AGENT_WRITE_RPC_METHODS = frozenset({"POST"})
+
 #: Characters that cannot appear in any identifier the schema accepts, listed so
 #: the refusal names the thing it refuses. A wildcard is the interesting one:
 #: `columns: ["*"]` is the shape of contract that describes everything and
@@ -64,6 +74,7 @@ _WILDCARD = re.compile(r"[*%?]")
 
 __all__ = [
     "AGENT_RPC_METHODS",
+    "AGENT_WRITE_RPC_METHODS",
     "CONTRACT_PATH",
     "RELATION_METHODS",
     "REQUIRED_FORBIDDEN_SCHEMAS",
@@ -176,6 +187,31 @@ def validate_surface(document: dict[str, Any]) -> None:
                 "serves a stable argument-free function"
             )
 
+    # 4b. An agent-plane function that WRITES takes arguments and is POST only
+    #     (ADR 0136). The rule above is not relaxed to make room for it: a
+    #     STABLE function's arguments really do reach the query string, measured,
+    #     so `agent_rpcs` keeps `maxItems: 0`. What separates this section is
+    #     that its members write, and a GET runs in a read-only transaction --
+    #     so the write is refused (25006 as 405) and nothing happens.
+    #
+    #     The argument list must be non-empty. An argument-free function belongs
+    #     in `agent_rpcs`, which keeps the stronger guarantee, and letting one
+    #     sit here would quietly move it to the weaker one.
+    for name, entry in document["agent_write_rpcs"].items():
+        if not entry["arguments"]:
+            raise SurfaceError(
+                f"agent_write_rpcs {name!r} declares no arguments. An argument-free "
+                "agent-plane function belongs in agent_rpcs, where GET is harmless "
+                "because there is nothing to put in the query string"
+            )
+        extra = set(entry["methods"]) - AGENT_WRITE_RPC_METHODS
+        if extra:
+            raise SurfaceError(
+                f"agent_write_rpcs {name!r} declares {sorted(extra)}. A GET reaches the "
+                "function and its write is refused by the read-only transaction, so a "
+                "route named here that is not POST is one that cannot complete"
+            )
+
     # 5. No wildcard anywhere. The identifier pattern already forbids one, so
     #    this is the guard on the guard -- and it is the rule worth stating,
     #    because a contract that describes everything constrains nothing.
@@ -206,6 +242,7 @@ def _refuse_name_collisions(document: dict[str, Any]) -> None:
         "relations": "a relation",
         "rpcs": "an RPC",
         "agent_rpcs": "an agent-plane RPC",
+        "agent_write_rpcs": "an agent-plane write RPC",
         "enums": "an enum type",
     }
     seen: dict[str, str] = {}
@@ -248,7 +285,12 @@ def declared_objects(document: dict[str, Any]) -> set[str]:
     schema = document["exposed_schema"]
     return {
         f"{schema}.{name}"
-        for name in (*document["relations"], *document["rpcs"], *document["agent_rpcs"])
+        for name in (
+            *document["relations"],
+            *document["rpcs"],
+            *document["agent_rpcs"],
+            *document["agent_write_rpcs"],
+        )
     }
 
 
