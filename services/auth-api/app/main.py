@@ -277,6 +277,12 @@ def public_paths() -> tuple[str, ...]:
         "/admin/agents",
         "/admin/agents/{agent_id}",
         "/admin/agents/{agent_id}/rotate-secret",
+        # Session 9 Run 7 (ADR 0142). Published like every other administrative
+        # path and behind its own scope, `admin_audit:read`, which lives in
+        # `project_admin`'s ceiling and in neither agent's -- so no agent token
+        # can carry it however it is minted, and an agent cannot read the record
+        # that exists to attribute it.
+        "/admin/audit",
         "/admin/users",
         "/admin/users/{user_id}",
         "/auth/agent-token",

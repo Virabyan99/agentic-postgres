@@ -61,7 +61,7 @@ Six columns, the house shape. The "summary says" column quotes
 is confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D494.**
+**Next free number after this table is D504.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -97,6 +97,9 @@ is confirmed, corrected or replaced during implementation, and anything found
 | **D498** | — (found during Run 6, by a mutation that survived). | **The request id's PROPAGATION was proved and its UNIQUENESS was not.** Every offline test arranges a fixed id through `monkeypatch` so an assertion can name it — which is the right call, because a test that minted its own could only say "some id was forwarded", a claim satisfied by forwarding the wrong one. But it meant nothing offline ever executed `uuid.uuid4()`: replacing the mint with a constant left **every** contract test green, and the only proof that two calls differ was the live-host one, which has never run. | **A new offline test of the mint**, not a changed mutation: three requests through the real middleware, two of them reusing a TOKEN, and all three ids must differ and parse as UUIDs. The token arm matters because an id *derived* from the caller would pass a naive uniqueness check. | **D493's distinction, pointing the other way.** There a survivor was evidence about the *arm* — two equal sets, so no operator could discriminate. Here the arm was right and the coverage was absent, and telling the two apart is the whole reason a survivor gets read rather than re-rolled. Question 2 of §6 found it: *has this run at all, in this environment, since the thing it measures changed?* — and the answer for the mint was **never**. | 0141 |
 | **D499** | — (found during Run 6, by the battery's own pairing). | **Two battery arms reported a false survivor because the CONTROL called the mutated function.** A7 and A8 mutate `mcp_audit.redact`; their control was `test_redaction_does_not_invent_a_parameter_the_caller_never_sent`, which calls `redact` directly. Target and control both went red, so the pair proved the target had died and **nothing about isolation**. | **The control moved, not the assertion** — to a test that exercises `begin`/`complete` and never reaches `redact`. Both arms then killed with a green control in the same invocation. | **CLAUDE.md §1 names this rule and says Session 8 paid for it twice** — Run 1 reported two false survivors and Run 3 one, every time because the control legitimately read the mutated value. Recording it a third time because the failure is silent in the direction that matters: a false survivor reads as "the test is weak", and the reflex repair is to strengthen an assertion that was never the problem. | — |
 | **D500** | ADR 0135 and D480: the two records "answer different questions", and Run 6 "propagates a request ID through the downstream stack". | **The `database`-source row carries no `request_id`, so the two records for one MCP write cannot be joined by it.** Migration 0019's write RPCs insert `source, agent_id, owner_id, tool, outcome, row_count, completed_at` and no id — correctly, because at the time nothing minted one. Measured alongside it (rig6): **a custom request header DOES reach the database**, in `current_setting('request.headers')::jsonb` as a lowercased `x-request-id`, present when sent and absent when not. So the repair is available and is not taken here. | **The gap is recorded and left open.** The two records correlate by agent, tool and time. Closing it needs a **migration 0020** — 0019 is released, and amending a released migration is what the release control exists to prevent — so it is named in ADR 0141's consequences and in the Session 10 handoff rather than done quietly. A deployment test asserts the `database` row's `request_id` **is** NULL, so the day 0020 lands, the test that says so fails and points at its own premise. | **§6 question 5 — which of this decision's callers got it?** — asked of the id rather than of a grant. The answer is "the agent-plane record and every upstream request, but not the row PostgreSQL writes", and the honest half is that the *header measurement* makes it look cheap while the *release control* makes it a migration. D478's discipline applied forward: `OPS-LOG-001` is Session 11's and this row is what stops Session 9's evidence reading as if it closed the span. | 0141 |
+| **D501** | Run 7: *"`GET /admin/…` beside `GET /admin/agents`, same four pieces — `_service` → `authenticate` → `require_scope` → `_guard`."* | **There is no fifth piece and the endpoint needs one: a statement it is allowed to send.** Migration 0019 created `app_private.agent_audit` and two indexes whose own comment names their reader — *"The admin query endpoint (Run 7) reads by owner and by agent, most recent first. Both indexes exist for that one reader; neither is speculative"* — and created neither the reader nor a grant. `repository.py`'s header states what that runs into: *"Fourteen function calls and no table names. `auth_service` holds schema USAGE on `app_private` and nothing else."* Verified: `SET ROLE auth_service; SELECT count(*) FROM app_private.agent_audit` is `permission denied`, with the positive control that the same role reaches the new function. | **Migration 0020**: `app_private.auth_list_agent_audit`, `STABLE SECURITY DEFINER`, granted to `auth_service` alone. Not a `SELECT` grant — the table's own `COMMENT` says no role holds `SELECT` and the definer functions are the only paths in, and a grant would make that sentence false. 0020 rather than an edit to 0019, because 0019 is released (ADR 0091). | **CLAUDE.md §6 question 5, asked of 0019: which of this decision's callers got it?** The indexes did; the grant did not. The failure mode is the one this project keeps producing — the endpoint would have been written, reviewed and merged, and failed on the first cluster with `permission denied for function`, four steps from its cause. It is D465's shape from the other side: there a wrong input produced an artefact rather than an error, here a missing grant produced two indexes rather than a warning. | 0142 |
+| **D502** | — (found in Run 7, writing the first query-string endpoint in the auth service). | **`routes.py` refuses the duplicate-member defect for BODIES and nothing had asked the same question of a query string**, because no endpoint had one. Measured (rig7, locked Starlette 0.49.3, control arm first): `QueryParams("limit=1&limit=9999")["limit"]` is `"9999"` — **last wins, silently**, the body defect exactly. But `getlist` and `multi_items` still carry BOTH pairs, so unlike a JSON body the duplicate is still there to be refused. Also measured: keys are case-sensitive (`Limit` and `limit` are two keys, not a repeat); `limit=` is PRESENT with value `""`, not absent; and `int()` accepts whitespace, `+`, `1_0` and any Unicode decimal digit. | **`strict_query`, a sibling of `strict_json`**: a repeat is refused, an unknown name is refused, an empty value is a supplied value, and a bound REFUSES rather than clamping. The route parses; FastAPI binds nothing, because `Query` would inherit the defect. The document's `parameters` fragment is emitted by hand and a contract test compares it against the parser's allowlist. | The refusal is cheap here and the reason to write the difference down is the opposite case: for a body the duplicate had to be caught DURING parsing because nothing afterwards could see it. Two surfaces, one defect, two mechanisms — and the hand-declared document is **D274's shape** waiting to happen, which is why the comparison test exists rather than a comment saying to keep them in step. | 0143 |
+| **D503** | D472, quoting migration 0011: *"a user is `disabled` by an administrator and can be re-enabled; an agent credential is `revoked`, which is **terminal** for that credential"* — and that comment names `SEC-REV-001` as its proof. | **Terminality is stated in a comment and enforced by nothing.** Measured through the product's own route: `PATCH /admin/agents/{id}` with `{"status": "active"}` on a revoked agent answers **200**, and the agent works again. `app_private.auth_set_agent_status` is a plain `UPDATE ... SET status = p_status` with no transition guard. The two-value enum is what stops a third state existing; it does not stop the second transition. | **Recorded, and the test asserts what the product DOES.** Session 9 Run 7 proves revocation rather than building it (D471, D472), and a transition guard is a migration and a product change. The day one lands, `test_the_status_type_admits_no_third_state_and_terminality_is_UNENFORCED` fails and points at its own premise — D500's arrangement, applied to a second gap. | **CLAUDE.md §6 question 1, asked of a comment rather than a test: what would have to break for this to go red?** Until Run 7, nothing — the sentence had sat in a released migration for three sessions naming a requirement that was still a placeholder. The bound half is worth stating precisely: every status change moves `authz_version`, so **no token issued before either transition survives**. What un-revoking restores is the SECRET's usefulness, which revocation never invalidated — a second door the kill switch was assumed to have shut and does not. | 0142 |
 
 ---
 
@@ -552,15 +555,106 @@ directions rather than asserted once.
 
 ### Run 7 — The admin audit endpoint, and revocation proved rather than built
 
-- `GET /admin/…` beside `GET /admin/agents`, same four pieces — `_service` →
-  `authenticate` → `require_scope` → `_guard` — with a new `admin_audit:read`
-  scope in `scopes.py` and in `project_admin`'s ceiling only.
-- `SEC-PARAM-001`: a tool parameter cannot name a principal, because the audit
-  functions take no identity argument and the hook sets the GUCs (D473).
-- `SEC-REV-001`'s offline arm: revoke, then the same token fails its next MCP
-  read, its next MCP write, and its next direct PostgREST request. **The proof
-  runs `PATCH /admin/agents/{id}`** — the product's own route (ADR 0065/0066) —
-  not an `UPDATE` against the table.
+**Done.**
+
+`GET /admin/audit` exists, with the four pieces in that order and a fifth thing
+the plan did not anticipate: **migration 0020**. 0019 built two indexes for a
+reader it never created and granted `auth_service` nothing, so the endpoint had
+no statement it was allowed to send (**D501**, ADR 0142). The reader is
+`app_private.auth_list_agent_audit` — `STABLE SECURITY DEFINER`, granted to
+`auth_service` and to nobody else, because the table's own `COMMENT` forbids a
+`SELECT` grant. **Two migrations are now released and applied on no cluster.**
+
+`admin_audit:read` is in the schema's two enums and in **`project_admin`'s
+ceiling alone** — not `admin_agents:read` reused, because listing which agents
+exist and reading what they did are different authorities. There is no `:write`
+twin and a test asserts the absence: the table is append-only, so the name would
+be an authority nothing can exercise.
+
+**The bound on `limit` has one authority and it is the route** — 422 outside
+`[1, 500]`, never a clamp; 0020 applies `p_limit` and does not restate it
+(D495, D463).
+
+`GET /admin/audit` is the service's first query-string endpoint, so rig7 asked
+of a query string what `routes.py` had already measured of a body. **`limit=1&
+limit=9999` resolves to `9999`, silently** — but unlike a JSON body the
+duplicate survives in `multi_items()`, so it can be refused rather than mourned
+(**D502**, ADR 0143). `strict_query` refuses a repeat, an unknown name and an
+empty value; the document's `parameters` are declared by hand because FastAPI's
+binding would inherit the defect, and a contract test compares the two halves
+because that hand-declaration is D274's shape waiting to happen.
+
+**`SEC-REV-001` is proved and not built** (D471, D472). The database half runs
+`PATCH /admin/agents/{id}` — the product's own route — captures the agent's
+claims while it is active and replays them unchanged afterwards, and the hook
+refuses with `AP401`; the positive arm runs first, so a hook that refused
+everything cannot pass. The MCP half is in
+`tests/security/test_session9_revocation.py`: a revoked agent's context cannot
+be resolved, no upstream status becomes a degraded mode, and a read and a write
+lose their context together. **The one-token-three-requests arm is live-host and
+the module says so**, because a session that half-closes a requirement without
+saying which half is which leaves the next reader unable to tell a proved
+guarantee from a plausible one (D478, applied to this session's own claim).
+
+**And proving it found D503**: `revoked → active` answers **200**. 0011's
+comment says revocation is *terminal* and names `SEC-REV-001` as its proof, and
+`auth_set_agent_status` is an unguarded `UPDATE`. Recorded, not repaired — the
+test asserts what the product does and fails the day a guard lands. The bound
+half: `authz_version` moves on every transition, so no token survives either
+way; what un-revoking restores is the secret.
+
+`SEC-PARAM-001` is asserted as an **absence**, in three places: no write tool's
+compiled arguments name a principal (read from the committed snapshot, not
+re-compiled — D277), neither audit function's `CREATE FUNCTION` header does, and
+`GET /admin/audit`'s filters are named as **not** a counterexample — there the
+caller is already authorized to read the whole record, so a filter narrows a
+permitted read rather than authorizing one.
+
+**ADR 0136's owed proof now exists.** A `GET` against the deployed
+`agent_audit_begin` must answer **405** with `25006`, with a POST control first
+and a separate arm asserting the refused GET wrote nothing. It is live-host and
+runs on the trip.
+
+**Two corrections the run made to itself**, both cases of asserting a property
+the product does not claim: `UpstreamRefusal.reason` *does* name the upstream
+status, and that is not a D433 violation because it is a plain `Exception` and
+ADR 0130's mask is what keeps it off the wire — the useful assertion is that the
+upstream *body's* detail never enters it and that the type is the masked one.
+And `aclexplode(proacl)` reports a function's OWNER as a grantee, so the
+grant-equality subtracts the owner rather than expecting it.
+
+**Battery: A1-A7, 7 of 7 killed** after two repairs, every one `FAILED` rather
+than `ERROR` (D386) and every control green in the same invocation. Both repairs
+were found by the battery's own machinery and neither weakened a test:
+
+* **A6 was a FALSE KILL on the first run** and the outcome check caught it —
+  target and control both `ERROR`, not `FAILED`. The mutation added
+  `{{agent_reader}}` to 0020's grant, and 0020's manifest entry does not list
+  that placeholder, so the **renderer** hard-failed on residue and nothing about
+  the grant was measured. A battery reading only "did the target go red" would
+  have scored it KILLED and reported a grant assertion it never exercised. The
+  arm is now a two-file mutation, which is what a real change would have to be.
+  Its manifest anchor then matched **three** times — three migrations declare the
+  same placeholder pair — and pre-flight caught that in one second (CLAUDE.md §1).
+* **A7 SURVIVED**, and the repair is the TEST. Dropping `, r.id DESC` left the
+  tiebreak assertion green: three rows sharing `started_at` still come back in a
+  consistent prefix order, because PostgreSQL's sort is deterministic for an
+  input that small. **The behavioural half cannot discriminate the tiebreak** —
+  a test passing for a reason unrelated to its name. The migration is right, so
+  the behavioural half is kept (it still catches unordered or newest-last) and a
+  structural half is added beside it, reading `pg_get_functiondef` from the
+  **deployed** function. ADR 0134's division applied to an ordering.
+
+**And the battery caught a third thing before it ran.** Designing an arm against
+`AUDIT_LIMIT_MAX` showed that `test_the_documented_limit_range_is_the_enforced_one`
+compared the document's `maximum` to the constant the document is *generated
+from* — two constants that move together, so a route documenting 500 and
+enforcing a literal 100 passed. CLAUDE.md §6 names it. Split in two: the offline
+test asserts what a document alone can be wrong about (its own coherence), and a
+cluster arm sends the **advertised** boundary and one past it, so the published
+bound and the enforced bound are compared through a real request.
+
+**ADRs 0142 and 0143. Divergences D501, D502, D503. Next free: D504, 0144.**
 
 ### Run 8 — Publish
 

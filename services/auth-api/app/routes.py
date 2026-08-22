@@ -21,7 +21,7 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app import errors, openapi_docs
+from app import errors, openapi_docs, strict_query
 from app import scopes as scope_map
 from app.models import (
     AgentTokenRequest,
@@ -209,6 +209,69 @@ DOC_UPDATE_AGENT = openapi_docs.described(
 RESP_UPDATE_AGENT = {
     200: openapi_docs.ok("The agent after the change."),
     400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    422: openapi_docs.INVALID,
+}
+
+#: `GET /admin/audit`'s parameter names, in one place (ADR 0142).
+#:
+#: **The route parses against this tuple and the document is generated from it**
+#: -- one authority, not a docstring and an allowlist that agree today. An
+#: endpoint whose document names a filter the parser rejects is D274's shape: a
+#: claim living in an artifact nobody dereferences.
+AUDIT_QUERY_PARAMETERS: tuple[str, ...] = ("agent_id", "owner_id", "limit")
+
+#: The bound on `limit`, and the ONE place it is stated. Migration 0020's reader
+#: takes `p_limit` and applies it without clamping, deliberately: a second bound
+#: in the database would be a second authority over one rule, and the two drift
+#: the moment either moves (D495, D463). Out of range is a 422 naming the range,
+#: never a silent clamp -- a clamp answers a question the caller did not ask and
+#: says nothing about having done so.
+AUDIT_LIMIT_MIN = 1
+AUDIT_LIMIT_MAX = 500
+AUDIT_LIMIT_DEFAULT = 100
+
+DOC_LIST_AUDIT = openapi_docs.described(
+    summary="Read the agent audit record",
+    description=(
+        "Requires the `admin_audit:read` scope, which is in `project_admin`'s ceiling and in "
+        "no other -- an agent cannot be authorized to read the record that attributes it. "
+        "Rows come back most recent first. Each carries a `source`: `agent_plane` is what an "
+        "agent ATTEMPTED, including calls refused for a missing scope that never reached the "
+        "database, and `database` is what actually CHANGED, including a write that reached "
+        "PostgREST without going near the agent plane. The two answer different questions and "
+        "a single agent write produces one of each. A repeated query parameter is refused "
+        "rather than resolved to its last value."
+    ),
+    query_parameters=[
+        openapi_docs.query_parameter(
+            "agent_id",
+            schema={"type": "string", "format": "uuid"},
+            description="Narrow to one agent. Absent means every agent.",
+        ),
+        openapi_docs.query_parameter(
+            "owner_id",
+            schema={"type": "string", "format": "uuid"},
+            description="Narrow to one owner. Absent means every owner.",
+        ),
+        openapi_docs.query_parameter(
+            "limit",
+            schema={
+                "type": "integer",
+                "minimum": AUDIT_LIMIT_MIN,
+                "maximum": AUDIT_LIMIT_MAX,
+                "default": AUDIT_LIMIT_DEFAULT,
+            },
+            description=(
+                f"Rows to return, {AUDIT_LIMIT_MIN}-{AUDIT_LIMIT_MAX}. A value outside the "
+                "range is refused with 422; it is never clamped."
+            ),
+        ),
+    ],
+)
+RESP_LIST_AUDIT = {
+    200: openapi_docs.ok("Audit rows, most recent first."),
     401: openapi_docs.UNAUTHENTICATED,
     403: openapi_docs.UNAUTHORIZED,
     422: openapi_docs.INVALID,
@@ -636,5 +699,108 @@ async def update_agent(request: Request, agent_id: str) -> Response:
             applied["authz_version"] = version
 
         return JSONResponse({"agent_id": agent_id, **applied})
+
+    return await _guard(run)
+
+
+@router.get("/admin/audit", openapi_extra=DOC_LIST_AUDIT, responses=RESP_LIST_AUDIT)
+async def list_agent_audit(request: Request) -> Response:
+    """The one read path to `app_private.agent_audit` (ADR 0142).
+
+    **Four pieces, in this order, and the order is the point**: `_service`,
+    `authenticate`, `require_scope`, and only then the query string. A caller
+    that has not proved who it is cannot use `strict_query`'s refusals to
+    enumerate which filters this endpoint takes -- and by the time any of them
+    can fire, the caller is an authenticated administrator, which is the shape
+    `errors.invalid` is reserved for (ADR 0097).
+
+    **`admin_audit:read`, not `admin_agents:read`.** Listing which agents exist
+    and reading what they did are different authorities, and reusing the roster
+    scope would have made that one decision, taken once, by whoever first
+    granted the roster.
+
+    **Nothing here filters by the caller.** An administrator holding the scope
+    reads the whole record; `agent_id` and `owner_id` narrow a permitted read
+    rather than authorize one. That is why they can be parameters at all, and it
+    is the opposite of the agent plane's audit functions, which take no identity
+    argument precisely because there the parameter WOULD be the authority
+    (SEC-PARAM-001, D473).
+    """
+
+    async def run() -> Response:
+        service = _service(request)
+        principal = await service.authenticate(request.headers.get("authorization"))
+        AuthService.require_scope(principal, scope_map.ADMIN_AUDIT_READ)
+
+        # `multi_items()` and not the mapping: the mapping is where a repeated
+        # parameter has already been resolved to its last value, silently
+        # (measured, Run 7). This is the same reason `_body` goes through
+        # `strict_json` rather than `request.json()`, one layer earlier.
+        try:
+            supplied = strict_query.parse(
+                request.query_params.multi_items(), AUDIT_QUERY_PARAMETERS
+            )
+            agent_id = (
+                strict_query.as_uuid("agent_id", supplied["agent_id"])
+                if "agent_id" in supplied
+                else None
+            )
+            owner_id = (
+                strict_query.as_uuid("owner_id", supplied["owner_id"])
+                if "owner_id" in supplied
+                else None
+            )
+            limit = (
+                strict_query.as_bounded_int(
+                    "limit",
+                    supplied["limit"],
+                    minimum=AUDIT_LIMIT_MIN,
+                    maximum=AUDIT_LIMIT_MAX,
+                )
+                if "limit" in supplied
+                else AUDIT_LIMIT_DEFAULT
+            )
+        except strict_query.InvalidQuery as exc:
+            raise errors.InvalidRequest(str(exc)) from exc
+
+        rows = await service.repository.list_agent_audit(
+            agent_id=agent_id, owner_id=owner_id, limit=limit
+        )
+        return JSONResponse(
+            {
+                "audit": [
+                    {
+                        "id": str(row["id"]),
+                        "source": row["source"],
+                        "agent_id": str(row["agent_id"]),
+                        "owner_id": str(row["owner_id"]),
+                        "tool": row["tool"],
+                        # NULL on every `database` row, and that is D500 rather
+                        # than a serialization gap: migration 0019's write RPCs
+                        # insert no request id, so the two records for one MCP
+                        # write join by agent, tool and time. Rendered anyway,
+                        # because an absent key and a null one read the same to
+                        # a client and only one of them is honest.
+                        "request_id": None if row["request_id"] is None else str(row["request_id"]),
+                        # Already redacted, by the capability lock's
+                        # `audit.redact` and in the runtime (D479). This service
+                        # redacts nothing: a second redaction here would be a
+                        # second authority over one rule, and the one that is
+                        # reviewed is the lock's.
+                        "parameters": row["parameters"],
+                        "outcome": row["outcome"],
+                        "row_count": row["row_count"],
+                        "elapsed_ms": row["elapsed_ms"],
+                        "started_at": row["started_at"].isoformat(),
+                        "completed_at": (
+                            None if row["completed_at"] is None else row["completed_at"].isoformat()
+                        ),
+                    }
+                    for row in rows
+                ],
+                "limit": limit,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
     return await _guard(run)

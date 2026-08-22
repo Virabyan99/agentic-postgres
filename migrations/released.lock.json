@@ -229,6 +229,17 @@
       "template": "templates/0019-agent-write-and-audit-plane.sql",
       "template_sha256": "32bbcb6d3a51f1fa8c18bdaa0a10534075f31352dec73d7a04cb349c95736c82",
       "version": "20260822120019"
+    },
+    {
+      "canonical_render_sha256": "201c035fc2a79ce8ffae945dedb094085da7800c5d1ddeaf0e237edf7aafb373",
+      "name": "agent_audit_reader",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0020-agent-audit-reader.sql",
+      "template_sha256": "0959627dae5e252fbf384c6cf4a7b3b2ab8395a4fd8fe782ede5ba487b481d7d",
+      "version": "20260822120020"
     }
   ],
   "schema_version": 1

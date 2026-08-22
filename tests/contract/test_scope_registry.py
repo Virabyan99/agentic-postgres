@@ -59,14 +59,30 @@ def test_the_administrative_class_is_one_per_identity_resource_and_verb() -> Non
     partition test below covers every pair *and* the union -- which is what
     catches the failure the complement produced and this could not: an approved
     name belonging to no class at all.
+
+    **Five members since Session 9 Run 7** (ADR 0142), and the equality is what
+    moved rather than the assertion's shape. An equality over a closed list is
+    what makes an unreviewed addition to the vocabulary fail here, so it stays
+    one; a `<=` would have admitted `admin_audit:read` silently and admitted the
+    next name silently too.
     """
     assert scope_registry.administrative_scopes() == {
         "admin_users:read",
         "admin_users:write",
         "admin_agents:read",
         "admin_agents:write",
+        "admin_audit:read",
     }
     assert scope_registry.administrative_scopes() <= scope_registry.approved_scopes()
+
+    # The asymmetry is a decision and not an oversight (ADR 0142), so it is
+    # asserted rather than left to the equality above to imply. Every other
+    # administrative resource carries a read/write pair; this one cannot,
+    # because `app_private.agent_audit` is append-only and its own COMMENT says
+    # the definer functions are the only paths in. A scope named for a write
+    # nobody can perform is a name for an authority that does not exist -- and
+    # the way that arrives is somebody completing the pattern.
+    assert "admin_audit:write" not in scope_registry.approved_scopes()
 
 
 def test_the_storage_class_is_one_per_object_verb() -> None:

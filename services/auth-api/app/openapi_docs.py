@@ -148,13 +148,53 @@ def body(model: type[BaseModel]) -> dict[str, Any]:
     }
 
 
-def described(
-    *, summary: str, description: str, request_model: type[BaseModel] | None = None
+def query_parameter(
+    name: str, *, schema: dict[str, Any], description: str, required: bool = False
 ) -> dict[str, Any]:
-    """The `openapi_extra` half: prose, and a request body if the route takes one."""
+    """One entry for a route's `parameters` array.
+
+    **Declared here rather than bound by FastAPI**, for the reason this whole
+    module exists: a declared parameter hands parsing to the framework, and
+    Starlette resolves a repeated query parameter to its LAST value silently --
+    measured in Session 9 Run 7, `QueryParams("limit=1&limit=9999")["limit"]` is
+    `"9999"`. That is `strict_json`'s duplicate-member defect arriving over the
+    query string, and `strict_query` is what refuses it. So the document
+    describes the parameter and the route still parses it.
+
+    That split has a cost worth naming: this fragment and `strict_query`'s
+    allowlist are two statements of one surface, and nothing in the framework
+    holds them together. `test_the_documented_query_parameters_are_the_parsed
+    _ones` is what does, by comparing the generated document against the
+    allowlist the route passes.
+    """
+    return {
+        "name": name,
+        "in": "query",
+        "required": required,
+        "schema": schema,
+        "description": description,
+    }
+
+
+def described(
+    *,
+    summary: str,
+    description: str,
+    request_model: type[BaseModel] | None = None,
+    query_parameters: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """The `openapi_extra` half: prose, a request body, and query parameters.
+
+    `openapi_extra` is deep-merged into what FastAPI generated (the measurement
+    is at the top of this module), and a route that declares no parameter of its
+    own generates no `parameters` key at all -- so this adds one rather than
+    merging into one.
+    """
     fragment: dict[str, Any] = {"summary": summary, "description": description}
     if request_model is not None:
         fragment["requestBody"] = body(request_model)
+    if query_parameters is not None:
+        fragment["parameters"] = query_parameters
     return fragment
 
 

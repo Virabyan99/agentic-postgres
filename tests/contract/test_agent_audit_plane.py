@@ -99,7 +99,7 @@ def _locked_image() -> str:
 
 @pytest.fixture(scope="module")
 def cluster() -> Any:
-    """A cluster built the way a deploy builds one, with all nineteen applied."""
+    """A cluster built the way a deploy builds one, with all twenty applied."""
     if not (FIXTURE / "outputs.json").is_file():
         pytest.skip("no rendered fixture; run ./deploy.sh --render-only")
     if _docker("version", "--format", "{{.Server.Version}}", timeout=30).returncode != 0:
@@ -170,11 +170,12 @@ def cluster() -> Any:
         # with "relation does not exist" -- which reads as a broken test rather
         # than a stale rendering. D211-D214 is four ways a proof stays unexecuted;
         # this is the cheap guard against the one that applies here.
-        assert "agent_write_and_audit_plane" in applied_names, (
-            f"0019 was not applied; the rendered set is {applied_names}. "
-            "Re-render: ./deploy.sh --project project.example.yaml "
-            "--capabilities capabilities.example.yaml --render-only"
-        )
+        for required in ("agent_write_and_audit_plane", "agent_audit_reader"):
+            assert required in applied_names, (
+                f"{required} was not applied; the rendered set is {applied_names}. "
+                "Re-render: ./deploy.sh --project project.example.yaml "
+                "--capabilities capabilities.example.yaml --render-only"
+            )
 
         yield {"name": name, "database": database, "roles": roles, "su": su}
     finally:
@@ -678,3 +679,331 @@ def test_a_human_write_leaves_no_audit_row(cluster: dict[str, Any]) -> None:
         f"AND owner_id = '{owner}';",
     )
     assert rows.stdout.strip() == "0", "a human write left an agent audit row"
+
+
+# ---------------------------------------------------------------------------
+# Migration 0020 -- the one reader, and the grant 0019 did not make (ADR 0142)
+#
+# **Why this migration exists is D501.** 0019 created the table and two indexes
+# whose own comment names their reader -- "The admin query endpoint (Run 7)
+# reads by owner and by agent, most recent first. Both indexes exist for that
+# one reader; neither is speculative" -- and created neither the reader nor a
+# grant. `auth_service` holds schema USAGE on `app_private` and nothing else, so
+# `GET /admin/audit` had no statement it was allowed to send. CLAUDE.md section 6
+# question 5, asked of 0019: which of this decision's callers got it? The
+# indexes did.
+#
+# Every assertion below keeps the two kinds of question apart (ADR 0134): a
+# GRANT question reads `aclexplode`, and a REACH question sets the role and
+# tries it.
+# ---------------------------------------------------------------------------
+
+READER = "auth_list_agent_audit"
+
+
+def _reader_acl(cluster: dict[str, Any]) -> list[str]:
+    """Every grantee in the reader's ACL, by name, excluding its owner."""
+    result = su(
+        cluster,
+        f"""
+        SELECT coalesce(string_agg(DISTINCT grantee.rolname, ',' ORDER BY grantee.rolname), '')
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private'
+        CROSS JOIN LATERAL aclexplode(p.proacl) acl
+        JOIN pg_roles grantee ON grantee.oid = acl.grantee
+        WHERE p.proname = '{READER}'
+          AND grantee.rolname <> current_user;
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+    return [name for name in result.stdout.strip().split(",") if name]
+
+
+def test_the_audit_reader_is_granted_to_the_auth_service_and_to_nobody_else(
+    cluster: dict[str, Any],
+) -> None:
+    """A grant question, so it reads the catalog (ADR 0134).
+
+    The omissions are the design and each has its own reason. Not
+    `project_admin`: the scope is checked at the endpoint, and a request role
+    holding EXECUTE could reach the record over PostgREST with no scope check at
+    all. Not either agent role: ADR 0135's stated residual threat is that an
+    agent can add noise to its own record under a true identity, and reading the
+    record back is not part of that threat. Not `api_documentation`: the
+    function is not in `api` and could not be served, and a grant is the one
+    thing that could change that.
+
+    An equality and not a containment. `set(holders) <= {expected}` would pass
+    for a function granted to nobody at all, which is a different release.
+
+    **The owner is subtracted rather than expected, and that is a measurement.**
+    `aclexplode(proacl)` reports the function's OWNER as a grantee: PostgreSQL
+    materialises `owner=X/owner` in the ACL as soon as any explicit grant forces
+    one to exist. That entry is not a decision anybody took and asserting it
+    would be asserting PostgreSQL's bookkeeping. The table twin above compares
+    `<= {owner}` for the same reason.
+    """
+    owner = cluster["roles"]["object_owner"]
+    holders = set(_reader_acl(cluster)) - {owner}
+    assert holders == {cluster["roles"]["auth_service"]}, (
+        f"app_private.{READER} is granted to {sorted(holders)} besides its owner. "
+        "One grantee, and every omission has a reason (ADR 0142)"
+    )
+
+
+def test_the_audit_reader_is_not_executable_by_public(cluster: dict[str, Any]) -> None:
+    """D57, re-measured as D262, and again here.
+
+    A newly created function is EXECUTABLE BY PUBLIC the moment it exists, and
+    `ALTER DEFAULT PRIVILEGES` -- the form that reads like the fix -- records
+    nothing at all for functions. The targeted `REVOKE ... FROM PUBLIC` in 0020
+    is what removes it, and this is the assertion that the revoke ran.
+    """
+    result = su(
+        cluster,
+        f"""
+        SELECT count(*)
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private'
+        CROSS JOIN LATERAL aclexplode(p.proacl) acl
+        WHERE p.proname = '{READER}' AND acl.grantee = 0;
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "0", f"PUBLIC holds EXECUTE on app_private.{READER}"
+
+
+def test_the_audit_reader_is_a_stable_definer_with_a_pinned_search_path(
+    cluster: dict[str, Any],
+) -> None:
+    """Three properties of one function, each load-bearing for a different reason.
+
+    SECURITY DEFINER is what lets a role holding no privilege on the table read
+    it. The pinned `search_path` is what stops a caller-controlled path from
+    resolving `agent_audit` somewhere else -- the standing rule for every
+    definer in this schema. And `provolatile = 's'` says it writes nothing,
+    which is worth asserting rather than inheriting: ADR 0136's whole category
+    exists because PostgREST refuses a WRITING function over GET, and a reader
+    that ever became volatile-and-writing would be a second write path to an
+    append-only table.
+    """
+    result = su(
+        cluster,
+        f"""
+        SELECT p.prosecdef, p.provolatile,
+               coalesce(array_to_string(p.proconfig, ','), '')
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private'
+        WHERE p.proname = '{READER}';
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+    secdef, volatility, config = result.stdout.strip().split("|")
+    assert secdef == "t", f"app_private.{READER} is not SECURITY DEFINER"
+    assert volatility == "s", (
+        f"app_private.{READER} is {volatility!r}, not STABLE. A reader that writes is a "
+        "second write path to a table whose own COMMENT says the definer functions are "
+        "the only paths in"
+    )
+    assert config == "search_path=pg_catalog, pg_temp", f"unpinned search_path: {config!r}"
+
+
+def test_the_auth_service_reads_the_record_only_through_the_reader(
+    cluster: dict[str, Any],
+) -> None:
+    """A reach question, both halves (ADR 0134).
+
+    The negative half alone would pass on a cluster where the function does not
+    exist either, and a role that can reach nothing looks identical to a perfect
+    boundary. So the positive half runs first and has to succeed.
+    """
+    reachable = as_role(
+        cluster,
+        "auth_service",
+        f"SELECT count(*) FROM app_private.{READER}(NULL, NULL, 10)",
+    )
+    assert reachable.returncode == 0, (
+        f"auth_service cannot call app_private.{READER}, which is the only statement "
+        f"GET /admin/audit is allowed to send: {reachable.stderr[:300]}"
+    )
+
+    denied = as_role(cluster, "auth_service", "SELECT count(*) FROM app_private.agent_audit")
+    assert denied.returncode != 0, "auth_service can read app_private.agent_audit directly"
+    assert "permission denied" in denied.stderr
+
+
+def test_no_request_role_can_execute_the_audit_reader(cluster: dict[str, Any]) -> None:
+    """The refusal that matters most, and it is about the agent roles.
+
+    An agent must not read the record that exists to attribute it. The
+    administrative path to it is a scope on a human's token, checked in the auth
+    service; a request role holding EXECUTE here would reach the same rows over
+    PostgREST with no scope check anywhere.
+
+    Over **every** request role, read from the product's own constant rather
+    than restated -- D492 is what a fifth copy of that list costs, and it was
+    found in this session.
+    """
+    request_roles = _bootstrap_module().AUTHENTICATOR_REQUEST_ROLES
+    assert request_roles, "no request role to refuse; this test would be vacuous"
+    for role_key in request_roles:
+        result = as_role(
+            cluster, role_key, f"SELECT count(*) FROM app_private.{READER}(NULL, NULL, 10)"
+        )
+        assert result.returncode != 0, (
+            f"{role_key} can execute app_private.{READER}. An agent reading the audit "
+            "record is not part of ADR 0135's threat model and must not become part of it"
+        )
+        assert "permission denied" in result.stderr
+
+
+def test_the_reader_returns_the_most_recent_first_and_breaks_ties_by_id(
+    cluster: dict[str, Any],
+) -> None:
+    """The tiebreak is not decoration, and this is what would notice its absence.
+
+    `started_at` defaults to `now()`, which is TRANSACTION time, so rows written
+    by one transaction share it to the microsecond. Without the `id DESC`
+    tiebreak their order under a LIMIT is arbitrary, and an arbitrary order under
+    a LIMIT is a row that appears in no page at all. Three rows are written in
+    ONE transaction here precisely so they collide.
+    """
+    agent = str(uuid.uuid4())
+    owner = str(uuid.uuid4())
+    written = as_agent(
+        cluster,
+        "agent_reader",
+        agent,
+        owner,
+        """
+        SELECT api.agent_audit_begin('query_resource');
+        SELECT api.agent_audit_begin('run_report');
+        SELECT api.agent_audit_begin('list_resources');
+        """,
+    )
+    assert written.returncode == 0, written.stderr
+
+    collided = su(
+        cluster,
+        f"SELECT count(DISTINCT started_at) FROM app_private.agent_audit "
+        f"WHERE agent_id = '{agent}'",
+    )
+    assert collided.stdout.strip() == "1", (
+        "the three rows did not share a started_at, so this test is not measuring the "
+        f"tiebreak it names (distinct values: {collided.stdout.strip()})"
+    )
+
+    def page(limit: int) -> list[str]:
+        result = as_role(
+            cluster,
+            "auth_service",
+            f"SELECT id::text FROM app_private.{READER}('{agent}', NULL, {limit})",
+        )
+        assert result.returncode == 0, result.stderr
+        return [line for line in result.stdout.strip().splitlines() if line]
+
+    full = page(10)
+    assert len(full) == 3, f"expected three rows, got {full}"
+    # The behavioural half: every prefix of the full ordering is what a shorter
+    # LIMIT returns. **Measured to be insufficient on its own** -- Run 7's
+    # battery arm A7 dropped `, r.id DESC` from the migration and this stayed
+    # green, because PostgreSQL's sort is deterministic for three rows. It is
+    # kept because it catches what the structural half below cannot: a reader
+    # that returns rows unordered, or newest-LAST.
+    assert page(2) == full[:2]
+    assert page(1) == full[:1]
+
+    # The structural half, and it is the one that holds the tiebreak. ADR 0134's
+    # division applied to an ordering: what the function IS is a question for the
+    # catalog, and what it DOES is a question for calling it. `pg_get_functiondef`
+    # returns the deployed definition, so this is not a scan of the template --
+    # it is what the cluster actually has.
+    definition = su(
+        cluster,
+        "SELECT pg_get_functiondef(p.oid) FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private' "
+        f"WHERE p.proname = '{READER}';",
+    )
+    assert definition.returncode == 0, definition.stderr
+    collapsed = " ".join(definition.stdout.split())
+    assert "ORDER BY r.started_at DESC, r.id DESC" in collapsed, (
+        "the deployed reader has no id tiebreak. started_at defaults to now(), which is "
+        "TRANSACTION time, so two rows written by one transaction share it exactly -- and "
+        "an arbitrary order under a LIMIT is a row that appears in no page. The prefix "
+        f"assertions above cannot see this (Run 7 battery A7): {collapsed[-300:]}"
+    )
+
+
+def test_the_reader_filters_narrow_and_do_not_authorize(cluster: dict[str, Any]) -> None:
+    """Both filters optional, and the unfiltered read is the widest one.
+
+    This is what makes `agent_id` and `owner_id` acceptable as parameters at all
+    while the agent plane's own audit functions take no identity argument
+    (SEC-PARAM-001, D473). There, a parameter naming a principal WOULD be the
+    authority. Here the caller has already been authorized to read the whole
+    record by a scope, so a filter can only ever return less.
+    """
+    mine, other = str(uuid.uuid4()), str(uuid.uuid4())
+    owner = str(uuid.uuid4())
+    for agent in (mine, other):
+        result = as_agent(
+            cluster, "agent_reader", agent, owner, "SELECT api.agent_audit_begin('query_resource');"
+        )
+        assert result.returncode == 0, result.stderr
+
+    def rows(agent_filter: str, owner_filter: str) -> int:
+        result = as_role(
+            cluster,
+            "auth_service",
+            f"SELECT count(*) FROM app_private.{READER}({agent_filter}, {owner_filter}, 500)",
+        )
+        assert result.returncode == 0, result.stderr
+        return int(result.stdout.strip())
+
+    unfiltered = rows("NULL", "NULL")
+    by_owner = rows("NULL", f"'{owner}'")
+    by_agent = rows(f"'{mine}'", "NULL")
+    both = rows(f"'{mine}'", f"'{owner}'")
+
+    assert by_agent == 1, f"the agent filter returned {by_agent} rows, not one"
+    assert by_owner >= 2, "the owner filter lost a row it should have kept"
+    assert both == 1
+    assert unfiltered >= by_owner >= both, (
+        "a filter returned MORE than the unfiltered read, which would make it a widening "
+        f"rather than a narrowing: {unfiltered} / {by_owner} / {both}"
+    )
+    # The one arrangement that would make the three numbers above meaningless.
+    assert rows(f"'{mine}'", f"'{uuid.uuid4()!s}'") == 0, (
+        "a filter naming an owner with no rows returned some, so the filters are not "
+        "conjunctive and the numbers above prove nothing"
+    )
+
+
+def test_the_reader_applies_the_limit_it_is_given_without_clamping(
+    cluster: dict[str, Any],
+) -> None:
+    """One authority for the bound, and it is the route's (D495, D463).
+
+    The route validates `limit` into its documented range and answers 422
+    outside it; this function applies what it is handed. A second clamp here
+    would be a second bound over one rule, and the two drift the moment either
+    moves. What this asserts is that the second clamp is genuinely absent --
+    a clamp at, say, 100 would be invisible until somebody asked for 101.
+    """
+    agent, owner = str(uuid.uuid4()), str(uuid.uuid4())
+    calls = "\n".join(["SELECT api.agent_audit_begin('query_resource');" for _ in range(4)])
+    result = as_agent(cluster, "agent_reader", agent, owner, calls)
+    assert result.returncode == 0, result.stderr
+
+    def count(limit: int) -> int:
+        got = as_role(
+            cluster,
+            "auth_service",
+            f"SELECT count(*) FROM app_private.{READER}('{agent}', NULL, {limit})",
+        )
+        assert got.returncode == 0, got.stderr
+        return int(got.stdout.strip())
+
+    assert count(4) == 4
+    assert count(2) == 2, "the limit is not applied"
+    assert count(1) == 1

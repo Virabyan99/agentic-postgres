@@ -479,3 +479,261 @@ def test_the_audit_functions_take_no_principal_on_the_deployed_cluster(
     assert "agent_audit_begin" in out and "agent_audit_complete" in out, (
         f"migration 0019's audit functions are not both present: {out}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Run 7 -- the 405 ADR 0136 named and did not run, and the admin reader
+#
+# **ADR 0136 wrote down a proof it could not run, and this is it.** Its own
+# consequences section says so: *"The category's safety property -- these
+# functions really do write, so GET really is ineffective -- is asserted offline
+# only as a contract shape. The property itself is a live-host proof: a GET
+# against the deployed endpoint must answer 405, and that belongs with Run 7's
+# proofs rather than being assumed here. Until it runs, the 405 is measured on a
+# rig and not on the deployment."*
+#
+# The distinction is not pedantry. Offline, nothing can tell a writing function
+# from a reading one by looking at the contract -- so a future entry in
+# `agent_write_rpcs` that does NOT write would keep the section's shape and
+# silently lose its guarantee. This is the only assertion that would notice.
+# ---------------------------------------------------------------------------
+
+ADMIN_AUDIT_USERNAME = "apg-acceptance-audit-admin"
+ADMIN_AUDIT_PASSWORD = "apg-audit-admin-6f21c8d4e0b7"  # noqa: S105 -- a probe credential
+
+#: What the audit reader holds, and what it deliberately does not. No
+#: `admin_agents:read`: the two are different authorities (ADR 0142), and a
+#: subject holding both could not tell which one served the request.
+ADMIN_AUDIT_SCOPES = ("admin_audit:read",)
+
+
+@pytest.fixture(scope="module")
+def audit_admin(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+) -> Any:
+    """A `project_admin` holding `admin_audit:read` and nothing else administrative.
+
+    Created through `app_private.auth_create_user` -- the same function
+    `POST /admin/users` calls -- rather than through the endpoint, for the reason
+    `app_probe_subject` gives: a fixture built on an endpoint makes every proof
+    below conditional on that endpoint. The token comes from `/auth/login`,
+    because obtaining one IS the product's route and there is no function
+    underneath it to prefer.
+    """
+    from agentic_postgres import service_source
+
+    hashing = service_source.load("hashing")
+    role_name = project_a["database"]["roles"]["project_admin"]
+    scopes = ", ".join(f"'{scope}'" for scope in sorted(ADMIN_AUDIT_SCOPES))
+
+    psql(project_a, f"DELETE FROM app_private.users WHERE username = '{ADMIN_AUDIT_USERNAME}';")
+    code, user_id, error = psql(
+        project_a,
+        "SELECT app_private.auth_create_user("
+        f"'{ADMIN_AUDIT_USERNAME}', 'Audit reader probe', '{role_name}', "
+        f"ARRAY[{scopes}]::text[], "
+        f"'{hashing.Hasher().hash(ADMIN_AUDIT_PASSWORD)}');",
+    )
+    assert code == 0 and user_id, f"could not create the audit-admin probe subject: {error}"
+
+    try:
+        answer = api_call(
+            f"{app_base(project_a)}/auth/login",
+            method="POST",
+            body={"username": ADMIN_AUDIT_USERNAME, "password": ADMIN_AUDIT_PASSWORD},
+        )
+        assert answer.status == 200, (
+            f"the audit-admin probe could not log in ({answer.status}: {answer.body[:200]}). "
+            "Every refusal below would then be a refusal of a missing credential"
+        )
+        yield {"user_id": user_id, "token": json.loads(answer.body)["access_token"]}
+    finally:
+        psql(project_a, f"DELETE FROM app_private.users WHERE username = '{ADMIN_AUDIT_USERNAME}';")
+
+
+def test_a_get_against_the_deployed_audit_rpc_is_refused(
+    rest_base: Callable[[dict[str, Any]], str],
+    project_a: dict[str, Any],
+    api_call: Callable[..., Any],
+    mcp_writer_session: dict[str, Any],
+) -> None:
+    """**The proof ADR 0136 named and left unrun.** `agent_write_rpcs`' whole reason.
+
+    Measured on a rig in Run 1, and both predictions going in were wrong in
+    opposite directions (D490). PostgREST does **not** refuse GET on a VOLATILE
+    function -- it executes it and takes the argument from the query string, so
+    volatility protects nothing. What refuses a function that actually **writes**
+    is that PostgREST runs a GET in a **read-only transaction**: `25006` surfaced
+    as `405`, and the write does not happen. That is D474's mechanism arriving
+    from the other side, and it is why `agent_rpcs`' `maxItems: 0` keeps its
+    reason while a fourth section exists beside it.
+
+    **The POST control runs first and must succeed.** Without it, a 405 could
+    equally mean the function is absent, the route is wrong, or the token is
+    refused -- three states that look identical from outside and none of which is
+    the property being claimed.
+
+    The guarantee this asserts is narrower than it looks and ADR 0136 says so:
+    the 405 prevents the **effect**, not the **disclosure**. The argument is
+    already in every log and cache by the time PostgreSQL refuses it, which is
+    why the section enumerates its arguments as a review surface and why none of
+    them may carry a secret.
+    """
+    base = rest_base(project_a)
+    token = mcp_writer_session["token"]
+
+    control = api_call(
+        f"{base}/rpc/agent_audit_begin",
+        method="POST",
+        token=token,
+        body={"p_tool": "query_resource"},
+    )
+    assert control.status == 200, (
+        f"the control failed: POST /rpc/agent_audit_begin answered {control.status} "
+        f"({control.body[:200]}). A 405 below would then say nothing about GET"
+    )
+
+    refused = api_call(
+        f"{base}/rpc/agent_audit_begin?p_tool=leaked",
+        method="GET",
+        token=token,
+    )
+    assert refused.status == 405, (
+        f"GET /rpc/agent_audit_begin answered {refused.status}, not 405. "
+        "ADR 0136's category rests on a writing function being ineffective over GET, "
+        f"and nothing offline can tell a writing function from a reading one: {refused.body[:300]}"
+    )
+    assert "25006" in refused.body or "read-only" in refused.body, (
+        "the 405 did not come from the read-only transaction, so it is a different "
+        f"refusal than the one this category rests on: {refused.body[:300]}"
+    )
+
+
+def test_the_get_that_was_refused_wrote_nothing(
+    rest_base: Callable[[dict[str, Any]], str],
+    project_a: dict[str, Any],
+    api_call: Callable[..., Any],
+    psql: Callable[..., tuple[int, str, str]],
+    mcp_writer_session: dict[str, Any],
+) -> None:
+    """A refusal that still wrote would be the worst of both.
+
+    Asserted separately from the status, because a status is a claim about the
+    response and this is a claim about the table -- and the rig measured them as
+    two facts rather than one.
+    """
+    agent_id = mcp_writer_session["agent_id"]
+    tool = "apg-run7-get-canary"
+
+    api_call(
+        f"{rest_base(project_a)}/rpc/agent_audit_begin?p_tool={tool}",
+        method="GET",
+        token=mcp_writer_session["token"],
+    )
+
+    code, out, error = psql(
+        project_a,
+        "SELECT count(*) FROM app_private.agent_audit "
+        f"WHERE agent_id = '{agent_id}' AND tool = '{tool}';",
+    )
+    assert code == 0, error
+    assert out.strip() == "0", (
+        f"a GET that answered 405 still wrote {out.strip()} rows. The refusal is supposed "
+        "to be the read-only transaction rejecting the INSERT, which means no row"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Run 7 -- the admin audit endpoint, against the deployment (ADR 0142)
+# ---------------------------------------------------------------------------
+
+
+def test_the_admin_audit_endpoint_serves_what_the_table_holds(
+    audit_admin: dict[str, Any],
+    mcp_writer_session: dict[str, Any],
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+) -> None:
+    """The endpoint and the table, side by side -- which is the only way to tell.
+
+    `_audit_rows` above reads the table with `psql` and says why: a proof about
+    the RECORD must not become conditional on the reader. This test is the
+    other half of that decision -- the one place the two are compared, so a
+    reader that filtered, truncated or reordered would be visible.
+
+    **This needs migration 0020**, which is released and, until the trip,
+    applied on no cluster. Without it `auth_service` holds schema USAGE on
+    `app_private` and nothing else, and this answers 500 rather than 200 --
+    correctly and loudly, which is what a released-and-unapplied migration
+    should look like from a gate (D501).
+    """
+    agent_id = mcp_writer_session["agent_id"]
+    psql(
+        project_a,
+        f"SELECT set_config('app.agent_id', '{agent_id}', false);",
+    )
+    from_table = _audit_rows(psql, project_a, agent_id)
+    assert from_table, (
+        "the probe agent has no audit rows, so this comparison would hold vacuously. "
+        "Run the AGT-AUDIT-001 arms above first"
+    )
+
+    answer = api_call(
+        f"{app_base(project_a)}/admin/audit?agent_id={agent_id}&limit=500",
+        method="GET",
+        token=audit_admin["token"],
+    )
+    assert answer.status == 200, (
+        f"GET /admin/audit answered {answer.status} ({answer.body[:300]}). If this is "
+        "500, the likely cause is that migration 0020 has not been applied to this "
+        "cluster -- auth_service then holds no EXECUTE on auth_list_agent_audit"
+    )
+    served = json.loads(answer.body)
+
+    assert {row["tool"] for row in served["audit"]} == {row["tool"] for row in from_table}, (
+        "the endpoint and the table disagree about which tools this agent used"
+    )
+    assert len(served["audit"]) == len(from_table), (
+        f"the endpoint served {len(served['audit'])} rows and the table holds {len(from_table)}"
+    )
+    # Newest first, which is the opposite of `_audit_rows`' ordering -- so this
+    # also catches a reader that returned the table's natural order.
+    started = [row["started_at"] for row in served["audit"]]
+    assert started == sorted(started, reverse=True), (
+        f"the endpoint did not return the record most recent first: {started}"
+    )
+
+
+def test_the_admin_audit_endpoint_refuses_an_administrator_without_the_scope(
+    mcp_writer_session: dict[str, Any],
+    project_a: dict[str, Any],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+) -> None:
+    """API-ADMIN-001 on the deployment, and the agent half beside it.
+
+    Two callers who each hold a real, current credential and neither of which
+    holds `admin_audit:read`: the write agent, whose ceiling does not admit the
+    scope at all, and an anonymous request. An agent must never read the record
+    that exists to attribute it, and the ceiling is only one of the two places
+    that is enforced -- this is the other.
+    """
+    url = f"{app_base(project_a)}/admin/audit"
+
+    anonymous = api_call(url, method="GET")
+    assert anonymous.status == 401, f"{anonymous.status}: {anonymous.body[:200]}"
+
+    as_agent = api_call(url, method="GET", token=mcp_writer_session["token"])
+    assert as_agent.status in {401, 403}, (
+        f"an agent token reached the admin audit endpoint ({as_agent.status}): "
+        f"{as_agent.body[:300]}"
+    )
+    for leaked in ("agent_plane", "started", "query_resource"):
+        assert leaked not in as_agent.body, (
+            f"a refused request carried {leaked!r} out of the audit record"
+        )

@@ -22,6 +22,7 @@ import json
 import secrets
 import subprocess
 import time
+import uuid as uuid_module
 from pathlib import Path
 from typing import Any
 
@@ -776,7 +777,13 @@ def test_a_second_bootstrap_is_refused(cluster: dict[str, Any], administrator: s
 def test_the_service_cannot_read_the_tables_it_reaches_through_functions(
     cluster: dict[str, Any],
 ) -> None:
-    for table in ("users", "user_credentials"):
+    # `agent_audit` since Session 9 Run 7. Migration 0020 gives `auth_service`
+    # EXECUTE on one definer function over this table and nothing else, so the
+    # property it already had for the identity registry has to hold for the
+    # audit record too -- and if it ever stops holding, the endpoint that reads
+    # it would keep working, which is exactly the failure that would go
+    # unnoticed.
+    for table in ("users", "user_credentials", "agent_audit"):
         result = _docker(
             "exec", "-i", cluster["cluster"].name, "psql", "-qtA", "-U", "postgres",
             "-d", cluster["database"], "-c",
@@ -1278,3 +1285,592 @@ def test_the_authenticator_becomes_exactly_the_request_roles(cluster: dict[str, 
             f"the authenticator became {role_suffix}, which this release does not activate"
         )
         assert "permission denied to set role" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# Run 7: the admin audit endpoint (ADR 0142, migration 0020)
+#
+# `GET /admin/audit` is four pieces in one order -- `_service`, `authenticate`,
+# `require_scope`, then the query string -- and the order is load-bearing: a
+# caller that has not proved who it is cannot use a parse refusal to enumerate
+# the filters this endpoint takes.
+# ---------------------------------------------------------------------------
+
+AUDIT_SCOPES = [
+    "admin_audit:read",
+    "admin_users:read",
+    "notes:read",
+]
+
+
+def _errors_module() -> Any:
+    """`app.errors`, for the refusal payloads.
+
+    Imported inside a function because this module only puts the service on the
+    path once `create_app` has run, the way every other import of `app.*` here
+    does. The payloads are read rather than restated: a body compared against a
+    literal passes when both copies are edited together, which is exactly the
+    class of proof CLAUDE.md section 6 is about.
+    """
+    from app import errors
+
+    return errors
+
+
+def _seed_audit_row(cluster: dict[str, Any], agent_id: str, owner_id: str, tool: str) -> None:
+    """One `agent_plane` row, written the way the pre-request hook would arrange it.
+
+    There is no PostgREST in this rig, so the GUCs are set directly -- which is
+    what `tests/contract/test_agent_audit_plane.py` does and says why. All of it
+    in ONE `-c`, because `set_config(..., true)` is transaction-local and a GUC
+    set in one session and read in another is a different measurement entirely.
+    """
+    cluster["cluster"].psql(
+        f'SET ROLE "{cluster["roles"]["agent_reader"]}"; '
+        f"SELECT set_config('app.agent_id', '{agent_id}', true); "
+        f"SELECT set_config('app.user_id', '{owner_id}', true); "
+        f"SELECT api.agent_audit_begin('{tool}')"
+    )
+
+
+def _auditor(drive: Any, admin: str, username: str) -> str:
+    """A second administrator holding `admin_audit:read`, created THROUGH THE PRODUCT.
+
+    `POST /admin/users`, not an INSERT and not `auth_bootstrap_administrator`:
+    ADR 0065/0066's rule is that a proof reaching the right end state by a route
+    the product does not take proves the end state is reachable, not that the
+    product reaches it. The bootstrap function is also refused a second time by
+    design, so a direct route would not have worked twice anyway.
+
+    It exists because `ada` deliberately does NOT hold the scope. That is
+    `API-ADMIN-001`'s shape: the role never implies the scope, so the same
+    `project_admin` role is refused on one token and served on another.
+    """
+    created = drive(
+        "POST",
+        "/admin/users",
+        headers={"Authorization": f"Bearer {admin}"},
+        content=json.dumps(
+            {
+                "username": username,
+                "display_name": "An auditor",
+                "role": "project_admin",
+                "scopes": AUDIT_SCOPES,
+                "password": PASSPHRASE,
+            }
+        ),
+    )
+    assert created.status_code == 201, created.text
+    token = _login(drive, username=username).json()["access_token"]
+    return str(token)
+
+
+def test_the_audit_endpoint_needs_its_own_scope_not_the_agent_roster_one(drive: Any) -> None:
+    """API-ADMIN-001, on the scope Session 9 adds.
+
+    `ada` is a `project_admin` holding `admin_agents:read` -- she can list every
+    agent -- and she is refused here. Listing WHICH agents exist and reading WHAT
+    THEY DID are different authorities, and reusing the roster scope would have
+    made that one decision, taken once, by whoever first granted the roster.
+
+    The positive half is the next test. Without it a route that refused
+    everybody would pass this one.
+    """
+    admin = _login(drive).json()["access_token"]
+    assert "admin_audit:read" not in ADMIN_SCOPES, (
+        "ada now holds the audit scope, so this test measures nothing"
+    )
+
+    roster = drive("GET", "/admin/agents", headers={"Authorization": f"Bearer {admin}"})
+    assert roster.status_code == 200, "the control failed: ada cannot reach the roster either"
+
+    response = drive("GET", "/admin/audit", headers={"Authorization": f"Bearer {admin}"})
+    assert response.status_code == 403, response.text
+    assert response.json() == _errors_module().AUTHORIZATION_FAILED
+
+
+def test_an_administrator_holding_the_scope_reads_the_record(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """The positive half, end to end: HTTP, the scope, the grant and 0020's function.
+
+    This is the assertion migration 0020 exists for. Before it, `auth_service`
+    held schema USAGE on `app_private` and nothing else, so this request had no
+    statement it was allowed to send (D501) -- and it would have failed here with
+    `permission denied for function`, not with an empty list.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-reads")
+
+    agent, owner = str(uuid_module.uuid4()), str(uuid_module.uuid4())
+    _seed_audit_row(cluster, agent, owner, "query_resource")
+
+    response = drive("GET", "/admin/audit", headers={"Authorization": f"Bearer {auditor}"})
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+
+    body = response.json()
+    assert body["limit"] == 100, "the default limit is not the documented one"
+    row = next(entry for entry in body["audit"] if entry["agent_id"] == agent)
+    assert row["source"] == "agent_plane"
+    assert row["outcome"] == "started"
+    assert row["tool"] == "query_resource"
+    assert row["owner_id"] == owner
+    assert row["started_at"]
+    # D500, rendered rather than omitted. An absent key and a null one read the
+    # same to a client and only one of them is honest about the gap.
+    assert "request_id" in row
+
+
+def test_the_audit_endpoint_returns_no_secret_material(drive: Any, cluster: dict[str, Any]) -> None:
+    """The record names a tool and a principal, never a credential.
+
+    Asserted as an absence over the response rather than field by field: a
+    column added to `agent_audit` by a later migration reaches this endpoint
+    through `SELECT *`, so the guard has to be over what came back.
+    """
+    admin = _login(drive).json()["access_token"]
+    created = _create_agent(drive, admin, "audited-agent")
+    auditor = _auditor(drive, admin, "auditor-no-secrets")
+    _seed_audit_row(cluster, created["agent_id"], str(uuid_module.uuid4()), "run_report")
+
+    response = drive("GET", "/admin/audit", headers={"Authorization": f"Bearer {auditor}"})
+    assert response.status_code == 200, response.text
+    assert created["secret"] not in response.text
+    for forbidden in ("secret", "password", "hash", "token"):
+        assert forbidden not in response.text.lower(), f"the audit response contains {forbidden!r}"
+
+
+def test_a_repeated_query_parameter_is_refused_rather_than_resolved(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """The measured defect, refused (Run 7's rig7).
+
+    `QueryParams("limit=1&limit=9999")["limit"]` is `"9999"` on the locked
+    Starlette -- last value wins, silently, which is `strict_json`'s
+    duplicate-member defect arriving over the query string. A caller that sends
+    a modest bound and an enormous one would get the enormous one.
+
+    The control is the same request with the parameter once, which must be
+    served: a route that refused every `limit` would pass the refusal half.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-duplicates")
+    headers = {"Authorization": f"Bearer {auditor}"}
+
+    control = drive("GET", "/admin/audit?limit=1", headers=headers)
+    assert control.status_code == 200, f"the control failed: {control.text}"
+
+    response = drive("GET", "/admin/audit?limit=1&limit=9999", headers=headers)
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert body["error"] == "invalid_request"
+    assert "more than once" in body["message"]
+    assert "limit" in body["message"]
+
+    # And it is not a special case for `limit`. A repeated filter resolves the
+    # same way and would silently answer a different question than the one asked.
+    repeated_filter = drive(
+        "GET",
+        f"/admin/audit?agent_id={uuid_module.uuid4()}&agent_id={uuid_module.uuid4()}",
+        headers=headers,
+    )
+    assert repeated_filter.status_code == 422, repeated_filter.text
+
+
+def test_an_unknown_query_parameter_is_refused(drive: Any) -> None:
+    """`extra="forbid"`'s reasoning, over the query string.
+
+    Without it the framework accepts and DISCARDS the parameter, so a caller
+    that believes it filtered is served the unfiltered record and nothing tells
+    it otherwise. That is `models.py`'s stated measurement -- an unknown member
+    leaves no trace at all -- and a silently ignored filter on an audit endpoint
+    is the same failure with worse consequences.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-unknown")
+    headers = {"Authorization": f"Bearer {auditor}"}
+
+    response = drive("GET", "/admin/audit?cursor=abc", headers=headers)
+    assert response.status_code == 422, response.text
+    assert "unknown query parameter" in response.json()["message"]
+
+    # Case-sensitivity, measured in rig7: `Limit` and `limit` are DISTINCT keys,
+    # so an allowlist that folded case would accept `LIMIT` and one that did not
+    # must refuse it. This asserts which of the two this endpoint is.
+    assert drive("GET", "/admin/audit?Limit=5", headers=headers).status_code == 422
+
+
+@pytest.mark.parametrize(
+    ("query", "why"),
+    [
+        ("limit=0", "below the range"),
+        ("limit=501", "above the range"),
+        ("limit=-1", "negative"),
+        ("limit=abc", "not an integer"),
+        ("limit=", "present and empty"),
+        ("agent_id=not-a-uuid", "not a uuid"),
+        ("agent_id=", "present and empty"),
+    ],
+)
+def test_a_value_outside_its_contract_is_refused_and_never_clamped(
+    drive: Any, query: str, why: str
+) -> None:
+    """A refusal names the bound; a clamp answers a question nobody asked.
+
+    `limit=501` is the arm that matters. A clamp would return 500 rows with a
+    `200` and say nothing, and the caller would believe it had read the whole
+    record. The bound lives at the route and migration 0020's reader
+    deliberately does not restate it: two bounds over one rule drift the moment
+    either moves (D495, D463).
+
+    `limit=` and `agent_id=` are the empty-value arms. Measured in rig7: an
+    empty query value is PRESENT, not absent, so a converter that let it fall
+    through to a default would be the one path by which a caller could make a
+    filter disappear.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, f"auditor-{abs(hash(query)) % 100000}")
+    response = drive("GET", f"/admin/audit?{query}", headers={"Authorization": f"Bearer {auditor}"})
+    assert response.status_code == 422, f"{why}: {response.status_code} {response.text}"
+    assert response.json()["error"] == "invalid_request"
+
+
+def test_the_advertised_boundary_is_the_enforced_one(drive: Any) -> None:
+    """The bound the DOCUMENT publishes, sent to the endpoint that publishes it.
+
+    Read from the generated document rather than from `routes.py`'s constant,
+    which is the whole point: the offline test next to this one can only show
+    that the document is coherent, because both of its sides come from the same
+    constant. This sends the advertised maximum and one past it, so a route
+    enforcing a number it does not publish is refused for a request its own
+    contract says is legal -- and goes red here.
+    """
+    from app import main as main_module
+
+    document = main_module.create_app("auth").openapi()
+    parameters = document["paths"]["/admin/audit"]["get"]["parameters"]
+    schema = next(p for p in parameters if p["name"] == "limit")["schema"]
+    advertised_max = int(schema["maximum"])
+    advertised_min = int(schema["minimum"])
+
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-boundary")
+    headers = {"Authorization": f"Bearer {auditor}"}
+
+    for value in (advertised_min, advertised_max):
+        served = drive("GET", f"/admin/audit?limit={value}", headers=headers)
+        assert served.status_code == 200, (
+            f"limit={value} is inside the advertised range and was refused "
+            f"({served.status_code}): {served.text}"
+        )
+        assert served.json()["limit"] == value, "the endpoint applied a different limit"
+
+    for value in (advertised_min - 1, advertised_max + 1):
+        refused = drive("GET", f"/admin/audit?limit={value}", headers=headers)
+        assert refused.status_code == 422, (
+            f"limit={value} is outside the advertised range and was served "
+            f"({refused.status_code}), so the published bound is not the enforced one"
+        )
+
+
+def test_the_limit_is_applied_and_reported(drive: Any, cluster: dict[str, Any]) -> None:
+    """What the caller asked for is what ran, and the response says which.
+
+    The reported `limit` is what makes the absence of a clamp observable from
+    outside: a response that returned fewer rows than asked and named no bound
+    would be indistinguishable from a record that simply has fewer rows.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-limits")
+    agent, owner = str(uuid_module.uuid4()), str(uuid_module.uuid4())
+    for tool in ("query_resource", "run_report", "list_resources"):
+        _seed_audit_row(cluster, agent, owner, tool)
+
+    headers = {"Authorization": f"Bearer {auditor}"}
+    full = drive("GET", f"/admin/audit?agent_id={agent}", headers=headers).json()
+    assert len(full["audit"]) == 3
+    assert full["limit"] == 100
+
+    bounded = drive("GET", f"/admin/audit?agent_id={agent}&limit=2", headers=headers).json()
+    assert len(bounded["audit"]) == 2
+    assert bounded["limit"] == 2
+    # Every prefix of the full ordering, which is what the reader's `id` tiebreak
+    # is for -- the three rows above share a `started_at` to the microsecond.
+    assert [row["id"] for row in bounded["audit"]] == [row["id"] for row in full["audit"]][:2]
+
+
+def test_the_filters_narrow_the_record_and_do_not_widen_it(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """`agent_id` and `owner_id` narrow a permitted read rather than authorize one.
+
+    That is what makes them acceptable as parameters at all, while the agent
+    plane's own audit functions take no identity argument (SEC-PARAM-001, D473).
+    There a parameter naming a principal WOULD be the authority; here the caller
+    has already been authorized to read the whole record by a scope, so a filter
+    can only ever return less.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-filters")
+    headers = {"Authorization": f"Bearer {auditor}"}
+
+    mine, other, owner = (str(uuid_module.uuid4()) for _ in range(3))
+    _seed_audit_row(cluster, mine, owner, "query_resource")
+    _seed_audit_row(cluster, other, owner, "query_resource")
+
+    def rows(query: str) -> list[dict[str, Any]]:
+        response = drive("GET", f"/admin/audit?{query}&limit=500", headers=headers)
+        assert response.status_code == 200, response.text
+        return list(response.json()["audit"])
+
+    unfiltered = rows("")
+    by_agent = rows(f"agent_id={mine}")
+    by_owner = rows(f"owner_id={owner}")
+
+    assert {row["agent_id"] for row in by_agent} == {mine}
+    assert {row["agent_id"] for row in by_owner} == {mine, other}
+    assert len(unfiltered) >= len(by_owner) > len(by_agent), (
+        "a filter returned more than the unfiltered read, which would make it a widening"
+    )
+    assert rows(f"agent_id={mine}&owner_id={uuid_module.uuid4()}") == [], (
+        "the filters are not conjunctive, so the counts above prove nothing"
+    )
+
+
+def test_an_unauthenticated_caller_learns_nothing_about_the_parameters(drive: Any) -> None:
+    """The ORDER of the four pieces, asserted rather than left to reading order.
+
+    Authenticate, require the scope, then parse. A route that parsed first would
+    answer 422 `unknown query parameter: 'cursor' (this endpoint takes agent_id,
+    limit, owner_id)` to a caller holding no credential at all -- which hands an
+    anonymous prober the filter names and the fact that the endpoint exists.
+
+    Both wrong-caller cases are covered: no token, and a token whose subject
+    holds every other administrative scope. Each must answer its own refusal and
+    neither may name a parameter.
+    """
+    bad_query = "?cursor=x&limit=1&limit=2&agent_id=not-a-uuid"
+
+    anonymous = drive("GET", f"/admin/audit{bad_query}")
+    assert anonymous.status_code == 401, anonymous.text
+
+    admin = _login(drive).json()["access_token"]
+    unscoped = drive(
+        "GET", f"/admin/audit{bad_query}", headers={"Authorization": f"Bearer {admin}"}
+    )
+    assert unscoped.status_code == 403, unscoped.text
+
+    for response in (anonymous, unscoped):
+        for leaked in ("cursor", "agent_id", "owner_id", "limit", "uuid"):
+            assert leaked not in response.text, (
+                f"a refusal before the scope check named {leaked!r}, so the query string "
+                "was parsed before the caller was authorized"
+            )
+
+
+# ---------------------------------------------------------------------------
+# Run 7: SEC-REV-001's database half -- revocation PROVED, not built (D471, D472)
+#
+# **Session 9 adds no revocation mechanism and must not appear to.** Migration
+# 0018 already carries the authoritative check and its own COMMENT states the
+# property: *"A revoked, disabled or re-authorized agent stops on the NEXT
+# request, not at the token's expiry."* And `PATCH /admin/agents/{agent_id}`
+# already revokes, gated on `admin_agents:write`, since Session 6. Building a
+# second of either would give one fact two authorities that have to be kept in
+# step, and the two would drift on the `authz_version` bump -- which is the part
+# that actually stops the token.
+#
+# So this section takes the product's own route in and asserts the effect at the
+# authority. It runs `PATCH`, never an `UPDATE` against the table: ADR 0065/0066
+# says a proof reaching the right end state by a route the product does not take
+# proves the end state is reachable, not that the product reaches it.
+# ---------------------------------------------------------------------------
+
+
+def _agent_claims(cluster: dict[str, Any], agent_id: str) -> dict[str, Any]:
+    """An agent token's claims, read from the registry the way the issuer reads them.
+
+    `credential_version` is `0` by convention (D397): an agent has no password,
+    so "not a human" is a VALUE rather than an absence, and the hook checks the
+    convention itself. `token_use` is the discriminator and is the only claim in
+    the token that is one (ADR 0117).
+    """
+    row = cluster["cluster"].psql(
+        f'SET ROLE "{cluster["owner"]}"; '  # noqa: S608
+        "SELECT role_name, array_to_string(scopes, ','), authz_version "
+        f"FROM app_private.auth_lookup_agent('{agent_id}'::uuid)"
+    )
+    role_name, scopes, authz_version = row.split("|")
+    return {
+        "sub": agent_id,
+        "role": role_name,
+        "scope": scopes.split(","),
+        "credential_version": 0,
+        "authz_version": int(authz_version),
+        "token_use": "agent",
+    }
+
+
+def test_a_revoked_agents_existing_token_stops_at_the_authoritative_check(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """SEC-REV-001's database half, through the product's own revocation route.
+
+    The claims are captured BEFORE the revocation and replayed unchanged after
+    it, which is the whole point: this is a perfectly signed token that was true
+    when it was issued. Nothing about the signature changes; what changes is the
+    answer to "is this still true", asked inside the request's own transaction.
+
+    **The positive arm runs first and must succeed.** Without it, a hook that
+    refused every agent would pass the negative arm, and the test would report a
+    boundary where there was a broken fixture. That is not hypothetical here --
+    an agent whose scopes were stored unsorted would fail the array equality and
+    look exactly like a revocation.
+    """
+    admin = _login(drive).json()["access_token"]
+    created = _create_agent(drive, admin, "revoked-mid-session", role="agent_writer")
+    agent_id = created["agent_id"]
+    role = cluster["roles"]["agent_writer"]
+
+    claims = _agent_claims(cluster, agent_id)
+
+    before = _hook(cluster, role, claims)
+    assert before.returncode == 0, (
+        f"the control failed: an ACTIVE agent's claims were refused: {before.stderr[:300]}"
+    )
+    assert before.stdout.strip(), "app.user_id was not established for an active agent"
+
+    revoked = drive(
+        "PATCH",
+        f"/admin/agents/{agent_id}",
+        headers={"Authorization": f"Bearer {admin}"},
+        content=json.dumps({"status": "revoked"}),
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json()["authz_version"] > claims["authz_version"], (
+        "revoking did not move authz_version, which is the part that stops the token"
+    )
+
+    after = _hook(cluster, role, claims)
+    assert after.returncode != 0, (
+        "the same claims were still accepted after revocation, so the token outlives "
+        "the credential it was issued against"
+    )
+    assert "AP401" in after.stderr, after.stderr[:400]
+
+
+def test_the_status_type_admits_no_third_state_and_terminality_is_UNENFORCED(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """D472's half that holds, and D503 -- the half that does not.
+
+    `app_private.agent_status` is a TWO-value enum, because 0011 decided that
+    *"a user is `disabled` by an administrator and can be re-enabled; an agent
+    credential is `revoked`, which is terminal for that credential"* -- and that
+    comment names `SEC-REV-001` as its proof. Read from the catalog, not from the
+    migration text: what a release ships is the type, and a comment in a file is
+    not a constraint.
+
+    **Which is exactly what this test found.** The enum is what stops a third
+    state existing. Nothing stops the SECOND transition: `auth_set_agent_status`
+    is an unguarded `UPDATE`, so `revoked -> active` is legal and answers 200.
+    "Terminal" was stated in a comment and enforced by nothing, for three
+    sessions, while the requirement whose proof it claims to be sat as a
+    placeholder.
+
+    CLAUDE.md section 6's first question, asked of a comment rather than a test:
+    what would have to break for this to go red? Until Run 7, nothing.
+    """
+    values = cluster["cluster"].psql(
+        "SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) "
+        "FROM pg_type t JOIN pg_enum e ON e.enumtypid = t.oid "
+        "JOIN pg_namespace n ON n.oid = t.typnamespace "
+        "WHERE n.nspname = 'app_private' AND t.typname = 'agent_status'"
+    )
+    assert values.strip() == "active,revoked", (
+        f"app_private.agent_status is {values!r}. A third value would make un-revoking "
+        "expressible, and the kill switch would become a toggle"
+    )
+
+    admin = _login(drive).json()["access_token"]
+    created = _create_agent(drive, admin, "terminal-state", role="agent_reader")
+    agent_id = created["agent_id"]
+    initial_version = int(_agent_claims(cluster, agent_id)["authz_version"])
+
+    for _ in range(2):
+        response = drive(
+            "PATCH",
+            f"/admin/agents/{agent_id}",
+            headers={"Authorization": f"Bearer {admin}"},
+            content=json.dumps({"status": "revoked"}),
+        )
+        assert response.status_code == 200, response.text
+
+    # **And here is what the product actually does** (D503). Measured in Run 7:
+    # setting a revoked agent back to `active` answers 200 and the agent works
+    # again. Nothing enforces the terminality 0011's comment states -- the enum
+    # stops `disabled` from existing, and `auth_set_agent_status` is a plain
+    # `UPDATE ... SET status = p_status` with no transition guard.
+    #
+    # Asserted as it IS, deliberately. Session 9 Run 7 proves revocation rather
+    # than building it (D471, D472), and a guard is a migration and a product
+    # change. The day one lands, this assertion fails and points at its own
+    # premise -- which is the arrangement D500's deployment test uses for the
+    # same reason.
+    restored = drive(
+        "PATCH",
+        f"/admin/agents/{agent_id}",
+        headers={"Authorization": f"Bearer {admin}"},
+        content=json.dumps({"status": "active"}),
+    )
+    assert restored.status_code == 200, (
+        "un-revoking is now refused, which is a product change. If it was intended, "
+        "invert this assertion and close D503; the guard belongs in a migration"
+    )
+
+    # What revocation DOES guarantee, and it is the half that matters: every
+    # status change moves `authz_version`, so no token issued before either
+    # transition survives. Un-revoking restores the SECRET's usefulness -- which
+    # revocation never invalidated -- and resurrects no token.
+    versions = [int(response.json()["authz_version"]) for response in (restored,)]
+    assert versions[0] > initial_version + 2, (
+        "a status change did not move authz_version, which is the part that stops "
+        f"the token: {versions[0]} against {initial_version}"
+    )
+
+
+def test_a_revoked_agent_cannot_exchange_its_secret_for_a_fresh_token(drive: Any) -> None:
+    """The other half of the kill switch, and the reason it is a kill switch.
+
+    Refusing the OLD token would be worth little if the agent could simply ask
+    for a new one -- the secret it holds is unchanged by revocation. Both doors
+    have to be shut, and this is the second one.
+
+    The refusal is the same shape as every other authentication failure and
+    names no cause (ADR 0097): whether the agent was revoked, never existed, or
+    sent the wrong secret costs a caller the same.
+    """
+    admin = _login(drive).json()["access_token"]
+    created = _create_agent(drive, admin, "revoked-then-asks-again", role="agent_reader")
+
+    def exchange() -> Any:
+        return drive(
+            "POST",
+            "/auth/agent-token",
+            content=json.dumps({"agent_id": created["agent_id"], "secret": created["secret"]}),
+        )
+
+    assert exchange().status_code == 200, "the control failed: an active agent cannot exchange"
+
+    revoked = drive(
+        "PATCH",
+        f"/admin/agents/{created['agent_id']}",
+        headers={"Authorization": f"Bearer {admin}"},
+        content=json.dumps({"status": "revoked"}),
+    )
+    assert revoked.status_code == 200, revoked.text
+
+    refused = exchange()
+    assert refused.status_code == 401, refused.text
+    assert refused.json() == _errors_module().AUTHENTICATION_FAILED

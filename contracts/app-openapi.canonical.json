@@ -632,6 +632,87 @@
         "summary": "Replace an agent's secret and show the new one once"
       }
     },
+    "/admin/audit": {
+      "get": {
+        "description": "Requires the `admin_audit:read` scope, which is in `project_admin`'s ceiling and in no other -- an agent cannot be authorized to read the record that attributes it. Rows come back most recent first. Each carries a `source`: `agent_plane` is what an agent ATTEMPTED, including calls refused for a missing scope that never reached the database, and `database` is what actually CHANGED, including a write that reached PostgREST without going near the agent plane. The two answer different questions and a single agent write produces one of each. A repeated query parameter is refused rather than resolved to its last value.",
+        "operationId": "list_agent_audit_admin_audit_get",
+        "parameters": [
+          {
+            "description": "Narrow to one agent. Absent means every agent.",
+            "in": "query",
+            "name": "agent_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Narrow to one owner. Absent means every owner.",
+            "in": "query",
+            "name": "owner_id",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to return, 1-500. A value outside the range is refused with 422; it is never clamped.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Audit rows, most recent first."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Read the agent audit record"
+      }
+    },
     "/admin/users": {
       "get": {
         "description": "Requires the `admin:users` scope. A role name does not grant it.",

@@ -29,9 +29,10 @@
         "admin_users:read",
         "admin_users:write",
         "admin_agents:read",
-        "admin_agents:write"
+        "admin_agents:write",
+        "admin_audit:read"
       ],
-      "description": "Every approved scope name: the union of three closed classes, and the classes are the point (ADR 0079, ADR 0100). DATA scopes are one per (frozen-domain resource, verb) plus meta:read for schema introspection, closed by docs/decisions/0003-example-domain.md and growing only when that is superseded. STORAGE scopes are one per (object, verb) over the object-storage surface, closed by that surface. ADMINISTRATIVE scopes are one per (platform identity resource, verb) over the auth service's own surface, closed by that surface, and are the only class that is DERIVED rather than listed -- as this union less the other two. A name added here and to no class raises where the registry is read: see scope_registry.assert_classes_partition_the_vocabulary. A capability manifest may request only the data class: see $defs/agent_scope."
+      "description": "Every approved scope name: the union of three closed classes, and the classes are the point (ADR 0079, ADR 0100). DATA scopes are one per (frozen-domain resource, verb) plus meta:read for schema introspection, closed by docs/decisions/0003-example-domain.md and growing only when that is superseded. STORAGE scopes are one per (object, verb) over the object-storage surface, closed by that surface. ADMINISTRATIVE scopes are one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. All three classes are LISTED; the administrative one was derived as this union less the other two until ADR 0100, and that sentence outlived the change by two sessions -- see $defs/administrative_scope, which has said so since Session 7 Run 1. A name added here and to no class raises where the registry is read: see scope_registry.assert_classes_partition_the_vocabulary. A capability manifest may request only the data class: see $defs/agent_scope."
     },
     "agent_scope": {
       "type": "string",
@@ -58,9 +59,10 @@
         "admin_users:read",
         "admin_users:write",
         "admin_agents:read",
-        "admin_agents:write"
+        "admin_agents:write",
+        "admin_audit:read"
       ],
-      "description": "The platform identity class (ADR 0079), one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. LISTED here since ADR 0100; it used to be derived as the union less the data class, which is correct for two classes and silently wrong for three -- a name in the union and in no class was absorbed into this one, classified by arithmetic rather than by a decision. Measured in Session 7 Run 1. The three classes are now checked against the union exactly: see scope_registry.assert_classes_partition_the_vocabulary."
+      "description": "The platform identity class (ADR 0079), one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. LISTED here since ADR 0100; it used to be derived as the union less the data class, which is correct for two classes and silently wrong for three -- a name in the union and in no class was absorbed into this one, classified by arithmetic rather than by a decision. Measured in Session 7 Run 1. The three classes are now checked against the union exactly: see scope_registry.assert_classes_partition_the_vocabulary. admin_audit:read joined in Session 9 Run 7 with no :write twin, and the asymmetry is the decision rather than an omission: app_private.agent_audit is append-only, its own COMMENT says so, and the only paths in are the definer functions that write it. A scope naming a write nobody can perform would be a name for an authority that does not exist."
     },
     "capability": {
       "type": "object",

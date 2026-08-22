@@ -1,11 +1,17 @@
 """Every statement this service sends, in one place.
 
-**Fourteen function calls and no table names.** `auth_service` holds schema
+**Fifteen function calls and no table names.** `auth_service` holds schema
 USAGE on `app_private` and nothing else -- measured against the applied
 migrations: `SELECT` on `app_private.users` is `permission denied for table
 users`, and the granted functions answer. So a query written here that named a table would
 fail at run time rather than review, and this module is the whole surface a
 reviewer has to read to know what the service can reach.
+
+The fifteenth is `auth_list_agent_audit`, added by migration 0020 (ADR 0142).
+The count is in this sentence because it is the sentence a reviewer reads to
+know the surface, and a count that stops being maintained is a count that stops
+being read -- Session 9 Run 7 found migration 0019 having built two indexes for
+a reader nobody created (D501), which is the same failure in the other file.
 
 Two of the functions 0012 creates are deliberately absent:
 `auth_bootstrap_administrator` and `auth_bootstrap_lock_key` are not granted to
@@ -256,3 +262,30 @@ class Repository:
             "SELECT app_private.auth_set_agent_status(%s, %s) AS version", (agent_id, status)
         )
         return None if row is None else row["version"]
+
+    async def list_agent_audit(
+        self, *, agent_id: UUID | None, owner_id: UUID | None, limit: int
+    ) -> list[dict[str, Any]]:
+        """The audit record, most recent first (migration 0020, ADR 0142).
+
+        The fifteenth function call, and still no table name: `auth_service`
+        holds no `SELECT` on `app_private.agent_audit` and reads it through
+        `auth_list_agent_audit`, a definer function granted to this role alone.
+        A statement here that named the table would fail at run time rather than
+        at review, which is this module's whole arrangement.
+
+        **Both filters go through as `NULL` when absent**, which the function
+        reads as "do not filter". A caller-side branch building one of four
+        statements would be four statements to review instead of one, and the
+        `IS NULL OR` form is what lets the planner still use 0019's
+        `(agent_id, started_at DESC)` and `(owner_id, started_at DESC)` indexes
+        when a filter is supplied.
+
+        `limit` is bounded by the route, which answers 422 outside its range. It
+        is re-bounded neither here nor in the function: two bounds over one rule
+        drift the moment either moves (D495, D463).
+        """
+        return await self._all(
+            "SELECT * FROM app_private.auth_list_agent_audit(%s, %s, %s)",
+            (agent_id, owner_id, limit),
+        )
