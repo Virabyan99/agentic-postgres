@@ -329,11 +329,28 @@ def test_a_role_that_makes_no_request_cannot_address_the_private_schema(
     bootstrap = _bootstrap_module()
     request_roles = set(bootstrap.AUTHENTICATOR_REQUEST_ROLES)
 
-    holders = {
-        role
-        for role, name in roles.items()
-        if sql(project_a, f"SELECT has_schema_privilege('{name}', 'app_private', 'USAGE');") == "t"
-    }
+    # **The CATALOG, not `has_schema_privilege`** (ADR 0134, D467). That
+    # function reports a privilege held directly *or by way of membership in a
+    # role that holds it* -- membership, not inheritance -- so it returns `true`
+    # for `app_runtime`, which is `NOINHERIT`, is a member of `authenticated` by
+    # ADR 0041's design, and appears in no ACL entry on this schema at all.
+    #
+    # **Migration 0006 wrote this trap down, for the table twin**, and this test
+    # walked into the schema one two sessions later: *"the obvious test for this
+    # migration fails while the property is true: has_table_privilege(...) ->
+    # true; SET ROLE app_runtime; SELECT ... -> denied. Both are correct."*
+    #
+    # `aclexplode` over `nspacl` is what a GRANT writes and a REVOKE removes,
+    # which is the question this assertion is actually asking.
+    granted = sql(
+        project_a,
+        "SELECT coalesce(string_agg(DISTINCT g.grantee::regrole::text, ',' "
+        "ORDER BY g.grantee::regrole::text), '') "
+        "FROM pg_namespace n, aclexplode(n.nspacl) g "
+        "WHERE n.nspname = 'app_private' AND g.privilege_type = 'USAGE';",
+    )
+    by_name = {name: role for role, name in roles.items()}
+    holders = {by_name[name] for name in granted.split(",") if name in by_name}
 
     # The roles that reach `app_private` for a reason other than running the
     # hook: `auth_service` (0011) and `storage_service` (0014) administer what
@@ -344,7 +361,7 @@ def test_a_role_that_makes_no_request_cannot_address_the_private_schema(
     # distinguishing them.
     services = {"auth_service", "storage_service", "object_owner", "migration_user"}
     assert holders - services == request_roles, (
-        f"the roles holding USAGE on app_private are {sorted(holders - services)}; the "
+        f"the roles GRANTED USAGE on app_private are {sorted(holders - services)}; the "
         f"roles that run the pre-request hook are {sorted(request_roles)}. A grant to a "
         "role that cannot make a request widens the private schema to buy nothing, and "
         "a request role without it fails in db-pre-request on every call it makes"
@@ -352,6 +369,52 @@ def test_a_role_that_makes_no_request_cannot_address_the_private_schema(
     assert "agent_writer" not in holders, (
         "agent_writer holds USAGE on app_private. Session 9 activates the write role, "
         "and until an ADR moves it this grant buys nothing and widens the schema"
+    )
+
+
+def test_the_application_runtime_role_cannot_name_a_private_object(
+    project_a: dict[str, Any], roles: dict[str, str]
+) -> None:
+    """The other half of ADR 0134, and the half a catalog cannot answer.
+
+    `app_runtime` is granted nothing on `app_private` -- the test above asserts
+    that -- and is a member of `authenticated`, which is granted USAGE. It is
+    `NOINHERIT`, so the membership is a door it must open explicitly rather than
+    a privilege it carries. **Whether that holds is a question about behaviour**,
+    and migration 0006 says in as many words that behaviour is what to assert:
+
+        has_table_privilege(app_runtime, 'app.notes', 'SELECT')  ->  true
+        SET ROLE app_runtime; SELECT * FROM app.notes            ->  denied
+        Both are correct.
+
+    The CONTROL is the second arm: the same role, the same session, reading
+    through `api` -- which must WORK. Without it this passes against a role that
+    cannot do anything at all, including the thing it exists to do, and a broken
+    application would read as a strong boundary.
+    """
+    runtime = roles["app_runtime"]
+
+    refused = as_role(project_a, runtime, "SELECT count(*) FROM app_private.users;")
+    assert refused.startswith("ERROR:"), (
+        f"app_runtime read app_private.users and got {refused!r}. It is granted nothing "
+        "on that schema and is NOINHERIT, so its membership of `authenticated` is a door "
+        "it must open rather than a privilege it holds (ADR 0041, ADR 0134)"
+    )
+    assert "permission denied" in refused.lower(), refused
+
+    # THE CONTROL. `app_runtime` reaches data through `authenticated` and by no
+    # other path (SEC-DBX-002) -- so it must still be able to. Without this arm
+    # the refusal above is satisfied by a role that can do nothing at all,
+    # including its job, and a broken application would read as a strong
+    # boundary.
+    served = as_role(
+        project_a,
+        runtime,
+        f'SET ROLE "{roles["authenticated"]}"; SELECT count(*) FROM api.notes;',
+    )
+    assert not served.startswith("ERROR:"), (
+        f"app_runtime cannot reach api.notes through authenticated ({served!r}). The "
+        "refusal above would then prove nothing"
     )
 
 
@@ -408,9 +471,25 @@ def test_a_request_role_reaches_one_private_function_and_no_private_data(
             "WHERE n.nspname = 'app_private' AND "
             f"has_function_privilege('{roles[role]}', p.oid, 'EXECUTE');",
         )
-        assert reachable == "auth_claims_are_current,postgrest_pre_request", (
+        # THREE since migration 0018, and the third is deliberate (ADR 0134,
+        # D468). `agent_claims_are_current` is granted to all five request roles,
+        # not to the agent role alone: `role` and `token_use` are independent
+        # claims, so every combination of physical role and hook branch is a
+        # reachable request. Measured on 0018's first rig -- a HUMAN token naming
+        # the agent role was refused `42501 permission denied for function`
+        # instead of `AP401`, which is D393 arriving through a missing grant.
+        #
+        # Safe for 0013's reason, unchanged: it takes the whole claim tuple and
+        # returns a BOOLEAN, so it answers no question of the form "what may
+        # subject X do". A probe costs a correct guess of every value.
+        #
+        # Still an allowlist and still enumerated: a FOURTH function appearing
+        # here fails, which is what this assertion is for.
+        assert reachable == (
+            "agent_claims_are_current,auth_claims_are_current,postgrest_pre_request"
+        ), (
             f"{role} can execute {reachable!r} in app_private, where the hook and "
-            "its comparison helper are the only two it may reach"
+            "its two comparison helpers are the only three it may reach"
         )
 
         tables = sql(
@@ -566,7 +645,18 @@ def test_the_retired_write_rpc_is_gone(project_a: dict[str, Any]) -> None:
         "SELECT coalesce(string_agg(p.proname, ',' ORDER BY p.proname), '') FROM pg_proc p "
         "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'api';",
     )
-    assert present == "create_note,update_task_status", present
+    # FOUR since migration 0018 (ADR 0134, D468). The two additions are the agent
+    # plane's RPCs, and they are in `api` because PostgREST can only call what is
+    # in the exposed schema -- while being `REVOKE ALL ... FROM PUBLIC` and
+    # granted to `agent_reader` alone, which is what keeps them out of the
+    # OpenAPI document an anonymous caller receives (ADR 0118).
+    #
+    # The name of this test is about ADR 0048's retirement and its assertion
+    # enumerates the whole schema. Both are worth keeping: the enumeration is
+    # what catches a fifth function nobody reviewed.
+    assert present == ("create_note,mcp_agent_context,owner_activity_report,update_task_status"), (
+        present
+    )
 
 
 def test_the_write_rpc_derives_ownership_from_the_claim(

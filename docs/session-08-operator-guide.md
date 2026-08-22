@@ -285,8 +285,16 @@ run this: it needs no TTY and no root, given fresh deployed documents (one
 bin/session-08-check.sh --mode external --public-ipv4 62.238.99.122 \
      --project-a-outputs ./alpha-dev-outputs.json \
      --project-b-outputs ./beta-dev-outputs.json \
-     --ssh-destination apg-agent@62.238.99.122
+     --ssh-destination op@62.238.99.122
 ```
+
+> **`op@`, not `apg-agent@`** (D466), and the safer-looking choice is the wrong
+> one. The external suite's connection-tooling proofs exercise the **access
+> broker**, whose policy is an enumerated grant of *one* account — and that
+> account is `op`. With `apg-agent` two Session 4 proofs fail on
+> `sudo: I'm sorry apg-agent. I'm afraid I can't do that`. `sudo -n` on the
+> trampoline needs no password and no TTY for `op`, which is what makes this
+> half runnable without a human at all.
 
 **This mode is only meaningful off-host.** The agent plane's health routes answer
 **200 on the container's own socket** and are private by the *absence* of a
