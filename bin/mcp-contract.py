@@ -139,6 +139,24 @@ def command_lock(arguments: argparse.Namespace) -> int:
     except OSError as exc:
         return fail(EXIT_PREREQUISITE, f"cannot read the rendered outputs: {exc}")
 
+    # **The RENDERED shape, and the deployed one is refused by name** (D465).
+    #
+    # `routes.rest` is a string on the rendered branch and a published-route
+    # object on the deployed one. Handed the wrong branch, this compiled happily
+    # and wrote a lock whose `upstream` was a dict -- and the runtime refused it
+    # at container start, four steps and one restart later. A wrong input that
+    # produces an artefact is worse than one that produces an error: the artefact
+    # gets published.
+    upstream = (outputs.get("routes") or {}).get("rest")
+    if not isinstance(upstream, str):
+        return fail(
+            EXIT_PREREQUISITE,
+            f"routes.rest is {type(upstream).__name__}, not str. This looks like a "
+            "DEPLOYED document, where routes.rest is a published-route object; the "
+            "lock is compiled from the RENDERED one, where it is the URL itself "
+            "(ADR 0126, D465).",
+        )
+
     canonical = json.loads(CANONICAL_PATH.read_text(encoding="utf-8"))
     try:
         lock = capability_compiler.compile_lock(
@@ -147,7 +165,7 @@ def command_lock(arguments: argparse.Namespace) -> int:
             # The ONE address the runtime may call. Read from the document rather
             # than rebuilt, so this never becomes a second derivation of an
             # address `naming` owns (ADR 0002, ADR 0053).
-            upstream=outputs["routes"]["rest"],
+            upstream=upstream,
             # Digests of the BYTES, not of the parsed documents. A digest over a
             # re-serialization is equal for two files whose comments differ, and
             # the comments are where the reasoning lives -- which is the reason

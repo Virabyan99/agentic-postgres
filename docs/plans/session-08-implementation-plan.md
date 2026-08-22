@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D465.**
+**Next free number after this table is D466.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -118,6 +118,7 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D462** | The Session 7 guide's step 0, carried into Session 8's: *"Re-render the fixtures — ON THE HOST, after transport (D383)"*, with the two **example** manifests. | **That is half of what `.generated/` holds.** Run on the host at `42db9e4`, with both fixtures freshly re-rendered at v12, `bin/session-01-check.sh` exited **5** at step 8: *"these projects were rendered by an older release: alpha-dev (v11), beta-dev (v11)"*. The evidence step compares **every** rendered project — and the host also carries `.generated/alpha-dev` and `.generated/beta-dev` from real deploys, which the example manifests do not touch. A collision count over two schema versions compares different documents, so the refusal is right. | Step 0 re-renders **four** projects: the two example fixtures and the two real ones, with `project.alpha.yaml`/`project.beta.yaml` and `capabilities.yaml`. All four are `--render-only`, all four need **no root**, and all four reached v12. `session-01-check` then passed on the host. | **D383 said where to re-render and not what.** The fixture guard (`rendered_fixtures.py`) only knows about the two example keys, so it reported `current` while two other rendered projects sat a version behind — the guard was right about its own question and silent about the one the gate asks. A second finding rode along: `op` **cannot reach the Docker daemon**, so step 7's *"no project container is running"* half is not proved by an operator-run gate. The gate says so in as many words rather than passing quietly (ADR 0018), which is the behaviour to keep. | — |
 | **D463** | `MCP_SERVICE`'s own docstring: *"it is **deliberately absent from `POST_BOOTSTRAP_SERVICES`** … every other application service is in that tuple because it logs in as a role the bootstrap plane must activate first. This one has no role to activate (D410)."* Asserted by a passing test. | **Every word of that is true, and the agent plane's first start anywhere exited 1 because of it.** On the host at `bf1d398`: `IsADirectoryError: Is a directory: '/etc/mcp/jwks.json'`, on both projects. **Docker creates a bind-mount source that does not exist as a DIRECTORY**, so the fourth verifier opened a directory where its key set should be. Read out of the deploy's line order: `install_rendered` (1327) replaces the rendered directory, **step 5 starts everything not deferred (1332)**, `render-jwks` writes the key set (1413), the lock is compiled (1453). The agent plane is started **eighty lines before the two files it mounts are written**. The deploy then failed at 1413 — `staging.replace()` onto a directory raises — so the deployed document stayed **v11** and all four deploys failed identically. | **ADR 0133**, and it adds a concept rather than redefining one. `POST_ARTIFACT_SERVICES` carries the second reason — *cannot start until the deploy has written the files it mounts* — `DEFERRED_SERVICES` is the **computed** union, and the deploy defers that. D410's assertion and its docstring stand unchanged. And because the ordering fix closes this instance and not the class, the deploy now **proves its file mounts exist before each start**, derived from the override it is about to write. | **One name was carrying two ideas.** A service landed in that tuple for a stated reason (a database role) and the deploy used it for an unstated one (an artefact written late). PostgREST needs both, so membership satisfied the second **by accident** and nothing ever separated them; the agent plane needs only the second, was correctly excluded for a reason about the first, and lost the second with it. **§6's question 5** — *when a decision is implemented, which of its callers got it?* — and **D381's family**: the mount was written in the right run, by an author who cited D381 while writing it, and the START ORDERING was the caller nobody asked. `deploy-project.py` already carried a comment naming this exact Docker behaviour, **written for PostgREST**. | 0133 |
 | **D464** | `test_no_operator_command_puts_a_service_directory_on_the_path`, whose docstring names one thing: a `bin/` command doing `sys.path.insert(0, REPO_ROOT / "services" / "auth-api")` so an image-only package becomes importable in a checkout. | **It is a text scan for two unrelated strings**: `'"services"' in source and "sys.path" in source`. Run 10's mount pre-flight read `document.get("services")` — a YAML key — and `deploy-project.py` has a legitimate `sys.path.insert(…, "src")` twenty lines from the top. The guard reported a command that does nothing of the kind, in the run whose whole subject is a guard that was too narrow. | **The scan is not narrowed** — that is a weakening of a passing guard and needs an ADR this run does not own. The parsing moved instead, and it moved somewhere better: `runtime_override` **builds** the override, so it is the module that should read it back. `mount_sources` and `override_service_names` take the rendered bytes, and the command now mentions neither `"services"` nor `yaml`. | **D455's family, one session later, and the mirror of this run's own subject.** D463 is a check whose evidence was too NARROW — one name for two ideas. This is a check whose evidence is too WIDE — two strings standing in for a construct. Both pass for exactly as long as their approximation happens to coincide with the property. The repair here was free because the code was better the other way; the next one may not be, and the row is what that reader needs. | — |
+| **D465** | `deploy-project.py`, above the lock step: *"`--outputs` is the document THIS deploy is about to write, so the lock is compiled last, from the **rendered outputs** rather than from the previous deploy's."* | **Two errors in one sentence, and it passed `deployed_path`.** (1) The deployed document IS the previous deploy's — step 7 writes the new one 140 lines later. (2) The two branches carry `routes.rest` in **different shapes**: rendered it is a string, `"https://…/api/rest"`; deployed it is a published-route **object**, `{"status": "ready", "url": …}`. `command_lock` reads `outputs["routes"]["rest"]` and wants the URL — so it got a dict, compiled happily, and **wrote a lock whose `upstream` was an object**. The failure surfaced at container start, one step and one restart later: `LockError: the lock.upstream is not str`. Measured on the host after D463's fix let execution reach it. | The deploy passes `rendered_path(key) / "outputs.json"` — the same directory the lock is written into. And `command_lock` now **refuses a deployed-shaped document by name**, exit 3, naming both branches. Verified end to end: rendered → a string upstream that `load_lock` accepts with all four tools; deployed → refused. | **D389's shape, and the third time this session.** One field, two branches, different shapes, a consumer reading the wrong one. The sharp part is what the wrong input produced: not an error but an **artefact** — a lock, written to the rendered directory, mounted into a container, and refused four steps away from its cause. A wrong input that yields an artefact is worse than one that yields an exception, because the artefact gets published. **And D463 is why this was found at all**: one unrun proof hides the next, and one broken start hides the next. | — |
 
 ---
 
@@ -865,6 +866,37 @@ Suite **3783 passed, 271 skipped**.
 **What is left is one `sudo` sequence**: remove the two directories Docker
 created (`rmdir` — it refuses a non-empty directory and is therefore the safe
 verb), redeploy twice, then the host gate. The external half is the assistant's.
+
+### Run 11 — The second start, and the lock nobody could load — **Done, pending the redeploy.**
+
+**D463's fix worked and revealed the next thing**, which is what a first start is
+for. With the agent plane deferred to step 6b, the key set and the capability
+lock both existed as real files — and the container still exited 1:
+
+    LockError: the lock.upstream is not str
+
+**D465.** The deploy compiled the lock from `deployed_path` while a comment
+directly above it said *"from the rendered outputs"*. Both halves of that
+sentence were wrong: the deployed document is the **previous** deploy's, and the
+two branches carry `routes.rest` in **different shapes** — a string when
+rendered, a published-route object when deployed. The compiler wanted the URL,
+got the object, and **wrote a lock** whose `upstream` was a dict.
+
+**That is D389's shape for the third time this session**, and the sharp part is
+what a wrong input produced: not an exception but an **artefact**. The lock was
+written, mounted, and refused four steps from its cause.
+
+The deploy now passes the rendered document, and `command_lock` **refuses a
+deployed-shaped one by name** — exit 3, naming both branches — so the mistake
+cannot produce a lock at all. Verified end to end offline: rendered compiles a
+lock `load_lock` accepts with all four tools; deployed is refused.
+
+**The trip's ledger so far.** Two starts, two defects, both invisible to a green
+offline suite of 3,783 tests, and each hidden behind the one before it. That is
+D211–D214's rule — *one unrun proof hides the next* — arriving as *one broken
+start hides the next*.
+
+Battery **BATTERY**. Suite **SUITE**.
 
 ---
 

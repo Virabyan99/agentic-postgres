@@ -18,11 +18,19 @@ import copy
 import json
 import subprocess
 import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, api_surface, capability_compiler, config, openapi_normalize
+from agentic_postgres import (
+    REPO_ROOT,
+    api_surface,
+    capability_compiler,
+    config,
+    deployed_output,
+    openapi_normalize,
+)
 from agentic_postgres.capability_compiler import CompilerError
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
@@ -465,3 +473,112 @@ def test_the_canonical_contract_names_no_project(canonical: dict[str, Any]) -> N
         assert project["slug"] not in text, manifest
         assert project["domain"] not in text, manifest
     assert "https://" not in text, "the canonical contract carries a URL"
+
+
+# ---------------------------------------------------------------------------
+# D465 -- the lock is compiled from the RENDERED branch, and the other is refused
+# ---------------------------------------------------------------------------
+
+
+def test_the_lock_is_compiled_from_the_rendered_document_not_the_deployed_one() -> None:
+    """**D465.** Two errors lived in one comment, and both reached a host.
+
+    It said *"the document THIS deploy is about to write … rather than from the
+    previous deploy's"* and passed `deployed_path`. That document is the previous
+    deploy's — step 7 writes the new one long afterwards — **and** the two
+    branches carry `routes.rest` in different shapes: a string when rendered, a
+    published-route object when deployed.
+
+    So the compiler read an object where it wanted a URL, wrote a lock whose
+    `upstream` was a dict, and the agent plane refused it at container start.
+    **D389's shape**: one field, two branches, a consumer reading the wrong one.
+    """
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    lock_call = source[source.index('"mcp-contract.sh"') :]
+    lock_call = lock_call[: lock_call.index("lock_path.write_text")]
+
+    assert 'rendered_path(key) / "outputs.json"' in lock_call, (
+        "the lock is not compiled from the rendered document"
+    )
+    assert "deployed_path" not in lock_call, (
+        "the lock is compiled from the DEPLOYED document, whose routes.rest is a "
+        "published-route object rather than the URL the compiler wants (D465)"
+    )
+
+
+def test_the_two_branches_really_do_carry_routes_rest_differently() -> None:
+    """The premise of the test above, asserted rather than assumed.
+
+    If the two shapes ever converge, the test above becomes a rule with no
+    reason behind it — and this is the arm that would say so. Read off the
+    document builders rather than off a fixture, so it is a statement about the
+    code and not about one render.
+    """
+    assert "published_route" in (
+        REPO_ROOT / "src" / "agentic_postgres" / "deployed_output.py"
+    ).read_text(encoding="utf-8")
+
+    rendered = deployed_output.ROUTE_NOT_PUBLISHED
+    assert set(rendered) == {"status", "url"}, (
+        "the deployed branch no longer wraps a route in an object; D465's premise "
+        "has changed and the rule above needs re-reading"
+    )
+
+
+def test_the_compiler_refuses_a_deployed_shaped_document_by_name(tmp_path: Path) -> None:
+    """**The guard, and it is the half that matters next time.**
+
+    The ordering fix stops *this* mistake. It does not stop the next caller from
+    passing the wrong branch — and the failure mode was not an error, it was a
+    **lock**: a published artefact whose defect surfaced four steps later inside
+    a container. A wrong input that produces an artefact is worse than one that
+    produces an error.
+
+    Three arms, and the third is the CONTROL: the rendered shape must still
+    compile, or the guard refuses everything and is worth nothing.
+    """
+    import json
+
+    def document(rest: object) -> Path:
+        path = tmp_path / f"outputs-{abs(hash(json.dumps(rest, sort_keys=True)))}.json"
+        path.write_text(
+            json.dumps({"project": {"key": "probe-dev"}, "routes": {"rest": rest}}),
+            encoding="utf-8",
+        )
+        return path
+
+    def compile_from(path: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "bin" / "mcp-contract.py"),
+                # `--capabilities` is a GLOBAL option and precedes the
+                # subcommand. After it, argparse reports "unrecognized
+                # arguments" and exits **2** -- which a test asserting merely
+                # "non-zero" would have accepted as the refusal it was looking
+                # for. That is why both refusal arms below check the MESSAGE.
+                "--capabilities",
+                str(REPO_ROOT / "capabilities.example.yaml"),
+                "lock",
+                "--outputs",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=REPO_ROOT,
+        )
+
+    deployed = compile_from(document({"status": "ready", "url": "https://x.test/api/rest"}))
+    assert deployed.returncode != 0, "a deployed-shaped document compiled a lock"
+    assert "DEPLOYED document" in deployed.stderr, deployed.stderr
+
+    absent = compile_from(document(None))
+    assert absent.returncode != 0
+    assert "routes.rest is NoneType" in absent.stderr, absent.stderr
+
+    # THE CONTROL. Without it, both arms are satisfied by a guard that refuses
+    # every document it is given.
+    ok = compile_from(document("https://x.test/api/rest"))
+    assert ok.returncode == 0, f"the rendered shape no longer compiles: {ok.stderr}"
+    assert '"upstream"' in ok.stdout

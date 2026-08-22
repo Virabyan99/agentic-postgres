@@ -1503,18 +1503,27 @@ def main(argv: list[str] | None = None) -> int:
     # container started somewhere real. The producer and the consumer arrive
     # together or neither does.
     #
-    # `--outputs` is the document THIS deploy is about to write, so the lock is
-    # compiled last, from the rendered outputs rather than from the previous
-    # deploy's. The upstream it records is that document's public `routes.rest`,
-    # which names the API surface the capabilities were compiled against and is
-    # NOT what the runtime dials (ADR 0126).
+    # `--outputs` is the **rendered** document, out of the same directory the
+    # lock is written into. It said "the document THIS deploy is about to write"
+    # and passed `deployed_path` instead, which is two errors in one sentence
+    # (D465): the deployed document is the PREVIOUS deploy's, because step 7
+    # writes the new one long after this -- and the two branches carry
+    # `routes.rest` in **different shapes**. Rendered it is a string; deployed it
+    # is a published-route object. The compiler wants the string, got the object,
+    # and wrote a lock whose `upstream` was a dict. The failure then surfaced at
+    # container start as `LockError: the lock.upstream is not str`, which is
+    # D389's shape: one field, two branches, a consumer reading the wrong one.
+    #
+    # The upstream it records is the public `routes.rest`, which names the API
+    # surface the capabilities were compiled against and is NOT what the runtime
+    # dials (ADR 0126).
     if arguments.through_session >= AGENT_PLANE_SESSION:
         lock_path = deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME
         compiled = run(
             str(release / "bin" / "mcp-contract.sh"),
             "lock",
             "--outputs",
-            str(deployed_output.deployed_path(key)),
+            str(deployed_output.rendered_path(key) / "outputs.json"),
         )
         if compiled.returncode != 0:
             fail(
