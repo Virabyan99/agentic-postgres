@@ -36,7 +36,7 @@ unactivated and that is now a decision rather than a deferral (ADR 0135).
 |---|---|---|
 | 1 | Transport the release to the host | `git bundle` + `scp`; no GitHub credential goes on the VPS |
 | 2 | **Sync the host venv** | D384, D297 — three times now, and it costs a gate run each time |
-| 3 | **Apply migrations 0019 and 0020, on BOTH clusters, BEFORE the deploy** | §4 step 4. The ordering is not cosmetic — see §1 |
+| 3 | **Do NOT apply 0019 and 0020 by hand** — the deploy does it, in step 6, before it starts anything that could serve a request | §4 step 4, D506. A hand `--runtime up` reads the PREVIOUS release's set and reports `Pending: 0` |
 | 4 | Deploy both projects | Twice if the first leaves a route or a document field unready (D326) |
 | 5 | Run the gates and merge the evidence | §4 steps 6–8 |
 
@@ -59,10 +59,10 @@ Both are forward-only, applied as `migration_user` and **never as a superuser**
 (D285): a superuser bypasses the ownership check that let migration 0012 pass
 four sessions of green proofs while being unappliable.
 
-### The ordering, and why it is not arbitrary
+### The ordering, and why it is not yours to arrange
 
-**The migration must land before the deploy**, because the deploy runs the
-bootstrap plane and the bootstrap plane activates `agent_writer`.
+**The migration must land before anything SERVES** — and the deploy guarantees
+that, which is why there is no separate migration step (D506).
 
 0019 grants the *privileges* — `USAGE ON SCHEMA app_private`, `EXECUTE` on the
 pre-request hook, `EXECUTE` on both comparison helpers. `bin/postgres-bootstrap.py`
@@ -74,6 +74,20 @@ granted before the privileges exist produces a write request refused by
 `permission denied for function postgrest_pre_request` — a `42501` — instead of by
 the boundary's own `AP401`. A client cannot tell "your token is stale" from "this
 deployment is half-migrated", and that is D417's shape, one session later (D475).
+
+**And the deploy's step 6 runs in exactly that wrong order**, measured on
+alpha-dev at release `f3004fd`: `postgres-bootstrap` applied 54 statements, and
+*then* dbmate applied 0019 and 0020. The window between them is real.
+
+It is unreachable, and that is the actual invariant: `project-runtime` reports
+`alpha-dev is up without auth,mcp,postgrest,storage`, because all four are in
+`DEFERRED_SERVICES` and do not start until **step 6b**, after the migrations.
+Nothing can send a request into the window because nothing is listening in it.
+
+So the property D475 asked an operator to arrange by hand is held by
+`DEFERRED_SERVICES` (ADR 0133) — the same constant D463 was about. **What
+protects the boundary here is not the order of two commands an operator types;
+it is which services the deploy refuses to start yet.**
 
 ### Also irreversible, and already done in the tree you are transporting
 
@@ -198,31 +212,70 @@ cd ~op/agentic-postgres && . .venv/bin/activate && bin/lock-dev-deps.sh --check
 Three sessions have paid for skipping this (D384, D297). Session 9 adds no new
 runtime dependency, so this should be a no-op — confirm it, do not assume it.
 
-### Step 4 — Apply migrations 0019 and 0020, on BOTH clusters, BEFORE the deploy
+### Step 4 — There is no separate migration step, and that is D506
 
-```bash
-sudo bin/migrate.sh --project project.alpha.yaml status   # expect 0019 and 0020 pending
-sudo bin/migrate.sh --project project.alpha.yaml up
-sudo bin/migrate.sh --project project.beta.yaml  status
-sudo bin/migrate.sh --project project.beta.yaml  up
+**Do not try to apply 0019 and 0020 before the deploy.** The deploy does it, in
+the right order, and it is the only thing that can.
+
+`bin/migrate.sh status` and `up` run dbmate in a container, so they need the
+runtime override — which only root can write — and they read a rendered
+migration *set* whose location depends on one flag:
+
+| invocation | reads | on this trip |
+|---|---|---|
+| `--project <manifest>` | the checkout's `.generated/<key>/` | **no override**: step 2's `--render-only` atomically replaced that directory, and a staged copy cannot contain a root-written file. `die 3`. |
+| `--project <manifest> --runtime` | `/var/lib/agentic-postgres/rendered/<key>/` | the override is there — **and so is the PREVIOUS release's migration set**, because that directory is installed by the deploy. |
+
+The second is the dangerous one. Measured on alpha-dev before the deploy:
+`/var/lib` carried 18 migrations, the checkout 20, and `--runtime status`
+answered **`Applied: 18, Pending: 0`, exit 0**. 0019 and 0020 were not reported
+pending — they were *absent*, and the operator gets a green line for work that
+has not happened.
+
+What actually applies them is `bin/deploy-project.py:1553`:
+
+```
+==> 6. Bootstrap and migrate the cluster      <- roles, then migrate --runtime up
+==> 6b. Start the deferred services            <- postgrest, auth, storage, mcp
 ```
 
-**`sudo`, and it is not optional** (D505): `bin/migrate.sh` refuses every
-subcommand that runs a container unless `id -u` is 0, so `status` and `up`
-both stop with `requires root: it runs a container` when invoked as `op`.
+**§1's ordering is a property of the product, not of this page.** The agent
+plane starts in 6b, after 6 has migrated, so it cannot serve a write against an
+unmigrated cluster — which is the guarantee D475 asked the operator to arrange
+by hand. Restating it here as a manual step asked for an ordering the tooling
+forbids.
 
-`--project`, naming the manifest, is the corrected invocation from Session 8's
-trip. Run `status` first and read it: two pending is what you expect, and
-anything else is worth stopping for.
+So: go to step 5. Then come back and verify, with a second reader rather than
+the deploy's own report:
 
-**This is step 4 and not step 6.** §1 explains why.
+```bash
+sudo bin/migrate.sh --project project.alpha.yaml --runtime status
+sudo bin/migrate.sh --project project.beta.yaml  --runtime status
+```
+
+**Both must read `Applied: 20, Pending: 0`.** If either reads 18, the deploy's
+step 6 did not run and nothing downstream is trustworthy.
+
+If a `migrate` ever refuses with *"no runtime override … the project is
+unroutable without it"*, the narrow repair — no container moves, re-runnable,
+marks no allocation active — is:
+
+```bash
+sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
+     --capabilities capabilities.yaml --render-runtime-only
+```
 
 ### Step 5 — Deploy both projects
 
 ```bash
-sudo ./deploy.sh --project project.alpha.yaml --capabilities capabilities.yaml --through-session 9
-sudo ./deploy.sh --project project.beta.yaml  --capabilities capabilities.yaml --through-session 9
+sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
+     --capabilities capabilities.yaml --through-session 9
+sudo ./deploy.sh --host host.yaml --project project.beta.yaml \
+     --capabilities capabilities.yaml --through-session 9
 ```
+
+**`--host host.yaml`, or the deploy refuses** (D507) — the third flag lost
+by retyping this page from Session 8's.
 
 **`sudo` here too** (D505): `deploy.sh` refuses `--through-session` unless
 `id -u` is 0, because it writes host state. `--render-only` in step 2 does
