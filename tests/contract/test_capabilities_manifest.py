@@ -65,10 +65,11 @@ def test_the_example_manifest_is_the_reviewed_agent_surface() -> None:
     shipped the reviewed surface and the approved snapshot, and Session 8 Run 3
     is what compiles against them.
 
-    What replaces the equality is not a looser check. Five capabilities, four
+    What replaces the equality is not a looser check. Seven capabilities, six
     tools, every one enabled and every one resolved against the reviewed contract
     by `capability_compiler` -- a stronger statement than "the list is empty",
-    and one that fails if a sixth appears without review.
+    and one that fails if an eighth appears without review. The two writes are
+    Session 9 Run 3's, exactly the rows docs/capability-plan.md reserved for it.
     """
     document = config.load_capabilities_manifest(EXAMPLE)
     assert document["schema_version"] == 1
@@ -78,6 +79,8 @@ def test_the_example_manifest_is_the_reviewed_agent_surface() -> None:
         "query_notes",
         "query_tasks",
         "run_report",
+        "create_note",
+        "update_task_status",
     }
     assert all(entry["enabled"] for entry in document["capabilities"])
 

@@ -90,6 +90,7 @@ is confirmed, corrected or replaced during implementation, and anything found
 | **D491** | — (found during Run 1, by a test failing for the wrong reason). | **`test_api_migrations.py`'s `_CREATE_FUNCTION` regex silently over-matched and swallowed a whole function.** It requires `RETURNS` on its own line — `\)\s*\n\s*RETURNS` — and 0019 was first written as `) RETURNS uuid`. With `re.DOTALL` and a non-greedy group the match ran forward from `agent_audit_begin(` to `create_note`'s `RETURNS`, capturing a garbage argument list and consuming the text in which `agent_audit_complete` was defined. The reported failure was *"agent_audit_complete is missing"*, which points at the wrong file entirely. | **The migration's formatting moved, not the shared regex.** Four other functions depend on that anchor, and loosening it to accept both spellings would make the over-match permanent rather than fixing it. Verified afterwards that all four functions now parse with their **correct** argument lists, because a matching count is not the same as a correct capture. | A scanner that mis-parses rather than refusing is this project's signature defect with the failure on the wrong side. Had 0019 added **one** function instead of two, the regex would have swallowed forward, captured garbage arguments, and the count would still have matched — and only the argument comparison, which does not run for this section, could have noticed. **The near-miss is the finding**, not the formatting. | — |
 | **D492** | — (found during Run 2, reading the tests that name `agent_writer`). | **A test had been asserting a property the product lost in Session 8.** `test_the_authenticator_cannot_become_an_agent_role` asserted the authenticator could become neither `agent_reader` nor `agent_writer` — but Session 8 activated `agent_reader`, so in production it *can*. It stayed green because its fixture granted a **hardcoded list of four** request roles omitting both, with a comment saying granting them *"would delete the property"*: the fixture was manufacturing the condition the test measured. Its docstring's other premise had expired too — *"there is no path on which the hook could emit an agent-specific error"* is false since migration 0018's `token_use` branch, which raises `AP401`. | **The assertion becomes the rule the old list was an instance of**: the authenticator becomes **exactly** the request roles and no others, both halves read from `AUTHENTICATOR_REQUEST_ROLES`, with the negative arm over every other declared role and an explicit refusal to run vacuously. Every fixture that grants memberships now reads the constant. And a new comparison with teeth: the roles granted `EXECUTE` on the hook, read from the catalog, must **equal** the request-role set — two independent products rather than one read twice. | **A fifth copy of an enumeration that exists as a constant so proofs read it** — D301's shape, after Session 8 Run 2 deleted three others (D416). The habit is durable enough that **Run 1 of this session made a sixth**, one run after this was found, in a test written by the same hand that wrote the row. | 0137 |
 | **D493** | — (found during Run 2, by a mutation that survived). | **A subset-versus-exact mutation cannot discriminate while the two sets are equal.** Turning `holders == request_roles` into `holders >= request_roles` SURVIVED — not because the assertion is weak but because every comparison operator agrees when the sets coincide. The battery had nothing to measure. | **The mutation was replaced, not the test.** Proving exactness needs the asymmetric state — a role GRANTED the hook that no token can name — which means granting to a role the migration does not declare, which the renderer refuses (Run 1's M3). So M5 became a **two-file** mutation moving the manifest entry with the template, and it kills. | **D300's property is the one this project re-learns most often, and this is the first time a battery could not demonstrate it.** Worth recording because the obvious reading of a survivor is "the test is weak", and here the test was exact and the mutation was uninformative — the mirror of D269, where an unapplied mutation reads as a weak test. A battery arm that cannot distinguish two behaviours is evidence about the arm. | — |
+| **D494** | — (found during Run 3, by running two mcp test modules outside the gate's canonical order). | **The middleware-pipeline test could not pass alone, and a concurrency test's cleanup was why no gate ever saw that.** `test_a_request_reaches_a_tool_through_the_real_middleware_pipeline` (D450's proof) arranged a context resolver and a tool executor and never a **token**, so in isolation `AgentContextMiddleware` correctly refused its tokenless request. It passed every gate since Session 8 Run 8 because `test_concurrent_requests_never_see_each_others_context` swapped `fastmcp.server.dependencies.get_access_token` **per coroutine** and restored it in each one's `finally` — and under interleaving the restores race: a coroutine captures another's stub as `original`, the LAST restore wins, and the framework module keeps a fake token function **for the rest of the process**. Measured with a probe-and-control rig: after the concurrent test a probe asserting the genuine function FAILS; after the sequential `_drive` test beside it, it passes. | **Both tests repaired, neither weakened.** The concurrent test installs ONE stub via `monkeypatch` that reads the caller's token from a `ContextVar` — task-local under `gather`, so the twelve tokens stay distinct and the single restore cannot race (battery M9 mutates the stub to a constant and the test goes red). The pipeline test arranges its own token, which is the thing a pipeline behind an authenticating middleware requires of a caller. Verified: the probe passes after the fixed concurrent test, and the pipeline test passes **alone**. | **A test green only downstream of another test's leak is D374's family with the pollution in the suite rather than in the assertion** — it passed every gate since Session 8 Run 8 for an unrelated reason, and the unrelated reason was another proof's cleanup racing itself. The swap-and-restore pattern (`original = attr; attr = stub; finally: attr = original`) is correct sequentially and wrong under ANY interleaving, and `_drive` in the same file uses it safely — sequential use is the entire boundary, and nothing marked it. §6 question 2 found it: the proof had never run in the environment "alone". | — |
 
 ---
 
@@ -331,7 +332,7 @@ mutation was replaced, not the test — it became a two-file mutation granting t
 hook to a role no token can name, which is the asymmetric state exactness is
 about.
 
-### Run 3 — The compiler learns to write
+### Run 3 — The compiler learns to write — **Done.**
 
 - Two `kind: write` capabilities in `capabilities.example.yaml`, each one-to-one
   with its operation, `max_affected_rows: 1` (D487), `idempotent` stated
@@ -352,6 +353,33 @@ about.
 surface and the approved snapshot must still expose no capability, and the test
 is written the only way that means anything — by adding a real one and asserting
 the compiled bytes do not move.
+
+**What Run 3 built.** All of the above, as planned: two `kind: write` entries
+(`create_note` not idempotent with `audit.redact: [p_content]`,
+`update_task_status` idempotent as a compare-and-swap, both `max_affected_rows:
+1` per D487); `_compile_tool` split into `_compile_resource` and
+`_compile_write` — a write tool carries `operation`, `arguments` (the reviewed
+contract's list **in parameter order**), `required_scopes`,
+`max_affected_rows`, `idempotent`, and none of the read shape; **every** tool
+now carries `audit_redact` (the union over its backing capabilities), which is
+what puts D479's orphan into the lock; `surface_operations` carries each
+operation's `arguments` through. Three new compiler refusals: a write carrying
+any of the five read-shape fields (the schema deliberately does not forbid
+them — D403), a write backed by a non-POST operation, and a write naming an
+unbacked source. The canonical snapshot recompiled to **6 tools / 7
+capabilities**; `render-mcp-catalog.py` gained the write detail section; the
+catalog's prose was rewritten where the tripwire test demanded it, "No writes"
+left the deliberately-absent list (and a test asserts it stays gone), and the
+audit-retention line points at Session 10.
+
+**What was measured.** Nothing third-party — compilation is pure over committed
+inputs, and D487's single-composite-row premise was Run 1's measurement. The
+run's one rig was D494's probe-and-control (a leaked
+`fastmcp.server.dependencies.get_access_token` stub, found because Run 3's
+first targeted test run used a non-canonical module order). Battery: **M1–M9
+all killed** — redaction key, bound, argument order, idempotency, the three new
+refusals, the renderer's write branch, and the repaired concurrency stub — each
+with a paired control green in the same invocation.
 
 ### Run 4 — The lock and the write transport
 

@@ -438,23 +438,33 @@ def test_concurrent_requests_never_see_each_others_context(monkeypatch: Any) -> 
     is correct on every sequential request, so a suite without this arm would
     pass the broken implementation. Twelve requests, twelve tokens, with an
     `await` inside the middleware so the loop genuinely interleaves them.
+
+    **The stub is installed ONCE and reads a ContextVar** (D494). The first
+    version swapped `dependencies.get_access_token` per coroutine and restored
+    it in each one's `finally` -- and under interleaving the restores race: a
+    coroutine captures another's stub as `original`, the LAST restore wins, and
+    the framework module is left holding a fake token function for the rest of
+    the process. That leak is what kept `test_mcp_route`'s pipeline test green
+    for four gates while it could not pass alone. `monkeypatch` undoes one
+    swap; each task's context copy keeps the tokens distinct.
     """
+    import contextvars
+
+    import fastmcp.server.dependencies as dependencies
+
     middleware = _middleware(monkeypatch)
     observed: dict[str, str] = {}
+    calling = contextvars.ContextVar[str]("calling_token")
+    monkeypatch.setattr(dependencies, "get_access_token", lambda: _FakeToken(calling.get()))
 
     async def one(token: str) -> None:
-        import fastmcp.server.dependencies as dependencies
+        calling.set(token)  # task-local: gather gives every coroutine its own context copy
 
         async def call_next(_: Any) -> None:
             await asyncio.sleep(0.01)
             observed[token] = current_agent_context().owner_id
 
-        original = dependencies.get_access_token
-        dependencies.get_access_token = lambda: _FakeToken(token)  # type: ignore[assignment]
-        try:
-            await middleware.on_request(None, call_next)
-        finally:
-            dependencies.get_access_token = original  # type: ignore[assignment]
+        await middleware.on_request(None, call_next)
 
     async def all_at_once() -> None:
         await asyncio.gather(*(one(f"tok-{n:02d}") for n in range(12)))

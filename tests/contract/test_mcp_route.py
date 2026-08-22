@@ -455,12 +455,26 @@ def test_a_request_reaches_a_tool_through_the_real_middleware_pipeline(
     Not `middleware.on_request(...)` -- the framework's own pipeline, reached by
     calling a registered tool. This is the arrangement that raised "object is not
     callable" for three runs while every unit test passed.
+
+    **The token is arranged HERE** (D494). This test passed four gates without
+    arranging one, because a concurrency test in `test_mcp_authorization` was
+    leaving a fake `get_access_token` installed in the framework module for the
+    rest of the process -- so alone, the middleware correctly refused the
+    tokenless request and this test failed for the thing it never supplied. A
+    pipeline behind an authenticating middleware needs a caller, and the caller
+    is this test's to provide.
     """
     import asyncio
+
+    import fastmcp.server.dependencies as dependencies
 
     from app import mcp_authorization, mcp_tools
     from app.mcp_upstream import AgentContext
 
+    class _Token:
+        token = "the.callers.token"  # noqa: S105 — a fixed placeholder, not a credential
+
+    monkeypatch.setattr(dependencies, "get_access_token", lambda: _Token())
     monkeypatch.setattr(
         mcp_authorization,
         "resolve_agent_context",

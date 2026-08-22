@@ -1,10 +1,42 @@
 {
-  "capability_count": 5,
+  "capability_count": 7,
   "contract_id": "notes-tasks-agent-v1",
   "schema_version": 1,
-  "tool_count": 4,
+  "tool_count": 6,
   "tools": [
     {
+      "arguments": [
+        "p_title",
+        "p_content"
+      ],
+      "audit_redact": [
+        "p_content"
+      ],
+      "descriptions": [
+        "Create one note owned by the caller's owner. Returns the created row."
+      ],
+      "discovery_scope_sets": [
+        [
+          "notes:write"
+        ]
+      ],
+      "idempotent": false,
+      "kind": "write",
+      "max_affected_rows": 1,
+      "name": "create_note",
+      "operation": {
+        "method": "post",
+        "operation_id": "rpc.create_note.post",
+        "path": "/rpc/create_note"
+      },
+      "required_scopes": [
+        "notes:write"
+      ],
+      "source": "postgrest",
+      "timeout_ms": 5000
+    },
+    {
+      "audit_redact": [],
       "descriptions": [
         "One resource's frozen columns, permitted filters and permitted ordering, exactly as the lock froze them. Read from the deployed lock."
       ],
@@ -23,6 +55,7 @@
       "timeout_ms": 1000
     },
     {
+      "audit_redact": [],
       "descriptions": [
         "The resources this deployment's agent surface can query, and the scope each one needs. Read from the deployed lock; reaches no database."
       ],
@@ -41,6 +74,7 @@
       "timeout_ms": 1000
     },
     {
+      "audit_redact": [],
       "descriptions": [
         "The caller's own notes, filtered and ordered within frozen bounds.",
         "The caller's own tasks, filtered and ordered within frozen bounds."
@@ -219,6 +253,7 @@
       "timeout_ms": 5000
     },
     {
+      "audit_redact": [],
       "descriptions": [
         "The caller's own activity, counted under the caller's own RLS: notes and tasks totals, tasks by status, and the two most recent update times."
       ],
@@ -258,6 +293,36 @@
             "tasks:read"
           ]
         }
+      ],
+      "source": "postgrest",
+      "timeout_ms": 5000
+    },
+    {
+      "arguments": [
+        "p_task_id",
+        "p_expected_status",
+        "p_new_status"
+      ],
+      "audit_redact": [],
+      "descriptions": [
+        "Move one of the caller's owner's tasks from an expected status to a new one; refused when the expected status no longer holds."
+      ],
+      "discovery_scope_sets": [
+        [
+          "tasks:write"
+        ]
+      ],
+      "idempotent": true,
+      "kind": "write",
+      "max_affected_rows": 1,
+      "name": "update_task_status",
+      "operation": {
+        "method": "post",
+        "operation_id": "rpc.update_task_status.post",
+        "path": "/rpc/update_task_status"
+      },
+      "required_scopes": [
+        "tasks:write"
       ],
       "source": "postgrest",
       "timeout_ms": 5000

@@ -136,12 +136,16 @@ def test_every_derived_id_resolves_against_the_reviewed_contract(
 
 
 # ---------------------------------------------------------------------------
-# Five capabilities, four tools (ADR 0120)
+# Seven capabilities, six tools (ADR 0120)
 # ---------------------------------------------------------------------------
 
 
-def test_the_compiled_tools_are_the_four_that_were_planned(canonical: dict[str, Any]) -> None:
-    """`docs/capability-plan.md` named these in Session 1. This is where they meet.
+def test_the_compiled_tools_are_the_six_that_were_planned(canonical: dict[str, Any]) -> None:
+    """`docs/capability-plan.md` named all six in Session 1. This is where they meet.
+
+    Four since Session 8; Session 9 Run 3 added the two writes the plan's rows
+    5 and 6 had reserved for it. The counts moved with them: seven capabilities
+    behind six tools.
 
     `PLANNED_TOOLS` is a constant rather than a derivation on purpose: the
     compiler derives the tool set from the manifest, so a test comparing the two
@@ -151,8 +155,8 @@ def test_the_compiled_tools_are_the_four_that_were_planned(canonical: dict[str, 
     names = tuple(tool["name"] for tool in canonical["tools"])
     assert names == capability_compiler.PLANNED_TOOLS
     assert names == tuple(sorted(names)), "the tools are not lexicographic"
-    assert canonical["tool_count"] == 4
-    assert canonical["capability_count"] == 5
+    assert canonical["tool_count"] == 6
+    assert canonical["capability_count"] == 7
 
 
 def test_one_tool_carries_two_resources_with_a_scope_each(canonical: dict[str, Any]) -> None:
@@ -219,6 +223,135 @@ def test_a_metadata_tool_reaches_no_backend(canonical: dict[str, Any]) -> None:
         assert tool["reads"] == "lock"
         assert "resources" not in tool
         assert "max_rows" not in tool
+
+
+# ---------------------------------------------------------------------------
+# The two writes (Session 9 Run 3): D470, D479, D487
+# ---------------------------------------------------------------------------
+
+
+def test_a_write_tool_is_an_operation_and_an_argument_contract(canonical: dict[str, Any]) -> None:
+    """**D470's resolution, asserted on the artefact.**
+
+    A write compiles to an operation, an argument contract and a side-effect
+    bound -- and to no `columns`, `filters`, `order_by`, `max_rows` or
+    `resources`, because a write projects nothing. The arguments are the
+    reviewed contract's, **in PostgreSQL parameter order**: they are positional
+    facts about a function, and sorting them would be a second spelling of a
+    list one authority already owns.
+    """
+    expected = {
+        "create_note": ("rpc.create_note.post", ["p_title", "p_content"]),
+        "update_task_status": (
+            "rpc.update_task_status.post",
+            ["p_task_id", "p_expected_status", "p_new_status"],
+        ),
+    }
+    for name, (operation_id, arguments) in expected.items():
+        tool = next(tool for tool in canonical["tools"] if tool["name"] == name)
+        assert tool["kind"] == "write"
+        assert tool["source"] == "postgrest"
+        assert tool["operation"]["operation_id"] == operation_id
+        assert tool["operation"]["method"] == "post"
+        assert tool["arguments"] == arguments, "the argument contract is not in parameter order"
+        for field in ("resources", "columns", "filters", "order_by", "max_rows"):
+            assert field not in tool, f"write tool {name!r} carries the read field {field!r}"
+
+
+def test_the_write_bound_is_the_functions_own_shape(canonical: dict[str, Any]) -> None:
+    """**D487.** `max_affected_rows` is 1 on both writes, and 1 is not a choice.
+
+    Both RPCs are `RETURNS api.notes` / `RETURNS api.tasks` -- a single
+    composite row, not `SETOF` -- so 1 is the function's actual shape. A bound
+    larger than the operation can produce can never fire, which is a control
+    measuring nothing.
+
+    `idempotent` is stated honestly rather than defensively: `create_note`
+    creates a row on every call; `update_task_status` is a compare-and-swap,
+    so a repeat cannot advance the state twice.
+    """
+    tools = {tool["name"]: tool for tool in canonical["tools"]}
+    assert tools["create_note"]["max_affected_rows"] == 1
+    assert tools["update_task_status"]["max_affected_rows"] == 1
+    assert tools["create_note"]["idempotent"] is False
+    assert tools["update_task_status"]["idempotent"] is True
+
+
+def test_audit_redaction_reaches_every_tool_and_one_list_is_non_empty(
+    canonical: dict[str, Any],
+) -> None:
+    """**D479.** `audit.redact` was validated on the way in and emitted into nothing.
+
+    Now every compiled tool carries its redaction list, and at least one is
+    NON-empty -- `create_note` redacts `p_content`, the note's body -- because
+    an empty redaction list on every capability is indistinguishable from a
+    redaction mechanism that does not exist.
+    """
+    redactions = {tool["name"]: tool["audit_redact"] for tool in canonical["tools"]}
+    assert set(redactions) == set(capability_compiler.PLANNED_TOOLS), (
+        "a tool compiled without its redaction list; the runtime would have nothing to obey"
+    )
+    assert redactions["create_note"] == ["p_content"]
+    assert any(redactions.values()), (
+        "every redaction list is empty, which is D479's original state wearing new keys"
+    )
+
+
+def test_a_write_carrying_a_reads_shape_is_refused(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """**D470's other half.** The schema does not forbid a write these fields --
+    forbidding them there would be a version bump renaming nothing (D403) -- so
+    the compiler must, or a `columns` list on a write validates, compiles into
+    nothing, and reads exactly like a real projection (D274's shape).
+    """
+    for field, value in (
+        ("resource", "notes"),
+        ("columns", ["id"]),
+        ("filters", [{"column": "id", "operators": ["eq"]}]),
+        ("order_by", [{"column": "id", "direction": "asc"}]),
+        ("max_rows", 10),
+    ):
+        broken = copy.deepcopy(capabilities)
+        for entry in broken["capabilities"]:
+            if entry["name"] == "create_note":
+                entry[field] = value
+        with pytest.raises(CompilerError, match="describe a read"):
+            compile_with(broken, surface, published)
+
+
+def test_a_write_backed_by_a_read_operation_is_refused(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """A write whose backing is a GET is a tool whose kind lies about its effect.
+
+    `notes.get` is a reviewed, published operation, so nothing upstream of the
+    write branch refuses it -- which is exactly why the branch must.
+    """
+    broken = copy.deepcopy(capabilities)
+    for entry in broken["capabilities"]:
+        if entry["name"] == "create_note":
+            entry["operation"]["operation_id"] = "notes.get"
+
+    with pytest.raises(CompilerError, match="lies about its effect"):
+        compile_with(broken, surface, published)
+
+
+def test_an_unbacked_write_is_refused(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """A write that reaches no backend is a side effect nobody can locate.
+
+    `source: lock` is legitimate for a metadata capability and the schema does
+    not couple sources to kinds, so the refusal is the compiler's.
+    """
+    broken = copy.deepcopy(capabilities)
+    for entry in broken["capabilities"]:
+        if entry["name"] == "create_note":
+            entry["operation"] = {"source": "lock", "operation_id": "lock.resources.list"}
+
+    with pytest.raises(CompilerError, match="unbacked source"):
+        compile_with(broken, surface, published)
 
 
 # ---------------------------------------------------------------------------
@@ -357,13 +490,21 @@ def test_a_published_operation_missing_from_the_snapshot_is_refused(
 def test_capabilities_sharing_a_tool_must_share_a_kind(
     capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
 ) -> None:
-    """One name with two authorization models is two tools wearing one label."""
+    """One name with two authorization models is two tools wearing one label.
+
+    The turned capability is stripped of its read shape as well as re-kinded,
+    because Session 9's write-shape refusal (D470) would otherwise fire first
+    and this test would be re-measuring that check under this one's name.
+    """
     broken = copy.deepcopy(capabilities)
     for entry in broken["capabilities"]:
         if entry["name"] == "query_tasks":
             entry["kind"] = "write"
             entry["max_affected_rows"] = 1
             entry["idempotent"] = True
+            for field in ("resource", "columns", "filters", "order_by", "max_rows"):
+                entry.pop(field, None)
+            entry["operation"]["operation_id"] = "rpc.update_task_status.post"
 
     with pytest.raises(CompilerError, match="two authorization models"):
         compile_with(broken, surface, published)
@@ -417,7 +558,7 @@ def test_check_exits_zero_against_the_committed_tree() -> None:
         timeout=120,
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
-    assert "4 tools" in result.stdout
+    assert "6 tools" in result.stdout
 
 
 def test_the_lock_carries_the_digests_of_everything_it_was_compiled_from(

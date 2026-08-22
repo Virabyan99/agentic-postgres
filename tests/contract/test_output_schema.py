@@ -376,12 +376,12 @@ def test_the_rendered_document_records_the_enabled_capabilities(alpha: dict[str,
 
     No capability could be enabled because no live backing contract existed to
     validate one against. Session 8 Run 3 compiles against the reviewed surface
-    and the approved OpenAPI snapshot, so five are enabled and the document
-    records them.
+    and the approved OpenAPI snapshot; Session 9 Run 3 added the two writes, so
+    seven are enabled and the document records them.
 
     **Capability names, not tool names** (ADR 0120). The rendered document is a
-    record of the manifest, and the manifest's unit is the capability -- five of
-    them behind four tools. A document listing tools would be a second, lossier
+    record of the manifest, and the manifest's unit is the capability -- seven of
+    them behind six tools. A document listing tools would be a second, lossier
     spelling of the same fact, and the one place `query_notes` and `query_tasks`
     become indistinguishable is the one place their separate scopes stop being
     visible.

@@ -269,27 +269,71 @@ def test_the_renderer_distinguishes_the_two_shapes_directly() -> None:
 def test_the_prose_and_the_contract_agree_on_how_many_tools_there_are(
     catalog: str, contract: dict
 ) -> None:
-    """ "Four tools, and there are exactly four" is a claim, so it is checked.
+    """ "Six tools, and there are exactly six" is a claim, so it is checked.
 
     The generated table is derived and cannot disagree. The sentence above it is
-    written by hand, and a fifth tool arriving would leave it saying four while
-    the table said five -- with the contradiction inside one document.
+    written by hand, and a seventh tool arriving would leave it saying six while
+    the table said seven -- with the contradiction inside one document. This
+    tripwire fired exactly as designed when Session 9 Run 3 took the contract
+    from four to six, and the prose was rewritten rather than regenerated.
     """
     prose = catalog[: catalog.index(BEGIN)]
-    assert contract["tool_count"] == 4, (
+    assert contract["tool_count"] == 6, (
         f"the contract now carries {contract['tool_count']} tools; the catalog's prose "
-        "says four and has to be rewritten rather than regenerated"
+        "says six and has to be rewritten rather than regenerated"
     )
-    assert "exactly four" in prose
+    assert "exactly six" in prose
 
 
 def test_the_catalog_says_what_the_surface_deliberately_lacks(catalog: str) -> None:
     """A reference that lists only what exists invites the reader to assume the rest.
 
-    Writes, storage and a durable audit are each absent by decision, and each is
-    something a reader would otherwise reasonably expect an agent surface to
-    have. Naming them is how the document stops being an incomplete list.
+    Deletes, storage and a runtime-written audit are each absent by decision,
+    and each is something a reader would otherwise reasonably expect an agent
+    surface with writes to have. Naming them is how the document stops being an
+    incomplete list. "No writes" left the list in Session 9 Run 3 -- and must
+    STAY gone, because a document claiming no writes above a table listing two
+    is the contradiction-in-one-document this file exists to prevent.
     """
     absent = catalog[catalog.index("deliberately absent") :]
-    for subject in ("No writes", "No storage", "No durable audit"):
+    for subject in ("No delete", "No storage", "No durable audit from the runtime"):
         assert subject in absent, f"the catalog does not say {subject.lower()}"
+    assert "No writes" not in absent, (
+        "the catalog says 'No writes' while the contract carries two; the surface "
+        "gained writes in Session 9 Run 3 and the prose has to say what is absent NOW"
+    )
+
+
+def test_the_write_tools_details_reach_the_catalog(generated: str, contract: dict) -> None:
+    """The write half of `test_every_resource_ceiling_reaches_the_catalog`.
+
+    The renderer emitted a detail section only for a tool with `resources`, so
+    a write tool rendered as a bare table row (Session 9 Run 3) -- and the
+    numbers a reader acts on lived only in the contract JSON. The side-effect
+    bound, the argument names in order, and what the audit record will not
+    carry must all reach the page.
+    """
+    writes = [tool for tool in contract["tools"] if tool["kind"] == "write"]
+    assert writes, "the contract carries no write tool; this test would be vacuous"
+
+    for tool in writes:
+        section = generated[generated.index(f"### `{tool['name']}`") :]
+        section = section[: section.index("### ", 4)] if "### " in section[4:] else section
+        assert f"**{tool['max_affected_rows']}** affected" in section, (
+            f"{tool['name']}'s side-effect bound is not in the catalog"
+        )
+        assert f"`{tool['operation']['operation_id']}`" in section
+        rendered_arguments = ", ".join(f"`{argument}`" for argument in tool["arguments"])
+        assert rendered_arguments in section, (
+            f"{tool['name']}'s arguments are not in the catalog in contract order"
+        )
+        if tool["audit_redact"]:
+            for parameter in tool["audit_redact"]:
+                assert f"`{parameter}`" in section, (
+                    f"{tool['name']} redacts {parameter!r} and the catalog does not say so"
+                )
+        else:
+            assert "Redacted from the audit record: nothing" in section
+    idempotence = {tool["name"]: tool["idempotent"] for tool in writes}
+    assert idempotence["create_note"] is False and "not idempotent" in generated
+    assert idempotence["update_task_status"] is True

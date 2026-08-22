@@ -94,6 +94,35 @@ def render(contract: dict[str, Any]) -> str:
         )
 
     for tool in tools:
+        # A write tool has no resources -- it is one-to-one with its operation
+        # (D470) -- so without its own detail section it would render as a bare
+        # table row, and the numbers a reader acts on (the side-effect bound,
+        # the argument names, what the audit record will not carry) would exist
+        # only in the contract JSON.
+        if tool["kind"] == "write":
+            lines.append("")
+            lines.append(f"### `{tool['name']}`")
+            lines.append("")
+            effect = "idempotent" if tool["idempotent"] else "not idempotent"
+            lines.append(
+                f"**Write** — operation `{tool['operation']['operation_id']}`, at most "
+                f"**{tool['max_affected_rows']}** affected rows, {effect}, requires "
+                f"{scope_expression([list(tool['required_scopes'])])}."
+            )
+            lines.append("")
+            lines.append(
+                "- Arguments, by name and in order: "
+                + ", ".join(f"`{argument}`" for argument in tool["arguments"])
+            )
+            redacted = tool.get("audit_redact") or []
+            if redacted:
+                lines.append(
+                    "- Redacted from the audit record: "
+                    + ", ".join(f"`{parameter}`" for parameter in redacted)
+                )
+            else:
+                lines.append("- Redacted from the audit record: nothing")
+            continue
         resources = sorted(tool.get("resources", []), key=lambda entry: entry["name"])
         if not resources:
             continue

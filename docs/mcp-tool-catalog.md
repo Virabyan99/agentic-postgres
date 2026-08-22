@@ -14,12 +14,17 @@ editing the block below is overwritten on the next render and is caught by
 
 ## What a tool is, and what it is not
 
-**Four tools, and there are exactly four.** The runtime reads the deployed lock
-at startup and validates it strictly: a fifth tool, or an unknown
-`schema_version`, fails the start rather than being ignored (ADR 0127). Two of
-the four are `metadata` and answer from the lock in memory — they reach no
+**Six tools, and there are exactly six.** The runtime reads the deployed lock
+at startup and validates it strictly: a tool the roster does not name, or an
+unknown `schema_version`, fails the start rather than being ignored (ADR 0127).
+Two of the six are `metadata` and answer from the lock in memory — they reach no
 database and take no concurrency slot. Two are `read` and make exactly one
-upstream request each.
+upstream request each. Two are `write`, each one-to-one with a reviewed RPC: a
+write selects among nothing, projects nothing, and declares its side-effect
+bound, its idempotency and its audit redaction in the contract (D470). The
+bound is **1 affected row** on both, and that is the function's own shape —
+each RPC returns a single composite row, not a set — rather than a ceiling
+chosen to look safe (D487).
 
 **A caller supplies values. It never supplies syntax.** The operation is chosen
 **by name from the lock**; columns, operators and orderings are checked against
@@ -28,12 +33,18 @@ position it occupies (ADR 0127). There is no input that accepts SQL, a SQL
 fragment, a PostgREST query string, a path, an operation name, or an ordering
 expression. An ordering is chosen by **index** into the list `describe_resource`
 returns, because the permitted orderings are frozen and choosing one is not the
-same feature as writing one.
+same feature as writing one. A write's arguments are the same rule on the other
+verb: the contract declares them **by name and in order**, taken from the
+reviewed surface contract, and a caller supplies values for exactly those names
+— never a name of its own.
 
-**An agent reads its owner's rows.** A request runs under the identity of the
-human who owns the agent (ADR 0117), through the same eight row-level policies
-that govern that human — no policy was added or moved for the agent plane. An
-agent cannot see another owner's rows and cannot see another agent's existence.
+**An agent reads — and writes — its owner's rows.** A request runs under the
+identity of the human who owns the agent (ADR 0117), through the same eight
+row-level policies that govern that human — no policy was added or moved for
+the agent plane. Both write RPCs **derive** ownership from that identity rather
+than accepting it as an argument, so an agent cannot create a note or move a
+task for anyone but its owner. An agent cannot see another owner's rows and
+cannot see another agent's existence.
 
 **Scopes are a disjunction of conjunctions.** `query_resource` needs *either*
 `notes:read` *or* `tasks:read`; `run_report` needs *both*. A flat list cannot
@@ -57,14 +68,23 @@ would not have returned.
 
 <!-- BEGIN GENERATED: mcp-catalog -->
 
-Contract `notes-tasks-agent-v1`, schema version 1: **4 tools** behind **5 capabilities**.
+Contract `notes-tasks-agent-v1`, schema version 1: **6 tools** behind **7 capabilities**.
 
 | Tool | Kind | Reads | Scopes | Timeout |
 |---|---|---|---|---|
+| `create_note` | write | postgrest | `notes:write` | 5000 ms |
 | `describe_resource` | metadata | lock | `meta:read` | 1000 ms |
 | `list_resources` | metadata | lock | `meta:read` | 1000 ms |
 | `query_resource` | read | postgrest | `notes:read` OR `tasks:read` | 5000 ms |
 | `run_report` | read | postgrest | `notes:read` AND `tasks:read` | 5000 ms |
+| `update_task_status` | write | postgrest | `tasks:write` | 5000 ms |
+
+### `create_note`
+
+**Write** — operation `rpc.create_note.post`, at most **1** affected rows, not idempotent, requires `notes:write`.
+
+- Arguments, by name and in order: `p_title`, `p_content`
+- Redacted from the audit record: `p_content`
 
 ### `query_resource`
 
@@ -87,6 +107,13 @@ Contract `notes-tasks-agent-v1`, schema version 1: **4 tools** behind **5 capabi
 - Columns: `notes_total`, `tasks_total`, `tasks_pending`, `tasks_in_progress`, `tasks_completed`, `tasks_cancelled`, `latest_note_at`, `latest_task_at`
 - Filters: none
 - Orderings: none
+
+### `update_task_status`
+
+**Write** — operation `rpc.update_task_status.post`, at most **1** affected rows, idempotent, requires `tasks:write`.
+
+- Arguments, by name and in order: `p_task_id`, `p_expected_status`, `p_new_status`
+- Redacted from the audit record: nothing
 
 <!-- END GENERATED: mcp-catalog -->
 
@@ -121,9 +148,11 @@ itself.
 tools, and adding a second kind of thing is a decision with its own ADR rather
 than a default that arrives with a framework upgrade.
 
-**No writes.** `agent_writer` exists as a role and is not activated; every tool
-here is a read. Agent writes, the audit record they require, and the fail-closed
-contract for a write whose audit record cannot be written are Session 9's.
+**No delete, and no general update.** The two writes are the frozen domain's
+own narrow operations (ADR 0003): create one note, and move one task between
+statuses through a compare-and-swap. Nothing deletes a row, nothing updates an
+arbitrary column, and widening either is a change to the frozen domain rather
+than an entry in a manifest.
 
 **No storage.** `objects:read` and `objects:write` are human-only: the scope
 vocabulary does not admit them for an agent, so no agent token can carry them
@@ -131,10 +160,16 @@ however it is minted (ADR 0100). An agent token presented to the storage surface
 is refused, and that refusal is a property of the vocabulary rather than of one
 agent's configuration.
 
-**No durable audit.** What exists is telemetry: one structured record per tool
-call, carrying the tool, the resource, the outcome, the row count, the elapsed
-milliseconds and the agent and owner ids — and **no token, no fingerprint, no
-URL and no caller value**. Telemetry answers "what happened" for an operator
-watching a running deployment; an audit record answers it for a record-keeper,
-months later, with a contract about what happens when it cannot be written. They
-are not the same artefact (ADR 0130, D412).
+**No durable audit from the runtime yet.** The record itself now exists:
+migration 0019 ships `app_private.agent_audit` and the two definer functions
+that write it as the caller (ADR 0135) — released, and applied on no cluster.
+The runtime's begin/complete calls around a write, and the fail-closed contract
+for a write whose record cannot be written, are Session 9's remaining runs.
+What runs today is telemetry: one structured record per tool call, carrying the
+tool, the resource, the outcome, the row count, the elapsed milliseconds and
+the agent and owner ids — and **no token, no fingerprint, no URL and no caller
+value**. Telemetry answers "what happened" for an operator watching a running
+deployment; an audit record answers it for a record-keeper, months later, with
+a contract about what happens when it cannot be written. They are not the same
+artefact (ADR 0130, D412). And nothing prunes the audit record — retention is
+undecided, and it is Session 10's inbox.

@@ -33,12 +33,21 @@ from typing import Any
 
 from agentic_postgres.config import CapabilityContractError
 
-#: The MCP tool names this release registers, lexicographically. A constant
-#: rather than a derivation, and that is deliberate: `compile_canonical` derives
-#: the tool set from the manifest, so a test comparing the two would be comparing
-#: a function against itself. This is the reviewed answer, and
-#: `test_the_compiled_tools_are_the_four_that_were_planned` is where the two meet.
-PLANNED_TOOLS = ("describe_resource", "list_resources", "query_resource", "run_report")
+#: The MCP tool names the reviewed manifest compiles to, lexicographically. A
+#: constant rather than a derivation, and that is deliberate: `compile_canonical`
+#: derives the tool set from the manifest, so a test comparing the two would be
+#: comparing a function against itself. This is the reviewed answer, and
+#: `test_the_compiled_tools_are_the_six_that_were_planned` is where the two meet.
+#: Session 9 Run 3 added the two writes from docs/capability-plan.md; the
+#: runtime's own roster (`mcp_lock.EXPECTED_TOOL_NAMES`) catches up in Run 4.
+PLANNED_TOOLS = (
+    "create_note",
+    "describe_resource",
+    "list_resources",
+    "query_resource",
+    "run_report",
+    "update_task_status",
+)
 
 #: Sources a capability may name, and what each one means for compilation.
 #:
@@ -113,7 +122,7 @@ def surface_operations(surface: dict[str, Any]) -> dict[str, dict[str, Any]]:
     schema = surface["exposed_schema"]
     operations: dict[str, dict[str, Any]] = {}
 
-    def add(section: str, name: str, obj: str, methods: list[str]) -> None:
+    def add(section: str, name: str, obj: str, methods: list[str], arguments: list[str]) -> None:
         for method in methods:
             identifier = derive_operation_id(obj, method)
             if identifier in operations:
@@ -130,14 +139,20 @@ def surface_operations(surface: dict[str, Any]) -> dict[str, dict[str, Any]]:
                 "path": f"/{obj}",
                 "qualified": f"{schema}.{name}",
                 "published": section in {"relations", "rpcs"},
+                # The reviewed contract records an RPC's arguments in PostgreSQL
+                # parameter order, and that list IS a write tool's argument
+                # contract (D470). A relation takes none: its inputs are the
+                # frozen filters, which are a capability's business, not an
+                # operation's.
+                "arguments": list(arguments),
             }
 
     for name, relation in surface["relations"].items():
-        add("relations", name, name, relation["methods"])
+        add("relations", name, name, relation["methods"], [])
     for name, rpc in surface["rpcs"].items():
-        add("rpcs", name, f"rpc/{name}", rpc["methods"])
+        add("rpcs", name, f"rpc/{name}", rpc["methods"], rpc["arguments"])
     for name, rpc in surface["agent_rpcs"].items():
-        add("agent_rpcs", name, f"rpc/{name}", rpc["methods"])
+        add("agent_rpcs", name, f"rpc/{name}", rpc["methods"], rpc["arguments"])
 
     return operations
 
@@ -207,6 +222,33 @@ def _check_columns(capability: dict[str, Any], surface: dict[str, Any]) -> None:
             )
 
 
+#: The fields that describe a read's projection, and only a read's. The schema
+#: requires `max_affected_rows` and `idempotent` of a write and deliberately
+#: does NOT forbid it these -- forbidding them there would be a schema change
+#: for a shape nothing had ever carried, D403's version bump that renames
+#: nothing. So the refusal lives in the compiler, beside the branch it protects.
+_READ_SHAPE_FIELDS = ("resource", "columns", "filters", "order_by", "max_rows")
+
+
+def _check_write_shape(capability: dict[str, Any]) -> None:
+    """A write capability may not carry a read's shape (D470).
+
+    Without this, a `columns` list on a write would validate against the schema
+    and compile into nothing -- a field that reads exactly like a real
+    projection and reaches nothing, which is D274's shape: a claim that lives
+    only in a document nobody dereferences.
+    """
+    if capability["kind"] != "write":
+        return
+    carried = [field for field in _READ_SHAPE_FIELDS if field in capability]
+    if carried:
+        raise CompilerError(
+            f"write capability {capability['name']!r} carries {carried}, which describe a "
+            "read. A write is one-to-one with its operation and projects nothing; a field "
+            "that validates and compiles into nothing is a claim nobody can dereference"
+        )
+
+
 def _check_against_snapshot(
     capability: dict[str, Any], backend: dict[str, Any] | None, published: set[str]
 ) -> None:
@@ -256,6 +298,7 @@ def compile_canonical(
     grouped: dict[str, list[dict[str, Any]]] = {}
     for capability in entries:
         _check_columns(capability, surface)
+        _check_write_shape(capability)
         resolved = _resolve(capability, operations)
         _check_against_snapshot(capability, resolved["backend"], published_objects)
         grouped.setdefault(capability.get("tool") or capability["name"], []).append(
@@ -291,31 +334,6 @@ def _compile_tool(name: str, backing: list[dict[str, Any]]) -> dict[str, Any]:
             "selects among frozen resources; a write is one-to-one with its operation"
         )
 
-    resources = [
-        {
-            "name": entry["capability"]["resource"],
-            "capability": entry["capability"]["name"],
-            "required_scopes": sorted(entry["capability"]["required_scopes"]),
-            "columns": list(entry["capability"]["columns"]),
-            "filters": [
-                {"column": f["column"], "operators": sorted(f["operators"])}
-                for f in sorted(entry["capability"].get("filters") or [], key=lambda f: f["column"])
-            ],
-            "order_by": [
-                {"column": o["column"], "direction": o["direction"]}
-                for o in entry["capability"].get("order_by") or []
-            ],
-            "max_rows": entry["capability"]["max_rows"],
-            "operation": {
-                "operation_id": entry["resolved"]["operation_id"],
-                "method": entry["resolved"]["backend"]["method"],
-                "path": entry["resolved"]["backend"]["path"],
-            },
-        }
-        for entry in sorted(backing, key=lambda e: e["capability"]["name"])
-        if kind != "metadata"
-    ]
-
     # **Discovery is a disjunction of conjunctions, and a flat union will not do.**
     #
     # A tool is discoverable when the caller can use at least one capability
@@ -344,14 +362,96 @@ def _compile_tool(name: str, backing: list[dict[str, Any]]) -> dict[str, Any]:
             entry["capability"].get("description", "").strip()
             for entry in sorted(backing, key=lambda e: e["capability"]["name"])
         ],
+        # **Every tool carries its redaction list** (D479). The union across the
+        # backing capabilities, because redaction is conservative: a parameter
+        # any one of them redacts is redacted for the tool. Until Session 9
+        # every list was `[]` and nothing read any of them, which made the
+        # mechanism indistinguishable from one that does not exist -- the lock
+        # carrying the list is what gives the runtime something to obey.
+        "audit_redact": sorted(
+            {
+                parameter
+                for entry in backing
+                for parameter in (entry["capability"].get("audit") or {}).get("redact", [])
+            }
+        ),
     }
     if kind == "metadata":
         compiled["reads"] = "lock"
         compiled["operation_ids"] = sorted(entry["resolved"]["operation_id"] for entry in backing)
+    elif kind == "write":
+        compiled.update(_compile_write(name, backing[0]))
     else:
-        compiled["resources"] = resources
-        compiled["max_rows"] = max(resource["max_rows"] for resource in resources)
+        compiled["resources"] = [_compile_resource(entry) for entry in backing]
+        compiled["max_rows"] = max(resource["max_rows"] for resource in compiled["resources"])
     return compiled
+
+
+def _compile_resource(entry: dict[str, Any]) -> dict[str, Any]:
+    """One frozen resource behind a read tool, exactly as before Session 9."""
+    capability = entry["capability"]
+    return {
+        "name": capability["resource"],
+        "capability": capability["name"],
+        "required_scopes": sorted(capability["required_scopes"]),
+        "columns": list(capability["columns"]),
+        "filters": [
+            {"column": f["column"], "operators": sorted(f["operators"])}
+            for f in sorted(capability.get("filters") or [], key=lambda f: f["column"])
+        ],
+        "order_by": [
+            {"column": o["column"], "direction": o["direction"]}
+            for o in capability.get("order_by") or []
+        ],
+        "max_rows": capability["max_rows"],
+        "operation": {
+            "operation_id": entry["resolved"]["operation_id"],
+            "method": entry["resolved"]["backend"]["method"],
+            "path": entry["resolved"]["backend"]["path"],
+        },
+    }
+
+
+def _compile_write(name: str, entry: dict[str, Any]) -> dict[str, Any]:
+    """A write tool's half of the contract: an operation, an argument contract,
+    and a side-effect bound -- and no `columns`, `filters`, `order_by` or
+    `max_rows`, because a write projects nothing (D470).
+
+    `arguments` is the reviewed contract's list, in PostgreSQL parameter order.
+    A caller supplies values for exactly these names and may never supply a
+    name of its own -- the same rule `mcp_query` keeps for filter columns
+    (ADR 0127), applied to the other verb.
+
+    `max_affected_rows` is carried for the runtime to check **against the
+    response**, never to trust (D487): both current writes bound it at 1
+    because that is the function's own shape -- `RETURNS api.notes` /
+    `RETURNS api.tasks`, a single composite row, not `SETOF`.
+    """
+    capability, resolved = entry["capability"], entry["resolved"]
+    backend = resolved["backend"]
+    if backend is None:
+        raise CompilerError(
+            f"write tool {name!r} names the unbacked source {resolved['source']!r}. A write "
+            "changes rows, so it must reach a backend; an unbacked write is a side effect "
+            "nobody can locate"
+        )
+    if backend["method"] != "post":
+        raise CompilerError(
+            f"write tool {name!r} is backed by {resolved['operation_id']!r}, whose method is "
+            f"{backend['method'].upper()}. A write is a POST to a reviewed RPC; backing one "
+            "with a read operation is a tool whose kind lies about its effect"
+        )
+    return {
+        "required_scopes": sorted(capability["required_scopes"]),
+        "operation": {
+            "operation_id": resolved["operation_id"],
+            "method": backend["method"],
+            "path": backend["path"],
+        },
+        "arguments": list(backend["arguments"]),
+        "max_affected_rows": capability["max_affected_rows"],
+        "idempotent": capability["idempotent"],
+    }
 
 
 def compile_lock(

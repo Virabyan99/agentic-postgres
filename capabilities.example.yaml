@@ -16,7 +16,7 @@
 # schema enforces that structurally; see schemas/capabilities.schema.json,
 # which is also the sole authority for the approved scope vocabulary.
 #
-# **Five capabilities, four tools** (ADR 0120). A capability is the
+# **Seven capabilities, six tools** (ADR 0120). A capability is the
 # authorization unit -- one (resource, verb), which is what `required_scopes`
 # bounds -- and a tool is a name an agent calls. `query_notes` and `query_tasks`
 # are two authorizations behind the one tool `query_resource`, which is what
@@ -30,8 +30,11 @@
 # contracts/postgrest-api-surface.yaml, which is the reviewed authority, and
 # cross-checks the published half against the approved OpenAPI snapshot.
 #
-# Session 9's two write capabilities are in docs/capability-plan.md and
-# deliberately not here.
+# Session 9 Run 3 added the two write capabilities docs/capability-plan.md had
+# planned since Session 1. Each is one-to-one with its reviewed RPC -- a write
+# never selects among resources the way `query_resource` does, and the compiler
+# refuses a write that groups (ADR 0120) or one that carries a read's shape
+# (D470).
 
 schema_version: 1
 
@@ -184,5 +187,60 @@ capabilities:
       - latest_task_at
     max_rows: 1
     timeout_ms: 5000
+    audit:
+      redact: []
+
+  # --- The two writes (Session 9) --------------------------------------------
+  #
+  # One-to-one with their reviewed RPCs, exactly as docs/capability-plan.md
+  # planned them in Session 1. `max_affected_rows: 1` on both is the function's
+  # actual shape rather than a ceiling chosen to look safe: each RPC is
+  # `RETURNS api.notes` / `RETURNS api.tasks` -- a single composite row, not
+  # `SETOF` -- so a bound of 1 is one the runtime can actually see violated
+  # (D487). A bound larger than the operation can produce can never fire, which
+  # is a control measuring nothing.
+  #
+  # `idempotent` is stated honestly, not defensively: `create_note` creates a
+  # new row on every call, so repeating it repeats the effect;
+  # `update_task_status` is a compare-and-swap on `p_expected_status`, so a
+  # repeat either finds the transition already made and changes nothing, or is
+  # refused -- the state cannot advance twice.
+  - name: create_note
+    description: >-
+      Create one note owned by the caller's owner. Returns the created row.
+    kind: write
+    enabled: true
+    required_scopes: [notes:write]
+    operation:
+      source: postgrest
+      operation_id: rpc.create_note.post
+    max_affected_rows: 1
+    idempotent: false
+    timeout_ms: 5000
+    # `p_content` is the note's body -- bulk user content. An audit record's
+    # job is who did what and when, not a second copy of the data the write
+    # carried, so the body is redacted before the parameter document is written
+    # (D479). Deliberately NON-empty: an empty redaction list on every
+    # capability is indistinguishable from a redaction mechanism that does not
+    # exist.
+    audit:
+      redact: [p_content]
+
+  - name: update_task_status
+    description: >-
+      Move one of the caller's owner's tasks from an expected status to a new
+      one; refused when the expected status no longer holds.
+    kind: write
+    enabled: true
+    required_scopes: [tasks:write]
+    operation:
+      source: postgrest
+      operation_id: rpc.update_task_status.post
+    max_affected_rows: 1
+    idempotent: true
+    timeout_ms: 5000
+    # Nothing redacted: a task id and two members of a four-value enum carry no
+    # user content, and redacting them would blind the record to the one thing
+    # a status transition's audit row is for.
     audit:
       redact: []
