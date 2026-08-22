@@ -932,9 +932,48 @@ neither becomes a subset check (D300).
 *more restricted* account — the obvious, safer-looking choice — is the wrong one.
 The positive control fired first and said so, exactly as written.
 
-Suite **SUITE**. **The three repaired assertions are `live_host` and have not
-run since the repair** — the host gate re-run is what executes them, and saying
-so is the whole point of D211–D214.
+Suite **3786 passed, 272 skipped**.
+
+**The re-run is green.** `session-08-check --mode host` PASSED — 212 live proofs,
+0 failed, plus 108 static claim proofs — and the three repaired assertions were
+among them, which is the first time any of the three had executed against a
+cluster carrying migration 0018.
+
+---
+
+## Session 8 is complete
+
+`evidence/session-08.json`, merged from both halves against release
+**`911a9d3b`**: **43 claims, 41 passed, 2 failed.**
+
+**All eight Session 8 claims passed** — `agent_reads`,
+`agent_query_construction`, `agent_scopes`, `agent_budgets`, `agent_surface`,
+`agent_authentication`, `agent_credentials` on the host, and
+`public_agent_boundary` from off-host.
+
+**The document reads `status: failed`, and that is the documented outcome.** The
+two red claims are Session 5's — `api_authorization` and `bootstrap_identity` —
+blocked on the rotation window. §7 of this plan wrote it down before the session
+began: *"Session 8 does not close them and must not appear to."* It is the same
+sentence Session 7 closed on, for the same two claims, for the same reason.
+**Nothing in Session 8 is unproved.**
+
+**The trip found seven** (D462–D468), none of them visible to a green offline
+suite of 3,786 tests, and each hidden behind the one before it:
+
+| | What |
+|---|---|
+| **D463** | The agent plane started before its files existed — one constant carrying two reasons to defer a service. **The row to read.** |
+| **D465** | The lock was compiled from the deployed document, whose `routes.rest` is an object where the compiler wants a string. D389's shape, third time. |
+| **D467** | A grant assertion that could not tell a grant from a membership — and migration 0006 had written that exact trap down for the table twin. |
+| **D468** | Two allowlists older than migration 0018. Both right to fail. |
+| **D462** | Step 0 re-rendered two of the four projects the Session 1 gate reads. |
+| **D464** | A guard whose evidence is two strings standing in for a construct. D463's mirror. |
+| **D466** | `--ssh-destination` needs `op@`; the safer-looking account is the wrong one. |
+
+Session 8 was planned as **nine** runs and took **twelve**. Session 7 was planned
+as ten and took sixteen; §2 said to budget for the same, and the budget was
+right.
 
 ---
 
