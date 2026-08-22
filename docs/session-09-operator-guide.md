@@ -201,11 +201,15 @@ runtime dependency, so this should be a no-op — confirm it, do not assume it.
 ### Step 4 — Apply migrations 0019 and 0020, on BOTH clusters, BEFORE the deploy
 
 ```bash
-bin/migrate.sh --project project.alpha.yaml status   # expect 0019 and 0020 pending
-bin/migrate.sh --project project.alpha.yaml up
-bin/migrate.sh --project project.beta.yaml  status
-bin/migrate.sh --project project.beta.yaml  up
+sudo bin/migrate.sh --project project.alpha.yaml status   # expect 0019 and 0020 pending
+sudo bin/migrate.sh --project project.alpha.yaml up
+sudo bin/migrate.sh --project project.beta.yaml  status
+sudo bin/migrate.sh --project project.beta.yaml  up
 ```
+
+**`sudo`, and it is not optional** (D505): `bin/migrate.sh` refuses every
+subcommand that runs a container unless `id -u` is 0, so `status` and `up`
+both stop with `requires root: it runs a container` when invoked as `op`.
 
 `--project`, naming the manifest, is the corrected invocation from Session 8's
 trip. Run `status` first and read it: two pending is what you expect, and
@@ -216,9 +220,13 @@ anything else is worth stopping for.
 ### Step 5 — Deploy both projects
 
 ```bash
-./deploy.sh --project project.alpha.yaml --capabilities capabilities.yaml --through-session 9
-./deploy.sh --project project.beta.yaml  --capabilities capabilities.yaml --through-session 9
+sudo ./deploy.sh --project project.alpha.yaml --capabilities capabilities.yaml --through-session 9
+sudo ./deploy.sh --project project.beta.yaml  --capabilities capabilities.yaml --through-session 9
 ```
+
+**`sudo` here too** (D505): `deploy.sh` refuses `--through-session` unless
+`id -u` is 0, because it writes host state. `--render-only` in step 2 does
+not, which is why that step runs as `op` and this one cannot.
 
 **Expect no new container.** Sixteen before, sixteen after (§0).
 
