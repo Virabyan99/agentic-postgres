@@ -32,6 +32,26 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 
 from agentic_postgres import REPO_ROOT, migrations
 
+
+def _bootstrap_module() -> Any:
+    """`bin/postgres-bootstrap.py`, loaded by path.
+
+    It is an operator command rather than a package module, so it is loaded the
+    way the other proofs that read it load it. What this file wants from it is
+    `AUTHENTICATOR_REQUEST_ROLES` -- the single authority for which roles a token
+    may name, which D301 and D492 are both about not copying.
+    """
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location(
+        "apg_postgres_bootstrap_auth_endpoints", REPO_ROOT / "bin" / "postgres-bootstrap.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
 pytestmark = [pytest.mark.contract, pytest.mark.database, pytest.mark.security, pytest.mark.p0]
 
 PASSPHRASE = "a-correct-horse-battery-staple"  # noqa: S105 -- a fixture, hashed and verified
@@ -174,16 +194,26 @@ def cluster(tmp_path_factory: pytest.TempPathFactory) -> Any:
         )
 
         # And the request-role memberships, with the three options the bootstrap
-        # plane sets. The agent roles are deliberately NOT granted -- that
-        # absence is what `test_the_authenticator_cannot_become_an_agent_role`
-        # measures, so granting them here would delete the property.
+        # plane sets, **read from the product's own constant** (D492).
+        #
+        # This was a written-down list of four until Session 9 Run 2, with a
+        # comment saying the agent roles were deliberately omitted because
+        # `test_the_authenticator_cannot_become_an_agent_role` measured their
+        # absence. That stopped being true in Session 8, which activated
+        # `agent_reader`: from then on the fixture was manufacturing the
+        # condition the test measured, and the test asserted a property the
+        # product no longer had. Both stayed green for a session and a half.
+        #
+        # A fifth copy of an enumeration that exists as a constant precisely so
+        # proofs read it rather than restate it -- D301's shape, and Session 8
+        # Run 2 deleted three others (D416).
         authenticator = roles["postgrest_authenticator"]
         authenticator_password = secrets.token_hex(24)
         cluster.psql(
             f"ALTER ROLE \"{authenticator}\" LOGIN PASSWORD '{authenticator_password}'",
             database="postgres",
         )
-        for request_role in ("anon", "authenticated", "api_documentation", "project_admin"):
+        for request_role in _bootstrap_module().AUTHENTICATOR_REQUEST_ROLES:
             cluster.psql(
                 f'GRANT "{roles[request_role]}" TO "{authenticator}" '
                 "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
@@ -1181,40 +1211,70 @@ def test_the_service_keeps_its_access_plane_after_0013(cluster: dict[str, Any]) 
         assert result.returncode == 0, f"{function}: {result.stderr}"
 
 
-def test_the_authenticator_cannot_become_an_agent_role(cluster: dict[str, Any]) -> None:
-    """Why no agent-specific pre-request error code exists.
+def test_the_authenticator_becomes_exactly_the_request_roles(cluster: dict[str, Any]) -> None:
+    """Which roles a token may name, measured through a real connection (D492).
 
-    An agent token names an agent role, and PostgREST fails at `SET ROLE` before
-    `db-pre-request` ever runs. There is no path on which the hook could emit
-    one. The membership is the bootstrap plane's (D266), so this rig asserts the
-    refusal the cluster gives rather than the statement that grants it.
+    **This used to be `test_the_authenticator_cannot_become_an_agent_role`, and
+    it had been asserting a false property since Session 8.** It named
+    `agent_reader` and `agent_writer` as roles the authenticator must not become
+    -- but Session 8 activated `agent_reader`, so in production the authenticator
+    *can* become it. The test kept passing because the fixture granted a
+    hardcoded list of four that omitted both, which is the fixture manufacturing
+    the condition the test measures.
+
+    Its docstring's other premise expired at the same time. It said *"there is no
+    path on which the hook could emit an agent-specific error"*; migration 0018's
+    `token_use` branch is exactly that path, and raises `AP401`.
+
+    So the assertion becomes the rule the old list was an instance of: **the
+    authenticator becomes exactly the roles the bootstrap plane grants it, and no
+    others.** Both halves are read from `AUTHENTICATOR_REQUEST_ROLES`, so the
+    refusal below is about a service identity rather than about whichever agent
+    role happens to be waiting for activation this session.
+
+    Re-derived, not relaxed (ADR 0096): the negative arm is now over *every*
+    project role outside the request set, which is strictly more than the two
+    names it replaced.
     """
     authenticator = cluster["roles"]["postgrest_authenticator"]
+    request_roles = set(_bootstrap_module().AUTHENTICATOR_REQUEST_ROLES)
 
-    # Connected AS the authenticator, over TCP, with its own password. The first
-    # version of this test ran `SET ROLE authenticator; SET ROLE agent_reader`
-    # inside a superuser session -- and it PASSED, because a further SET ROLE is
-    # checked against the SESSION user, which was `postgres`. It proved that a
-    # superuser can become anything. ADR 0065's warning, reached through a
-    # connection rather than through a configuration.
-    for role in ("agent_reader", "agent_writer"):
-        result = _docker(
+    def become(role_suffix: str) -> subprocess.CompletedProcess[str]:
+        # Connected AS the authenticator, over TCP, with its own password. The
+        # first version of this test ran `SET ROLE authenticator; SET ROLE
+        # agent_reader` inside a superuser session -- and it PASSED, because a
+        # further SET ROLE is checked against the SESSION user, which was
+        # `postgres`. It proved that a superuser can become anything. ADR 0065's
+        # warning, reached through a connection rather than a configuration.
+        return _docker(
             "exec", "-i", "-e", f"PGPASSWORD={cluster['authenticator_password']}",
             cluster["cluster"].name, "psql", "-qtA",
             "-h", "127.0.0.1", "-U", authenticator, "-d", cluster["database"],
-            "-c", f'SET ROLE "{cluster["roles"][role]}"',
+            "-c", f'SET ROLE "{cluster["roles"][role_suffix]}"; SELECT current_user',
         )  # fmt: skip
-        assert result.returncode != 0, f"the authenticator became {role}"
-        assert "permission denied to set role" in result.stderr
 
-    # The control: it CAN become the roles the bootstrap plane grants it. Without
-    # this, a test that refused every role -- because the connection was broken,
-    # say -- would look identical.
-    granted = _docker(
-        "exec", "-i", "-e", f"PGPASSWORD={cluster['authenticator_password']}",
-        cluster["cluster"].name, "psql", "-qtA",
-        "-h", "127.0.0.1", "-U", authenticator, "-d", cluster["database"],
-        "-c", f'SET ROLE "{cluster["roles"]["authenticated"]}"; SELECT current_user',
-    )  # fmt: skip
-    assert granted.returncode == 0, granted.stderr
-    assert cluster["roles"]["authenticated"] in granted.stdout
+    # The positive half, over every request role. Without it a broken connection
+    # would refuse everything and look identical to a perfect boundary.
+    for role_suffix in sorted(request_roles):
+        result = become(role_suffix)
+        assert result.returncode == 0, (
+            f"the authenticator cannot become {role_suffix}, which is a request role: "
+            f"{result.stderr[:200]}"
+        )
+        assert cluster["roles"][role_suffix] in result.stdout
+
+    # The negative half, over everything else this project declares -- service
+    # identities, the owner, the migration user. `mcp_audit_service` is among
+    # them and ADR 0135 keeps it there.
+    others = sorted(
+        suffix
+        for suffix in cluster["roles"]
+        if suffix not in request_roles and suffix != "postgrest_authenticator"
+    )
+    assert others, "no non-request role to refuse; the negative half would be vacuous"
+    for role_suffix in others:
+        result = become(role_suffix)
+        assert result.returncode != 0, (
+            f"the authenticator became {role_suffix}, which this release does not activate"
+        )
+        assert "permission denied to set role" in result.stderr

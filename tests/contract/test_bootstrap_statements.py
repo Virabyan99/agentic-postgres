@@ -315,19 +315,29 @@ def test_a_document_naming_no_timeouts_asks_the_catalog_nothing(
 # ---------------------------------------------------------------------------
 
 
-#: The role Session 9 owns, and the one fact here that is NOT read from the
-#: product (ADR 0116).
+#: The one fact here that is NOT read from the product (ADR 0116, ADR 0137).
 #:
-#: Everything else about the membership set is now derived from
+#: Everything else about the membership set is derived from
 #: `bootstrap.AUTHENTICATOR_REQUEST_ROLES`, because a copy is what let the last
 #: two changes through -- this module carried a fourth one until Session 8 Run 2,
 #: alongside the two `check_violations` carried, alongside the constant that
 #: exists to stop exactly this (D301). But a set derived entirely from the
 #: product's own constant cannot refuse a bad edit to that constant, which is
-#: D300's warning. So one name stays written down, with an ADR behind it: adding
-#: `agent_writer` to the authenticator's memberships is Session 9's decision and
-#: fails here until an ADR moves this line.
-SESSION_NINE_ROLE = "agent_writer"
+#: D300's warning. So one name stays written down.
+#:
+#: **It was `agent_writer` until Session 9 Run 2, and that was the wrong KIND of
+#: anchor.** A name held here because a later session is expected to activate it
+#: has an expiry date: it does its job until that session arrives, and then the
+#: correct edit is to remove it -- which leaves the derived set with nothing
+#: holding it, at exactly the moment the constant is being changed. The anchor
+#: has to name a role that must **never** be a request role, so that moving this
+#: line is always a mistake rather than sometimes a milestone.
+#:
+#: `mcp_audit_service` is that role. It is a service identity that authenticates
+#: as nothing over HTTP, and ADR 0135 decided it stays unactivated rather than
+#: deferring the question again -- so there is no session in which granting the
+#: authenticator a membership of it is the right thing to do.
+NEVER_A_REQUEST_ROLE = "mcp_audit_service"
 
 
 def _authenticator_grants(statements: list[str], roles: dict[str, str]) -> dict[str, str]:
@@ -387,33 +397,42 @@ def test_the_authenticator_is_granted_every_request_role_and_no_other(
     )
 
 
-def test_the_session_nine_role_is_not_activated(bootstrap: Any, document: dict[str, Any]) -> None:
-    """The one membership fact this module states rather than derives (ADR 0116).
+def test_a_service_identity_is_never_a_request_role(
+    bootstrap: Any, document: dict[str, Any]
+) -> None:
+    """The one membership fact this module states rather than derives (ADR 0137).
 
-    `agent_reader` is activated in Session 8 and `agent_writer` is not. Every
-    other assertion about the membership set now reads
+    Every other assertion about the membership set reads
     `AUTHENTICATOR_REQUEST_ROLES`, which means a bad edit to that constant would
     be invisible to all of them -- D300's warning, and the reason this test does
     not derive its subject.
 
-    PostgREST fails at `SET ROLE` before `db-pre-request` runs, which is why no
-    agent-specific pre-request error code exists: until Session 9 grants this
-    membership, a token naming the writer role is refused before any hook.
+    **The subject changed in Session 9 Run 2 and the change is the point.** This
+    used to name `agent_writer`, on the ground that activating it was Session 9's
+    decision. Session 9 activated it, so the anchor's correct edit was to remove
+    it -- leaving the derived set unanchored exactly when the constant moved.
+    An anchor that expires is not an anchor.
 
-    Goes red if: `agent_writer` joins `AUTHENTICATOR_REQUEST_ROLES`; or the
-    statement builder emits a grant for it by some other route. Either is
-    Session 9's decision and needs an ADR, which is what moves this line.
+    `mcp_audit_service` cannot expire that way: it is a service identity, it
+    authenticates as nothing over HTTP, and ADR 0135 decided it stays unactivated
+    rather than deferring the question. Granting the authenticator a membership
+    of it is wrong in every session, which is what an anchor has to be.
+
+    Goes red if: a service identity joins `AUTHENTICATOR_REQUEST_ROLES`; or the
+    statement builder emits a grant for one by some other route, which is worse
+    than the grant itself.
     """
     roles = document["database"]["roles"]
     granted = _authenticator_grants(bootstrap.build_statements(document, INSTANCE_UUID), roles)
 
-    assert SESSION_NINE_ROLE not in bootstrap.AUTHENTICATOR_REQUEST_ROLES, (
-        f"{SESSION_NINE_ROLE} is in AUTHENTICATOR_REQUEST_ROLES. Activating the write "
-        "role is Session 9's decision (ADR 0116) and needs an ADR of its own"
+    assert NEVER_A_REQUEST_ROLE not in bootstrap.AUTHENTICATOR_REQUEST_ROLES, (
+        f"{NEVER_A_REQUEST_ROLE} is in AUTHENTICATOR_REQUEST_ROLES. It is a service "
+        "identity that authenticates as nothing over HTTP; a token naming it must fail "
+        "at SET ROLE (ADR 0135, ADR 0137)"
     )
-    assert SESSION_NINE_ROLE not in granted, (
-        f"{SESSION_NINE_ROLE} is granted to the authenticator by a route that does not "
-        "go through AUTHENTICATOR_REQUEST_ROLES, which is worse than the grant itself"
+    assert NEVER_A_REQUEST_ROLE not in granted, (
+        f"{NEVER_A_REQUEST_ROLE} is granted to the authenticator by a route that does "
+        "not go through AUTHENTICATOR_REQUEST_ROLES, which is worse than the grant itself"
     )
 
 

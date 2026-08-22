@@ -200,3 +200,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0134](0134-a-grant-assertion-reads-the-catalog-and-a-reach-assertion-sets-the-role.md) | A grant assertion reads the catalog, and a reach assertion sets the role | 8 | Accepted |
 | [0135](0135-an-audit-record-is-written-by-a-definer-function-as-the-caller.md) | An audit record is written by a definer function, as the caller, and the hook cannot write one | 9 | Accepted |
 | [0136](0136-an-agent-plane-function-that-writes-takes-arguments-and-is-post-only.md) | An agent-plane function that writes takes arguments, and GET refuses it | 9 | Accepted |
+| [0137](0137-session-9-activates-the-agent-writer-role-and-the-anchor-must-not-expire.md) | Session 9 activates agent_writer, and an anchor that expires is not an anchor | 9 | Accepted |
+| [0138](0138-the-write-agents-ceiling-gains-meta-read.md) | A write agent may hold meta:read | 9 | Accepted |

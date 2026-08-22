@@ -61,7 +61,7 @@ Six columns, the house shape. The "summary says" column quotes
 is confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D492.**
+**Next free number after this table is D494.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -88,6 +88,8 @@ is confirmed, corrected or replaced during implementation, and anything found
 | **D489** | — (measured during Run 1). D480 says the write RPCs append their own audit row so that a write cannot happen unaudited by any route. | **A row written inside the transaction it describes can record a COMMITTED change and nothing else.** Measured on the pinned image: a write that `RAISE`s aborts the transaction and the audit row inserted before the raise goes with it — 0 rows, against a paired positive that leaves 1. There is no arrangement of exception blocks or subtransactions that keeps it: a handler discards its savepoint just as surely as an aborting transaction does. Recording a failed write durably would need an autonomous transaction, which is a second connection, which is the credential this plane does not hold (D407). | **The table carries a `source` column and the two records are named as different artefacts.** A `database` row records what CHANGED and is the only kind that can say `committed`; an `agent_plane` row records what was ATTEMPTED and is the only kind that can say `refused` or `failed`. `agent_audit_complete` **refuses** the `committed` outcome, so the agent plane cannot label its own attempt as a change that happened. | The plan said the two records "answer different questions" and did not say this, which would have left the next reader expecting failed writes in the database record and finding none. **The paired positive is what makes the negative mean anything**: zero rows is also what a table nothing ever writes to looks like, and that is the shape D269 is about. | 0135 |
 | **D490** | Run 1: *"Both reviewed into `contracts/postgrest-api-surface.yaml`'s `agent_rpcs:` block."* | **`agent_rpcs` structurally cannot hold them.** `api_surface.py` refuses any entry declaring arguments and the schema states it as `maxItems: 0`, because *"PostgREST serves a stable function over GET as well as POST, so an argument here reaches the query string."* The audit functions cannot be argument-free — `complete` must name the record it closes. **Measured on PostgREST v14.16, and both predictions were wrong**: a GET on a VOLATILE function is **not** refused (200, argument taken from the query string), so volatility protects nothing; but a function that actually **writes** is refused **405 / `25006 cannot execute INSERT in a read-only transaction`** — D474's mechanism, arriving from the other side. | **A fourth section, `agent_write_rpcs`**, POST-only, arguments enumerated. **`agent_rpcs`' `maxItems: 0` does not move**: its reason survives the measurement intact. The new category's guarantee is explicitly narrower — the 405 prevents the **effect**, not the **disclosure**, because the argument is already in every log and cache by then — so the argument list is enumerated as the review surface and may carry no secret. | The first draft put both functions under `agent_rpcs` and deleted the check, which is **D300's shape on a boundary whose justification is still true**. Widening a rule to fit two functions it was not written for is how a boundary stops meaning anything. And the honest half is the one worth keeping: this category is weaker, it says so, and a live-host GET returning 405 is named as the proof rather than assumed. | 0136 |
 | **D491** | — (found during Run 1, by a test failing for the wrong reason). | **`test_api_migrations.py`'s `_CREATE_FUNCTION` regex silently over-matched and swallowed a whole function.** It requires `RETURNS` on its own line — `\)\s*\n\s*RETURNS` — and 0019 was first written as `) RETURNS uuid`. With `re.DOTALL` and a non-greedy group the match ran forward from `agent_audit_begin(` to `create_note`'s `RETURNS`, capturing a garbage argument list and consuming the text in which `agent_audit_complete` was defined. The reported failure was *"agent_audit_complete is missing"*, which points at the wrong file entirely. | **The migration's formatting moved, not the shared regex.** Four other functions depend on that anchor, and loosening it to accept both spellings would make the over-match permanent rather than fixing it. Verified afterwards that all four functions now parse with their **correct** argument lists, because a matching count is not the same as a correct capture. | A scanner that mis-parses rather than refusing is this project's signature defect with the failure on the wrong side. Had 0019 added **one** function instead of two, the regex would have swallowed forward, captured garbage arguments, and the count would still have matched — and only the argument comparison, which does not run for this section, could have noticed. **The near-miss is the finding**, not the formatting. | — |
+| **D492** | — (found during Run 2, reading the tests that name `agent_writer`). | **A test had been asserting a property the product lost in Session 8.** `test_the_authenticator_cannot_become_an_agent_role` asserted the authenticator could become neither `agent_reader` nor `agent_writer` — but Session 8 activated `agent_reader`, so in production it *can*. It stayed green because its fixture granted a **hardcoded list of four** request roles omitting both, with a comment saying granting them *"would delete the property"*: the fixture was manufacturing the condition the test measured. Its docstring's other premise had expired too — *"there is no path on which the hook could emit an agent-specific error"* is false since migration 0018's `token_use` branch, which raises `AP401`. | **The assertion becomes the rule the old list was an instance of**: the authenticator becomes **exactly** the request roles and no others, both halves read from `AUTHENTICATOR_REQUEST_ROLES`, with the negative arm over every other declared role and an explicit refusal to run vacuously. Every fixture that grants memberships now reads the constant. And a new comparison with teeth: the roles granted `EXECUTE` on the hook, read from the catalog, must **equal** the request-role set — two independent products rather than one read twice. | **A fifth copy of an enumeration that exists as a constant so proofs read it** — D301's shape, after Session 8 Run 2 deleted three others (D416). The habit is durable enough that **Run 1 of this session made a sixth**, one run after this was found, in a test written by the same hand that wrote the row. | 0137 |
+| **D493** | — (found during Run 2, by a mutation that survived). | **A subset-versus-exact mutation cannot discriminate while the two sets are equal.** Turning `holders == request_roles` into `holders >= request_roles` SURVIVED — not because the assertion is weak but because every comparison operator agrees when the sets coincide. The battery had nothing to measure. | **The mutation was replaced, not the test.** Proving exactness needs the asymmetric state — a role GRANTED the hook that no token can name — which means granting to a role the migration does not declare, which the renderer refuses (Run 1's M3). So M5 became a **two-file** mutation moving the manifest entry with the template, and it kills. | **D300's property is the one this project re-learns most often, and this is the first time a battery could not demonstrate it.** Worth recording because the obvious reading of a survivor is "the test is weak", and here the test was exact and the mutation was uninformative — the mirror of D269, where an unapplied mutation reads as a weak test. A battery arm that cannot distinguish two behaviours is evidence about the arm. | — |
 
 ---
 
@@ -273,7 +275,7 @@ reporting "agent_audit_complete is missing". The formatting moved, not the share
 regex — and the argument captures were checked afterwards, because a matching
 count is not a correct capture.
 
-### Run 2 — Activating `agent_writer`
+### Run 2 — Activating `agent_writer` — **Done.**
 
 - One string added to `postgres_bootstrap.AUTHENTICATOR_REQUEST_ROLES`.
 - The three assertions that name the role by hand — two in
@@ -288,6 +290,46 @@ count is not a correct capture.
 - `agent_writer`'s ceiling gains `meta:read` (D481).
 
 **ADR:** the ceiling amendment to ADR 0079's table.
+
+**What was measured — nothing new, and that is the correct answer.** Both halves
+are decisions about this repository's own constants, not about a third party, so
+there was no third-party behaviour to put a control around. What Run 2 did
+instead was ask §6 question 5 — *which of this decision's callers got it?* — and
+that found the run's real work.
+
+**D492 is what it found.** `test_the_authenticator_cannot_become_an_agent_role`
+had been asserting a property the product lost in **Session 8**: it named both
+agent roles as unassumable, and `agent_reader` has been assumable since Run 2 of
+that session. It stayed green because its fixture granted a hardcoded list of
+four request roles omitting both — the fixture manufacturing the condition the
+test measured. Its docstring's other premise had expired too: migration 0018's
+`token_use` branch is exactly the path it said could not exist.
+
+**What was built.** ADR 0137 and 0138. `agent_writer` in
+`AUTHENTICATOR_REQUEST_ROLES` — **six request roles**, with 0019 already landed,
+because the other order refuses a request by `permission denied` rather than by
+the boundary (D475, D417). The ceiling gains `meta:read`, so a write agent can
+ask which rows it may change rather than discovering the surface by probing it.
+
+**Both anchors moved to `mcp_audit_service`, and that is the ADR's real subject.**
+`SESSION_NINE_ROLE` named a role a later session was *expected* to activate, so
+its correct edit on arrival was deletion — leaving the derived set unanchored at
+exactly the moment the constant changed. **An anchor that expires is not an
+anchor.** `mcp_audit_service` is wrong in every session, which is what an anchor
+has to be.
+
+**And one new comparison with teeth**: the roles granted `EXECUTE` on the hook,
+read from the catalog with `aclexplode`, must **equal** the request-role set —
+two independent products rather than one read twice. Dropping `agent_writer` from
+the constant now fails against the catalog.
+
+**The battery: 5 mutations, 5 killed**, every one `FAILED` rather than `ERROR`,
+controls green in the same invocation, restore byte-identical. **M5 is the one to
+read, and its first form SURVIVED** (D493): `==` → `>=` could not discriminate,
+because every comparison operator agrees while the two sets are equal. The
+mutation was replaced, not the test — it became a two-file mutation granting the
+hook to a role no token can name, which is the asymmetric state exactness is
+about.
 
 ### Run 3 — The compiler learns to write
 

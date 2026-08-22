@@ -65,16 +65,27 @@ IDENTITY_FIELDS = ("project_key", "database_name", "compose_project_name", "inst
 #: it is the whole of "activating the role" -- migration 0018 grants the
 #: privileges, and this decides whether any token can name it.
 #:
-#: **`agent_writer` is still absent, and its absence is now DERIVED rather than
-#: listed.** `check_violations` reads this tuple and refuses every project role
-#: outside it, so Session 9's activation moves one line here and a *fourth*
-#: unexpected membership still fails.
+#: `agent_writer` joined in Session 9 Run 2 (ADR 0137), and **migration 0019 had
+#: to land first**: it grants the role `USAGE` on `app_private` and `EXECUTE` on
+#: the hook and both comparison helpers, none of which 0018 gave it (D475).
+#: Granting the membership first would have produced a request refused by
+#: `permission denied for function postgrest_pre_request` rather than by the
+#: boundary -- the correct outcome for a false reason, which is D417.
+#:
+#: **Six now, and the set is still closed by derivation rather than by listing.**
+#: `check_violations` reads this tuple and refuses every project role outside it,
+#: so a *seventh* unexpected membership still fails without anyone editing a
+#: second place. What a derived set cannot do is refuse a bad edit to itself,
+#: which is why one name stays written down in the proofs --
+#: `test_bootstrap_statements.NEVER_A_REQUEST_ROLE`, which is now a service
+#: identity rather than a role some later session is expected to activate.
 AUTHENTICATOR_REQUEST_ROLES = (
     "anon",
     "authenticated",
     "api_documentation",
     "project_admin",
     "agent_reader",
+    "agent_writer",
 )
 
 

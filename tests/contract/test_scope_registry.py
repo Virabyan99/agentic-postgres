@@ -281,6 +281,42 @@ def test_a_reader_agent_cannot_reach_a_write_scope() -> None:
     assert not {scope for scope in reader if scope.endswith(":write")}
 
 
+def test_both_agent_ceilings_admit_introspection() -> None:
+    """ADR 0138. `meta:read` was in the reader's ceiling and not the writer's.
+
+    A ceiling that omits a scope does not withhold it from a subject -- it makes
+    the scope **unrequestable by any token naming the role**. Those are different
+    things, and only one of them was ever intended: as written, an `agent_writer`
+    token could be authorized to change rows and structurally unable to ask which
+    rows it may change, because both metadata tools require `meta:read`.
+
+    Asserted for both roles rather than only the one that moved, so the property
+    is "an agent may be issued introspection" rather than "this line was edited".
+    """
+    for role in ("agent_reader", "agent_writer"):
+        assert "meta:read" in scope_registry.permitted_scopes(role), (
+            f"{role} cannot be issued meta:read, so no token naming it can call "
+            "list_resources or describe_resource (ADR 0138)"
+        )
+
+
+def test_an_agent_may_not_hold_a_storage_scope() -> None:
+    """The half ADR 0138 explicitly does not move (ADR 0100).
+
+    Object storage is human-only, refused in two independent places: a ceiling
+    says what a token may carry, and `$defs/agent_scope` says what a manifest may
+    ask for. Widening the writer's ceiling for `meta:read` is exactly the moment
+    somebody widens it for something else, so the refusal is asserted beside the
+    addition rather than only in a different file.
+    """
+    storage = scope_registry.storage_scopes()
+    assert storage, "the storage class is empty; the refusal below would be vacuous"
+    for role in ("agent_reader", "agent_writer"):
+        assert not (scope_registry.permitted_scopes(role) & storage), (
+            f"{role}'s ceiling admits a storage scope; object storage is human-only"
+        )
+
+
 # ---------------------------------------------------------------------------
 # The issuer's check
 # ---------------------------------------------------------------------------

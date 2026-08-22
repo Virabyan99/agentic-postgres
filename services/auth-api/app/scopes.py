@@ -57,15 +57,25 @@ ROLE_SCOPES: dict[str, frozenset[str]] = {
     # shape of the API and none of its data.
     "api_documentation": frozenset({"meta:read"}),
     # Agents, whose ceiling is deliberately narrower than the human's on the
-    # write side. Session 9 activates the role memberships; until then a token
-    # naming one is refused at role switching, which is a tested property.
+    # write side. Both memberships are activated as of Session 9 Run 2
+    # (ADR 0116, ADR 0137).
     #
     # No `objects:*`, and this is the second of the two places Session 7's
     # human-only property is written -- the schema's $ref being the first. An
     # agent's ceiling not containing a scope and a manifest being unable to
     # request it are different guarantees, and the storage surface wants both.
+    #
+    # **`meta:read` is in BOTH agent ceilings** (ADR 0138). It was absent from
+    # the writer's until Session 9 Run 2, which would have left a write-capable
+    # agent unable to call either metadata tool -- so it could be authorized to
+    # change rows and unable to ask which rows it may change. Introspection is a
+    # scope precisely so it is granted per subject rather than implied by being
+    # an agent; leaving it out of the ceiling made it unrequestable instead,
+    # which is a different thing from withholding it.
     "agent_reader": frozenset({"notes:read", "tasks:read", "meta:read"}),
-    "agent_writer": frozenset({"notes:read", "notes:write", "tasks:read", "tasks:write"}),
+    "agent_writer": frozenset(
+        {"notes:read", "notes:write", "tasks:read", "tasks:write", "meta:read"}
+    ),
     # An administrator is also a user, so the ceiling is the union rather than
     # the administrative class alone. The role does not imply any of it.
     "project_admin": frozenset(

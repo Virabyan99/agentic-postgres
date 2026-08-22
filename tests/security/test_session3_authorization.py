@@ -366,9 +366,18 @@ def test_a_role_that_makes_no_request_cannot_address_the_private_schema(
         "role that cannot make a request widens the private schema to buy nothing, and "
         "a request role without it fails in db-pre-request on every call it makes"
     )
-    assert "agent_writer" not in holders, (
-        "agent_writer holds USAGE on app_private. Session 9 activates the write role, "
-        "and until an ADR moves it this grant buys nothing and widens the schema"
+    # The independent anchor, and Session 9 Run 2 moved it (ADR 0137). It named
+    # `agent_writer` while that role was waiting to be activated -- an anchor
+    # whose correct edit, once the session arrived, was to delete it. That is an
+    # anchor with an expiry date, and deleting it leaves the derived comparison
+    # above holding nothing at exactly the moment the constant it reads changes.
+    #
+    # `mcp_audit_service` cannot expire that way: ADR 0135 decided it stays
+    # unactivated rather than deferring the question again, so a grant to it is
+    # wrong in every session rather than wrong until some session.
+    assert "mcp_audit_service" not in holders, (
+        "mcp_audit_service holds USAGE on app_private. It is a service identity ADR "
+        "0135 leaves unactivated, so the grant buys nothing and widens the schema"
     )
 
 

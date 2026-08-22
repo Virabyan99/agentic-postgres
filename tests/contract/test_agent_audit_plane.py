@@ -72,6 +72,23 @@ def _bootstrap() -> Any:
     return module
 
 
+def _bootstrap_module() -> Any:
+    """`bin/postgres-bootstrap.py`, loaded by path.
+
+    `AUTHENTICATOR_REQUEST_ROLES` is the single authority for which roles a token
+    may name. Reading it rather than restating it is what D301, D416 and D492 are
+    all about, and restating it is the habit that has now produced five copies
+    across four sessions.
+    """
+    specification = importlib.util.spec_from_file_location(
+        "apg_postgres_bootstrap_audit_plane", REPO_ROOT / "bin" / "postgres-bootstrap.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
 def _locked_image() -> str:
     for line in (REPO_ROOT / "versions.env").read_text(encoding="utf-8").splitlines():
         name, _, value = line.partition("=")
@@ -406,12 +423,63 @@ def test_every_request_role_can_reach_the_hook(cluster: dict[str, Any]) -> None:
     be named by a token and cannot run the hook is refused with a 42501 that
     reaches the caller as a different failure from every other refusal the hook
     issues.
+
+    **Read from the product's constant, not written down.** The first version of
+    this test listed the five roles by hand, which is the copy D301, D416 and
+    D492 are all about -- and it was written in the run immediately after D492
+    was found, which is how durable that habit is.
     """
-    for role_key in ("anon", "authenticated", "api_documentation", "agent_reader", "agent_writer"):
+    for role_key in _bootstrap_module().AUTHENTICATOR_REQUEST_ROLES:
         result = as_role(cluster, role_key, "SELECT app_private.postgrest_pre_request();")
         assert result.returncode == 0, (
             f"{role_key} cannot execute the pre-request hook: {result.stderr[:200]}"
         )
+
+
+def test_the_roles_granted_the_hook_are_exactly_the_request_roles(
+    cluster: dict[str, Any],
+) -> None:
+    """The other direction, and it is the one with teeth (D492).
+
+    The test above reads `AUTHENTICATOR_REQUEST_ROLES` and asks whether each of
+    those roles can run the hook. A set derived entirely from the product cannot
+    refuse a bad edit to the product, so on its own it would stay green if a role
+    were dropped from the constant while keeping every grant a request role has.
+
+    This compares the two independent products -- what the **migrations grant**,
+    read from the catalog, against what the **bootstrap plane activates** -- and
+    requires them equal. Dropping `agent_writer` from the constant now fails
+    here, because 0019's grant is still in the catalog and the role is no longer
+    in the set; so does granting the hook to a role nothing can assume.
+
+    A grant question, so it reads the catalog rather than asking
+    `has_function_privilege`, which would answer for membership (ADR 0134).
+    """
+    result = su(
+        cluster,
+        """
+        SELECT coalesce(string_agg(DISTINCT grantee.rolname, ',' ORDER BY grantee.rolname), '')
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private'
+        CROSS JOIN LATERAL aclexplode(p.proacl) acl
+        JOIN pg_roles grantee ON grantee.oid = acl.grantee
+        WHERE p.proname = 'postgrest_pre_request' AND acl.privilege_type = 'EXECUTE';
+        """,
+    )
+    assert result.returncode == 0, result.stderr
+
+    by_name = {name: suffix for suffix, name in cluster["roles"].items()}
+    holders = {by_name[name] for name in result.stdout.strip().split(",") if name in by_name}
+    # The owner appears in its own function's ACL and is not a request role.
+    holders -= {"object_owner"}
+
+    request_roles = set(_bootstrap_module().AUTHENTICATOR_REQUEST_ROLES)
+    assert holders == request_roles, (
+        f"the roles GRANTED EXECUTE on the pre-request hook are {sorted(holders)}; the "
+        f"roles the bootstrap plane activates are {sorted(request_roles)}. A grant to a "
+        "role no token can name buys nothing, and a request role without the grant is "
+        "refused by permission denied rather than by the boundary (D475, D417)"
+    )
 
 
 # ---------------------------------------------------------------------------
