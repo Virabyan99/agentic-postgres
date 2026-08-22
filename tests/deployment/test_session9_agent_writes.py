@@ -737,3 +737,452 @@ def test_the_admin_audit_endpoint_refuses_an_administrator_without_the_scope(
         assert leaked not in as_agent.body, (
             f"a refused request carried {leaked!r} out of the audit record"
         )
+
+
+# ---------------------------------------------------------------------------
+# AGT-AUDITFAIL-001 -- a write whose record cannot be opened does not happen
+#
+# **ADR 0141's central asymmetry, on a real cluster for the first time.** It was
+# proved offline in Run 6 with the audit path pointed at a base URL nothing
+# answers, and that measures the runtime's branch. It does not measure the
+# deployment: a write whose `agent_audit_begin` fails there has to fail closed
+# through the real transport, the real function and the real grant.
+#
+# **The failure is arranged by removing a real privilege**, inside the project
+# lock and restored in a `finally`. `test_session5_api_contract.py` sets the
+# precedent for privilege DDL against a deployed cluster, and the shape here is
+# narrower than that one: no object is created, one grant is withdrawn from one
+# role for the length of one request.
+#
+# The blast radius is stated rather than discovered: while the grant is off,
+# every `agent_writer` request's audit begin fails and its write does not happen
+# -- which is precisely the behaviour under test. Reads are unaffected, because
+# a read does NOT fail closed (D483), and `agent_reader` keeps its own grant.
+# ---------------------------------------------------------------------------
+
+AUDITFAIL_TITLE = "apg-run8-auditfail-canary-3b7e"
+
+
+def test_a_write_whose_audit_record_cannot_be_opened_does_not_happen(
+    mcp_route: str,
+    mcp_rpc: Callable[..., Any],
+    mcp_writer_session: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    project_a: dict[str, Any],
+) -> None:
+    """**AGT-AUDITFAIL-001**, end to end, and the row is what proves it.
+
+    "Did not happen" is asserted against `app.notes` rather than against the
+    shape of the refusal. A tool that returned an error while the write had
+    already committed would satisfy any assertion about the response, and that
+    is the failure this requirement exists to exclude.
+
+    **The positive control runs first and must write**, in the same test and
+    against the same agent. Without it a refusal here could equally be a broken
+    token, a wrong route or an agent that never had the scope -- three states
+    that look identical from outside and none of which is fail-closed behaviour.
+
+    The grant is restored in a `finally` and the restoration is CHECKED (D391):
+    a guard whose result is unchecked is a comment, and leaving this grant off
+    would leave the probe project's write plane failing closed for real.
+    """
+    from agentic_postgres.rendering import project_lock
+
+    owner_role = project_a["database"]["roles"]["object_owner"]
+    writer_role = project_a["database"]["roles"]["agent_writer"]
+    signature = "api.agent_audit_begin(text, uuid, jsonb)"
+
+    def write(title: str) -> Any:
+        return mcp_rpc(
+            mcp_route,
+            token=mcp_writer_session["token"],
+            method="tools/call",
+            params={
+                "name": "create_note",
+                "arguments": {"p_title": title, "p_content": CANARY_BODY},
+            },
+        )
+
+    def note_count(title: str) -> int:
+        code, out, error = psql(
+            project_a, f"SELECT count(*) FROM app.notes WHERE title = '{title}';"
+        )
+        assert code == 0, f"could not count notes: {error}"
+        return int(out.strip())
+
+    control_title = f"{AUDITFAIL_TITLE}-control"
+    try:
+        # The control, with the grant intact. A write that cannot succeed here
+        # makes everything below meaningless.
+        answer = write(control_title)
+        assert answer.status == 200, f"the control write failed: {answer.body[:300]}"
+        control = sse_result(answer.body)
+        assert control is not None and "error" not in control, (
+            f"the control write was refused with the audit grant INTACT: {control}"
+        )
+        assert note_count(control_title) == 1, "the control write left no row"
+
+        with project_lock(project_a["project"]["key"]):
+            code, _, error = psql(
+                project_a,
+                f'REVOKE EXECUTE ON FUNCTION {signature} FROM "{writer_role}";',
+                role=owner_role,
+            )
+            assert code == 0, f"could not withdraw the audit grant: {error}"
+            try:
+                refused = write(AUDITFAIL_TITLE)
+                # A refusal reaches an MCP caller as a JSON-RPC error inside a
+                # 200, so the status alone says nothing (D458's neighbourhood).
+                assert refused.status == 200, refused.body[:300]
+                result = sse_result(refused.body)
+                assert result is not None, f"no JSON-RPC message came back: {refused.body[:300]}"
+                assert "error" in result or result.get("result", {}).get("isError"), (
+                    "the write was SERVED while its audit record could not be opened: "
+                    f"{str(result)[:400]}"
+                )
+            finally:
+                restored, _, restore_error = psql(
+                    project_a,
+                    f'GRANT EXECUTE ON FUNCTION {signature} TO "{writer_role}";',
+                    role=owner_role,
+                )
+                assert restored == 0, (
+                    "THE AUDIT GRANT COULD NOT BE RESTORED and this project's write plane "
+                    f"is now failing closed for agent_writer: {restore_error}. Restore it "
+                    f'by hand: SET ROLE "{owner_role}"; GRANT EXECUTE ON FUNCTION '
+                    f'{signature} TO "{writer_role}";'
+                )
+
+        # **The assertion the requirement is actually about.** Not the shape of
+        # the refusal -- the absence of the row.
+        assert note_count(AUDITFAIL_TITLE) == 0, (
+            "an unauditable write REACHED THE DATABASE. ADR 0141: a write whose "
+            "agent_audit_begin fails does not happen, and the record is the thing that "
+            "makes an agent write attributable at all"
+        )
+
+        # And the grant really is back, measured rather than assumed -- the
+        # `finally` above asserts the statement succeeded, and this asserts the
+        # effect. A write that still fails here would mean the restore ran and
+        # did not take.
+        recovered = write(f"{AUDITFAIL_TITLE}-recovered")
+        assert recovered.status == 200, recovered.body[:300]
+        recovered_result = sse_result(recovered.body)
+        assert recovered_result is not None and "error" not in recovered_result, (
+            f"writes are still failing after the grant was restored: {recovered_result}"
+        )
+    finally:
+        for title in (control_title, AUDITFAIL_TITLE, f"{AUDITFAIL_TITLE}-recovered"):
+            psql(project_a, f"DELETE FROM app.notes WHERE title = '{title}';")
+
+
+def test_a_read_survives_the_same_audit_failure(
+    mcp_route: str,
+    mcp_rpc: Callable[..., Any],
+    mcp_writer_session: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    project_a: dict[str, Any],
+) -> None:
+    """**The other half of ADR 0141, and the asymmetry is the decision** (D483).
+
+    The same failure, the same cluster, the same agent, the opposite outcome --
+    so neither result can be explained by the grant withdrawal simply not
+    working. Failing a read closed would couple every agent read's availability
+    to the audit table and add a mandatory round trip to a path ADR 0125 already
+    pays one for.
+
+    The reader role keeps its own grant throughout; only the writer's is
+    withdrawn, and the agent here holds both scopes, so the read and the write
+    above travel the same token.
+    """
+    from agentic_postgres.rendering import project_lock
+
+    owner_role = project_a["database"]["roles"]["object_owner"]
+    writer_role = project_a["database"]["roles"]["agent_writer"]
+    signature = "api.agent_audit_begin(text, uuid, jsonb)"
+
+    def read() -> Any:
+        return mcp_rpc(
+            mcp_route,
+            token=mcp_writer_session["token"],
+            method="tools/call",
+            params={"name": "query_resource", "arguments": {"resource": "notes"}},
+        )
+
+    answer = read()
+    assert answer.status == 200, f"the control read failed: {answer.body[:300]}"
+    control = sse_result(answer.body)
+    assert control is not None and "error" not in control, (
+        f"the control read was refused with the audit grant INTACT: {control}"
+    )
+
+    with project_lock(project_a["project"]["key"]):
+        code, _, error = psql(
+            project_a,
+            f'REVOKE EXECUTE ON FUNCTION {signature} FROM "{writer_role}";',
+            role=owner_role,
+        )
+        assert code == 0, f"could not withdraw the audit grant: {error}"
+        try:
+            answered = read()
+            assert answered.status == 200, answered.body[:300]
+            result = sse_result(answered.body)
+            assert result is not None, f"no JSON-RPC message came back: {answered.body[:300]}"
+            assert "error" not in result and not result.get("result", {}).get("isError"), (
+                "a READ failed closed on its audit record. ADR 0141 makes the asymmetry "
+                f"deliberate: a write does and a read does not: {str(result)[:400]}"
+            )
+        finally:
+            restored, _, restore_error = psql(
+                project_a,
+                f'GRANT EXECUTE ON FUNCTION {signature} TO "{writer_role}";',
+                role=owner_role,
+            )
+            assert restored == 0, (
+                "THE AUDIT GRANT COULD NOT BE RESTORED and this project's write plane "
+                f"is now failing closed for agent_writer: {restore_error}. Restore it "
+                f'by hand: SET ROLE "{owner_role}"; GRANT EXECUTE ON FUNCTION '
+                f'{signature} TO "{writer_role}";'
+            )
+
+
+# ---------------------------------------------------------------------------
+# SEC-REV-001 -- one token, three requests, after the product's own PATCH
+#
+# **Session 9 adds no revocation mechanism and must not appear to** (D471, D472).
+# Migration 0018's `agent_claims_are_current` is the authoritative check and its
+# own COMMENT states the property; `PATCH /admin/agents/{agent_id}` has revoked
+# since Session 6. What was missing is the proof, and specifically the proof of
+# the requirement's own sentence: *denied on its next read and write through
+# BOTH MCP and PostgREST*.
+#
+# Run 7 proved the two halves separately -- the hook refusing replayed claims on
+# a throwaway cluster, and the agent plane refusing when its context cannot be
+# resolved -- and said that the arm carrying one token across all three requests
+# was live-host. This is it. It needs a real PostgREST between the two halves,
+# which is exactly why it could not be written offline.
+#
+# **Its own agent**, not `mcp_writer_session`'s: revoking that one would break
+# every other proof in this module, and a fixture whose teardown is another
+# test's precondition is how a suite becomes order-dependent.
+# ---------------------------------------------------------------------------
+
+REVOCABLE_NAME = "apg-acceptance-mcp-revocable"
+REVOCABLE_SECRET = "mcp-revocable-secret-1f70c9a4e2d8"  # noqa: S105 -- a probe credential
+REVOCATION_ADMIN_USERNAME = "apg-acceptance-agent-admin"
+REVOCATION_ADMIN_PASSWORD = "apg-agent-admin-8d21f6b0c4a9"  # noqa: S105 -- a probe credential
+REVOKED_TITLE = "apg-run8-revoked-canary-9c2d"
+
+
+@pytest.fixture(scope="module")
+def agent_admin(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+) -> Any:
+    """A `project_admin` holding `admin_agents:write`, which is what revokes.
+
+    A separate subject from `audit_admin`: that one holds `admin_audit:read` and
+    nothing else administrative, which is what makes ITS refusal arm meaningful.
+    One subject holding both scopes would make each of the two tests unable to
+    say which scope served it.
+    """
+    from agentic_postgres import service_source
+
+    hashing = service_source.load("hashing")
+    role_name = project_a["database"]["roles"]["project_admin"]
+
+    psql(
+        project_a,
+        f"DELETE FROM app_private.users WHERE username = '{REVOCATION_ADMIN_USERNAME}';",
+    )
+    code, user_id, error = psql(
+        project_a,
+        "SELECT app_private.auth_create_user("
+        f"'{REVOCATION_ADMIN_USERNAME}', 'Agent admin probe', '{role_name}', "
+        "ARRAY['admin_agents:read', 'admin_agents:write']::text[], "
+        f"'{hashing.Hasher().hash(REVOCATION_ADMIN_PASSWORD)}');",
+    )
+    assert code == 0 and user_id, f"could not create the agent-admin probe: {error}"
+
+    try:
+        answer = api_call(
+            f"{app_base(project_a)}/auth/login",
+            method="POST",
+            body={
+                "username": REVOCATION_ADMIN_USERNAME,
+                "password": REVOCATION_ADMIN_PASSWORD,
+            },
+        )
+        assert answer.status == 200, (
+            f"the agent-admin probe could not log in ({answer.status}: {answer.body[:200]})"
+        )
+        yield {"user_id": user_id, "token": json.loads(answer.body)["access_token"]}
+    finally:
+        psql(
+            project_a,
+            f"DELETE FROM app_private.users WHERE username = '{REVOCATION_ADMIN_USERNAME}';",
+        )
+
+
+@pytest.fixture(scope="module")
+def revocable_agent(
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+    app_probe_subject: Any,
+) -> Any:
+    """An `agent_writer` created to be revoked, and a token minted before it is."""
+    from agentic_postgres import service_source
+
+    hashing = service_source.load("hashing")
+    role_name = project_a["database"]["roles"]["agent_writer"]
+    scopes = ", ".join(f"'{scope}'" for scope in sorted(WRITER_SCOPES))
+
+    psql(project_a, f"DELETE FROM app_private.agents WHERE name = '{REVOCABLE_NAME}';")
+    code, agent_id, error = psql(
+        project_a,
+        "SELECT app_private.auth_create_agent("
+        f"'{REVOCABLE_NAME}', 'MCP revocation acceptance probe', '{role_name}', "
+        f"ARRAY[{scopes}]::text[], '{app_probe_subject.user_id}', "
+        f"'{hashing.Hasher().hash(REVOCABLE_SECRET)}');",
+    )
+    assert code == 0 and agent_id, f"could not create the revocable probe agent: {error}"
+
+    try:
+        answer = api_call(
+            f"{app_base(project_a)}/auth/agent-token",
+            method="POST",
+            body={"agent_id": agent_id, "secret": REVOCABLE_SECRET},
+        )
+        assert answer.status == 200, (
+            f"the revocable probe could not obtain a token ({answer.status}: "
+            f"{answer.body[:200]}). Every refusal below would then be a refusal of a "
+            "missing credential rather than of a revocation"
+        )
+        yield {"agent_id": agent_id, "token": json.loads(answer.body)["access_token"]}
+    finally:
+        psql(project_a, f"DELETE FROM app.notes WHERE title = '{REVOKED_TITLE}';")
+        psql(project_a, f"DELETE FROM app_private.agents WHERE name = '{REVOCABLE_NAME}';")
+
+
+def test_a_revoked_token_fails_its_next_read_write_and_direct_request(
+    mcp_route: str,
+    mcp_rpc: Callable[..., Any],
+    revocable_agent: dict[str, Any],
+    agent_admin: dict[str, Any],
+    project_a: dict[str, Any],
+    psql: Callable[..., tuple[int, str, str]],
+    api_call: Callable[..., Any],
+    app_base: Callable[[dict[str, Any]], str],
+    rest_base: Callable[[dict[str, Any]], str],
+) -> None:
+    """**SEC-REV-001**, one token, three requests, across both verifiers.
+
+    The token is minted BEFORE the revocation and never refreshed. Nothing about
+    its signature changes and it has not expired -- what changes is the answer to
+    *is this still true*, asked inside each request's own transaction. That is
+    the whole difference between "this token was issued" and "this token is
+    current", and it is why an expiry alone is not a kill switch.
+
+    **All three arms run twice**, before and after, and the before-run must
+    succeed. A revoked-only test would pass against an agent that never had the
+    scopes, a wrong route, or a plane that refuses everything -- and each of
+    those looks identical from outside.
+
+    The revocation goes through `PATCH /admin/agents/{agent_id}`, the product's
+    own route (ADR 0065/0066): a proof that reaches the right end state by a
+    route the product does not take proves the end state is reachable, not that
+    the product reaches it. Session 9 builds no second revocation path (D472).
+    """
+    token = revocable_agent["token"]
+
+    def mcp_read() -> Any:
+        return mcp_rpc(
+            mcp_route,
+            token=token,
+            method="tools/call",
+            params={"name": "query_resource", "arguments": {"resource": "notes"}},
+        )
+
+    def mcp_write(title: str) -> Any:
+        return mcp_rpc(
+            mcp_route,
+            token=token,
+            method="tools/call",
+            params={
+                "name": "create_note",
+                "arguments": {"p_title": title, "p_content": CANARY_BODY},
+            },
+        )
+
+    def direct() -> Any:
+        # PostgREST, with no agent plane in the way. The second verifier, and the
+        # route an agent token can take on its own -- which is why the record has
+        # a `database` source at all (D480).
+        return api_call(f"{rest_base(project_a)}/notes?limit=1", method="GET", token=token)
+
+    # ---- before: all three must work, or nothing below means anything --------
+    read_before = mcp_read()
+    assert read_before.status == 200, f"the MCP read control failed: {read_before.body[:300]}"
+    read_result = sse_result(read_before.body)
+    assert read_result is not None and "error" not in read_result, (
+        f"the MCP read was refused while the agent was ACTIVE: {read_result}"
+    )
+
+    write_before = mcp_write(f"{REVOKED_TITLE}-before")
+    assert write_before.status == 200, f"the MCP write control failed: {write_before.body[:300]}"
+    write_result = sse_result(write_before.body)
+    assert write_result is not None and "error" not in write_result, (
+        f"the MCP write was refused while the agent was ACTIVE: {write_result}"
+    )
+
+    direct_before = direct()
+    assert direct_before.status == 200, (
+        f"the direct PostgREST control failed ({direct_before.status}): {direct_before.body[:300]}"
+    )
+
+    # ---- the revocation, through the product's own route --------------------
+    revoked = api_call(
+        f"{app_base(project_a)}/admin/agents/{revocable_agent['agent_id']}",
+        method="PATCH",
+        token=agent_admin["token"],
+        body={"status": "revoked"},
+    )
+    assert revoked.status == 200, f"the revocation failed: {revoked.body[:300]}"
+
+    # ---- after: the SAME token, unchanged, on all three paths ---------------
+    read_after = mcp_read()
+    read_after_result = sse_result(read_after.body) if read_after.status == 200 else None
+    assert read_after.status != 200 or (
+        read_after_result is not None
+        and ("error" in read_after_result or read_after_result.get("result", {}).get("isError"))
+    ), f"a revoked agent's next MCP READ was served: {read_after.body[:400]}"
+
+    write_after = mcp_write(REVOKED_TITLE)
+    write_after_result = sse_result(write_after.body) if write_after.status == 200 else None
+    assert write_after.status != 200 or (
+        write_after_result is not None
+        and ("error" in write_after_result or write_after_result.get("result", {}).get("isError"))
+    ), f"a revoked agent's next MCP WRITE was served: {write_after.body[:400]}"
+
+    direct_after = direct()
+    assert direct_after.status != 200, (
+        f"a revoked agent's next DIRECT PostgREST request was served ({direct_after.status}). "
+        "The agent plane is not the boundary -- an agent token reaches PostgREST on its own, "
+        "which is why the authoritative check lives in the pre-request hook (D471)"
+    )
+
+    # And the write really did not happen. A refusal reported after a commit
+    # would satisfy every assertion above, which is the failure this requirement
+    # exists to exclude.
+    code, out, error = psql(
+        project_a, f"SELECT count(*) FROM app.notes WHERE title = '{REVOKED_TITLE}';"
+    )
+    assert code == 0, f"could not count notes: {error}"
+    assert out.strip() == "0", (
+        f"a revoked agent's write reached the database ({out.strip()} rows). The refusal "
+        "above was reported after the row was committed"
+    )

@@ -5,7 +5,9 @@ pointed at placeholders in `tests/integration/test_future_mcp.py` until then
 (D414), and the placeholders are gone with them. Session 9 added the write half:
 the lock's write shape and the write request in Run 4, and the two write TOOLS
 plus name-level discovery filtering in Run 5 — which is `AGT-WRITE-001`'s
-offline arm, both of its halves, at the bottom of this file.
+offline arm, both of its halves, at the bottom of this file. **Run 8 repointed
+the registry at them and deleted `test_future_mcp.py` entirely**: every marker
+left in it was Session 9's, so activating the three emptied the module.
 
 The construction rule these tests enforce was **measured against a live
 PostgREST on the locked digest**, twice, because the obvious answers were wrong:

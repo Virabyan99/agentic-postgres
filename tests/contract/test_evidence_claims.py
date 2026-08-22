@@ -783,6 +783,14 @@ CLAIM_INTRODUCED_IN = {
     "agent_authentication": 8,
     "agent_credentials": 8,
     "public_agent_boundary": 8,
+    # Session 9. Five requirements, five claims, and the two audit ones are
+    # split because they are different guarantees: what is recorded, and what
+    # happens when recording is impossible (ADR 0141's asymmetry).
+    "agent_writes": 9,
+    "agent_audit_record": 9,
+    "agent_audit_fails_closed": 9,
+    "agent_revocation": 9,
+    "agent_parameter_boundary": 9,
 }
 
 

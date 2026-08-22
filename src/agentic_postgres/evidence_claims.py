@@ -265,6 +265,51 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # The one measured from off-host, and the reason Session 8's external mode
     # is not ceremonial.
     "public_agent_boundary": ("AGT-PUBLIC-001",),
+    # Session 9 adds five, one per requirement, and every one names an ID
+    # targeted at Session 9 and only at Session 9 (ADR 0089). No ID is new: all
+    # five have existed since Session 1 as placeholders, and D279 is why that was
+    # checked rather than assumed -- three of Session 6's six "new" IDs were
+    # already taken, and because `claim_session` derives from `max()`, one would
+    # have turned three earlier sessions' evidence red while the other vanished
+    # from the gate with no error at all.
+    #
+    # **Five claims rather than three**, and the splits are decisions:
+    #
+    #   `agent_audit_record` and `agent_audit_fails_closed` are separate because
+    #   they are different guarantees, not one guarantee measured twice. The
+    #   first is *what is recorded* -- two records from two routes that agree
+    #   (D480) -- and the second is *what happens when recording is impossible*,
+    #   which ADR 0141 decides asymmetrically: a write fails closed and a read
+    #   does not. Folding them would make the asymmetry unreportable, and D119 is
+    #   the rule: extending a claim is right when the guarantee genuinely grew
+    #   and wrong when a new requirement merely neighbours an old one.
+    #
+    #   `agent_revocation` is NOT extended into `token_non_resurrection`, which
+    #   is Session 6's `SEC-REV-002`. Extending it would retroactively change
+    #   what Session 6's evidence asserts, and `claim_session` would move the
+    #   claim to 9 and drop it out of Session 6's gate silently -- the exact
+    #   failure D279 measured.
+    #
+    # **Every one of these carries at least one live node id**, which `claim_mode`
+    # requires and which shaped two of Run 8's tests rather than the other way
+    # round. `AGT-AUDITFAIL-001` had only offline proofs, and its live arm --
+    # withdrawing a real grant so the write path fails through the real transport
+    # -- was written because the alternative was a claim that read as
+    # deployment-measured while its central property was not. `SEC-REV-001`'s
+    # one-token-three-requests arm was named as live-host by Run 7 and did not
+    # exist; registering a claim against a test nobody had written is D211-D214's
+    # shape, so Run 8 wrote it before naming it here.
+    #
+    # **Every one of these reports `not_run` until a host trip**, and two
+    # migrations (0019 and 0020) are released and applied on no cluster, so they
+    # would report `failed` on a cluster that has not been migrated. D282's
+    # sentence stands: a claim that has never been measured must not be mistaken
+    # for one that passed.
+    "agent_writes": ("AGT-WRITE-001",),
+    "agent_audit_record": ("AGT-AUDIT-001",),
+    "agent_audit_fails_closed": ("AGT-AUDITFAIL-001",),
+    "agent_revocation": ("SEC-REV-001",),
+    "agent_parameter_boundary": ("SEC-PARAM-001",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().

@@ -658,18 +658,80 @@ bound and the enforced bound are compared through a real request.
 
 ### Run 8 — Publish
 
-- **One commit**: `CURRENT_SESSION` 8 → 9 and all five registry entries
-  repointed, the five placeholder functions deleted (D484). Verified first with
-  `APG_ACCEPTANCE_SESSION=9`.
-- The outputs version decided in Run 1, if it moves.
-- `bin/session-09-check.sh` in `session-08-check.sh`'s three-mode shape —
-  `readonly SESSION=9` **above** a derived `EVIDENCE_PREFIX`, every claim-bearing
-  flag **inside** the usage command (D213), `--ssh-destination` documented as
-  `op@` (D466), and a session-specific precondition check in the shape of
-  `check_agent_plane_is_published`.
-- The claims in `evidence_claims.CLAIMS`, each with at least one live node id.
-- `docs/session-09-operator-guide.md`, `bin/app-contract.sh --check`,
-  `render-acceptance-matrix.py --write`, `render-mcp-catalog.py --write`.
+**Done.**
+
+`CURRENT_SESSION` is **9**, all five registry entries point at real tests, and
+**both placeholder modules are deleted** — `tests/integration/test_future_mcp.py`
+and `tests/security/test_future_security_boundaries.py` each carried nothing but
+Session 9's markers, so activating the five emptied them. Verified with
+`APG_ACCEPTANCE_SESSION=9` first, which named exactly the five D484 predicted.
+`docs/threat-model.md`'s `THR-AGENT-TOKEN` row named a deleted node id directly
+and moved with it.
+
+**The outputs version does NOT move.** No commit in Session 9 touched
+`output_migrations.py` or `outputs.schema.json`, and `tool_count` 4 → 6 is a
+value rather than a shape — which is D485's own rule, applied rather than
+re-litigated.
+
+**Five claims, one per requirement**, and the two audit ones are split because
+they are different guarantees: what is recorded, and what happens when recording
+is impossible (ADR 0141's asymmetry). `agent_revocation` is deliberately NOT
+extended into Session 6's `token_non_resurrection` — that would move
+`claim_session` and drop the claim out of this gate silently, which is the exact
+failure D279 measured.
+
+**Two tests were written because the claims needed them, not the other way
+round**, and both would otherwise have been claims that read as
+deployment-measured while their central property was not:
+
+* **`AGT-AUDITFAIL-001` had only offline proofs.** ADR 0141's asymmetry had never
+  been seen on a cluster. The live arm withdraws `EXECUTE` on
+  `api.agent_audit_begin` from the writer role inside the project lock, attempts
+  a write, and asserts the absence of the ROW rather than the shape of the
+  refusal — a tool that errored after committing would satisfy any assertion
+  about the response. The read arm beside it is the strongest possible control:
+  same failure, same cluster, same token, opposite outcome. The grant is restored
+  in a `finally` and the restore is *checked* (D391), and the operator guide says
+  what to run if a killed gate leaves it withdrawn.
+* **`SEC-REV-001`'s live arm did not exist.** Run 7 named it as live-host and
+  deferred it here; registering a claim against a test nobody had written is
+  D211–D214's shape. It mints a token, proves all three paths work, revokes
+  through `PATCH /admin/agents/{id}`, and replays the same unchanged token
+  against its next MCP read, its next MCP write and its next direct PostgREST
+  request.
+
+**`bin/session-09-check.sh` keeps THREE modes, and that was checked rather than
+assumed.** All five of Session 9's own claims resolve to `host` — but
+`claims_through_session(9)` is cumulative, so a Session 9 document must answer
+for five *external* claims inherited from Sessions 4–8, `public_agent_boundary`
+among them, and the writer refuses a document silent about a claim. A two-mode
+gate would have written one quietly.
+
+Its session-specific precondition is **`check_the_audit_plane_is_migrated`**: it
+reads each cluster's own ledger and refuses if any released migration is missing,
+because without it thirteen proofs fail as a wall of `relation
+"app_private.agent_audit" does not exist` and the operator reconstructs one fact
+from it. It asks the CLUSTER rather than a manifest — `migrate.sh status` needs a
+gitignored host-only input this gate does not take, and the question is what was
+*applied*, not what was asked for. `--ssh-destination` is documented as `op@`
+(D466) inside the usage command (D213), and the copy is checked for `session-08`
+residue afterwards, because D221 is a rename that did not match.
+
+**Battery B1–B4, 4 of 4 killed** after one repair, every one `FAILED` rather than
+`ERROR` and every control green in the same invocation. **B3 survived first, and
+the mutation was wrong rather than the test**: `claim_session` is the MAX of its
+requirements' sessions, so *adding* an earlier id changes nothing and the
+assertion was right to pass. The direction that hurts is downward — naming the
+earlier id *instead* — which is the substitution D279 caught being made for real,
+and the arm now does that. Three of the four target names were guessed and did
+not exist; grepping for them first is the cheap version of the anchor pre-flight.
+
+`docs/session-09-operator-guide.md` is written, and it carries the ordering this
+trip turns on: **migrations before the deploy**, because 0019 grants the
+privileges and the bootstrap plane grants the membership, and the wrong order
+produces a `42501` where the boundary's own `AP401` belongs (D475). It also
+names D503 under the kill switch, so an operator is not surprised that
+un-revoking answers 200.
 
 ### Runs 9+ — The host trip
 
