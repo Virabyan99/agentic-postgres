@@ -333,6 +333,50 @@ def _is_migration_artifact(path: Path, staging: Path) -> bool:
     return path == migrations_dir or path.parent == migrations_dir
 
 
+def require_mounts_exist(override_payload: bytes, services: Any, when: str) -> None:
+    """Refuse to start a service whose bind-mount source is not there (ADR 0133).
+
+    **Docker does not fail on a missing bind-mount source. It creates a
+    DIRECTORY.** The service then opens a directory where a file should be, and
+    the symptom arrives as a runtime error inside a container -- `IsADirectoryError`
+    on a key set, in the case that produced this function -- rather than as
+    anything the deploy said.
+
+    Worse, the directory persists: `render-jwks.py` finishes with
+    `staging.replace(destination)`, which raises on a directory, so every
+    subsequent deploy fails at a step unrelated to the cause. That is how one
+    missing file turned into four failed deploys (D463).
+
+    Checked per phase, because the phases are the point: the deferred services'
+    artefacts legitimately do not exist at step 5, and refusing on them would
+    refuse a correct deploy.
+    """
+    sources = runtime_override.mount_sources(override_payload, services)
+
+    missing = [source for source in sources if not Path(source).exists()]
+    directories = [
+        source
+        for source in sources
+        if Path(source).is_dir() and Path(source).suffix in {".json", ".yaml", ".yml"}
+    ]
+
+    if missing or directories:
+        detail = ""
+        if missing:
+            detail += "\n  missing:     " + "\n               ".join(missing)
+        if directories:
+            detail += "\n  a directory: " + "\n               ".join(directories)
+        fail(
+            EXIT_VALIDATION,
+            f"{when} would start a service whose bind-mount source is not a file:{detail}\n\n"
+            "  Docker creates a missing bind-mount source as a DIRECTORY, so the service\n"
+            "  would open a directory where a file should be and exit. A source that is\n"
+            "  already a directory is the residue of that happening before: remove it with\n"
+            "  `rmdir` -- which refuses a non-empty directory and is therefore the safe\n"
+            "  verb -- and re-run this deploy (ADR 0133, D463).",
+        )
+
+
 def install_rendered(source: Path, destination: Path, override_payload: bytes) -> Path:
     """Install the rendered directory out of the checkout, atomically.
 
@@ -1345,7 +1389,22 @@ def main(argv: list[str] | None = None) -> int:
     #
     # The edge is not attached while anything is deferred, which is also §4.1's
     # rule that the route is added last.
-    deferred = ",".join(runtime_override.POST_BOOTSTRAP_SERVICES)
+    # The UNION of the two deferral reasons (ADR 0133). It was
+    # `POST_BOOTSTRAP_SERVICES` alone until Run 10, which meant the agent plane
+    # -- correctly absent from that tuple, because it authenticates as no role
+    # (D410) -- was started here, eighty lines before the key set and the
+    # capability lock it mounts are written. Docker created both sources as
+    # directories and the container exited 1 on its first start anywhere (D463).
+    deferred = ",".join(runtime_override.DEFERRED_SERVICES)
+    require_mounts_exist(
+        override_payload,
+        [
+            name
+            for name in runtime_override.override_service_names(override_payload)
+            if name not in set(runtime_override.DEFERRED_SERVICES)
+        ],
+        when="step 5",
+    )
     started = run(
         str(release / "bin" / "project-runtime.sh"),
         "--host",
@@ -1515,6 +1574,7 @@ def main(argv: list[str] | None = None) -> int:
 
         database_observed = observe_database(rendered["database"])
 
+    require_mounts_exist(override_payload, runtime_override.DEFERRED_SERVICES, when="step 6b")
     step("6b. Start the deferred services and attach the edge")
     # Now, and not in step 5: the roles those services authenticate as exist and
     # can log in as of the bootstrap above (ADR 0063). `resume` materializes

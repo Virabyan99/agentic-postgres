@@ -196,3 +196,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0130](0130-a-refusal-reaches-the-caller-only-through-tool-error.md) | A refusal reaches the caller only through ToolError | 8 | Accepted |
 | [0131](0131-the-agent-plane-memory-limit-is-a-choice-with-a-measured-floor.md) | The agent plane's memory limit is a choice with a measured floor, and it gets no validator | 8 | Accepted |
 | [0132](0132-session-eights-requirements-gain-live-proofs-and-four-new-ids-carry-the-deployed-guarantees.md) | Session 8's requirements gain live proofs, and four new ids carry the deployed guarantees | 8 | Accepted |
+| [0133](0133-a-service-is-deferred-for-two-reasons-and-the-deploy-proves-its-mounts-exist.md) | A service is deferred for two reasons, and the deploy proves its mounts exist | 8 | Accepted |

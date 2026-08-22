@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -346,12 +347,26 @@ def test_the_deploy_defers_what_the_module_declares_and_resumes_after_bootstrapp
     Goes red if: the deploy grows its own list of deferred services rather than
     reading the declared one; `resume` moves above the bootstrap; or the
     deferral is dropped and step 5 goes back to starting everything.
+
+    **Replaced by a stricter version in Run 10, and ADR 0133 authorises it.**
+    This asserted `POST_BOOTSTRAP_SERVICES` by name, which was true and too
+    narrow: that tuple means *"authenticates as a role the bootstrap must
+    activate"*, and the deploy was also using it to mean *"must not start before
+    the files it mounts are written"*. The agent plane needs the second and not
+    the first, so it was correctly absent and started too early — and its first
+    start anywhere exited 1 on a key set Docker had turned into a directory
+    (D463). The deploy now defers the **union**, and this test refuses the
+    single-reason spelling as well as the second-list one.
     """
     source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
 
-    assert "runtime_override.POST_BOOTSTRAP_SERVICES" in source, (
+    assert "runtime_override.DEFERRED_SERVICES" in source, (
         "the deploy no longer reads the declared deferred set; a second list is "
         "the one that goes stale when a service is added"
+    )
+    assert 'deferred = ",".join(runtime_override.POST_BOOTSTRAP_SERVICES)' not in source, (
+        "the deploy defers only the bootstrap reason again; that is D463, and the "
+        "service it silently starts too early is the one with no database role"
     )
 
     defer_at = source.index('"--defer"')
@@ -1018,3 +1033,196 @@ def test_the_declared_key_files_are_the_ones_the_secret_contract_writes() -> Non
         module.PREPARED_KEY_FILE,
     ):
         assert declared in targets, f"{declared} is not a file secrets.required.yaml writes"
+
+
+# ---------------------------------------------------------------------------
+# ADR 0133 -- a service is deferred for two reasons, and they are separate
+# ---------------------------------------------------------------------------
+
+
+def test_the_two_deferral_reasons_are_separate_constants() -> None:
+    """**D463.** One name carrying two ideas is what cost the agent plane its
+    first start anywhere.
+
+    `POST_BOOTSTRAP_SERVICES` means *"authenticates as a role the bootstrap must
+    activate"*. The deploy also used it to mean *"must not start before the
+    files it mounts are written"*. PostgREST needs both, so membership satisfied
+    the second by accident; the agent plane needs only the second, was correctly
+    excluded for a reason about the first, and lost the second with it.
+
+    Asserted as a **disjointness that is allowed to be non-empty**: a service may
+    legitimately be in both. What may not happen is the two collapsing into one
+    tuple again.
+    """
+    assert runtime_override.MCP_SERVICE in runtime_override.POST_ARTIFACT_SERVICES
+    assert runtime_override.MCP_SERVICE not in runtime_override.POST_BOOTSTRAP_SERVICES, (
+        "D410 still holds: the agent plane authenticates as no role"
+    )
+    assert runtime_override.POST_ARTIFACT_SERVICES != runtime_override.POST_BOOTSTRAP_SERVICES
+
+
+def test_the_deferred_set_is_the_union_and_is_computed() -> None:
+    """A third list that had to agree with two others would go stale (D175, D264).
+
+    The CONTROL is the second assertion: a union that merely *contained* both
+    would be satisfied by a hand-typed superset, which is the thing being
+    refused. It has to equal the union exactly.
+    """
+    union = set(runtime_override.POST_BOOTSTRAP_SERVICES) | set(
+        runtime_override.POST_ARTIFACT_SERVICES
+    )
+    assert set(runtime_override.DEFERRED_SERVICES) == union
+    assert runtime_override.DEFERRED_SERVICES == tuple(sorted(union)), (
+        "the deferred set is not derived from the two reasons; a typed copy drifts"
+    )
+
+
+def test_the_deploy_defers_the_union_rather_than_one_reason() -> None:
+    """The caller, which is the half D463 was actually about.
+
+    Both constants can be perfectly correct while the deploy reads only one of
+    them -- and that is exactly what happened. §6's question 5: when a decision
+    is implemented, which of its callers got it?
+    """
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    assert "runtime_override.DEFERRED_SERVICES" in source
+    assert 'deferred = ",".join(runtime_override.POST_BOOTSTRAP_SERVICES)' not in source, (
+        "the deploy still defers only the bootstrap reason"
+    )
+
+
+def test_the_agent_planes_mounts_are_written_after_the_step_that_starts_it() -> None:
+    """Why the agent plane needs the second reason, as an ordering fact.
+
+    Read out of the deploy's own line order rather than asserted as a comment:
+    the service is started by step 5, and both files it mounts are written after
+    it. If a future change moved either write earlier, this test should be the
+    thing that says the deferral is no longer needed.
+    """
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+    # The CALL, not the first mention. Both names appear in commentary above the
+    # step that runs them, and a scan that cannot tell an instruction from a
+    # description of one reports documentation as a defect.
+    starts = source.index('step("5. Start the data plane')
+    jwks = source.index('str(release / "bin" / "render-jwks.py")')
+    lock = source.index('str(release / "bin" / "mcp-contract.sh")')
+
+    assert starts < jwks, "the key set is written before the start; the deferral may be stale"
+    assert starts < lock, "the lock is written before the start; the deferral may be stale"
+
+
+# ---------------------------------------------------------------------------
+# ADR 0133 -- the mount pre-flight
+# ---------------------------------------------------------------------------
+
+
+def test_the_deploy_calls_the_pre_flight_before_BOTH_starts() -> None:
+    """The wiring, which the function's own test cannot see (D454's family).
+
+    There are two starts and therefore two checks: step 5 starts everything not
+    deferred, step 6b starts the rest. A guard wired into one of them leaves the
+    other exactly as exposed as it was — and the phase that was missing its
+    guard would be the one that starts the agent plane.
+
+    Asserted on source ORDER rather than by running a deploy, because the
+    property is "before", and each call is placed by hand where a human could
+    put it in the wrong place.
+    """
+    source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
+
+    calls = [
+        index
+        for index in range(len(source))
+        if source.startswith("    require_mounts_exist(", index)
+    ]
+    assert len(calls) == 2, (
+        f"the deploy calls require_mounts_exist {len(calls)} times; there are two "
+        "starts, so a guard on one of them leaves the other as exposed as before"
+    )
+
+    step_five = source.index('step("5. Start the data plane')
+    up_at = source.index('"up",', step_five)
+    step_six_b = source.index('step("6b. Start the deferred services')
+
+    assert step_five < calls[0] < up_at, (
+        "the step 5 pre-flight does not sit between the step and the `up` it guards"
+    )
+    assert calls[1] < step_six_b, "the step 6b pre-flight runs after the services start"
+
+
+def test_mount_sources_are_read_out_of_the_override_rather_than_restated() -> None:
+    """Derived, so a mount added later is covered without anyone editing a list.
+
+    A hand-maintained inventory is precisely what goes stale when a mount is
+    added — which is the defect this function exists because of.
+    """
+    payload = yaml.safe_dump(
+        {
+            "services": {
+                "mcp": {
+                    "volumes": [
+                        "/var/lib/x/jwks.json:/etc/mcp/jwks.json:ro",
+                        "/var/lib/x/mcp-capability-lock.json:/etc/mcp/capability-lock.json:ro",
+                    ]
+                },
+                "postgrest": {"volumes": ["/var/lib/x/jwks.json:/etc/postgrest/jwks.json:ro"]},
+                "postgres": {"volumes": ["pgdata:/var/lib/postgresql/data"]},
+            }
+        }
+    ).encode("utf-8")
+
+    assert runtime_override.mount_sources(payload, ["mcp"]) == (
+        "/var/lib/x/jwks.json",
+        "/var/lib/x/mcp-capability-lock.json",
+    )
+    # Only the named services. At step 5 the deferred services' artefacts do not
+    # exist yet, and asking about them would refuse a correct deploy.
+    assert runtime_override.mount_sources(payload, ["postgrest"]) == ("/var/lib/x/jwks.json",)
+    # A NAMED VOLUME is not a bind mount: Docker creates one on demand and it is
+    # not this check's business. Without this arm the pre-flight would refuse
+    # every deploy on `pgdata`.
+    assert runtime_override.mount_sources(payload, ["postgres"]) == ()
+
+
+def test_the_deploy_proves_its_mounts_before_each_start(tmp_path: Path) -> None:
+    """**The guard D463 says the class needs**, exercised rather than grepped.
+
+    The ordering fix makes this instance impossible; it does not make the class
+    impossible. The next service to mount a file the deploy writes late fails the
+    same way, at the same silent seam.
+
+    Three arms, and the third is the CONTROL: a present file must not be refused,
+    or the guard would refuse every correct deploy and would be removed by the
+    first person it inconvenienced.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "_deploy_project_mounts", REPO_ROOT / "bin" / "deploy-project.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+
+    def payload(source: str) -> bytes:
+        return (
+            f"services:\n  probe:\n    volumes:\n      - {source}:/etc/probe/thing.json:ro\n"
+        ).encode()
+
+    absent = tmp_path / "absent.json"
+    with pytest.raises(SystemExit) as missing:
+        module.require_mounts_exist(payload(str(absent)), ["probe"], when="test")
+    assert missing.value.code == module.EXIT_VALIDATION
+
+    a_directory = tmp_path / "adirectory.json"
+    a_directory.mkdir()
+    with pytest.raises(SystemExit) as directory:
+        module.require_mounts_exist(payload(str(a_directory)), ["probe"], when="test")
+    assert directory.value.code == module.EXIT_VALIDATION
+
+    # THE CONTROL. Without it, both arms above are satisfied by a guard that
+    # refuses unconditionally.
+    present = tmp_path / "present.json"
+    present.write_text("{}", encoding="utf-8")
+    module.require_mounts_exist(payload(str(present)), ["probe"], when="test")

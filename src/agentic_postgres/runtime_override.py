@@ -16,6 +16,7 @@ middleware chain from its routes.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from ipaddress import ip_address
 from typing import Any
 
@@ -124,6 +125,36 @@ MCP_SERVICE_PORT = 8080
 #: already standing.
 POST_BOOTSTRAP_SERVICES: tuple[str, ...] = (REST_SERVICE, AUTH_SERVICE, STORAGE_SERVICE)
 
+#: Services that cannot start until the deploy has WRITTEN the files they mount
+#: (ADR 0133).
+#:
+#: **A different reason from the tuple above, and the distinction cost the agent
+#: plane its first start anywhere** (D463). That one is about a database role the
+#: bootstrap plane must activate; this one is about an artefact the deploy
+#: produces after step 5. PostgREST needs both, so its membership above satisfied
+#: this one by accident and nothing ever separated them. The agent plane needs
+#: only this one -- it authenticates as no role (D410) -- so it was correctly
+#: excluded above and lost the deferral it did need.
+#:
+#: What happens without it is not a clean failure: **Docker creates a bind-mount
+#: source that does not exist as a DIRECTORY**, so the runtime opened a directory
+#: where its key set should be and exited 1. `deploy-project.py` carried a
+#: comment naming that exact trap, written for PostgREST.
+#:
+#: `mcp` mounts two files the deploy writes late: the rendered `jwks.json` it
+#: verifies with (ADR 0113) and the compiled capability lock (ADR 0127). Both
+#: exist by step 6b and neither exists at step 5.
+POST_ARTIFACT_SERVICES: tuple[str, ...] = (MCP_SERVICE,)
+
+#: What `--defer` actually receives: the union of the two reasons.
+#:
+#: **Computed, never typed.** A third list that had to agree with two others is
+#: the shape this repository has paid for (D175, D264) -- and it would go stale
+#: in exactly the way the two above did not.
+DEFERRED_SERVICES: tuple[str, ...] = tuple(
+    sorted(set(POST_BOOTSTRAP_SERVICES) | set(POST_ARTIFACT_SERVICES))
+)
+
 #: Session 5's documentation service, the port `serve.py` binds, and the
 #: reviewed snapshot it serves.
 #:
@@ -231,6 +262,7 @@ __all__ = [
     "AUTH_SERVICE_PORT",
     "DATABASE_SERVICE",
     "DATABASE_SERVICE_PORT",
+    "DEFERRED_SERVICES",
     "JWKS_CONTAINER_PATH",
     "JWKS_FILENAME",
     "MCP_JWKS_CONTAINER_PATH",
@@ -242,6 +274,7 @@ __all__ = [
     "MIGRATION_SERVICE",
     "POOLER_SERVICE",
     "POOLER_SERVICE_PORT",
+    "POST_ARTIFACT_SERVICES",
     "POST_BOOTSTRAP_SERVICES",
     "PUBLIC_REFERENCE_PATHS",
     "REST_SERVICE",
@@ -254,6 +287,8 @@ __all__ = [
     "STORAGE_SERVICE_PORT",
     "build_override",
     "is_loopback",
+    "mount_sources",
+    "override_service_names",
     "publication",
     "render_override",
 ]
@@ -540,6 +575,56 @@ def build_override(
             },
         }
     }
+
+
+def override_service_names(payload: bytes) -> tuple[str, ...]:
+    """Every service the rendered override names.
+
+    Here rather than in the caller for the reason `mount_sources` is: this
+    module owns the document's shape, and a `bin/` command that reached into it
+    would be a second place that knows the top-level key.
+    """
+    document = yaml.safe_load(payload.decode("utf-8")) or {}
+    return tuple(sorted(document.get("services") or {}))
+
+
+def mount_sources(payload: bytes, services: Iterable[str]) -> tuple[str, ...]:
+    """The host paths `services` bind-mount, read out of the built override.
+
+    **Takes the rendered bytes, not a parsed document.** The deploy holds the
+    payload it is about to write, and parsing it here keeps the document's shape
+    -- including its top-level key -- knowledge this module has and `bin/` does
+    not (D464).
+
+    **Takes the rendered bytes, not a parsed document.** The deploy holds the
+    payload it is about to write, and parsing it here keeps the document's shape
+    -- including its top-level key -- knowledge this module has and `bin/` does
+    not (D464).
+
+    **Derived, not declared** (ADR 0133). A hand-maintained inventory of mounts
+    is precisely the thing that goes stale when a mount is added, which is the
+    defect this function exists because of -- so it parses the document the
+    deploy is about to write rather than repeating it.
+
+    The `source:destination:mode` form is Compose's short syntax, which is what
+    `build_override` emits. Only the source half is returned, and only for the
+    named services: at step 5 the deferred services' artefacts do not exist yet
+    and asking about them would refuse a correct deploy.
+    """
+    document = yaml.safe_load(payload.decode("utf-8")) or {}
+    document = yaml.safe_load(payload.decode("utf-8")) or {}
+    wanted = set(services)
+    found: dict[str, None] = {}
+    for name, service in (document.get("services") or {}).items():
+        if name not in wanted:
+            continue
+        for volume in service.get("volumes") or ():
+            # A named volume has no `/` in its source and is not a bind mount;
+            # Docker creates one on demand and it is not this check's business.
+            source = volume.split(":", 1)[0]
+            if source.startswith("/"):
+                found[source] = None
+    return tuple(sorted(found))
 
 
 def _docs_labels(

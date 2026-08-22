@@ -44,7 +44,7 @@ Six columns, the house shape. Rows are predictions made at plan time; each is
 confirmed, corrected or replaced during implementation, and anything found
 *during* implementation is appended with the next free number.
 
-**Next free number after this table is D463.**
+**Next free number after this table is D465.**
 
 | # | Runbook says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -116,6 +116,8 @@ confirmed, corrected or replaced during implementation, and anything found
 | **D460** | §5 Run 9: *"The MCP tool catalog, generated from the lock, and a page that **fetches its own assets** (D274)."* | **The catalog is not a page, and forcing it into the one surface that serves pages would be worse than not.** The documentation service renders **OpenAPI** documents through Scalar; a capability lock is not an OpenAPI document, and publishing one there needs a third Traefik router and a renderer for a format Scalar does not read. What the deployment already publishes about its agent surface is machine-readable and asserted: the `mcp` block's protocol revision, accepted token use, contract digest and tool count. | `docs/mcp-tool-catalog.md`, generated from the committed canonical contract by `bin/render-mcp-catalog.py`, with `--check` in the **Session 1 gate**. D274's instruction is obeyed in the form that applies: the document names tools, scopes, ceilings, ADRs and divergence numbers, and **every one of them is resolved against the authority that owns it** — with a control per scan. | D274's lesson is not about HTML. It is *the proof asked for the artifact's URL and never for what the artifact then asks for*. A catalog citing an ADR that does not exist is the same defect wearing different clothes: a document that reads correct and is not, offered to a reader who cannot check it. | — |
 | **D461** | — (found by the arm that exists to check the checker.) | **The drift message raised while reporting drift.** `render-mcp-catalog.py --check` printed `{CATALOG.relative_to(REPO_ROOT)}`, and `relative_to` **raises `ValueError`** for a path outside the repository. The only caller that reaches it is the guard-the-guard test, which perturbs the catalog at a temporary path — so the branch that reports a failure turned into a traceback that hid it. | A `shown()` helper that falls back to the absolute path. Four call sites, one function. | **The guard-the-guard arm found a defect in the guard**, which is what it is for and the first time in this repository that it has. A diagnostic is code: it has a failure path, and its failure path runs precisely when something is already wrong. D391 is the same family — a guard whose result was discarded — arriving here as a guard whose *message* could not be printed. | — |
 | **D462** | The Session 7 guide's step 0, carried into Session 8's: *"Re-render the fixtures — ON THE HOST, after transport (D383)"*, with the two **example** manifests. | **That is half of what `.generated/` holds.** Run on the host at `42db9e4`, with both fixtures freshly re-rendered at v12, `bin/session-01-check.sh` exited **5** at step 8: *"these projects were rendered by an older release: alpha-dev (v11), beta-dev (v11)"*. The evidence step compares **every** rendered project — and the host also carries `.generated/alpha-dev` and `.generated/beta-dev` from real deploys, which the example manifests do not touch. A collision count over two schema versions compares different documents, so the refusal is right. | Step 0 re-renders **four** projects: the two example fixtures and the two real ones, with `project.alpha.yaml`/`project.beta.yaml` and `capabilities.yaml`. All four are `--render-only`, all four need **no root**, and all four reached v12. `session-01-check` then passed on the host. | **D383 said where to re-render and not what.** The fixture guard (`rendered_fixtures.py`) only knows about the two example keys, so it reported `current` while two other rendered projects sat a version behind — the guard was right about its own question and silent about the one the gate asks. A second finding rode along: `op` **cannot reach the Docker daemon**, so step 7's *"no project container is running"* half is not proved by an operator-run gate. The gate says so in as many words rather than passing quietly (ADR 0018), which is the behaviour to keep. | — |
+| **D463** | `MCP_SERVICE`'s own docstring: *"it is **deliberately absent from `POST_BOOTSTRAP_SERVICES`** … every other application service is in that tuple because it logs in as a role the bootstrap plane must activate first. This one has no role to activate (D410)."* Asserted by a passing test. | **Every word of that is true, and the agent plane's first start anywhere exited 1 because of it.** On the host at `bf1d398`: `IsADirectoryError: Is a directory: '/etc/mcp/jwks.json'`, on both projects. **Docker creates a bind-mount source that does not exist as a DIRECTORY**, so the fourth verifier opened a directory where its key set should be. Read out of the deploy's line order: `install_rendered` (1327) replaces the rendered directory, **step 5 starts everything not deferred (1332)**, `render-jwks` writes the key set (1413), the lock is compiled (1453). The agent plane is started **eighty lines before the two files it mounts are written**. The deploy then failed at 1413 — `staging.replace()` onto a directory raises — so the deployed document stayed **v11** and all four deploys failed identically. | **ADR 0133**, and it adds a concept rather than redefining one. `POST_ARTIFACT_SERVICES` carries the second reason — *cannot start until the deploy has written the files it mounts* — `DEFERRED_SERVICES` is the **computed** union, and the deploy defers that. D410's assertion and its docstring stand unchanged. And because the ordering fix closes this instance and not the class, the deploy now **proves its file mounts exist before each start**, derived from the override it is about to write. | **One name was carrying two ideas.** A service landed in that tuple for a stated reason (a database role) and the deploy used it for an unstated one (an artefact written late). PostgREST needs both, so membership satisfied the second **by accident** and nothing ever separated them; the agent plane needs only the second, was correctly excluded for a reason about the first, and lost the second with it. **§6's question 5** — *when a decision is implemented, which of its callers got it?* — and **D381's family**: the mount was written in the right run, by an author who cited D381 while writing it, and the START ORDERING was the caller nobody asked. `deploy-project.py` already carried a comment naming this exact Docker behaviour, **written for PostgREST**. | 0133 |
+| **D464** | `test_no_operator_command_puts_a_service_directory_on_the_path`, whose docstring names one thing: a `bin/` command doing `sys.path.insert(0, REPO_ROOT / "services" / "auth-api")` so an image-only package becomes importable in a checkout. | **It is a text scan for two unrelated strings**: `'"services"' in source and "sys.path" in source`. Run 10's mount pre-flight read `document.get("services")` — a YAML key — and `deploy-project.py` has a legitimate `sys.path.insert(…, "src")` twenty lines from the top. The guard reported a command that does nothing of the kind, in the run whose whole subject is a guard that was too narrow. | **The scan is not narrowed** — that is a weakening of a passing guard and needs an ADR this run does not own. The parsing moved instead, and it moved somewhere better: `runtime_override` **builds** the override, so it is the module that should read it back. `mount_sources` and `override_service_names` take the rendered bytes, and the command now mentions neither `"services"` nor `yaml`. | **D455's family, one session later, and the mirror of this run's own subject.** D463 is a check whose evidence was too NARROW — one name for two ideas. This is a check whose evidence is too WIDE — two strings standing in for a construct. Both pass for exactly as long as their approximation happens to coincide with the property. The repair here was free because the code was better the other way; the next one may not be, and the row is what that reader needs. | — |
 
 ---
 
@@ -807,6 +809,62 @@ re-renders four.
 D326), `--mode host`, and one `install -o op` so the deployed documents can be
 read off-host. The **external** half needs neither root nor a TTY and is the
 assistant's.
+
+---
+
+### Run 10 — The first start, and what it found — **Done, pending the redeploy.**
+
+**The agent plane started nowhere.** Both `mcp` containers exited 1 on the host's
+first deploy of Session 8, and the cause is **D463** — the row to read, and the
+sharpest instance of §6's question 5 this session has produced.
+
+`POST_BOOTSTRAP_SERVICES` meant *"authenticates as a role the bootstrap must
+activate"*. The deploy also used it to mean *"must not start before the files it
+mounts are written"*. PostgREST needs both, so its membership satisfied the
+second **by accident**. The agent plane needs only the second, was correctly
+excluded for a correct reason about the first, and lost the second with it —
+so step 5 started it eighty lines before its key set and capability lock were
+written. **Docker creates a missing bind-mount source as a directory**, and the
+runtime opened a directory where a key set should be.
+
+**The deploy behaved well.** It failed at the key-set step rather than
+continuing, and never published a document claiming an agent plane that had not
+started: both deployed documents are still v11 with `routes.mcp: null`. All
+fourteen pre-existing containers stayed up and healthy.
+
+**ADR 0133** splits the two reasons — `POST_ARTIFACT_SERVICES` beside
+`POST_BOOTSTRAP_SERVICES`, with `DEFERRED_SERVICES` the **computed** union — so
+D410's assertion and its docstring stand unchanged. Adding a third case to the
+overloaded name would have been the same defect with more members.
+
+**And because that closes the instance rather than the class**, the deploy now
+proves its file mounts exist before each start, derived from the override it is
+about to write rather than from a second list. A missing source, or the
+directory Docker leaves behind, is a named refusal with the path in it.
+
+**The trip's non-privileged half is done and green**: the host is at the release,
+its venv is synced, all four projects render at v12, and both `session-01-check`
+and `session-08-check --mode offline` pass there.
+
+Battery **10 of 10 killed** — one arm survived and it was the test's fault: the mount
+pre-flight was proved as a *function* while its **wiring** was asserted nowhere,
+so removing the deploy's second call to it stayed green. **D454's family**, one
+run later.
+
+**D464 is the run's second row, and it is D463's mirror.** The suite refused the
+new code: `test_no_operator_command_puts_a_service_directory_on_the_path` is a
+text scan for `"services"` and `sys.path`, and the pre-flight read a YAML key
+called `services` in a file with a legitimate `sys.path.insert`. D463 is a check
+whose evidence was too **narrow**; this is one whose evidence is too **wide**.
+The scan was not touched — narrowing a passing guard needs an ADR — and the
+parsing moved to `runtime_override`, which builds the override and should be
+what reads it back.
+
+Suite **3783 passed, 271 skipped**.
+
+**What is left is one `sudo` sequence**: remove the two directories Docker
+created (`rmdir` — it refuses a non-empty directory and is therefore the safe
+verb), redeploy twice, then the host gate. The external half is the assistant's.
 
 ---
 
