@@ -1,0 +1,539 @@
+# Session 9 — Agent writes, the audit record, and the kill switch
+
+Two write tools, one-to-one with two operations this repository shipped in
+Session 5, a durable audit record with a fail-closed contract, and a revocation
+that stops a token on its next request through both surfaces.
+
+**No generic dispatcher. No second authorization system. No new API operation.**
+
+---
+
+## 0. Where Session 9 actually starts
+
+Session 8 closed with `evidence/session-08.json`: **43 claims, 41 passed, 2
+failed**, the two red ones Session 5's and blocked on the rotation window. Both
+projects run `911a9d3b` with 18 migrations, `max_connections` 56, outputs v12,
+and a deployed four-tool agent read plane — 16 containers, `mcp` included.
+
+**There is no Session 9 runbook.** Sessions 1–8 each rewrote one, and §1 of each
+plan was the list of places the runbook was wrong. What Session 9 has instead is
+`docs/source-specification.md` §17's five-paragraph summary. So **§1's job
+changes**: it is now the list of places where the session summary asks for
+something this repository already has, or asks for it in a shape this repository
+refuses. That list is still the point of this document, and it is longer than it
+looks.
+
+Five things are already true and change the shape of the work:
+
+1. **Both write operations exist, are reviewed, and are granted to
+   `agent_writer`.** `api.create_note(p_title, p_content)` and
+   `api.update_task_status(p_task_id, p_expected_status, p_new_status)` shipped in
+   migration 0007; `contracts/postgrest-api-surface.yaml` reviews both under
+   `rpcs:`. **No migration adds an operation and ADR 0003's frozen domain does
+   not move.**
+2. **The two tools are already named**, in `docs/capability-plan.md`, with their
+   scopes and the one-to-one rule. Session 9 implements a plan; it does not
+   invent one.
+3. **`capabilities.schema.json` v1 already carries the write shape** — `kind:
+   write`, `max_affected_rows`, `idempotent`, and `audit.redact`. Nothing is
+   renamed and nothing is removed, so **no version bump** (D403, second time).
+4. **The authoritative active-agent check is already inside every database
+   request.** Migration 0018's `agent_claims_are_current` matches `status`,
+   `role_name`, `scopes` and `authz_version` and returns the owner. Session 9
+   adds no check; it proves the one that is there.
+5. **The revocation endpoint already exists** — `PATCH /admin/agents/{agent_id}`
+   with `{"status": "revoked"}`, which flips the status *and* bumps
+   `authz_version` in one statement.
+
+**So two of the summary's five Build bullets are already deployed**, and what is
+left of a third is the audit *query* endpoint alone.
+
+Session 8 was planned as nine runs and took **twelve**; Session 7 was planned as
+ten and took **sixteen**, because the trips found seven and eight defects. **Plan
+for the same.**
+
+---
+
+## 1. Divergences from the session summary
+
+Six columns, the house shape. The "summary says" column quotes
+`docs/source-specification.md` §17. Rows are predictions made at plan time; each
+is confirmed, corrected or replaced during implementation, and anything found
+*during* implementation is appended with the next free number.
+
+**Next free number after this table is D489.**
+
+| # | Summary says | Repository does | Decision | Why | ADR |
+|---|---|---|---|---|---|
+| **D469** | "Two representative project-specific tools should demonstrate the one-tool-to-one-operation pattern." | **Both tools are already named and both operations already exist.** `docs/capability-plan.md` has listed `create_note` (`notes:write`) and `update_task_status` (`tasks:write`) as Session 9's since Session 1, each "Named PostgREST RPC, one-to-one". The operations shipped in migration 0007: `api.create_note(p_title text, p_content text DEFAULT '')` and `api.update_task_status(p_task_id uuid, p_expected_status api.task_status, p_new_status api.task_status)`, both `SECURITY DEFINER`, both reviewed in `contracts/postgrest-api-surface.yaml` under `rpcs:`. `update_task_status` is already an optimistic compare-and-swap raising `AP404`/`AP409`. | **Session 9 writes no SQL for the operations themselves.** It writes two capability entries, two tool closures, and the transport that can carry an argument body. The derived operation ids are `rpc.create_note.post` and `rpc.update_task_status.post` (ADR 0119). | Inventing a "representative" operation here would be a fifth and sixth human operation, and **ADR 0003's example domain is frozen** — amended exactly once, by ADR 0048, for one additive column. D418 is the precedent: when a proof wanted a fifth operation, *the proof moved, not the product*. | — |
+| **D470** | "explicit writes … with input validation, required scopes, bounded side effects". | **The schema already expresses all three, and the compiler cannot compile any of them.** `schemas/capabilities.schema.json` `$defs/capability` has `kind` enum `["read","write","metadata"]` and a conditional requiring `max_affected_rows` (1–100) and `idempotent` for a write. But `capability_compiler._compile_tool`'s `resources` comprehension is gated `if kind != "metadata"`, so it runs for a write, and it unconditionally reads `entry["capability"]["resource"]`, `["columns"]` and `["max_rows"]` — three fields the schema does **not** require of a write. A write capability `KeyError`s. `max_affected_rows`, `idempotent` and `audit.redact` are validated on the way in and **emitted into nothing**. | **Extend the compiler; do not touch the schema.** A write compiles to a tool with an operation, an argument contract and a `max_affected_rows`, and no `columns`, `filters`, `order_by` or `max_rows`. The three orphaned fields reach the lock, or the manifest's audit declaration is a comment. | **D403's shape, second time**: a version bump that renames nothing and removes nothing is a migration everyone pays for and nobody needed. And a field that validates but reaches nothing is **D274's shape** — a claim that lives only in a document nobody dereferences. | — |
+| **D471** | "PostgREST adds the authoritative active-agent check inside each database request so a previously issued token stops working immediately after revocation." | **Migration 0018 already did this, and its own `COMMENT` states the property.** `app_private.agent_claims_are_current(p_agent_id, p_role_name, p_scopes, p_authz_version)` selects `a.owner_id … WHERE a.id = … AND a.status = 'active' AND a.role_name = … AND a.authz_version = … AND a.scopes = …`; the hook's `token_use = 'agent'` branch raises `AP401`/`PT401` when it returns NULL. The comment: *"A revoked, disabled or re-authorized agent stops on the NEXT request, not at the token's expiry."* | **Session 9 adds no check here and must not appear to.** `SEC-REV-001` becomes a **proof**, not a build: revoke mid-session, then assert the same token fails its next MCP read, its next MCP write, and its next direct PostgREST request. | Building a second check would give one fact two authorities that have to be kept in step — which is D397's shape, and the reason there is no `agent_id` claim beside `sub`. The failure mode a session like this produces is *a control added beside a control that was already there*, after which neither is the one anybody reads. | — |
+| **D472** | "Admin audit query **and revocation** endpoint." | **The revocation endpoint exists.** `PATCH /admin/agents/{agent_id}`, gated on `admin_agents:write`, body `{"status": "revoked"}` → `AuthService.set_agent_status` → `app_private.auth_set_agent_status`, which does `SET status = p_status, authz_version = authz_version + 1` and returns the new version. `app_private.agent_status` is a **two-value enum** — `('active','revoked')` — because 0011 decided that *"a user is disabled and can be re-enabled; an agent credential is revoked, which is terminal."* | **Only the audit query endpoint is new.** It sits beside `GET /admin/agents` with a new `admin_audit:read` scope. The kill switch is one PATCH that already works, and the operator guide names it rather than a new verb. | A second revocation path would be a second way to reach a terminal state, and the two would drift on the `authz_version` bump — which is the part that actually stops the token. **`SEC-REV-002` is Session 6's and already green**; this row is what keeps `SEC-REV-001` from re-proving it. | — |
+| **D473** | "FastMCP records an audit entry before forwarding a request … and completes the record." | **FastMCP cannot write to the database, by construction and on purpose.** `settings.load_mcp` refuses to start if any of `FORBIDDEN_VARIABLES["mcp"]` is set — `APG_SIGNING_KEY_FILE`, five `APG_DATABASE_*`, `APG_POOL_SIZE` — and `McpSettings` has no `conninfo`, no passfile and no pool size for a later change to fill in. Its zero share of ADR 0099's budget is asserted by a test that parses the arithmetic (D407). | **Two `SECURITY DEFINER` functions in `api`, called over PostgREST with the caller's own token**: `agent_audit_begin` returns an id, `agent_audit_complete` closes it. Identity comes from the `app.agent_id` / `app.user_id` GUCs the hook sets and is **not a parameter**. `mcp_audit_service` stays unactivated. | Handing the runtime a credential reverses D407 and reopens a fully-allocated budget inside a session about writes; routing the write through auth-api gives one service two database roles. The definer route needs neither, and it is the route the runtime **already takes** for `mcp_agent_context` — so it is one more call on a path that is proved, not a new one. **And the GUC identity is what makes `SEC-PARAM-001` structural**: a parameter that could name a principal is the thing that requirement forbids. | **needed** |
+| **D474** | The audit entry is recorded "before forwarding a request". | **The pre-request hook cannot be where that happens, and this repository measured it twice.** 0008's header and 0013's both record it: PostgREST runs the hook inside the request transaction, which is **READ ONLY on a GET**, and *"an early version that kept an audit row turned the entire read surface into 405 'cannot execute INSERT in a read-only transaction'."* | **Nothing is written from the hook.** The record is written by an explicit call the runtime makes before it forwards, and closed by a second call after. Two round trips per audited call, on top of the context resolution — stated as a cost in §3 rather than discovered on a cluster. | The tempting design is the cheap one: the hook already runs on every request and already knows who is asking. It is also the one place in this schema that provably cannot write. **A measurement recorded in two migration headers is exactly the kind CLAUDE.md §4 step 2 says to grep for before measuring again** (D57/D262's lesson). | — |
+| **D475** | Implied: activating `agent_writer` is adding it to the authenticator's memberships. | **`agent_writer` appears zero times in migration 0018** — verified, `grep -c` returns 0. 0018 granted `USAGE ON SCHEMA app_private`, `EXECUTE` on `postgrest_pre_request`, `EXECUTE` on **both** comparison helpers, and `EXECUTE` on the two read RPCs to `{{anon}}, {{authenticated}}, {{api_documentation}}, {{project_admin}}, {{agent_reader}}` — and to no write role. **An `agent_writer` token today is refused by `permission denied for function postgrest_pre_request`, not by `AP401`.** | **Migration 0019 grants the hook and both helpers to `agent_writer`** before anything activates the membership. The activation itself is one string in `postgres_bootstrap.AUTHENTICATOR_REQUEST_ROLES`. | **This is D417 exactly, one session later.** There, the correct refusal stood on a missing GRANT and reached the caller as a 42501 instead of the hook's own `AP401`, so a client could not treat "your token is stale" as one outcome. 0018's own comment says the rule — *"both comparison helpers, to every role that runs the hook"* — and lists five roles because a sixth did not exist yet. **§6 question 5: which of this decision's callers got it?** | — |
+| **D476** | "Scope-gated tool visibility and execution" — and the exit criterion, "a read-only agent cannot **call or discover** unauthorized writes." | **Execution is gated; `tools/list` is not.** `Tool.discoverable_by()` — the disjunction-of-conjunctions ADR 0120 and D421 exist for — is compiled into the lock, asserted by two contract tests, and **has no production caller anywhere**. There is no `on_list_tools` hook; `AgentContextMiddleware` implements `on_request` only. Session 8's filtering is at the **resource** level, inside the `list_resources` payload, and its deployment proof says so in as many words: *"`run_report` must not appear among the resources discovery returns, while the four tool NAMES still do."* | **Session 9 adds the `tools/list` filter and `discoverable_by` gets its first caller.** The two levels stay distinct and both are proved: a name is hidden, and a resource behind a visible name is hidden. | Four read tool names leaking to a reader who would be refused was untidy. **A write tool name leaking to a read-only agent fails `AGT-WRITE-001` on its own words.** This is **D454's family** — the seam nobody crossed, third instance after D444 and D450 — and it is recorded as that rather than repaired quietly, because the class is what predicts the next one. | — |
+| **D477** | "propagates a request ID through the downstream stack". | **There is no argument channel at all, let alone a header one.** `UpstreamRequest` is `(method, path, query, timeout_ms)` with no body field, and `mcp_upstream.execute` sends a hardcoded `data=b"{}" if request.method == "post" else None` — enough for the argument-free `run_report` and for nothing else. `execute` also refuses outright when `set(headers) != set(FORWARDED_HEADERS)`, and `FORWARDED_HEADERS` is `("Authorization", "Accept")`. | **`UpstreamRequest` gains a body; `build_request` gains a write branch emitting no `select` and no `limit`; `FORWARDED_HEADERS` gains the request-id header and the guard moves with it in the same commit.** | The guard is a good one and it will fail closed on exactly this change, which is the correct behaviour and the reason to name it here: **a widened allowlist whose checker did not move is D300's shape**, and the repair is never to turn the equality into a subset. Both allowlists that failed on Session 8's trip (D468) were right to fail. | — |
+| **D478** | "propagates a request ID through the downstream stack" (the scope of "the stack"). | **`OPS-LOG-001` is Session 11's**, registered as P1, and reads *"One request ID propagates across **ingress**, API, agent, and audit records"*. Nothing in this repository mints a request id today except `services/edge-probe/probe.py`, which is unrelated. | **Session 9 owns exactly MCP → PostgREST → audit record.** Ingress is Session 11's and this plan says so, in §7, so that Session 9's evidence cannot be read as closing `OPS-LOG-001`. | **This is the §7 discipline Sessions 7 and 8 both closed on**, applied forward instead of backward: a session that half-closes another session's requirement and does not say so leaves the next reader unable to tell a proved guarantee from a plausible one. | — |
+| **D479** | "completes the record with … redacted parameters." | **`audit.redact` is required by the schema whenever `audit` is present, is carried by all five current capabilities as `redact: []`, and is read by nothing.** It survives `load_capabilities_manifest`, is dropped by `_compile_tool`, and never reaches the lock or the runtime. | **The lock carries `audit.redact` per tool and the runtime obeys it.** At least one write declares a **non-empty** list, so the mechanism has something to prove rather than a redaction of nothing. | An empty redaction list on every capability is indistinguishable from a redaction mechanism that does not exist — which is what it currently is. **D277**: a proof asking whether a name is *mentioned* is satisfied by dead code; assert what the code produces. | — |
+| **D480** | "durable attribution" for agent writes. | **An agent token reaches PostgREST directly — that is how MCP forwards it.** The hook's agent branch runs for any request carrying an agent token, so an agent holding `notes:write` can `POST /rpc/create_note` without going near `/mcp`. An MCP-side record would not see that write. | **The two write RPCs append their own audit row, in the same transaction, when `app.agent_id` is set.** Both are already `SECURITY DEFINER` and both run in a POST transaction, so D474's read-only constraint does not apply. A human caller sets no `app.agent_id` and is unaffected. The MCP begin/complete record keeps denials, timing and redaction. | Two records, and the plan says which answers what: **a denied call never reaches the database**, so it has only the MCP record; **a bypassing call never reaches MCP**, so it has only the database record; an ordinary MCP write has both and they agree. Attribution that a caller can route around is attribution the record-keeper cannot rely on, which is the whole difference between this and telemetry. | **needed** |
+| **D481** | Implied: a write agent uses the same surface a read agent does. | **`agent_writer`'s ceiling is `{notes:read, notes:write, tasks:read, tasks:write}` — no `meta:read`.** So `scope_registry` would refuse to mint a write token carrying it, `_resource_for` would refuse `describe_resource`, and `list_resources` would return an empty resource list. **A write agent cannot discover the surface it is authorized against.** | **An ADR amends ADR 0079's table** and `agent_writer` gains `meta:read`. It is a ceiling, not a grant: each agent's own scope list still decides what it holds. | The omission reads as deliberate and is not: `meta:read` exists precisely so introspection is a scope rather than a privilege of being an agent, and every other role that can call a tool has it. Leaving it out would make D476's new `tools/list` filter hide discovery from exactly the callers who most need it. | **needed** |
+| **D482** | "FastMCP records an audit entry" — with `mcp_audit_service` sitting unactivated since Session 3. | **The role is not merely unactivated, it is unreferenced.** It is in `naming.ROLE_SUFFIXES` and in the bootstrap's `CREATE ROLE` sweep, and in **no** migration template, **no** `migrations/manifest.json` placeholder, and no grant. And `tests/contract/test_mcp_budgets.py::test_nothing_in_the_agent_plane_names_the_audit_role_in_CODE` is an AST scan that fails if the literal string appears in any `services/auth-api/app/mcp_*.py`. | **It stays unactivated, and Session 9 records the reason rather than inheriting the deferral.** No manifest placeholder is added. The AST guard stays exactly as strict. | The handoff says Session 9 *owns deciding*, not inheriting — and the decision is that D473's route needs no service identity at all, so activating one would put a login role in production to write records that something else writes. **A role that exists and is not activated is a promise the next session keeps; keeping it can mean deciding it is not needed.** | **needed** |
+| **D483** | "audit initialization fails closed **for writes**". | The summary says writes and is silent on reads, and the asymmetry is load-bearing rather than an omission to tidy. Failing a read closed would couple every agent read's availability to the audit table and add a mandatory round trip to a path ADR 0125 already pays one for. | **A write whose `agent_audit_begin` fails does not happen.** A read whose begin fails is refused too **only if** the record is the point of the read; otherwise it proceeds and the failure is emitted as telemetry with outcome `failed`. **This is an ADR, taken with the measurement in hand**, not a default. | Stating "fails closed" without saying for what is how a guarantee becomes two guarantees, one of which nobody implemented. `AGT-AUDITFAIL-001`'s own description is *"a write fails closed when its audit record cannot be created"* — the requirement is already narrower than the reflex, and the reflex is what needs writing down. | **needed** |
+| **D484** | Implied: Session 9's five placeholders are replaced as the code that satisfies them lands. | **They cannot be, one at a time.** `test_every_later_requirement_has_a_placeholder` requires a placeholder for every requirement with `target_session > gate_session`; `test_no_requirement_at_or_before_the_gate_session_remains_future` forbids one at or before it. Exact mirrors, and `gate_session` defaults to `CURRENT_SESSION`, which is **8**. | **One commit** moves `CURRENT_SESSION` 8 → 9 and repoints all five registry entries at real tests, deleting the five placeholder functions. Verified beforehand with `APG_ACCEPTANCE_SESSION=9 pytest tests/contract/test_acceptance_registry.py tests/contract/test_future_marker_policy.py`. | **D439, verbatim, and it is the second session to pay for it.** Session 7 Run 9 and Session 8 Run 6 both did it in one commit for the same reason. Session 9's count is **five** and every one is `target_session: 9` — checked, unlike D414's five which turned out to be six. | — |
+| **D485** | — (a consequence of the above, at plan time). | Outputs is **v12** on this tree and both deployed projects. The `mcp` block publishes protocol, `authorization_spec_conformant`, `token_use`, tool count and the two capability digests. Session 9 changes `tool_count` from 4 to 6 — a **value**, not a schema change — and may want the audit plane's readiness published. | **Decide the version once, in Run 1, from the whole session's surface** — not from the run in front of you. If nothing but `tool_count` moves, **there is no bump**. | **D255 and D308 are the same mistake twice**, and D402 is the rule they produced: a version chosen one run early, from the run in front of you, is a version that has to move again. | — |
+| **D486** | "no generic dispatcher" — four tools become six. | **"Exactly four" is asserted in five independent places**, which is the design working: `mcp_lock.METADATA_TOOLS`/`READ_TOOLS`/`EXPECTED_TOOL_NAMES` (a fifth tool fails `load_lock` before registration), `mcp_tools.TOOL_NAMES`, two contract tests in `test_mcp_tools.py`, the prose in `docs/mcp-tool-catalog.md`, and `test_mcp_catalog.py` comparing the prose to the contract. | **All of them re-derive to six, in one run**, with `WRITE_TOOLS` added beside the other two tuples so the number stays computed. **A seventh tool must still fail the start, offline**, and a test proves it after the change, not only before. | ADR 0127's "there are exactly four" was never about the number — it was about the surface being enumerated rather than discovered. Widening it by editing one of five copies and leaving four is **D416's shape**, where a constant existed precisely so the proof could read it and three restatements survived anyway. | — |
+| **D487** | "bounded side effects". | Both RPCs are `RETURNS api.notes` / `RETURNS api.tasks` — **a single composite row, not `SETOF`**. `max_affected_rows` for each is therefore **1**, and that is the function's actual shape rather than a ceiling chosen to look safe. | `max_affected_rows: 1` on both write capabilities, with the reason at the entry, and the bound checked **against the response** rather than trusted. | This is `run_report`'s `max_rows: 1` argument again, and the manifest already states it: *"the function's actual shape — it returns exactly one row — rather than a bound chosen to look safe."* A bound larger than the operation can produce is a bound that can never fire, which is a control measuring nothing. | — |
+| **D488** | — (found at plan time, reading `compose.yaml`). | Moving `CURRENT_SESSION` to 9 arms a `session9` Compose profile. **No service declares one**, because Session 9 adds no container: writes and the audit calls live in the existing `mcp` runtime, and the admin endpoint in the existing auth-api. | **No new service, no new profile, no change to `DEFERRED_SERVICES`.** The plan states it so that an empty profile is not mistaken for a missing one during the trip. | Session 7 Run 9 moved the constant and the next deploy immediately tried to start a storage container that failed closed without its secrets, so the guide had to say so **before** the step. The inverse — a constant that arms nothing — is worth the same sentence, because the operator will look for the container that did not appear. | — |
+
+---
+
+## 2. What Session 9 adds to the acceptance registry
+
+**Nothing.** The five requirement IDs already exist and point at placeholders:
+
+| ID | What it must prove |
+|---|---|
+| `AGT-WRITE-001` | A read-only agent can neither discover nor invoke a write |
+| `AGT-AUDIT-001` | Read, write, denied and failed attempts are audited with redaction |
+| `AGT-AUDITFAIL-001` | A write fails closed when its audit record cannot be created |
+| `SEC-REV-001` | A token issued before revocation is denied on its next read and write through both MCP and PostgREST |
+| `SEC-PARAM-001` | Tool parameters cannot override agent identity, role or scope |
+
+**Replace the placeholders; keep the IDs and their descriptions**, rewriting a
+description only to a *stricter* statement of the same property (ADR 0096, and
+D422 for what that looks like). Adding a new ID requires grepping the registry
+first — **ADR 0089/D279**: three of Session 6's six "new" IDs were already taken,
+and because `claim_session` derives from `max()`, one would have turned three
+earlier sessions' evidence red while the other vanished from the gate.
+
+`SEC-REV-002` is **Session 6's and already green** — non-resurrection through
+`authz_version`. `SEC-REV-001` is not a second copy of it: it is about a revoked
+token failing its next read *and* write through MCP *and* PostgREST, and Session 6
+ships no MCP.
+
+**Claims are a separate act.** Under ADR 0045 a requirement complete in a
+checkout is not a claim; every claim needs at least one node id marked
+`live_host` or `external`, or `claim_mode` refuses it. Session 9's claims are
+registered in `evidence_claims.CLAIMS` in the run that publishes.
+
+---
+
+## 3. Environment feasibility
+
+| Requirement | Status | Note |
+|---|---|---|
+| The two write operations | **exist and are granted** | Migration 0007, `TO {{authenticated}}, {{agent_writer}}`. D469. |
+| `agent_writer` as an assumable role | **one string, plus 0019's grants** | It holds no `EXECUTE` on the hook today. D475. |
+| An audit table | **must be built** | Migration 0019. Nothing named `audit` exists in any of the 18 migrations. |
+| Connection budget | **no change** | The audit write goes over PostgREST as the caller. D473 keeps D407's considered zero intact. |
+| Round trips per audited write | **three, and must be measured** | Context resolution + begin + complete, plus the operation. ADR 0125's round trip *has never been timed against the deployment* — a standing open item that this session makes three times more load-bearing. |
+| Memory | **re-check, do not re-measure** | ADR 0131's floor is `128 + share × 4` against a limit of 384. Two extra tools and two extra upstream calls do not obviously move it — but `mcp` containers are now running and healthy, so **reading their resident set is one command**, which is the open item this session can close cheaply. |
+| An agent with `notes:write` | **mintable once the ceiling and membership move** | `scope_registry` refuses a scope above the role's ceiling today, which is the control that the ceiling is real. |
+
+**The unmeasured boundary that stays unmeasured:** IPv6. Eight
+`APG_PUBLIC_IPV6` proofs have never run, and running them from a machine without
+IPv6 reports every port closed — a fact about the scanner.
+
+---
+
+## 4. Safety plan for irreversible operations
+
+Four operations cannot be undone by re-running a command.
+
+**1. Activating `agent_writer`.** `GRANT role TO role` is a bootstrap-plane change
+(D102) and widens what a token may name — from "an agent can read its owner's
+rows" to "an agent can change them". It requires D475's migration to land
+**first**, or the first write token is refused by a privilege error rather than
+by the boundary. Reversible in principle, disruptive in practice.
+
+**2. Applying migration 0019.** Forward-only, `freeze-lock` after writing it,
+applied as `migration_user` and never as a superuser — **D285**: every offline rig
+applies migrations as `psql -U postgres`, and a superuser bypasses the ownership
+check that made 0012 and 0013 fail on a real cluster. `RESET ROLE` goes **below**
+the privileges block.
+
+**3. Moving `CURRENT_SESSION` to 9.** It is the gate session, so it moves in one
+commit with all five placeholder replacements (D484). It arms a `session9`
+profile that nothing declares, which is expected (D488).
+
+**4. Publishing a capability lock that contains a write.** The deployed lock is
+what the runtime obeys, and from this session it is what decides that an agent
+may change a row. A lock compiled from the wrong document produced not an error
+but an **artefact** in Session 8 — refused four steps from its cause (D465) — so
+`bin/mcp-contract.sh lock --outputs` still reads the **rendered** document and
+refuses the deployed one by name.
+
+**The standing rules apply unchanged.** `sudo` needs a TTY, so anything
+privileged that mutates is run by a human at a terminal; read-only diagnosis is
+not — but **`apg-diag` still cannot read `mcp`'s logs** (D380), which sent an
+operator to a terminal twice in Session 7 and again in Session 8's trip.
+
+---
+
+## 5. Build order
+
+Runs are the unit. Each ends with the offline gate green on a clean tree, and
+CLAUDE.md §4's procedure applies to every one: measure third-party behaviour with
+a **control** before writing anything that depends on it, write the ADR when the
+measurement decides something with alternatives, implement, then **try to break
+the tests** with a mutation battery whose failures are fatal (D269), whose
+control is a test the mutation cannot reach, and which asserts *how* each
+mutation failed (D386).
+
+### Run 1 — Migration 0019: the audit record, and the grants `agent_writer` never got
+
+- `app_private.agent_audit`, append-only: no `UPDATE` and no `DELETE` granted to
+  any request role.
+- `api.agent_audit_begin(...) → uuid` and `api.agent_audit_complete(...)`, both
+  `SECURITY DEFINER`, both deriving identity from `app.agent_id` / `app.user_id`
+  and **taking no identity parameter** (D473).
+- Both reviewed into `contracts/postgrest-api-surface.yaml`'s `agent_rpcs:`
+  block, which keeps them **unpublished** — `api_documentation` holds no
+  `EXECUTE`, and `openapi-mode = follow-privileges` builds the document as that
+  role (ADR 0118).
+- **The two write RPCs append their own row in the same transaction when
+  `app.agent_id` is set** (D480). `CREATE OR REPLACE` on the same signature so
+  0007's grants survive — and the whole body is re-read from 0007 first, because
+  **D270** is the rule that a function defined in several files is only ever the
+  last definition.
+- The grants `agent_writer` is missing: `USAGE ON SCHEMA app_private`, `EXECUTE`
+  on `postgrest_pre_request`, `EXECUTE` on **both** comparison helpers (D475,
+  D417's rule), and `EXECUTE` on the two audit functions.
+- Decide the outputs version once, from the whole surface (D485).
+
+**Measure first.** Whether `app.agent_id` is readable inside a `SECURITY DEFINER`
+function invoked through PostgREST — with a control proving the rig can tell a
+set GUC from an unset one — and what `INSERT … RETURNING` costs inside the write
+RPC's existing transaction. **Grep the plans before measuring**: Session 3
+measured how PostgreSQL grants `EXECUTE` on a new function (D57, D262) and
+Session 8 measured it again.
+
+**ADRs:** who writes an audit record and why the hook cannot (D473, D474);
+`mcp_audit_service` stays unactivated and this is the decision, not the deferral
+(D482).
+
+### Run 2 — Activating `agent_writer`
+
+- One string added to `postgres_bootstrap.AUTHENTICATOR_REQUEST_ROLES`.
+- The three assertions that name the role by hand — two in
+  `tests/security/test_session3_authorization.py`, one as
+  `SESSION_NINE_ROLE` in `tests/contract/test_bootstrap_statements.py` — are
+  **re-derived, not relaxed**. The forbidden set is already a complement over the
+  project's own roles (ADR 0116), so the negative half moves for free; **the
+  subset check stays refused** (D300, which arrived three times in one session).
+- One independent anchor survives, because a set derived entirely from the
+  product cannot refuse a bad edit to the product. `mcp_audit_service` is the
+  natural candidate now that `agent_writer` is no longer available for the job.
+- `agent_writer`'s ceiling gains `meta:read` (D481).
+
+**ADR:** the ceiling amendment to ADR 0079's table.
+
+### Run 3 — The compiler learns to write
+
+- Two `kind: write` capabilities in `capabilities.example.yaml`, each one-to-one
+  with its operation, `max_affected_rows: 1` (D487), `idempotent` stated
+  honestly — `create_note` is not, `update_task_status` is, because it is a
+  compare-and-swap — and a **non-empty** `audit.redact` on at least one (D479).
+- `_compile_tool` gains a write branch: an operation, an argument contract, a
+  `max_affected_rows`, and no `columns`/`filters`/`order_by`/`max_rows` (D470).
+- `max_affected_rows`, `idempotent` and `audit.redact` reach the lock.
+- The canonical snapshot is recompiled; `bin/mcp-contract.sh check` compares it
+  byte for byte and **contains no writer**.
+- `bin/render-mcp-catalog.py` gains a write rendering path — today it emits a
+  detail section only for a tool with `resources`, so a write tool would render
+  as a bare table row.
+- `docs/mcp-tool-catalog.md`'s "No writes" paragraph is rewritten, and the "what
+  is deliberately absent" section is Session 10's inbox.
+
+**The AGT-DRIFT-001 discipline holds**: adding an operation to the reviewed
+surface and the approved snapshot must still expose no capability, and the test
+is written the only way that means anything — by adding a real one and asserting
+the compiled bytes do not move.
+
+### Run 4 — The lock and the write transport
+
+- `mcp_lock.WRITE_TOOLS`; `EXPECTED_TOOL_NAMES` re-derived to six; `_tool()`'s
+  two kind assertions gain a third arm; a seventh tool still fails the start
+  (D486).
+- `UpstreamRequest` gains a body; `mcp_upstream.execute` sends it instead of
+  `b"{}"`; `build_request` gains a write branch emitting no `select` and no
+  `limit` (D477).
+- Arguments are validated **by name against the lock's declared argument list**
+  and by type — the same shape `mcp_query` already uses for a filter column
+  against a frozen allowlist. A caller supplies values, never names.
+- `max_affected_rows` is checked against the response, never trusted.
+- `mcp_errors.CALLER_FACING_TOKENS` gains what a write refusal needs; it is a
+  closed tuple and `AgentVisible.__init__` raises on anything outside it.
+
+**Measure first.** What the locked PostgREST returns for an RPC POST with a
+JSON body — status, shape, and what a `Prefer` header does or does not change —
+against a live service, with a control. **D438 is the standing warning**: both
+obvious answers about escaping an `in` member matched zero rows, and only
+measurement said so.
+
+### Run 5 — The two write tools, and discovery that filters names
+
+- `create_note` and `update_task_status` registered with explicit `name=`,
+  through `bounded()`, taking a concurrency slot because they reach upstream.
+- **An `on_list_tools` hook, and `discoverable_by`'s first production caller**
+  (D476). The context is already resolved once per HTTP request before both
+  discovery and execution, so nothing about ADR 0125 moves.
+- Both levels proved separately: a tool **name** hidden from a caller without its
+  scope set, and a **resource** hidden behind a visible name.
+- `AGT-WRITE-001`: a read-only agent can neither list nor call either write.
+
+### Run 6 — The request ID and the audit lifecycle
+
+- The id is minted in `AgentContextMiddleware.on_request`, carried on `_Held`,
+  read through an accessor beside `current_agent_context()`, and reset in the
+  same `finally`.
+- Added to `mcp_telemetry.RECORD_FIELDS` — whose `as_dict` raises if the record
+  shape and the tuple disagree — and passed to both audit calls.
+- Forwarded upstream: `FORWARDED_HEADERS` gains it **and** `execute`'s equality
+  guard moves in the same commit (D477).
+- `bounded()` gains its fourth job: begin before the work, complete after, with
+  outcome, elapsed ms and parameters redacted per the lock. **Writes fail closed;
+  reads do not, and the asymmetry is the ADR** (D483).
+- The canary constraints hold unchanged: no token, no fingerprint, no URL, no
+  caller value in a telemetry record, and the sink allowlist tests still pass.
+- `AGT-AUDIT-001` and `AGT-AUDITFAIL-001`.
+
+**ADR:** what fails closed and what does not, with the measurement in hand.
+
+### Run 7 — The admin audit endpoint, and revocation proved rather than built
+
+- `GET /admin/…` beside `GET /admin/agents`, same four pieces — `_service` →
+  `authenticate` → `require_scope` → `_guard` — with a new `admin_audit:read`
+  scope in `scopes.py` and in `project_admin`'s ceiling only.
+- `SEC-PARAM-001`: a tool parameter cannot name a principal, because the audit
+  functions take no identity argument and the hook sets the GUCs (D473).
+- `SEC-REV-001`'s offline arm: revoke, then the same token fails its next MCP
+  read, its next MCP write, and its next direct PostgREST request. **The proof
+  runs `PATCH /admin/agents/{id}`** — the product's own route (ADR 0065/0066) —
+  not an `UPDATE` against the table.
+
+### Run 8 — Publish
+
+- **One commit**: `CURRENT_SESSION` 8 → 9 and all five registry entries
+  repointed, the five placeholder functions deleted (D484). Verified first with
+  `APG_ACCEPTANCE_SESSION=9`.
+- The outputs version decided in Run 1, if it moves.
+- `bin/session-09-check.sh` in `session-08-check.sh`'s three-mode shape —
+  `readonly SESSION=9` **above** a derived `EVIDENCE_PREFIX`, every claim-bearing
+  flag **inside** the usage command (D213), `--ssh-destination` documented as
+  `op@` (D466), and a session-specific precondition check in the shape of
+  `check_agent_plane_is_published`.
+- The claims in `evidence_claims.CLAIMS`, each with at least one live node id.
+- `docs/session-09-operator-guide.md`, `bin/app-contract.sh --check`,
+  `render-acceptance-matrix.py --write`, `render-mcp-catalog.py --write`.
+
+### Runs 9+ — The host trip
+
+Transport by `git bundle` + `scp`; **read the `release <sha>` line and confirm it
+is the sha you fetched**. Then, in order:
+
+- **Re-render all four projects on the host**, not two, and not on the
+  workstation (D462, D383 — `.generated/` is gitignored and never transported).
+- **Sync the host venv before the gate** (D384, D297 — three times now).
+- Migrate both clusters with `migrate.sh --project`, naming the manifest.
+- **Deploy twice** if a route or a document field is newly published (D326).
+- Run `session-09-check.sh` in all three modes; merge both halves against the
+  same release or the merge refuses, correctly.
+
+**Budget three to four more runs than this list.** Session 8 was planned as nine
+and took twelve; Session 7 as ten and took sixteen. **Not one of the seven
+defects Session 8's trip found was visible to a green offline suite of 3,786
+tests.**
+
+---
+
+## 6. The MCP surface
+
+Six tools, and no MCP resources, prompts, roots, sampling, elicitation or UI.
+
+| Tool | Kind | Reaches | Scopes |
+|---|---|---|---|
+| `list_resources` | metadata | the deployed lock | `meta:read` |
+| `describe_resource` | metadata | the deployed lock | `meta:read` |
+| `query_resource` | read | PostgREST, structured | `notes:read` or `tasks:read` |
+| `run_report` | read | one named RPC | `notes:read`, `tasks:read` |
+| `create_note` | **write** | one named RPC, one-to-one | `notes:write` |
+| `update_task_status` | **write** | one named RPC, one-to-one | `tasks:write` |
+
+**What a write cannot accept**, structurally rather than by validation: SQL, a
+SQL fragment, a PostgREST query string, a path, an operation name, an argument
+name the lock does not declare, an owner, an agent id, a role, a scope, or a
+row count above `max_affected_rows`.
+
+**What a tool result never carries:** a token, an object key, a presigned URL, a
+connection string, another agent's existence, an audit row belonging to anyone
+else, or a row the caller's RLS would not have returned.
+
+**No storage.** `objects:read` and `objects:write` are human-only and the scope
+vocabulary does not admit them for an agent, so no agent token can carry them
+however it is minted (ADR 0100). Adding a write plane does not change that.
+
+---
+
+## 7. Evidence and claims
+
+Unchanged: a claim's verdict is computed from the registry's node ids and JUnit
+results, never hand-entered, and **a skip is not a pass**. Host and external
+halves are written separately and merged by
+`bin/write-session-evidence.py --session 9`.
+
+**Both halves must describe the same release** or the merge refuses — Session 7
+proved that the hard way, and was right to. `evidence/*` is gitignored by design.
+
+**The two inherited red claims are Session 5's.** Session 9 does not close them
+and must not appear to. If the rotation window is held during this session, it
+closes them and the plan says so; if it is not, Session 9's evidence carries them
+red for the same stated reason. **This is the third session to close on that
+sentence**, and it stays true until the window is held.
+
+**`OPS-LOG-001` is Session 11's and Session 9 does not close it.** Session 9's
+request id spans MCP → PostgREST → audit record; `OPS-LOG-001` spans ingress →
+API → agent → audit. A session that half-closes another's requirement without
+saying so leaves the next reader unable to tell a proved guarantee from a
+plausible one (D478).
+
+---
+
+## 8. Security invariant matrix
+
+| Invariant | Control | Proof |
+|---|---|---|
+| A read-only agent cannot discover a write | `tools/list` filtered by `discoverable_by` | `AGT-WRITE-001` — the name is absent |
+| A read-only agent cannot invoke a write | `_resource_for`'s scope check at call time | `AGT-WRITE-001` — refused, not merely hidden |
+| An agent write touches only its owner's rows | RLS keyed on `app.user_id`, set to the owner | No policy moves (ADR 0117) |
+| A write is bounded | `max_affected_rows`, checked against the response | `AGT-WRITE-001` |
+| An agent cannot run SQL | No input accepts one; the compiler cannot emit one | `AGT-SQL-001`, still green |
+| Every outcome is recorded | Begin before, complete after, both required | `AGT-AUDIT-001` |
+| An unauditable write does not happen | Begin fails ⇒ the call is refused | `AGT-AUDITFAIL-001` |
+| A write cannot be routed around the record | The RPC writes its own row in the same transaction | `AGT-AUDIT-001`'s direct-PostgREST arm |
+| Parameters cannot name a principal | The audit functions take no identity argument | `SEC-PARAM-001` |
+| A revoked token stops on its next request | `agent_claims_are_current`, per request | `SEC-REV-001`, through MCP and PostgREST |
+| An audit record carries no secret | `audit.redact`, from the lock | `AGT-AUDIT-001` |
+| MCP still holds no database credential | `FORBIDDEN_VARIABLES["mcp"]`, `McpSettings`' shape | The budget arithmetic test, unchanged |
+| A seventh tool fails offline | `EXPECTED_TOOL_NAMES`, before registration | A contract test, re-derived to six |
+
+---
+
+## 9. Risks and stop conditions
+
+**Stop and ask** rather than proceeding, when:
+
+- activating `agent_writer` would require relaxing rather than re-deriving an
+  assertion, or turning an equality into a subset check;
+- the audit record would need a field that is a caller value, a token or a URL;
+- a write tool needs an argument the reviewed surface contract does not name;
+- making a read fail closed looks like the tidy answer to an inconvenient test;
+- `--render-only` stops working with no host and no root;
+- a Session 1–8 claim goes red and the fix would weaken a passing test.
+
+**The failure mode this session is most exposed to** is the one this project
+keeps producing: *a value that looked measured and was not.* Session 9 adds a
+write path, a second and third upstream call per request, an identifier that must
+survive three hops, and a record whose whole value is that it is complete.
+Every one is a place where a plausible wrong answer passes for exactly as long as
+nobody asks.
+
+The five standing questions:
+
+1. What would have to break for this test to go red?
+2. Has it run at all, in this environment, since the thing it measures changed?
+3. Whose identity, and through which tool, does the proof run — and are they the
+   ones production uses?
+4. When a defect class was fixed, **which side got the fix** — product or proof?
+5. When a decision is implemented, **which of its callers got it?**
+
+**Question 5 wrote three of this plan's rows before a line of code was
+touched** — D475 (five roles granted the hook and a sixth about to exist), D476
+(`discoverable_by` compiled, tested and called by nothing) and D479
+(`audit.redact` validated and consumed by nothing). It caught five defects in
+Session 7 and D454 in Session 8. **Ask it at every boundary this session adds.**
+
+---
+
+## 10. Open items carried in
+
+- **The rotation window.** Still the only thing keeping two Session 5 claims red.
+- **The signing-key cutover** (ADR 0088). Unblocked since Session 6, and there are
+  **four verifiers** now (ADR 0113, ADR 0122). `render-jwks` still prints *"the
+  key set CHANGED"* on every deploy (D296).
+- **Nothing knows which proofs have never executed** (D211–D214). **Five sessions,
+  still unbuilt**, and Session 8 paid again: three assertions in the first host
+  gate had never run.
+- **The agent plane's round trip has never been timed against the deployment.**
+  ADR 0125's deliberate price, and this session makes it three round trips.
+- **`MCP_MEMORY_LIMIT` is measured for the interpreter, not the container.**
+  `mcp` containers are now running and healthy, so reading their resident set is
+  one command. §3 says so; nothing forces it.
+- **`apg-diag` cannot read the agent plane's logs** (D380). Third service it
+  cannot see; it sent an operator to a terminal in Sessions 7 and 8.
+- **`test_no_operator_command_puts_a_service_directory_on_the_path` is a text
+  scan** (D464). Two strings standing in for a construct. Whoever next touches
+  that file owns the decision.
+- **The `--ssh-destination` account is not derivable** (D466). The guide names
+  `op@`; nothing checks it.
+- **`tests/deployment/conftest.py` is past 2,100 lines.** Session 8 put its
+  fixtures in the test module instead, which helps the next module and not this
+  file. Session 9 should do the same.
+- `requirements-dev.in` pins nothing; it has produced a red gate five times.
+- **D387** — the REST document observation does not retry; hit twice in one trip.
+- **D394** — an sshd deviation that would not reproduce, and the check discards
+  `sshd -T`'s output so a one-off leaves nothing to diagnose.
+- ADR 0060: the REST document advertises DELETE, PATCH and POST on both views and
+  all three return 403 — and an agent now reads that document with a write scope.
+
+---
+
+## 11. Session 10 handoff
+
+Session 10 receives an activated `agent_writer`, two write tools that are
+one-to-one with reviewed operations, a durable audit record with a stated
+fail-closed contract, a request id that survives from the agent plane to the
+database, and a revocation proved through both surfaces on a live deployment.
+
+Session 10 is **backup, WAL archiving, PITR and the restore drill**. It **must
+not** treat a successful backup as a proved recovery, mount or mutate the active
+database volume in a restore path, or record a recovery time it did not measure.
+Its five requirement IDs — `REC-PITR-001`, `REC-SAFE-001`, `REC-SMOKE-001`,
+`REC-EVID-001`, `REC-WAL-001` — already exist as placeholders in
+`tests/recovery/test_future_pitr.py`.
+
+**And it inherits one thing this session creates:** a table that grows without
+bound. `app_private.agent_audit` has no retention policy, and secret generations
+already accumulate with nothing pruning them.
+
+---
+
+## Appendix — what to consult, and what to measure instead
+
+**Consult:** `docs/decisions/README.md` (134 ADRs, indexed) — for this session
+especially **0116** (`agent_writer` is Session 9's, and the forbidden set is a
+complement), **0117** (an agent runs under its owner's identity; no RLS policy
+moved), **0118** (a reviewed and unpublished RPC), **0119/0120** (derived
+operation ids; a tool may be backed by more than one capability), **0125** (the
+caller's own token, context once per request), **0127** (a caller value is a
+value), **0129/0130** (budgets, and what a caller may be told), **0134** (a grant
+assertion reads the catalog; a reach assertion sets the role). Behind them: 0003
+(the frozen domain), 0045/0089 (what a claim is), 0065/0066 (a proof takes the
+product's route), 0079/0100 (the closed scope vocabulary).
+`docs/capability-plan.md` for the two tools. `docs/mcp-tool-catalog.md`'s "what
+is deliberately absent". §1 of this document.
+`docs/plans/session-08-implementation-plan.md` §1 rows D395–D468 and §5 runs
+10–12, which are what one host trip costs.
+
+**Measure instead of consulting**, every time: what PostgREST does with an RPC
+body, what a header does to a route, whether a GUC is visible inside a definer
+function, what a container holds, and whether a proof has ever run.
+
+**Before measuring how a third party behaves, grep the plans for it.** Session 8
+Run 8 measured how PostgreSQL grants `EXECUTE` on a new function; Session 3 had
+measured it three sessions earlier in more detail (D57, D262). Every ADR is
+indexed; **nothing indexes the ~470 measured facts in the divergence tables by
+subject**, so the pointer has to be a `grep`.
+
+**Never write a measurement you did not run** (D267).
