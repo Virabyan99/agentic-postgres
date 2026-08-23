@@ -173,6 +173,33 @@ SNAPSHOT_CONTAINER_PATH = "/app/snapshot/openapi.json"
 #: the test consumes.
 SNAPSHOT_ENV_KEY = "APG_DOCS_SNAPSHOT"
 
+#: PostgreSQL's data directory inside the locked image, and the ONE place this
+#: repository states it. Session 10, D514.
+#:
+#: The volume mounts one level ABOVE this, at `POSTGRES_VOLUME_TARGET`, which is
+#: what the image declares as its VOLUME. D53 measured all three candidates: the
+#: pre-18 `/var/lib/postgresql/data` makes the image refuse to start, mounting
+#: at PGDATA itself works while silently leaving an anonymous volume on the
+#: parent, and two of the three persist data -- so "the row survived" does not
+#: distinguish them.
+#:
+#: Promoted out of a test constant because Session 10 gave it a second reader:
+#: `pgbackrest.conf`'s `pg1-path`. A stanza created against the mount point
+#: rather than PGDATA does not fail -- it makes the first restore wrong.
+#: `tests/contract/test_image_contracts.py` asserts THIS constant against the
+#: running image, so the value the renderer writes is the value that was
+#: measured.
+POSTGRES_PGDATA = "/var/lib/postgresql/18/docker"
+POSTGRES_VOLUME_TARGET = "/var/lib/postgresql"
+
+#: The rendered pgBackRest configuration, and where the archiver reads it.
+#:
+#: Host side per-project and therefore here, exactly like the JWKS below and for
+#: the same reason: the path contains the rendered directory, which does not
+#: exist in a checkout and cannot be a `compose.yaml` interpolation.
+PGBACKREST_CONF_FILENAME = "pgbackrest.conf"
+PGBACKREST_CONF_CONTAINER_PATH = "/etc/pgbackrest/pgbackrest.conf"
+
 #: The rendered JWKS, and where PostgREST reads it.
 #:
 #: The host side is per-project and lives in this override; the container side is
@@ -439,6 +466,22 @@ def build_override(
             # Read-only, and the only thing dbmate is given besides its
             # credential. It runs one command against one schema; a writable
             # mount would let a migration rewrite the set that produced it.
+            # The archiver's configuration. Read-only, and the cluster's only
+            # mount besides its own data volume.
+            #
+            # Written by the render at step 4, which is BEFORE step 5 starts
+            # this container -- so `postgres` is not in `POST_ARTIFACT_SERVICES`
+            # and does not need to be. What makes that safe rather than lucky is
+            # `require_mounts_exist(..., when="step 5")`, which refuses a
+            # missing source instead of letting Docker create a DIRECTORY there
+            # and the container open a directory where its config should be
+            # (D463, ADR 0133).
+            DATABASE_SERVICE: {
+                "volumes": [
+                    f"{rendered_directory}/{PGBACKREST_CONF_FILENAME}"
+                    f":{PGBACKREST_CONF_CONTAINER_PATH}:ro"
+                ]
+            },
             MIGRATION_SERVICE: {
                 "volumes": [f"{rendered_directory}/migrations:{MIGRATIONS_MOUNT}:ro"]
             },

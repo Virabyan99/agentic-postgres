@@ -241,14 +241,61 @@ def test_no_project_service_publishes_a_host_port() -> None:
         assert "ports" not in service, f"service {name} publishes a host port"
 
 
+#: The uid every BUILT service runs as, by service name (Session 10, D539).
+#:
+#: One shared literal until now, when `postgres` became the first service this
+#: repository builds that legitimately runs as something else: 999 is the
+#: image's own postgres user, it owns PGDATA, and 65532 would be a cluster that
+#: cannot read its own data directory.
+#:
+#: A per-service map rather than a relaxed `!= 0`, and the distinction is the
+#: whole repair. Widening to "not root" would accept any uid at all, including a
+#: typo'd one -- weakening a passing assertion to admit a new case, which is
+#: what D300 refuses. Pinning each service is STRICTER than one shared literal:
+#: it now also fails on a service that starts or stops being built without a
+#: decision, which the old form could not see.
+BUILT_SERVICE_USERS = {
+    "edge-probe": "65532:65532",
+    "unlabeled-probe": "65532:65532",
+    "secret-check": "65532:65532",
+    "postgres": "999:999",
+    "auth": "65532:65532",
+    "storage": "65532:65532",
+    "docs": "65532:65532",
+    "mcp": "65532:65532",
+    "client-psql": "65532:65532",
+    "client-node-pg": "65532:65532",
+    "client-psycopg": "65532:65532",
+    "client-prisma": "65532:65532",
+}
+
+#: Built services whose root filesystem is writable, and there is exactly one.
+#:
+#: `postgres` cannot be otherwise: the entrypoint writes its socket, its PID
+#: file and the whole of initdb's output, and a cluster with `read_only: true`
+#: does not start. The other three hardening keys still apply to it, which is
+#: what keeps this an exception rather than an exemption.
+WRITABLE_ROOT_FILESYSTEM = frozenset({"postgres"})
+
+
 def test_built_services_run_as_a_fixed_non_root_user() -> None:
     """A root container makes `cap_drop: ALL` and `no-new-privileges` cosmetic."""
     document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
-    for name, service in document["services"].items():
-        if "build" not in service:
-            continue
-        assert service["user"] == "65532:65532", f"service {name} does not run as nonroot"
-        assert service["read_only"] is True, f"service {name} has a writable root filesystem"
+    built = {name for name, service in document["services"].items() if "build" in service}
+
+    assert built == set(BUILT_SERVICE_USERS), (
+        "a service started or stopped being built without a decision about which "
+        f"uid it runs as. built={sorted(built)} declared={sorted(BUILT_SERVICE_USERS)}"
+    )
+
+    for name in sorted(built):
+        service = document["services"][name]
+        assert service["user"] == BUILT_SERVICE_USERS[name], (
+            f"service {name} runs as {service.get('user')!r}"
+        )
+        assert service["user"].split(":")[0] != "0", f"service {name} runs as root"
+        if name not in WRITABLE_ROOT_FILESYSTEM:
+            assert service["read_only"] is True, f"service {name} has a writable root filesystem"
         assert service["cap_drop"] == ["ALL"], f"service {name} retains capabilities"
         assert "no-new-privileges:true" in service["security_opt"], name
 
@@ -267,8 +314,44 @@ def test_postgres_joins_only_the_internal_network() -> None:
     which is a different fact wearing the same green tick.
     """
     document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
-    assert document["services"]["postgres"]["networks"] == ["internal"]
+    # Session 10 (ADR 0147). The cluster gained a SECOND network and this
+    # assertion is replaced by a stricter one rather than relaxed: the old form
+    # said "only internal" and would have been satisfied by any single network,
+    # including `edge`. What matters is which two, and which one it is NOT on.
+    assert document["services"]["postgres"]["networks"] == ["internal", "backup"]
     assert document["networks"]["internal"]["internal"] is True
+    assert "edge" not in document["services"]["postgres"]["networks"], (
+        "the database is on the network Traefik's public side lives on. `backup` "
+        "exists precisely so that reaching R2 does not require this (D516)"
+    )
+
+
+def test_the_backup_network_carries_the_database_and_nothing_else() -> None:
+    """ADR 0147's blast radius, stated as a membership rather than as prose.
+
+    The egress network exists for one command in one container. A second member
+    added later would widen what can reach the internet from inside a project,
+    and it would do so invisibly -- there is no other assertion anywhere that
+    counts who is on it.
+
+    `internal: true` is deliberately NOT set on it: that is the whole point of
+    the network. The assertion is that it is absent, so that a future edit
+    "hardening" it -- which would silently stop every backup -- fails here
+    instead of at the first archive-push.
+    """
+    document = yaml.safe_load(MODEL.read_text(encoding="utf-8"))
+
+    members = sorted(
+        name
+        for name, service in document["services"].items()
+        if "backup" in (service.get("networks") or [])
+    )
+    assert members == ["postgres"], f"the egress network has other members: {members}"
+    assert document["networks"]["backup"].get("internal") is not True, (
+        "the backup network is marked internal, so it has no route off the host "
+        "and archive-push cannot reach the repository. That is the state D516 "
+        "measured and this network exists to leave"
+    )
 
 
 def test_postgres_carries_no_traefik_label_of_any_kind() -> None:

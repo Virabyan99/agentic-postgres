@@ -159,7 +159,16 @@ services:
   # derives is recorded in outputs.json instead; Run 8 compares that against the
   # container actually running.
   postgres:
-    image: ${POSTGRES_IMAGE:?required}
+    # Built rather than pulled since Session 10, and `image:` is gone rather
+    # than kept beside `build:` -- Compose accepts both and then TAGS the build
+    # with that name, which would leave a locally built image wearing the
+    # upstream digest's identity. The base is still digest-pinned; it is the
+    # `BASE_IMAGE` argument below (ADR 0144).
+    build:
+      context: ./services/postgres
+      args:
+        BASE_IMAGE: ${POSTGRES_IMAGE:?required}
+        PGBACKREST_APT_VERSION: ${PGBACKREST_APT_VERSION:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [session3]
     restart: "on-failure:5"
@@ -195,6 +204,35 @@ services:
       # unreachable from its own project's services.
       - -c
       - listen_addresses=*
+      # Continuous WAL archiving, Session 10 (ADR 0144).
+      #
+      # `archive_mode` is not reloadable -- it costs a restart, which is why it
+      # is on the command line with the rest and not in a conf file something
+      # could try to SIGHUP.
+      #
+      # The archive command is a `${VAR}` rather than a literal because it
+      # carries the project's stanza, which `naming` derives. It is rendered by
+      # `rendering.py` into `compose.env`, never assembled here.
+      #
+      # **A failing archive command is not a failing cluster**, and Run 1
+      # measured what that looks like: with `archive_command=/bin/false`,
+      # `failed_count` climbed 11/15/26 over 60 seconds, `pg_wal` grew from 5 to
+      # 11 segments, and `pg_isready` -- the healthcheck below -- answered
+      # "accepting connections" at every sample (D534). The healthcheck cannot
+      # see this and is not being asked to; `REC-WAL-001`'s signal reads
+      # `pg_stat_archiver` and arrives in Run 7.
+      - -c
+      - archive_mode=${POSTGRES_ARCHIVE_MODE:?required}
+      - -c
+      - archive_command=${POSTGRES_ARCHIVE_COMMAND:?required}
+      # A ceiling on how long a low-traffic cluster may leave a partially filled
+      # segment unarchived, which is the real RPO floor: without it a project
+      # that writes little could go hours with its most recent commits only in
+      # `pg_wal`. It forces a segment switch, so it also costs a 16 MB segment
+      # per interval on an idle cluster -- accepted, and the number is the
+      # manifest's rather than a literal here.
+      - -c
+      - archive_timeout=${POSTGRES_ARCHIVE_TIMEOUT:?required}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d ${POSTGRES_DATABASE_NAME:?required} -q"]
       interval: 10s
@@ -203,8 +241,22 @@ services:
       start_period: 60s
     networks:
       - internal
+      # The egress network, and the database is the ONLY service on it (ADR
+      # 0147). `internal` is `internal: true` and has no route off the host --
+      # measured in Run 1, where a container on it failed both DNS and TCP to
+      # R2 while the same image on a plain bridge resolved and connected (D516).
+      # So `archive-push` cannot reach the repository from where the postmaster
+      # runs it, and something has to change. `edge` would work and is refused:
+      # it is where Traefik's public side lives.
+      - backup
     volumes:
       - postgres-data:/var/lib/postgresql
+      # The rendered `pgbackrest.conf` is NOT here. Its host path contains the
+      # project's rendered directory, which only exists at deploy time and does
+      # not exist at all under `--render-only`, so it is added by
+      # `runtime_override.py` exactly as the rendered `jwks.json` is (ADR 0113).
+      # A `${VAR}` here would need a value in `compose.env` that a checkout
+      # cannot produce.
 
   # The migration plane (ADR 0026). A separate service from `postgres` because
   # it is a separate authority: dbmate connects as `migration_user`, which holds
@@ -1338,6 +1390,20 @@ networks:
     # No route off the host. Product services attach here; only Traefik will
     # ever straddle both networks.
     internal: true
+  # Session 10 (ADR 0147). Egress, and nothing else: no Traefik, no published
+  # port, and exactly one member -- `postgres`, so that `archive-push` can reach
+  # the repository.
+  #
+  # A third network rather than putting the database on `edge`, and the comment
+  # above is now two-thirds true rather than wholly true: `storage` has
+  # straddled `internal` and `edge` since Session 7. What has never happened is
+  # the DATABASE being on the network Traefik's public side lives on, and this
+  # keeps it that way.
+  #
+  # The residual cost is real and is written down rather than implied: a
+  # compromised postgres container can reach the internet. It could not before.
+  backup:
+    name: ${BACKUP_NETWORK_NAME:?required}
 
 volumes:
   postgres-data:

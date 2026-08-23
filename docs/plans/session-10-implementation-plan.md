@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D539.**
+**Next free number after this table is D541.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -103,6 +103,8 @@ anything found *during* implementation is appended with the next free number.
 | **D536** | — | **Two hand-written lists of the same identities, and nothing compared them.** `evidence.ISOLATED_FIELDS` is what the shipped evidence document counts collisions over; `tests/contract/test_render_isolation.py::MUST_DIFFER` is what the isolation test iterates. They are named together in a comment in `output_migrations.py:343` and no test related them. Found by adding `backup.bucket` to both and noticing it could as easily have gone into one. | **A containment test**, added in this run: every pointer in `ISOLATED_FIELDS` must appear in `MUST_DIFFER`, and the surplus is **pinned to an exact list** rather than merely bounded, so it cannot be satisfied by `MUST_DIFFER` growing something unrelated. | D174/D175's shape — a property maintained by review rather than by a test — and it fails in the worse direction: a name dropped from `ISOLATED_FIELDS` leaves the published `collision_count` reporting **zero over a smaller set**, which is indistinguishable from isolation. Containment rather than equality is the true relation here and not a weakened one (cf. D300): `MUST_DIFFER` legitimately covers the slug and four route URLs, which are project-scoped but are not identities two projects could collide *on*. | — |
 | **D537** | — | **ADR 0012 and D389 pull in opposite directions, and outputs v13 is the first block to feel it.** ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be *unrepresentable* on that branch — which `database` achieves by splitting into `renderedDatabase` and `deployedDatabase`, a settings block duplicated per branch. D389 is the record of what that duplication costs: `storageSettings` was copied per branch, the two disagreed, and `STO-BOUND-001` read the deployed document for a bound that existed only on the rendered one. | **The observation moves out instead of the settings being duplicated.** `backup` is one `$def` referenced from both branches; `backup_state` is a separate top-level block that exists only on the deployed one. Both constraints hold at once and neither is traded away. | The alternative satisfies ADR 0012 by reintroducing exactly the copy D389 was written about. The database pays that cost for historical reasons; a block added today need not, and choosing otherwise would have been a decision made by imitation rather than by reading why the precedent exists. | 0146 |
 | **D538** | "Repository encryption enabled with a key stored separately from repository credentials." | **The contract can say a value is generated and rotatable; it has no way to say that rotating it destroys what it protects.** pgBackRest binds the cipher to the repository at `stanza-create`, so writing a new generation of the pass phrase re-encrypts nothing — the repository stays exactly as it was and the *reader* now holds the wrong phrase. Every check here passes, `materialize-secrets` reports success, and every backup ever taken becomes unreadable. | **`one_time_initialization: true` and `rotate_by_replacement: false`**, which is `postgres_init_superuser_password`'s declaration reused for a sharper consequence — there a new generation is *inert*, here it is destructive to readability. **`must_refresh_on_start: false` inverts the two credential halves beside it** and the asymmetry is stated in the file: a revoked API token fails closed at the provider, so refusing the last-known-good start only relocates that error; this value cannot be revoked, so the last known good IS the correct value and failing closed would take a cluster down to protect nothing. | The three flags already existed and D56 already recorded why: they are what lets rotation tooling **refuse to claim a rotation it did not perform**. What Session 10 adds is the first secret where the false claim is not merely misleading — it is the report you would read while the repository became unrecoverable. A test asserts all three, with the two credential halves as its control so it cannot pass because every secret in the file happens to be declared this way. | 0145 |
+| **D539** | — | **`postgres` is the first service this repository BUILDS that must not run as 65532.** `test_built_services_run_as_a_fixed_non_root_user` asserted one literal for every built service; the moment `postgres` gained a `build:` block it was swept in, and 65532 is a cluster that cannot read the PGDATA its own image owns. The same edit exposed a second buried assumption: the test also required `read_only: true`, which no PostgreSQL container can satisfy — the entrypoint writes its socket, its PID file and the whole of initdb's output. | **A per-service uid map and a one-member `WRITABLE_ROOT_FILESYSTEM` set**, plus an equality check that the built set and the declared set are the same. **Not** a relaxation to `!= 0`. | Widening to "not root" would accept any uid including a typo'd one — weakening a passing assertion to admit a new case, which is what D300 refuses three times over. Pinning each service is **stricter** than one shared literal: it now fails on a service that starts or stops being built without a decision, which the old form could not see. It caught its own author immediately — `contract-probe` was in the first draft of the map and is not a built service. | 0147 |
+| **D540** | — | **`bin/lock-versions.sh --update` is wholesale, so adding one pin adopted three unrelated ones.** Locking the new apt entry re-resolved every image and moved `POSTGRES_IMAGE` (`691673…` → `2ba9ca…`), `PYTHON_RUNTIME_IMAGE` (3.12.13 → 3.12.14, reddening an unrelated test) and `TRAEFIK_IMAGE`. The first is disqualifying: **Run 1 measured pgBackRest's availability, the libssh2 failure and PGDATA against `691673…`**, so adopting the new digest would have left this session's whole first run describing an image the lock no longer names. | **The three are restored to their committed digests**, so Run 4's diff is the apt pin and nothing else. `--check` stays green because it verifies that a digest is present, well formed and paired with the tag `versions.in.yaml` names — it deliberately reaches no registry, so a restored digest is coherent rather than a lie the check cannot see. | D99's third instance, and the first where the drift would have invalidated a measurement rather than merely a version string. Adopting all three is its own run with its own re-measurement — the same rule CLAUDE.md already states for `requirements-dev.in`: *commit it separately*. **Nothing forces this**: `--update` will re-adopt them the next time anyone runs it, and the only thing standing in the way is this row. | — |
 
 ---
 
@@ -437,7 +439,7 @@ matched twice and the battery refused to run. Unanchored, it would have mutated
 the wrong secret and reported a kill for a test that never saw the mutation
 (D269's exact shape).
 
-### Run 4 — The image, the config, the network, the archive
+### Run 4 — The image, the config, the network, the archive — **Done.**
 
 - `services/postgres/Dockerfile`; `PGBACKREST_VERSION` beside the image pin in
   `versions.in.yaml`.
@@ -449,6 +451,72 @@ the wrong secret and reported a kill for a test that never saw the mutation
   on the command list.
 - **`--render-only` must still work with no host and no root**, and a rendered
   fixture must still render identically for both example projects.
+
+**Done.** The cluster builds from its own image, carries an archiver, reaches a
+repository over a network of its own, and renders a configuration with no
+credential in it.
+
+**What was built.** `services/postgres/Dockerfile` — the first database image
+this repository builds — taking `BASE_IMAGE` and `PGBACKREST_APT_VERSION` as
+arguments with no defaults. `compose.yaml`: `build:` replacing `image:` (both
+together would tag the local build with the upstream digest's identity), the
+three archiving settings on the command line, the `backup` network, and the
+rendered config mounted through `runtime_override` rather than through a
+`${VAR}` a checkout cannot produce. `build_pgbackrest_conf`, and
+`config.ARCHIVE_TIMEOUT_SECONDS`.
+
+**The lock learned a third registry**, and that was not in the plan. An apt
+version added the obvious way is a string nothing dereferences, which is D201's
+exact condition and has reddened this gate six times — and D533 had already
+forecast that `lock-versions.sh` is where it gets fixed. Measured first (rig2,
+four arms): the bookworm-pgdg index is 1.1 MB gzipped, 4,310 stanzas, fetched in
+0.4s, and **both controls refuse** — a version that does not exist and a package
+that does not exist each resolve to nothing rather than to something plausible.
+`versions.env` now carries
+`PGBACKREST_APT_VERSION_DIGEST=sha256:ecea2337…`, and the production path
+resolved the same digest the rig did, independently.
+
+**`PGBACKREST_IMAGE` is retired** (D532), so the lock names one pgBackRest and
+it is the one that gets installed.
+
+**Two things the archiving config does that a default would not.**
+`repo1-cipher-type` is written rather than omitted, because its default is
+`none` — an unencrypted repository that looks configured is the worst default
+in this file. `repo1-s3-uri-style=path` is written for ADR 0107's *reason*
+rather than its measurement: the botocore fallback D344 measured does not
+transfer to pgBackRest, but freezing one style does, so an upstream default
+change becomes a diff instead of a deployment that stops working.
+
+**`archive_timeout` is a product constant and not a manifest field**, and the
+refusal is recorded rather than left looking like an oversight. D519 says a
+bound should be published; publishing this one means a member on
+`backupSettings`, which means outputs **v14 inside the session that shipped
+v13** — which ADR 0146 refused in as many words.
+
+**Two passing tests were replaced by stricter ones, both ADR-authorised.**
+D539 is the built-service uid rule. The other is
+`test_postgres_joins_only_the_internal_network`: its old assertion was
+`networks == ["internal"]`, which would have been satisfied by any single
+network **including `edge`** — the replacement pins both members and asserts
+`edge` is not among them, which is more than the original said (ADR 0147,
+ADR 0096).
+
+**D540 is the row a future run has to act on.** `--update` re-resolved three
+unrelated rolling tags, one of which would have invalidated Run 1's entire
+measurement set. They are restored; nothing prevents the next `--update` from
+re-adopting them.
+
+**Battery: E1–E9, 9 of 9 killed** as `FAILED`, control green and unreachable in
+every arm, both mutated files restored byte-for-byte. Four arms re-render the
+fixtures because the tests read `.generated/`, and that is per-arm rather than
+unconditional so an arm cannot pass because of a re-render it did not need. The
+arms worth naming: **E1** leaves the repository unencrypted, **E2** points
+`pg1-path` at the volume mount rather than PGDATA — the mutation whose real
+consequence is a restore of the wrong directory rather than an error — and
+**E8** marks the egress network `internal: true`, which is the edit a future
+reader makes while "hardening" and which would silently stop every backup.
+
+**`--render-only` still works with no host and no root**, verified as uid 1000.
 
 ### Run 5 — Activating `backup_user`, and the fifth claimant
 

@@ -442,7 +442,9 @@ def test_the_repository_credential_is_granted_to_postgres_and_to_nothing_else(
             f"{name} is granted to something other than postgres"
         )
 
-    postgres = {g["secret"]["name"] for g in secrets_contract.consumers_of(contract, "postgres", 10)}
+    postgres = {
+        g["secret"]["name"] for g in secrets_contract.consumers_of(contract, "postgres", 10)
+    }
     storage = {g["secret"]["name"] for g in secrets_contract.consumers_of(contract, "storage", 10)}
 
     assert set(BACKUP_SECRETS) <= postgres
@@ -622,3 +624,203 @@ def test_the_deploy_never_reports_ready_before_anything_reads_the_repository(
     for member, value in state.items():
         if member != "status":
             assert value is None, f"{member} is {value!r} and nothing has been observed"
+
+
+# ---------------------------------------------------------------------------
+# Run 4: the rendered archiver configuration (ADR 0144)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def alpha_conf() -> str:
+    path = REPO_ROOT / ".generated" / "fixture-alpha-dev" / "pgbackrest.conf"
+    if not path.exists():
+        pytest.skip("the alpha fixture has not been rendered")
+    return path.read_text(encoding="utf-8")
+
+
+def test_the_rendered_config_carries_no_credential(alpha_conf: str) -> None:
+    """The three keys pgBackRest reads from the environment instead.
+
+    A secret in a rendered file is a secret in the rendered directory, and the
+    whole point of `secrets.required.yaml` is that values live in per-consumer
+    generations under /run/secrets (ADR 0010, D60). pgBackRest falls back to the
+    environment for each of these when the config omits it, so omitting them is
+    a working configuration rather than an incomplete one.
+
+    Asserted as an absence of the KEYS rather than by scanning for
+    secret-looking values: a value scan passes for a config that happens to have
+    none today and fails to notice the key that will carry one tomorrow.
+    """
+    for key in ("repo1-s3-key", "repo1-s3-key-secret", "repo1-cipher-pass"):
+        assert key not in alpha_conf, f"{key} is written into the rendered config"
+
+
+def test_pg1_path_is_pgdata_and_not_the_mount_point(alpha_conf: str) -> None:
+    """D514, and it is the assertion with the worst failure mode in this file.
+
+    Two of the three candidate paths persist data (D53), so a stanza created
+    against the wrong one does not error -- it restores the wrong directory. The
+    expected value is imported from the one constant the image contract measures
+    against the running image, so this cannot pass by agreeing with itself.
+    """
+    from agentic_postgres import runtime_override
+
+    assert f"pg1-path={runtime_override.POSTGRES_PGDATA}" in alpha_conf
+    assert f"pg1-path={runtime_override.POSTGRES_VOLUME_TARGET}\n" not in alpha_conf
+
+
+def test_the_config_names_the_repository_the_document_names(
+    alpha_conf: str, alpha_outputs: dict[str, Any]
+) -> None:
+    """Every value comes out of `outputs`, not out of a second derivation.
+
+    ADR 0002 in the place it matters most: the stanza, the bucket and the
+    retention are already decided and published, and a renderer that re-derived
+    any of them from the project key would be the copy that disagrees.
+    """
+    backup = alpha_outputs["backup"]
+    assert f"repo1-s3-bucket={backup['bucket']}" in alpha_conf
+    assert f"[{backup['stanza']}]" in alpha_conf
+    assert f"repo1-retention-full={backup['retain_full']}" in alpha_conf
+    assert f"repo1-path=/{backup['repository_prefix'].rstrip('/')}" in alpha_conf
+
+
+def test_the_endpoint_is_derived_from_the_backups_own_account(alpha_conf: str) -> None:
+    """`backup.account_id`, through `naming.storage_endpoint_url` (ADR 0106).
+
+    The same function storage uses, not a second one, and the container is
+    handed a finished host rather than two fragments and a format string.
+    """
+    manifest = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
+    expected = naming.storage_endpoint_url(manifest["backup"]["account_id"]).removeprefix(
+        "https://"
+    )
+    assert f"repo1-s3-endpoint={expected}" in alpha_conf
+
+
+def test_encryption_and_the_addressing_style_are_written_not_defaulted(
+    alpha_conf: str,
+) -> None:
+    """Two values that would work today if omitted, and are written anyway.
+
+    `repo1-cipher-type` defaults to `none`, so omitting it is an unencrypted
+    repository that looks configured -- the single worst default in this file.
+    `repo1-s3-uri-style` is written for ADR 0107's reason rather than its
+    measurement: the botocore fallback it measured does not transfer to
+    pgBackRest, but freezing one style does, so an upstream default change
+    becomes a visible diff instead of a deployment that stops working.
+    """
+    assert "repo1-cipher-type=aes-256-cbc" in alpha_conf
+    assert "repo1-s3-uri-style=path" in alpha_conf
+
+
+def test_a_disabled_project_still_renders_a_file_and_it_names_no_repository() -> None:
+    """The mount is unconditional, so the file has to be.
+
+    Docker turns a missing bind-mount source into a DIRECTORY, and the container
+    then opens a directory where its configuration should be -- which is exactly
+    how the agent plane failed its first start anywhere (D463).
+    """
+    from agentic_postgres import rendering
+
+    document = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
+    document["backup"] = {"enabled": False}
+    outputs = _render(document)
+    identity = naming.derive(
+        slug=document["project"]["slug"],
+        environment=document["project"]["environment"],
+        domain=document["project"]["domain"],
+        api_base_path=document["api"]["public_base_path"],
+        mcp_base_path=document["mcp"]["public_base_path"],
+        backup_enabled=False,
+    )
+    rendered = rendering.build_pgbackrest_conf(identity, outputs, "").decode("utf-8")
+
+    assert rendered.strip(), "a disabled project rendered an empty file"
+    assert "repo1-s3-bucket" not in rendered
+    assert "pg1-path" not in rendered, (
+        "a disabled project names a stanza, so `pgbackrest info` would report on "
+        "a repository this project does not have"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Run 4: what the cluster is told to do with its WAL
+# ---------------------------------------------------------------------------
+
+
+def _compose_env(**backup: Any) -> dict[str, str]:
+    from agentic_postgres import rendering
+
+    document = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
+    if backup:
+        document["backup"] = {**document["backup"], **backup}
+    identity = naming.derive(
+        slug=document["project"]["slug"],
+        environment=document["project"]["environment"],
+        domain=document["project"]["domain"],
+        api_base_path=document["api"]["public_base_path"],
+        mcp_base_path=document["mcp"]["public_base_path"],
+        backup_enabled=bool(document["backup"].get("enabled")),
+        backup_stanza=document["backup"].get("stanza"),
+    )
+    raw = rendering.build_compose_env(
+        identity,
+        config.database_budget(document["database"]),
+        document["database"],
+        document["api"],
+        document.get("storage"),
+        document["backup"],
+    ).decode("utf-8")
+    values = {}
+    for line in raw.splitlines():
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            values[key] = value
+    return values
+
+
+def test_the_archive_command_carries_the_projects_own_stanza() -> None:
+    """Interpolated from `naming`, assembled nowhere else.
+
+    ADR 0106's rule -- the container is handed a finished value -- applied to a
+    command line instead of a URL. A container that built its own stanza from a
+    project key would be a second derivation of a name ADR 0002 allows one of.
+    """
+    values = _compose_env()
+    assert values["POSTGRES_ARCHIVE_MODE"] == "on"
+    assert values["POSTGRES_ARCHIVE_COMMAND"] == (
+        "pgbackrest --stanza=fixture-alpha-dev archive-push %p"
+    )
+
+
+def test_a_disabled_project_renders_an_archive_command_that_cannot_run() -> None:
+    """Not an empty string, and not a real command either.
+
+    Compose refuses an empty interpolation exactly as it refuses an unset one
+    (D178, ADR 0062), so every project must carry a value. With
+    `archive_mode=off` the postmaster never runs it, which makes `/bin/false`
+    both honest and unreachable.
+    """
+    values = _compose_env(enabled=False, stanza=None, repository_prefix=None, account_id=None)
+    assert values["POSTGRES_ARCHIVE_MODE"] == "off"
+    assert values["POSTGRES_ARCHIVE_COMMAND"] == "/bin/false"
+    assert values["BACKUP_NETWORK_NAME"], (
+        "the network name is empty for a disabled project, and compose.yaml "
+        "declares the network unconditionally -- D178's exact failure"
+    )
+
+
+def test_the_archive_timeout_bounds_the_rpo_of_a_quiet_cluster() -> None:
+    """The one archiving value that is a product constant rather than a field.
+
+    D519 says a bound should be published, and this one is not: publishing it
+    means a member on `backupSettings`, which means outputs v14 inside the
+    session that shipped v13 -- which ADR 0146 refused in as many words. Read
+    from the constant so that the refusal is visible here rather than looking
+    like an oversight.
+    """
+    values = _compose_env()
+    assert values["POSTGRES_ARCHIVE_TIMEOUT"] == f"{config.ARCHIVE_TIMEOUT_SECONDS}s"
+    assert config.ARCHIVE_TIMEOUT_SECONDS > 0

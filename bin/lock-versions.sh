@@ -105,6 +105,7 @@ update() {
   fi
 
   "$(python_bin)" - "$CANDIDATES" "$LOCK" "${packages_only}" <<'PY'
+import gzip
 import json
 import os
 import subprocess
@@ -207,8 +208,66 @@ for name, reference in sorted(spec["images"].items()):
 # its package, and resolves to the digest of exactly one published artifact: the
 # sdist on PyPI, the tarball on npm. A fictional version cannot be locked,
 # because there is no artifact to name.
+def resolve_apt(name, entry):
+    """The SHA256 of the one .deb matching package and version exactly.
+
+    A Debian archive publishes one index per suite, so the entry names it. The
+    stanzas are parsed by splitting rather than with a library: three fields
+    matter, and a dependency here would be a dependency of the lock tool, which
+    has to run before anything is installed.
+
+    Continuation lines (leading space) are skipped rather than joined -- none of
+    the three fields read here is ever continued, and joining them would be code
+    exercised by nothing.
+    """
+    package, version, index = entry["package"], entry["version"], entry["index"]
+    try:
+        with urllib.request.urlopen(index, timeout=120) as response:
+            body = response.read()
+    except urllib.error.HTTPError as error:
+        return None, f"{name}: apt index returned HTTP {error.code} for {index}"
+    except OSError as error:
+        return None, f"{name}: cannot reach the apt index ({error})"
+
+    try:
+        text = gzip.decompress(body).decode("utf-8", errors="replace")
+    except (OSError, EOFError) as error:
+        return None, f"{name}: apt index at {index} is not gzip ({error})"
+
+    for stanza in text.split("\n\n"):
+        fields = {}
+        for line in stanza.splitlines():
+            if line.startswith((" ", "\t")):
+                continue
+            key, _, value = line.partition(":")
+            fields[key.strip()] = value.strip()
+        if fields.get("Package") != package or fields.get("Version") != version:
+            continue
+        digest = fields.get("SHA256")
+        if not digest:
+            return None, f"{name}: {package} {version} is in the index with no SHA256"
+        return f"sha256:{digest}", None
+
+    # D201's condition, and the message says so in the same words the other two
+    # registries use. An apt suite drops superseded versions, so this is also
+    # what an expired pin looks like -- the build fails closed rather than
+    # floating to whatever is current (D533).
+    return None, (
+        f"{name}: the apt index has no {package} {version}. The version does not "
+        "exist or has been superseded and removed; this is D201's condition and it blocks"
+    )
+
+
 def resolve_package(name, entry):
     registry, package, version = entry["registry"], entry["package"], entry["version"]
+
+    # An apt archive answers with a whole suite rather than one release, so it
+    # is resolved separately and returns before the JSON path below. Measured
+    # (rig2, Session 10 Run 4): the bookworm-pgdg index is 1.1 MB gzipped, 4,310
+    # stanzas, and fetches in under a second -- a cost `--update` pays and
+    # `--check` never does, because `--check` reads two files on disk.
+    if registry == "apt":
+        return resolve_apt(name, entry)
 
     if registry == "pypi":
         url = f"https://pypi.org/pypi/{package}/{version}/json"
@@ -406,7 +465,13 @@ for name, reference in sorted(spec["images"].items()):
 #     That is not proof the artifact exists today; it is proof that whoever ran
 #     `--update` found one, which a copied version string could never be.
 DIGEST = re.compile(r"^(sha256|sha512):[A-Za-z0-9+/=_\-]{32,}$")
-REGISTRIES = ("pypi", "npm")
+#: `apt` is Session 10's, and it exists so a Debian package pin is a dereference
+#: rather than a string (D201's condition, forecast by D533). An `apt` entry
+#: declares one more key than the other two -- `index` -- because a Debian
+#: archive has no per-package endpoint the way PyPI and npm do: the whole suite
+#: is one file, and which file it is depends on the base image's release.
+REGISTRIES = ("pypi", "npm", "apt")
+REGISTRY_KEYS = {"apt": {"index"}}
 
 for name, entry in sorted(spec["packages"].items()):
     if not isinstance(entry, dict):
@@ -416,7 +481,10 @@ for name, entry in sorted(spec["packages"].items()):
         )
         continue
 
-    missing = {"registry", "package", "version"} - set(entry)
+    required_keys = {"registry", "package", "version"} | REGISTRY_KEYS.get(
+        entry.get("registry"), set()
+    )
+    missing = required_keys - set(entry)
     if missing:
         problems.append(f"{name} is missing {sorted(missing)} in versions.in.yaml")
         continue

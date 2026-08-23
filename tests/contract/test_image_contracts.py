@@ -104,7 +104,7 @@ from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, runtime_override
 
 pytestmark = [pytest.mark.database, pytest.mark.p0]
 
@@ -113,8 +113,16 @@ pytestmark = [pytest.mark.database, pytest.mark.p0]
 #: commit as a `bin/lock-versions.sh --update`, not in a fix-up.
 POSTGRES_UID = 999
 POSTGRES_GID = 999
-POSTGRES_PGDATA = "/var/lib/postgresql/18/docker"
-POSTGRES_VOLUME_TARGET = "/var/lib/postgresql"
+#: Imported rather than restated since Session 10 (D514).
+#:
+#: These were literals here, and that was right while this module was their only
+#: reader. Session 10 gave PGDATA a second one -- `pgbackrest.conf`'s `pg1-path`
+#: -- and two literals would be two authorities for a path whose disagreement
+#: does not fail: a stanza created against the mount point instead of PGDATA
+#: restores the wrong thing rather than erroring. Importing makes the
+#: measurement below a measurement of the value the renderer actually writes.
+POSTGRES_PGDATA = runtime_override.POSTGRES_PGDATA
+POSTGRES_VOLUME_TARGET = runtime_override.POSTGRES_VOLUME_TARGET
 POSTGRES_MAJOR = "18"
 PGVECTOR_VERSION = "0.8.6"
 

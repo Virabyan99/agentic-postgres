@@ -138,7 +138,12 @@ def render(project: Path, capabilities: Path) -> int:
 
     summary = (directory / "rendered-summary.txt").read_text(encoding="utf-8")
     print(summary, end="")
-    print(f"\nWrote {directory}/{{outputs.json,compose.env,rendered-summary.txt}} (mode 0600)")
+    # Spelled out rather than globbed, so a file the renderer stops producing is
+    # a visible diff here. Session 10 added pgbackrest.conf.
+    print(
+        f"\nWrote {directory}/"
+        "{outputs.json,compose.env,pgbackrest.conf,rendered-summary.txt} (mode 0600)"
+    )
     print("No service was started, and no provider was contacted.")
     return 0
 

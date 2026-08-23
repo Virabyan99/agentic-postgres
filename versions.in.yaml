@@ -84,7 +84,16 @@ images:
   # `latest` is 16.0 today. Not adopted: two majors of unmeasured configuration
   # change, bought for one key this session mitigates in the error wrapper.
   POSTGREST_IMAGE: docker.io/postgrest/postgrest:v14.16
-  PGBACKREST_IMAGE: docker.io/woblerr/pgbackrest:2.55.1
+  # PGBACKREST_IMAGE was here from Session 1 to Session 10 and was referenced by
+  # nothing -- no service, no script, no test. It is retired rather than wired
+  # up, because the archiver has to live where `archive_command` runs and that
+  # is the Postgres container (ADR 0144, D513). What replaces it is
+  # `PGBACKREST_APT_VERSION` under `packages:`.
+  #
+  # It could not have been kept as a second reference either: PGDG does not
+  # carry 2.55.1, so the pin and the installable version cannot be made equal,
+  # and two pgBackRest versions in one lock is D201's shape -- the inert one is
+  # what a reader quotes (D532).
   PYTHON_RUNTIME_IMAGE: docker.io/library/python:3.12-slim
   NODE_RUNTIME_IMAGE: docker.io/library/node:22-alpine
   INFISICAL_IMAGE: docker.io/infisical/cli:0.41.89
@@ -382,3 +391,35 @@ packages:
     registry: pypi
     package: botocore
     version: "1.43.72"
+  # Session 10, Run 4, and the first `apt` entry in this file (ADR 0144).
+  #
+  # pgBackRest goes INTO the Postgres image rather than beside it, because
+  # `archive_command` is run by the postmaster in its own container. Run 1
+  # measured both routes: a multi-stage COPY out of the old `PGBACKREST_IMAGE`
+  # builds and will not load -- `libssh2.so.1: cannot open shared object file`,
+  # since the Debian 12 base does not ship it -- and the PGDG install adds
+  # exactly that library beside the package, two packages and 800,863 bytes on a
+  # 158,801,932-byte base.
+  #
+  # `registry: apt` is new, and `index:` with it. A Debian archive has no
+  # per-package endpoint the way PyPI and npm do, so the entry names the suite
+  # index and the lock reads the SHA256 of one .deb out of it. Measured (rig2):
+  # 1.1 MB gzipped, 4,310 stanzas, under a second, and both controls refuse -- a
+  # version that does not exist and a package that does not exist each resolve
+  # to nothing rather than to something plausible.
+  #
+  # **This pin expires, and that is accepted rather than unnoticed** (D533). A
+  # PGDG suite drops superseded versions, so one day this resolves to nothing
+  # and `--update` blocks with D201's message. That is the acceptable half: the
+  # build fails closed and produces no image, which is not what a floating tag
+  # does. The index offers 2.58.0, 2.59.0 and 2.59.1 today.
+  #
+  # The suite is `bookworm-pgdg` because the base image is Debian 12 -- read off
+  # the running image, not assumed from the tag. If POSTGRES_IMAGE moves to a
+  # new Debian release this index moves with it, and the build failing closed is
+  # what makes that visible.
+  PGBACKREST_APT_VERSION:
+    registry: apt
+    package: pgbackrest
+    version: "2.59.1-1.pgdg12+1"
+    index: https://apt.postgresql.org/pub/repos/apt/dists/bookworm-pgdg/main/binary-amd64/Packages.gz

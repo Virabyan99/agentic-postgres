@@ -295,6 +295,26 @@ STORAGE_DEFAULTS: dict[str, Any] = {
 #: `account_id` deliberately has NO default, for STORAGE_DEFAULTS' reason and
 #: with a sharper edge: a plausible-looking account id would be discovered at
 #: the first `archive-push`, which is the one place nobody is watching.
+#: How long a segment may sit partially filled before the cluster forces a
+#: switch, in seconds. Session 10, ADR 0144.
+#:
+#: A product constant and NOT a manifest field, which is a deliberate refusal.
+#: It is a bound, so D519 says it should be published in `outputs.json` beside
+#: `retain_full` -- and publishing it means adding a member to `backupSettings`,
+#: which means outputs v14 inside the same session that shipped v13. ADR 0146
+#: refused exactly that ("Three separate versions, one per run"), so the choice
+#: is between a per-project knob nobody has asked for and a second version bump.
+#: The knob loses. If a project ever needs its own, it arrives with the next
+#: version and this constant becomes its default.
+#:
+#: 60 seconds is the real RPO floor for a quiet cluster: without it a project
+#: that writes little keeps its most recent commits in `pg_wal` alone until a
+#: segment fills, which on a 16 MB segment can be hours. The cost is one 16 MB
+#: segment per interval on an idle cluster, and it is accepted -- an empty
+#: segment compresses to almost nothing in the repository, and the alternative
+#: is an RPO nobody can state.
+ARCHIVE_TIMEOUT_SECONDS = 60
+
 BACKUP_DEFAULTS: dict[str, Any] = {
     "enabled": False,
     "stanza": None,
