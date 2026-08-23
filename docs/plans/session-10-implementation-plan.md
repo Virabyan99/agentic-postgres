@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D531.**
+**Next free number after this table is D536.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -95,6 +95,11 @@ anything found *during* implementation is appended with the next free number.
 | **D528** | "…health checks that expose failures." | Nothing measures how a failed archive actually surfaces. The tempting proof is a log grep. | **`REC-WAL-001` is measured against `pg_stat_archiver`** — `last_failed_time`, `last_failed_wal`, `failed_count`, `last_archived_time` — with a green control in the same invocation, and the container healthcheck reads the same view rather than a second source. | D374: *a test can check a string its target cannot contain*, and it passed for an unrelated reason. A log line is a third party's formatting decision; a catalog view is the product's own report. | — |
 | **D529** | "Recovery time and latest recoverable time must be recorded as evidence." | Nothing measures either, and both are trivially fakeable. | **RTO is wall time recorded by `bin/restore-test.sh` itself around the restore**, and the **latest recoverable time is read from `pgbackrest info`**, never from the clock and never from the requested target. The evidence document records requested target **and** achieved recovery point as separate fields, because a restore that lands early is the failure this pair exists to expose. | Session 9's handoff states it as a prohibition: Session 10 must not *"record a recovery time it did not measure."* D267 is the general rule — never write a measurement you did not run. | needed |
 | **D530** | — | **`ADMINISTRATION_RESERVED_CONNECTIONS = 5` already claims to hold connections "for migrations, backups, a direct developer session and PostgreSQL's own `superuser_reserved_connections`"** (`config.py:303-306`). So the budget arithmetic may already contain the backup allowance, unnamed. | **Decide, do not assume.** Either the backup claimant is charged its own summand and the administration reserve's comment is corrected, or the reserve *is* its budget and `backup_user`'s `CONNECTION LIMIT` is set from it — and the ADR says which, with the number. | D327's shape: the manifest's arithmetic and the bootstrap plane's arithmetic *"agreed by coincidence, 23 against 20"*, and nothing compared them until Session 7. Two arithmetics over one budget is how a fifth claimant becomes a sixth. | needed |
+| **D531** | — | **The plan predicted the multi-stage `COPY` route would fail on musl-versus-glibc. It does not, and it fails anyway.** Measured (rig1): the pinned `woblerr/pgbackrest:2.55.1` image is **Ubuntu 24.04, glibc** — there is no musl anywhere in this question. The `COPY` builds and the binary will not load: `error while loading shared libraries: libssh2.so.1: cannot open shared object file`. Every other soname resolved, `libc.so.6` included. The Debian 12 base does not ship libssh2, and the PGDG install adds exactly that library beside the package. | **A1, the apt route.** The plan's stated reason for refusing A2 is **corrected in place rather than quietly dropped**: the route is dead for a mundane missing-library reason, not an ABI one. | A prediction that reaches the right conclusion by the wrong mechanism is the thing this project is worst at noticing — it reads as a confirmed measurement forever after, and the mechanism is the part a future reader reuses. | 0144 |
+| **D532** | "pgBackRest installed at a pinned version." | **PGDG does not carry the pinned version.** Measured: `apt-cache madison pgbackrest` inside the Postgres base offers **2.59.1, 2.59.0, 2.58.0** from PGDG and 2.45 from Debian. `PGBACKREST_IMAGE` pins **2.55.1**, available from neither. The pin and the installable version cannot be made equal. | **`PGBACKREST_IMAGE` is retired from `versions.in.yaml` and `versions.env` in Run 4**, and the derived image's apt pin becomes the authority. Installed and measured: `pgbackrest 2.59.1-1.pgdg12+1`, two packages added, **800,863 bytes** on a 158,801,932-byte base. | Keeping both puts two pgBackRest versions in one lock — one inert and wrong, one real — and D201 is the record of which one a reader quotes: `SCALAR_VERSION` named a release that had never existed, for four sessions. | 0144 |
+| **D533** | — | **An apt version pin is not a digest.** PGDG is a rolling repository that removes superseded versions, so `pgbackrest=2.59.1-1.pgdg12+1` will eventually stop resolving. | **Accepted, and stated.** Measured: an unresolvable pin exits **100** and produces no image — the build **fails closed**, which is the acceptable half. Nothing moves silently, and refreshing the pin is a deliberate edit. `bin/lock-versions.sh` is where a later session teaches the lock about apt pins. | D99's shape (`PYTHON_RUNTIME_IMAGE` selects a rolling minor tag), with one difference that matters: this pin cannot drift into a *different* build, only into no build. A failure that is loud and total is not the defect a floating tag is. | 0144 |
+| **D534** | "…health checks that expose failures." | **`pg_isready` cannot see a broken archiver, and `pg_isready` is the healthcheck `compose.yaml` uses today.** Measured over 60s against a cluster with `archive_command=/bin/false`: `failed_count` 11 → 15 → 26, `archived_count` **0**, `pg_wal` **5 → 6 → 11 files** — and `pg_isready` answered *accepting connections* at every sample, container status `running`, while the `/bin/true` control archived cleanly and held `pg_wal` flat at 4. | **`REC-WAL-001`'s signal is a new one**, reading `pg_stat_archiver`. Whether the Postgres healthcheck gains an archiving clause or a second check carries it is decided in Run 7, with the numbers in hand. | A cluster archiving nothing and filling its disk toward the outage this session exists to prevent is currently reported **healthy**. That is not a weak signal; it is the absence of one. | — |
+| **D535** | — | **`last_failed_wal` does not advance.** Measured: it pinned to `000000010000000000000001` across all three samples while `failed_count` climbed 11 → 15 → 26, because the archiver retries the **oldest** unarchived segment, not the newest. The retry shape is three attempts a second apart, then `WARNING: archiving write-ahead log file … failed too many times, will try again later`. | **`failed_count` is the moving value and the one a proof asserts on.** `last_failed_wal` says *which* segment is stuck — diagnosis, not detection. | A proof asserting `last_failed_wal` advances would be green only when something else was also wrong, and red during exactly the steady-state failure it exists to catch. Written down before anybody writes that assertion. | — |
 
 ---
 
@@ -208,7 +213,7 @@ the tests** with a mutation battery whose failures are fatal (D269), whose
 control is a test the mutation cannot reach (D499), and which asserts *how* each
 mutation failed (D386).
 
-### Run 1 — Measure how pgBackRest reaches the cluster
+### Run 1 — Measure how pgBackRest reaches the cluster — **Done.**
 
 Nothing is written until this run answers, each arm with a control that proves
 the rig can tell success from failure:
@@ -228,6 +233,65 @@ the rig can tell success from failure:
   `*.r2.cloudflarestorage.com`?
 
 **ADR:** the archiver lives beside the cluster it archives, and what that costs.
+
+**Done.** Five arms, each with a control that ran green in the same invocation,
+against the pinned digests on 2026-08-23. **Three of the five contradicted this
+plan**, and the corrections are D531-D535.
+
+**What was measured (rig1).**
+
+* **Arm C - PGDATA.** `/var/lib/postgresql/18/docker`, read off the running
+  image rather than off `test_image_contracts.py`'s constant; the image's
+  declared VOLUME is `/var/lib/postgresql`. The two differ, so the comparison
+  can fail. **D514 confirmed.**
+* **Arm A0 - the source image.** Ubuntu 24.04, glibc. **The plan's musl trap
+  does not exist** (D531).
+* **Arm A1 - the apt route works**, and cheaply: `pgbackrest
+  2.59.1-1.pgdg12+1`, package count 155 to **157** (`pgbackrest` and
+  `libssh2-1`, nothing else), **+800,863 bytes**. Its control - the same
+  Dockerfile with `pgbackrest=0.0.0-doesnotexist` - fails with `E: Version ...
+  was not found`, exit 100, so a green install is not a step that cannot fail.
+  **PGDG does not carry the pinned 2.55.1** (D532), and the pin is not a digest
+  (D533).
+* **Arm A2 - the COPY route builds and does not run**, on a missing
+  `libssh2.so.1` (D531). The library A1 installs is precisely the one A2 lacks.
+* **Arm B - a config the archiver cannot read stops it.** uid 999 against a
+  root-owned `0400` config: `P00 ERROR: [041]: unable to open file ... for
+  read: [13] Permission denied`, **exit 41**. Owned `999:999`, same mode:
+  **exit 0**, and the output names stanza `rig`, which exists only in that
+  file. **pgBackRest does not silently fall back to defaults** - the failure
+  mode §9 fears is absent here, and that is worth knowing before Run 4 mounts
+  anything. **D515 confirmed and strengthened.**
+* **Arm D - a failing `archive_command`.** `failed_count` 11 / 15 / 26 at T+0,
+  T+30, T+60; `archived_count` 0; `last_archived_wal` NULL; `pg_wal` 5 to 6 to
+  11 files. The `/bin/true` control archived 4 to 5 to 6 with `failed_count` 0
+  and `pg_wal` flat at 4, in the same invocation. **`pg_isready` reported
+  accepting connections throughout** (D534), and **`last_failed_wal` never
+  advanced** (D535).
+* **Arm E - egress.** A plain user-defined bridge resolved
+  `r2.cloudflarestorage.com` to `172.64.190.1` and connected on 443; the same
+  image on an `--internal` network failed both DNS and TCP. **`internal: true`
+  is a real boundary**, so D516's second network is required rather than
+  tidy-looking.
+
+**One rig defect, recorded because it is the same shape as the product defects
+this session hunts.** Arm B's *verdict* lines looked for a `repo1-path` marker
+in `pgbackrest info` output, which `info` never prints, so both arms printed
+"inconclusive" while the measurement underneath them was decisive. The
+discriminator that actually worked was unplanned: B2's output names the stanza
+`rig`, which exists only in the config under test. **The reading was wrong, not
+the measurement** - and a rig whose verdict logic cannot see its own result is
+one commit away from a proof with the same property.
+
+**ADR 0144**, and it decides more than the install route: the base stays
+digest-pinned, the derived layer adds two packages, `archive_command` runs as
+the postmaster's own uid, every archiver-readable file is `999:999` `0400`, and
+**`PGBACKREST_IMAGE` is retired** rather than left inert beside a pin that
+disagrees with it.
+
+**No mutation battery.** This run wrote no assertion to mutate - its output is
+five measurements, an ADR and five divergence rows. The battery arrives with
+Run 2's first tests.
 
 ### Run 2 — The manifest, the identity, and outputs v13
 
