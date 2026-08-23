@@ -654,7 +654,11 @@ def test_the_retired_write_rpc_is_gone(project_a: dict[str, Any]) -> None:
         "SELECT coalesce(string_agg(p.proname, ',' ORDER BY p.proname), '') FROM pg_proc p "
         "JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'api';",
     )
-    # FOUR since migration 0018 (ADR 0134, D468). The two additions are the agent
+    # SIX since migration 0019, which added api.agent_audit_begin and
+    # api.agent_audit_complete -- an allowlist older than the migration that
+    # changed it, right to fail, and widened to the measured set rather than
+    # loosened to a subset check (D468's shape, one session later).
+    # FOUR since migration 0018 (ADR 0134, D468). That pair are the agent
     # plane's RPCs, and they are in `api` because PostgREST can only call what is
     # in the exposed schema -- while being `REVOKE ALL ... FROM PUBLIC` and
     # granted to `agent_reader` alone, which is what keeps them out of the
@@ -663,9 +667,10 @@ def test_the_retired_write_rpc_is_gone(project_a: dict[str, Any]) -> None:
     # The name of this test is about ADR 0048's retirement and its assertion
     # enumerates the whole schema. Both are worth keeping: the enumeration is
     # what catches a fifth function nobody reviewed.
-    assert present == ("create_note,mcp_agent_context,owner_activity_report,update_task_status"), (
-        present
-    )
+    assert present == (
+        "agent_audit_begin,agent_audit_complete,create_note,"
+        "mcp_agent_context,owner_activity_report,update_task_status"
+    ), present
 
 
 def test_the_write_rpc_derives_ownership_from_the_claim(

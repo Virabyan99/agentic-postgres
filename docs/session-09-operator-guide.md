@@ -36,7 +36,7 @@ unactivated and that is now a decision rather than a deferral (ADR 0135).
 |---|---|---|
 | 1 | Transport the release to the host | `git bundle` + `scp`; no GitHub credential goes on the VPS |
 | 2 | **Sync the host venv** | D384, D297 — three times now, and it costs a gate run each time |
-| 3 | **Do NOT apply 0019 and 0020 by hand** — the deploy does it, in step 6, before it starts anything that could serve a request | §4 step 4, D506. A hand `--runtime up` reads the PREVIOUS release's set and reports `Pending: 0` |
+| 3 | **Do NOT apply 0019, 0020 and 0021 by hand** — the deploy does it, in step 6, before it starts anything that could serve a request | §4 step 4, D506. A hand `--runtime up` reads the PREVIOUS release's set and reports `Pending: 0` |
 | 4 | Deploy both projects | Twice if the first leaves a route or a document field unready (D326) |
 | 5 | Run the gates and merge the evidence | §4 steps 6–8 |
 
@@ -55,7 +55,18 @@ step 4 comes before step 5.
 - **0020 — the audit record's one reader.** `app_private.auth_list_agent_audit`,
   granted to `auth_service` alone, which is what `GET /admin/audit` sends.
 
-Both are forward-only, applied as `migration_user` and **never as a superuser**
+- **0021 — the two grants that make `agent_writer` an agent** (D508, found on
+  this trip). `agent_writer` held every privilege a WRITE needs and no `EXECUTE`
+  on `api.mcp_agent_context()` — the statement ADR 0125 sends once per request,
+  before discovery and before execution — so every write agent was refused `403`
+  before its scope was checked, before its audit record was opened and before
+  `api.create_note` was reached. `api.owner_activity_report()` is granted beside
+  it, because `run_report`'s scopes are inside the writer's ceiling and the same
+  refusal waited one step further on. No ADR: ADR 0118 is unchanged and is now
+  applied to both agent roles rather than to the only one that existed in
+  Session 8.
+
+All three are forward-only, applied as `migration_user` and **never as a superuser**
 (D285): a superuser bypasses the ownership check that let migration 0012 pass
 four sessions of green proofs while being unappliable.
 
@@ -113,9 +124,9 @@ them and its evidence must not read as if it did.
 record. `OPS-LOG-001` spans ingress → API → agent → audit and is **Session 11's**
 (D478). Do not read Session 9's evidence as closing it.
 
-**Amending a released migration.** 0019 is released. The `request_id` gap on the
-`database`-source row (D500) is a **migration 0021** when somebody takes it, not
-an edit to 0019.
+**Amending a released migration.** 0019, 0020 and 0021 are released. The
+`request_id` gap on the `database`-source row (D500) is a **migration 0022**
+when somebody takes it, not an edit to 0019.
 
 ---
 
@@ -214,7 +225,7 @@ runtime dependency, so this should be a no-op — confirm it, do not assume it.
 
 ### Step 4 — There is no separate migration step, and that is D506
 
-**Do not try to apply 0019 and 0020 before the deploy.** The deploy does it, in
+**Do not try to apply 0019, 0020 and 0021 before the deploy.** The deploy does it, in
 the right order, and it is the only thing that can.
 
 `bin/migrate.sh status` and `up` run dbmate in a container, so they need the
@@ -253,8 +264,8 @@ sudo bin/migrate.sh --project project.alpha.yaml --runtime status
 sudo bin/migrate.sh --project project.beta.yaml  --runtime status
 ```
 
-**Both must read `Applied: 20, Pending: 0`.** If either reads 18, the deploy's
-step 6 did not run and nothing downstream is trustworthy.
+**Both must read `Applied: 21, Pending: 0`.** If either reads 18 or 20, the
+deploy's step 6 did not run and nothing downstream is trustworthy.
 
 If a `migrate` ever refuses with *"no runtime override … the project is
 unroutable without it"*, the narrow repair — no container moves, re-runnable,

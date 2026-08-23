@@ -178,11 +178,21 @@ def _audit_rows(
     Read with `psql` rather than through an endpoint on purpose: the admin audit
     query endpoint is Run 7's, and a proof about the RECORD must not become
     conditional on the reader that has not been built.
+
+    **`started_at` is in the projection because the outer `ORDER BY` names it**,
+    and until Run 9's host trip it was not. `row_to_json(r) ORDER BY r.started_at`
+    over a subquery that does not select the column is
+    `ERROR: column r.started_at does not exist` -- against any cluster, in any
+    state, on the first execution. It took four proofs red on the deployment to
+    find, because this helper is reached only from live-host tests and no gate
+    had ever run one. **D211-D214's family: a proof that has never executed says
+    nothing about the product, and its own defects sit there looking green.**
     """
     code, out, error = psql(
         project_a,
         "SELECT coalesce(json_agg(row_to_json(r) ORDER BY r.started_at), '[]'::json) FROM ("
-        "SELECT source::text, tool, request_id::text, parameters, outcome::text, row_count "
+        "SELECT source::text, tool, request_id::text, parameters, outcome::text, row_count, "
+        "started_at "
         "FROM app_private.agent_audit "
         f"WHERE agent_id = '{agent_id}' ORDER BY started_at) r;",
     )
@@ -817,7 +827,8 @@ def test_a_write_whose_audit_record_cannot_be_opened_does_not_happen(
         answer = write(control_title)
         assert answer.status == 200, f"the control write failed: {answer.body[:300]}"
         control = sse_result(answer.body)
-        assert control is not None and "error" not in control, (
+        assert control is not None, f"no JSON-RPC message came back: {answer.body[:300]}"
+        assert "error" not in control and not control.get("result", {}).get("isError"), (
             f"the control write was refused with the audit grant INTACT: {control}"
         )
         assert note_count(control_title) == 1, "the control write left no row"
@@ -912,7 +923,15 @@ def test_a_read_survives_the_same_audit_failure(
     answer = read()
     assert answer.status == 200, f"the control read failed: {answer.body[:300]}"
     control = sse_result(answer.body)
-    assert control is not None and "error" not in control, (
+    # `isError` as well as `error`, and D509 is why. A tool failure comes back
+    # as {"result": {"content": [...], "isError": true}} and carries no
+    # JSON-RPC `error` member at all, so the weaker assertion this replaces was
+    # SATISFIED BY THE FAILURE IT EXISTS TO EXCLUDE: on the host it passed while
+    # the control read was being refused 403, and the arm it guards caught that
+    # refusal two lines later using the check this one lacked. A control that
+    # cannot fail for the reason it is watching for is not a control.
+    assert control is not None, f"no JSON-RPC message came back: {answer.body[:300]}"
+    assert "error" not in control and not control.get("result", {}).get("isError"), (
         f"the control read was refused with the audit grant INTACT: {control}"
     )
 

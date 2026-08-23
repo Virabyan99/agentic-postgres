@@ -240,6 +240,17 @@
       "template": "templates/0020-agent-audit-reader.sql",
       "template_sha256": "0959627dae5e252fbf384c6cf4a7b3b2ab8395a4fd8fe782ede5ba487b481d7d",
       "version": "20260822120020"
+    },
+    {
+      "canonical_render_sha256": "4fb13a439bdc0e3c37303a4a943b61101ac859b58f6b1b4025a1eb7fb269fe2f",
+      "name": "agent_writer_context_grants",
+      "placeholders": [
+        "agent_writer",
+        "object_owner"
+      ],
+      "template": "templates/0021-agent-writer-context-grants.sql",
+      "template_sha256": "de6ef489bdf4fdf08fbd26b2a349fcd23eb842eb8353a526725db4c73ff04843",
+      "version": "20260823120021"
     }
   ],
   "schema_version": 1
