@@ -19,6 +19,7 @@ clean cluster while every request role ran unbounded.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import re
@@ -26,7 +27,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, output_migrations
+from agentic_postgres import REPO_ROOT, config, output_migrations
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -465,23 +466,34 @@ def test_the_two_limits_and_the_reserve_fit_what_the_server_will_give(bootstrap:
     everything is two limits that sum past what the server hands out. That is a
     budget that looks computed and is not.
 
-    Four claimants since ADR 0099, and the sum is the same relation.
+    Four claimants since ADR 0099. **Five since ADR 0148**, and the sum is the
+    same relation -- re-derived to five rather than weakened, which is what an
+    ADR authorises a passing assertion to become (D518). The backup identity is
+    the fifth, and it is in this sum because it carries a server-enforced
+    `CONNECTION LIMIT`; a ceiling this arithmetic cannot see is how the enforced
+    limits come to exceed what the server hands out with every check passing.
     """
     maximum, reserved = 56, 3
     api_budget, auth_budget, storage_budget = 13, 6, 6
-    application, api, auth, storage = bootstrap.connection_limits(
+    application, api, auth, storage, backup = bootstrap.connection_limits(
         maximum, reserved, api_budget, auth_budget, storage_budget, 20
     )
 
     assert api == api_budget, "the API's ceiling is not the figure the document published"
     assert auth == auth_budget, "the auth service's ceiling is not the document's figure"
     assert storage == storage_budget, "the storage service's ceiling is not the document's figure"
+    assert backup == config.BACKUP_RESERVED_CONNECTIONS, (
+        "the backup identity's ceiling is not `config.BACKUP_RESERVED_CONNECTIONS`. That "
+        "constant is the ONE authority over this number -- the manifest check in "
+        "`config._validate_connection_budget` charges the same value -- and a second "
+        "literal in this plane is two arithmetics over one budget (D327, D545)"
+    )
     assert application > 0
     assert (
-        application + api + auth + storage + bootstrap.OPERATIONAL_CONNECTION_HEADROOM
+        application + api + auth + storage + backup + bootstrap.OPERATIONAL_CONNECTION_HEADROOM
         == maximum - reserved
     ), (
-        "the four limits and the operational headroom do not account for exactly what the "
+        "the five limits and the operational headroom do not account for exactly what the "
         "server will hand out; one of them is being computed independently of the others"
     )
 
@@ -522,10 +534,105 @@ def test_the_application_gives_way_to_the_storage_claimant_too(bootstrap: Any) -
     )
 
 
+def test_the_application_gives_way_to_the_backup_claimant_too(
+    bootstrap: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fifth claimant is divided out of the same budget, not added beside it.
+
+    The same difference-shaped assertion the API and the storage service get,
+    and it exists for the reason theirs do: without it the new term would be
+    exercised only as a passenger -- present in every call and load-bearing in
+    none, which is D260's shape found three times in one run.
+
+    **Driven by moving the constant rather than by passing an argument**, because
+    the backup figure deliberately is not a parameter: it is a constant of the
+    release, not a manifest `pool_size` (ADR 0148). Monkeypatching it is
+    therefore the only way to vary it -- and a test that could not vary it would
+    be asserting a literal against itself.
+    """
+    monkeypatch.setattr(config, "BACKUP_RESERVED_CONNECTIONS", 2)
+    small, *_ = bootstrap.connection_limits(56, 3, 13, 6, 6, 1)
+    monkeypatch.setattr(config, "BACKUP_RESERVED_CONNECTIONS", 6)
+    large, *_ = bootstrap.connection_limits(56, 3, 13, 6, 6, 1)
+
+    assert small - large == 4, (
+        "the application's ceiling did not move with the backup identity's; the fifth "
+        "claimant is being added beside the budget rather than divided out of it, which "
+        "is the arithmetic that hands out more connections than the server has"
+    )
+
+
+def test_the_bootstrap_plane_does_not_restate_the_backup_figure(bootstrap: Any) -> None:
+    """One authority over the number, and the other plane imports it (D545).
+
+    `config._validate_connection_budget` charges this figure against the
+    manifest and `connection_limits` charges it against the live server. Two
+    literals with one meaning is D327 exactly -- the manifest's arithmetic and
+    the bootstrap plane's *"agreed by coincidence, 23 against 20"*, and nothing
+    compared them until Session 7.
+
+    **What would have to break for this to go red:** somebody types `2` into
+    `bin/postgres-bootstrap.py` instead of importing it.
+
+    **This was a text scan and the battery killed it.** M9 replaced
+    `backup_budget = config.BACKUP_RESERVED_CONNECTIONS` with `backup_budget = 2`
+    and this test still passed, because the string `config.BACKUP_RESERVED_-
+    CONNECTIONS` also appears in a COMMENT a few lines above the import. That is
+    D277 exactly -- *a scan asking whether a name is mentioned is satisfied by
+    dead code* -- and D464 is the standing example in this repository of a text
+    scan producing a false positive.
+
+    So the assertion is on what the code PRODUCES: the value bound to
+    `backup_budget` inside `connection_limits` must be an attribute access on
+    `config`, read from the syntax tree, where a comment cannot reach and a
+    literal cannot hide.
+    """
+    tree = ast.parse((REPO_ROOT / "bin" / "postgres-bootstrap.py").read_text(encoding="utf-8"))
+    function = next(
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "connection_limits"
+    )
+    bindings = [
+        node.value
+        for node in ast.walk(function)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "backup_budget" for t in node.targets)
+    ]
+    assert len(bindings) == 1, (
+        f"`backup_budget` is bound {len(bindings)} times in `connection_limits`; this "
+        "assertion cannot say which binding the arithmetic used"
+    )
+    bound = bindings[0]
+    assert isinstance(bound, ast.Attribute) and bound.attr == "BACKUP_RESERVED_CONNECTIONS", (
+        f"`backup_budget` is bound to {ast.dump(bound)}, not to an attribute of `config`. "
+        "A literal here is a second authority over one number: the manifest check charges "
+        "`config.BACKUP_RESERVED_CONNECTIONS` and this plane would charge its own copy, "
+        "which is two arithmetics over one budget (D327)"
+    )
+    assert isinstance(bound.value, ast.Name) and bound.value.id == "config", (
+        f"`backup_budget` reads BACKUP_RESERVED_CONNECTIONS from {ast.dump(bound.value)}, "
+        "not from `config`"
+    )
+
+    # And the arithmetic actually uses it, rather than binding it and ignoring it.
+    application, *_ = bootstrap.connection_limits(56, 3, 13, 6, 6, 1)
+    assert application == (56 - 3) - 13 - 6 - 6 - config.BACKUP_RESERVED_CONNECTIONS - (
+        bootstrap.OPERATIONAL_CONNECTION_HEADROOM
+    ), "the remainder does not reflect `config.BACKUP_RESERVED_CONNECTIONS`"
+
+
 def test_the_headroom_is_held_back_from_all_of_them(bootstrap: Any) -> None:
-    """It is what leaves a psql available when this arithmetic is wrong."""
-    application, api, auth, storage = bootstrap.connection_limits(56, 3, 13, 6, 6, 20)
-    assert (56 - 3) - application - api - auth - storage == (
+    """It is what leaves a psql available when this arithmetic is wrong.
+
+    **The headroom does not move when a claimant is added**, and that is the
+    half worth asserting after ADR 0148: the fifth claimant's two connections
+    are charged to the application's remainder, not taken out of the slack that
+    keeps a psql available. Charging them to the headroom would have been the
+    invisible way to pay for a backup.
+    """
+    application, api, auth, storage, backup = bootstrap.connection_limits(56, 3, 13, 6, 6, 20)
+    assert (56 - 3) - application - api - auth - storage - backup == (
         bootstrap.OPERATIONAL_CONNECTION_HEADROOM
     )
 
@@ -545,14 +652,21 @@ def test_a_remainder_below_the_poolers_pool_is_refused(bootstrap: Any) -> None:
     a passing test would not distinguish "refuses correctly" from "refuses
     everything".
     """
-    # Control: 56 leaves the application 23, above the pooler's 20.
+    # Control: 56 leaves the application 21, above the pooler's 20.
+    #
+    # **21 rather than the 23 this asserted through Session 9**, and the two are
+    # the price of ADR 0148's fifth claimant, stated here rather than discovered:
+    # the backup identity's two connections come out of the application's
+    # remainder, so its slack over the pooler's pool is 1 where it was 3. Nothing
+    # is weakened -- the relation asserted is the same one, against the division
+    # the current arithmetic actually computes.
     application, *_ = bootstrap.connection_limits(56, 3, 13, 6, 6, 20)
-    assert application == 23, (
-        "the control does not produce the division ADR 0099 computed; the arm below would "
+    assert application == 21, (
+        "the control does not produce the division ADR 0148 computed; the arm below would "
         "be measuring something else"
     )
 
-    # Arm: one field differs. 50 leaves 17, and 17 < 20.
+    # Arm: one field differs. 50 leaves 15, and 15 < 20.
     with pytest.raises(ValueError, match=r"below the pooler's server-side pool"):
         bootstrap.connection_limits(50, 3, 13, 6, 6, 20)
 

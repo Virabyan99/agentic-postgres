@@ -211,3 +211,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0145](0145-the-backup-repository-is-a-bucket-of-its-own.md) | The backup repository is a bucket of its own, with its own credential and its own key | 10 | Accepted |
 | [0146](0146-outputs-version-13.md) | Outputs version 13, and why the observation is a block of its own | 10 | Accepted |
 | [0147](0147-the-database-reaches-its-repository-over-an-egress-network-of-its-own.md) | The database reaches its repository over an egress network of its own | 10 | Accepted |
+| [0148](0148-what-a-backup-identity-holds-and-the-fifth-claimant.md) | What a backup identity holds, and the fifth claimant on one budget | 10 | Accepted |

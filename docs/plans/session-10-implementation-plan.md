@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D541.**
+**Next free number after this table is D548.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -105,6 +105,13 @@ anything found *during* implementation is appended with the next free number.
 | **D538** | "Repository encryption enabled with a key stored separately from repository credentials." | **The contract can say a value is generated and rotatable; it has no way to say that rotating it destroys what it protects.** pgBackRest binds the cipher to the repository at `stanza-create`, so writing a new generation of the pass phrase re-encrypts nothing — the repository stays exactly as it was and the *reader* now holds the wrong phrase. Every check here passes, `materialize-secrets` reports success, and every backup ever taken becomes unreadable. | **`one_time_initialization: true` and `rotate_by_replacement: false`**, which is `postgres_init_superuser_password`'s declaration reused for a sharper consequence — there a new generation is *inert*, here it is destructive to readability. **`must_refresh_on_start: false` inverts the two credential halves beside it** and the asymmetry is stated in the file: a revoked API token fails closed at the provider, so refusing the last-known-good start only relocates that error; this value cannot be revoked, so the last known good IS the correct value and failing closed would take a cluster down to protect nothing. | The three flags already existed and D56 already recorded why: they are what lets rotation tooling **refuse to claim a rotation it did not perform**. What Session 10 adds is the first secret where the false claim is not merely misleading — it is the report you would read while the repository became unrecoverable. A test asserts all three, with the two credential halves as its control so it cannot pass because every secret in the file happens to be declared this way. | 0145 |
 | **D539** | — | **`postgres` is the first service this repository BUILDS that must not run as 65532.** `test_built_services_run_as_a_fixed_non_root_user` asserted one literal for every built service; the moment `postgres` gained a `build:` block it was swept in, and 65532 is a cluster that cannot read the PGDATA its own image owns. The same edit exposed a second buried assumption: the test also required `read_only: true`, which no PostgreSQL container can satisfy — the entrypoint writes its socket, its PID file and the whole of initdb's output. | **A per-service uid map and a one-member `WRITABLE_ROOT_FILESYSTEM` set**, plus an equality check that the built set and the declared set are the same. **Not** a relaxation to `!= 0`. | Widening to "not root" would accept any uid including a typo'd one — weakening a passing assertion to admit a new case, which is what D300 refuses three times over. Pinning each service is **stricter** than one shared literal: it now fails on a service that starts or stops being built without a decision, which the old form could not see. It caught its own author immediately — `contract-probe` was in the first draft of the map and is not a built service. | 0147 |
 | **D540** | — | **`bin/lock-versions.sh --update` is wholesale, so adding one pin adopted three unrelated ones.** Locking the new apt entry re-resolved every image and moved `POSTGRES_IMAGE` (`691673…` → `2ba9ca…`), `PYTHON_RUNTIME_IMAGE` (3.12.13 → 3.12.14, reddening an unrelated test) and `TRAEFIK_IMAGE`. The first is disqualifying: **Run 1 measured pgBackRest's availability, the libssh2 failure and PGDATA against `691673…`**, so adopting the new digest would have left this session's whole first run describing an image the lock no longer names. | **The three are restored to their committed digests**, so Run 4's diff is the apt pin and nothing else. `--check` stays green because it verifies that a digest is present, well formed and paired with the tag `versions.in.yaml` names — it deliberately reaches no registry, so a restored digest is coherent rather than a lie the check cannot see. | D99's third instance, and the first where the drift would have invalidated a measurement rather than merely a version string. Adopting all three is its own run with its own re-measurement — the same rule CLAUDE.md already states for `requirements-dev.in`: *commit it separately*. **Nothing forces this**: `--update` will re-adopt them the next time anyone runs it, and the only thing standing in the way is this row. | — |
+| **D541** | "…backups run with a dedicated identity." | **One missing privilege masks the next, and the first arm of rig 5 got the answer wrong because of it.** Granted only `pg_read_all_settings`, `pg_backup_start` and `pg_backup_stop`, a full backup **succeeds** — so an early arm recorded `pg_switch_wal` as unnecessary. It was never reached: `pgbackrest check` failed earlier, on `pg_create_restore_point`, and granting *that* moved the failure to `pg_switch_wal` rather than making `check` pass. | **The privilege set is measured by revoking one at a time**, not by granting until something works. The matrix (arm G): `-pg_switch_wal` check=57 backup=0; `-pg_create_restore_point` check=57 backup=0; `-pg_backup_start` check=0 backup=57; `-pg_backup_stop` check=0 backup=57; `-pg_read_all_settings` check=27 backup=56; all five restored 0/0. **`check` needs two that `backup` does not**, and Run 6 puts `check` in the deploy's step 6c and on both timers. | "The last thing I granted fixed it" is not a measurement of a set — it is a measurement of the first failure. A role provisioned from the backup path alone takes backups for weeks and fails every check, which is the half that is supposed to notice. | 0148 |
+| **D542** | — | **`pg_settings` OMITS a restricted row rather than nulling it**, and pgBackRest does not use `SHOW`. Measured: it issues `select setting from pg_catalog.pg_settings where name = 'data_directory'`, and without `pg_read_all_settings` the query returns **four of five rows** — not five with a NULL. Of the five settings it reads, only `data_directory` is restricted; `archive_command`, `archive_mode`, `checkpoint_timeout` and `server_version_num` are readable without the membership. | **Recorded as the acceptable failure it is.** pgBackRest detects the shortfall and names the cause exactly: `unable to select some rows from pg_settings` / `is the pg_read_all_settings role assigned for PostgreSQL >= 10?`, exit 56. Nothing is defended against, because nothing needs to be. | The outcome worth checking for was the other one. D514 says `pg1-path` must be PGDATA and never the mount point; a NULL `data_directory` silently compared against a configured path is that defect arriving from a direction nobody was watching. It does not happen, and now that is written down rather than assumed. | — |
+| **D543** | "…health checks that expose failures." | **A backup identity at its connection ceiling reports as a missing database.** Measured, `CONNECTION LIMIT 1` with a `check` overlapping a `backup`: the headline is `ERROR: [027]: no database found` / `HINT: check indexed pg-path/pg-host configurations`, and `FATAL: too many connections for role` appears only as a `WARN` above it. | **Not repaired — the message is pgBackRest's, not this product's. The ceiling is set above the measured concurrency so it is not reached** (ADR 0148), and the string is recorded here so the next reader of a `[027]` does not spend the incident on `pg1-path`. | D518 predicted a fifth claimant would fail in a way that is hard to debug. It is worse than predicted: the error does not mention connections at all, and the one setting it names is the one that is correct. | 0148 |
+| **D544** | "Scheduled full and incremental backups." | **pgBackRest takes no lock that prevents a `check` running during a `backup`.** Measured: a `check` launched two seconds into a full backup ran to completion, both exited 0, and a sampler inside the same invocation recorded **2** concurrent backends. A lone command holds **1** — 68 samples, maximum 1. | **`CONNECTION LIMIT 2`, and the budget's fifth summand is 2** (ADR 0148). Two is not a margin: Run 6 puts `check` in the deploy's step 6c and Run 9 puts `backup` on a timer, and a deploy does not consult a timer. | The control is what makes the number honest: the same `check`, at the same ceiling of 1, with no backup running, exits 0 — so the failing arm measured the overlap rather than the ceiling in general (D509's rule, applied before the number was chosen). | 0148 |
+| **D545** | — | **`config.ADMINISTRATION_RESERVED_CONNECTIONS = 5` and `postgres-bootstrap.OPERATIONAL_CONNECTION_HEADROOM = 5` are one claim stated twice, in two modules, and nothing compares them.** Both hold connections back "for operations"; both are 5; neither reads the other. Found while deciding D530, which warns about exactly this shape one layer up. | **Not merged in this run, and deliberately.** The new figure does **not** repeat the mistake: `BACKUP_RESERVED_CONNECTIONS` lives in `config` alone and the bootstrap plane imports it, with a test asserting the binding is an attribute of `config` read from the syntax tree. Merging the existing pair is its own change to two passing arithmetics and belongs with an ADR that has measured what each is actually for. | D327 is the record of what two arithmetics over one budget cost: they *"agreed by coincidence, 23 against 20"*, and nothing compared them until Session 7. These two agree by coincidence today at 5 and 5. Writing it down is what stops the next reader assuming somebody checked. | — |
+| **D546** | — | **The fifth claimant narrows the application's slack over the pooler's pool from 3 to 1**, and the manifests it will actually meet are unread. Measured through the product's own functions on `project.example.yaml`: manifest 50 → 52 of 56; bootstrap remainder 23 → 21 against a pooler pool of 20. `project.alpha.yaml` and `project.beta.yaml` are gitignored operator inputs that exist only on the host. | **Charged to the application, not to the headroom**, and stated rather than discovered. If either real manifest sets `database.pool_size` within two of its remainder, `connection_limits` raises and the deploy refuses. **That refusal is loud, offline and reachable without root** — `deploy.sh --render-only` — so it is the first thing the trip runs. | Taking the two connections out of `OPERATIONAL_CONNECTION_HEADROOM` instead would have been the invisible way to pay for a backup: the headroom is what leaves a psql available when this arithmetic is wrong, and spending it is spending the diagnosis. | 0148 |
+| **D547** | — | **The bootstrap plane's consumer list was hand-written and nothing enumerated it.** `test_the_bootstrap_consumers_match_the_secret_contract` compares three named `*_CONSUMER` globals against `secrets.required.yaml`; a fourth added by any session would simply not be compared, and the failure mode is silent — the file is not found, the credential is reported absent, and the role is left NOLOGIN with no error (D288's exact cost). | **A containment test added in this run**: every `*_CONSUMER` global the module declares must appear in the checked set, derived from the module rather than counted. `len(...) == 4` was refused for D536's reason — it passes while the fourth entry is a duplicate of the third. | Question 5, in a file that already records the last time it was asked here. D536 found the same shape in `ISOLATED_FIELDS`/`MUST_DIFFER` three runs ago; this is the third hand-written list this session has found and the second it has closed. | — |
 
 ---
 
@@ -518,7 +525,7 @@ reader makes while "hardening" and which would silently stop every backup.
 
 **`--render-only` still works with no host and no root**, verified as uid 1000.
 
-### Run 5 — Activating `backup_user`, and the fifth claimant
+### Run 5 — Activating `backup_user`, and the fifth claimant. **Done.**
 
 - Bootstrap-plane LOGIN, credential and `CONNECTION LIMIT` — the migration plane
   creates nothing (D102).
@@ -533,6 +540,108 @@ reader makes while "hardening" and which would silently stop every backup.
   with the number.
 
 **ADR:** what a backup identity holds, and the fifth claimant on one budget.
+
+---
+
+**What Run 5 measured, and what it changed.** ADR 0148. Rig 5, eight arms
+against the pinned PG 18 digest and the Run 4 derived image, every arm with a
+control that could distinguish success from failure.
+
+**The privileges are five, not the three the plan guessed, and `pg_checkpoint`
+is not among them.** The plan's list was written from the shape of the problem
+rather than from a measurement, and both halves of it were wrong. What the
+matrix says (arm G, one revocation at a time): `pg_read_all_settings`,
+`EXECUTE` on `pg_backup_start(text, boolean)`, `pg_backup_stop(boolean)`,
+`pg_create_restore_point(text)` and `pg_switch_wal()`. **`pgbackrest check`
+needs the last two and `pgbackrest backup` needs neither** — which matters
+because Run 6 puts `check` in the deploy's step 6c and Run 9 puts it on both
+timers.
+
+**D541 is the row worth reading before the next privilege question.** An early
+arm granted three, ran a full backup successfully, saw `check` fail on
+`pg_create_restore_point`, granted it — and `check` still failed, on
+`pg_switch_wal`, which that arm had already recorded as unnecessary because
+nothing had reached it. One missing privilege masks the next, so *"the last
+thing I granted fixed it"* measures the first failure and not the set. Only
+revoke-one-at-a-time measures a set.
+
+**There is no migration 0022, and arm C measured that rather than citing a
+rule.** A role with the migration plane's exact shape — NOSUPERUSER, owning the
+application schema, no ADMIN option — was refused all five: `permission denied
+for function` on the four, and `Only roles with the ADMIN option on role
+"pg_read_all_settings" may grant this role` on the membership. The arm's control
+is what makes that a plane boundary rather than a broken `SET ROLE`: the same
+role, in the same session, granted `SELECT` on a table it owned and succeeded.
+**Migrations are unchanged at 21.**
+
+**D530 is decided: the backup is its own summand, and the number is 2.** The
+administration reserve exists for claimants that hold **no `CONNECTION LIMIT`** —
+there is nothing on a superuser or on `migration_user` to bound them with. A
+role that carries a server-enforced ceiling belongs in the sum beside the other
+four, because a ceiling the arithmetic cannot see is how the enforced limits come
+to exceed `max_connections` with every check still passing. The reserve's comment
+loses the word "backups" it has carried since Session 5.
+
+**Two, and both halves were measured.** A lone pgBackRest command holds **one**
+connection — 68 samples of `pg_stat_activity` taken inside the same invocation as
+a real full backup, maximum 1. The second is the overlap (D544): pgBackRest takes
+no lock preventing a `check` during a `backup`, a `check` launched two seconds in
+ran to completion, both exited 0, and the sampler recorded 2. The control is the
+same `check` at the same ceiling with no backup running, which exits 0 — so the
+failing arm measured the overlap and not the ceiling.
+
+**Both arithmetics moved together**, which is the whole of D327's lesson:
+manifest 50 → 52 of 56, bootstrap remainder 23 → 21 against a pooler pool of 20,
+**headroom untouched at 5**. The application's slack for direct sessions falls
+from 3 to 1 and that is charged, stated and recorded as D546 — the real
+`project.alpha.yaml` and `project.beta.yaml` are gitignored and unread, so
+`deploy.sh --render-only` on the host is the first thing that can confirm they
+still fit, and it needs no root.
+
+**Two predicted rednesses arrived as predicted, and neither was weakened.**
+`_summands_of_the_budget_check` parses the arithmetic rather than a list beside
+it, precisely so a fifth claimant fails offline — and it did, here, rather than
+as a refused login on a host. `LOGIN_ROLES` and `activated_login_roles` gained
+`backup_user` keyed on **the credential appearing in `secrets.required_names`**,
+which is the same fact `activate_backup_user` reads. `backup.enabled` was the
+available mistake and is refused by a test: the bootstrap plane never reads that
+flag, and every project's first Session 10 deploy is a project with backups
+enabled and no materialized secret.
+
+**Three findings the plan did not predict**, all from the full suite rather than
+from the targeted set — which is the argument for having run it once here:
+`backup_user_password` had to enter `bootstrap-state.schema.json`'s
+`managed_resources` (Run 4's lesson, verbatim, for the second time this session);
+the bootstrap plane's consumer list was hand-written and enumerated by nothing
+(D547, now a containment test); and `ADMINISTRATION_RESERVED_CONNECTIONS` and
+`OPERATIONAL_CONNECTION_HEADROOM` turn out to be one claim stated twice in two
+modules at the same value (D545, recorded and deliberately not merged).
+
+**Battery: M1–M9, 9 of 9 killed** as `FAILED`, control green and unreachable in
+every arm, all three mutated files restored byte-for-byte. **Two survived the
+first run and both were real weak tests**, which is the outcome a battery is
+for:
+
+- **M5** mutated `BACKUP_USER_CONSUMER`'s `target_file` and the activation test
+  passed, because the fixture wrote the generation at *the module's* path rather
+  than the contract's — so the test moved with the mutation. That is
+  D288/D289/D291 occurring inside the test whose docstring says it does not make
+  that mistake. The fixture now reads the path from `secrets.required.yaml`.
+- **M9** replaced `config.BACKUP_RESERVED_CONNECTIONS` with the literal `2` and
+  the test guarding against exactly that passed, because it was a text scan and
+  the string also appears in a **comment** four lines above the import — D277,
+  and D464's shape. It is now an assertion on the syntax tree: the value bound to
+  `backup_budget` must be an attribute access on `config`, where a comment cannot
+  reach and a literal cannot hide.
+
+Preflight earned its place too: M3's anchor matched twice, because `app_runtime`'s
+membership carries the same three options, and an unapplied mutation would have
+reported as a weak test (D269).
+
+**Nothing is deployed.** No pgBackRest command has been run against R2 by this
+run or any other; arm E used a `posix` repository on a local volume, because the
+questions it asked — which SQL, how many backends — do not depend on where the
+bytes land.
 
 ### Run 6 — `bin/backup.sh`, and the deploy's step 6c
 

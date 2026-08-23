@@ -157,12 +157,22 @@ def test_an_unpublished_agent_plane_names_nothing_at_all() -> None:
 #: Every claimant on `max_connections`, by the name `config` gives it (ADR 0099).
 #: The MCP runtime is deliberately not here: it holds no database credential and
 #: opens no pool, so its share is zero.
+#:
+#: **`BACKUP_RESERVED_CONNECTIONS` joined in Session 10 Run 5** (D518, ADR 0148),
+#: and this is the re-derivation the test below was built to force rather than a
+#: weakening. `_summands_of_the_budget_check` parses the arithmetic instead of
+#: comparing two lists beside it, precisely so a fifth claimant fails offline --
+#: here, rather than as a refused login on a host -- and it did. The backup
+#: identity is in the sum because it carries a server-enforced `CONNECTION
+#: LIMIT`; the administration reserve beside it bounds the claimants that
+#: carry none.
 BUDGET_CLAIMANTS = frozenset(
     {
         "rest_budget",
         "auth_budget",
         "storage_budget",
         "database",
+        "BACKUP_RESERVED_CONNECTIONS",
         "ADMINISTRATION_RESERVED_CONNECTIONS",
     }
 )
@@ -204,14 +214,18 @@ def test_the_connection_budget_has_no_term_for_the_agent_plane() -> None:
 
     The MCP runtime forwards the caller's bearer token to PostgREST and holds no
     database credential of its own, so it opens no connection and takes no share
-    of ADR 0099's division. `max_connections` 56 stays api 13, auth 6, storage 6,
-    application 23, headroom 5.
+    of ADR 0099's division. `max_connections` 56 is now api 13, auth 6,
+    storage 6, backup 2, application 21, headroom 5 (ADR 0148) -- the agent
+    plane's zero is the only figure in that line this test is about, and it has
+    not moved.
 
     **What would have to break for this to go red:** somebody gives MCP a pool.
-    The moment a fifth summand appears in the arithmetic every manifest is
-    checked against, this fails -- by arithmetic, here, rather than by a cluster
-    refusing a login on a host. D309 was the same class of defect found the
-    expensive way: a service added with no term in the budget at all.
+    The moment a summand appears in the arithmetic every manifest is checked
+    against, this fails -- by arithmetic, here, rather than by a cluster refusing
+    a login on a host. D309 was the same class of defect found the expensive
+    way: a service added with no term in the budget at all. It has now caught a
+    claimant once for real: the backup identity, in Run 5, exactly as D518
+    predicted it would.
     """
     summands = _summands_of_the_budget_check()
     assert summands == BUDGET_CLAIMANTS, (

@@ -32,7 +32,14 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from agentic_postgres import migrations, secrets_contract
+# `config` is imported for exactly one value: `BACKUP_RESERVED_CONNECTIONS`
+# (ADR 0148). The three service budgets arrive in the document because each
+# resolves a manifest `pool_size` and this plane reads one document (D102); the
+# backup's figure is a constant of the release, so importing it is what keeps
+# ONE authority over it. The alternative is a second literal beside
+# `OPERATIONAL_CONNECTION_HEADROOM` -- two arithmetics over one budget, which is
+# D327 and is the thing ADR 0148 exists to avoid repeating.
+from agentic_postgres import config, migrations, secrets_contract
 from agentic_postgres.secrets_contract import SECRET_ROOT
 
 EXIT_CONTRACT = 5
@@ -244,12 +251,49 @@ def build_statements(document: dict[str, Any], instance_uuid: str) -> list[str]:
     # and no USAGE on the schema, so every grant reached nothing (D337). Two
     # instances of one cause in two runs is the argument for adding a role to
     # every list at once rather than to the list in front of you.
+    #
+    # `backup_user` joins in Session 10 Run 5, in the run that ACTIVATES it, for
+    # the same reason `storage_service` did -- and the two prior instances are
+    # the argument for adding a role to every list at once. It is the only role
+    # on this line whose connection is opened by pgBackRest rather than by a
+    # service: measured (rig 5), one connection per command and two when a
+    # `check` overlaps a `backup` (ADR 0148).
     statements.append(
         f"GRANT CONNECT ON DATABASE {db} TO "
         f"{q(roles['migration_user'])}, {q(roles['app_runtime'])}, "
         f"{q(roles['postgrest_authenticator'])}, {q(roles['auth_service'])}, "
-        f"{q(roles['storage_service'])};"
+        f"{q(roles['storage_service'])}, {q(roles['backup_user'])};"
     )
+
+    # The five privileges an online backup needs, all issued HERE because arm C
+    # of rig 5 measured that the migration plane cannot issue any of them
+    # (ADR 0148, D102's shape). A non-superuser object owner is refused each
+    # function grant with `permission denied for function` and the role grant
+    # with `Only roles with the ADMIN option ... may grant this role`, while the
+    # same role's grant on a table it owns succeeds -- so it is a plane boundary
+    # and not a broken `SET ROLE`.
+    #
+    # Applied unconditionally, on every deploy, whether or not the role has a
+    # credential yet. A privilege granted to a role nothing can assume is inert
+    # rather than wrong (CLAUDE.md §7), and the alternative -- granting only on
+    # the deploy that happens to carry a secret -- makes the catalog depend on
+    # which generation ran, which is the state nobody can reason about.
+    #
+    # `WITH ADMIN FALSE, INHERIT TRUE, SET FALSE` on the membership: INHERIT is
+    # load-bearing and is the opposite of the authenticator's, because pgBackRest
+    # issues no `SET ROLE` -- it connects and reads `pg_settings`, so a
+    # membership it had to assume would be a membership it never uses. ADMIN
+    # FALSE so it cannot pass the reach on; SET FALSE because it has no reason
+    # to become the role.
+    statements.append(
+        f"GRANT {q(BACKUP_SETTINGS_ROLE)} TO {q(roles['backup_user'])} "
+        f"WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;"
+    )
+    for signature in BACKUP_FUNCTION_GRANTS:
+        # The signature is a fixed string from a module constant, never a derived
+        # or manifest value, so it is interpolated as written; the role is quoted
+        # like every other identity in this function.
+        statements.append(f"GRANT EXECUTE ON FUNCTION {signature} TO {q(roles['backup_user'])};")
 
     # CONNECT only, for the application runtime role. CREATE and TEMPORARY are
     # deliberately absent and are not an oversight to be tidied up later: CREATE
@@ -803,7 +847,7 @@ def connection_limits(
     auth_budget: int,
     storage_budget: int,
     pooler_pool_size: int,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, int]:
     """Every ceiling, computed together (D161, ADR 0070; D327, ADR 0099).
 
     Together is the whole point. `app_runtime` used to be given
@@ -830,20 +874,41 @@ def connection_limits(
     with `too many connections for role`, PgBouncer hands that to the client,
     and the message names the role rather than the number that caused it.
 
+    **The backup identity is the fifth ceiling** (D518, D530, ADR 0148), and it
+    is subtracted here for the reason this function exists at all: the manifest
+    charges it in `config._validate_connection_budget` and this plane charges the
+    remainder, so a claimant added to one arithmetic and not the other is D327
+    exactly. Its figure is `config.BACKUP_RESERVED_CONNECTIONS` — imported, not
+    restated, because two literals with one meaning is the defect one layer down.
+
+    Measured, on `project.example.yaml`: the application's remainder falls from
+    23 to 21 against a pooler pool of 20, so the slack it holds for direct
+    sessions goes from 3 to 1. That is the price of the fifth claimant and it is
+    charged to the application because the application is where the remainder
+    lives. **The headroom is untouched**, which is the part that matters: it is
+    what leaves a psql available when this arithmetic is wrong.
+
     Returned rather than applied so the arithmetic is testable without a
     cluster. Every failure raises rather than producing a value PostgreSQL reads
     as something else: a negative limit is "unlimited" and 0 is "refuse every
     login", so an error here is the only honest failure.
     """
+    backup_budget = config.BACKUP_RESERVED_CONNECTIONS
     available = maximum - reserved
     application = (
-        available - api_budget - auth_budget - storage_budget - OPERATIONAL_CONNECTION_HEADROOM
+        available
+        - api_budget
+        - auth_budget
+        - storage_budget
+        - backup_budget
+        - OPERATIONAL_CONNECTION_HEADROOM
     )
     if application < 1:
         raise ValueError(
             f"max_connections={maximum} with {reserved} reserved leaves {available} usable; "
             f"the API commits {api_budget}, the auth service {auth_budget}, the storage "
-            f"service {storage_budget}, and {OPERATIONAL_CONNECTION_HEADROOM} are held for "
+            f"service {storage_budget}, the backup identity {backup_budget}, and "
+            f"{OPERATIONAL_CONNECTION_HEADROOM} are held for "
             f"operations, so the application would be left with {application}. Raise "
             "database.max_connections or lower a pool_size; do not remove the headroom, "
             "because it is what leaves a psql available when this is wrong"
@@ -854,6 +919,7 @@ def connection_limits(
             + api_budget
             + auth_budget
             + storage_budget
+            + backup_budget
             + OPERATIONAL_CONNECTION_HEADROOM
             + reserved
         )
@@ -867,7 +933,7 @@ def connection_limits(
             f"Raise database.max_connections to at least {sufficient}, "
             "or lower database.pool_size"
         )
-    return application, api_budget, auth_budget, storage_budget
+    return application, api_budget, auth_budget, storage_budget, backup_budget
 
 
 def app_runtime_password_available(project_key: str) -> bool:
@@ -935,6 +1001,111 @@ STORAGE_SERVICE_CONSUMER = {
     "target_file": "storage_service_pgpass",
     "format": "pgpass",
 }
+
+#: The backup identity's, in the same shape and for the same reasons -- with one
+#: difference that is the whole of ADR 0147's residual: the consumer is
+#: `postgres` itself.
+#:
+#: Session 10 Run 5. pgBackRest runs inside the database container, because
+#: `archive_command` is executed by the postmaster (ADR 0144), so the process
+#: that needs this credential is the cluster's own. That is why the uid is 999
+#: rather than 65532 (D515), and it is why this file is the only pgpass in the
+#: contract that a database container reads rather than a service one.
+#:
+#: Must match `secrets.required.yaml`'s declaration of `backup_user_password`
+#: exactly; `test_the_bootstrap_consumers_match_the_secret_contract` compares the
+#: two rather than trusting this copy.
+BACKUP_USER_CONSUMER = {
+    "plane": "compose",
+    "service": "postgres",
+    "target_file": "backup_user_pgpass",
+    "format": "pgpass",
+}
+
+#: Every privilege an online backup needs on PG 18, and nothing else.
+#:
+#: **Measured, one revocation at a time** (rig 5 arm G, ADR 0148). The set is
+#: five because `pgbackrest check` needs two that `pgbackrest backup` does not,
+#: and the deploy's step 6c and both timers run `check`:
+#:
+#:   revoked                     check  backup
+#:   (all five granted)            0      0
+#:   pg_switch_wal                57      0
+#:   pg_create_restore_point      57      0
+#:   pg_backup_start               0     57
+#:   pg_backup_stop                0     57
+#:   pg_read_all_settings         27     56
+#:   (restored -- the control)     0      0
+#:
+#: **D541 is why this is a necessity matrix rather than a copy of the pgBackRest
+#: documentation.** Granting `pg_create_restore_point` did not make `check` pass;
+#: it moved the failure to `pg_switch_wal`, which an earlier arm had recorded as
+#: unnecessary because nothing had reached it. One missing privilege masks the
+#: next, so only revoke-one-at-a-time measures a set.
+#:
+#: The function signatures are spelled out because `GRANT EXECUTE ON FUNCTION`
+#: needs them and because `pg_backup_stop` is overloaded: naming the wrong arity
+#: raises rather than granting silently.
+BACKUP_FUNCTION_GRANTS: tuple[str, ...] = (
+    "pg_catalog.pg_backup_start(text, boolean)",
+    "pg_catalog.pg_backup_stop(boolean)",
+    "pg_catalog.pg_create_restore_point(text)",
+    "pg_catalog.pg_switch_wal()",
+)
+
+#: The one grant that is a role membership rather than a function privilege.
+#:
+#: Separate from the tuple above because it is issued with different syntax and
+#: fails differently: measured, a non-superuser is refused it with
+#: `permission denied to grant role "pg_read_all_settings"` / `Only roles with
+#: the ADMIN option ... may grant this role`, while the function grants are
+#: refused with `permission denied for function`. Both refusals land on the
+#: migration plane, which is why every one of the five is issued here (ADR 0148).
+#:
+#: Its absence does not fail as a permission error. `pg_settings` OMITS a
+#: restricted row rather than nulling it, so pgBackRest sees four rows where it
+#: asked for five and reports `unable to select some rows from pg_settings` with
+#: the hint naming this very role (D542). Loud and total, which is the acceptable
+#: half -- `pg1-path` is never silently compared against NULL.
+BACKUP_SETTINGS_ROLE = "pg_read_all_settings"
+
+
+def activate_backup_user(
+    container: str, database: str, project_key: str, role: str, limit: int
+) -> bool:
+    """Give the backup role its credential and its ceiling. True if credentialed.
+
+    `activate_storage_service`'s shape exactly, and deliberately so -- Session 7
+    Run 4's docstring explains why the decision rather than the `ALTER ROLE` is
+    what gets tested, and the reasoning transfers unchanged: with this logic
+    inline, a mutation that never applied the credential at all leaves every test
+    green because the reach test calls `apply_credential` itself (ADR 0065/0066).
+
+    The privileges are NOT here. They are in `build_statements`, because they are
+    idempotent catalog statements that must be applied whether or not a
+    credential exists: a role that is left NOLOGIN this deploy and credentialed
+    the next must find its grants already in place, rather than acquiring them
+    only on the deploy that happened to carry a secret. That asymmetry is the
+    reason this function returns a bool instead of raising.
+    """
+    secret = materialized_secret_path(project_key, BACKUP_USER_CONSUMER)
+    if secret is None:
+        apply_connection_limit(container, database, role, limit)
+        print(
+            "  backup credential absent from this generation; role left NOLOGIN, "
+            f"CONNECTION LIMIT {limit}"
+        )
+        return False
+
+    apply_credential(
+        container,
+        database,
+        role,
+        read_pgpass_password(secret, BACKUP_USER_CONSUMER, "backup user"),
+        connection_limit=limit,
+    )
+    print(f"  backup credential set, CONNECTION LIMIT {limit}")
+    return True
 
 
 def activate_storage_service(
@@ -1201,7 +1372,7 @@ def main() -> int:
     # It is the manifest's `database.pool_size`, carried through the document
     # rather than re-read, because the bootstrap plane reads one document (D102).
     pooler_pool_size = int(document["database"]["pooler_pool_size"])
-    runtime_limit, api_limit, auth_limit, storage_limit = connection_limits(
+    runtime_limit, api_limit, auth_limit, storage_limit, backup_limit = connection_limits(
         maximum, reserved, api_budget, auth_budget, storage_budget, pooler_pool_size
     )
 
@@ -1290,6 +1461,24 @@ def main() -> int:
     # creates it -- an absent credential here means the generation predates
     # session 7, not that an operator forgot something at Cloudflare.
     activate_storage_service(container, database, key, roles["storage_service"], storage_limit)
+
+    # The backup identity's ceiling and credential, Session 10 Run 5. The fifth
+    # claimant on one `max_connections` and the first that is not a service
+    # (ADR 0148): the process that opens this connection is pgBackRest, inside
+    # the database container, because `archive_command` runs where the postmaster
+    # runs (ADR 0144).
+    #
+    # `backup_user_password` is `origin: generated`, so `--apply` creates it --
+    # an absent credential here means the generation predates session 10, not
+    # that an operator missed a step at Cloudflare. The two R2 halves are the
+    # ones an operator supplies, and they are a different secret with a different
+    # consumer; this one is a database password like every other on this page.
+    #
+    # The role's five grants are NOT conditional on the credential and are issued
+    # in `build_statements` above. A deploy that leaves this role NOLOGIN still
+    # leaves it correctly privileged, so the deploy that finally carries a secret
+    # activates a role that is already right rather than one that becomes right.
+    activate_backup_user(container, database, key, roles["backup_user"], backup_limit)
 
     # Applied, then read back. The statements above returning 0 says psql
     # accepted them, which is not the same as the catalog holding what they

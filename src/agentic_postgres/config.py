@@ -344,10 +344,52 @@ STORAGE_RESERVED_CONNECTIONS = 2
 #: load, which is the moment the cluster has least to spare.
 AUTH_RESERVED_CONNECTIONS = 2
 
-#: Held back for migrations, backups, a direct developer session and PostgreSQL's
-#: own `superuser_reserved_connections`. If this is exhausted, the operation that
-#: cannot get a connection is the one that would have fixed the problem.
+#: Held back for the migration plane, the bootstrap plane, a direct developer
+#: session and PostgreSQL's own `superuser_reserved_connections`. If this is
+#: exhausted, the operation that cannot get a connection is the one that would
+#: have fixed the problem.
+#:
+#: **"backups" was in this list from Session 5 until Session 10 Run 5, and is
+#: gone because backups are now charged their own summand** (D530, ADR 0148).
+#: What remains is what this reserve is actually for: every claimant here holds
+#: **no `CONNECTION LIMIT`** -- there is nothing on a superuser or on
+#: `migration_user` to bound it with, so a reserve bounding them by convention is
+#: the only bound available. A role that *does* carry a server-enforced ceiling
+#: belongs in the sum beside the other four, because a ceiling the arithmetic
+#: cannot see is how the enforced limits come to exceed `max_connections` with
+#: every check still passing (ADR 0070).
 ADMINISTRATION_RESERVED_CONNECTIONS = 5
+
+#: What a backup takes, and the fifth claimant on one `max_connections`
+#: (D518, D530, ADR 0148).
+#:
+#: **Two, and both halves are measured.** Rig 5 arm E sampled `pg_stat_activity`
+#: inside the same invocation as a real full backup against the Run 4 image: 68
+#: samples, maximum **1** concurrent backend. A lone pgBackRest command holds one
+#: connection.
+#:
+#: The second is the overlap, and it is not a margin. Run 6 puts `check` in the
+#: deploy's step 6c and Run 9 puts `backup` on a timer, and a deploy does not
+#: consult a timer -- so arm I asked whether pgBackRest's own locking prevents
+#: the two running together. **It does not**: a `check` launched two seconds into
+#: a full backup ran to completion, both exited 0, and the sampler recorded **2**.
+#:
+#: What a ceiling of 1 costs was measured rather than imagined (D543): the
+#: overlapping `check` fails `[027]: no database found` with the hint `check
+#: indexed pg-path/pg-host configurations`, and `too many connections for role`
+#: appears only as a `WARN` above it. The headline sends the reader to the one
+#: setting that is correct.
+#:
+#: A constant of the release rather than a manifest field, for
+#: `ARCHIVE_TIMEOUT_SECONDS`' reason (ADR 0146): a per-project value needs a
+#: member on `backupSettings` and arrives with the next outputs version. Because
+#: it is not a manifest figure, the bootstrap plane **imports** it rather than
+#: reading it from the document -- the three published `*_connection_budget`
+#: figures are published precisely because each resolves a manifest `pool_size`,
+#: which this does not. Imported and never restated: a second literal in the
+#: other plane is exactly the shape D530 warns about, and D545 records that
+#: `OPERATIONAL_CONNECTION_HEADROOM` is already one.
+BACKUP_RESERVED_CONNECTIONS = 2
 
 #: The documentation page's prefix, and the REST surface's suffix.
 #:
@@ -978,7 +1020,14 @@ def _validate_connection_budget(
     Every service is charged the same way and for the same reason. ADR 0070
     exists because `app_runtime` was once given everything and the authenticator
     nothing: two claimants bounded separately sum past what the server hands out.
-    A fourth claimant makes that arithmetic more load-bearing, not less.
+    A fifth claimant makes that arithmetic more load-bearing, not less.
+
+    **The fifth is the backup identity** (D518, D530, ADR 0148), and it is a
+    summand rather than a charge against the administration reserve because it
+    is the kind of claimant that carries a server-enforced `CONNECTION LIMIT`.
+    The reserve bounds the claimants that carry none. A ceiling this sum cannot
+    see is how the enforced limits come to exceed `max_connections` while every
+    check here still passes -- which is the failure ADR 0070 was written after.
 
     **What this check is and is not**, because ADR 0099 turns on the
     distinction. This sum charges `database.pool_size` for the application. The
@@ -1002,6 +1051,7 @@ def _validate_connection_budget(
         + auth_budget
         + storage_budget
         + database["pool_size"]
+        + BACKUP_RESERVED_CONNECTIONS
         + ADMINISTRATION_RESERVED_CONNECTIONS
     )
     ceiling = int(database.get("max_connections", DATABASE_BUDGET_DEFAULTS["max_connections"]))
@@ -1012,10 +1062,13 @@ def _validate_connection_budget(
             f"api.app.pool_size ({app['pool_size']}) plus {AUTH_RESERVED_CONNECTIONS} "
             f"reserved, storage.pool_size ({storage['pool_size']}) plus "
             f"{STORAGE_RESERVED_CONNECTIONS} reserved, database.pool_size "
-            f"({database['pool_size']}), and {ADMINISTRATION_RESERVED_CONNECTIONS} held "
+            f"({database['pool_size']}), {BACKUP_RESERVED_CONNECTIONS} for the backup "
+            f"identity, and {ADMINISTRATION_RESERVED_CONNECTIONS} held "
             f"for administration come to {committed}, above database.max_connections "
-            f"({ceiling}). The connection that cannot be opened is the pooler's or the "
-            "migration's, and neither reports the reason as a capacity problem"
+            f"({ceiling}). The connection that cannot be opened is the pooler's, the "
+            "migration's or the backup's, and none of the three reports the reason as a "
+            "capacity problem -- pgBackRest reports it as `[027]: no database found` "
+            "and sends the reader to pg1-path (D543)"
         )
 
 

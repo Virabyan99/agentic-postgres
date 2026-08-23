@@ -1555,6 +1555,13 @@ LOGIN_ROLES = {
     "auth_service": "apg_x_auth_service",
     "storage_service": "apg_x_storage_service",
     "app_runtime": "apg_x_app_runtime",
+    # Session 10 Run 5, and D517 **predicted** this line rather than discovering
+    # it. `backup_user` has been in `naming.ROLE_SUFFIXES` since Session 3 as a
+    # NOLOGIN stub; ADR 0148 activates it, so the derivation has to say so or
+    # `test_only_the_activated_roles_may_log_in` reports the product's own
+    # deliberate activation as a violation on the next host gate -- which is
+    # exactly what D301 cost after `project_admin`.
+    "backup_user": "apg_x_backup_user",
 }
 
 
@@ -1669,9 +1676,51 @@ def test_the_storage_credential_in_the_generation_activates_the_role() -> None:
     assert LOGIN_ROLES["storage_service"] in result
 
 
-def test_a_full_session_seven_deployment_activates_every_service_identity() -> None:
-    """All five clauses at once, so a derivation that handled them only in
-    isolation is caught."""
+def test_the_backup_role_is_keyed_on_the_credential_and_not_on_the_manifest_flag() -> None:
+    """The storage row's shape, applied to Session 10's activation (D517).
+
+    `backup.enabled` is the tempting key and it is the wrong one: the bootstrap
+    plane never reads it. `activate_backup_user` credentials the role when the
+    active generation carries the file and leaves it NOLOGIN when it does not,
+    so the credential is the event and the manifest flag is a different question.
+
+    **There is no route to key on either**, which is what makes this row
+    different from the storage one rather than a copy of it: a repository is not
+    an HTTP surface, so the mistake D307 caught for storage is not available here.
+    The mistake that IS available is keying on `backup.enabled`, and this
+    document is a project with backups enabled whose secret has not been
+    materialized -- which is every project's state on the first Session 10 deploy.
+    """
+    document = _login_document(required_names=["session2_sentinel"])
+    document["backup"] = {"enabled": True, "retain_full": 2}
+
+    result = deployed_output.activated_login_roles(document, LOGIN_ROLES)
+    assert LOGIN_ROLES["backup_user"] not in result, (
+        "the backup role is expected to log in on a deployment that never materialized its "
+        "credential. The key is `secrets.required_names`, not `backup.enabled` -- and the "
+        "first deploy of every project is in exactly this state"
+    )
+
+
+def test_the_backup_credential_in_the_generation_activates_the_role() -> None:
+    """The other half. Without it the clause could be `if False` and every other
+    row here would still pass -- which is precisely what the storage battery's
+    M5 was, and the reason that pair is written as a pair."""
+    result = deployed_output.activated_login_roles(
+        _login_document(required_names=["session2_sentinel", "backup_user_password"]),
+        LOGIN_ROLES,
+    )
+    assert LOGIN_ROLES["backup_user"] in result
+
+
+def test_a_full_session_ten_deployment_activates_every_service_identity() -> None:
+    """All six clauses at once, so a derivation that handled them only in
+    isolation is caught.
+
+    Six since Run 5. The assertion is `== set(LOGIN_ROLES.values())` rather than
+    a list written here, so adding a role to the table without adding a clause
+    that activates it fails here -- which is the direction this test is for.
+    """
     result = deployed_output.activated_login_roles(
         _login_document(
             profiles={
@@ -1679,7 +1728,7 @@ def test_a_full_session_seven_deployment_activates_every_service_identity() -> N
             },
             rest_status="ready",
             app_route={"status": "ready", "url": "https://x.test/api/app"},
-            required_names=["storage_service_password"],
+            required_names=["storage_service_password", "backup_user_password"],
         ),
         LOGIN_ROLES,
     )

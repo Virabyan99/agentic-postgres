@@ -178,6 +178,12 @@ def test_the_bootstrap_consumers_match_the_secret_contract(bootstrap: Any) -> No
         # and the failure is silent every time: the file is not found, the
         # credential is reported absent, and the role is left NOLOGIN.
         ("storage_service_password", bootstrap.STORAGE_SERVICE_CONSUMER),
+        # Session 10 Run 5, and the fourth (ADR 0148). Its consumer service is
+        # `postgres` rather than a service connecting to the cluster, because
+        # pgBackRest runs inside the database container (ADR 0144) -- so this is
+        # the one entry whose `target_file` is read back by the postmaster's own
+        # image rather than by a client of it.
+        ("backup_user_password", bootstrap.BACKUP_USER_CONSUMER),
     ):
         secret = declared.get(name)
         assert secret, f"{name} is not declared in secrets.required.yaml"
@@ -193,6 +199,41 @@ def test_the_bootstrap_consumers_match_the_secret_contract(bootstrap: Any) -> No
             f"contract declares ({secret['consumers']}). The credential would be reported "
             "absent and the role left NOLOGIN"
         )
+
+
+def test_every_consumer_the_bootstrap_declares_is_covered_by_the_check_above(
+    bootstrap: Any,
+) -> None:
+    """The list above is hand-written, and this is what stops it going stale.
+
+    **Question 5, asked of this file** (CLAUDE.md §6): *when a decision is
+    implemented, which of its callers got it?* The pairs above are maintained by
+    whoever remembers to add a line, and this project's most-repeated defect is
+    a list that stopped enumerating what it claims to. Session 7 added a third
+    consumer and Session 10 a fourth; nothing would have failed if either had
+    been left out, because a consumer nobody compares is a consumer that agrees
+    with the contract by assumption.
+
+    So the module's own `*_CONSUMER` globals are enumerated and each must appear
+    in the pairs above. **Derived from the module rather than counted**: a
+    `len(...) == 4` would pass while the fourth consumer was a duplicate of the
+    third.
+    """
+    declared_in_module = {
+        name for name in dir(bootstrap) if name.endswith("_CONSUMER") and name.isupper()
+    }
+    checked = {
+        "POSTGREST_CONSUMER",
+        "AUTH_SERVICE_CONSUMER",
+        "STORAGE_SERVICE_CONSUMER",
+        "BACKUP_USER_CONSUMER",
+    }
+    assert declared_in_module == checked, (
+        f"the bootstrap plane declares consumers {sorted(declared_in_module)} and "
+        f"test_the_bootstrap_consumers_match_the_secret_contract checks {sorted(checked)}. "
+        "A consumer nobody compares against the contract is one whose target_file can "
+        "disagree silently -- the credential is reported absent and the role left NOLOGIN"
+    )
 
 
 # ---------------------------------------------------------------------------

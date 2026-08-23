@@ -526,6 +526,18 @@ def activated_login_roles(document: dict[str, Any], roles: dict[str, str]) -> se
       `CURRENT_SESSION` was still 6 -- so a correct deployment today renders a
       storage route, materializes no storage secret, and leaves the role
       correctly NOLOGIN.
+    * The **backup credential in `secrets.required_names`**, for exactly the
+      reason one line up, and Session 10 Run 5's addition (D517, ADR 0148).
+      `backup_user` had been a NOLOGIN stub since Session 3; the moment it can
+      log in this function has to say so, or `test_only_the_activated_roles_-
+      may_log_in` reports the product's own deliberate activation as a
+      violation -- which is what D301 cost on the first host gate after
+      `project_admin`. Keyed on the credential rather than on `backup.enabled`,
+      and the difference is load-bearing: `activate_backup_user` credentials the
+      role whenever the generation carries the file and never reads the
+      manifest's flag. **There is no route to key on** -- a repository is not an
+      HTTP surface -- so the symmetrical-looking alternative does not exist here
+      at all.
 
     Returns role NAMES rather than suffixes, so a caller compares the result
     against `pg_roles` without a second mapping step.
@@ -546,6 +558,8 @@ def activated_login_roles(document: dict[str, Any], roles: dict[str, str]) -> se
     required = (document.get("secrets") or {}).get("required_names") or []
     if "storage_service_password" in required:
         activated.add(roles["storage_service"])
+    if "backup_user_password" in required:
+        activated.add(roles["backup_user"])
 
     return activated
 
