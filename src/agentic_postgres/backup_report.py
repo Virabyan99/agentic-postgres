@@ -163,25 +163,120 @@ def status_for(summary: dict[str, Any]) -> str:
     return STATUS_FAILING
 
 
-def backup_state(summary: dict[str, Any]) -> dict[str, Any]:
-    """The deployed document's `backup_state` block, from one repository report.
+#: The one query that reads the archiver, and the ONE place its columns are named.
+#:
+#: `pg_stat_archiver` is the product's own report, and it is the source for the
+#: same reason ADR 0149 refuses a process's exit code: a log line is a third
+#: party's formatting decision, and D374 is the record of a test checking a
+#: string its target could not contain (D528).
+#:
+#: `-qtA` with this separator is how `bin/deploy-project.py` already reads the
+#: cluster, so the parsing below matches the reader that exists rather than
+#: introducing a second shape.
+ARCHIVER_QUERY = (
+    "SELECT archived_count, coalesce(last_archived_time::text, ''), "
+    "failed_count, coalesce(last_failed_time::text, ''), "
+    "coalesce(last_failed_wal, '') FROM pg_stat_archiver"
+)
 
-    `wal_archived_count` and `wal_failed_count` are **null here on purpose**.
-    They come from `pg_stat_archiver`, which is the archiver's own counter and
-    Run 7's subject -- not something the repository reports. A `ready` beside two
-    nulls is honest: the repository was read and the archiver was not.
+ARCHIVER_SEPARATOR = "|"
 
-    What makes `ready` defensible without them is that **step 6c's `check` is
-    itself an archiving proof** -- it forces a WAL switch and confirms the
-    segment arrived. Run 7 adds the continuous signal; this is the
-    point-in-time one.
+
+def parse_archiver(raw: str) -> dict[str, Any] | None:
+    """`ARCHIVER_QUERY`'s single row, or None if there is nothing to read.
+
+    None rather than a dict of zeros: a cluster that could not be asked and a
+    cluster reporting zero failures are different facts, and publishing the
+    second for the first is the substitution `NOT_OBSERVED` exists to refuse.
     """
+    line = next((part for part in raw.strip().splitlines() if part.strip()), "")
+    if not line:
+        return None
+    fields = line.split(ARCHIVER_SEPARATOR)
+    if len(fields) != 5:
+        return None
+    archived, archived_at, failed, failed_at, failed_wal = fields
+    try:
+        archived_count = int(archived)
+        failed_count = int(failed)
+    except ValueError:
+        return None
     return {
-        "status": status_for(summary),
+        "archived_count": archived_count,
+        "last_archived_time": archived_at or None,
+        "failed_count": failed_count,
+        "last_failed_time": failed_at or None,
+        "last_failed_wal": failed_wal or None,
+    }
+
+
+def archiving_is_failing(archiver: dict[str, Any]) -> bool:
+    """Is the MOST RECENT archive attempt a failure? (ADR 0150)
+
+    **Timestamps, never the counter**, and rig 7 is why. Measured, arm G, with
+    the arm and its control in one invocation:
+
+      healthy baseline   archived 8 -> 12   failed 11 -> 11
+      archiving broken   archived 12 -> 12  failed 11 -> 26
+      repaired (control) archived 12 -> 21  failed 26 -> 26
+
+    **`failed_count > 0` is unusable as a status** (D553): the healthy,
+    fully-caught-up cluster in the last row carries 26. The counter is cumulative
+    and never resets, and **every project accrues failures before its stanza
+    exists** -- the window between the container starting with `archive_mode=on`
+    and step 6c running `stanza-create` is a window in which every attempt
+    fails. That predicate would report every project failing, permanently, from
+    its first deploy.
+
+    This REFINES D535 rather than contradicting it. D535 says `failed_count` is
+    the value that moves while `last_failed_wal` pins to the oldest stuck
+    segment, and that is right *for detecting a change across an interval*, which
+    is what `REC-WAL-001` asserts. A point-in-time status is a different question.
+
+    `archived_count` is no better on its own: it freezes during the failure and
+    then **catches up** (12 -> 21 across the repair), so a reader sampling it
+    twice around a repair sees a healthy-looking increase.
+    """
+    if archiver.get("last_failed_time") is None:
+        return False
+    if archiver.get("last_archived_time") is None:
+        # Something has failed and nothing has ever succeeded.
+        return True
+    return str(archiver["last_failed_time"]) > str(archiver["last_archived_time"])
+
+
+def backup_state(summary: dict[str, Any], archiver: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The deployed document's `backup_state` block.
+
+    Two sources, deliberately: the repository's own report says whether a backup
+    exists and when, and **`pg_stat_archiver` says whether WAL is still
+    arriving** (ADR 0150). They fail independently -- a repository full of good
+    backups can sit behind an archiver that stopped an hour ago -- so a status
+    derived from one alone is a status about half the system.
+
+    ``archiver`` is None when nothing read the cluster: a deployment through a
+    session before 10, or a read that failed. Then the two counters stay null,
+    which is what Run 6 published for every deployment, and the repository's
+    verdict stands alone.
+
+    **The archiver can only make the status worse, never better.** A repository
+    with no backup is `awaiting_first_backup` whether or not WAL is flowing, and
+    a healthy archiver cannot promote it: there is still nothing to restore.
+    """
+    status = status_for(summary)
+    if archiver is not None and archiving_is_failing(archiver):
+        status = STATUS_FAILING
+
+    return {
+        "status": status,
         "stanza_created": bool(summary.get("stanza_created")),
         "last_full_backup_label": summary.get("last_full_backup_label"),
         "last_full_backup_at": summary.get("last_full_backup_at"),
         "latest_recoverable_time": summary.get("latest_recoverable_time"),
-        "wal_archived_count": None,
-        "wal_failed_count": None,
+        # Published AS MEASURED -- cumulative, unreset, and including the
+        # failures every project accrues before its stanza exists. They are the
+        # diagnostic that justifies the status, not the status itself, and
+        # resetting them would make the deploy a writer of the evidence it reads.
+        "wal_archived_count": None if archiver is None else archiver["archived_count"],
+        "wal_failed_count": None if archiver is None else archiver["failed_count"],
     }

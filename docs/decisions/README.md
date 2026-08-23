@@ -213,3 +213,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0147](0147-the-database-reaches-its-repository-over-an-egress-network-of-its-own.md) | The database reaches its repository over an egress network of its own | 10 | Accepted |
 | [0148](0148-what-a-backup-identity-holds-and-the-fifth-claimant.md) | What a backup identity holds, and the fifth claimant on one budget | 10 | Accepted |
 | [0149](0149-the-backup-command-and-what-a-repository-can-honestly-report.md) | The backup command, step 6c, and what a repository can honestly report | 10 | Accepted |
+| [0150](0150-a-broken-archiver-is-visible-without-taking-the-database-down.md) | A broken archiver is visible, and it does not take the database down | 10 | Accepted |

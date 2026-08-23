@@ -900,7 +900,11 @@ def backup_credentialed_for(secrets: dict[str, Any]) -> bool:
 
 
 def observe_backup(
-    *, enabled: bool, credentialed: bool, summary: dict[str, Any] | None = None
+    *,
+    enabled: bool,
+    credentialed: bool,
+    summary: dict[str, Any] | None = None,
+    archiver: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """What this deploy can honestly say about the repository. Version 13.
 
@@ -938,7 +942,10 @@ def observe_backup(
         return state
     if summary is None:
         return dict(deployed_output.BACKUP_NOT_OBSERVED)
-    return backup_report.backup_state(summary)
+    # Run 7: the archiver too. `backup_state` can only make the status worse
+    # with it -- a repository with no backup stays `awaiting_first_backup`
+    # however well WAL is flowing, because there is still nothing to restore.
+    return backup_report.backup_state(summary, archiver)
 
 
 def read_backup_repository(release: Path, outputs_path: Path) -> dict[str, Any] | None:
@@ -973,6 +980,46 @@ def read_backup_repository(release: Path, outputs_path: Path) -> dict[str, Any] 
         # configuration, and that carries the bucket and the prefix.
         print("  the repository report was not JSON; backup not_observed")
         return None
+
+
+def read_archiver(database: dict[str, Any]) -> dict[str, Any] | None:
+    """`pg_stat_archiver`, read from the cluster this deploy just started.
+
+    **The archiver and the repository fail independently** (ADR 0150), which is
+    why this is a second read rather than something `bin/backup.sh` returns: a
+    repository full of good backups can sit behind an archiver that stopped an
+    hour ago, and `pgbackrest info` would report `ok` for it. The repository says
+    what was saved; this says whether anything still is.
+
+    Returns None rather than failing the deploy. Step 6c has already run `check`
+    by the time this is called, so an archiver that is genuinely broken has
+    stopped the deploy with a named reason -- and a read that fails here should
+    publish "nobody looked" rather than a status nobody measured.
+    """
+    result = run(
+        "docker",
+        "exec",
+        "-i",
+        database["container"],
+        "psql",
+        "-U",
+        "postgres",
+        "-d",
+        database["name"],
+        "-X",
+        "-qtA",
+        "-F",
+        backup_report.ARCHIVER_SEPARATOR,
+        "-c",
+        backup_report.ARCHIVER_QUERY,
+    )
+    if result.returncode != 0:
+        print("  could not read pg_stat_archiver; the WAL counters stay null")
+        return None
+    archiver = backup_report.parse_archiver(result.stdout)
+    if archiver is None:
+        print("  pg_stat_archiver returned nothing readable; the WAL counters stay null")
+    return archiver
 
 
 def observe_storage(url: str, *, credentialed: bool) -> str:
@@ -1751,6 +1798,7 @@ def main(argv: list[str] | None = None) -> int:
     # shape and only the freshness matters -- which is exactly why 0146 chose a
     # shared definition over a copy per branch (D389).
     backup_summary: dict[str, Any] | None = None
+    backup_archiver: dict[str, Any] | None = None
     if (
         rendered["backup"]["enabled"]
         and arguments.through_session >= BACKUP_PLANE_SESSION
@@ -1794,6 +1842,12 @@ def main(argv: list[str] | None = None) -> int:
         backup_summary = read_backup_repository(
             release, deployed_output.rendered_path(key) / "outputs.json"
         )
+        # Read here rather than in step 7, so that the repository's report and
+        # the archiver's counters describe the same instant. Two reads minutes
+        # apart could publish a `ready` repository beside counters taken after
+        # something broke -- a document that is internally inconsistent about
+        # one system.
+        backup_archiver = read_archiver(rendered["database"])
 
     # The API plane, observed rather than asserted. Until Run 9 these four were
     # hard-coded `unavailable` with a comment saying "Session 5's runs replace
@@ -1944,6 +1998,9 @@ def main(argv: list[str] | None = None) -> int:
         # SAME function step 6c used, so the two cannot disagree about whether
         # this project has a repository (see `backup_credentialed_for`).
         summary=backup_summary,
+        # And what the archiver said at the same instant (ADR 0150). The two
+        # fail independently, so the status needs both.
+        archiver=backup_archiver,
     )
     if (
         rendered["backup"]["enabled"]

@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D553.**
+**Next free number after this table is D558.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -117,6 +117,11 @@ anything found *during* implementation is appended with the next free number.
 | **D550** | "Recovery time and latest recoverable time must be recorded as evidence." | **`pgbackrest info` has no latest-recoverable-time field.** Measured: it carries per-backup epoch integers (`timestamp.start`/`stop`) and WAL **segment names** (`archive[].min`/`max`), and a segment name has no time in or beside it. The v13 schema description asserted the value "is read from `pgbackrest info`". | **The newest backup's stop time is published as a proven FLOOR**, and the schema description is corrected in place to say so rather than left asserting something the measurement refutes. Run 8's evidence records the **achieved** recovery point as a separate field. | A drill landing later than this value is the floor being a floor, not a contradiction — WAL archived after the newest backup extends real recovery past it. Written down before anybody reads the two side by side and "fixes" the one that is right. Null was refused for D519's reason inverted: a required field that is always null is published and reaches nothing. | 0149 |
 | **D551** | — | **`backup_state.status` had no value for "configured, stanza exists, awaiting its first backup"** — which is the state of **every** project between its first Session 10 deploy and its first operator-run full backup, because the plan puts that backup in an operator's hands at a TTY (Runs 11+). | **`awaiting_first_backup` joins the enum**, extending outputs **v13** rather than opening v14: v13 has never left this tree — both host projects are on v12 — so a document carrying it is one nothing has to migrate. | `ready` is false (nothing can be restored), `failing` would be red on every first deploy (a status operators learn to ignore, the argument `provision-host.sh` already makes for installing timers disabled), and `unconfigured` means a MISSING CREDENTIAL — it would send an operator hunting for a secret that is present and correct. **The third instance of ADR 0053's cost** (D255, D308): a version chosen once from the whole surface, still short a value only measurement surfaced. | 0149 |
 | **D552** | — | **The rig measured its own setup failure as a pgBackRest finding.** Rig 6's first run used `docker exec` without `-i`, so stdin was never attached, psql ran **nothing**, `rig_backup` did not exist, and every pgBackRest command failed with `unable to find primary cluster - cannot proceed`. Every step reported an exit code and none of them was about pgBackRest. | **The rig's setup gained a control** — it counts the role in `pg_roles` and aborts fatally if it is absent — before any measurement was taken from it. | CLAUDE.md §1 already names this exact trap (`docker exec` needs `-i`), and it was still paid for. The lesson that is new: **a rig needs a control on its own setup, not only on its subject.** Every arm downstream was ready to report a confident, wrong finding about a third party, and the numbers all looked plausible. | — |
+| **D553** | "…health checks that expose failures." | **`failed_count > 0` is unusable as a status, and it is the obvious predicate.** Measured (rig 7 arm G), arm and control in one invocation: healthy baseline `archived_count` 8 → 12 with `failed_count` 11 → 11; broken `archived_count` **frozen at 12** with `failed_count` 11 → **26**; repaired `archived_count` 12 → **21** with `failed_count` still **26**. The healthy, fully-caught-up cluster carries 26 — the counter is cumulative, never resets, and **every project accrues failures in the window between its container starting with `archive_mode=on` and step 6c creating its stanza.** | **The status compares timestamps:** `last_failed_time > last_archived_time`, with never-archived treated as failing. `archiving_is_failing` is refused the counters by an AST test, not only by a comment. | **This REFINES D535 rather than contradicting it.** D535 says `failed_count` is the value that moves while `last_failed_wal` pins to the oldest stuck segment — right **for detecting a change across an interval**, which is what `REC-WAL-001` asserts. A point-in-time status is a different question, and conflating them puts a cumulative counter in a status field that would then read `failing` on every project forever. `archived_count` alone is no better: it freezes, then **catches up** across a repair, so a reader sampling twice sees a healthy-looking increase. | 0150 |
+| **D554** | "Break the archive deliberately (a revoked credential arm and a wrong-prefix arm)." | **Only one of the two arms can be run off a host.** The wrong-prefix arm is exact — `repo1-path` pointing where no stanza exists is the same misconfiguration a bad `repository_prefix` produces. The revoked-credential arm is **a stand-in**: rig 7 made the posix repository unwritable, and an `EACCES` from a filesystem is not a `403` from R2. | **Run offline with the substitution STATED**, not silently. What the two share is what the cluster sees — `archive_command` exiting non-zero — and that is the whole of what `pg_stat_archiver` records, which is what this run's mapping consumes. **The real revoked-credential arm needs the host trip** and lands in `REC-WAL-001`. | D267's rule pointed the other way for once: the measurement WAS run, and what needs writing down is precisely what it was a measurement *of*. An arm labelled "revoked credential" that revoked nothing would read as the real thing forever after, and the mechanism is the part a future reader reuses (D531's lesson, in the other direction). | 0150 |
+| **D555** | "…the healthcheck goes unhealthy." | **Measured, and the prediction is reversed.** With the archiving predicate as the Postgres healthcheck, `docker compose up --wait` **exits 1** — "container … is unhealthy" — while the container is `running`, `RestartCount` **0**, and the database **answers queries**. The control, the same broken archiver behind `pg_isready`, exits **0**. And **three services gate on `postgres: condition: service_healthy`**: the pooler, the auth service and storage. | **The archiving signal does NOT go in the Postgres healthcheck.** It reaches an operator through the deployed document (`backup_state.status: failing` with both counters), `bin/backup.sh check`'s non-zero exit, and step 6c failing the deploy with a named reason. A test asserts the healthcheck is still `pg_isready` **and** that the gating this rests on is real. | An archiving predicate there converts a recoverability incident into an availability one — a backup problem stopping the application from starting, on a cluster that is serving. **And it blocks its own repair:** a broken archiver is fixed by deploying, and a deploy that cannot get past `compose up --wait` cannot deliver the fix. The failure also names nothing: "container is unhealthy" against step 6c's *"WAL archiving does not work for this project… this is the archiver"*. | 0150 |
+| **D556** | — | **A red healthcheck costs nothing at the container level**, which is the half that made the question look cheap. Measured (arm F): unhealthy after ~15s, `status=running`, `RestartCount=0`, and the database answered a query while unhealthy. Nothing restarts it, nothing stops it. | **Recorded, because it is the argument FOR the rejected option** and it is a real one. The cost is entirely in what reads the health — `--wait` and `depends_on` — and both are exactly what must not see it. | A decision is only safe to inherit if the strongest case for the alternative is written beside it. Whoever revisits this will find the healthcheck harmless in isolation and should not have to rediscover that the harm is in the two consumers. | 0150 |
+| **D557** | — | **`pg_switch_wal()` on an idle cluster archives nothing**, and a rig that churns without writing measures its own inactivity. Rig 7's arm F called it five times against a quiet cluster: `archived_count` and `failed_count` were **byte-identical before and after**, and the arm reported the predicate as `ok` in a state it had failed to break. | **The churn writes first**, and the rig **asserts its counters moved** before drawing any conclusion — a fatal check, like the setup control D552 added. | The second rig-defect-as-finding in two runs, and the more dangerous shape: D552's rig failed loudly (`unable to find primary cluster`), this one produced a **plausible, quiet, wrong answer** — "the predicate says ok" — in an arm whose whole purpose was to see it say failing. **An arm hoping for "no change" cannot distinguish success from having done nothing**, so it needs a control proving it did something. | — |
 
 ---
 
@@ -740,7 +745,7 @@ repository on a local volume, because the questions were about pgBackRest's own
 reporting rather than about where the bytes land. Step 6c has never run on a
 host.
 
-### Run 7 — A WAL archiving failure is visible
+### Run 7 — A WAL archiving failure is visible. **Done.**
 
 - Break the archive deliberately (a revoked credential arm and a wrong-prefix
   arm), and prove the signal: `pg_stat_archiver.failed_count` moves,
@@ -748,6 +753,101 @@ host.
   operator command reports non-zero. **The control is the same assertion against
   a healthy archive in the same invocation.**
 - `REC-WAL-001`.
+
+---
+
+**What Run 7 measured, and what it changed.** ADR 0150. Rig 7, eight arms
+against the Run 4 derived image, each arm paired with its control in the same
+invocation.
+
+**The obvious predicate is wrong, and that is the run's main finding (D553).**
+`failed_count > 0` would report **every project as failing, permanently, from its
+first deploy**: the counter is cumulative, never resets, and every project
+accrues failures in the window between its container starting with
+`archive_mode=on` and step 6c creating its stanza. Measured, with the arm and its
+control in one invocation:
+
+    healthy baseline   archived_count  8 -> 12   failed_count 11 -> 11
+    archiving broken   archived_count 12 -> 12   failed_count 11 -> 26
+    repaired (control) archived_count 12 -> 21   failed_count 26 -> 26
+
+The last row is the whole argument: **more cumulative failures than the broken
+row, and perfectly healthy.** So the status compares timestamps —
+`last_failed_time > last_archived_time` — and an AST test refuses the counters to
+that function, because "simplify it to a count" reads as more obvious than what
+is there. `archived_count` alone is no better: it freezes during the failure and
+then **catches up** across the repair, so a reader sampling it twice sees a
+healthy-looking increase.
+
+**This refines D535 rather than contradicting it.** D535 says `failed_count` is
+the value that moves while `last_failed_wal` pins to the oldest stuck segment,
+and that is right *for detecting a change across an interval* — which is what
+`REC-WAL-001` asserts. A point-in-time status is a different question, and
+conflating the two is how a cumulative counter ends up in a status field.
+
+**The plan's healthcheck prediction is reversed, and it was measured before it
+was reversed (D555).** With the archiving predicate as the Postgres healthcheck,
+`compose up --wait` **exits 1** while the database answers queries; the control —
+the same broken archiver behind `pg_isready` — exits 0. **Three services gate on
+`postgres: condition: service_healthy`**, so an archiving predicate there turns a
+recoverability incident into an availability one: a backup problem stopping the
+pooler, the auth service and storage from starting, on a cluster that is serving.
+**And it blocks its own repair** — a broken archiver is fixed by deploying, and a
+deploy that cannot pass `compose up --wait` cannot deliver the fix. D556 records
+the strongest case for the rejected option, which is real: a red healthcheck
+costs nothing at the container level (`status=running`, `RestartCount=0`, queries
+answered). The harm is entirely in the two things that read health, and those are
+exactly the two that must not.
+
+So the signal reaches an operator through the deployed document
+(`backup_state.status: failing` with both counters), `bin/backup.sh check`'s
+non-zero exit, and step 6c's named deploy failure — all of which existed after
+Run 6 except the first.
+
+**`wal_archived_count` and `wal_failed_count` stop being null.** Run 6 returned
+both as `None` with a test asserting it; Run 7 populates them from
+`pg_stat_archiver`, read in step 6c **beside** the repository report so the two
+describe one instant. They are published as measured — cumulative, unreset,
+including the pre-stanza failures — because they are the diagnostic that
+justifies the status rather than the status itself. `bin/backup.sh info` prints
+them and says in as many words that a non-zero failed count on a healthy archiver
+is expected.
+
+**The two sources can only compound, never cancel.** A broken archiver turns a
+`ready` repository into `failing`; a healthy archiver cannot promote a repository
+with no backup out of `awaiting_first_backup`, because there is still nothing to
+restore. Both directions are asserted.
+
+**Only one of the plan's two arms can be run off a host, and the write-up says
+so (D554).** The wrong-prefix arm is exact. The revoked-credential arm is a
+**stand-in** — an unwritable posix repository, and an `EACCES` is not a `403`.
+What they share is what the cluster sees, `archive_command` exiting non-zero,
+which is all `pg_stat_archiver` records. The real arm needs the trip.
+
+**Battery: P1–P9, 9 of 9 killed** as `FAILED`, control green and unreachable in
+every arm, all three mutated files restored byte-for-byte. **P5 survived the
+first run** and was a real coverage gap: the empty-timestamp test exercised only
+the *failed* timestamp, so mutating the *archived* one survived — and survived
+for an uncomfortable reason, since an empty string still compares greater-than
+against nothing and the predicate returned the right answer by accident. Now both
+empty fields are parsed, including the row a never-archived cluster actually
+prints.
+
+**A rig defect worth more than the arm it broke (D557).** Arm F churned with
+`pg_switch_wal()` against an idle cluster, which archives nothing, and reported
+the predicate as `ok` in a state it had failed to break — counters byte-identical
+before and after. D552's rig failed loudly; this one produced a **plausible,
+quiet, wrong answer** in the arm whose whole purpose was to watch the predicate
+fire. **An arm hoping for "no change" cannot tell success from having done
+nothing**, so arm G's churn writes first and the rig asserts its own counters
+moved before concluding anything.
+
+**`REC-WAL-001` is still a placeholder and is still Run 9's.** Its node id lives
+in `tests/recovery/` and needs a deployment; Run 7 builds the signal and proves
+the mapping offline. Nothing here empties `FUTURE_STUBS` or activates a registry
+id.
+
+**Nothing is deployed and nothing has dialled R2.**
 
 ### Run 8 — `bin/restore-test.sh` leaves `FUTURE_STUBS`
 

@@ -226,6 +226,50 @@ def _relay(result: subprocess.CompletedProcess) -> None:
         print(result.stderr, end="", file=sys.stderr)
 
 
+def read_archiver(container: str, document: dict) -> dict | None:
+    """`pg_stat_archiver`, over the container's own socket.
+
+    Through `psql` as the superuser rather than as `backup_user`: this is the
+    operator's command, it already runs as root on the host and reaches the
+    container over the local socket, and giving the backup identity a sixth
+    privilege so that a diagnostic could use it would be a grant nothing
+    measured needed (ADR 0148's necessity matrix).
+
+    The SQL is a module constant in `backup_report` -- one place naming the
+    columns, so this command and the deploy's observer cannot read the archiver
+    two different ways.
+
+    Returns None rather than raising: a repository report is still worth
+    printing when the cluster will not answer a second question.
+    """
+    result = subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            container,
+            "psql",
+            "-U",
+            "postgres",
+            "-d",
+            (document.get("database") or {}).get("name", "postgres"),
+            "-X",
+            "-qtA",
+            "-F",
+            backup_report.ARCHIVER_SEPARATOR,
+            "-c",
+            backup_report.ARCHIVER_QUERY,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=QUICK_TIMEOUT_SECONDS,
+    )
+    if result.returncode != 0:
+        return None
+    return backup_report.parse_archiver(result.stdout)
+
+
 def read_repository(container: str, stanza: str) -> dict:
     """The repository's own report, summarised. Never reads the exit code.
 
@@ -327,21 +371,47 @@ def verb_info(arguments: argparse.Namespace) -> int:
     stanza = stanza_name(document)
     container = database_container(document)
 
+    # **Both sources, because they fail independently** (ADR 0150). A repository
+    # full of good backups can sit behind an archiver that stopped an hour ago,
+    # and `pgbackrest info` reports `ok` for exactly that cluster. The
+    # repository says what was saved; `pg_stat_archiver` says whether anything
+    # still is.
+    summary = read_repository(container, stanza)
+    archiver = read_archiver(container, document)
+    state = backup_report.backup_state(summary, archiver)
+    status = state["status"]
+
     if arguments.json:
-        summary = read_repository(container, stanza)
-        # The summary, not the raw report: this is what the deployed document is
-        # built from, so printing it is what lets an operator see exactly what
-        # the deploy will publish.
-        print(json.dumps(summary, indent=2, sort_keys=True))
-        return (
-            0 if backup_report.status_for(summary) != backup_report.STATUS_FAILING else EXIT_REFUSED
-        )
+        # The published block, not the raw report: this is exactly what the
+        # deploy writes into `outputs.json`, so an operator can see the document
+        # before it exists rather than diffing it afterwards.
+        print(json.dumps(state, indent=2, sort_keys=True))
+        return 0 if status != backup_report.STATUS_FAILING else EXIT_REFUSED
 
     result = pgbackrest(container, stanza, "info")
     _relay(result)
-    summary = read_repository(container, stanza)
-    status = backup_report.status_for(summary)
     print(f"backup: {stanza} is {status} (pgbackrest status.code {summary['status_code']})")
+    if archiver is None:
+        print("  archiver: not readable, so the WAL counters are unknown")
+    else:
+        print(
+            f"  archiver: {archiver['archived_count']} archived, "
+            f"{archiver['failed_count']} failed"
+            + (
+                ""
+                if not backup_report.archiving_is_failing(archiver)
+                else f" -- THE NEWEST ATTEMPT FAILED, at {archiver['last_failed_wal']}"
+            )
+        )
+        # The counters are cumulative and never reset, so a non-zero
+        # `failed_count` on a healthy cluster is normal and says so: every
+        # project accrues failures in the window between the container starting
+        # with archive_mode=on and step 6c creating the stanza (D553).
+        if archiver["failed_count"] and not backup_report.archiving_is_failing(archiver):
+            print(
+                "  (a non-zero failed count on a healthy archiver is expected: the counter "
+                "is cumulative and every project fails to archive until its stanza exists)"
+            )
     return 0 if status != backup_report.STATUS_FAILING else EXIT_REFUSED
 
 
