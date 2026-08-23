@@ -111,3 +111,14 @@ backup:
   stanza: fixture-alpha-dev
   repository_prefix: pgbackrest/fixture-alpha-dev/
   retain_full: 2
+  # Session 10. The repository's own account, declared separately from
+  # `storage.account_id` so a repository can live somewhere else. Nothing
+  # requires the two to match and nothing requires them to differ, and this
+  # fixture deliberately reuses the storage account's id: the isolation this
+  # session proves is between BUCKETS and the tokens scoped to them (ADR 0145),
+  # and a fixture that split the accounts too would make the bucket boundary
+  # look like it depended on an account boundary it does not depend on.
+  account_id: 0123456789abcdef0123456789abcdef
+  # No `bucket` override on purpose -- this fixture exercises the derived
+  # `apg-fixture-alpha-dev-backup`, and if both examples overrode it the
+  # derivation would be rendered by neither.

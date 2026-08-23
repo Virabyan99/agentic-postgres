@@ -296,11 +296,29 @@
           "maxLength": 256,
           "description": "Relative repository prefix ending in '/'."
         },
+        "bucket": {
+          "type": ["string", "null"],
+          "minLength": 3,
+          "maxLength": 63,
+          "description": "The R2 bucket holding the pgBackRest repository. Defaults to `apg-{project_key}-backup`, namespaced like every other derived identifier (ADR 0105 applied, not restated), and a value given HERE is used verbatim and unprefixed for the same reason storage.bucket's override is. A SEPARATE bucket from storage.bucket, and that is ADR 0145 rather than a filing choice: R2 scopes an API token to buckets far more cleanly than to key prefixes, so 'the storage service cannot reach the backup repository' becomes a token scope a HeadBucket can be measured against instead of a policy sentence nothing executes."
+        },
+        "account_id": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{32}$",
+          "description": "The Cloudflare account the backup bucket lives in, 32 lowercase hex characters. Required when backups are enabled and forbidden when they are not. An IDENTIFIER and not a credential, exactly as storage.account_id is: it appears in the endpoint hostname of every request, so it is a manifest field rather than a secret, and the endpoint is derived from it by naming.storage_endpoint_url -- the same function, not a second one (ADR 0002, ADR 0106). Declared separately from storage.account_id so a repository can live in a different account from application objects; nothing here requires them to differ, and nothing requires them to match."
+        },
+        "jurisdiction": {
+          "type": "string",
+          "enum": ["default", "eu", "fedramp"],
+          "default": "default",
+          "description": "The R2 jurisdiction the backup bucket was created in. storage.jurisdiction's paragraph applies unchanged: a jurisdictional bucket is reachable only through its own endpoint host, only 'default' has ever been dialled by anything here, and the enum is closed at what Cloudflare documents rather than at what has been proved."
+        },
         "retain_full": {
           "type": "integer",
+          "default": 2,
           "minimum": 1,
           "maximum": 12,
-          "description": "Full backup chains retained."
+          "description": "Full backup chains retained, rendered into the repository's `repo1-retention-full`. Two is what docs/source-specification.md section 12.1 asks for. This bound existed from Session 1 and was read by NO code until Session 10 -- no default resolution, no propagation, absent from outputs.json (D519) -- so a manifest could set it to 7 and nothing would retain seven chains."
         }
       },
       "if": {
@@ -310,7 +328,9 @@
       "then": {
         "properties": {
           "stanza": { "type": "null" },
-          "repository_prefix": { "type": "null" }
+          "repository_prefix": { "type": "null" },
+          "bucket": { "type": "null" },
+          "account_id": { "type": "null" }
         }
       }
     }

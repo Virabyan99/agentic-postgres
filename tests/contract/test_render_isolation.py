@@ -78,7 +78,48 @@ MUST_DIFFER = (
     ("storage", "prefix"),
     ("backup", "stanza"),
     ("backup", "repository_prefix"),
+    # Session 10, outputs v13.
+    ("backup", "bucket"),
+    ("compose", "networks", "backup"),
 )
+
+
+def test_every_field_the_collision_evidence_checks_is_checked_here_too() -> None:
+    """The two lists that had to agree and never met.
+
+    ``MUST_DIFFER`` above and ``evidence.ISOLATED_FIELDS`` are both hand-written
+    tuples of the same kind of thing, they are named together in a comment in
+    ``output_migrations``, and **nothing compared them** until Session 10 added a
+    field to both and noticed it could as easily have added it to one (D536).
+    That is D174/D175's shape -- a property maintained by review rather than by
+    a test -- and it fails silently in the worse direction: a name dropped from
+    ``ISOLATED_FIELDS`` leaves the published ``collision_count`` reporting zero
+    over a smaller set, which reads exactly like isolation.
+
+    Containment rather than equality, and the surplus is pinned rather than
+    waved at, so this cannot be satisfied by ``MUST_DIFFER`` growing something
+    unrelated. ``ISOLATED_FIELDS`` is the set the shipped evidence document
+    counts collisions over; ``MUST_DIFFER`` additionally covers values that are
+    project-scoped but are not identities two projects could collide *on*.
+    """
+    from agentic_postgres.evidence import ISOLATED_FIELDS
+
+    missing = sorted(set(ISOLATED_FIELDS) - set(MUST_DIFFER))
+    assert not missing, f"ISOLATED_FIELDS checks these and this module does not: {missing}"
+
+    surplus = sorted(set(MUST_DIFFER) - set(ISOLATED_FIELDS))
+    assert surplus == [
+        ("project", "slug"),
+        ("routes", "app"),
+        ("routes", "docs"),
+        ("routes", "mcp"),
+        ("routes", "rest"),
+    ], (
+        "MUST_DIFFER's surplus over ISOLATED_FIELDS moved. Adding an identity to "
+        "one list and not the other is the defect this test exists for, so the "
+        "difference is pinned rather than merely bounded."
+    )
+
 
 #: Runbook §8: these are *allowed* to match. Asserting they do keeps the
 #: isolation test from being satisfied by two unrelated documents.

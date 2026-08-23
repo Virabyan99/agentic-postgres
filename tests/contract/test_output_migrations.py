@@ -260,6 +260,47 @@ def storage_settings_for(document: dict[str, Any]) -> dict[str, Any]:
     return {name: config.STORAGE_DEFAULTS[name] for name in output_migrations._V11_STORAGE_MEMBERS}
 
 
+def backup_bucket_for(document: dict[str, Any]) -> str | None:
+    """What version 13 resolves into ``backup.bucket``.
+
+    Derived through `naming` from the document's own project key, like every
+    other helper here, and ``None`` when the archived document has backups off:
+    the migrator refuses a bucket for a disabled facility, and supplying one
+    would be testing a state the renderer cannot produce.
+
+    A v12 document does not record whether its manifest overrode the bucket, so
+    this resolves to the DERIVED name. That is `storage_settings_for`'s
+    assumption, stated for the same reason -- an archived document is exactly a
+    document whose manifest named none of these, and inventing an operator's
+    override would be worse than assuming they made none.
+    """
+    backup = document.get("backup", {})
+    if not backup.get("enabled"):
+        return None
+    return naming.backup_bucket_name(document["project"]["key"])
+
+
+def backup_network_for(document: dict[str, Any]) -> str:
+    """What version 13 resolves into ``compose.networks.backup``.
+
+    Through `naming.backup_network_name`, which exists precisely so that this
+    call and `derive`'s are one derivation rather than two spellings of it.
+    """
+    return naming.backup_network_name(document["project"]["key"])
+
+
+def backup_retain_full_for(document: dict[str, Any]) -> int:
+    """What version 13 resolves into ``backup.retain_full``.
+
+    From `config.BACKUP_DEFAULTS` rather than the literal 2, for
+    `storage_settings_for`'s reason: it is what a manifest naming nothing
+    resolves to, and a literal here would keep agreeing with itself after the
+    default moved.
+    """
+    del document
+    return int(config.BACKUP_DEFAULTS["retain_full"])
+
+
 def documentation_role_for(document: dict[str, Any]) -> str:
     """What a caller supplies for the v6 step (D158).
 
@@ -311,6 +352,9 @@ def chained(v1: dict[str, Any]) -> dict[str, Any]:
         pooler_pool_size=pooler_pool_size_for(v1),
         storage_route_url=storage_route_url_for(v1),
         storage_settings=storage_settings_for(v1),
+        backup_bucket=backup_bucket_for(v1),
+        backup_retain_full=backup_retain_full_for(v1),
+        backup_network=backup_network_for(v1),
     )
 
 
@@ -407,6 +451,9 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         pooler_pool_size=pooler_pool_size_for(v1),
         storage_route_url=storage_route_url_for(v1),
         storage_settings=storage_settings_for(v1),
+        backup_bucket=backup_bucket_for(v1),
+        backup_retain_full=backup_retain_full_for(v1),
+        backup_network=backup_network_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
 
@@ -477,6 +524,13 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
     assert migrated["schema_version"] == 11
     migrated = output_migrations.migrate_v11_to_v12(migrated)
     assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -559,6 +613,9 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             pooler_pool_size=pooler_pool_size_for(v1),
             storage_route_url=storage_route_url_for(v1),
             storage_settings=storage_settings_for(v1),
+            backup_bucket=backup_bucket_for(v1),
+            backup_retain_full=backup_retain_full_for(v1),
+            backup_network=backup_network_for(v1),
         )
 
 
@@ -631,7 +688,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 12"):
+    with pytest.raises(MigrationError, match="already version 13"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -647,6 +704,9 @@ def test_a_current_version_document_is_not_migrated_again(
             pooler_pool_size=pooler_pool_size_for(chained),
             storage_route_url=storage_route_url_for(chained),
             storage_settings=storage_settings_for(chained),
+            backup_bucket=backup_bucket_for(chained),
+            backup_retain_full=backup_retain_full_for(chained),
+            backup_network=backup_network_for(chained),
         )
     with pytest.raises(MigrationError, match="already version 5"):
         output_migrations.migrate_v4_to_v5(v5)
@@ -660,7 +720,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1 through 11"):
+    with pytest.raises(MigrationError, match="only versions 1 through 12"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -676,6 +736,9 @@ def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
             pooler_pool_size=pooler_pool_size_for(v1),
             storage_route_url=storage_route_url_for(v1),
             storage_settings=storage_settings_for(v1),
+            backup_bucket=backup_bucket_for(v1),
+            backup_retain_full=backup_retain_full_for(v1),
+            backup_network=backup_network_for(v1),
         )
 
 
@@ -697,6 +760,9 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             pooler_pool_size=pooler_pool_size_for(v1),
             storage_route_url=storage_route_url_for(v1),
             storage_settings=storage_settings_for(v1),
+            backup_bucket=backup_bucket_for(v1),
+            backup_retain_full=backup_retain_full_for(v1),
+            backup_network=backup_network_for(v1),
         )
 
 
@@ -727,6 +793,9 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             pooler_pool_size=pooler_pool_size_for(v1),
             storage_route_url=storage_route_url_for(v1),
             storage_settings=storage_settings_for(v1),
+            backup_bucket=backup_bucket_for(v1),
+            backup_retain_full=backup_retain_full_for(v1),
+            backup_network=backup_network_for(v1),
         )
 
 
@@ -863,6 +932,13 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
     assert migrated["schema_version"] == 11
     migrated = output_migrations.migrate_v11_to_v12(migrated)
     assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1051,6 +1127,13 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
     assert migrated["schema_version"] == 11
     migrated = output_migrations.migrate_v11_to_v12(migrated)
     assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1183,6 +1266,13 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
     assert migrated["schema_version"] == 11
     migrated = output_migrations.migrate_v11_to_v12(migrated)
     assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1326,6 +1416,13 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
     assert migrated["schema_version"] == 11
     migrated = output_migrations.migrate_v11_to_v12(migrated)
     assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
 
@@ -1659,6 +1756,13 @@ def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]
         storage_settings=storage_settings_for(migrated),
     )
     migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1834,6 +1938,14 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
         storage_settings=storage_settings_for(migrated),
     )
     migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
+    assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
     without = {
@@ -1889,6 +2001,13 @@ def test_the_v9_fixture_is_a_real_render_at_version_9(v9_fixture: dict[str, Any]
         storage_settings=storage_settings_for(migrated),
     )
     migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2017,6 +2136,13 @@ def test_the_v10_fixture_is_a_real_render_at_version_10(v10_fixture: dict[str, A
     # assertion stopped meaning anything the last time a version was added, and
     # it is why this line had to be edited rather than merely re-run.
     migrated = output_migrations.migrate_v11_to_v12(migrated)
+    assert migrated["schema_version"] == 12
+    migrated = output_migrations.migrate_v12_to_v13(
+        migrated,
+        backup_bucket=backup_bucket_for(migrated),
+        backup_retain_full=backup_retain_full_for(migrated),
+        backup_network=backup_network_for(migrated),
+    )
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 

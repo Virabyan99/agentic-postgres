@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -134,8 +134,32 @@ MCP_NOT_PUBLISHED: dict[str, Any] = {
 #: session, so nulling it would delete an address rather than withhold a claim.
 ROUTE_NOT_PUBLISHED: dict[str, Any] = {"status": "unavailable", "url": None}
 
+#: The repository of a deployment nothing has asked yet. Version 13.
+#:
+#: `not_observed` and six nulls, `NOT_OBSERVED`'s discipline rather than a new
+#: one: a zero `wal_failed_count` beside a `ready` status would be a claim that
+#: archiving is healthy, and a zero here would be indistinguishable from a real
+#: measurement that happened to be zero. This is the value every project carries
+#: until Run 6 writes an observer, and a project deployed through a session
+#: before 10 carries it permanently.
+#:
+#: `last_failed_wal` is deliberately absent from this block. rig1 measured the
+#: segment name pinning to the oldest stuck WAL while `failed_count` climbed
+#: 11/15/26 (D535), so a reader watching the name would see a steady value for
+#: the whole failure. The count is what moves, so the count is what is published.
+BACKUP_NOT_OBSERVED: dict[str, Any] = {
+    "status": "not_observed",
+    "stanza_created": None,
+    "last_full_backup_label": None,
+    "last_full_backup_at": None,
+    "latest_recoverable_time": None,
+    "wal_archived_count": None,
+    "wal_failed_count": None,
+}
+
 __all__ = [
     "API_NOT_PUBLISHED",
+    "BACKUP_NOT_OBSERVED",
     "JWT_NOT_PUBLISHED",
     "MCP_NOT_PUBLISHED",
     "NOT_OBSERVED",
@@ -276,6 +300,11 @@ def build_deployed_document(
     jwt: dict[str, Any],
     mcp: dict[str, Any],
     database_observed: dict[str, Any],
+    # Version 13. Optional, and defaulting to `not_observed` rather than being
+    # required, because nothing observes the repository until Run 6 -- and a
+    # required argument every caller would satisfy with the same constant is a
+    # constant with extra steps. The moment an observer exists it passes one.
+    backup_state: dict[str, Any] | None = None,
     deployed_through_session: int,
 ) -> dict[str, Any]:
     """Assemble a deployed document from a rendered one plus observed facts.
@@ -437,6 +466,17 @@ def build_deployed_document(
         # duplicated into a second list to keep in step -- which is the shape
         # that produced this row.
         "storage": dict(rendered["storage"]),
+        # Version 13, and carried whole for the reason the line above is: one
+        # `$def` serves both branches, so copying it key by key here would be a
+        # second list to keep in step -- the shape that produced STO-BOUND-001.
+        #
+        # The settings and the observation are two blocks, not one. `backup` is
+        # derived and identical on both branches; `backup_state` is measured and
+        # exists only here, which is how ADR 0012's "a rendered document
+        # contains no observed value" stays a property of the schema rather than
+        # a rule somebody keeps.
+        "backup": dict(rendered["backup"]),
+        "backup_state": dict(backup_state) if backup_state else dict(BACKUP_NOT_OBSERVED),
         # Version 12's agent plane, in `api`'s role and deliberately in `api`'s
         # shape: what the surface serves, observed, with a status that forces
         # every other member null.

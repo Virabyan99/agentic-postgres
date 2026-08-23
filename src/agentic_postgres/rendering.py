@@ -243,7 +243,8 @@ def build_outputs(
     """
     storage_settings = {**config.STORAGE_DEFAULTS, **(project.get("storage") or {})}
     storage_enabled = bool(storage_settings["enabled"])
-    backup_enabled = bool(project.get("backup", {}).get("enabled", False))
+    backup_settings = {**config.BACKUP_DEFAULTS, **(project.get("backup") or {})}
+    backup_enabled = bool(backup_settings["enabled"])
 
     unavailable_endpoint = {
         "status": "unavailable",
@@ -327,6 +328,11 @@ def build_outputs(
             "networks": {
                 "edge": identity.edge_network,
                 "internal": identity.internal_network,
+                # Version 13, and named here a run before anything attaches to
+                # it -- Run 4 puts it in the model. The rendered branch names
+                # what a deployment WOULD create, and `storage_bucket` sat in
+                # exactly this state from Session 1 to Session 7.
+                "backup": identity.backup_network,
             },
             "volumes": {"postgres": identity.postgres_volume},
         },
@@ -409,6 +415,20 @@ def build_outputs(
             "enabled": backup_enabled,
             "stanza": identity.backup_stanza,
             "repository_prefix": identity.backup_repository_prefix,
+            # Version 13. The bucket is `naming`'s, like the stanza beside it;
+            # `retain_full` is the manifest's, resolved against the defaults
+            # HERE for the reason the storage bounds above are resolved here --
+            # this document is the one thing every plane reads (ADR 0002), and
+            # a `pgbackrest.conf` renderer applying its own default would be a
+            # second authority for a retention the deploy was checked against.
+            #
+            # `retain_full` is published whether or not backups are enabled,
+            # unlike the three identities: it is a bound rather than a name, and
+            # nulling it would make "the default is two chains" a fact readable
+            # only from source. The identities go null because a rendered
+            # document must not name a repository for a facility that is off.
+            "bucket": identity.backup_bucket,
+            "retain_full": int(backup_settings["retain_full"]),
         },
         "capabilities": {
             "enabled": sorted(
@@ -1291,6 +1311,7 @@ def render_project(
         backup_enabled=bool(project.get("backup", {}).get("enabled", False)),
         backup_stanza=project.get("backup", {}).get("stanza"),
         backup_repository_prefix=project.get("backup", {}).get("repository_prefix"),
+        backup_bucket=project.get("backup", {}).get("bucket"),
     )
 
     digests = input_digests(project_path, capabilities_path)

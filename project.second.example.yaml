@@ -95,3 +95,14 @@ backup:
   stanza: fixture-alpine-dev
   repository_prefix: pgbackrest/fixture-alpine-dev/
   retain_full: 2
+  account_id: fedcba9876543210fedcba9876543210
+  # This one DOES override the bucket, and the asymmetry with the alpha fixture
+  # is the point: between them the two examples render both the derived name
+  # and a verbatim override, so ADR 0105's "an override is not prefixed" is
+  # exercised by a real render rather than by a unit test alone. The value is
+  # deliberately not `apg-`-shaped, because an override that happened to look
+  # derived would pass whether or not the prefixing branch was taken.
+  bucket: alpine-dev-repository
+  # `retain_full: 2` above is also the default, and that is not redundant here:
+  # a fixture that omitted it would leave the default resolution unrendered,
+  # which is precisely the state D519 found this field in for nine sessions.

@@ -199,7 +199,7 @@ def published(rendered: dict, **overrides):
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 12
+    assert document["schema_version"] == 13
     assert document["project"]["key"] == KEY
 
 
@@ -387,6 +387,52 @@ def test_an_observed_block_is_required(rendered: dict) -> None:
     del document["database"]["observed"]
     with pytest.raises(ManifestError):
         deployed_output.validate_deployed_document(document)
+
+
+def test_the_deployed_document_carries_the_repository_and_an_honest_observation(
+    rendered: dict,
+) -> None:
+    """Version 13. The settings are the rendered ones; the observation is not.
+
+    `backup` is carried whole from the render because it is one `$def` shared by
+    both branches (ADR 0146, D389). `backup_state` is measured, so a builder
+    with no observer publishes `not_observed` -- and `NOT_OBSERVED`'s rule
+    applies for its reason: a zero `wal_failed_count` here would be a claim that
+    archiving is healthy, and indistinguishable from a real zero.
+    """
+    document = build(rendered)
+    assert document["backup"] == rendered["backup"]
+    assert document["backup_state"] == deployed_output.BACKUP_NOT_OBSERVED
+    assert document["backup_state"]["status"] == "not_observed"
+    deployed_output.validate_deployed_document(document)
+
+
+def test_not_observed_forces_every_other_backup_member_null(rendered: dict) -> None:
+    """The conditional is the whole value of the `not_observed` status.
+
+    Without it a document could say "nothing has been observed" and carry a
+    backup label beside it, which is the substitution `NOT_OBSERVED` exists to
+    refuse -- stated in the schema rather than left to whoever writes the
+    observer in Run 6.
+    """
+    document = build(rendered)
+    document["backup_state"]["wal_failed_count"] = 0
+    with pytest.raises(ManifestError):
+        deployed_output.validate_deployed_document(document)
+
+
+def test_a_rendered_document_cannot_carry_a_backup_state(rendered: dict) -> None:
+    """ADR 0012, and the reason `backup_state` is a block of its own.
+
+    An observation must be unrepresentable on the rendered branch rather than
+    merely absent from it. `database` buys that with two `$defs` and pays a
+    duplicated settings block for it; version 13 buys it by moving the
+    observation out, so the settings stay one definition (D389).
+    """
+    smuggled = json.loads(json.dumps(rendered))
+    smuggled["backup_state"] = dict(deployed_output.BACKUP_NOT_OBSERVED)
+    with pytest.raises(ManifestError):
+        config.validate_against_schema(smuggled, "outputs.schema.json")
 
 
 def test_a_rendered_document_cannot_carry_an_observed_block(rendered: dict) -> None:

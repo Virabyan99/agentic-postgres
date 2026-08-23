@@ -281,6 +281,30 @@ STORAGE_DEFAULTS: dict[str, Any] = {
     "allowed_cors_origins": [],
 }
 
+#: Defaults for the manifest's backup block, and the reason this exists at all
+#: is D519.
+#:
+#: `retain_full` has been bounded by `schemas/project.schema.json` since Session
+#: 1 and read by **no code**: `_validate_backup` never touched it, there was no
+#: dict for it to be resolved against, and it never reached `outputs.json`. A
+#: bound that is validated and reaches nothing is Question 5's shape -- the same
+#: shape as `audit.redact` compiled and consumed by nothing (D479) -- and it sat
+#: here for nine sessions.
+#:
+#: Two full chains, which is what `docs/source-specification.md` §12.1 asks for.
+#: `account_id` deliberately has NO default, for STORAGE_DEFAULTS' reason and
+#: with a sharper edge: a plausible-looking account id would be discovered at
+#: the first `archive-push`, which is the one place nobody is watching.
+BACKUP_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "stanza": None,
+    "repository_prefix": None,
+    "bucket": None,
+    "account_id": None,
+    "jurisdiction": "default",
+    "retain_full": 2,
+}
+
 #: What the storage service takes beyond its pool.
 #:
 #: Two, the auth service's reservation and for its stated reason: it holds no
@@ -788,7 +812,7 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
     _validate_rest_service(api, database=database, domain=project["domain"])
     _validate_route_boundaries(api, mcp)
     _validate_storage(document.get("storage", {}))
-    _validate_backup(document.get("backup", {}))
+    _validate_backup({**BACKUP_DEFAULTS, **(document.get("backup") or {})})
 
 
 def _validate_memory_budget(database: dict[str, Any]) -> None:
@@ -1153,12 +1177,19 @@ def _validate_backup(backup: dict[str, Any]) -> None:
     enabled = backup.get("enabled", False)
     stanza = backup.get("stanza")
     repository_prefix = backup.get("repository_prefix")
+    bucket = backup.get("bucket")
+    account_id = backup.get("account_id")
 
     if not enabled:
-        if stanza is not None or repository_prefix is not None:
+        if (
+            stanza is not None
+            or repository_prefix is not None
+            or bucket is not None
+            or account_id is not None
+        ):
             raise ManifestError(
-                "backup is disabled, so backup.stanza and backup.repository_prefix "
-                "must be absent or null"
+                "backup is disabled, so backup.stanza, backup.repository_prefix, "
+                "backup.bucket and backup.account_id must be absent or null"
             )
         return
 
@@ -1169,6 +1200,32 @@ def _validate_backup(backup: dict[str, Any]) -> None:
         )
     if repository_prefix is not None:
         _validate_prefix(repository_prefix, field="backup.repository_prefix")
+
+    # `_validate_storage`'s paragraph, applied to a second facility rather than
+    # restated: the positive requirement lives here and not in the schema so the
+    # message can name where the value comes from. "'account_id' is a required
+    # property" is true and tells an operator nothing about a value that exists
+    # only in a Cloudflare dashboard.
+    if not account_id:
+        raise ManifestError(
+            "backup is enabled, so backup.account_id is required: the repository's S3 "
+            "endpoint is derived from it (ADR 0106, ADR 0145) and there is no default, "
+            "because a well-formed account id that authenticates to nothing would fail "
+            "at the first archive-push instead of here. It is the 32-hex string in the "
+            "dashboard URL -- see docs/session-10-operator-guide.md."
+        )
+    # Through the deriver, never beside it (ADR 0002). A second copy of the
+    # account-id pattern here is one that can drift from naming.py's.
+    try:
+        naming.storage_endpoint_url(account_id, backup.get("jurisdiction", "default"))
+    except naming.NamingError as exc:
+        raise ManifestError(f"backup: {exc}") from exc
+
+    if bucket is not None:
+        if not 3 <= len(bucket) <= 63:
+            raise ManifestError(f"backup.bucket must be 3-63 characters: {bucket!r}")
+        if not _R2_BUCKET.match(bucket):
+            raise ManifestError(f"invalid R2 bucket name: {bucket!r}")
 
 
 # ---------------------------------------------------------------------------

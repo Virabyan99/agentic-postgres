@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/outputs.schema.json",
   "title": "Agentic Postgres generated outputs",
-  "description": "The automation contract, version 5. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. Version 4 added `database.access_profiles`, three ways to reach the two transports (ADR 0041), and closed the endpoint conditional so that an `available` endpoint must actually carry a host, a port, a password-free URL and a secret reference. Version 5 is entirely on the deployed branch (ADR 0053): `routes` gains `rest` and `docs` as status-carrying objects beside `health`, a new `api` block records what the published surface actually serves, `jwt` appears for the first time carrying public metadata only, and `database.observed` gains the `instance_uuid` the port registry is keyed by. Version 12 is Session 8's, and it is entirely on the deployed branch: `routes.mcp` -- named by the rendered branch since version 1 and never published here (D395) -- and an `mcp` block carrying the protocol revision, the authorization profile's honest non-conformance, the accepted token use (ADR 0115) and the capability lock's identity. Chosen ONCE from the session's whole surface rather than a run at a time, because D255 and D308 are the record of the alternative. See docs/decisions/0012-output-document-kinds.md, docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md, docs/decisions/0041-two-transports-three-access-profiles.md, docs/decisions/0051-the-bootstrap-issuer-is-temporary-and-carries-its-own-expiry.md, docs/decisions/0053-outputs-version-5.md and docs/decisions/0115-the-agent-plane-accepts-only-agent-tokens.md.",
+  "description": "The automation contract, version 5. One versioned schema, two document kinds, discriminated by a required `document_kind` const and separated by a oneOf so a rendered document can never validate as deployed state. `rendered` is a pure function of the digested inputs and contains no timestamp, no observed value and no provider identifier. `deployed` is a published observation of a converged host and contains all three. additionalProperties is false at every level of both branches. Version 3 added the Session 3 database block -- container identity, memory budget, and observed cluster facts -- and split the formerly shared `database` definition in two so that `observed` is unrepresentable on the rendered branch. Version 4 added `database.access_profiles`, three ways to reach the two transports (ADR 0041), and closed the endpoint conditional so that an `available` endpoint must actually carry a host, a port, a password-free URL and a secret reference. Version 5 is entirely on the deployed branch (ADR 0053): `routes` gains `rest` and `docs` as status-carrying objects beside `health`, a new `api` block records what the published surface actually serves, `jwt` appears for the first time carrying public metadata only, and `database.observed` gains the `instance_uuid` the port registry is keyed by. Version 12 is Session 8's, and it is entirely on the deployed branch: `routes.mcp` -- named by the rendered branch since version 1 and never published here (D395) -- and an `mcp` block carrying the protocol revision, the authorization profile's honest non-conformance, the accepted token use (ADR 0115) and the capability lock's identity. Chosen ONCE from the session's whole surface rather than a run at a time, because D255 and D308 are the record of the alternative. See docs/decisions/0012-output-document-kinds.md, docs/decisions/0027-the-output-schema-gains-a-version-and-a-migration-path.md, docs/decisions/0041-two-transports-three-access-profiles.md, docs/decisions/0051-the-bootstrap-issuer-is-temporary-and-carries-its-own-expiry.md, docs/decisions/0053-outputs-version-5.md and docs/decisions/0115-the-agent-plane-accepts-only-agent-tokens.md. Version 13 is Session 10's, and it is the only version to touch both branches at once: `backup` becomes a shared definition carrying the repository's bucket and `retain_full` -- a bound the schema had declared and no code had ever read (D519) -- the rendered branch's `compose.networks` gains the egress network the cluster reaches its repository over (D516), and the deployed branch gains `backup_state`, the first place this document can say when a backup last succeeded and whether WAL is reaching the repository. `backup_state` is separate from `backup` rather than nested inside it so that an observation stays unrepresentable on the rendered branch (ADR 0012) WITHOUT duplicating the settings into two defs, which is the copy D389 warns about. See docs/decisions/0146-outputs-version-13.md.",
   "type": "object",
   "oneOf": [
     {
@@ -35,7 +35,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            12
+            13
           ]
         },
         "document_kind": {
@@ -120,7 +120,8 @@
               "additionalProperties": false,
               "required": [
                 "edge",
-                "internal"
+                "internal",
+                "backup"
               ],
               "properties": {
                 "edge": {
@@ -128,8 +129,12 @@
                 },
                 "internal": {
                   "$ref": "#/$defs/composeName"
+                },
+                "backup": {
+                  "$ref": "#/$defs/composeName"
                 }
-              }
+              },
+              "description": "Version 13 added `backup`: an egress network of the cluster's own, because `internal` is `internal: true` and has no route off the host (measured, D516), so `archive-push` cannot reach R2 from where the postmaster runs it. `edge` would work and is refused -- it is where Traefik's public side lives. Named here a run before anything attaches to it; the rendered branch names what a deployment WOULD create, and `storage.bucket` sat in exactly this state from Session 1 to Session 7."
             },
             "volumes": {
               "type": "object",
@@ -247,32 +252,7 @@
           "$ref": "#/$defs/storageSettings"
         },
         "backup": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "enabled",
-            "stanza",
-            "repository_prefix"
-          ],
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "stanza": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
-            },
-            "repository_prefix": {
-              "type": [
-                "string",
-                "null"
-              ],
-              "pattern": "^[^/].*/$"
-            }
-          }
+          "$ref": "#/$defs/backupSettings"
         },
         "capabilities": {
           "type": "object",
@@ -320,14 +300,16 @@
         "template_version",
         "observed_at",
         "storage",
-        "mcp"
+        "mcp",
+        "backup",
+        "backup_state"
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            12
+            13
           ]
         },
         "document_kind": {
@@ -662,6 +644,12 @@
         },
         "mcp": {
           "$ref": "#/$defs/deployedMcp"
+        },
+        "backup": {
+          "$ref": "#/$defs/backupSettings"
+        },
+        "backup_state": {
+          "$ref": "#/$defs/backupState"
         }
       }
     },
@@ -1944,6 +1932,140 @@
             "$ref": "#/$defs/httpsOrigin"
           },
           "description": "The ONE origin list for storage (D323). The edge middleware and the bucket's own CORS policy are two renderings of this array, tied together by a test -- two lists would be two policies that agree until one of them is edited."
+        }
+      }
+    },
+    "backupSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "stanza",
+        "repository_prefix",
+        "bucket",
+        "retain_full"
+      ],
+      "description": "The backup repository's identity and its one bound, version 13. ONE definition referenced from both branches, `storageSettings`' shape and for its measured reason (D389): a copy per branch is what let the two disagree, and STO-BOUND-001 read the deployed document for a bound that existed only on the rendered one. Every member here is derived or resolved by the deploy, so both branches carry the same values. `bucket` is a SEPARATE bucket from `storage.bucket` and that is ADR 0145 rather than a filing choice -- R2 scopes a token to buckets far more cleanly than to prefixes, so the isolation is a measured 403 rather than a policy sentence. `retain_full` is published whether or not backups are enabled, unlike the three identities beside it: it is a bound rather than a name, it was validated and read by NO code for nine sessions (D519), and nulling it would put 'the default is two chains' back where only source can answer it. What is NOT here is any observation -- see `backup_state`, which exists only on the deployed branch.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "stanza": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$"
+        },
+        "repository_prefix": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[^/].*/$"
+        },
+        "bucket": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 3,
+          "maxLength": 63
+        },
+        "retain_full": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 12
+        }
+      }
+    },
+    "backupState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "stanza_created",
+        "last_full_backup_label",
+        "last_full_backup_at",
+        "latest_recoverable_time",
+        "wal_archived_count",
+        "wal_failed_count"
+      ],
+      "description": "What was READ from the repository and the archiver, version 13, deployed branch only. `not_observed` with every other member null is the honest state for a deployment nothing has asked yet, and it is the value this block carries until Run 6 writes an observer -- the discipline `database.observed` and `endpoint` already use, for the reason they use it: a zero would be indistinguishable from a real measurement that happened to be zero. `unconfigured` is backups disabled, or enabled with no repository credential in the active generation, which is D326's two-stage convergence and not a failed deploy. `wal_failed_count` is here and `last_failed_wal` is not, because measurement (rig1, D535) showed the count is the value that MOVES while the segment name pins to the oldest stuck one -- a reader watching the name would see a steady value throughout the failure. `latest_recoverable_time` is read from `pgbackrest info` and never from the clock (D529).",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_observed",
+            "unconfigured",
+            "ready",
+            "failing"
+          ]
+        },
+        "stanza_created": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "last_full_backup_label": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 128
+        },
+        "last_full_backup_at": {
+          "$ref": "#/$defs/nullableTimestamp"
+        },
+        "latest_recoverable_time": {
+          "$ref": "#/$defs/nullableTimestamp"
+        },
+        "wal_archived_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "wal_failed_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "if": {
+        "properties": {
+          "status": {
+            "const": "not_observed"
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "then": {
+        "properties": {
+          "stanza_created": {
+            "type": "null"
+          },
+          "last_full_backup_label": {
+            "type": "null"
+          },
+          "last_full_backup_at": {
+            "type": "null"
+          },
+          "latest_recoverable_time": {
+            "type": "null"
+          },
+          "wal_archived_count": {
+            "type": "null"
+          },
+          "wal_failed_count": {
+            "type": "null"
+          }
         }
       }
     }

@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 12
+CURRENT_VERSION = 13
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -218,6 +218,9 @@ def migrate_rendered(
     pooler_pool_size: int,
     storage_route_url: str,
     storage_settings: dict[str, Any],
+    backup_bucket: str | None,
+    backup_retain_full: int,
+    backup_network: str,
 ) -> dict[str, Any]:
     """Migrate a ``rendered`` document of any earlier version to the current one.
 
@@ -238,8 +241,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11}:
-        raise MigrationError(f"only versions 1 through 11 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
+        raise MigrationError(f"only versions 1 through 12 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -278,7 +281,15 @@ def migrate_rendered(
             storage_settings=storage_settings,
         )
 
-    return migrate_v11_to_v12(document)
+    if detect_version(document) == 11:
+        document = migrate_v11_to_v12(document)
+
+    return migrate_v12_to_v13(
+        document,
+        backup_bucket=backup_bucket,
+        backup_retain_full=backup_retain_full,
+        backup_network=backup_network,
+    )
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1008,6 +1019,85 @@ def migrate_v11_to_v12(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def migrate_v12_to_v13(
+    document: dict[str, Any],
+    *,
+    backup_bucket: str | None,
+    backup_retain_full: int,
+    backup_network: str,
+) -> dict[str, Any]:
+    """Return a version 13 ``rendered`` document derived from a version 12 one.
+
+    Three values arrive as arguments and **none of them is invented here**, for
+    the reason `migrate_v11_to_v12` refuses to insert `routes.mcp`: two of the
+    three are `naming` derivations, and this module exists for documents whose
+    inputs are gone. A migrator that computed ``f"apg-{key}-backup"`` would be a
+    second derivation of a name ADR 0002 allows exactly one of — and it would be
+    the copy nobody re-reads when the deriver changes.
+
+    ``backup_retain_full`` is the third and it is not a derivation but a
+    manifest value with a default, so it could in principle be defaulted here.
+    It is not, and that is deliberate: `config.BACKUP_DEFAULTS` is the one place
+    that answers "two chains", and a second answer living in the migrator would
+    disagree the first time the default moved. The caller resolves it and hands
+    it over, which is what `migrate_v10_to_v11` does with `storage_settings`.
+
+    ``backup_bucket`` is nullable because a document with backups disabled names
+    no repository, exactly as it names no stanza — and a migrator that filled in
+    a bucket for a disabled facility would produce a document the schema
+    accepts and the renderer would never emit.
+    """
+    version = detect_version(document)
+    if version == 13:
+        raise MigrationError("document is already version 13; migration would be a no-op")
+    if version != 12:
+        raise MigrationError(f"only version 12 can be migrated to 13, got {version}")
+
+    require_kind(document, "rendered")
+
+    backup = document.get("backup")
+    if not isinstance(backup, dict) or "stanza" not in backup:
+        raise MigrationError(
+            "backup is missing or carries no stanza; every rendered document since "
+            "version 1 names the backup block, so a document without it is not a "
+            "version 12 rendered one"
+        )
+    if backup.get("enabled") and backup_bucket is None:
+        raise MigrationError(
+            "backups are enabled in this document but no backup_bucket was supplied. "
+            "The bucket is a `naming` derivation and inventing one here would be a "
+            "second authority for a name ADR 0002 allows one of"
+        )
+    if not backup.get("enabled") and backup_bucket is not None:
+        raise MigrationError(
+            "backups are disabled in this document but a backup_bucket was supplied. "
+            "A rendered document must not name a repository for a facility that is off"
+        )
+    if not 1 <= int(backup_retain_full) <= 12:
+        raise MigrationError(
+            f"backup_retain_full must be between 1 and 12, got {backup_retain_full!r}"
+        )
+
+    networks = document.get("compose", {}).get("networks")
+    if not isinstance(networks, dict) or "internal" not in networks:
+        raise MigrationError(
+            "compose.networks carries no internal network, so this document predates "
+            "version 12 and cannot be a version 12 one"
+        )
+    if "backup" in networks:
+        raise MigrationError(
+            "compose.networks already names a backup network, so this document is not "
+            "a version 12 one"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["backup"]["bucket"] = backup_bucket
+    migrated["backup"]["retain_full"] = int(backup_retain_full)
+    migrated["compose"]["networks"]["backup"] = backup_network
+    migrated["schema_version"] = 13
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1037,5 +1127,6 @@ __all__ = [
     "migrate_v9_to_v10",
     "migrate_v10_to_v11",
     "migrate_v11_to_v12",
+    "migrate_v12_to_v13",
     "require_kind",
 ]

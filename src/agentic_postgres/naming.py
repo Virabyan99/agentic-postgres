@@ -555,6 +555,47 @@ def storage_object_prefix(key: str, override: str | None = None) -> str:
     return override if override else f"objects/{key}/"
 
 
+def backup_bucket_name(key: str, override: str | None = None) -> str:
+    """The R2 bucket holding a project's pgBackRest repository.
+
+    **A different bucket from :func:`storage_bucket_name`, and that is the
+    decision rather than a filing choice** (ADR 0145). R2 scopes an API token
+    to buckets far more cleanly than to key prefixes, so "the storage service
+    cannot reach the backup repository" becomes a token scope a ``HeadBucket``
+    can be measured against, instead of a policy sentence nothing executes.
+
+    ADR 0105 is *applied* here, not restated: the derived name carries the
+    ``apg-`` namespace every other derived identifier carries, and an explicit
+    override is used **verbatim and unprefixed**, because an override exists so
+    an operator can point at a bucket named by a convention that is not ours.
+
+    The ``-backup`` suffix cannot collapse onto this project's own storage
+    bucket even when the key is long enough to truncate: :func:`truncate`
+    fingerprints the *untruncated* value together with ``context``, and both
+    differ here. That is asserted rather than assumed, because
+    ``evidence.ISOLATED_FIELDS`` compares identities *between* projects and
+    would never see a collision *within* one.
+    """
+    return r2_bucket(override if override else f"apg-{key}-backup", context="r2_bucket_backup")
+
+
+def backup_network_name(key: str) -> str:
+    """The egress network the cluster reaches its backup repository over.
+
+    Split out of :func:`derive` for :func:`storage_bucket_name`'s reason -- one
+    derivation, more than one reader. ``derive`` is one; the rendered Compose
+    model is another (Run 4); and ``output_migrations`` is a third, which is the
+    reader that forces the split: a migrator computing ``f"apg-{key}-backup"``
+    inline would be a second derivation of a name ADR 0002 allows one of, and it
+    is the copy nobody re-reads when this one changes.
+
+    No override. ``storage.bucket`` takes one because a bucket is a third
+    party's namespace that an operator may already have populated; a Docker
+    network is created by this project, on this host, every deploy.
+    """
+    return compose_name(f"apg-{key}-backup", context="compose_network_backup")
+
+
 #: The jurisdictions Cloudflare documents for R2, and the only values
 #: `storage.jurisdiction` admits.
 #:
@@ -651,6 +692,15 @@ class ProjectIdentity:
     compose_project_name: str
     edge_network: str
     internal_network: str
+    #: The egress network the cluster reaches its backup repository over.
+    #:
+    #: Derived unconditionally, like every other network name, and attached to
+    #: no service until Run 4 -- `storage_bucket` spent six sessions in exactly
+    #: this state. `internal` is `internal: true` and has no route off the host
+    #: (measured, D516), so `archive-push` cannot reach R2 from where the
+    #: postmaster runs it; `edge` would work and is refused, because it is where
+    #: Traefik's public side lives and the database has never been on it.
+    backup_network: str
     postgres_volume: str
     #: The name Compose gives the PostgreSQL container: `<project>-<service>-1`.
     #:
@@ -761,6 +811,10 @@ class ProjectIdentity:
     storage_prefix: str | None = None
     backup_stanza: str | None = None
     backup_repository_prefix: str | None = None
+    #: The repository's bucket. `None` when backups are disabled, for the reason
+    #: the stanza is: a rendered document must not name a repository for a
+    #: facility that is off.
+    backup_bucket: str | None = None
 
     generated_directory: str = ""
 
@@ -779,6 +833,7 @@ def derive(
     backup_enabled: bool = True,
     backup_stanza: str | None = None,
     backup_repository_prefix: str | None = None,
+    backup_bucket: str | None = None,
 ) -> ProjectIdentity:
     """Derive the complete identity set from validated manifest primitives.
 
@@ -798,6 +853,7 @@ def derive(
         compose_project_name=compose_name(f"apg-{key}", context="compose_project"),
         edge_network=compose_name(f"apg-{key}-edge", context="compose_network_edge"),
         internal_network=compose_name(f"apg-{key}-internal", context="compose_network_internal"),
+        backup_network=backup_network_name(key),
         postgres_volume=compose_name(f"apg-{key}-postgres", context="compose_volume_postgres"),
         postgres_container=compose_name(
             f"apg-{key}-postgres-1", context="compose_container_postgres"
@@ -847,6 +903,7 @@ def derive(
             if backup_enabled
             else None
         ),
+        backup_bucket=(backup_bucket_name(key, backup_bucket) if backup_enabled else None),
         generated_directory=f".generated/{key}",
     )
 

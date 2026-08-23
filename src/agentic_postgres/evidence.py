@@ -54,6 +54,17 @@ ISOLATED_FIELDS = (
     ("storage", "prefix"),
     ("backup", "stanza"),
     ("backup", "repository_prefix"),
+    # Session 10, outputs v13. Added in the run that DERIVES them rather than
+    # the run that consumes them: the collision proof runs before any cluster
+    # exists, and a name published for six sessions and compared for none is
+    # exactly how `storage.bucket` arrived at Session 7 as the only derived
+    # identifier in this project with no namespace (D339).
+    #
+    # The bucket's collision domain is the whole Cloudflare account, which is
+    # the class `storage.bucket` is in. The network's is the Docker host, which
+    # is the class the two networks above are in.
+    ("backup", "bucket"),
+    ("compose", "networks", "backup"),
 )
 
 

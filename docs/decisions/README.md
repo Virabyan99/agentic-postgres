@@ -208,3 +208,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0142](0142-the-audit-record-has-one-reader-and-it-is-a-definer-function.md) | The audit record has one reader, it is a definer function, and reading it is its own scope | 9 | Accepted |
 | [0143](0143-a-query-string-is-parsed-strictly-like-a-request-body.md) | A query string is parsed strictly, for the same measured reason a request body is | 9 | Accepted |
 | [0144](0144-the-archiver-is-installed-into-the-database-image-not-copied-into-it.md) | The archiver is installed into the database image, not copied into it | 10 | Accepted |
+| [0145](0145-the-backup-repository-is-a-bucket-of-its-own.md) | The backup repository is a bucket of its own, with its own credential and its own key | 10 | Accepted |
+| [0146](0146-outputs-version-13.md) | Outputs version 13, and why the observation is a block of its own | 10 | Accepted |

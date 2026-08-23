@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D536.**
+**Next free number after this table is D538.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -100,6 +100,8 @@ anything found *during* implementation is appended with the next free number.
 | **D533** | — | **An apt version pin is not a digest.** PGDG is a rolling repository that removes superseded versions, so `pgbackrest=2.59.1-1.pgdg12+1` will eventually stop resolving. | **Accepted, and stated.** Measured: an unresolvable pin exits **100** and produces no image — the build **fails closed**, which is the acceptable half. Nothing moves silently, and refreshing the pin is a deliberate edit. `bin/lock-versions.sh` is where a later session teaches the lock about apt pins. | D99's shape (`PYTHON_RUNTIME_IMAGE` selects a rolling minor tag), with one difference that matters: this pin cannot drift into a *different* build, only into no build. A failure that is loud and total is not the defect a floating tag is. | 0144 |
 | **D534** | "…health checks that expose failures." | **`pg_isready` cannot see a broken archiver, and `pg_isready` is the healthcheck `compose.yaml` uses today.** Measured over 60s against a cluster with `archive_command=/bin/false`: `failed_count` 11 → 15 → 26, `archived_count` **0**, `pg_wal` **5 → 6 → 11 files** — and `pg_isready` answered *accepting connections* at every sample, container status `running`, while the `/bin/true` control archived cleanly and held `pg_wal` flat at 4. | **`REC-WAL-001`'s signal is a new one**, reading `pg_stat_archiver`. Whether the Postgres healthcheck gains an archiving clause or a second check carries it is decided in Run 7, with the numbers in hand. | A cluster archiving nothing and filling its disk toward the outage this session exists to prevent is currently reported **healthy**. That is not a weak signal; it is the absence of one. | — |
 | **D535** | — | **`last_failed_wal` does not advance.** Measured: it pinned to `000000010000000000000001` across all three samples while `failed_count` climbed 11 → 15 → 26, because the archiver retries the **oldest** unarchived segment, not the newest. The retry shape is three attempts a second apart, then `WARNING: archiving write-ahead log file … failed too many times, will try again later`. | **`failed_count` is the moving value and the one a proof asserts on.** `last_failed_wal` says *which* segment is stuck — diagnosis, not detection. | A proof asserting `last_failed_wal` advances would be green only when something else was also wrong, and red during exactly the steady-state failure it exists to catch. Written down before anybody writes that assertion. | — |
+| **D536** | — | **Two hand-written lists of the same identities, and nothing compared them.** `evidence.ISOLATED_FIELDS` is what the shipped evidence document counts collisions over; `tests/contract/test_render_isolation.py::MUST_DIFFER` is what the isolation test iterates. They are named together in a comment in `output_migrations.py:343` and no test related them. Found by adding `backup.bucket` to both and noticing it could as easily have gone into one. | **A containment test**, added in this run: every pointer in `ISOLATED_FIELDS` must appear in `MUST_DIFFER`, and the surplus is **pinned to an exact list** rather than merely bounded, so it cannot be satisfied by `MUST_DIFFER` growing something unrelated. | D174/D175's shape — a property maintained by review rather than by a test — and it fails in the worse direction: a name dropped from `ISOLATED_FIELDS` leaves the published `collision_count` reporting **zero over a smaller set**, which is indistinguishable from isolation. Containment rather than equality is the true relation here and not a weakened one (cf. D300): `MUST_DIFFER` legitimately covers the slug and four route URLs, which are project-scoped but are not identities two projects could collide *on*. | — |
+| **D537** | — | **ADR 0012 and D389 pull in opposite directions, and outputs v13 is the first block to feel it.** ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be *unrepresentable* on that branch — which `database` achieves by splitting into `renderedDatabase` and `deployedDatabase`, a settings block duplicated per branch. D389 is the record of what that duplication costs: `storageSettings` was copied per branch, the two disagreed, and `STO-BOUND-001` read the deployed document for a bound that existed only on the rendered one. | **The observation moves out instead of the settings being duplicated.** `backup` is one `$def` referenced from both branches; `backup_state` is a separate top-level block that exists only on the deployed one. Both constraints hold at once and neither is traded away. | The alternative satisfies ADR 0012 by reintroducing exactly the copy D389 was written about. The database pays that cost for historical reasons; a block added today need not, and choosing otherwise would have been a decision made by imitation rather than by reading why the precedent exists. | 0146 |
 
 ---
 
@@ -293,7 +295,7 @@ disagrees with it.
 five measurements, an ADR and five divergence rows. The battery arrives with
 Run 2's first tests.
 
-### Run 2 — The manifest, the identity, and outputs v13
+### Run 2 — The manifest, the identity, and outputs v13 — **Done.**
 
 - `backup.bucket`, `backup.account_id`; `retain_full` gains a default and is
   propagated; a `BACKUP_DEFAULTS` beside `STORAGE_DEFAULTS`.
@@ -307,6 +309,61 @@ Run 2's first tests.
   block. `output_migrations` gains its v12 → v13 step and a fixture.
 
 **ADRs:** the repository's location, and outputs version 13.
+
+**Done.** The identity plane is complete and outputs is at **v13**. Both example
+projects render; the suite is **3956 passed, 281 skipped**, up 29.
+
+**What was built.** `naming.backup_bucket_name` and `naming.backup_network_name`
+— the second split out for the reason the first was, one derivation with three
+readers, the third being `output_migrations`. `config.BACKUP_DEFAULTS` beside
+`STORAGE_DEFAULTS`, which is D519's actual repair: `retain_full` now resolves,
+propagates and is published, after nine sessions of being bounded and read by
+nothing. `_validate_backup` gained the account-id requirement and the bucket
+check, both validated **through the deriver** rather than beside it. Outputs
+v13 on both branches, `backup` as one shared `$def` and `backup_state` as a
+deployed-only block, with `migrate_v12_to_v13` and `BACKUP_NOT_OBSERVED`.
+
+**Two decisions, ADR 0145 and ADR 0146.** 0145 refuses the specification's own
+fallback — one bucket, two prefixes — because R2 scopes a token to buckets and
+not to prefixes, so the fallback's isolation claim would have no executable
+check behind it while `THR-BACKUP-COMPROMISE` names one. 0146 is D537: the
+observation is a block of its own so that ADR 0012 and D389 can both hold.
+
+**The two example manifests now disagree on purpose.** Alpha derives its bucket,
+beta overrides it with `alpine-dev-repository` — deliberately not `apg-`-shaped,
+because an override that looked derived would pass whether or not the prefixing
+branch was taken (D374's shape). Neither fixture alone renders both paths, and
+two fixtures making the same choice is how `retain_full` reached this session
+unread.
+
+**Nine hand-chained migration tests had to be edited rather than re-run**, which
+is the convention working: each asserts the step's own result as a literal and
+the chain's endpoint as `CURRENT_VERSION`, and the file's own comments record
+that spelling both as the constant is how the assertion stopped meaning anything
+the last time a version was added.
+
+**Battery: B1–B9, 9 of 9 killed**, every one `FAILED` rather than `ERROR`
+(D386), every control green in the same invocation and unreachable by its
+mutation (D499), every anchor pre-flighted to exactly one match (D269), and
+every mutated file restored **by copy** and verified byte-for-byte — never
+`git checkout --`, because the files under test are uncommitted. The arms worth
+naming: **B3** collides the two buckets at a long key, which is the one
+collision `ISOLATED_FIELDS` structurally cannot see because every isolation
+proof here compares two *different* projects; **B7** drops `backup.bucket` from
+`ISOLATED_FIELDS` and is killed only by the test D536 added; **B9** replaces
+`not_observed`'s nulls with zeroes, which is the substitution `NOT_OBSERVED`
+exists to refuse.
+
+**One thing published a run before it is consumed.** `compose.networks.backup`
+is named here and attached to nothing until Run 4. That is the state
+`storage.bucket` was in from Session 1 to Session 7 — and it is exactly why the
+name went into `ISOLATED_FIELDS` now rather than then: D339 found the one
+derived identifier that had gone six sessions without a namespace, and it was
+the one nothing compared.
+
+**The deployed branch has no `compose` block at all**, so the network appears on
+the rendered branch alone. Read rather than assumed, and it is why v13 needed no
+deployed-side network field.
 
 ### Run 3 — The three secrets and the two-stage convergence
 
