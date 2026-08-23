@@ -121,6 +121,14 @@ STORAGE_PLANE_SESSION = 7
 #: timeout with a status attached.
 AGENT_PLANE_SESSION = 8
 
+#: The session that gives a project a backup repository.
+#:
+#: Above `CURRENT_SESSION` in Run 3, exactly as `AGENT_PLANE_SESSION` was in
+#: Session 8's Run 1, and for the same reason: nothing archives yet. What Run 3
+#: fixes is the *document* and the *credential gate*, neither of which needs a
+#: pgBackRest binary. The repository is reached for the first time in Run 6.
+BACKUP_PLANE_SESSION = 10
+
 #: The reviewed OpenAPI snapshot, mirroring `bin/api-contract.py`'s own
 #: constant. `test_the_deploy_and_the_contract_command_name_one_snapshot`
 #: asserts the two agree -- a deploy recording the digest of one file while
@@ -853,6 +861,57 @@ def observe_app(url: str, *, administrator: bool) -> str:
 #: `deployed_output.activated_login_roles` draws for the storage role's password,
 #: and for the same reason: v11 was published while `CURRENT_SESSION` was 6.
 STORAGE_CREDENTIAL_NAMES: tuple[str, ...] = ("r2_access_key_id", "r2_secret_access_key")
+
+
+#: The three files the repository needs, by the names `secrets.required.yaml`
+#: gives them. Read from the ACTIVE generation's required set for
+#: `STORAGE_CREDENTIAL_NAMES`' reason: the manifest says what a deployment wants
+#: and the generation says what it has (D76, D306).
+#:
+#: The cipher pass is in this list beside the two credential halves, and it
+#: belongs there: a repository reached with a valid token and the wrong pass
+#: phrase is not partially configured, it is unreadable. Treating two of the
+#: three as the gate would publish `ready` for a deployment whose backups
+#: nobody can restore.
+BACKUP_CREDENTIAL_NAMES: tuple[str, ...] = (
+    "backup_r2_access_key_id",
+    "backup_r2_secret_access_key",
+    "pgbackrest_repo_cipher_pass",
+)
+
+
+def observe_backup(*, enabled: bool, credentialed: bool) -> dict[str, Any]:
+    """What this deploy can honestly say about the repository. Version 13.
+
+    **Run 3 observes the INPUTS and nothing else**, and the three statuses it can
+    return are the three facts available before a pgBackRest binary exists:
+
+    * backups off in the manifest -> `unconfigured`
+    * on, but the active generation is missing one of the three files ->
+      `unconfigured`, D326's two-stage convergence, the deploy exits 0
+    * on and complete -> `not_observed`, because nothing has read the repository
+
+    That last one is the line worth reading. `ready` is not returned here and
+    must not be: the credential being present says a request *could* be made,
+    not that a stanza exists, not that a backup succeeded, and not that WAL is
+    arriving. Run 6 replaces this with an observer that asks the repository.
+    Returning `ready` on the strength of three files existing would be a value
+    that looked measured and was not -- §6's whole subject.
+
+    `observe_storage`'s gate is a route answering 401; this one has no route to
+    poll, so there is nothing to `await_observation` over. A polling loop
+    against a repository nothing writes to would be a timeout with a status
+    attached (`AGENT_PLANE_SESSION`'s note, in a second place).
+    """
+    state = dict(deployed_output.BACKUP_NOT_OBSERVED)
+    if not enabled:
+        state["status"] = "unconfigured"
+        return state
+    if not credentialed:
+        print("  no repository credential in the active generation; backup stays unconfigured")
+        state["status"] = "unconfigured"
+        return state
+    return state
 
 
 def observe_storage(url: str, *, credentialed: bool) -> str:
@@ -1738,6 +1797,34 @@ def main(argv: list[str] | None = None) -> int:
                 "  A project awaiting its storage credential is not a failed deploy (D326)."
             )
 
+    # The repository, version 13. Unlike the three blocks around it this one
+    # publishes for EVERY session rather than behind a `>= BACKUP_PLANE_SESSION`
+    # guard, because `backup_state` is required on the deployed branch and its
+    # honest value for a deployment that has no repository is a status, not an
+    # absence. The guard is inside `observe_backup` instead, where it can say
+    # which of the two `unconfigured` reasons applies.
+    backup_credentialed = all(name in secrets["required_names"] for name in BACKUP_CREDENTIAL_NAMES)
+    backup_state = observe_backup(
+        enabled=bool(rendered["backup"]["enabled"])
+        and arguments.through_session >= BACKUP_PLANE_SESSION,
+        credentialed=backup_credentialed,
+    )
+    if (
+        rendered["backup"]["enabled"]
+        and arguments.through_session >= BACKUP_PLANE_SESSION
+        and not backup_credentialed
+    ):
+        missing = [
+            name for name in BACKUP_CREDENTIAL_NAMES if name not in secrets["required_names"]
+        ]
+        print(
+            "\n  This project has no backup repository credential in its active secret\n"
+            "  generation, so no backup can be taken. Provision it, then re-run this "
+            f"deploy:\n\n    missing: {', '.join(missing)}\n"
+            "    see docs/session-10-operator-guide.md for the provider steps\n\n"
+            "  A project awaiting its repository credential is not a failed deploy (D326)."
+        )
+
     # The agent plane, observed the way `routes.app` and `routes.storage` are.
     #
     # **Two stages, and the first deploy of any project sees the first.** The
@@ -1846,6 +1933,7 @@ def main(argv: list[str] | None = None) -> int:
         # honest record of that is four nulls rather than an empty object a
         # reader could mistake for an empty database.
         database_observed=database_observed,
+        backup_state=backup_state,
         deployed_through_session=arguments.through_session,
     )
     destination = deployed_output.write_deployed_document(

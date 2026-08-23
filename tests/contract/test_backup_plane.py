@@ -18,7 +18,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, config, naming, output_migrations
+from agentic_postgres import REPO_ROOT, config, naming, output_migrations, secrets_contract
 from agentic_postgres.config import ManifestError
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
@@ -407,3 +407,218 @@ def test_the_migrator_does_not_mutate_its_input(v12: dict[str, Any]) -> None:
     before = json.dumps(v12, sort_keys=True)
     _v13(v12)
     assert json.dumps(v12, sort_keys=True) == before
+
+
+# ---------------------------------------------------------------------------
+# Run 3: the three secrets (ADR 0145)
+# ---------------------------------------------------------------------------
+
+BACKUP_SECRETS = (
+    "backup_r2_access_key_id",
+    "backup_r2_secret_access_key",
+    "pgbackrest_repo_cipher_pass",
+)
+
+
+@pytest.fixture(scope="module")
+def contract() -> dict[str, Any]:
+    return secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+
+
+def test_the_repository_credential_is_granted_to_postgres_and_to_nothing_else(
+    contract: dict[str, Any],
+) -> None:
+    """ADR 0145's isolation, on the filesystem side.
+
+    The archiver lives in the database image (ADR 0144), so `archive_command`
+    runs in the postgres container and the credential has to be readable there.
+    Asserted in both directions: a one-directional check is satisfied by a
+    service that receives nothing at all.
+    """
+    by_name = {secret["name"]: secret for secret in contract["secrets"]}
+    for name in BACKUP_SECRETS:
+        consumers = secrets_contract.compose_consumers(by_name[name])
+        assert [c["service"] for c in consumers] == ["postgres"], (
+            f"{name} is granted to something other than postgres"
+        )
+
+    postgres = {g["secret"]["name"] for g in secrets_contract.consumers_of(contract, "postgres", 10)}
+    storage = {g["secret"]["name"] for g in secrets_contract.consumers_of(contract, "storage", 10)}
+
+    assert set(BACKUP_SECRETS) <= postgres
+    assert not set(BACKUP_SECRETS) & storage, (
+        "the storage service holds a repository credential, so a defect in the "
+        "object-storage path reaches every historical copy of the database"
+    )
+    assert not {"r2_access_key_id", "r2_secret_access_key"} & postgres, (
+        "the database container holds the APPLICATION R2 credential. ADR 0145's "
+        "boundary runs in both directions or it is not a boundary"
+    )
+
+
+def test_the_repository_files_are_owned_by_the_postgres_uid(contract: dict[str, Any]) -> None:
+    """D515, and rig1 measured what getting it wrong looks like.
+
+    A `0400` file owned by root inside a container running as 999 is refused
+    with `unable to open file ... for read: [13] Permission denied`, exit 41 --
+    loudly, which is the good news, but at the first archive-push rather than
+    here. Every other compose consumer in this contract is 65532.
+    """
+    by_name = {secret["name"]: secret for secret in contract["secrets"]}
+    for name in BACKUP_SECRETS:
+        for consumer in secrets_contract.compose_consumers(by_name[name]):
+            assert (consumer["uid"], consumer["gid"]) == (999, 999), name
+            assert consumer["mode"] == "0400", name
+            assert consumer["format"] == "raw", name
+
+
+def test_the_two_credential_halves_are_operator_supplied(contract: dict[str, Any]) -> None:
+    """Nobody here can invent an R2 token, and `value_kind` must not hide that.
+
+    `random_hex` stays true about the SHAPE. The obvious "fix" on reading it is
+    to change it, and changing it would make the contract stop describing the
+    value -- ADR 0103's whole subject, and the reason `origin` is a second field
+    rather than a widened `value_kind`.
+    """
+    by_name = {secret["name"]: secret for secret in contract["secrets"]}
+    for name in ("backup_r2_access_key_id", "backup_r2_secret_access_key"):
+        secret = by_name[name]
+        assert secrets_contract.is_operator_supplied(secret)
+        assert secret["value_kind"] == "random_hex"
+        assert secret["required"], (
+            f"{name} is not optional: `required: false` tolerates a 404, which would "
+            "write a generation missing a credential the archiver needs"
+        )
+
+
+def test_the_cipher_pass_is_declared_as_something_rotation_cannot_replace(
+    contract: dict[str, Any],
+) -> None:
+    """The three most load-bearing flags in Session 10's half of the contract.
+
+    pgBackRest binds the cipher to the repository at `stanza-create`. Writing a
+    new generation re-encrypts nothing: the repository stays exactly as it was
+    and the READER now has the wrong pass phrase. So a "rotation" here does not
+    rotate a credential, it orphans every backup ever taken -- while every check
+    in this repository passes, which is precisely the defect class §6 describes.
+
+    `one_time_initialization: true` is what lets rotation tooling refuse to
+    claim a rotation it did not perform (D56), and it is
+    `postgres_init_superuser_password`'s flag for a sharper reason: there a new
+    generation is merely inert, here it is destructive to readability.
+
+    `must_refresh_on_start: false` INVERTS the two credential halves beside it,
+    and the asymmetry is the point. A revoked API token fails closed at the
+    provider, so refusing the last-known-good start only moves that error
+    somewhere harder to attribute. This value cannot be revoked, so the last
+    known good IS the correct value and failing closed would take a cluster down
+    to protect nothing.
+    """
+    by_name = {secret["name"]: secret for secret in contract["secrets"]}
+    cipher = by_name["pgbackrest_repo_cipher_pass"]
+
+    assert cipher["origin"] == "generated"
+    assert cipher["one_time_initialization"] is True
+    assert cipher["rotate_by_replacement"] is False
+    assert cipher["must_refresh_on_start"] is False
+
+    # The control for the assertion above: the two halves beside it are the
+    # opposite on all three, so this is not passing because every secret in the
+    # file happens to be declared this way.
+    for name in ("backup_r2_access_key_id", "backup_r2_secret_access_key"):
+        other = by_name[name]
+        assert other["one_time_initialization"] is False, name
+        assert other["rotate_by_replacement"] is True, name
+        assert other["must_refresh_on_start"] is True, name
+
+
+def test_the_repository_secrets_are_inactive_before_session_ten(
+    contract: dict[str, Any],
+) -> None:
+    """The session filter, and the control that proves it is applied.
+
+    Without the negative arm a filter that ignored the session would pass the
+    positive one and tell an operator deploying session 9 to go and create two
+    Cloudflare credentials nothing will read.
+    """
+    at_ten = {s["name"] for s in secrets_contract.active_secrets(contract, 10)}
+    at_nine = {s["name"] for s in secrets_contract.active_secrets(contract, 9)}
+
+    assert set(BACKUP_SECRETS) <= at_ten
+    assert not set(BACKUP_SECRETS) & at_nine
+    assert at_nine < at_ten
+
+
+def test_the_operator_supplied_list_at_session_ten_names_both_halves(
+    contract: dict[str, Any],
+) -> None:
+    """What `--plan` and `--apply` have to name, and what they must not.
+
+    The cipher pass is deliberately absent: it is ours to generate, and a plan
+    that asked an operator to paste one would be asking for a value no third
+    party issues.
+    """
+    names = [s["name"] for s in secrets_contract.operator_supplied_secrets(contract, 10)]
+    assert names == [
+        "r2_access_key_id",
+        "r2_secret_access_key",
+        "backup_r2_access_key_id",
+        "backup_r2_secret_access_key",
+    ]
+    assert "pgbackrest_repo_cipher_pass" not in names
+
+
+# ---------------------------------------------------------------------------
+# Run 3: what the deploy can honestly say before Run 6 exists
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def deploy() -> Any:
+    """`bin/deploy-project.py`, loaded by path the way the origin tests load the
+    bootstrap: it is a program, not a package member."""
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location(
+        "apg_deploy_project", REPO_ROOT / "bin" / "deploy-project.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_the_credential_gate_counts_all_three_files(deploy: Any) -> None:
+    """A valid token with the wrong pass phrase is not partial configuration.
+
+    Gating on the two credential halves alone would publish a repository state
+    for a deployment whose backups nobody can decrypt.
+    """
+    assert set(deploy.BACKUP_CREDENTIAL_NAMES) == set(BACKUP_SECRETS)
+
+
+@pytest.mark.parametrize(
+    ("enabled", "credentialed", "expected"),
+    [
+        (False, False, "unconfigured"),
+        (False, True, "unconfigured"),
+        (True, False, "unconfigured"),
+        (True, True, "not_observed"),
+    ],
+)
+def test_the_deploy_never_reports_ready_before_anything_reads_the_repository(
+    deploy: Any, enabled: bool, credentialed: bool, expected: str
+) -> None:
+    """`ready` is unreachable in Run 3, and that is the assertion.
+
+    Three files existing says a request COULD be made. It does not say a stanza
+    exists, that a backup succeeded, or that WAL is arriving. Returning `ready`
+    here would be a value that looked measured and was not -- and it would be
+    read by the evidence document as a working repository.
+    """
+    state = deploy.observe_backup(enabled=enabled, credentialed=credentialed)
+    assert state["status"] == expected
+    assert state["status"] != "ready"
+    for member, value in state.items():
+        if member != "status":
+            assert value is None, f"{member} is {value!r} and nothing has been observed"

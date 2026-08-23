@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D538.**
+**Next free number after this table is D539.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -102,6 +102,7 @@ anything found *during* implementation is appended with the next free number.
 | **D535** | — | **`last_failed_wal` does not advance.** Measured: it pinned to `000000010000000000000001` across all three samples while `failed_count` climbed 11 → 15 → 26, because the archiver retries the **oldest** unarchived segment, not the newest. The retry shape is three attempts a second apart, then `WARNING: archiving write-ahead log file … failed too many times, will try again later`. | **`failed_count` is the moving value and the one a proof asserts on.** `last_failed_wal` says *which* segment is stuck — diagnosis, not detection. | A proof asserting `last_failed_wal` advances would be green only when something else was also wrong, and red during exactly the steady-state failure it exists to catch. Written down before anybody writes that assertion. | — |
 | **D536** | — | **Two hand-written lists of the same identities, and nothing compared them.** `evidence.ISOLATED_FIELDS` is what the shipped evidence document counts collisions over; `tests/contract/test_render_isolation.py::MUST_DIFFER` is what the isolation test iterates. They are named together in a comment in `output_migrations.py:343` and no test related them. Found by adding `backup.bucket` to both and noticing it could as easily have gone into one. | **A containment test**, added in this run: every pointer in `ISOLATED_FIELDS` must appear in `MUST_DIFFER`, and the surplus is **pinned to an exact list** rather than merely bounded, so it cannot be satisfied by `MUST_DIFFER` growing something unrelated. | D174/D175's shape — a property maintained by review rather than by a test — and it fails in the worse direction: a name dropped from `ISOLATED_FIELDS` leaves the published `collision_count` reporting **zero over a smaller set**, which is indistinguishable from isolation. Containment rather than equality is the true relation here and not a weakened one (cf. D300): `MUST_DIFFER` legitimately covers the slug and four route URLs, which are project-scoped but are not identities two projects could collide *on*. | — |
 | **D537** | — | **ADR 0012 and D389 pull in opposite directions, and outputs v13 is the first block to feel it.** ADR 0012 says a rendered document contains no observed value, and the cheapest way to keep that true is for the field to be *unrepresentable* on that branch — which `database` achieves by splitting into `renderedDatabase` and `deployedDatabase`, a settings block duplicated per branch. D389 is the record of what that duplication costs: `storageSettings` was copied per branch, the two disagreed, and `STO-BOUND-001` read the deployed document for a bound that existed only on the rendered one. | **The observation moves out instead of the settings being duplicated.** `backup` is one `$def` referenced from both branches; `backup_state` is a separate top-level block that exists only on the deployed one. Both constraints hold at once and neither is traded away. | The alternative satisfies ADR 0012 by reintroducing exactly the copy D389 was written about. The database pays that cost for historical reasons; a block added today need not, and choosing otherwise would have been a decision made by imitation rather than by reading why the precedent exists. | 0146 |
+| **D538** | "Repository encryption enabled with a key stored separately from repository credentials." | **The contract can say a value is generated and rotatable; it has no way to say that rotating it destroys what it protects.** pgBackRest binds the cipher to the repository at `stanza-create`, so writing a new generation of the pass phrase re-encrypts nothing — the repository stays exactly as it was and the *reader* now holds the wrong phrase. Every check here passes, `materialize-secrets` reports success, and every backup ever taken becomes unreadable. | **`one_time_initialization: true` and `rotate_by_replacement: false`**, which is `postgres_init_superuser_password`'s declaration reused for a sharper consequence — there a new generation is *inert*, here it is destructive to readability. **`must_refresh_on_start: false` inverts the two credential halves beside it** and the asymmetry is stated in the file: a revoked API token fails closed at the provider, so refusing the last-known-good start only relocates that error; this value cannot be revoked, so the last known good IS the correct value and failing closed would take a cluster down to protect nothing. | The three flags already existed and D56 already recorded why: they are what lets rotation tooling **refuse to claim a rotation it did not perform**. What Session 10 adds is the first secret where the false claim is not merely misleading — it is the report you would read while the repository became unrecoverable. A test asserts all three, with the two credential halves as its control so it cannot pass because every secret in the file happens to be declared this way. | 0145 |
 
 ---
 
@@ -365,7 +366,7 @@ the one nothing compared.
 the rendered branch alone. Read rather than assumed, and it is why v13 needed no
 deployed-side network field.
 
-### Run 3 — The three secrets and the two-stage convergence
+### Run 3 — The three secrets and the two-stage convergence — **Done.**
 
 - `backup_r2_access_key_id`, `backup_r2_secret_access_key`
   (`origin: operator_supplied`, provider path `/backup`) and
@@ -379,6 +380,62 @@ deployed-side network field.
   manifest declares backups and whose generation carries no credential is a
   different fact (D76, D306). **The deploy exits 0**, prints the operator
   command, and converges on the redeploy.
+
+**Done.** Three secrets, all granted to `postgres` and to nothing else, and a
+deploy that can say what it does not know.
+
+**What was built.** `backup_r2_access_key_id` and `backup_r2_secret_access_key`
+(`origin: operator_supplied`, provider path `/backup`) and
+`pgbackrest_repo_cipher_pass` (`origin: generated`), every one `uid: 999,
+gid: 999, mode: 0400` — the postgres image's own user, not the 65532 every other
+consumer uses, which is D515 arriving in the file rather than on a host.
+`introduced_in_session: 10`, so nothing materializes them until Run 10 moves
+`CURRENT_SESSION`. `BACKUP_PLANE_SESSION`, `BACKUP_CREDENTIAL_NAMES` and
+`observe_backup` in the deploy.
+
+**`ready` is unreachable in this run, and that is the assertion.** Three files
+existing says a request *could* be made — not that a stanza exists, not that a
+backup succeeded, not that WAL is arriving. `observe_backup` returns
+`unconfigured` or `not_observed` and nothing else, and a parametrized test
+covers all four input combinations plus the invariant that every non-status
+member is null. Run 6 replaces it with an observer that asks the repository.
+Returning `ready` on the strength of three files would be §6's subject exactly,
+and the evidence document would read it as a working repository.
+
+**The credential gate counts all three files, not two.** A valid token with the
+wrong pass phrase is not partially configured; it is a repository nobody can
+restore. Gating on the credential halves alone would publish a state for a
+deployment whose backups are unreadable — C6 is the arm that proves the
+distinction is load-bearing.
+
+**D538 is the row to read**, and the flags it turns on were already there. The
+contract has always been able to say *generated* and *rotatable*; it has never
+had a way to say *changing this destroys what it protects*. The cipher pass is
+the first secret where a claimed rotation is not merely misleading but is the
+report you would be reading while every backup became unrecoverable.
+
+**One wording correction to this run's own plan text above.** It says the state
+is `unavailable` until the credential arrives, borrowing the vocabulary of a
+published route. `backup_state` is not a route and v13 gave it its own four
+values in Run 2; the state is **`unconfigured`**, which additionally covers
+backups being switched off — a thing `unavailable` cannot express.
+
+**Nothing was needed in `bootstrap-providers.py`.** Its refusal, its `--plan`
+report and its exclusion from `managed_resources` are all generic over
+`origin`, so the two new operator-supplied entries are named and refused by code
+Session 7 wrote. That was checked rather than assumed: the session-10 list is
+asserted to be the four operator-supplied secrets in order, and the cipher pass
+is asserted **absent** from it — a plan that asked an operator to paste a phrase
+nobody issues is C4.
+
+**Battery: C1–C7, 7 of 7 killed** as `FAILED`, each control green and
+unreachable, both mutated files restored byte-for-byte. **The pre-flight earned
+itself on C3**: the flag trio `rotate_by_replacement: false /
+must_refresh_on_start: false / one_time_initialization: true` matches
+`postgres_init_superuser_password` as well as the cipher pass, so the anchor
+matched twice and the battery refused to run. Unanchored, it would have mutated
+the wrong secret and reported a kill for a test that never saw the mutation
+(D269's exact shape).
 
 ### Run 4 — The image, the config, the network, the archive
 
