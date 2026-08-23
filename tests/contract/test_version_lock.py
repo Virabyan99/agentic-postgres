@@ -408,7 +408,22 @@ def test_cli_grammar() -> None:
 # ---------------------------------------------------------------------------
 
 PACKAGE_DIGEST = re.compile(r"^(sha256|sha512):[A-Za-z0-9+/=_\-]{32,}$")
-KNOWN_REGISTRIES = {"pypi", "npm"}
+KNOWN_REGISTRIES = {"pypi", "npm", "apt"}
+
+#: Keys a registry needs BEYOND the three every entry carries. Session 10.
+#:
+#: `apt` needs `index` because a Debian archive has no per-package endpoint the
+#: way PyPI and npm do -- the whole suite is one file, and which file depends on
+#: the base image's release. PyPI and npm are declared with empty sets rather
+#: than omitted, so a registry added without deciding this fails the
+#: completeness assertion below instead of defaulting to "no extra keys".
+#:
+#: This mirrors `REGISTRY_KEYS` in `bin/lock-versions.sh`, and the duplication is
+#: real: that one lives inside an embedded Python program a test cannot import.
+#: `test_the_lock_script_knows_every_registry_this_module_does` is what keeps
+#: the two from drifting, because two lists that must agree and nothing
+#: comparing them is D536's shape and it is one session old.
+REGISTRY_EXTRA_KEYS: dict[str, set[str]] = {"pypi": set(), "npm": set(), "apt": {"index"}}
 
 
 def test_every_package_declares_a_registry_and_a_package_name(candidates: dict) -> None:
@@ -420,12 +435,48 @@ def test_every_package_declares_a_registry_and_a_package_name(candidates: dict) 
     and survived four sessions of a green check (D201).
     """
     assert candidates["lock_format"] >= 2
+    assert set(REGISTRY_EXTRA_KEYS) == KNOWN_REGISTRIES, (
+        "a registry was added to one of these and not the other, so an entry's "
+        "required key set would be decided by a dict that does not know about it"
+    )
     for name, entry in candidates["packages"].items():
         assert isinstance(entry, dict), f"{name} is a bare version string, not a format-2 entry"
-        assert set(entry) == {"registry", "package", "version"}, f"{name}: {sorted(entry)}"
-        assert entry["registry"] in KNOWN_REGISTRIES, f"{name} declares {entry['registry']!r}"
+        assert entry.get("registry") in KNOWN_REGISTRIES, (
+            f"{name} declares {entry.get('registry')!r}"
+        )
+        expected = {"registry", "package", "version"} | REGISTRY_EXTRA_KEYS[entry["registry"]]
+        assert set(entry) == expected, f"{name}: {sorted(entry)} != {sorted(expected)}"
         assert entry["package"], name
         assert str(entry["version"]), name
+
+
+def test_the_lock_script_knows_every_registry_this_module_does() -> None:
+    """The two lists that must agree, related rather than reviewed.
+
+    `bin/lock-versions.sh` carries its validator inside an embedded Python
+    program, so this module cannot import its `REGISTRIES` tuple and has to
+    restate it. D536 is one session old and is exactly this shape -- two
+    hand-written lists of the same thing with nothing comparing them -- so the
+    comparison is written at the same time as the second list rather than after
+    something drifts.
+
+    A source scan rather than an execution, because the script's checker is not
+    reachable as a function. That is weaker than calling it, and it is stated:
+    what this catches is a registry added here and not there, which is the
+    failure that actually happens.
+    """
+    source = (REPO_ROOT / "bin" / "lock-versions.sh").read_text(encoding="utf-8")
+    for registry in sorted(KNOWN_REGISTRIES):
+        assert f'"{registry}"' in source, (
+            f"this module accepts registry {registry!r} and bin/lock-versions.sh "
+            "never mentions it, so --update cannot dereference it"
+        )
+    for registry, extra in REGISTRY_EXTRA_KEYS.items():
+        for key in sorted(extra):
+            assert f'"{key}"' in source, (
+                f"{registry} entries declare {key!r} and the lock script does not "
+                "read it, so the value would be ignored"
+            )
 
 
 def test_every_package_carries_an_artifact_digest(lock: dict[str, str], candidates: dict) -> None:
