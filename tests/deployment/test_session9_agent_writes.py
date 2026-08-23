@@ -430,8 +430,22 @@ def test_a_denied_write_is_recorded_and_never_reaches_the_database(
             "name": "update_task_status",
             "arguments": {
                 "p_task_id": "00000000-0000-4000-8000-00000000dead",
-                "p_expected_status": "todo",
-                "p_new_status": "done",
+                # `api.task_status` is ('pending', 'in_progress', 'completed',
+                # 'cancelled'), frozen by ADR 0003 and created in 0007. This
+                # sent "todo" and "done" until Run 9's host trip: neither is a
+                # label of that enum, so PostgreSQL raised 22P02 before
+                # `api.update_task_status`'s body ran, PostgREST returned that
+                # code, it mapped to nothing and stayed masked (D510).
+                #
+                # **The wrong labels did not merely fail the assertion; they
+                # measured the wrong boundary.** This test is named for a write
+                # refused by the product AFTER reaching it -- that is what makes
+                # the `refused` audit row and the absent `database` row mean
+                # something. A malformed enum is refused by the type system
+                # BEFORE reaching it, so the arm proved nothing about ADR 0141
+                # even in principle.
+                "p_expected_status": "pending",
+                "p_new_status": "completed",
             },
         },
     )
