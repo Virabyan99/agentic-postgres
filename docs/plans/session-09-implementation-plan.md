@@ -744,23 +744,78 @@ serve a request in step 6b, so the window exists and is unreachable. The guide
 also names D503 under the kill switch, so an operator is not surprised that
 un-revoking answers 200.
 
-### Runs 9+ — The host trip
+### Runs 9+ — The host trip — **Done.**
 
-Transport by `git bundle` + `scp`; **read the `release <sha>` line and confirm it
-is the sha you fetched**. Then, in order:
+**`evidence/session-09.json` exists**, merged from both halves against release
+**`c0816e7`**: **48 claims, 46 passed, 2 failed.** The document reads
+`status: failed`, and that is the documented outcome — the two red are Session
+5's `api_authorization` and `bootstrap_identity`, blocked on the rotation
+window. §7 said so before the session began, and this is the **fourth** session
+to close on that sentence. **Nothing in Session 9 is unproved.**
 
-- **Re-render all four projects on the host**, not two, and not on the
-  workstation (D462, D383 — `.generated/` is gitignored and never transported).
-- **Sync the host venv before the gate** (D384, D297 — three times now).
-- Migrate both clusters with `migrate.sh --project`, naming the manifest.
-- **Deploy twice** if a route or a document field is newly published (D326).
-- Run `session-09-check.sh` in all three modes; merge both halves against the
-  same release or the merge refuses, correctly.
+**All five Session 9 claims passed on the host**: `agent_writes`,
+`agent_audit_record`, `agent_audit_fails_closed`, `agent_revocation`,
+`agent_parameter_boundary`. The external half passed 25/0, `public_agent_boundary`
+among them.
 
-**Budget three to four more runs than this list.** Session 8 was planned as nine
-and took twelve; Session 7 as ten and took sixteen. **Not one of the seven
-defects Session 8's trip found was visible to a green offline suite of 3,786
-tests.**
+**The deployment.** Both projects at `c0816e7`, **21 migrations applied to both
+clusters**, 16 containers, `tool_count` 6, `capability_contract_sha256`
+identical across projects while `capability_lock_sha256` differs. Outputs stays
+**v12**.
+
+**Eight divergences, D504–D511, and they sort into three kinds.**
+
+**Four were runbook defects, all found before anything mutated.** D504: the
+transport used the generic `/tmp/apg.bundle`, which Session 8's trip had left on
+the host owned by `apg-agent` — `/tmp` is sticky, `op` cannot overwrite it, and
+the *next* command in the guide would have fetched the stale bundle and moved
+the host **backwards** to a mid-Session-8 commit, both halves exiting 0.
+D505 and D507: `sudo` on six lines and `--host host.yaml` on two, all present in
+Session 8's guide and lost when Run 8 retyped it. **D506 is the one to read**:
+step 4 asked for migrations to be applied before the deploy as a safety
+property, and that step cannot be executed — `/var/lib`'s migration set is
+installed *by* the deploy, so `--runtime status` read the previous release's set
+and answered **`Applied: 18, Pending: 0`, exit 0**, a green line for work that
+had not happened. The deploy already enforces the ordering, and more strictly:
+step 6 migrates, step 6b starts the four services that could serve a request.
+**The property D475 asked an operator to arrange is held by `DEFERRED_SERVICES`**
+(ADR 0133) — not by the order of two typed commands.
+
+**One was a product defect, and no offline test could have reached it.** **D508**:
+`agent_writer` held every privilege a write needs and **no `EXECUTE` on
+`api.mcp_agent_context()`** — the statement ADR 0125 sends once per request,
+before discovery and before execution. Every write agent was refused **403**
+before its scope was checked, before its audit record was opened and before
+`api.create_note` was reached. ADR 0118 granted the agent RPCs to `agent_reader`
+alone, correctly, when `agent_reader` was the only agent role; Session 9
+activated a second one and 0019 asked what a WRITE needs rather than what an
+AGENT needs. **Migration 0021**, which also grants `api.owner_activity_report()`
+because `run_report`'s scopes are inside the writer's ceiling and the same
+refusal waited one step further on. No ADR: 0021 decides nothing.
+
+**Three were proofs that had never executed**, all written in Runs 6–8, all
+live-host-only, all sitting green in a suite of 3,927 that never runs them:
+a `SELECT` list missing the column its own outer `ORDER BY` named (four
+failures); **D509**, a control arm asserting `"error" not in result` when a
+FastMCP tool failure carries only `isError` — so it **passed while the thing it
+controlled for was failing**, and made D508 look impossible for an hour; and
+**D510**, enum labels that do not exist in `api.task_status`, which did not
+merely fail an assertion but **measured the wrong boundary** — a write refused
+by the type system before reaching the function says nothing about ADR 0141's
+denied arm. **CLAUDE.md's oldest open item is exactly this, and Run 9 is the
+first gate to pay for it three times at once.**
+
+**D511 is recorded and deliberately not repaired.** A Session 6 proof passed in
+one host run and failed in the next on the same release, with a broken pipe
+rather than the edge's 413: reading the refusal is a race between Traefik
+closing the connection and the client finishing 64 KiB. Accepting `EPIPE` would
+make it green whenever the connection breaks — including for the defect it
+exists to detect, which is D509's shape. **The first proof in this repository
+observed to flip on one release.**
+
+**The trip took five deploy-and-gate cycles against a plan that listed one.**
+Session 8 was planned as nine runs and took twelve; Session 7 as ten and took
+sixteen.
 
 ---
 
