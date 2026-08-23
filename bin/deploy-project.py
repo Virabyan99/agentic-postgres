@@ -52,6 +52,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from agentic_postgres import (
     CURRENT_SESSION,
     api_surface,
+    backup_report,
     config,
     database_observation,
     deployed_output,
@@ -880,38 +881,98 @@ BACKUP_CREDENTIAL_NAMES: tuple[str, ...] = (
 )
 
 
-def observe_backup(*, enabled: bool, credentialed: bool) -> dict[str, Any]:
+def backup_credentialed_for(secrets: dict[str, Any]) -> bool:
+    """Does the active generation carry all three repository files?
+
+    **A function rather than an expression written twice** (Session 10 Run 6).
+    Step 6c decides whether to touch the repository at all and step 7 decides
+    what to publish about it, and those two must agree: a step 6c that ran
+    against a generation step 7 then calls `unconfigured` would have created a
+    stanza the document denies exists. Two `all(...)` comprehensions over one
+    tuple is how that disagreement arrives, and it is the same shape as two
+    arithmetics over one budget (D327).
+
+    All three, never any: a partial set is a repository that authenticates and
+    cannot decrypt, or decrypts and cannot authenticate.
+    """
+    required = secrets.get("required_names") or []
+    return all(name in required for name in BACKUP_CREDENTIAL_NAMES)
+
+
+def observe_backup(
+    *, enabled: bool, credentialed: bool, summary: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """What this deploy can honestly say about the repository. Version 13.
 
-    **Run 3 observes the INPUTS and nothing else**, and the three statuses it can
-    return are the three facts available before a pgBackRest binary exists:
+    **Run 6 makes this ask the repository**, which Run 3's version of this
+    docstring said it would -- a sentence that would otherwise have become
+    D276's shape, a comment describing work nobody wrote.
+
+    The two input gates are unchanged and still come first, because a repository
+    with no credential cannot be read at all:
 
     * backups off in the manifest -> `unconfigured`
     * on, but the active generation is missing one of the three files ->
       `unconfigured`, D326's two-stage convergence, the deploy exits 0
-    * on and complete -> `not_observed`, because nothing has read the repository
 
-    That last one is the line worth reading. `ready` is not returned here and
-    must not be: the credential being present says a request *could* be made,
-    not that a stanza exists, not that a backup succeeded, and not that WAL is
-    arriving. Run 6 replaces this with an observer that asks the repository.
-    Returning `ready` on the strength of three files existing would be a value
-    that looked measured and was not -- §6's whole subject.
+    Past those, ``summary`` is what `bin/backup.py info --json` produced from
+    the repository's own report, and `backup_report` maps it. **`ready` is now
+    reachable, and Run 3's test asserting it was not has been replaced by a
+    stricter one** rather than deleted: what makes it safe is that something
+    reads the repository, where Run 3 had only three files existing.
 
-    `observe_storage`'s gate is a route answering 401; this one has no route to
-    poll, so there is nothing to `await_observation` over. A polling loop
-    against a repository nothing writes to would be a timeout with a status
-    attached (`AGENT_PLANE_SESSION`'s note, in a second place).
+    ``summary`` is None when step 6c did not run -- a deploy through a session
+    before 10, or one where the read itself failed. That is `not_observed`, and
+    it is deliberately NOT `failing`: nothing was measured, and a status
+    asserting a failure nobody observed is the same substitution in the other
+    direction.
     """
-    state = dict(deployed_output.BACKUP_NOT_OBSERVED)
     if not enabled:
+        state = dict(deployed_output.BACKUP_NOT_OBSERVED)
         state["status"] = "unconfigured"
         return state
     if not credentialed:
         print("  no repository credential in the active generation; backup stays unconfigured")
+        state = dict(deployed_output.BACKUP_NOT_OBSERVED)
         state["status"] = "unconfigured"
         return state
-    return state
+    if summary is None:
+        return dict(deployed_output.BACKUP_NOT_OBSERVED)
+    return backup_report.backup_state(summary)
+
+
+def read_backup_repository(release: Path, outputs_path: Path) -> dict[str, Any] | None:
+    """The repository's own report, through the operator command that owns it.
+
+    Through `bin/backup.py` rather than by running `docker exec pgbackrest`
+    here, so there is ONE place that knows how pgBackRest is reached, which
+    stanza it is asked about and which uid it runs as. A second call site is a
+    second thing to keep in step with the config, and D543 is the record of how
+    unhelpful pgBackRest's own error is when one of them is wrong.
+
+    Returns None rather than raising: this is an observation, and a deploy that
+    could not read the repository publishes `not_observed` instead of failing.
+    **The failure that DOES fail a deploy is step 6c's `check`**, which has
+    already run by the time this is called -- so a repository that is genuinely
+    broken has stopped the deploy before it reaches here.
+    """
+    result = run(
+        str(release / "bin" / "backup.sh"),
+        "--outputs",
+        str(outputs_path),
+        "info",
+        "--json",
+    )
+    if not result.stdout.strip():
+        print(f"  could not read the repository (exit {result.returncode}); backup not_observed")
+        return None
+    try:
+        return json.loads(result.stdout)
+    except ValueError:
+        # Never echo the output. A failing command can print its own
+        # configuration, and that carries the bucket and the prefix.
+        print("  the repository report was not JSON; backup not_observed")
+        return None
 
 
 def observe_storage(url: str, *, credentialed: bool) -> str:
@@ -1663,6 +1724,77 @@ def main(argv: list[str] | None = None) -> int:
         fail(EXIT_VALIDATION, f"the deferred services did not start:\n{resumed.stderr}")
     edge["project_network_attached"] = True
 
+    # ------------------------------------------------------------------
+    # Step 6c -- the repository (Session 10 Run 6, ADR 0149)
+    # ------------------------------------------------------------------
+    #
+    # Here, and not earlier: `backup_user` can log in as of step 6, and the
+    # rendered `pgbackrest.conf` and the three secret mounts are in place as of
+    # step 5. Here, and not later: step 7 publishes what the repository reports,
+    # so the stanza has to exist before anything reads it.
+    #
+    # `stanza-create` runs UNCONDITIONALLY rather than after a probe. Measured
+    # (rig 6): twice in a row exits 0. A probe-then-create would buy nothing and
+    # add a window in which the answer can change.
+    #
+    # **A `check` failure fails the deploy**, and that is the whole point of the
+    # step. `check` is the only thing in this system that tests archiving end to
+    # end -- it forces a WAL switch and confirms the segment reached the
+    # repository. D534 measured what the alternative looks like from outside:
+    # `pg_isready` answers *accepting connections* while `failed_count` climbs
+    # 11 -> 15 -> 26 and `pg_wal` fills. Before this step, that deployment
+    # converged cleanly and published nothing about it.
+    # `--outputs` is the **rendered** document, for D465's reason one step up:
+    # the deployed document is the PREVIOUS deploy's, because step 7 writes the
+    # new one long after this. Unlike `routes.rest`, the `backup` block is ONE
+    # shared `$def` referenced from both branches (ADR 0146), so the two agree in
+    # shape and only the freshness matters -- which is exactly why 0146 chose a
+    # shared definition over a copy per branch (D389).
+    backup_summary: dict[str, Any] | None = None
+    if (
+        rendered["backup"]["enabled"]
+        and arguments.through_session >= BACKUP_PLANE_SESSION
+        and backup_credentialed_for(secrets)
+    ):
+        step("6c. Create the backup stanza and prove archiving works")
+        created = run(
+            str(release / "bin" / "backup.sh"),
+            "--outputs",
+            str(deployed_output.rendered_path(key) / "outputs.json"),
+            "stanza-create",
+        )
+        print(created.stdout, end="")
+        if created.returncode != 0:
+            fail(
+                EXIT_VALIDATION,
+                "the backup stanza could not be created, so this release has a cluster "
+                "archiving WAL to a repository that does not exist:\n"
+                f"{created.stderr}",
+            )
+
+        checked = run(
+            str(release / "bin" / "backup.sh"),
+            "--outputs",
+            str(deployed_output.rendered_path(key) / "outputs.json"),
+            "check",
+        )
+        print(checked.stdout, end="")
+        if checked.returncode != 0:
+            # Named reason, not a warning. An operator who sees "the deploy
+            # failed" here needs to know it is the archiver rather than the
+            # release, because the cluster itself is up and answering.
+            fail(
+                EXIT_VALIDATION,
+                "WAL archiving does not work for this project. `pgbackrest check` forces "
+                "a WAL switch and confirms the segment reached the repository, and it "
+                "did not. The cluster is up and serving -- this is the archiver, and a "
+                "cluster that cannot archive fills pg_wal until it stops:\n"
+                f"{checked.stderr}",
+            )
+        backup_summary = read_backup_repository(
+            release, deployed_output.rendered_path(key) / "outputs.json"
+        )
+
     # The API plane, observed rather than asserted. Until Run 9 these four were
     # hard-coded `unavailable` with a comment saying "Session 5's runs replace
     # these with observations of a running PostgREST" -- which was the honest
@@ -1803,11 +1935,15 @@ def main(argv: list[str] | None = None) -> int:
     # honest value for a deployment that has no repository is a status, not an
     # absence. The guard is inside `observe_backup` instead, where it can say
     # which of the two `unconfigured` reasons applies.
-    backup_credentialed = all(name in secrets["required_names"] for name in BACKUP_CREDENTIAL_NAMES)
+    backup_credentialed = backup_credentialed_for(secrets)
     backup_state = observe_backup(
         enabled=bool(rendered["backup"]["enabled"])
         and arguments.through_session >= BACKUP_PLANE_SESSION,
         credentialed=backup_credentialed,
+        # What step 6c read, or None if it did not run. The gate above is the
+        # SAME function step 6c used, so the two cannot disagree about whether
+        # this project has a repository (see `backup_credentialed_for`).
+        summary=backup_summary,
     )
     if (
         rendered["backup"]["enabled"]

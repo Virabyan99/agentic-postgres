@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D548.**
+**Next free number after this table is D553.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -112,6 +112,11 @@ anything found *during* implementation is appended with the next free number.
 | **D545** | — | **`config.ADMINISTRATION_RESERVED_CONNECTIONS = 5` and `postgres-bootstrap.OPERATIONAL_CONNECTION_HEADROOM = 5` are one claim stated twice, in two modules, and nothing compares them.** Both hold connections back "for operations"; both are 5; neither reads the other. Found while deciding D530, which warns about exactly this shape one layer up. | **Not merged in this run, and deliberately.** The new figure does **not** repeat the mistake: `BACKUP_RESERVED_CONNECTIONS` lives in `config` alone and the bootstrap plane imports it, with a test asserting the binding is an attribute of `config` read from the syntax tree. Merging the existing pair is its own change to two passing arithmetics and belongs with an ADR that has measured what each is actually for. | D327 is the record of what two arithmetics over one budget cost: they *"agreed by coincidence, 23 against 20"*, and nothing compared them until Session 7. These two agree by coincidence today at 5 and 5. Writing it down is what stops the next reader assuming somebody checked. | — |
 | **D546** | — | **The fifth claimant narrows the application's slack over the pooler's pool from 3 to 1**, and the manifests it will actually meet are unread. Measured through the product's own functions on `project.example.yaml`: manifest 50 → 52 of 56; bootstrap remainder 23 → 21 against a pooler pool of 20. `project.alpha.yaml` and `project.beta.yaml` are gitignored operator inputs that exist only on the host. | **Charged to the application, not to the headroom**, and stated rather than discovered. If either real manifest sets `database.pool_size` within two of its remainder, `connection_limits` raises and the deploy refuses. **That refusal is loud, offline and reachable without root** — `deploy.sh --render-only` — so it is the first thing the trip runs. | Taking the two connections out of `OPERATIONAL_CONNECTION_HEADROOM` instead would have been the invisible way to pay for a backup: the headroom is what leaves a psql available when this arithmetic is wrong, and spending it is spending the diagnosis. | 0148 |
 | **D547** | — | **The bootstrap plane's consumer list was hand-written and nothing enumerated it.** `test_the_bootstrap_consumers_match_the_secret_contract` compares three named `*_CONSUMER` globals against `secrets.required.yaml`; a fourth added by any session would simply not be compared, and the failure mode is silent — the file is not found, the credential is reported absent, and the role is left NOLOGIN with no error (D288's exact cost). | **A containment test added in this run**: every `*_CONSUMER` global the module declares must appear in the checked set, derived from the module rather than counted. `len(...) == 4` was refused for D536's reason — it passes while the fourth entry is a duplicate of the third. | Question 5, in a file that already records the last time it was asked here. D536 found the same shape in `ISOLATED_FIELDS`/`MUST_DIFFER` three runs ago; this is the third hand-written list this session has found and the second it has closed. | — |
+| **D548** | "…health checks that expose failures." | **`pgbackrest info` exits 0 in every state, including for a stanza that does not exist.** Measured, four phases: no stanza → exit **0**, `status.code` 1, `missing stanza path`; stanza with no backups → exit **0**, code 2, `no valid backups`; one full backup → exit **0**, code 0, `ok`; a stanza never named anywhere → exit **0**, code 1. | **The observer reads `status.code` and never a process's exit**, in one module (`backup_report`), with an AST test asserting nothing in it touches `returncode`. | **D145's shape** — `postgrest --ready` returned 0 while every request 404'd. An observer built the obvious way (run `info`, check it succeeded, report healthy) would report a healthy repository for a stanza that has never existed, on every project, forever. The three states are distinguishable by exactly one field. | 0149 |
+| **D549** | "The session configures pgBackRest with … retention rules." | **`stanza-create` is idempotent** — measured, twice in a row exits 0 — and **`expire` applies `repo1-retention-full` from the rendered config with nothing on the command line**, also measured. | Step 6c runs `stanza-create` **unconditionally**, with no probe; `verb_expire` passes pgBackRest the single argument `expire`, asserted on the argument vector rather than on the function's text. | The plan said "create the stanza if absent", which implies a probe; a probe-then-act adds a window in which the answer can change and buys nothing. And a `--retention` flag would be one value stated twice, where the second statement wins and the first is the one people read (D495, D463) — the point being that it was measured **unnecessary** before it was called undesirable. | 0149 |
+| **D550** | "Recovery time and latest recoverable time must be recorded as evidence." | **`pgbackrest info` has no latest-recoverable-time field.** Measured: it carries per-backup epoch integers (`timestamp.start`/`stop`) and WAL **segment names** (`archive[].min`/`max`), and a segment name has no time in or beside it. The v13 schema description asserted the value "is read from `pgbackrest info`". | **The newest backup's stop time is published as a proven FLOOR**, and the schema description is corrected in place to say so rather than left asserting something the measurement refutes. Run 8's evidence records the **achieved** recovery point as a separate field. | A drill landing later than this value is the floor being a floor, not a contradiction — WAL archived after the newest backup extends real recovery past it. Written down before anybody reads the two side by side and "fixes" the one that is right. Null was refused for D519's reason inverted: a required field that is always null is published and reaches nothing. | 0149 |
+| **D551** | — | **`backup_state.status` had no value for "configured, stanza exists, awaiting its first backup"** — which is the state of **every** project between its first Session 10 deploy and its first operator-run full backup, because the plan puts that backup in an operator's hands at a TTY (Runs 11+). | **`awaiting_first_backup` joins the enum**, extending outputs **v13** rather than opening v14: v13 has never left this tree — both host projects are on v12 — so a document carrying it is one nothing has to migrate. | `ready` is false (nothing can be restored), `failing` would be red on every first deploy (a status operators learn to ignore, the argument `provision-host.sh` already makes for installing timers disabled), and `unconfigured` means a MISSING CREDENTIAL — it would send an operator hunting for a secret that is present and correct. **The third instance of ADR 0053's cost** (D255, D308): a version chosen once from the whole surface, still short a value only measurement surfaced. | 0149 |
+| **D552** | — | **The rig measured its own setup failure as a pgBackRest finding.** Rig 6's first run used `docker exec` without `-i`, so stdin was never attached, psql ran **nothing**, `rig_backup` did not exist, and every pgBackRest command failed with `unable to find primary cluster - cannot proceed`. Every step reported an exit code and none of them was about pgBackRest. | **The rig's setup gained a control** — it counts the role in `pg_roles` and aborts fatally if it is absent — before any measurement was taken from it. | CLAUDE.md §1 already names this exact trap (`docker exec` needs `-i`), and it was still paid for. The lesson that is new: **a rig needs a control on its own setup, not only on its subject.** Every arm downstream was ready to report a confident, wrong finding about a third party, and the numbers all looked plausible. | — |
 
 ---
 
@@ -643,7 +648,7 @@ run or any other; arm E used a `posix` repository on a local volume, because the
 questions it asked — which SQL, how many backends — do not depend on where the
 bytes land.
 
-### Run 6 — `bin/backup.sh`, and the deploy's step 6c
+### Run 6 — `bin/backup.sh`, and the deploy's step 6c. **Done.**
 
 - `bin/backup.sh` + `bin/backup.py`: `stanza-create`, `check`, `backup --type
   full|incr`, `info`, `expire`. `--help` exits 0 with no host; the CLI contract's
@@ -654,6 +659,86 @@ bytes land.
   named reason, not a warning.
 - Retention comes from `retain_full`, applied once, in the config — never
   restated in a command (D495, D463).
+
+---
+
+**What Run 6 measured, and what it changed.** ADR 0149. Rig 6, five phases
+against the Run 4 derived image, with the rig's own setup under a control.
+
+**`pgbackrest info` exits 0 in every state, including for a stanza that does not
+exist** (D548). That single finding shaped the whole observer: the three
+repository states are distinguishable by `status.code` and by nothing else, so
+`backup_report` reads that field and an AST test asserts nothing in the module
+touches `returncode`. Built the obvious way — run `info`, check it succeeded,
+report healthy — the observer would have reported a healthy repository for a
+stanza that has never existed, on every project, forever. It is D145's shape and
+it was one line of code away.
+
+**`stanza-create` is idempotent, so step 6c does not probe** (D549). The plan
+said "create the stanza if absent", which implies asking first; measured, twice
+in a row exits 0, so the probe buys nothing and adds a window. **`expire` applies
+retention from the config with nothing on the command line**, also measured —
+which is the order those two facts have to be established in: unnecessary first,
+undesirable second.
+
+**A failing `check` fails the deploy**, and that is the run's real product.
+Before this, a project with a broken `archive_command` deployed cleanly and
+published nothing about it; D534 measured what that looks like from outside —
+`pg_isready` answering *accepting connections* while `failed_count` climbs
+11 → 15 → 26 and `pg_wal` fills. Step 6c is the first thing in this system that
+turns that into a non-zero exit, and the assertion guarding it reads the syntax
+tree rather than the text, because the comments around it say the word "fail"
+repeatedly (D277).
+
+**Two things v13 promised that measurement refuted.** `latest_recoverable_time`
+"is read from `pgbackrest info`" — and `info` has no such field at all, only
+per-backup epochs and WAL **segment names** with no time in or beside them
+(D550). What is published is the newest backup's stop time, named in the schema
+as a **proven floor**; a drill landing later is the floor being a floor, and
+Run 8's evidence records the achieved point separately. And the status enum had
+no value for the state **every** project is in after its first deploy, so
+`awaiting_first_backup` joins it (D551) — extending v13, which has never left
+this tree, rather than opening v14. That is the third instance of ADR 0053's
+cost: a version chosen once from the whole surface, still short a value only
+measurement surfaced.
+
+**`observe_backup` now asks the repository, which its own docstring said Run 6
+would do.** Leaving it would have been D276's shape — a comment describing work
+nobody wrote — and Run 5 had just paid for that pattern. Run 3's test asserting
+`ready` was unreachable is replaced by a stricter one rather than deleted: `ready`
+now requires `status.code` 0 **and** a full backup label **and** no per-backup
+error, and each non-ready rung is asserted separately.
+
+**Battery: N1–N11, 11 of 11 killed** as `FAILED`, control green and unreachable
+in every arm, all three mutated files restored byte-for-byte. **N4 survived the
+first run and was a real coverage gap** (D498's category, not a weak assertion):
+`test_the_newest_full_backup_is_reported_not_the_first_one_listed` used the
+full-plus-incremental fixture, where there is exactly **one** full backup — so
+`fulls[0]` and `max(fulls, key=stop)` are the same object and the mutation
+between them was invisible. A test that cannot distinguish the two things it is
+named after is testing neither. Repaired by capturing a real two-full report
+whose newest full is **last**, with an assertion that the fixture is in that
+arrangement — so the day a capture puts the newest first, the test says the
+premise broke instead of passing by accident.
+
+**The fixtures are real captures, not hand-written** — three of them, from
+`pgbackrest info --output=json` at three points in a repository's life, plus the
+two-full one. A hand-written fixture is a statement of what somebody expected the
+tool to say, and two of this run's four findings are places where that
+expectation was wrong.
+
+**The rig measured its own setup failure as a pgBackRest finding** (D552). Its
+first run used `docker exec` without `-i` — the trap CLAUDE.md §1 already names —
+so psql ran nothing, the role never existed, and every command failed with
+`unable to find primary cluster`. The setup now has a control that aborts
+fatally. The new lesson is that a rig needs a control on its **setup**, not only
+on its subject: every arm downstream was ready to report a confident wrong
+finding about a third party, with plausible numbers.
+
+**Nothing is deployed and nothing has dialled R2.** Rig 6 used a `posix`
+repository on a local volume, because the questions were about pgBackRest's own
+reporting rather than about where the bytes land. Step 6c has never run on a
+host.
 
 ### Run 7 — A WAL archiving failure is visible
 
