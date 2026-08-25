@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D575.**
+**Next free number after this table is D580.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -139,6 +139,12 @@ anything found *during* implementation is appended with the next free number.
 | **D572** | — | **A rig defect that reported "no leak" having done nothing.** Arm L2 passed its conf.d path through an environment variable on a `wsl bash -lc` command line, and **Git Bash path-converted it** to `C:/Users/gmpar/AppData/Local/Temp/rig9/…`. The Python found no directory, stripped no header, and the arm probed the **unmodified** files — reporting exit 0 and *"the value did NOT appear"*. | The arm **asserts its own stimulus landed** — the file's checksum must change and the header must be gone, both fatal — before it probes anything. | **D557 for the third time this session, and the worst instance**: a *leak check* that came back clean after doing nothing. CLAUDE.md §1 already names Git Bash's mangling of `$?` and of nested quoting; **it does not name path conversion of an argument that looks like a POSIX path**, and that is the new half. An arm hoping to see "no leak" cannot distinguish success from having done nothing any more than an arm hoping to see "no change" can. | — |
 | **D573** | — | **A test comparing two constants survived a mutation, for the second time in one session.** Battery arm R7 moved `PGBACKREST_INCLUDE_DIR` to `/etc/pgbackrest/includes` and nothing went red, because every assertion derived its expectation from that same constant. Q5 was the first instance, on `RESTORE_LOG_LEVEL`. | Both are asserted as **literals** now, each with a docstring saying why the literal is written out: `/etc/pgbackrest/conf.d` is pgBackRest's own measured default (`pgbackrest help backup config-include-path`), and `info` is the level at which a successful restore is not silent. | CLAUDE.md §6 names this defect and it still arrived twice in one session, in code written by someone who had just read the list. The general rule that follows: **when a constant encodes a MEASURED third-party fact, the test writes the measured value, not the constant.** A constant that encodes a free choice may be compared to itself; one that encodes a measurement may not. | — |
 | **D574** | — | **The `option` validation was correct and untested.** Battery arm R6 deleted the "a pgbackrest consumer must name an option" check and **survived**: the real contract always names one, so nothing ever drove the refusal. | Two tests, both directions — a `pgbackrest` consumer without `option` is refused, and a `raw` consumer carrying one is refused. | Question 2 of §6's five: *has it run at all, in this environment, since the thing it measures last changed?* The answer was no, and the battery is the only thing in this repository that asks it. Without the check a deploy raises `KeyError` inside the materializer, on the host, as root. | — |
+
+| **D575** | "The restored instance passes schema, RLS read, and write-RPC checks." | **Two of the six smoke checks need an owner id the command cannot discover**, and a check with nothing to do that reports `passed: true` is this repository's defect pattern with an evidence document as its reader. | **Every check carries `applicable`.** `--smoke-owner-id` is optional; without it the RLS read and the write RPC are recorded `applicable: false, passed: null`, `drill_verdict` treats them as neither pass nor failure, and **`REC-SMOKE-001` asserts `applicable` as well as `passed`** — so a drill run without the flag cannot satisfy the requirement by producing a document with fewer checks in it. | The alternative was for the command to discover an owner from the restored data, which proves "some owner's rows and only those" and cannot be tied to the T1/T2 scenario the requirement is about. The RLS half that matters is the **second** read: *the owner sees rows* passes against a table whose policies were dropped, and *nobody else sees them* does not — so both run, as `app_runtime`, because FORCE RLS exempts a superuser and the same SELECT as `postgres` returns every row (ADR 0065/0066). | — |
+| **D576** | "Scheduled full and incremental backups." | The four units need to reach `bin/backup.sh` inside a *release*, and a host-side unit naming a path into a release is D72 — a copy on the host still held a literal three runs after it was fixed here. | **The timers use the seam that already exists.** `agentic-postgres-project@.service`'s trampoline validates `%i` against the project-key pattern and **passes the action through unexamined**, because which actions exist is a property of a release; `libexec/project-launcher` gains `backup-full` and `backup-incr`. No new trampoline, and the units name no path inside any release. **The scheduled action runs `check` before `backup`**, and a test asserts that order. | The trampoline's own comment is the argument: *"a list here would be a second definition of it — the kind that agrees right up until a release adds one."* This run is that release adding one. `check` first, because it is the only thing in this system that tests the archiver end to end and it needs two privileges the backup does not (D541) — so a timer that backs up and fails its check is the expected shape, and it is the half that is supposed to notice. | — |
+| **D577** | — | **A test that reads a shell script by regex read the wrong loop.** `provision-host.sh` has more than one `for origin in …; do`; an earlier one installs `libexec/agentic-postgres-*`. `test_install_units_globs_timers_as_well_as_services` searched the whole file, matched that one, and reported that `install_units` globs no units at all — on a repository where it had just been fixed. Separately, `configparser` interpolates `%`, so every `Unit=…@%i.service` parsed to a mangled value. | The glob search is scoped to `install_units`' own body and fails loudly if that function cannot be found; the unit parser is `interpolation=None`. | Both were caught by the module's **first** run, which is the only reason they are a divergence row and not a defect that shipped. The first is D464's shape once more — a text scan standing in for a construct — and the mitigation that worked was not "stop scanning" but *name the subject precisely and fail if it cannot be found*. | — |
+| **D578** | — | `REC-SAFE-001` pointed at one node id, and D523 requires **two proofs**. | **Five node ids, across two modules**: the host arm and the teardown check in `tests/recovery/`, and the offline rig's three arms — including the control arm — in `tests/contract/test_restore_test_command.py`. `REC-SMOKE-001` likewise gains its offline arm. | Registering only the host half would leave the arm that has **actually executed** invisible to the evidence, on a requirement whose host half has never run. It also makes D523's "two proofs" a fact the registry states rather than a sentence in a plan. | — |
+| **D579** | — | **The five recovery proofs have never executed and cannot until a deploy.** The host is at `c0816e7`, Session 9's release; Session 10 has never been deployed and R2 has never been dialled. | **`CURRENT_SESSION` stays 9.** The placeholders are replaced in this run and the bump is **not** taken with them: the plan assigns `bin/session-10-check.sh` and the operator guide to Run 10, and a tree declaring session 10 without its gate script is a tree whose gate cannot run. Verified rather than argued — with the gate session at 9, `test_no_requirement_at_or_before_the_gate_session_remains_future` does not reach a requirement targeted at 10, and the registry module is green. | CLAUDE.md says the bump moves *together with* the five replacements in one commit (D439/D484), and the constraint that rule encodes is one-directional: **the bump requires the replacements, not the reverse.** Bumping without them goes red; replacing without bumping does not. Recorded rather than resolved silently, because the next reader will find the two sentences and need to know which way round they bind. | — |
 
 ---
 
@@ -1086,7 +1092,7 @@ the archiver *can* authenticate, proved against a posix repository by the
 product's own materializer. The endpoint, the token scope and a 403 remain
 untested and need the trip.
 
-### Run 9 — The proofs, and the schedule
+### Run 9 — The proofs, and the schedule. **Done.**
 
 - Replace all five placeholders with real tests in `tests/recovery/`.
 - `REC-SAFE-001`'s two arms (D523). `REC-SMOKE-001`: the restored instance's
@@ -1095,6 +1101,86 @@ untested and need the trip.
 - The T1/T2 scenario on **beta**, in the frozen example domain, under a drill-only
   owner id: no new table, no migration, ADR 0003 does not move.
 - The four systemd units, and `install_units`' glob (D522).
+
+---
+
+**What Run 9 built.** The five placeholders in `tests/recovery/test_future_pitr.py`
+are gone and five requirements now have proofs; the drill's smoke checks grew the
+three `REC-SMOKE-001` names; the four systemd units exist and `install_units`
+globs them (D522). Divergences D575–D579.
+
+**The five proofs have never executed, and this is the most important sentence in
+this entry (D579).** The host is at `c0816e7` — Session 9's release — so every
+test in that module is `live_host` and skips on environment absence, which is a
+skip for the right reason (`requires_environment`, never `future`) and is still a
+proof nobody has run. CLAUDE.md §8 names this as the oldest and most expensive
+open item, and Session 9's trip found **three** never-executed proofs in one gate,
+every one defective. So each of the five is written to fail loudly rather than
+plausibly, and every one that disturbs the cluster asserts its own stimulus landed
+first.
+
+**What has executed is the logic underneath.** The offline rig in
+`tests/contract/test_restore_test_command.py` grew from 57 to 64 tests and now
+drives all six smoke checks end to end against the recording `docker` — including
+the not-applicable path and a `schema_matches_the_release` arm that swaps one
+version for another **keeping the count identical**, because a count would report
+a cluster restored from another release as healthy. That is why `REC-SAFE-001` and
+`REC-SMOKE-001` are registered with their offline arms beside their host ones
+(D578): registering only the host half would leave the arm that has actually run
+invisible to the evidence.
+
+**`REC-SAFE-001`'s host arm does not read `system_identifier`, and that is the
+whole of what rig 8 bought it.** A restore inherits it — `7677917767700738081` on
+both live and drill — so a check reading it passes while reading the drill
+instance, which is the single mistake this requirement exists to prevent (D566).
+It compares the volume, the `instance_uuid`, the timeline and
+`pg_postmaster_start_time()`; the last is the one that catches a restore which
+took the live cluster down and brought it back, leaving every other field equal.
+
+**`REC-WAL-001` breaks a live archiver and says what it does not know.**
+`archive_command` is reloadable where `archive_mode` is not, but this deployment
+sets it on the postmaster's command line and **whether `postgresql.auto.conf`
+overrides a `-c` option here has not been measured**. So the test asserts the
+break landed, fails loudly on a healthy cluster if it did not, repairs in a
+`finally`, and asserts the repair — because a test that leaves a project's
+archiver broken has done more damage than the requirement is worth.
+
+**The timers use the seam that already existed (D576).** The trampoline validates
+`%i` and passes the action through unexamined — *"a list here would be a second
+definition of it, the kind that agrees right up until a release adds one"* — and
+this run is that release adding one. `libexec/project-launcher` learns
+`backup-full` and `backup-incr`; the units name no path inside any release; and
+the scheduled action runs **`check` before `backup`**, because `check` is the only
+thing here that tests the archiver end to end. Installed and **not** enabled, the
+rule the edge and project units already follow: nothing can back up until a bucket
+exists, a token has been issued out of band and the first full backup has been
+taken by hand.
+
+**D522 needed two assertions, not one.** A test reading the unit files would have
+passed against the exact defect the row records, because the defect was in the
+installer's glob. `test_no_unit_in_the_directory_is_left_uninstallable` is the
+general form: the suffixes the glob covers must be *all* the suffixes present, so
+a `.socket` added later fails here rather than being silently skipped.
+
+**Two defects in the new tests, both caught by their first run (D577).** The glob
+test searched the whole of `provision-host.sh` and matched an **earlier**
+`for origin in` loop — the one installing `libexec/` — and reported that
+`install_units` globs nothing, on a file where it had just been fixed. And
+`configparser` interpolates `%`, so every `Unit=…@%i.service` parsed to a mangled
+value. The repair for the first was not to stop scanning but to **name the subject
+precisely and fail if it cannot be found**, which is the usable form of D464.
+
+**`CURRENT_SESSION` stays 9 (D579).** CLAUDE.md says the bump moves together with
+the five replacements in one commit; the constraint that encodes is
+one-directional — the bump requires the replacements, not the reverse — and Run 10
+owns `bin/session-10-check.sh`. A tree declaring session 10 without its gate script
+is a tree whose gate cannot run. Verified rather than argued: the registry module
+is green with the gate session at 9.
+
+**Still nothing is deployed and nothing has dialled R2.** What Run 9 adds is that
+the capability now has proofs pointed at it. Whether they pass is the trip's
+question, and Runs 11+ budget three to five cycles for it.
+
 
 ### Run 10 — Publish
 

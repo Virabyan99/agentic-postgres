@@ -76,6 +76,14 @@ PROJECT_KEY_LABEL = "apg.project.key"
 #: The uid pgBackRest and the postmaster both run as inside the image.
 POSTGRES_UID = "999"
 
+#: An identity the drill asserts in order to see NOTHING (`REC-SMOKE-001`).
+#:
+#: A fixed, obviously-synthetic UUID rather than a random one, so that a row it
+#: ever matched would be a row somebody wrote deliberately. The RLS check needs
+#: both halves -- the owner sees rows, and a second identity sees none -- because
+#: the first half alone passes against a table whose policies were dropped.
+SMOKE_FOREIGN_OWNER = "00000000-0000-4000-8000-0000000000ff"
+
 #: How long the drill waits for a restored instance to leave recovery.
 #:
 #: A bound, not a measurement, and it is named so that it is a decision somebody
@@ -444,24 +452,55 @@ def observe_restored_instance(plan: restore_drill.DrillPlan) -> dict[str, Any]:
     return observed
 
 
-def smoke_checks(plan: restore_drill.DrillPlan, observed: dict[str, Any]) -> dict[str, Any]:
-    """What this run proves about the restored instance.
+def released_versions() -> list[str]:
+    """The versions `migrations/released.lock.json` says this release carries.
 
-    Run 8's three. `REC-SMOKE-001` adds an RLS-protected read and a write RPC and
-    is Run 9's, against a deployment -- so this is a dict a later run extends
-    rather than a list a later run replaces.
+    Read from the lock rather than counted from `migrations/templates/`: the lock
+    is what `bin/migrate.sh freeze-lock` froze and what the renderer installs, so
+    a template added and not frozen is a template this release does not have.
+    """
+    lock = json.loads((REPO_ROOT / "migrations" / "released.lock.json").read_text("utf-8"))
+    return [str(entry["version"]) for entry in lock["migrations"]]
+
+
+def smoke_checks(
+    plan: restore_drill.DrillPlan, observed: dict[str, Any], owner_id: str | None
+) -> dict[str, Any]:
+    """What the drill proves about the restored instance (`REC-SMOKE-001`).
+
+    Run 8 wrote three; Run 9 adds the three the requirement actually names -- the
+    schema matches the release's set, an RLS-protected read returns one owner's
+    rows and only those, and a write RPC succeeds.
+
+    **Every check carries `applicable`**, and the two that need an owner id are
+    `applicable: false` when none was supplied. A check that quietly reported
+    `passed: true` because it had nothing to do is the shape this repository
+    keeps producing, and `REC-SMOKE-001` asserts `applicable` as well as
+    `passed` so a drill run without `--smoke-owner-id` cannot satisfy it.
     """
     code, answer = query(plan, "SELECT 1")
-    return {
+    released = released_versions()
+    present = [
+        line
+        for line in query(
+            plan, "SELECT version FROM app_private.schema_migrations ORDER BY version"
+        )[1].splitlines()
+        if line.strip()
+    ]
+
+    checks: dict[str, Any] = {
         "answers_a_query": {
+            "applicable": True,
             "passed": code == 0 and answer == "1",
             "detail": f"SELECT 1 -> {answer!r} (exit {code})",
         },
         "left_recovery": {
+            "applicable": True,
             "passed": query(plan, "SELECT pg_is_in_recovery()")[1] == "f",
             "detail": "pg_is_in_recovery() is false",
         },
         "carries_a_schema_version": {
+            "applicable": True,
             "passed": bool(observed.get("schema_version"))
             and bool(observed.get("schema_migration_count")),
             "detail": (
@@ -470,7 +509,84 @@ def smoke_checks(plan: restore_drill.DrillPlan, observed: dict[str, Any]) -> dic
                 f"{observed.get('schema_version')!r}"
             ),
         },
+        # **Set equality, not a count.** A restored cluster with the right NUMBER
+        # of migrations and a different set is a cluster restored from another
+        # release, and counting would report it healthy.
+        "schema_matches_the_release": {
+            "applicable": True,
+            "passed": present == released,
+            "detail": (
+                f"restored {len(present)} versions, the release declares {len(released)}"
+                + (
+                    ""
+                    if present == released
+                    else f"; only in the restore {sorted(set(present) - set(released))}, "
+                    f"only in the release {sorted(set(released) - set(present))}"
+                )
+            ),
+        },
     }
+
+    if not owner_id:
+        for name in ("rls_read_is_owner_scoped", "write_rpc_succeeds"):
+            checks[name] = {
+                "applicable": False,
+                "passed": None,
+                "detail": (
+                    "no --smoke-owner-id was supplied, so this check did not run. It is "
+                    "recorded as not applicable rather than as passing: REC-SMOKE-001 "
+                    "reads `applicable` too."
+                ),
+            }
+        return checks
+
+    runtime_role = (plan.roles or {}).get("app_runtime")
+    if not runtime_role:
+        checks["rls_read_is_owner_scoped"] = {
+            "applicable": False,
+            "passed": None,
+            "detail": "the deployed document names no app_runtime role",
+        }
+        checks["write_rpc_succeeds"] = dict(checks["rls_read_is_owner_scoped"])
+        return checks
+
+    # **As `app_runtime`, not as the superuser.** ADR 0065/0066: a proof that
+    # reaches the right end state by a route the product does not take proves the
+    # end state is reachable. FORCE RLS still exempts a superuser, so the same
+    # SELECT run as `postgres` returns every row and passes for the wrong reason.
+    def as_owner(claim: str, statement: str) -> tuple[int, str]:
+        return query(
+            plan,
+            f"SET LOCAL ROLE {runtime_role}; SET LOCAL app.user_id = '{claim}'; {statement}",
+        )
+
+    mine_code, mine = as_owner(owner_id, "SELECT count(*) FROM api.notes;")
+    # A second, absent identity. The check is not "the owner sees rows" -- that
+    # passes against a table with RLS disabled -- it is "and nobody else sees
+    # them", which is the half that fails when a policy is dropped.
+    other_code, other = as_owner(SMOKE_FOREIGN_OWNER, "SELECT count(*) FROM api.notes;")
+
+    checks["rls_read_is_owner_scoped"] = {
+        "applicable": True,
+        "passed": (
+            mine_code == 0 and other_code == 0 and mine.isdigit() and int(mine) > 0 and other == "0"
+        ),
+        "detail": (
+            f"as {runtime_role}: the drill owner sees {mine!r} note(s) (exit {mine_code}), "
+            f"an unrelated identity sees {other!r} (exit {other_code})"
+        ),
+    }
+
+    write_code, written = as_owner(owner_id, "SELECT (api.create_note('restore drill', ''))::text;")
+    checks["write_rpc_succeeds"] = {
+        "applicable": True,
+        "passed": write_code == 0 and bool(written.strip()),
+        "detail": (
+            f"api.create_note as {runtime_role} exited {write_code} and returned "
+            f"{'a row' if written.strip() else 'nothing'}"
+        ),
+    }
+    return checks
 
 
 # ---------------------------------------------------------------------------
@@ -496,6 +612,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--target-time",
         required=True,
         help="the recovery target, as a timestamp PostgreSQL parses (ISO 8601 with an offset)",
+    )
+    parser.add_argument(
+        "--smoke-owner-id",
+        default=None,
+        help=(
+            "an owner id present in the restored data. Without it the RLS read and "
+            "the write RPC are recorded as not applicable rather than as passing"
+        ),
     )
     parser.add_argument(
         "--evidence-dir",
@@ -565,7 +689,7 @@ def drill(arguments: argparse.Namespace) -> int:
         rto_seconds = time.monotonic() - rto_started
 
         observed = observe_restored_instance(plan)
-        smoke = smoke_checks(plan, observed)
+        smoke = smoke_checks(plan, observed, arguments.smoke_owner_id)
 
         evidence = restore_drill.evidence_document(
             plan=plan,

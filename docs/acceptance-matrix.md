@@ -196,8 +196,8 @@ search passes on a commented-out test.
 |---|---|---|---|
 | `REC-EVID-001` | P0 | Restore evidence records backup set, requested and achieved recovery point, RTO, schema version, and test outcomes. | `tests/recovery/test_future_pitr.py::test_restore_evidence_records_the_required_fields` |
 | `REC-PITR-001` | P0 | A timestamp-targeted restore into a disposable volume succeeds. | `tests/recovery/test_future_pitr.py::test_timestamp_targeted_restore_succeeds` |
-| `REC-SAFE-001` | P0 | The restore path never mounts, overwrites, or mutates the active volume. | `tests/recovery/test_future_pitr.py::test_restore_never_touches_the_active_volume` |
-| `REC-SMOKE-001` | P0 | The restored instance passes schema, RLS read, and write-RPC checks. | `tests/recovery/test_future_pitr.py::test_restored_instance_passes_schema_and_rls_smoke_checks` |
+| `REC-SAFE-001` | P0 | The restore path never mounts, overwrites, or mutates the active volume. | `tests/recovery/test_future_pitr.py::test_restore_never_touches_the_active_volume`<br>`tests/recovery/test_future_pitr.py::test_the_drill_left_none_of_its_own_resources_behind`<br>`tests/contract/test_restore_test_command.py::test_the_command_never_hands_docker_the_live_volume`<br>`tests/contract/test_restore_test_command.py::test_a_wrong_derivation_is_caught_and_nothing_is_started`<br>`tests/contract/test_restore_test_command.py::test_the_command_never_passes_delta_and_never_mounts_read_write_material` |
+| `REC-SMOKE-001` | P0 | The restored instance passes schema, RLS read, and write-RPC checks. | `tests/recovery/test_future_pitr.py::test_restored_instance_passes_schema_and_rls_smoke_checks`<br>`tests/recovery/test_future_pitr.py::test_the_restore_landed_between_the_two_writes`<br>`tests/contract/test_restore_test_command.py::test_the_smoke_checks_run_and_are_recorded` |
 | `REC-WAL-001` | P1 | A WAL archiving failure produces a visible non-zero signal. | `tests/recovery/test_future_pitr.py::test_wal_archiving_failure_is_visible` |
 
 ### Session 11

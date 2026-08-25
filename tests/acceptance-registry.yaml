@@ -1597,6 +1597,10 @@
   target_session: 10
   test_nodeids:
     - tests/recovery/test_future_pitr.py::test_restore_never_touches_the_active_volume
+    - tests/recovery/test_future_pitr.py::test_the_drill_left_none_of_its_own_resources_behind
+    - tests/contract/test_restore_test_command.py::test_the_command_never_hands_docker_the_live_volume
+    - tests/contract/test_restore_test_command.py::test_a_wrong_derivation_is_caught_and_nothing_is_started
+    - tests/contract/test_restore_test_command.py::test_the_command_never_passes_delta_and_never_mounts_read_write_material
   description: >-
     The restore path never mounts, overwrites, or mutates the active volume.
 
@@ -1605,6 +1609,8 @@
   target_session: 10
   test_nodeids:
     - tests/recovery/test_future_pitr.py::test_restored_instance_passes_schema_and_rls_smoke_checks
+    - tests/recovery/test_future_pitr.py::test_the_restore_landed_between_the_two_writes
+    - tests/contract/test_restore_test_command.py::test_the_smoke_checks_run_and_are_recorded
   description: The restored instance passes schema, RLS read, and write-RPC checks.
 
 - id: REC-EVID-001

@@ -144,6 +144,13 @@ REQUIRED_PATHS = (
     "systemd/agentic-postgres-docker-firewall.service",
     "systemd/agentic-postgres-edge.service",
     "systemd/agentic-postgres-project@.service",
+    # Session 10 Run 9. Four files, and the pair of timers is the half D522 was
+    # about: `install_units` globbed `*.service` only, so a `.timer` here was
+    # installed by nothing.
+    "systemd/agentic-postgres-backup-full@.service",
+    "systemd/agentic-postgres-backup-full@.timer",
+    "systemd/agentic-postgres-backup-incr@.service",
+    "systemd/agentic-postgres-backup-incr@.timer",
     "services/edge-probe/Dockerfile",
     "services/edge-probe/probe.py",
     "services/secret-check/Dockerfile",

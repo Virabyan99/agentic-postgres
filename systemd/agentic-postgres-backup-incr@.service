@@ -1,0 +1,42 @@
+[Unit]
+Description=Agentic Postgres incremental backup for project %i
+Documentation=file:/opt/agentic-postgres/releases/current/docs/backup-operations.md
+
+# The cluster has to be up, and the project unit is what brings it up. This is
+# `After=` and not `Requires=`: a timer firing while a project is deliberately
+# stopped should do nothing, not start it. A backup is not a reason to bring a
+# stopped project back.
+After=network-online.target docker.service agentic-postgres-project@%i.service
+Wants=network-online.target
+BindsTo=agentic-postgres-project@%i.service
+
+[Service]
+Type=oneshot
+
+# %i is the project key and NOTHING ELSE, exactly as in
+# agentic-postgres-project@.service: the trampoline validates it against the
+# project-key pattern before it becomes a path component, and derives every path
+# from it rather than accepting one. A template instance name arrives through a
+# filename, so it is operator input however much it looks like configuration.
+#
+# The action is `backup-incr`, and the release's own launcher decides what that
+# means -- the trampoline passes actions through unexamined, because which
+# actions exist is a property of a release and a list on the host would be a
+# second definition of it. That is the same seam `materialize`, `up` and
+# `attach` already travel.
+#
+# The launcher runs `check` before the backup. `check` is the only thing in this
+# system that tests the archiver end to end, and it needs two privileges the
+# backup itself does not (D541) -- so a run that backs up and fails its check is
+# a real shape, and it is the half that is supposed to notice.
+ExecStart=/usr/local/libexec/agentic-postgres/project %i backup-incr
+
+# An incremental carries only what changed since the newest backup, so the
+# bound is half the full one -- still generous, and still chosen rather than
+# measured, because nothing here has timed either against R2.
+TimeoutStartSec=3600
+
+# No Restart=. A failed backup is a thing an operator should see in
+# `systemctl list-units --failed` and in the next `bin/backup.sh info`, not
+# something that retries until the timer fires again anyway.
+Restart=no

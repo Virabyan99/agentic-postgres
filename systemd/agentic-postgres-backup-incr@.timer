@@ -1,0 +1,23 @@
+[Unit]
+Description=Daily incremental backup for Agentic Postgres project %i
+Documentation=file:/opt/agentic-postgres/releases/current/docs/backup-operations.md
+
+[Timer]
+# Daily, and deliberately NOT on the day the full runs at the same hour: an
+# incremental that starts while a full is still running is two pgBackRest
+# commands against one stanza, and `backup_user` holds `CONNECTION LIMIT 2`
+# (ADR 0148) of which the deploy's step 6c may already be using one.
+#
+# 03:30 against the full's 02:00 is a ninety-minute head start plus jitter. That
+# is a gap chosen from a number nobody has measured -- no full backup of this
+# deployment has ever been timed -- so it is a place to look first if two
+# backups ever collide, rather than a bound anything enforces.
+OnCalendar=*-*-* 03:30
+Persistent=true
+
+RandomizedDelaySec=20m
+
+Unit=agentic-postgres-backup-incr@%i.service
+
+[Install]
+WantedBy=timers.target

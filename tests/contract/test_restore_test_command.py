@@ -729,7 +729,18 @@ _STUB_DOCKER = r"""#!/usr/bin/env bash
 printf '%s\n' "$*" >>"${APG_DOCKER_LOG}"
 
 sql_answer() {
+  # Order matters, most specific first: `count(*)` appears in the migration
+  # count AND in the RLS read, and `api.notes` is what tells them apart.
   case "$*" in
+    *api.create_note*)                printf '%s\n' "${APG_WRITTEN_NOTE_ID}" ;;
+    # The RLS read, both halves. The stub answers by the CLAIM in the statement,
+    # which is what makes the two arms distinguishable at all: the drill owner
+    # sees rows and the synthetic foreign identity sees none. A stub answering
+    # one number for both would let a dropped policy pass.
+    *"${APG_FOREIGN_OWNER}"*api.notes*) printf '0\n' ;;
+    *"${APG_SMOKE_OWNER}"*api.notes*)   printf '3\n' ;;
+    *api.notes*)                      printf '\n' ;;
+    *"ORDER BY version"*)             printf '%s\n' "${APG_SCHEMA_VERSIONS}" ;;
     *pg_is_in_recovery*)              printf 'f\n' ;;
     *recovery_target_time*)           printf '%s\n' "${APG_REQUESTED_TARGET}" ;;
     *pg_last_xact_replay_timestamp*)  printf '%s\n' "${APG_ACHIEVED_POINT}" ;;
@@ -801,6 +812,24 @@ _REQUESTED_TARGET = "2026-08-25 10:45:02.599903+00"
 _ACHIEVED_POINT = "2026-08-25 10:45:00.109084+00"
 
 
+SMOKE_OWNER = "11111111-2222-4333-8444-555555555555"
+
+
+def _released_versions() -> list[str]:
+    lock = json.loads((REPO_ROOT / "migrations" / "released.lock.json").read_text(encoding="utf-8"))
+    return [str(entry["version"]) for entry in lock["migrations"]]
+
+
+def _foreign_owner() -> str:
+    """The synthetic identity the drill asserts in order to see nothing.
+
+    Read off the command rather than written here: two spellings of one uuid is
+    a stub that answers `0` for an identity the product never asks about, and
+    the RLS arm would then pass without the product's own second read.
+    """
+    return _load_command().SMOKE_FOREIGN_OWNER
+
+
 def _load_command():
     """`bin/restore-test.py`, imported by path because its name has a hyphen."""
     import importlib.util
@@ -827,7 +856,10 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         json.dumps(
             {
                 "project": {"key": PROJECT_KEY},
-                "database": {"name": "fixture_alpha_dev"},
+                "database": {
+                    "name": "fixture_alpha_dev",
+                    "roles": {"app_runtime": "apg_fixture_alpha_dev_app_runtime"},
+                },
                 "backup": {"enabled": True, "stanza": STANZA},
                 "release": {"version": "0.10.0"},
                 "compose": {
@@ -874,6 +906,13 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         ("APG_RESTORE_LINE", _RESTORE_LINE),
         ("APG_REQUESTED_TARGET", _REQUESTED_TARGET),
         ("APG_ACHIEVED_POINT", _ACHIEVED_POINT),
+        # Read from the same lock `released_versions()` reads, so a schema check
+        # that passes here is a check comparing the real released set against
+        # itself -- which is what the host arm compares against a real cluster.
+        ("APG_SCHEMA_VERSIONS", "\n".join(_released_versions())),
+        ("APG_SMOKE_OWNER", SMOKE_OWNER),
+        ("APG_FOREIGN_OWNER", _foreign_owner()),
+        ("APG_WRITTEN_NOTE_ID", "6f1c3a10-0000-4000-8000-00000000abcd"),
     ):
         monkeypatch.setenv(name, value)
 
@@ -899,6 +938,8 @@ def _drive(rig: dict[str, Any]) -> int:
             str(rig["project_dir"]),
             "--evidence-dir",
             str(rig["evidence_dir"]),
+            "--smoke-owner-id",
+            SMOKE_OWNER,
         ]
     )
 
@@ -991,6 +1032,113 @@ def test_the_credential_environment_is_forwarded_but_never_written_down(
     )
     document = next(rig["evidence_dir"].glob("restore-drill-*.json"))
     assert "not-a-real-value" not in document.read_text(encoding="utf-8")
+
+
+def test_the_smoke_checks_run_and_are_recorded(rig: dict[str, Any]) -> None:
+    """`REC-SMOKE-001`'s logic, driven offline (Run 9).
+
+    The requirement's proof is a host test that has never executed, so this arm
+    exists to make its *logic* something that has. It drives the real
+    `smoke_checks` against the recording daemon and asserts the six checks that
+    should be applicable are, and that all six pass.
+    """
+    assert _drive(rig) == 0
+    evidence = json.loads(next(rig["evidence_dir"].glob("restore-drill-*.json")).read_text())
+    smoke = evidence["smoke"]
+
+    expected = {
+        "answers_a_query",
+        "left_recovery",
+        "carries_a_schema_version",
+        "schema_matches_the_release",
+        "rls_read_is_owner_scoped",
+        "write_rpc_succeeds",
+    }
+    assert set(smoke) == expected, sorted(set(smoke) ^ expected)
+    for name, result in smoke.items():
+        assert result["applicable"] is True, f"{name} did not run: {result['detail']}"
+        assert result["passed"] is True, f"{name}: {result['detail']}"
+
+
+def test_the_rls_read_asks_as_the_runtime_role_and_asserts_both_directions(
+    rig: dict[str, Any],
+) -> None:
+    """The half that fails when a policy is dropped is the SECOND read.
+
+    "the owner sees rows" passes against a table with RLS disabled. So the check
+    asserts an unrelated identity sees **none**, and this reads the recorded
+    daemon traffic to prove the product actually issued both reads -- as
+    `app_runtime`, not as the superuser, because FORCE RLS exempts a superuser
+    and the same SELECT as `postgres` returns every row (ADR 0065/0066).
+    """
+    assert _drive(rig) == 0
+    recorded = rig["log"].read_text(encoding="utf-8")
+    reads = [line for line in recorded.splitlines() if "api.notes" in line]
+    assert len(reads) == 2, f"expected two RLS reads, saw {len(reads)}"
+    assert any(SMOKE_OWNER in line for line in reads), "the drill owner was never asserted"
+    assert any(_foreign_owner() in line for line in reads), (
+        "no second identity was asserted, so a dropped policy would pass"
+    )
+    for line in reads:
+        assert "SET LOCAL ROLE apg_fixture_alpha_dev_app_runtime" in line, (
+            "the RLS read did not set the runtime role, so it ran as the superuser "
+            "-- which FORCE RLS exempts"
+        )
+
+
+def test_without_an_owner_id_the_rls_checks_are_not_applicable_rather_than_passing(
+    rig: dict[str, Any],
+) -> None:
+    """A check with nothing to do must not report success.
+
+    This is the shape this repository keeps producing, and `REC-SMOKE-001` reads
+    `applicable` as well as `passed` so that a drill run without
+    `--smoke-owner-id` cannot satisfy the requirement.
+    """
+    assert (
+        rig["module"].main(
+            [
+                "--target-time",
+                _REQUESTED_TARGET,
+                "--project-dir",
+                str(rig["project_dir"]),
+                "--evidence-dir",
+                str(rig["evidence_dir"]),
+            ]
+        )
+        == 0
+    )
+    smoke = json.loads(next(rig["evidence_dir"].glob("restore-drill-*.json")).read_text())["smoke"]
+    for name in ("rls_read_is_owner_scoped", "write_rpc_succeeds"):
+        assert smoke[name]["applicable"] is False, name
+        assert smoke[name]["passed"] is None, f"{name} reported a verdict it did not earn"
+    # And the drill as a whole still passes: a check that did not run is not a
+    # failure either. `REC-SMOKE-001` is what refuses this document, not the
+    # drill's own verdict.
+    assert smoke["schema_matches_the_release"]["passed"] is True
+
+
+def test_a_schema_set_that_differs_from_the_release_fails_the_drill(
+    rig: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Set equality, not a count.
+
+    A cluster restored from another release can carry the right NUMBER of
+    migrations and a different set, and a count would report it healthy. The
+    stub drops one version and adds one, keeping the count identical.
+    """
+    versions = _released_versions()
+    tampered = [*versions[:-1], "29991231000000"]
+    assert len(tampered) == len(versions)
+    monkeypatch.setenv("APG_SCHEMA_VERSIONS", "\n".join(tampered))
+
+    assert _drive(rig) == 6, "a restored cluster from another release was accepted"
+    evidence = json.loads(next(rig["evidence_dir"].glob("restore-drill-*.json")).read_text())
+    check = evidence["smoke"]["schema_matches_the_release"]
+    assert check["applicable"] is True
+    assert check["passed"] is False
+    assert "only in the restore" in check["detail"]
+    assert evidence["verdict"]["passed"] is False
 
 
 def test_a_wrong_derivation_is_caught_and_nothing_is_started(

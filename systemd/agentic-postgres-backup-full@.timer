@@ -1,0 +1,26 @@
+[Unit]
+Description=Weekly full backup for Agentic Postgres project %i
+Documentation=file:/opt/agentic-postgres/releases/current/docs/backup-operations.md
+
+[Timer]
+# Weekly, and the day is Sunday because that is when this host is least busy --
+# a statement about a habit rather than a measurement, and written here so a
+# future reader can change it knowing that is all it was.
+#
+# `repo1-retention-full` is 2 by default, so a weekly full keeps roughly a
+# fortnight of chains. Retention is applied by pgBackRest from the rendered
+# config as part of every backup and is NOT restated on any command line here
+# (D495): one value, one statement of it, and the config is the one everybody
+# reads.
+OnCalendar=Sun 02:00
+Persistent=true
+
+# Up to twenty minutes of jitter. Two projects on one host with one weekly slot
+# would otherwise start their fulls in the same second, on the same disk, over
+# the same uplink -- and the second would be measuring the first.
+RandomizedDelaySec=20m
+
+Unit=agentic-postgres-backup-full@%i.service
+
+[Install]
+WantedBy=timers.target

@@ -58,6 +58,7 @@ main() {
   case "${action}" in
     materialize|up|down|attach|detach|status) ;;
     "") usage >&2; die 2 "an action is required." ;;
+    backup-full|backup-incr) ;;
     *) usage >&2; die 2 "unknown action: ${action}" ;;
   esac
 
@@ -102,6 +103,23 @@ main() {
       exec "${ROOT_DIR}/bin/project-runtime.sh" \
         --host "${HOST_MANIFEST}" --project-key "${project_key}" \
         --through-session "${session}" "${action}"
+      ;;
+    # Session 10 Run 9. The two scheduled backups, and `check` before each of
+    # them -- because `check` is the only thing in this system that tests the
+    # archiver end to end, and a timer that took a backup without it would keep
+    # writing to a repository the cluster had stopped archiving to.
+    #
+    # `check` needs two privileges `backup` does not (D541), so a timer that
+    # passed `backup` and failed `check` is a real and expected shape rather
+    # than a contradiction -- and it is the half that is supposed to notice.
+    #
+    # No `--type` on the command line here beyond the one this action names, and
+    # no retention count anywhere: retention is `repo1-retention-full` in the
+    # rendered config and pgBackRest applies it as part of every backup (D495).
+    backup-full|backup-incr)
+      "${ROOT_DIR}/bin/backup.sh" --outputs "${deployment}" check || exit $?
+      exec "${ROOT_DIR}/bin/backup.sh" --outputs "${deployment}" \
+        backup --type "${action#backup-}"
       ;;
   esac
 }

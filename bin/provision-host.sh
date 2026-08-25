@@ -689,8 +689,12 @@ PYTHON
 }
 
 install_units() {
+  # `.service` AND `.timer` (D522). The glob was services only, so a timer
+  # placed in systemd/ was installed by nothing -- a schedule that is written
+  # and not installed, which is the same defect class as a bound that is
+  # validated and not applied (D519), one layer up.
   local origin name
-  for origin in "${ROOT_DIR}"/systemd/*.service; do
+  for origin in "${ROOT_DIR}"/systemd/*.service "${ROOT_DIR}"/systemd/*.timer; do
     [ -f "${origin}" ] || continue
     name="$(basename "${origin}")"
     install -m 0644 -o root -g root "${origin}" "${SYSTEMD_DIR}/${name}"
@@ -707,6 +711,12 @@ install_units() {
     || die 6 "could not enable the firewall reconciliation unit."
   note "enabled agentic-postgres-docker-firewall.service"
   note "edge and project units installed but not enabled; Run 6 starts them"
+  # The backup timers follow the same rule and for the same stated reason: a
+  # unit that fails on every boot until the operator is ready trains an
+  # operator to ignore it. Nothing can back up until a bucket exists, a token
+  # has been issued out of band and the first full backup has been taken by
+  # hand, so they are installed and left disabled.
+  note "backup timers installed but not enabled; they need a repository first"
 }
 
 apply_baseline() {

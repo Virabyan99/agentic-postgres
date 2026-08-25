@@ -200,6 +200,12 @@ class DrillPlan:
     inherited: tuple[Mount, ...]
     environment: dict[str, str] = field(default_factory=dict)
     network: str | None = None
+    #: The project's derived role names, read from the deployed document.
+    #:
+    #: `REC-SMOKE-001`'s RLS read runs as `app_runtime`, not as the superuser:
+    #: FORCE RLS still exempts a superuser, so the same SELECT run as `postgres`
+    #: returns every row and passes for the wrong reason (ADR 0065/0066).
+    roles: dict[str, str] = field(default_factory=dict)
 
     @property
     def data_mount(self) -> Mount:
@@ -391,6 +397,7 @@ def build_plan(
         inherited=inherited_mounts(inspect, required_container_paths(contract)),
         environment=inherited_environment(inspect),
         network=(document.get("compose") or {}).get("networks", {}).get("backup"),
+        roles=dict((document.get("database") or {}).get("roles") or {}),
     )
 
 
@@ -708,7 +715,15 @@ def drill_verdict(
             f"published latest recoverable time {floor}, which the repository claims "
             "is reachable"
         )
-    failed = sorted(name for name, result in (smoke or {}).items() if not result.get("passed"))
+    # `applicable` is read, and a check that did not run is neither a pass nor a
+    # failure here -- it is `REC-SMOKE-001`'s business, which asserts both fields.
+    # Defaulting to True keeps Run 8's three checks, which have no such field,
+    # exactly as strict as they were.
+    failed = sorted(
+        name
+        for name, result in (smoke or {}).items()
+        if result.get("applicable", True) and not result.get("passed")
+    )
     if failed:
         reasons.append(f"smoke checks failed: {', '.join(failed)}")
 
