@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D585.**
+**Next free number after this table is D586.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -152,6 +152,8 @@ anything found *during* implementation is appended with the next free number.
 | **D583** | — | **`CURRENT_SESSION` arms no new Compose profile this session**, which every previous bump did. Session 6, 7 and 9's guides each had to say which container would now start. | Stated as an absence rather than omitted: the archiver lives in the existing `session3` postgres service and the backup network is attached unconditionally. **What the bump does arm is the deploy's step 6c**, which creates a stanza and runs `pgbackrest check` — and a check failure fails the deploy. | An operator reading four consecutive guides that each name a new container, and then one that names none, is entitled to wonder what failed to start. The container that does not appear must not be mistaken for one that did not come up (D488's shape, inverted). The real consequence is that **a deploy from here on needs three provider secrets and an out-of-band bucket**, which is a larger prerequisite than any profile ever was. | — |
 
 | **D584** | — | **The gate ran the gate.** Run 8's `test_no_command_reports_an_unavailable_capability` invokes every command in `SHELL_COMMANDS` with **no arguments**, and `bin/smoke-test.sh` with no arguments runs `pytest -q -m "contract and not future"` — which is the contract suite this module is part of. So every gate run started a nested contract suite, whose own `test_cli_contract` started another. Measured: `tests/contract/test_cli_contract.py` alone exceeded **590 seconds** where it had taken seconds, and the full suite reached 22% in fifteen minutes. Two other commands do work bare (`session-01-check.sh` 4.0s, `doctor.sh` and `apg-diag.sh` report and exit 0); every one of the other thirty-six returns in under 0.5s. | **An allowlist of four commands that RUN rather than refuse**, named individually with the reason, excluded from the sweep — and a second test asserting each is still in `SHELL_COMMANDS`, still driven by every other check, and still refuses an unknown flag with a non-zero, non-10 code. **294 tests in 3 seconds.** | **The measurement Run 8 did not make was of its own method.** The test's *assertion* was measured — the bare exit codes were recorded before it was written — and its *cost* was not, which is §6's pattern pointed at a test rather than at a product value. Excluding the four is not a weakening: a command that runs has not reported an unavailable capability, so there was never an exit 10 to find. **A timeout was refused as the fix**: it would have capped the damage while leaving a nested pytest started and killed on every gate run, which is a slow test whose slowness nobody could explain. The module's silence also hid two Run 8/10 omissions — `bin/restore-test.py` and `bin/session-10-check.sh` were in neither command list, so **no check in that module applied to either**, including the secret-argument scan; both surfaced in the first run that finished. | — |
+
+| **D585** | "The session configures pgBackRest with encrypted R2 storage…" | **Both real manifests carry `backup: enabled: false`**, which is `BACKUP_DEFAULTS`' correct default and means the four host renders at the start of Run 11 **did not exercise the backup plane at all**. The first reading of those renders looked like D546 closing; it was four projects rendering with the feature off. `docs/session-10-operator-guide.md` §4 told an operator to create a bucket and paste a token and **never told them to enable it**. | The guide gains two explicit steps: turn `backup.enabled` on with `bucket` and `account_id` in each real manifest, then re-render and read `.backup` back. **`account_id` must be QUOTED** — measured: unquoted, a leading-zero id parses as an integer and `project.schema.json` refuses it with *"0 is not of type 'string', 'null'"*. | A step that is missing from a guide fails *quietly*: with `enabled: false` the deploy converges, publishes no repository, and the gate then refuses with *"backups are not enabled"* — the right message, two steps later than it needed to arrive. **And it nearly produced a false measurement**: "all four render, exit 0" is exactly what D546 closing would look like, and it was four renders of a disabled feature. **D546 is now closed for real** — alpha's own manifest, copied under a slug of its own with backups ON, renders at exit 0 at schema v13 with `max_connections` 56 against a pooler pool of 20 — and the probe removed what it published, because the gate compares every rendered project for identity collisions. | — |
 
 ---
 
@@ -1287,6 +1289,46 @@ full backup is a command at a TTY that the gate refuses to start without.
 
 
 ### Runs 11+ — The host trip
+
+**Run 11 has started. What is done, and what needs a human at a TTY.**
+
+Done, over SSH as `op`, with no root and no Docker:
+
+- **The release is on the host at `bd0b4f0`**, transported by `git bundle` +
+  `scp` under a per-release name, with `git rev-parse FETCH_HEAD` confirmed
+  **before** the checkout (D504). Host was at `c0816e7`.
+- **The venv is synced** and `bin/lock-dev-deps.sh --check` passes on both sides.
+  It was failing on both before this run — upstream drift, `mcp` 1.29.0 → 1.29.1
+  and `platformdirs` 4.11.3 → 4.11.4 — and it stops the gate at step 2 before
+  any test runs.
+- **All four projects re-render**, which is D462/D383's requirement and not two.
+- **D546 is closed, and closed for the right reason** (D585). The first reading
+  of those four renders was wrong: both real manifests carry
+  `backup: enabled: false`, so they rendered the feature *off*. A copy of
+  alpha's own manifest under a slug of its own, with backups **on**, renders at
+  exit 0 at schema v13 — the fifth claimant fits.
+- **Disk headroom measured, and it was never measured before**: 28 GB available
+  of 38 GB (22% used), 3814 MB RAM with 2209 available. The drill needs a second
+  copy of the cluster; there is room.
+- **The deployment is healthy at Session 9's release** — 16 containers, all up,
+  and both `postgres` containers are on `internal` **alone**, which is the
+  pre-Session-10 state confirmed from the host rather than assumed.
+
+Needs a human at a TTY, in this order:
+
+1. **Create an R2 bucket and token per project, at Cloudflare**, and paste both
+   halves into the provider at `/backup`. Nothing here can do it (ADR 0110).
+2. **Turn `backup.enabled` on** in `project.alpha.yaml` and `project.beta.yaml`
+   with `bucket` and a **quoted** `account_id` (D585), then re-render.
+3. `sudo ./deploy.sh … --through-session 10`, per project. Step 6c creates the
+   stanza and runs `check`, and a check failure fails the deploy on purpose.
+4. `sudo bin/backup.sh --outputs … backup --type full`, per project. The gate
+   refuses to start without it.
+5. `sudo bin/session-10-check.sh --mode host …`, then `--mode external` off-host,
+   then merge.
+
+Budget **three to five deploy-and-gate cycles**, not one. Each of the following
+is a place a trip stalls:
 
 Budget **three to five deploy-and-gate cycles**, not one. New this session, and
 each is a place a trip stalls:

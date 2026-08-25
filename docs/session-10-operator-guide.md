@@ -250,6 +250,41 @@ Per project, in this order:
 3. Put both halves into the provider at `/backup`:
    `APG_BACKUP_R2_ACCESS_KEY_ID`, `APG_BACKUP_R2_SECRET_ACCESS_KEY`.
 
+4. **Turn backups on in the manifest.** Both real manifests ship
+   `backup: enabled: false`, which is the correct default and is *not* what you
+   want here. Edit `project.alpha.yaml` and `project.beta.yaml`:
+
+   ```yaml
+   backup:
+     enabled: true
+     bucket: apg-<project-key>-backup      # or your own; used verbatim
+     account_id: "<32 lowercase hex>"      # QUOTE IT — unquoted YAML reads it as a number
+   ```
+
+   **This step is easy to miss and fails quietly** (D585). With `enabled: false`
+   the deploy converges happily, publishes no repository, and every Session 10
+   claim reports on a project that has no backups — the gate then refuses with
+   *"backups are not enabled for &lt;key&gt;"*, which is the right message arriving
+   two steps later than it needed to.
+
+   `account_id` is the same Cloudflare account id `storage.account_id` already
+   carries. The quotes are load-bearing: unquoted, a leading-zero id parses as
+   an integer and `project.schema.json` refuses it with *"0 is not of type
+   'string', 'null'"*.
+
+5. **Re-render and confirm** — this needs no root and no Docker, and it is where
+   the connection budget refuses if it is going to:
+
+   ```bash
+   ./deploy.sh --project project.alpha.yaml --capabilities capabilities.yaml --render-only
+   jq -r '.backup' .generated/alpha-dev/outputs.json
+   ```
+
+   `enabled: true` with a bucket, a stanza and a prefix means the manifest is
+   ready. **Measured on this host with alpha's real manifest: it fits** — the
+   backup identity as fifth claimant does not exhaust `max_connections` 56
+   against a pooler pool of 20 (D546, closed).
+
 **There is no migration step this session.** Session 9's guide had one here
 because 0019, 0020 and 0021 were released and applied on no cluster; Session 10
 releases none — Run 5 measured that every privilege an online backup wants is
