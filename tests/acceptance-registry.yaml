@@ -209,7 +209,7 @@
   target_session: 1
   test_nodeids:
     - tests/contract/test_cli_contract.py::test_help_exits_zero_and_says_something
-    - tests/contract/test_cli_contract.py::test_future_stub_exits_ten
+    - tests/contract/test_cli_contract.py::test_no_command_reports_an_unavailable_capability
     - tests/contract/test_cli_contract.py::test_command_works_from_another_directory
     - tests/contract/test_cli_contract.py::test_commands_do_not_echo_a_planted_environment_variable
   description: >-

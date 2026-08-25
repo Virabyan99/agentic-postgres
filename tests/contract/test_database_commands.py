@@ -185,7 +185,7 @@ def test_migrate_is_no_longer_a_stub() -> None:
     test in this module that parametrizes over MIGRATE, plus the subcommand
     surface below.
     """
-    from tests.contract.test_cli_contract import FUTURE_STUBS
+    from tests.contract.test_cli_contract import FUTURE_STUBS, GRADUATED_STUBS
 
     assert "bin/migrate.sh" not in FUTURE_STUBS
     # `bin/connect.sh` left in Session 4 Run 6, under the same rule and with its
@@ -193,7 +193,16 @@ def test_migrate_is_no_longer_a_stub() -> None:
     # than merely tolerated, so that this test keeps failing if the tuple is
     # emptied for any other reason.
     assert "bin/connect.sh" not in FUTURE_STUBS
-    assert "bin/restore-test.sh" in FUTURE_STUBS, "another stub's assertion was removed"
+    # `bin/restore-test.sh` was the last entry and left in Session 10 Run 8, so
+    # the cross-module guard moved with it (D524, ADR 0151). It used to read
+    # `assert "bin/restore-test.sh" in FUTURE_STUBS` -- an assertion that another
+    # stub's entry was still there. There is no other stub, so what this module
+    # guards now is that the *graduate list* still names this command: a
+    # `bin/migrate.sh` dropped from it stops being driven by
+    # `test_a_graduated_stub_reports_missing_input_not_absence`, which is the
+    # quiet failure the old line existed to prevent in the other direction.
+    assert "bin/migrate.sh" in GRADUATED_STUBS, "this command left the graduate list"
+    assert "bin/restore-test.sh" in GRADUATED_STUBS, "another stub's assertion was removed"
 
     result = run(MIGRATE)
     assert result.returncode == 2, "a bare invocation is a missing subcommand, not 'unavailable'"

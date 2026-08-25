@@ -325,6 +325,26 @@ BACKUP_DEFAULTS: dict[str, Any] = {
     "retain_full": 2,
 }
 
+#: The three secrets a repository needs before anything may touch it.
+#:
+#: The cipher pass is in this list beside the two credential halves, and it
+#: belongs there: a repository reached with a valid token and the wrong pass
+#: phrase is not partially configured, it is unreadable. Treating two of the
+#: three as the gate would publish `ready` for a deployment whose backups nobody
+#: can restore.
+#:
+#: **Here rather than in `bin/deploy-project.py`, where Run 6 first wrote it,
+#: because Run 8 gave it a second reader** (D560). `restore_drill` needs the same
+#: three names to know which of the database container's mounts to carry forward
+#: into a drill, and a second tuple spelling them out is D264's shape -- two
+#: authorities over one list, agreeing until one of them is edited. The deploy
+#: imports it from here; nothing re-states it.
+BACKUP_CREDENTIAL_NAMES: tuple[str, ...] = (
+    "backup_r2_access_key_id",
+    "backup_r2_secret_access_key",
+    "pgbackrest_repo_cipher_pass",
+)
+
 #: What the storage service takes beyond its pool.
 #:
 #: Two, the auth service's reservation and for its stated reason: it holds no

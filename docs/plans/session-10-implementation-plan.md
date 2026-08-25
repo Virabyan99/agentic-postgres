@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D558.**
+**Next free number after this table is D568.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -122,7 +122,16 @@ anything found *during* implementation is appended with the next free number.
 | **D555** | "…the healthcheck goes unhealthy." | **Measured, and the prediction is reversed.** With the archiving predicate as the Postgres healthcheck, `docker compose up --wait` **exits 1** — "container … is unhealthy" — while the container is `running`, `RestartCount` **0**, and the database **answers queries**. The control, the same broken archiver behind `pg_isready`, exits **0**. And **three services gate on `postgres: condition: service_healthy`**: the pooler, the auth service and storage. | **The archiving signal does NOT go in the Postgres healthcheck.** It reaches an operator through the deployed document (`backup_state.status: failing` with both counters), `bin/backup.sh check`'s non-zero exit, and step 6c failing the deploy with a named reason. A test asserts the healthcheck is still `pg_isready` **and** that the gating this rests on is real. | An archiving predicate there converts a recoverability incident into an availability one — a backup problem stopping the application from starting, on a cluster that is serving. **And it blocks its own repair:** a broken archiver is fixed by deploying, and a deploy that cannot get past `compose up --wait` cannot deliver the fix. The failure also names nothing: "container is unhealthy" against step 6c's *"WAL archiving does not work for this project… this is the archiver"*. | 0150 |
 | **D556** | — | **A red healthcheck costs nothing at the container level**, which is the half that made the question look cheap. Measured (arm F): unhealthy after ~15s, `status=running`, `RestartCount=0`, and the database answered a query while unhealthy. Nothing restarts it, nothing stops it. | **Recorded, because it is the argument FOR the rejected option** and it is a real one. The cost is entirely in what reads the health — `--wait` and `depends_on` — and both are exactly what must not see it. | A decision is only safe to inherit if the strongest case for the alternative is written beside it. Whoever revisits this will find the healthcheck harmless in isolation and should not have to rediscover that the harm is in the two consumers. | 0150 |
 | **D557** | — | **`pg_switch_wal()` on an idle cluster archives nothing**, and a rig that churns without writing measures its own inactivity. Rig 7's arm F called it five times against a quiet cluster: `archived_count` and `failed_count` were **byte-identical before and after**, and the arm reported the predicate as `ok` in a state it had failed to break. | **The churn writes first**, and the rig **asserts its counters moved** before drawing any conclusion — a fatal check, like the setup control D552 added. | The second rig-defect-as-finding in two runs, and the more dangerous shape: D552's rig failed loudly (`unable to find primary cluster`), this one produced a **plausible, quiet, wrong answer** — "the predicate says ok" — in an arm whose whole purpose was to see it say failing. **An arm hoping for "no change" cannot distinguish success from having done nothing**, so it needs a control proving it did something. | — |
-
+| **D558** | "pgBackRest repository using an S3-compatible R2 endpoint", and §12's whole archiving story. | **NOTHING SUPPLIES pgBackRest ITS CREDENTIALS AT RUNTIME.** `build_pgbackrest_conf` omits `repo1-s3-key`, `repo1-s3-key-secret` and `repo1-cipher-pass` by construction and its docstring says pgBackRest "reads them from the environment" — and no environment variable, `conf.d` include or entrypoint wrapper puts them there. `compose.yaml`'s `postgres` service defines four variables, none of them pgBackRest's; `runtime_override` adds **no** `environment` key to that service at all. The three secrets are materialized and mounted at `/run/secrets/...` and nothing reads them. Measured with a control (rig 8, arm 0): `PGBACKREST_REPO1_CIPHER_PASS` in the environment makes `repo-ls` exit **0** against an encrypted repository; the same command without it exits **37**, `[037]: repo-ls command requires option: repo1-cipher-pass`. There is **no** `repo-cipher-pass-file`, `repo-s3-key-file` or `repo-s3-key-secret-file` option — pgBackRest 2.59.1's only `-file` options are for TLS and SSH material — and `config-include-path` defaults to `/etc/pgbackrest/conf.d`, which nothing in this repository writes to. | **Recorded, not repaired in Run 8.** The fix is an entrypoint wrapper in `services/postgres/` reading `/run/secrets/*` and exporting the three variables before exec'ing the base entrypoint, or a `conf.d` file materialized through a new `format:` in `secrets.required.yaml`. Either is an image or contract change with an ADR of its own, and it is Run 4's territory reopened rather than Run 8's. **Run 8 is built so the fix needs no change here**: the drill inherits the whole `PGBACKREST_*` namespace from the running database container, so whichever route the repair takes, one fix serves the archiver and the drill. | This is the largest thing Session 10 has found and it was found by trying to *use* the archiver rather than by reading it. **Step 6c runs `pgbackrest check` and a check failure fails the deploy**, so the first deploy of the first project on the host would have failed there — loudly, which is the design working, but after a trip had been paid for. Nothing offline could have caught it: every Run 4–7 rig supplied its own credential to its own containers, which is exactly the shape ADR 0065/0066 warns about — *a proof that reaches the right end state by a route the product does not take proves the end state is reachable, not that the product reaches it.* | needed |
+| **D559** | — | **A successful `pgbackrest restore` prints ZERO BYTES on both streams at the log level this repository renders.** `build_pgbackrest_conf` writes `log-level-console=warn`; measured, a restore that exits 0 emits 0 bytes on stdout and 0 on stderr at `warn`, and six lines at `info` — the second of which is the only place the selected backup set is named. | `bin/restore-test.py` passes `--log-level-console=info` **on its own command line**, overriding the rendered value for its invocation only, and a restore whose output does not name a backup set **fails the drill** rather than publishing a null. | D145's shape again, one layer over: a command that succeeded and said nothing, where the obvious reading of "no output" is "nothing happened". A drill that parsed the rendered-level output would have published an empty backup set on **every drill that worked**, and an empty field is indistinguishable from one nobody filled in. This is the only place in the repository where a rendered configuration value is overridden on a command line. | 0152 |
+| **D560** | — | `BACKUP_CREDENTIAL_NAMES` was declared in `bin/deploy-project.py` in Run 6, when the deploy was its only reader. | **Moved to `config.py`; the deploy imports it.** The restore drill is the second reader — it needs the same three names to decide which of the database container's mounts to carry forward. | D264: two tuples over one list agree until one of them is edited, and the one nobody re-reads is the one that is wrong. A re-export keeps the readers that already name it through `deploy-project`. | — |
+| **D561** | — | `secrets_contract.active_secrets(contract, session)` filters by `introduced_in_session`, and the three backup secrets are session **10** while `CURRENT_SESSION` is **9** until Run 10. A drill filtering that way looks for **nothing at all** and inherits nothing. | **`required_container_paths` does not filter by session.** `active_secrets` answers "what would a deploy through session N materialize" — a question about a *deploy*. The drill asks about a *container that is already running*, and the authority on whether the material is there is `inherited_mounts`, reading the container. | Caught by the run's own end-to-end rig on its first execution, which is the argument for the rig: the pure-logic tests passed session 10 explicitly and were green while the command inherited nothing. A session filter in a command that reads a running container is a filter answering a different question than the one asked. | — |
+| **D562** | "Recovery time and latest recoverable time must be recorded as evidence." | **The achieved recovery point has no obvious catalog source, and the obvious one is wrong.** Measured, every candidate in one invocation: `pg_last_xact_replay_timestamp()` = `10:45:00.109084+00` (correct, and agreeing to the microsecond with the server log's *last completed transaction was at log time*); `pg_control_checkpoint().checkpoint_time` = `10:45:14+00` — the **end-of-recovery checkpoint, fourteen seconds late**; the log's *recovery stopping before commit of transaction 757, time* = `10:45:04.774492+00`, which is the first transaction **not** applied; `pg_last_committed_xact()` empty, because `track_commit_timestamp` is off. | **`pg_last_xact_replay_timestamp()` for the time, `pg_last_wal_replay_lsn()` for the LSN**, both read off the restored instance. The requested target is read back from `current_setting('recovery_target_time')` rather than echoed from the command line. | `checkpoint_time` is this project's defect pattern in its purest form — a real timestamp, from a catalog function, on the right instance, that has nothing to do with where recovery landed and would drift further the slower the machine. **The control is free and exact**: both functions return **NULL** on the live cluster, which never recovered, so a drill that read the wrong instance publishes an empty field rather than a plausible one. | 0152 |
+| **D563** | — | **The achieved recovery point and the published floor arrive in two different spellings of one instant, and compared as strings they sort backwards.** `pgbackrest info` reaches the verdict through `backup_report._timestamp` as `2026-08-25T10:42:29Z`; PostgreSQL reaches it through psql as `2026-08-25 10:45:00.109084+00`. A space is `0x20` and `T` is `0x54`, so the *later* instant compares *smaller* whenever the dates agree. | **`restore_drill.instant` parses both before comparing**, and raises on a third spelling rather than degrading to "unknown". A regression test asserts the premise — that the two spellings still sort wrongly as strings — so the test cannot quietly stop measuring anything. | Found by the run's own subject arm, which is what a subject arm is for. Left as written it would have failed **every correct drill** with a sentence about an inconsistency that was the comparison's own — and the sentence would have read like a real finding about the repository. `backup_report.archiving_is_failing` compares timestamps as strings legitimately, because both of its come from one `psql` call in one format; that is the distinction, and it is not visible from either call site. | 0152 |
+| **D564** | "…never overwrites the active database volume." | **pgBackRest already refuses to, and the refusal has a number.** Measured: restore into an empty volume exits **0**; the same restore into the volume it just populated exits **40**. A target earlier than every backup set exits **75** — `[075]: unable to find backup set with stop time less than '<target>'` — **before anything is written**. A target in the *future* exits **0** and produces an instance that never promotes: `FATAL: recovery ended before configured recovery target was reached`, no connections accepted. | **`--delta` is never on the argument vector**, and `assert_disposable` refuses a plan carrying it. The drill distinguishes **promoted**, **still recovering** and **dead** and never collapses them; only the first is a successful drill. | The exit-40 refusal is the outer guard — the one that holds if every derivation in the command is wrong at once — and `--delta` is the single argument that disarms it, which is why refusing the flag is worth more than any assertion about names. And a restore exiting 0 having landed nowhere is D145/D548 a **third** time, in a third third-party command: the state was never in the exit code. | 0151 |
+| **D565** | "…the disposable target is created by the command and removed by a `trap`." | **Docker's own verbs cannot tell absence from success.** Measured (rig 8, arm J): `docker volume create` on a name that already exists exits **0** and keeps the existing volume *and its labels*; `--mount type=volume` **creates** a volume that is not there; `docker volume rm -f` and `docker rm -f` exit **0** for a name that does not exist, while the unforced forms exit 1. | The pre-flight is `docker volume inspect`, **never** the exit code of a create. The teardown uses `rm` **without `-f`**, so "already gone" is distinguishable from "removed". The shell `trap` removes only what the Python side recorded in its state file, and **refuses** to remove anything matching the `live_volume` recorded in that same file. | §4.5 requires that a teardown which cannot find its target exits non-zero rather than widening its search — and a teardown runs at the moment when widening it looks like helpfulness. `-f` is the flag that makes a teardown always look successful. | 0151 |
+| **D566** | — | **A restore inherits the live cluster's `system_identifier`.** Measured: `7677917767700738081` on both the live cluster and its promoted restore. `timeline_id` is what differs — 1 against 2. Separately: `apg.project.key` is spelled as a module constant in **five** `bin/` commands. | **`REC-SAFE-001`'s host arm must not use `system_identifier` to prove the live cluster is untouched**, and `drill_verdict` reads `timeline_id` instead. The five-way label duplication is **recorded, not repaired** — consolidating it touches five operator commands and none of them is this run's subject. | A restore *is* the same cluster at an earlier moment, so the identifier is the one field guaranteed to agree. A host proof reading it would pass **while reading the drill instance**, which is the single mistake `REC-SAFE-001` is most able to make and the one it exists to prevent. | 0151 |
+| **D567** | — | **The per-derivation `context` is not what keeps the drill's names apart from the live volume — the stem is.** ADR 0151's first draft said it was, borrowing `backup_bucket_name`'s argument (ADR 0145). Battery arm Q7 changed the drill volume's context to `compose_volume_postgres`, the live volume's own, and **nothing went red**: `truncate` fingerprints `(context, value)`, and these values already differ, so the fingerprints differ whatever the contexts are. | **The ADR is corrected rather than the mutation discarded**, and the names gain `-pg` and `-pgbackrest` suffixes — without them the drill volume and the drill container are the **same string** for a short key and different strings for a long one. Q7 is replaced by a mutation that collides the stems, and Q11 added for the suffix; both are killed. | ADR 0145's argument is sound *for a pair that can share a stem*, which `apg-<key>` and `apg-<key>-backup` genuinely can once truncated. Reusing it here produced a sentence that sounded measured and was not — §6's whole subject — and a **survivor is what turned it back into a measurement**. The suffixes matter for D374's reason: an identity that is equal for short keys and unequal for long ones lets a test pass for a reason it does not state. | 0151 |
 ---
 
 ## 2. What Session 10 adds to the acceptance registry
@@ -849,7 +858,7 @@ id.
 
 **Nothing is deployed and nothing has dialled R2.**
 
-### Run 8 — `bin/restore-test.sh` leaves `FUTURE_STUBS`
+### Run 8 — `bin/restore-test.sh` leaves `FUTURE_STUBS`. **Done.**
 
 - `--target-time` and `--project-dir` parsed for real; the derived disposable
   volume and container names; a `trap` teardown that cannot name the live volume.
@@ -861,6 +870,109 @@ id.
   `schema_migrations`, and the smoke results.
 - `REC-PITR-001`, `REC-EVID-001`. **ADRs:** disposability by construction, and
   what the evidence document records.
+
+---
+
+**What Run 8 built, and what it measured.** ADR 0151 and ADR 0152. Rig 8, against
+the Run 4 derived image, the pinned base digest and pgBackRest 2.59.1, with a
+posix repository standing in for R2 exactly as rigs 5–7 used one — what a posix
+repository cannot measure is an endpoint, a token scope or a 403; what it measures
+exactly is pgBackRest's own restore behaviour, which is all this run depends on.
+
+**`bin/restore-test.sh` left `FUTURE_STUBS`, and the tuple is now `()`.** The
+fourth and final application of ADR 0017's lifecycle, after
+`bootstrap-providers.sh`, `migrate.sh` and `connect.sh`. `test_future_stub_exits_ten`
+and `test_future_stub_names_its_owning_session` are **gone** — with an empty tuple
+they would have collected zero cases, which is a test disappearing rather than
+passing — and `DX-002` now names
+`test_no_command_reports_an_unavailable_capability`, which drives **all forty**
+commands and requires that none returns 10, where the test it replaced drove one
+and required that it did. Measured before it was asserted: no command in
+`SHELL_COMMANDS` returns 10 on a bare invocation.
+`test_the_remaining_stubs_are_the_ones_later_sessions_own` is replaced by
+`test_the_stub_lifecycle_is_complete`, and `test_database_commands.py`'s
+cross-module guard moved in the same commit (D524).
+
+**The run's largest finding is not about restores (D558).** Nothing supplies
+pgBackRest its credentials at runtime. The rendered config omits all three by
+construction and says pgBackRest reads them from the environment; nothing puts
+them there. Measured with a control: the environment route works (`repo-ls` exit
+0 against an encrypted repository, exit **37** without it) and **no `-file`
+option exists** for any of the three. So step 6c's `check` would have failed on
+the first deploy of the first project — correctly, and after a trip had been
+paid for. **No offline rig before this one could have seen it**, because rigs 4–7
+each supplied their own credential to their own containers, which is ADR
+0065/0066's exact warning: *a proof that reaches the right end state by a route
+the product does not take proves the end state is reachable, not that the product
+reaches it.* Run 8 is built so the repair needs no change here — the drill
+inherits the whole `PGBACKREST_*` namespace from the running database container.
+
+**What the drill reads, and what it refuses to read.** The disposable volume and
+the two containers are derived through `naming`; everything else — the repository
+credential, the cipher pass and the rendered `pgbackrest.conf` — is **inherited
+from the container that runs the archiver**, selected by an allowlist of
+destinations and remounted read-only. The active secret generation changes on
+every deploy, so any path into it is derived, never typed; re-deriving it here
+would be a second authority that is right until the next `up`.
+
+**D523's proof is the argument vector, not the source.** The rig puts a recording
+`docker` on `PATH`, drives the command to completion in-process, and reads every
+`--mount` it emitted. **The control arm makes `naming.restore_drill_names` return
+the live volume** — a *derivation* producing the forbidden name, which is
+precisely what a source scan cannot see — and requires exit 7 with no `docker run`
+recorded. A seventh test asserts the subject and control arms differ in outcome,
+so a 7 arriving for an unrelated reason cannot make the control pass while
+measuring nothing.
+
+**The rig is driven in-process rather than spawned, and the reason is a skip.**
+The obvious shape was `skipif os.geteuid() != 0`, which would have left the three
+assertions D523 exists for **skipped in every run** and green in the gate's
+summary line — §7's *a skip is not a pass*, one layer up. Loading the command by
+path and patching `os.geteuid` costs two lines and removes the skip.
+
+**Three fields, three traps, and two of the traps produce well-formed values
+(D562, D563).** `pg_control_checkpoint().checkpoint_time` is a real timestamp
+from a catalog function on the right instance, measured **fourteen seconds**
+after the recovery point, and it would look right on a fast machine. The server
+log's *recovery stopping before commit* names the first transaction **not**
+applied. The answer is `pg_last_xact_replay_timestamp()`, which agrees with the
+log's *last completed transaction* to the microsecond and returns **NULL** on a
+cluster that never recovered — a control that is free, exact, and reused as the
+verdict's own first condition. And the achieved point and the published floor
+arrive in **two different spellings of one instant**, which compared as strings
+sort backwards; left alone that would have failed every correct drill with a
+sentence about an inconsistency that was its own.
+
+**`pgbackrest info` has no latest-recoverable-time field and the floor held
+(D550, confirmed).** Newest backup stop `10:42:29Z`, achieved recovery point
+`10:42:30.69Z` — later, by design, and the drill treats `achieved < floor` as the
+inconsistency rather than `achieved > floor`.
+
+**Battery: Q1–Q11, 11 of 11 killed** as `FAILED`, control green and unreachable in
+every arm, all three mutated files restored byte-for-byte. The pre-flight caught a
+bad anchor before it could report a false survivor. **Both first-pass survivors
+were real, and one of them corrected an ADR (D567):** Q5 survived because the test
+compared two constants — CLAUDE.md §6's named defect, with the mutation moving
+both sides — and the repair is a literal `info` plus a stubbed `docker` that
+reproduces pgBackRest's measured silence at `warn`. **Q7 survived because ADR
+0151's claim was wrong**: the contexts are not what separate the drill's names
+from the live volume, the stems are, and the ADR now says so with the survivor as
+its evidence.
+
+**Two implementation defects the run's own tests caught before anything else
+did.** The disposability guard compared mounts by object identity against a
+`@property` that rebuilds its value, so it refused **every correct plan** — found
+by the subject arm, which is the case for having one. And `required_container_paths`
+filtered the secret contract by `CURRENT_SESSION`, which is 9, so the drill looked
+for the session-10 backup secrets and found none (D561) — found by the end-to-end
+rig on its first execution, while the pure-logic tests passed session 10 by hand
+and stayed green.
+
+**Nothing is deployed, nothing has dialled R2, and `REC-PITR-001`, `REC-SAFE-001`,
+`REC-SMOKE-001` and `REC-EVID-001` are still placeholders.** Their node ids live
+in `tests/recovery/` and need a deployment; Run 9 replaces all five. Run 8 builds
+the capability and proves offline what is provable offline.
+
 
 ### Run 9 — The proofs, and the schedule
 

@@ -869,16 +869,13 @@ STORAGE_CREDENTIAL_NAMES: tuple[str, ...] = ("r2_access_key_id", "r2_secret_acce
 #: `STORAGE_CREDENTIAL_NAMES`' reason: the manifest says what a deployment wants
 #: and the generation says what it has (D76, D306).
 #:
-#: The cipher pass is in this list beside the two credential halves, and it
-#: belongs there: a repository reached with a valid token and the wrong pass
-#: phrase is not partially configured, it is unreadable. Treating two of the
-#: three as the gate would publish `ready` for a deployment whose backups
-#: nobody can restore.
-BACKUP_CREDENTIAL_NAMES: tuple[str, ...] = (
-    "backup_r2_access_key_id",
-    "backup_r2_secret_access_key",
-    "pgbackrest_repo_cipher_pass",
-)
+#: **Imported rather than declared, since Run 8** (D560). It was written here in
+#: Run 6, when the deploy was its only reader; the restore drill is the second,
+#: and it needs the same three names to decide which of the database container's
+#: mounts to carry forward. Two tuples over one list is D264's shape, so the
+#: declaration moved to `config` and this is a re-export for the readers already
+#: naming it through this module.
+BACKUP_CREDENTIAL_NAMES = config.BACKUP_CREDENTIAL_NAMES
 
 
 def backup_credentialed_for(secrets: dict[str, Any]) -> bool:

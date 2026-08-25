@@ -596,6 +596,82 @@ def backup_network_name(key: str) -> str:
     return compose_name(f"apg-{key}-backup", context="compose_network_backup")
 
 
+#: A drill identifier: lowercase letters and digits, and nothing else.
+#:
+#: Validated rather than trusted because it is the ONE component of a derived
+#: name that does not come from the project identity. It reaches this function
+#: from `bin/restore-test.py`, which generates it -- but a name assembled from an
+#: unvalidated component is a name whose shape depends on its caller, and the
+#: whole point of this module is that no name does.
+_DRILL_ID = re.compile(r"\A[0-9a-z]{4,24}\Z")
+
+
+@dataclass(frozen=True)
+class RestoreDrillNames:
+    """The resources one restore rehearsal owns, and nothing else.
+
+    Returned as a set rather than by three functions because they are created
+    and destroyed together: a caller that could derive one without the others is
+    a caller that can tear down half a drill.
+    """
+
+    volume: str
+    container: str
+    restore_container: str
+
+
+def restore_drill_names(key: str, drill_id: str) -> RestoreDrillNames:
+    """The disposable resources for one restore rehearsal (ADR 0151).
+
+    **The three stems differ, and that is what keeps the names apart -- not the
+    contexts.** Run 8's mutation battery is why this paragraph says so: arm Q7
+    changed the volume's context to ``compose_volume_postgres``, the live
+    volume's own, and **nothing went red**. It could not: :func:`truncate`
+    fingerprints ``(context, value)``, and these values already differ from
+    ``apg-<key>-postgres`` and from each other, so the fingerprints differ
+    whatever the contexts are. The first draft of ADR 0151 claimed the contexts
+    were load-bearing here; they are not, and a survivor said so (D493's
+    category, reached honestly).
+
+    A context is still given to each, because every derivation in this module
+    names one and because the guarantee it *does* buy is real: two derivations
+    that ever shared a stem would still not collapse. It is a convention with a
+    latent purpose rather than the reason these three are distinct.
+
+    ``-pg`` and ``-pgbackrest`` are therefore not cosmetic. Without them the
+    volume and the instance container would be the **same string** for any key
+    short enough to escape truncation and *different* strings for any key long
+    enough to hit it -- an identity that is sometimes equal and sometimes not,
+    which is the kind of thing a test then passes for the wrong reason (D374).
+
+    ``drill_id`` is part of the name so that a leftover from a crashed drill is a
+    **different resource** from the next drill's, rather than something the next
+    drill adopts. Measured (rig 8, arm J): ``docker volume create`` on a name
+    that already exists exits **0** and keeps the original volume, so "reuse one
+    volume per project" and "silently restore into whatever a crashed drill left
+    behind" are the same code path.
+
+    Two containers, because the restore and the instance are two things:
+    pgBackRest writes PGDATA in a one-shot container that exits, and the image's
+    own entrypoint then starts a cluster on it. That is what makes the drill
+    instance come up by the route production uses rather than by a route invented
+    for the drill (ADR 0065/0066).
+    """
+    if not _DRILL_ID.match(drill_id):
+        raise NamingError(
+            f"drill id is not a valid identifier: {drill_id!r} "
+            "(4-24 characters, lowercase letters and digits)"
+        )
+    stem = f"apg-{key}-restore-{drill_id}"
+    return RestoreDrillNames(
+        volume=compose_name(stem, context="compose_volume_restore_drill"),
+        container=compose_name(f"{stem}-pg", context="compose_container_restore_drill"),
+        restore_container=compose_name(
+            f"{stem}-pgbackrest", context="compose_container_restore_drill_pgbackrest"
+        ),
+    )
+
+
 #: The jurisdictions Cloudflare documents for R2, and the only values
 #: `storage.jurisdiction` admits.
 #:

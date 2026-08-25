@@ -108,14 +108,44 @@ PYTHON_COMMANDS = (
 
 #: Commands that document a future capability and refuse to pretend otherwise.
 #:
-#: ``bin/bootstrap-providers.sh`` left this tuple in Session 2, ``bin/migrate.sh``
-#: in Session 3 and ``bin/connect.sh`` in Session 4, each in the run that
-#: implemented it. ADR 0017 records why that is legitimate and what replaced the
-#: assertion: all three now carry real command-contract tests, which are stricter
-#: than the one they left. Emptying this tuple is not a way to make
-#: ``test_future_stub_exits_ten`` pass, and the one command still here is still a
-#: stub.
-FUTURE_STUBS = ("bin/restore-test.sh",)
+#: **Empty since Session 10 Run 8, and the lifecycle is over.** Four commands
+#: passed through here, each leaving in the run that implemented it:
+#: ``bin/bootstrap-providers.sh`` in Session 2, ``bin/migrate.sh`` in Session 3,
+#: ``bin/connect.sh`` in Session 4 and ``bin/restore-test.sh`` in Session 10
+#: (D524, ADR 0017, ADR 0151).
+#:
+#: Emptying this tuple was never a way to make ``test_future_stub_exits_ten``
+#: pass, which is the whole reason ADR 0017 exists -- so that test is **gone**,
+#: and what replaced it asserts more than it did:
+#:
+#: * ``test_a_graduated_stub_reports_missing_input_not_absence`` drives all four
+#:   graduates and requires exit ``2`` from each. The old test drove whatever was
+#:   still listed here and required exit ``10``.
+#: * ``test_no_command_reports_an_unavailable_capability`` drives **every**
+#:   command in :data:`SHELL_COMMANDS` and requires that none of them returns
+#:   ``10``. Forty commands rather than one, and it is the node id ``DX-002``
+#:   now names.
+#: * ``test_the_stub_lifecycle_is_complete`` guards the guard: this tuple is
+#:   empty **and** the graduate list is exactly the four, so a fifth stub added
+#:   later cannot quietly skip the lifecycle.
+#:
+#: Measured before it was asserted: no command in ``SHELL_COMMANDS`` returns 10
+#: on a bare invocation. `bin/session-01-check.sh` and `bin/smoke-test.sh` return
+#: 1, `bin/apg-diag.sh` and `bin/doctor.sh` return 0, and everything else
+#: returns 2.
+FUTURE_STUBS: tuple[str, ...] = ()
+
+#: The four commands that were stubs and are not (ADR 0017's whole lifecycle).
+#:
+#: Listed so that the assertions which replaced ``test_future_stub_exits_ten``
+#: have something to drive. A bare invocation of each is *missing input*, which
+#: is ``2``; a ``10`` from any of them means a command went back to being a stub.
+GRADUATED_STUBS: tuple[str, ...] = (
+    "bin/bootstrap-providers.sh",
+    "bin/migrate.sh",
+    "bin/connect.sh",
+    "bin/restore-test.sh",
+)
 
 
 def run(*args: str, cwd: Path | None = None, env: dict[str, str] | None = None):
@@ -285,24 +315,88 @@ def test_connect_is_no_longer_a_stub() -> None:
     assert "required" in result.stderr.lower()
 
 
-def test_the_remaining_stubs_are_the_ones_later_sessions_own() -> None:
-    """Guard the guard: emptying FUTURE_STUBS must not make its tests vacuous."""
-    assert set(FUTURE_STUBS) == {"bin/restore-test.sh"}
-    assert "bin/bootstrap-providers.sh" not in FUTURE_STUBS
-    assert "bin/connect.sh" not in FUTURE_STUBS
+def test_restore_test_is_no_longer_a_stub() -> None:
+    """ADR 0017, fourth and final application (D524, ADR 0151).
+
+    A bare invocation used to be exit ``10``, "unavailable this session". It is
+    now a missing required input, which is ``2``. Stated directly, as it is for
+    the other three, so that emptying ``FUTURE_STUBS`` without implementing the
+    command fails here rather than passing quietly.
+    """
+    result = run(str(REPO_ROOT / "bin" / "restore-test.sh"))
+    assert result.returncode == 2, (
+        f"expected 2 (missing required input), got {result.returncode}. "
+        "A 10 here means the command went back to being a stub."
+    )
+    assert "required" in result.stderr.lower()
 
 
-@pytest.mark.parametrize("relative", FUTURE_STUBS)
-def test_future_stub_exits_ten(relative: str) -> None:
-    """A stub must not report success for a capability that does not exist."""
+def test_the_stub_lifecycle_is_complete() -> None:
+    """Guard the guard, now that the tuple is empty (ADR 0017, ADR 0151).
+
+    ``test_the_remaining_stubs_are_the_ones_later_sessions_own`` asserted that
+    ``FUTURE_STUBS`` held exactly the one command a later session owned. There is
+    no later session to own one, so what replaces it says more: the tuple is
+    empty **and** the graduate list is exactly the four commands that passed
+    through it. A fifth stub added later has to appear in one of the two, and a
+    graduate quietly dropped from the second stops being driven by the test
+    below -- which is the failure this guard exists to catch.
+    """
+    assert FUTURE_STUBS == (), (
+        f"FUTURE_STUBS is not empty: {FUTURE_STUBS}. A new stub is legitimate, and it "
+        "needs its own entry in ADR 0017's lifecycle before it is listed here."
+    )
+    assert set(GRADUATED_STUBS) == {
+        "bin/bootstrap-providers.sh",
+        "bin/migrate.sh",
+        "bin/connect.sh",
+        "bin/restore-test.sh",
+    }
+    for relative in GRADUATED_STUBS:
+        assert relative in SHELL_COMMANDS, f"{relative} graduated out of the command list"
+
+
+@pytest.mark.parametrize("relative", GRADUATED_STUBS)
+def test_a_graduated_stub_reports_missing_input_not_absence(relative: str) -> None:
+    """Every graduate, driven: a bare invocation is 2, and it is never 10.
+
+    This is half of what replaced ``test_future_stub_exits_ten``. That test drove
+    whatever was still listed in ``FUTURE_STUBS`` -- one command by Session 4 --
+    and required ``10``. This drives all four and requires ``2``, which is the
+    assertion the three individual ``*_is_no_longer_a_stub`` tests each make for
+    one command, made for the set so that a fifth graduate cannot arrive without
+    one.
+    """
     result = run(str(REPO_ROOT / relative))
-    assert result.returncode == 10, f"{relative} returned {result.returncode}"
+    assert result.returncode == 2, (
+        f"{relative} returned {result.returncode}, expected 2 (missing required input). "
+        "A 10 here means the command went back to being a stub."
+    )
 
 
-@pytest.mark.parametrize("relative", FUTURE_STUBS)
-def test_future_stub_names_its_owning_session(relative: str) -> None:
+@pytest.mark.parametrize("relative", SHELL_COMMANDS)
+def test_no_command_reports_an_unavailable_capability(relative: str) -> None:
+    """Nothing in this repository still refuses a capability it does not have.
+
+    The other half of what replaced ``test_future_stub_exits_ten``, and the node
+    id ``DX-002`` now names. The old test asserted that **one** listed command
+    returned ``10``; this asserts that **none** of the forty does, which is the
+    property ADR 0017's lifecycle was always working towards and which nothing
+    stated until the lifecycle ended.
+
+    Measured before it was asserted (rig 8): `bin/session-01-check.sh` and
+    `bin/smoke-test.sh` return 1 with no arguments, `bin/apg-diag.sh` and
+    `bin/doctor.sh` return 0, and every other command returns 2. Exit ``10``
+    remains reserved by the exit-code convention, so a future stub is legitimate
+    -- it just has to say so in ADR 0017 and in ``FUTURE_STUBS`` rather than
+    appearing here.
+    """
     result = run(str(REPO_ROOT / relative))
-    assert "Session" in result.stderr, f"{relative} does not say when it becomes available"
+    assert result.returncode != 10, (
+        f"{relative} returned 10 with no arguments, which the exit-code convention "
+        "reserves for a capability that does not exist this session. FUTURE_STUBS is "
+        "empty, so nothing should be reporting one."
+    )
 
 
 def test_deploy_requires_render_only() -> None:
