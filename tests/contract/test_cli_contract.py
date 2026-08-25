@@ -75,6 +75,7 @@ SHELL_COMMANDS = (
     "bin/session-07-check.sh",
     "bin/session-08-check.sh",
     "bin/session-09-check.sh",
+    "bin/session-10-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
 )
@@ -101,6 +102,7 @@ PYTHON_COMMANDS = (
     "bin/render-config.py",
     "bin/render-jwks.py",
     "bin/render-secret-override.py",
+    "bin/restore-test.py",
     "bin/rotate-signing-key.py",
     "bin/storage-admin.py",
     "bin/write-session-evidence.py",
@@ -374,22 +376,56 @@ def test_a_graduated_stub_reports_missing_input_not_absence(relative: str) -> No
     )
 
 
-@pytest.mark.parametrize("relative", SHELL_COMMANDS)
+#: Commands that DO WORK when invoked with no arguments, so a bare invocation of
+#: them is not a question about the exit-code convention -- it is a job.
+#:
+#: **This set exists because omitting it made the gate recursive** (D584).
+#: `bin/smoke-test.sh` with no arguments runs
+#: `pytest -q -m "contract and not future"` -- the entire contract suite, which
+#: is the suite this module is part of. So the first version of the test below
+#: ran the whole contract suite from inside the whole contract suite, on every
+#: gate, and the gate went from roughly five minutes to over forty-five.
+#:
+#: It is an **allowlist of commands that run**, named individually with the
+#: reason, rather than a timeout that would merely cap the damage: a bound would
+#: have left a nested pytest starting on every gate run and being killed, which
+#: is a slow test whose slowness nobody could explain.
+#:
+#: Each was measured, not assumed (`/tmp/diag/bare.sh`): 120s+ for
+#: `smoke-test.sh`, 4.0s for `session-01-check.sh`, and under 0.5s for every
+#: other command in `SHELL_COMMANDS`.
+COMMANDS_THAT_RUN_WITHOUT_ARGUMENTS: tuple[str, ...] = (
+    # Runs the active contract suite. Recursive from here (D584).
+    "bin/smoke-test.sh",
+    # Renders both fixtures and reports; 4s, and it is a gate.
+    "bin/session-01-check.sh",
+    # Both print a report and exit 0 with no arguments, by design.
+    "bin/doctor.sh",
+    "bin/apg-diag.sh",
+)
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [name for name in SHELL_COMMANDS if name not in COMMANDS_THAT_RUN_WITHOUT_ARGUMENTS],
+)
 def test_no_command_reports_an_unavailable_capability(relative: str) -> None:
     """Nothing in this repository still refuses a capability it does not have.
 
     The other half of what replaced ``test_future_stub_exits_ten``, and the node
     id ``DX-002`` now names. The old test asserted that **one** listed command
-    returned ``10``; this asserts that **none** of the forty does, which is the
-    property ADR 0017's lifecycle was always working towards and which nothing
-    stated until the lifecycle ended.
+    returned ``10``; this asserts that **none** of the thirty-six that refuse
+    does, which is the property ADR 0017's lifecycle was always working towards
+    and which nothing stated until the lifecycle ended.
 
-    Measured before it was asserted (rig 8): `bin/session-01-check.sh` and
-    `bin/smoke-test.sh` return 1 with no arguments, `bin/apg-diag.sh` and
-    `bin/doctor.sh` return 0, and every other command returns 2. Exit ``10``
-    remains reserved by the exit-code convention, so a future stub is legitimate
-    -- it just has to say so in ADR 0017 and in ``FUTURE_STUBS`` rather than
-    appearing here.
+    Four commands are excluded and named in
+    :data:`COMMANDS_THAT_RUN_WITHOUT_ARGUMENTS`, because a bare invocation of
+    them is a job rather than a question. Excluding them is not a weakening: a
+    command that *runs* has not reported an unavailable capability, so there was
+    never an exit ``10`` to find. What it removes is a recursive gate (D584).
+
+    Measured before it was asserted: every command here returns in under half a
+    second, and returns 2 -- except the four excluded, which do work.
     """
     result = run(str(REPO_ROOT / relative))
     assert result.returncode != 10, (
@@ -397,6 +433,27 @@ def test_no_command_reports_an_unavailable_capability(relative: str) -> None:
         "reserves for a capability that does not exist this session. FUTURE_STUBS is "
         "empty, so nothing should be reporting one."
     )
+
+
+def test_the_excluded_commands_are_still_commands_and_still_refuse_a_bad_flag() -> None:
+    """Guard the exclusion: it must not become a way to stop testing a command.
+
+    Each excluded command is still in ``SHELL_COMMANDS`` -- so
+    ``test_help_exits_zero_and_says_something`` and every other sweep still drive
+    it -- and each still refuses an unknown flag with ``2``. That is the
+    exit-code convention holding for them by a route that does not run the job.
+    """
+    for relative in COMMANDS_THAT_RUN_WITHOUT_ARGUMENTS:
+        assert relative in SHELL_COMMANDS, f"{relative} was excluded out of the suite"
+        result = run(str(REPO_ROOT / relative), "--definitely-not-a-flag")
+        assert result.returncode != 10, (
+            f"{relative} returned 10 for an unknown flag, which the convention "
+            "reserves for an unavailable capability"
+        )
+        assert result.returncode != 0, (
+            f"{relative} accepted --definitely-not-a-flag and exited 0, so it is not "
+            "parsing its arguments at all"
+        )
 
 
 def test_deploy_requires_render_only() -> None:
