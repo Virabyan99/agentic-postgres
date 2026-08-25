@@ -310,6 +310,56 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "agent_audit_fails_closed": ("AGT-AUDITFAIL-001",),
     "agent_revocation": ("SEC-REV-001",),
     "agent_parameter_boundary": ("SEC-PARAM-001",),
+    # Session 10 adds five, one per requirement, and extends nothing.
+    #
+    # **No ID is new**, and that was checked rather than assumed (D279, ADR 0089):
+    # all five have existed since Session 1 as placeholders. Three of Session 6's
+    # six "new" IDs turned out to be already taken, and because `claim_session`
+    # derives from `max()`, one would have turned three earlier sessions' evidence
+    # red while the other vanished from the gate with no error at all. The five
+    # claim NAMES were grepped for too, for the same reason one layer up.
+    #
+    # **Five claims rather than one `recovery`**, and the splits are the same
+    # decision D119 governs -- extending a claim is right when the guarantee
+    # genuinely grew and wrong when a new requirement merely neighbours an old
+    # one. These are five different guarantees and each fails on its own:
+    #
+    #   `point_in_time_recovery` is *a restore to a chosen instant happens*.
+    #   `restore_isolation` is *and it cannot have touched production* -- which is
+    #   true or false independently of whether the restore worked at all, and is
+    #   the one an operator needs before running the drill rather than after.
+    #   `restore_verification` is *and the restored instance was asked* -- ADR
+    #   0152's premise that a restore which cannot be verified is a failed
+    #   restore, and the half that would silently disappear if it were folded into
+    #   the first.
+    #   `recovery_evidence` is *and the numbers were measured rather than
+    #   written* -- D529's prohibition, which is about the report and not about
+    #   the recovery.
+    #   `wal_archiving_signal` is P1 and is about the interval between backups,
+    #   not about a restore at all.
+    #
+    # **All five are `host`**, and no external arm was invented to make the shape
+    # symmetric: there is nothing about a backup repository a stranger on the
+    # public internet can measure, and an external arm would be a proof reaching
+    # an end state by a route the product does not take (ADR 0065).
+    #
+    # `restore_isolation` and `restore_verification` name **offline arms beside
+    # their live ones**, and `claim_mode` resolves them to `host` because only
+    # `live_host` is a mode marker. That is deliberate: D523 makes `REC-SAFE-001`
+    # two proofs, and the offline one -- the rig driving the command with a
+    # stubbed `docker`, with a control arm proving a wrong derivation is caught --
+    # is the arm that has actually executed.
+    #
+    # **Every one of these reports `not_run` until a host trip**, and unlike
+    # Session 9's five they are blocked on more than a deploy: an operator has to
+    # create an R2 bucket and issue a token out of band, and the first full backup
+    # is a command at a TTY. D282's sentence stands -- a claim that has never been
+    # measured must not be mistaken for one that passed.
+    "point_in_time_recovery": ("REC-PITR-001",),
+    "restore_isolation": ("REC-SAFE-001",),
+    "restore_verification": ("REC-SMOKE-001",),
+    "recovery_evidence": ("REC-EVID-001",),
+    "wal_archiving_signal": ("REC-WAL-001",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().

@@ -15,7 +15,8 @@ import os
 
 import pytest
 
-from agentic_postgres import CURRENT_SESSION, REPO_ROOT
+from agentic_postgres import REPO_ROOT
+from agentic_postgres import acceptance_session as _acceptance_session
 
 TESTS_ROOT = REPO_ROOT / "tests"
 
@@ -26,14 +27,16 @@ def acceptance_session() -> int:
     Defaults to the repository's ``CURRENT_SESSION`` so a bare ``pytest`` run
     enforces the same policy as ``bin/session-01-check.sh`` instead of silently
     skipping it (plan decision P).
+
+    **The derivation moved to ``agentic_postgres`` in Session 10 Run 10** (D526),
+    when the acceptance-matrix generator became its second reader. What is left
+    here is the translation of its error into pytest's own type, which is the
+    only part that was ever about testing.
     """
-    raw = os.environ.get("APG_ACCEPTANCE_SESSION")
-    if raw is None:
-        return CURRENT_SESSION
     try:
-        return int(raw)
+        return _acceptance_session()
     except ValueError as exc:
-        raise pytest.UsageError(f"APG_ACCEPTANCE_SESSION must be an integer, got {raw!r}") from exc
+        raise pytest.UsageError(str(exc)) from exc
 
 
 def _marker_arguments(decorator: ast.expr) -> dict[str, ast.expr] | None:

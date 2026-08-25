@@ -28,6 +28,9 @@ from typing import Any
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+from agentic_postgres import acceptance_session  # noqa: E402
 
 REGISTRY = REPO_ROOT / "tests" / "acceptance-registry.yaml"
 MATRIX = REPO_ROOT / "docs" / "acceptance-matrix.md"
@@ -65,7 +68,14 @@ def render_matrix(registry: list[dict[str, Any]]) -> str:
 
     total = len(registry)
     p0 = sum(1 for entry in registry if entry["priority"] == "P0")
-    active = sum(1 for entry in registry if entry["target_session"] == 1)
+    # **The gate session, not the literal 1** (D526). This read `target_session
+    # == 1` and the by-session table below hard-coded "active" for session 1
+    # alone, so the document said "placeholders owned by Session 2" beside
+    # thirteen shipped, passing requirements -- a generated document asserting
+    # the opposite of the tree, which is the drift the generator exists to
+    # prevent. Nine sessions of that went unread.
+    gate = acceptance_session()
+    active = sum(1 for entry in registry if entry["target_session"] <= gate)
 
     lines = [
         "# Acceptance matrix",
@@ -80,8 +90,8 @@ def render_matrix(registry: list[dict[str, Any]]) -> str:
         "comparing node IDs, not by searching files for function names — a text",
         "search passes on a commented-out test.",
         "",
-        f"**{total} requirements** — {p0} P0, {active} active in Session 1, "
-        f"{total - active} owned by later sessions.",
+        f"**{total} requirements** — {p0} P0, {active} active through Session "
+        f"{gate}, {total - active} owned by later sessions.",
         "",
         "## By session",
         "",
@@ -91,7 +101,7 @@ def render_matrix(registry: list[dict[str, Any]]) -> str:
 
     for session in sorted(by_session):
         count = len(by_session[session])
-        status = "active" if session == 1 else f"placeholders owned by Session {session}"
+        status = "active" if session <= gate else f"placeholders owned by Session {session}"
         lines.append(f"| {session} | {count} | {status} |")
 
     lines += ["", "## Requirements", ""]

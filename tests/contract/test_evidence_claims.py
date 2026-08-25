@@ -791,6 +791,11 @@ CLAIM_INTRODUCED_IN = {
     "agent_audit_fails_closed": 9,
     "agent_revocation": 9,
     "agent_parameter_boundary": 9,
+    "point_in_time_recovery": 10,
+    "restore_isolation": 10,
+    "restore_verification": 10,
+    "recovery_evidence": 10,
+    "wal_archiving_signal": 10,
 }
 
 

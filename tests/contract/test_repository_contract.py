@@ -89,6 +89,10 @@ REQUIRED_PATHS = (
     "docs/provider-bootstrap.md",
     "docs/secret-handling.md",
     "docs/session-02-operator-guide.md",
+    # Session 10. Cited by Documentation= in all four backup units, so
+    # `systemctl status` sends an operator to a path that must exist inside
+    # the release directory -- the same reason the two above are listed.
+    "docs/backup-operations.md",
     # The Session 3 operator documentation. The operator guide is the entry
     # point; the other three are what it links to for the cluster itself, the
     # schema-change path, and the authorization boundaries.

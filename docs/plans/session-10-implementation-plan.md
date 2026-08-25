@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D580.**
+**Next free number after this table is D584.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -145,6 +145,11 @@ anything found *during* implementation is appended with the next free number.
 | **D577** | — | **A test that reads a shell script by regex read the wrong loop.** `provision-host.sh` has more than one `for origin in …; do`; an earlier one installs `libexec/agentic-postgres-*`. `test_install_units_globs_timers_as_well_as_services` searched the whole file, matched that one, and reported that `install_units` globs no units at all — on a repository where it had just been fixed. Separately, `configparser` interpolates `%`, so every `Unit=…@%i.service` parsed to a mangled value. | The glob search is scoped to `install_units`' own body and fails loudly if that function cannot be found; the unit parser is `interpolation=None`. | Both were caught by the module's **first** run, which is the only reason they are a divergence row and not a defect that shipped. The first is D464's shape once more — a text scan standing in for a construct — and the mitigation that worked was not "stop scanning" but *name the subject precisely and fail if it cannot be found*. | — |
 | **D578** | — | `REC-SAFE-001` pointed at one node id, and D523 requires **two proofs**. | **Five node ids, across two modules**: the host arm and the teardown check in `tests/recovery/`, and the offline rig's three arms — including the control arm — in `tests/contract/test_restore_test_command.py`. `REC-SMOKE-001` likewise gains its offline arm. | Registering only the host half would leave the arm that has **actually executed** invisible to the evidence, on a requirement whose host half has never run. It also makes D523's "two proofs" a fact the registry states rather than a sentence in a plan. | — |
 | **D579** | — | **The five recovery proofs have never executed and cannot until a deploy.** The host is at `c0816e7`, Session 9's release; Session 10 has never been deployed and R2 has never been dialled. | **`CURRENT_SESSION` stays 9.** The placeholders are replaced in this run and the bump is **not** taken with them: the plan assigns `bin/session-10-check.sh` and the operator guide to Run 10, and a tree declaring session 10 without its gate script is a tree whose gate cannot run. Verified rather than argued — with the gate session at 9, `test_no_requirement_at_or_before_the_gate_session_remains_future` does not reach a requirement targeted at 10, and the registry module is green. | CLAUDE.md says the bump moves *together with* the five replacements in one commit (D439/D484), and the constraint that rule encodes is one-directional: **the bump requires the replacements, not the reverse.** Bumping without them goes red; replacing without bumping does not. Recorded rather than resolved silently, because the next reader will find the two sentences and need to know which way round they bind. | — |
+
+| **D580** | — | **`docs/acceptance-matrix.md` said "placeholders owned by Session 2" beside thirteen shipped, passing requirements** — and the same for Sessions 3 through 9. D526 predicted this from reading `bin/render-acceptance-matrix.py:96`; what it did not say is that the document had **already** been wrong for nine sessions, because `status = "active" if session == 1` was written when 1 was the only shipped session and never revisited. | **The generator learns the gate session.** `acceptance_session()` moves from `tests/conftest.py` into `agentic_postgres`, `tests/conftest.py` wraps it to raise pytest's own error type, and the generator imports it. Every session at or before the gate now reads `active`. | A generated document asserting the opposite of the tree is the drift the generator exists to prevent, which makes this the generator failing at its own job — in a file whose header says *"GENERATED FILE. Do not hand-edit."* and which therefore nobody reads closely. Two implementations of the gate-session rule would have been D264 one layer up, so the derivation moved rather than being copied into `bin/`. | — |
+| **D581** | — | **`bin/session-09-check.sh`'s `--help` documents the exact command an operator pastes**, including `--session 9` and three evidence paths. A derived Session 10 gate that changed only `readonly SESSION=10` would leave all four wrong. | The derivation is a **script of named substitutions** over a copy, and the operator-facing text — the mode descriptions, the merge command, the precondition prose, the "before host mode" sequence — is a second explicit pass. What is *not* named stays Session 9's byte for byte: the bundle name, `git rev-parse FETCH_HEAD` before the checkout, the venv sync, `op@`. | D213 is the record of thirteen secret proofs gated on a flag that was not passed once all session, and the flag was missing from the documented invocation. D505 and D507 are two flags lost to retyping. **A copy plus named substitutions is what "derived by diff" has to mean for a file whose value is in its details** — 321 of 874 lines changed, and four remaining "Session 9" references are all deliberate. | — |
+| **D582** | "Scheduled full and incremental backups… health checks that expose failures." | Session 9's gate had a precondition — the migration ledger — and **Session 10 has no migration to check**. Run 5 measured that every privilege an online backup wants is refused to a NOSUPERUSER object owner, so all five grants are bootstrap-plane. | **The precondition becomes the repository's own readiness**: the stanza exists, a full backup exists, and the archiver is not failing — all three from one `pgbackrest info` plus one `pg_stat_archiver` read per project, through `backup_report.backup_state`, which is the same function the deploy publishes from. **Nothing reads `pgbackrest info`'s exit code** (D548). | Without it, four requirements fail on one missing thing and an operator reads four tracebacks to learn it — which is precisely what Session 9's `check_agent_plane_is_published` exists to prevent, one session earlier. The second condition is the one an operator trips over, and it is deliberate: the first full backup is a command at a TTY because it is the first operation that writes a meaningful amount to a repository nobody has paid for yet. | — |
+| **D583** | — | **`CURRENT_SESSION` arms no new Compose profile this session**, which every previous bump did. Session 6, 7 and 9's guides each had to say which container would now start. | Stated as an absence rather than omitted: the archiver lives in the existing `session3` postgres service and the backup network is attached unconditionally. **What the bump does arm is the deploy's step 6c**, which creates a stanza and runs `pgbackrest check` — and a check failure fails the deploy. | An operator reading four consecutive guides that each name a new container, and then one that names none, is entitled to wonder what failed to start. The container that does not appear must not be mistaken for one that did not come up (D488's shape, inverted). The real consequence is that **a deploy from here on needs three provider secrets and an out-of-band bucket**, which is a larger prerequisite than any profile ever was. | — |
 
 ---
 
@@ -1182,7 +1187,7 @@ the capability now has proofs pointed at it. Whether they pass is the trip's
 question, and Runs 11+ budget three to five cycles for it.
 
 
-### Run 10 — Publish
+### Run 10 — Publish. **Done.**
 
 **One commit** (§ "The atomic commit" below), plus:
 
@@ -1195,6 +1200,89 @@ question, and Runs 11+ budget three to five cycles for it.
   spec requires be stated in operations documentation.
 - Regenerate the acceptance matrix, the product contract's marker block and the
   config bounds doc; `bin/migrate.sh freeze-lock` if a migration landed.
+
+---
+
+**What Run 10 published.** The atomic commit: `CURRENT_SESSION` 9 → 10, five
+claims registered, `bin/session-10-check.sh`, `docs/session-10-operator-guide.md`,
+`docs/backup-operations.md`, and the regenerated derived documents. Divergences
+D580–D583.
+
+**`CURRENT_SESSION` moved with the placeholder replacements, one commit apart and
+by design.** D439/D484 pairs them because the placeholder policy and the overdue
+policy are exact mirrors on the gate session — and the constraint binds one way:
+the bump requires the replacements, not the reverse. Run 9 replaced them and Run
+10 takes the bump, *together with the gate script*, because a tree declaring
+session 10 without `bin/session-10-check.sh` is a tree whose gate cannot run
+(D579). Both directions were verified rather than argued.
+
+**Five claims, one per requirement, and no external arm was invented** (§7's rule
+and ADR 0065). `point_in_time_recovery`, `restore_isolation`,
+`restore_verification`, `recovery_evidence`, `wal_archiving_signal`. The splits
+are D119's test — five different guarantees, each of which fails on its own —
+rather than one `recovery` claim that would report a single verdict on a restore
+that worked, could not be verified, and was reported with an invented number.
+**`restore_isolation` and `restore_verification` name their offline arms beside
+their live ones**, and `claim_mode` resolves both to `host` because only
+`live_host` is a mode marker: D523 makes `REC-SAFE-001` two proofs, and the
+offline one is the arm that has actually executed.
+
+**The gate is derived by a script of named substitutions, and the operator-facing
+text is a second pass (D581).** 321 of 874 lines changed. Changing only
+`readonly SESSION=10` would have left `--help` telling an operator to merge
+`--session 9` into `evidence/session-09.json` — and D213 is the record of thirteen
+proofs gated on a flag missing from exactly such a documented invocation. What is
+*not* substituted is Session 9's byte for byte, which is the half retyping loses:
+the per-release bundle name (D504), `git rev-parse FETCH_HEAD` *before* the
+checkout, the venv sync (D384, D297), and `op@` as the external destination
+(D466).
+
+**The gate's precondition is this session's, not Session 9's (D582).** There is no
+migration to check — Run 5 measured that all five backup grants are
+bootstrap-plane — so what it checks is that the stanza exists, a full backup
+exists, and the archiver is not failing. All three come from
+`backup_report.backup_state`, the same function the deploy publishes from, so the
+gate and the deployed document cannot disagree about what a repository's report
+means. **Nothing reads `pgbackrest info`'s exit code** (D548).
+
+**The acceptance matrix had been lying for nine sessions (D580).** D526 predicted
+that the summary would read *"placeholders owned by Session 10"* beside five live
+requirements; what it did not say is that the document **already** said
+"placeholders owned by Session 2" beside thirteen shipped ones, and had since
+Session 2. `status = "active" if session == 1` was written when 1 was the only
+shipped session and never revisited — in a file whose header says *"GENERATED
+FILE. Do not hand-edit"*, which is exactly the file nobody reads closely. The fix
+moved `acceptance_session()` into `agentic_postgres` rather than copying the rule
+into `bin/`, because two implementations of it would have been D264 one layer up.
+
+**The bump arms no Compose profile, and that is stated rather than omitted
+(D583).** Every previous bump armed one and every previous guide named the
+container that would now start. This one arms **step 6c**, which is a larger
+prerequisite than any profile: a deploy from here on needs three provider secrets
+and a bucket an operator created out of band, and it will fail on purpose without
+them.
+
+**`docs/backup-operations.md` states the account boundary the spec requires**, and
+states it as a limitation rather than a footnote: everything is in one Cloudflare
+account — the application bucket, the backup bucket, both tokens and the DNS — so
+the backups are inside the blast radius of the thing most likely to take the site
+down. Cross-account replication, a second provider and an offline copy are absent
+by decision. The same section names the two other things the plane does not
+protect against: a compromised database container, which holds the credential
+*and* the cipher pass (ADR 0147's residual), and destruction of
+`pgbackrest_repo_cipher_pass`, which orphans every backup ever taken while every
+check in this repository still passes (D538).
+
+**No migration landed, so no `freeze-lock`.** Both clusters stay at 21.
+
+**Session 10 is code-complete and entirely undeployed.** The host is at
+`c0816e7`, running Session 9 at outputs v12, while this tree is at v13 with an
+archiver, a drill, four units and five claims that have never run. Runs 11+ are
+the trip, and they budget three to five deploy-and-gate cycles for a reason that
+is now longer than it was: an operator has to create a bucket and a token before
+the first deploy, the first deploy fails without them on purpose, and the first
+full backup is a command at a TTY that the gate refuses to start without.
+
 
 ### Runs 11+ — The host trip
 

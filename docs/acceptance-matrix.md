@@ -10,22 +10,22 @@ actually collect. That is checked by running a real collection and
 comparing node IDs, not by searching files for function names — a text
 search passes on a commented-out test.
 
-**127 requirements** — 121 P0, 17 active in Session 1, 110 owned by later sessions.
+**127 requirements** — 121 P0, 119 active through Session 10, 8 owned by later sessions.
 
 ## By session
 
 | Session | Requirements | Status |
 |---:|---:|---|
 | 1 | 17 | active |
-| 2 | 13 | placeholders owned by Session 2 |
-| 3 | 15 | placeholders owned by Session 3 |
-| 4 | 16 | placeholders owned by Session 4 |
-| 5 | 15 | placeholders owned by Session 5 |
-| 6 | 11 | placeholders owned by Session 6 |
-| 7 | 12 | placeholders owned by Session 7 |
-| 8 | 10 | placeholders owned by Session 8 |
-| 9 | 5 | placeholders owned by Session 9 |
-| 10 | 5 | placeholders owned by Session 10 |
+| 2 | 13 | active |
+| 3 | 15 | active |
+| 4 | 16 | active |
+| 5 | 15 | active |
+| 6 | 11 | active |
+| 7 | 12 | active |
+| 8 | 10 | active |
+| 9 | 5 | active |
+| 10 | 5 | active |
 | 11 | 5 | placeholders owned by Session 11 |
 | 12 | 3 | placeholders owned by Session 12 |
 

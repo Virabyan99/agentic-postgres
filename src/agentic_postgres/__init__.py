@@ -7,6 +7,7 @@ connection, or starts a service.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 #: Session whose acceptance gate this working tree currently targets.
@@ -26,7 +27,24 @@ from pathlib import Path
 #: -- and nothing had. A deploy from here on will try to, which means the two R2
 #: secrets have to exist at the provider first. That is Run 10's sequence and
 #: `docs/session-07-operator-guide.md` is the order to follow.
-CURRENT_SESSION = 9
+#:
+#: **Session 10, since Run 10.** Moved together with the five recovery
+#: placeholders' replacement, which is the pairing D439/D484 requires: the
+#: placeholder policy and the overdue policy are exact mirrors on the gate
+#: session. The constraint binds one way -- the bump requires the replacements,
+#: and not the reverse -- so Run 9 replaced them and this run takes the bump,
+#: together with ``bin/session-10-check.sh``. A tree declaring session 10
+#: without its gate script is a tree whose gate cannot run (D579).
+#:
+#: **This arms no new Compose profile**, and that is the difference from every
+#: previous bump. Session 10 added none: the archiver lives in the ``session3``
+#: postgres service and the backup network is attached unconditionally. What it
+#: arms is the deploy's **step 6c**, which creates a stanza and runs
+#: ``pgbackrest check`` -- and a check failure fails the deploy. So a deploy from
+#: here on needs the three repository secrets present at the provider, and an R2
+#: bucket and token an operator created out of band. That is Runs 11+, and
+#: ``docs/session-10-operator-guide.md`` is the order to follow.
+CURRENT_SESSION = 10
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere
@@ -43,4 +61,30 @@ def template_version() -> str:
     return (REPO_ROOT / "VERSION").read_text(encoding="utf-8").strip()
 
 
-__all__ = ["CURRENT_SESSION", "REPO_ROOT", "template_version"]
+def acceptance_session() -> int:
+    """The session whose registry policy is in force, honouring the override.
+
+    **Here rather than in ``tests/conftest.py``, since Session 10 Run 10.** It
+    was written there when the tests were its only reader; D526 gave it a second
+    one. ``bin/render-acceptance-matrix.py`` hard-coded ``session == 1`` for
+    "active", so ``docs/acceptance-matrix.md`` said *"placeholders owned by
+    Session 2"* beside thirteen shipped, passing requirements -- a generated
+    document asserting the opposite of the tree, which is the drift the generator
+    exists to prevent. It said so for nine sessions and nobody read it.
+
+    A second implementation in ``bin/`` would have been the same defect one layer
+    up (D264), so the derivation moved here and ``tests/conftest.py`` wraps it.
+
+    Raises ``ValueError`` on a non-integer override, and the caller decides what
+    that means: a test run wants ``pytest.UsageError``, a generator wants to exit.
+    """
+    raw = os.environ.get("APG_ACCEPTANCE_SESSION")
+    if raw is None:
+        return CURRENT_SESSION
+    try:
+        return int(raw)
+    except ValueError as error:
+        raise ValueError(f"APG_ACCEPTANCE_SESSION must be an integer, got {raw!r}") from error
+
+
+__all__ = ["CURRENT_SESSION", "REPO_ROOT", "acceptance_session", "template_version"]
