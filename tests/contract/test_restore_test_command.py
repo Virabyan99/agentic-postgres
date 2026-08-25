@@ -355,17 +355,18 @@ def _inspect(**overrides: Any) -> dict[str, Any]:
         },
         "Mounts": [
             {"Type": "volume", "Name": LIVE_VOLUME, "Destination": "/var/lib/postgresql"},
+            # Derived from the contract, not typed. Run 8b moved the three
+            # backup secrets from /run/secrets to pgBackRest's config-include
+            # path (ADR 0153), and a fixture spelling the old basenames would
+            # have kept passing while the drill inherited nothing.
             *[
                 {
                     "Type": "bind",
-                    "Source": f"{GENERATION}/postgres/{name}",
-                    "Destination": f"/run/secrets/{name}",
+                    "Source": f"{GENERATION}/postgres{destination}",
+                    "Destination": destination,
                 }
-                for name in (
-                    "backup_r2_access_key_id",
-                    "backup_r2_secret_access_key",
-                    "pgbackrest_repo_cipher_pass",
-                )
+                for destination in restore_drill.required_container_paths(_contract())
+                if destination != runtime_override.PGBACKREST_CONF_CONTAINER_PATH
             ],
             {
                 "Type": "bind",
@@ -385,13 +386,40 @@ def _contract() -> dict[str, Any]:
 
 
 def test_the_required_paths_come_from_the_secret_contract() -> None:
-    """Not typed here: the target file names belong to `secrets.required.yaml`."""
+    """Not typed here: the target file names belong to `secrets.required.yaml`.
+
+    Since Run 8b the three credentials land in pgBackRest's config-include path
+    rather than /run/secrets (ADR 0153), and this reads that off the contract --
+    so the drill follows the credential wherever the contract puts it, which is
+    what ADR 0151 §2 was built for.
+    """
+    from agentic_postgres.secrets_contract import PGBACKREST_INCLUDE_DIR
+
+    # **The literal, not the constant.** Battery arm R7 moved
+    # `PGBACKREST_INCLUDE_DIR` to `/etc/pgbackrest/includes` and **survived**,
+    # because every assertion derived its expectation from that same constant --
+    # CLAUDE.md §6's *a test comparing two constants is not testing the thing
+    # between them*, and the second instance of it this session after Q5.
+    #
+    # This path is not a choice. It is pgBackRest's own default, measured:
+    # `pgbackrest help backup config-include-path` prints
+    # `default: /etc/pgbackrest/conf.d`, and nothing sets the option. Any other
+    # directory is one pgBackRest does not read, which is D558 again.
+    assert PGBACKREST_INCLUDE_DIR == "/etc/pgbackrest/conf.d"
+
     paths = restore_drill.required_container_paths(_contract())
     assert runtime_override.PGBACKREST_CONF_CONTAINER_PATH in paths
     assert len(paths) == 4, paths
-    for path in paths:
-        assert path.startswith("/run/secrets/") or path == (
-            runtime_override.PGBACKREST_CONF_CONTAINER_PATH
+    credentials = [p for p in paths if p != runtime_override.PGBACKREST_CONF_CONTAINER_PATH]
+    assert len(credentials) == 3, credentials
+    for path in credentials:
+        assert path.startswith(PGBACKREST_INCLUDE_DIR + "/"), (
+            f"{path} is not where pgBackRest reads its includes from, so nothing "
+            "would read it -- which is the whole of D558"
+        )
+        assert path.endswith(".conf"), (
+            f"{path} does not end in .conf, and pgBackRest concatenates only .conf "
+            "files from its include path"
         )
 
 

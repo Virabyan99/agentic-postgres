@@ -22,7 +22,9 @@ import yaml
 from agentic_postgres import REPO_ROOT, secret_override
 from agentic_postgres.secrets_contract import (
     CONTAINER_SECRET_DIR,
+    PGBACKREST_INCLUDE_DIR,
     active_secrets,
+    container_secret_path,
     load_secret_contract,
     secret_source_path,
 )
@@ -52,8 +54,13 @@ def test_every_active_secret_reaches_its_consumer(contract: dict) -> None:
     override that dropped every other grant.
     """
     document = build(contract, 3)
+    # `container_secret_path`, not `target_file`. The grant's target is the full
+    # container path since ADR 0153 §6, because a `pgbackrest`-format consumer's
+    # file belongs in pgBackRest's include directory rather than /run/secrets --
+    # so this compares the whole path, which is more than the basename it
+    # compared before.
     expected = {
-        (consumer["service"], consumer["target_file"])
+        (consumer["service"], container_secret_path(consumer))
         for secret in active_secrets(contract, 3)
         for consumer in secret["consumers"]
     }
@@ -82,13 +89,42 @@ def test_each_source_is_the_materializer_s_own_path(contract: dict) -> None:
 
 
 def test_the_container_path_is_the_contract_s_container_path(contract: dict) -> None:
-    """`target:` is the basename, so /run/secrets/<file> is what a service sees."""
+    """`target:` is the full container path, and one function decides it.
+
+    **Stricter than what it replaced** (ADR 0153 §6). The old body asserted
+    `source.endswith(f"/{service}/{grant['target']}")` -- true only while the
+    target was a basename -- and then
+    `f"{CONTAINER_SECRET_DIR}/{grant['target']}".startswith(CONTAINER_SECRET_DIR)`,
+    which is true of any string and measured nothing at all.
+
+    What is asserted now is that every grant's target is exactly what
+    `container_secret_path` returns for that consumer, that the source path still
+    ends in the consumer's own directory and basename, and that a
+    `pgbackrest`-format consumer lands **outside** /run/secrets while every other
+    lands inside it. That last pair is the one the format exists for.
+    """
     document = build(contract, 3)
+    by_service: dict[str, dict[str, dict]] = {}
+    for secret in active_secrets(contract, 3):
+        for consumer in secret["consumers"]:
+            by_service.setdefault(consumer["service"], {})[container_secret_path(consumer)] = (
+                consumer
+            )
+
+    seen = 0
     for service, block in document["services"].items():
         for grant in block["secrets"]:
+            consumer = by_service[service][grant["target"]]
+            assert grant["target"] == container_secret_path(consumer)
             source = document["secrets"][grant["source"]]["file"]
-            assert source.endswith(f"/{service}/{grant['target']}")
-            assert f"{CONTAINER_SECRET_DIR}/{grant['target']}".startswith(CONTAINER_SECRET_DIR)
+            assert source.endswith(f"/{service}/{consumer['target_file']}")
+            if consumer["format"] == "pgbackrest":
+                assert grant["target"].startswith(PGBACKREST_INCLUDE_DIR)
+                assert not grant["target"].startswith(CONTAINER_SECRET_DIR)
+            else:
+                assert grant["target"].startswith(CONTAINER_SECRET_DIR)
+            seen += 1
+    assert seen, "no grant was examined, so this test measured nothing"
 
 
 def test_a_session_two_surface_grants_nothing_from_session_three(contract: dict) -> None:
@@ -129,7 +165,7 @@ def test_two_services_receiving_the_same_basename_do_not_collide() -> None:
     assert len(sources) == 2
     for service in ("alpha", "beta"):
         grant = document["services"][service]["secrets"][0]
-        assert grant["target"] == "credential"
+        assert grant["target"] == f"{CONTAINER_SECRET_DIR}/credential"
         assert f"/{service}/credential" in document["secrets"][grant["source"]]["file"]
 
 

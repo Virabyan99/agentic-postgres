@@ -507,6 +507,127 @@ def test_a_pgpass_file_written_by_something_else_is_refused() -> None:
         secrets_contract.recover_secret("localhost:5432:db:role:hunter2\n", consumer)
 
 
+#: The third format, and the one the docstring below was written in advance for.
+_PGBACKREST = {"format": "pgbackrest", "option": "repo1-cipher-pass"}
+
+
+def test_pgbackrest_writes_a_one_option_config_fragment() -> None:
+    """`[global]` and one `option=value` line (ADR 0153).
+
+    The header is on **every** file, because pgBackRest concatenates the include
+    path with the main config and rig 9 measured (K2) that three files each
+    carrying their own `[global]` concatenate cleanly -- which is what lets this
+    contract keep materializing one value per file.
+    """
+    rendered = secrets_contract.render_secret("hunter2", _PGBACKREST)
+    assert rendered == "[global]\nrepo1-cipher-pass=hunter2\n"
+
+
+def test_pgbackrest_round_trips() -> None:
+    """The writer and the reader agree, which is the pair's whole contract.
+
+    This is the assertion that caught the first draft: `recover_secret` built its
+    prefix by formatting the template with an empty value, which keeps the
+    template's TRAILING newline -- so the prefix was `[global]\\nopt=\\n`, no real
+    file began with it, and every pgbackrest-format read raised.
+    """
+    for value in ("hunter2", "a" * 64, "0", "value=with=equals"):
+        rendered = secrets_contract.render_secret(value, _PGBACKREST)
+        assert secrets_contract.recover_secret(rendered, _PGBACKREST) == value
+
+
+def test_a_value_with_a_line_break_is_refused_in_pgbackrest_format() -> None:
+    """Refused because it is a LEAK, not because it is malformed (ADR 0153).
+
+    Measured (rig 9, K3): pgBackRest reports a key outside a section as
+    `[029]: key/value found outside of section at line 1:` **followed by the
+    line** -- on its console and in its log, which for `archive-push` is the
+    postmaster's stderr. A newline in the value ends the `key=value` line and
+    leaves the remainder as exactly such a key, so part of the value reaches the
+    archiver's log.
+    """
+    with pytest.raises(ManifestError, match="line break"):
+        secrets_contract.render_secret("first\nsecond", _PGBACKREST)
+    with pytest.raises(ManifestError, match="line break"):
+        secrets_contract.render_secret("first\rsecond", _PGBACKREST)
+
+
+def test_the_pgbackrest_refusal_never_quotes_the_value() -> None:
+    """The message must not do the thing the check exists to prevent."""
+    planted = "a-very-recognisable-value"
+
+    try:
+        secrets_contract.render_secret(f"{planted}\nmore", _PGBACKREST)
+    except ManifestError as error:
+        assert planted not in str(error)
+    else:
+        raise AssertionError("a value with a line break was accepted")
+
+    try:
+        secrets_contract.recover_secret(f"repo1-cipher-pass={planted}\n", _PGBACKREST)
+    except ManifestError as error:
+        assert planted not in str(error)
+    else:
+        raise AssertionError("a headerless file was accepted")
+
+
+def test_a_pgbackrest_file_without_its_header_is_refused() -> None:
+    """The exact shape rig 9 measured pgBackRest printing the value for."""
+    with pytest.raises(ManifestError, match="does not begin with its"):
+        secrets_contract.recover_secret("repo1-cipher-pass=hunter2\n", _PGBACKREST)
+
+
+def test_a_pgbackrest_file_setting_a_different_option_is_refused() -> None:
+    """The option is verified, not only the header.
+
+    A file with the right header and the wrong option is a credential mounted
+    where a different one belongs -- pgBackRest would accept it and then fail
+    elsewhere, with a message about the option that is still missing.
+    """
+    other = secrets_contract.render_secret("hunter2", {**_PGBACKREST, "option": "repo1-s3-key"})
+    with pytest.raises(ManifestError, match="does not begin with its"):
+        secrets_contract.recover_secret(other, _PGBACKREST)
+
+
+def test_a_pgbackrest_consumer_with_no_option_is_refused(
+    tmp_path: Path, raw: dict[str, Any]
+) -> None:
+    """Battery arm R6 removed this check and survived: nothing drove it.
+
+    The real contract always names an `option`, so the validation had no test at
+    all -- correct and unmeasured, which is the same thing as untested. Without
+    it a `pgbackrest` consumer raises `KeyError` inside the materializer at
+    deploy time, on the host, as root.
+    """
+
+    def mutate(document: dict[str, Any]) -> None:
+        consumer = document["secrets"][0]["consumers"][0]
+        consumer["format"] = "pgbackrest"
+        consumer.pop("option", None)
+
+    with pytest.raises(ManifestError, match="names no `option`"):
+        load_mutated(tmp_path, raw, mutate)
+
+
+def test_a_non_pgbackrest_consumer_carrying_an_option_is_refused(
+    tmp_path: Path, raw: dict[str, Any]
+) -> None:
+    """The mirror, and it is the direction a reader gets wrong.
+
+    A `raw` consumer with an `option` line looks like it sets that option and
+    sets nothing. Both directions are checked so the field cannot become
+    decoration on a format that ignores it.
+    """
+
+    def mutate(document: dict[str, Any]) -> None:
+        consumer = document["secrets"][0]["consumers"][0]
+        consumer["format"] = "raw"
+        consumer["option"] = "repo1-cipher-pass"
+
+    with pytest.raises(ManifestError, match="does not write"):
+        load_mutated(tmp_path, raw, mutate)
+
+
 def test_a_format_with_no_reader_is_refused() -> None:
     """The realistic failure is a third format that only the writer learns about.
 

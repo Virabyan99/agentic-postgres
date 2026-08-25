@@ -39,6 +39,7 @@ import yaml
 from agentic_postgres.secrets_contract import (
     active_secrets,
     compose_consumers,
+    container_secret_path,
     secret_source_path,
 )
 
@@ -82,7 +83,12 @@ def build_secret_override(
             name = grant_name(consumer)
             secrets[name] = {"file": secret_source_path(project_key, generation_id, consumer)}
             grants = services.setdefault(consumer["service"], {"secrets": []})["secrets"]
-            grants.append({"source": name, "target": consumer["target_file"]})
+            # `container_secret_path`, not `target_file` (ADR 0153 §6). The
+            # bare basename and that function were two spellings of one fact,
+            # and a `pgbackrest`-format consumer needs them to disagree: its
+            # file belongs in pgBackRest's include directory, not in
+            # /run/secrets. Measured that Compose accepts an absolute target.
+            grants.append({"source": name, "target": container_secret_path(consumer)})
 
     # An empty document is a valid answer -- session 1 grants nothing -- but it
     # must still be a document Compose accepts rather than `{}` with no keys.

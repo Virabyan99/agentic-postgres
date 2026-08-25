@@ -216,3 +216,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0150](0150-a-broken-archiver-is-visible-without-taking-the-database-down.md) | A broken archiver is visible, and it does not take the database down | 10 | Accepted |
 | [0151](0151-the-restore-drill-is-disposable-by-construction.md) | The restore drill is disposable by construction, not by care | 10 | Accepted |
 | [0152](0152-what-a-restore-drill-can-honestly-report.md) | What a restore drill can honestly report | 10 | Accepted |
+| [0153](0153-the-archiver-reads-its-credential-from-a-config-include.md) | The archiver reads its credential from a config include, not from an environment | 10 | Accepted |

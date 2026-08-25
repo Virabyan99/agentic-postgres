@@ -471,7 +471,22 @@ def test_the_repository_files_are_owned_by_the_postgres_uid(contract: dict[str, 
         for consumer in secrets_contract.compose_consumers(by_name[name]):
             assert (consumer["uid"], consumer["gid"]) == (999, 999), name
             assert consumer["mode"] == "0400", name
-            assert consumer["format"] == "raw", name
+            # `pgbackrest` since Run 8b, and this replaces `format == "raw"`
+            # with a stricter statement (ADR 0153). `raw` was true and was not
+            # enough: the file was materialized correctly, mounted correctly,
+            # owned correctly -- and **read by nothing**, because pgBackRest has
+            # no `-file` option for any of these three and nothing put a value
+            # into its environment (D558). What the assertions below add is that
+            # the file lands where the archiver actually reads it.
+            assert consumer["format"] == "pgbackrest", name
+            assert consumer["option"], f"{name} names no pgBackRest option"
+            assert secrets_contract.container_secret_path(consumer).startswith(
+                secrets_contract.PGBACKREST_INCLUDE_DIR + "/"
+            ), name
+            assert consumer["target_file"].endswith(".conf"), (
+                f"{name} is mounted into pgBackRest's include path but does not end "
+                "in .conf, and only .conf files there are concatenated"
+            )
 
 
 def test_the_two_credential_halves_are_operator_supplied(contract: dict[str, Any]) -> None:
@@ -743,6 +758,57 @@ def test_a_disabled_project_still_renders_a_file_and_it_names_no_repository() ->
         "a disabled project names a stanza, so `pgbackrest info` would report on "
         "a repository this project does not have"
     )
+
+
+def test_the_rendered_config_never_names_an_option_the_credential_files_set() -> None:
+    """Run 8b's constraint, and getting it wrong takes every archiver down (ADR 0153 §5).
+
+    The three credentials reach pgBackRest as `.conf` fragments under its
+    config-include path, which it **concatenates** with this file. Measured
+    (rig 9, K4): an option set in both places is not a silent override -- it is
+    `[031]: option 'repo1-cipher-type' cannot be set multiple times`, a hard
+    failure of every pgBackRest command including `archive-push`.
+
+    So the tempting future edit -- rendering `repo1-cipher-pass` here "for
+    completeness", beside the `repo1-cipher-type` that already is -- would stop
+    archiving on every project at once. This asserts it cannot arrive quietly.
+    """
+    from agentic_postgres import rendering, secrets_contract
+
+    document = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
+    outputs = _render(document)
+    identity = naming.derive(
+        slug=document["project"]["slug"],
+        environment=document["project"]["environment"],
+        domain=document["project"]["domain"],
+        api_base_path=document["api"]["public_base_path"],
+        mcp_base_path=document["mcp"]["public_base_path"],
+        backup_enabled=True,
+        backup_bucket=(document.get("backup") or {}).get("bucket"),
+    )
+    rendered = rendering.build_pgbackrest_conf(
+        identity, outputs, "https://account.r2.cloudflarestorage.com"
+    ).decode("utf-8")
+
+    # The options are read off the contract, not typed here: a fourth credential
+    # added later has to be in this check without anybody remembering.
+    contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    options = [
+        consumer["option"]
+        for secret in contract["secrets"]
+        for consumer in secret["consumers"]
+        if consumer.get("format") == "pgbackrest"
+    ]
+    assert len(options) == 3, options
+    for option in options:
+        assert f"{option}=" not in rendered, (
+            f"the rendered config sets {option!r}, which a credential file also sets. "
+            "pgBackRest refuses an option set twice with exit 31, and that failure "
+            "reaches archive-push on every project."
+        )
+    # The control: an option this file IS expected to set, so a scan that matched
+    # nothing at all would fail here rather than passing quietly.
+    assert "repo1-cipher-type=" in rendered
 
 
 # ---------------------------------------------------------------------------

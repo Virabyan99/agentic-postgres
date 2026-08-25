@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D568.**
+**Next free number after this table is D575.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -132,6 +132,14 @@ anything found *during* implementation is appended with the next free number.
 | **D565** | "…the disposable target is created by the command and removed by a `trap`." | **Docker's own verbs cannot tell absence from success.** Measured (rig 8, arm J): `docker volume create` on a name that already exists exits **0** and keeps the existing volume *and its labels*; `--mount type=volume` **creates** a volume that is not there; `docker volume rm -f` and `docker rm -f` exit **0** for a name that does not exist, while the unforced forms exit 1. | The pre-flight is `docker volume inspect`, **never** the exit code of a create. The teardown uses `rm` **without `-f`**, so "already gone" is distinguishable from "removed". The shell `trap` removes only what the Python side recorded in its state file, and **refuses** to remove anything matching the `live_volume` recorded in that same file. | §4.5 requires that a teardown which cannot find its target exits non-zero rather than widening its search — and a teardown runs at the moment when widening it looks like helpfulness. `-f` is the flag that makes a teardown always look successful. | 0151 |
 | **D566** | — | **A restore inherits the live cluster's `system_identifier`.** Measured: `7677917767700738081` on both the live cluster and its promoted restore. `timeline_id` is what differs — 1 against 2. Separately: `apg.project.key` is spelled as a module constant in **five** `bin/` commands. | **`REC-SAFE-001`'s host arm must not use `system_identifier` to prove the live cluster is untouched**, and `drill_verdict` reads `timeline_id` instead. The five-way label duplication is **recorded, not repaired** — consolidating it touches five operator commands and none of them is this run's subject. | A restore *is* the same cluster at an earlier moment, so the identifier is the one field guaranteed to agree. A host proof reading it would pass **while reading the drill instance**, which is the single mistake `REC-SAFE-001` is most able to make and the one it exists to prevent. | 0151 |
 | **D567** | — | **The per-derivation `context` is not what keeps the drill's names apart from the live volume — the stem is.** ADR 0151's first draft said it was, borrowing `backup_bucket_name`'s argument (ADR 0145). Battery arm Q7 changed the drill volume's context to `compose_volume_postgres`, the live volume's own, and **nothing went red**: `truncate` fingerprints `(context, value)`, and these values already differ, so the fingerprints differ whatever the contexts are. | **The ADR is corrected rather than the mutation discarded**, and the names gain `-pg` and `-pgbackrest` suffixes — without them the drill volume and the drill container are the **same string** for a short key and different strings for a long one. Q7 is replaced by a mutation that collides the stems, and Q11 added for the suffix; both are killed. | ADR 0145's argument is sound *for a pair that can share a stem*, which `apg-<key>` and `apg-<key>-backup` genuinely can once truncated. Reusing it here produced a sentence that sounded measured and was not — §6's whole subject — and a **survivor is what turned it back into a measurement**. The suffixes matter for D374's reason: an identity that is equal for short keys and unequal for long ones lets a test pass for a reason it does not state. | 0151 |
+| **D568** | — | **The credential route exists, and it is `config-include-path`.** Measured (rig 9), every arm with a control: a `.conf` under `/etc/pgbackrest/conf.d` supplying `repo1-cipher-pass` makes `repo-ls` exit **0** against an encrypted repository, against **37** with no include mounted. **Three files, each carrying its own `[global]` header, concatenate cleanly** (exit 0) — which is what lets the contract keep materializing one value per file. A file with no section header is **29**; an option set in both the include and the rendered config is **31**, `cannot be set multiple times`; a partial set is **37** naming the one that is missing; a `0400` file owned by root under a container running as 999 is **41**. | **The `conf.d` route, not the environment.** `secrets_contract` gains a third `format: pgbackrest` writing `[global]` and one `option=value` line, the consumer names its `option`, and `container_secret_path` mounts it where pgBackRest reads its includes. | The environment works (rig 8 arm 0) and is refused for three reasons: it needs an **image change** — `services/postgres/Dockerfile` says "No USER line, no ENTRYPOINT, no CMD" and ADR 0144 built that image to add a binary and nothing else — it puts the value in `/proc/<pid>/environ` for every process in the container, and it goes around per-consumer materialization, which is what makes ADR 0145's isolation a filesystem property. | 0153 |
+| **D569** | — | **A pgBackRest config file with no section header prints the value.** Measured, K3 and again on the product's own bytes (L2): `[029]: key/value found outside of section at line 1: repo1-cipher-pass=<THE VALUE>`, on the console and in the log — and for `archive-push` that log is the postmaster's stderr in the container. | `render_secret` **refuses a value containing a line break** (a newline ends the `key=value` line and leaves the remainder as exactly such a key), `recover_secret` **verifies the header and the option name** before returning anything, and neither refusal quotes the line or the value. | The same pair `pgpass` already carries, for a worse reason: pgpass's newline makes a malformed second entry, and this one makes a **log line containing a credential**. It is not closed — nothing validates the file at the mount point, and pgBackRest quoting the line is not ours to change — so the residual is written into ADR 0153's consequences rather than implied by the guards. | 0153 |
+| **D570** | — | **`pgbackrest info` was never the problem; the grant surface had two spellings of one fact.** `build_secret_override` emitted `target: <target_file>`, a bare basename Compose resolves under `/run/secrets`, and `container_secret_path` said the same thing separately. | `build_secret_override` emits `container_secret_path(consumer)` for **every** consumer, and that function is the one place that decides. Measured (K8) with a control: Compose accepts an **absolute** target and the file lands exactly there; a relative one lands in `/run/secrets`, as documented. | D264, found while making the two disagree on purpose. Two passing tests in `test_secret_override.py` are replaced by stricter ones — one of them had `f"{CONTAINER_SECRET_DIR}/{target}".startswith(CONTAINER_SECRET_DIR)`, which is true of **any** string and measured nothing. | 0153 |
+| **D571** | — | **Compose ignores a secret grant's `uid`, `gid` and `mode`.** Measured (K8): `level=warning msg="secrets 'uid', 'gid' and 'mode' are not supported, they will be ignored"`, and the **host file's** ownership and mode pass through unchanged. | **Nothing changes, and that is the finding.** The contract's `uid: 999, gid: 999, mode: "0400"` are applied by `materialize-secrets` **on the host**, which is what has always protected the file; the grant surface never did. Recorded so that a future reader does not delete the contract fields as redundant with a grant that ignores them. | The design was already relying on the right thing without saying so, which is the pleasant version of this project's defect pattern rather than the usual one. K7 is what a failure of it looks like: exit 41, loudly, at the first read (D515). | 0153 |
+| **D572** | — | **A rig defect that reported "no leak" having done nothing.** Arm L2 passed its conf.d path through an environment variable on a `wsl bash -lc` command line, and **Git Bash path-converted it** to `C:/Users/gmpar/AppData/Local/Temp/rig9/…`. The Python found no directory, stripped no header, and the arm probed the **unmodified** files — reporting exit 0 and *"the value did NOT appear"*. | The arm **asserts its own stimulus landed** — the file's checksum must change and the header must be gone, both fatal — before it probes anything. | **D557 for the third time this session, and the worst instance**: a *leak check* that came back clean after doing nothing. CLAUDE.md §1 already names Git Bash's mangling of `$?` and of nested quoting; **it does not name path conversion of an argument that looks like a POSIX path**, and that is the new half. An arm hoping to see "no leak" cannot distinguish success from having done nothing any more than an arm hoping to see "no change" can. | — |
+| **D573** | — | **A test comparing two constants survived a mutation, for the second time in one session.** Battery arm R7 moved `PGBACKREST_INCLUDE_DIR` to `/etc/pgbackrest/includes` and nothing went red, because every assertion derived its expectation from that same constant. Q5 was the first instance, on `RESTORE_LOG_LEVEL`. | Both are asserted as **literals** now, each with a docstring saying why the literal is written out: `/etc/pgbackrest/conf.d` is pgBackRest's own measured default (`pgbackrest help backup config-include-path`), and `info` is the level at which a successful restore is not silent. | CLAUDE.md §6 names this defect and it still arrived twice in one session, in code written by someone who had just read the list. The general rule that follows: **when a constant encodes a MEASURED third-party fact, the test writes the measured value, not the constant.** A constant that encodes a free choice may be compared to itself; one that encodes a measurement may not. | — |
+| **D574** | — | **The `option` validation was correct and untested.** Battery arm R6 deleted the "a pgbackrest consumer must name an option" check and **survived**: the real contract always names one, so nothing ever drove the refusal. | Two tests, both directions — a `pgbackrest` consumer without `option` is refused, and a `raw` consumer carrying one is refused. | Question 2 of §6's five: *has it run at all, in this environment, since the thing it measures last changed?* The answer was no, and the battery is the only thing in this repository that asks it. Without the check a deploy raises `KeyError` inside the materializer, on the host, as root. | — |
+
 ---
 
 ## 2. What Session 10 adds to the acceptance registry
@@ -973,6 +981,110 @@ and stayed green.
 in `tests/recovery/` and need a deployment; Run 9 replaces all five. Run 8 builds
 the capability and proves offline what is provable offline.
 
+
+### Run 8b — The archiver can authenticate. **Done.**
+
+Not in the original build order. It exists because Run 8 found D558 by trying to
+*use* the archiver, and because a Run 9 that proved a restore against an archiver
+which cannot authenticate would be proving nothing.
+
+- The credential route: `format: pgbackrest`, one option per file, mounted under
+  pgBackRest's `config-include-path`.
+- ADR 0153. Divergences D568–D574.
+
+---
+
+**What Run 8b measured, and what it changed.** ADR 0153. Rig 9, against the same
+derived image and pgBackRest 2.59.1, with a posix repository standing in for R2.
+
+**The gap was real and the route existed.** Measured, every arm with a control:
+
+| arm | what | exit |
+|---|---|---|
+| K1 | a `.conf` under `/etc/pgbackrest/conf.d` supplying `repo1-cipher-pass` | **0** |
+| K1 control | the same command with no include mounted | **37** |
+| K2 | three files, each with its own `[global]` header | **0** |
+| K3 | a file with no section header | **29**, *quoting the value* |
+| K4 | an option set in the include **and** the rendered config | **31** |
+| K6 | a partial credential set | **37**, naming the missing one |
+| K7 | a `0400` file owned by root, container as 999 | **41** |
+| K8 | a Compose secret with an **absolute** `target:` | lands exactly there |
+
+**K2 is what makes the design possible.** Repeated `[global]` sections across
+files concatenate cleanly, so the contract keeps its rule that it materializes
+one value per file — a format packing three values into one would be a second
+parser of a compound value, which ADR 0056 already refused for the storage pair.
+
+**K4 turns a tempting future edit into a stated rule.** An option set twice is a
+hard failure of *every* pgBackRest command including `archive-push`, not a silent
+override — so rendering `repo1-cipher-pass` into `pgbackrest.conf` "for
+completeness", beside the `repo1-cipher-type` that already is there, would stop
+archiving on every project at once. A test reads the option names off the
+contract and asserts the rendered config names none of them, with a control on an
+option it *is* expected to set.
+
+**K3 is a leak, and it reproduces on the product's own bytes (D569).** A
+credential file that reaches the container without its `[global]` header makes
+pgBackRest print `[029]: key/value found outside of section at line 1:` followed
+by the value — to its console and its log, which for `archive-push` is the
+postmaster's stderr. So `render_secret` refuses a value with a line break and
+`recover_secret` verifies the header and the option, neither quoting anything.
+The residual is in ADR 0153's consequences rather than implied.
+
+**The closing arm is the one that matters, and it is the one four earlier rigs
+did not run (L1).** Rigs 4–7 each handed their own containers a credential of
+their own, which is ADR 0065/0066's exact warning — *a proof that reaches the
+right end state by a route the product does not take proves the end state is
+reachable, not that the product reaches it* — and it is precisely how D558
+survived four runs. Arm L renders the three files with **`render_secret`**, at
+the paths **`container_secret_path`** returns, for the consumers
+**`secrets.required.yaml`** declares, against a config **`build_pgbackrest_conf`**
+produced. Nothing is typed. **L1 exits 0**: the archiver can authenticate.
+L2 (one header stripped) is 29 with the value in the output; L3 (one file
+removed) is 37.
+
+**Compose ignores the grant's `uid`, `gid` and `mode` (D571)** — it warns and
+passes the host file's through. Nothing changes: the contract's fields are
+applied by `materialize-secrets` on the host, which is what has always protected
+the file. Recorded so nobody deletes them as redundant with a grant that ignores
+them.
+
+**Battery: R1–R8, 8 of 8 killed** as `FAILED`, control green and unreachable in
+every arm, all three mutated files restored byte-for-byte. **Both first-pass
+survivors were real.** R6 deleted the "a pgbackrest consumer must name an option"
+validation and survived, because the real contract always names one and nothing
+ever drove the refusal (D574) — §6's question 2, which the battery is the only
+thing here that asks. **R7 moved `PGBACKREST_INCLUDE_DIR` and survived because
+every assertion derived its expectation from that same constant** — the second
+constant-vs-constant test in one session after Q5, and the rule that falls out is
+in D573: *when a constant encodes a measured third-party fact, the test writes the
+measured value.*
+
+**A rig defect worth more than the arm it broke (D572).** Arm L2's conf.d path
+was passed through an environment variable on a `wsl bash -lc` line and Git Bash
+**path-converted it** to a Windows path; the Python found nothing, stripped
+nothing, and the arm probed the unmodified files — reporting *"the value did NOT
+appear"*. A leak check that comes back clean having done nothing is D557's shape
+at its worst. The arm now asserts its own stimulus landed, fatally, before it
+probes.
+
+**Three secrets changed their container path** from `/run/secrets/<name>` to
+`/etc/pgbackrest/conf.d/<nn>-<option>.conf`. Nothing else read them, because
+nothing read them at all — which is the whole of D558. `bin/restore-test.py`
+needed **no change**: it inherits mounts by destination from
+`container_secret_path`, which is what ADR 0151 §2 was built for.
+
+**Three passing tests were replaced by stricter ones, all ADR-authorised.** Two
+in `test_secret_override.py` — one of which asserted
+`f"{DIR}/{target}".startswith(DIR)`, true of any string — and
+`test_the_repository_files_are_owned_by_the_postgres_uid`'s `format == "raw"`,
+which was true and was not enough: the file was materialized, mounted and owned
+correctly, and read by nothing.
+
+**Still nothing is deployed and nothing has dialled R2.** What is closed is that
+the archiver *can* authenticate, proved against a posix repository by the
+product's own materializer. The endpoint, the token scope and a 403 remain
+untested and need the trip.
 
 ### Run 9 — The proofs, and the schedule
 

@@ -52,8 +52,8 @@ ROOT_PLANE_DIRECTORY = "_root"
 #: file; `root` is a value no container may hold at all.
 PLANES = ("compose", "root")
 
-#: What the materializer writes into a consumer's file (ADR 0056).
-FORMATS = ("raw", "pgpass")
+#: What the materializer writes into a consumer's file (ADR 0056, ADR 0153).
+FORMATS = ("raw", "pgpass", "pgbackrest")
 
 #: Who creates a secret's value (ADR 0103), which is a different question from
 #: what kind of value it is.
@@ -80,6 +80,32 @@ OPERATOR_SUPPLIED = "operator_supplied"
 #: the file is `0400`, owned by the one uid its container runs as, and that
 #: container has exactly one connection target.
 PGPASS_TEMPLATE = "*:*:*:*:{value}\n"
+
+#: The `pgbackrest` template (ADR 0153, Session 10 Run 8b).
+#:
+#: A one-option pgBackRest configuration fragment. pgBackRest concatenates every
+#: `.conf` under `config-include-path` with its main configuration, and rig 9
+#: measured that **three files each carrying their own `[global]` header
+#: concatenate cleanly** (exit 0) -- which is what lets this contract keep its
+#: rule that it materializes one value per file.
+#:
+#: **The header is not optional and its absence is a leak.** Measured, K3: a file
+#: whose first line is a bare `key=value` fails with
+#: `[029]: key/value found outside of section at line 1:` **followed by the
+#: value**, on pgBackRest's console and in its log -- and for `archive-push` that
+#: is the postmaster's stderr. So `render_secret` refuses a value containing a
+#: line break (a newline would end the line and leave the remainder outside the
+#: section, reaching K3's condition from the value rather than from the header)
+#: and `recover_secret` verifies the header before returning anything.
+PGBACKREST_TEMPLATE = "[global]\n{option}={value}\n"
+
+#: Where pgBackRest reads its configuration includes from.
+#:
+#: Its own default, measured rather than assumed: `pgbackrest help backup
+#: config-include-path` prints `default: /etc/pgbackrest/conf.d`. Nothing sets
+#: the option, so this is the path that is in force, and a consumer whose format
+#: is `pgbackrest` is mounted here instead of under `CONTAINER_SECRET_DIR`.
+PGBACKREST_INCLUDE_DIR = "/etc/pgbackrest/conf.d"
 
 
 def load_secret_contract(path: Path) -> dict[str, Any]:
@@ -191,6 +217,21 @@ def render_secret(value: str, consumer: dict[str, Any]) -> str:
                 "value is not what this consumer's contract declares"
             )
         return PGPASS_TEMPLATE.format(value=value)
+    if fmt == "pgbackrest":
+        # The same refusal as pgpass, and here it prevents a LEAK rather than a
+        # malformed entry (ADR 0153 §4). A newline ends the `key=value` line and
+        # leaves the remainder as a key outside any section, which pgBackRest
+        # reports as `[029]: key/value found outside of section at line N:`
+        # **quoting the line** -- so a value with a newline in it puts part of
+        # itself into the archiver's log. No value is echoed here either.
+        if "\n" in value or "\r" in value:
+            raise ManifestError(
+                "a pgbackrest-format secret value contains a line break. pgBackRest "
+                "reports a key outside a section by quoting the line, so this would "
+                "put part of the value into the archiver's log. The value is not what "
+                "this consumer's contract declares"
+            )
+        return PGBACKREST_TEMPLATE.format(option=consumer["option"], value=value)
     raise ManifestError(f"no writer for secret format {fmt!r}")
 
 
@@ -228,6 +269,26 @@ def recover_secret(rendered: str, consumer: dict[str, Any]) -> str:
                 "means is unknown"
             )
         return line[len(prefix) :]
+    if fmt == "pgbackrest":
+        # The header is verified, not assumed, and that is the whole point of
+        # this branch: a file that reached the container without it makes
+        # pgBackRest print the value (ADR 0153 §4). Neither the line nor the
+        # value is echoed in the refusal.
+        # Split on the placeholder rather than formatting an empty value, which
+        # is what `pgpass` above does and for the reason this branch first got
+        # wrong: formatting with `value=""` keeps the template's TRAILING
+        # newline, so the prefix is `[global]\nopt=\n` and no real file starts
+        # with it. Caught by the round-trip the module's own docstring demands.
+        prefix = PGBACKREST_TEMPLATE.split("{value}")[0].format(option=consumer["option"])
+        line = rendered.rstrip("\n")
+        if not line.startswith(prefix):
+            raise ManifestError(
+                "a pgbackrest-format secret file does not begin with its [global] "
+                f"header and {consumer['option']!r}. It was not written by this "
+                "contract's materializer, and pgBackRest reports a key outside a "
+                "section by quoting the line -- so this file must not be mounted"
+            )
+        return line[len(prefix) :].rstrip("\n")
     raise ManifestError(f"no reader for secret format {fmt!r}")
 
 
@@ -291,6 +352,27 @@ def secret_source_path(project_key: str, generation_id: str, consumer: dict[str,
 
 
 def container_secret_path(consumer: dict[str, Any]) -> str:
+    """Where this consumer's file appears inside its container.
+
+    **The single authority on that, since Run 8b** (ADR 0153 §6). The grant
+    surface used to emit a bare `target_file`, which Compose resolves under
+    `/run/secrets` -- one fact spelled in two places, and the `pgbackrest` format
+    needs them to disagree.
+
+    A `pgbackrest`-format file is mounted where pgBackRest reads its includes
+    from, because that is the only way it is read at all: there is no
+    `repo-cipher-pass-file` option, and nothing in this repository puts a value
+    into the archiver's environment (D558).
+
+    Measured (rig 9, K8), with a control: Compose accepts an **absolute** target
+    and the file lands exactly there; a relative one lands in `/run/secrets`, as
+    documented. The same arm measured that Compose **ignores** the grant's `uid`,
+    `gid` and `mode` -- it warns and passes the host file's through -- so what
+    protects the file is `materialize-secrets` chowning the generation on the
+    host, which is what the contract's own fields have always driven.
+    """
+    if consumer.get("format") == "pgbackrest":
+        return f"{PGBACKREST_INCLUDE_DIR}/{consumer['target_file']}"
     return f"{CONTAINER_SECRET_DIR}/{consumer['target_file']}"
 
 
@@ -331,6 +413,24 @@ def _validate_formats(secret: dict[str, Any]) -> None:
             raise ManifestError(
                 f"secret {secret['name']!r} is a {secret['value_kind']} and a consumer "
                 "asks for it in pgpass format. A password file holds a password"
+            )
+        # `option` is required by the format that uses it and forbidden to the
+        # ones that do not. Both directions, because a consumer carrying an
+        # `option` its format ignores is a line a reader will believe (ADR 0153).
+        has_option = "option" in consumer
+        if consumer["format"] == "pgbackrest" and not has_option:
+            raise ManifestError(
+                f"secret {secret['name']!r} has a pgbackrest-format consumer that names "
+                "no `option`. The file it writes is `[global]` and one `option=value` "
+                "line, so without it there is nothing to write -- and the option is not "
+                "derived from the target file's name, because a rename would then be a "
+                "silent behaviour change"
+            )
+        if consumer["format"] != "pgbackrest" and has_option:
+            raise ManifestError(
+                f"secret {secret['name']!r} has a {consumer['format']}-format consumer "
+                "carrying an `option`, which that format does not write. A field nothing "
+                "reads is a field somebody will trust"
             )
 
 
