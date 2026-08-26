@@ -330,18 +330,6 @@ def _override_names(compose_env: Path) -> dict[str, str]:
     return {keyword: _env_value(compose_env, key) for keyword, key in OVERRIDE_NAME_KEYS.items()}
 
 
-def _is_migration_artifact(path: Path, staging: Path) -> bool:
-    """The rendered migration directory, or a file directly inside it.
-
-    Deliberately not `"migrations" in path.parts`: that would widen the mode of
-    anything a future render happened to put under a directory of that name at
-    any depth, which is how an exemption written for one file becomes a
-    property of the tree.
-    """
-    migrations_dir = staging / "migrations"
-    return path == migrations_dir or path.parent == migrations_dir
-
-
 def require_mounts_exist(override_payload: bytes, services: Any, when: str) -> None:
     """Refuse to start a service whose bind-mount source is not there (ADR 0133).
 
@@ -412,20 +400,29 @@ def install_rendered(source: Path, destination: Path, override_payload: bytes) -
     for path in (staging, previous):
         shutil.rmtree(path, ignore_errors=True)
 
+    # **The render decides the mode; this decides the owner** (D589).
+    #
+    # This used to re-impose 0600 on everything except the migration set, which
+    # made it a SECOND authority over a decision `rendering.py` had already
+    # taken three times -- `FILE_MODE`, `MIGRATION_FILE_MODE`, `SNAPSHOT_MODE`
+    # -- and this one won. So the archiver's config was rendered 0444 for a
+    # container running as 999 and installed 0600, and pgBackRest refused it
+    # with `[041]: unable to open file ... Permission denied` at step 6c and at
+    # every archive_command after it (D588, whose repair was incomplete until
+    # this one).
+    #
+    # `shutil.copytree` uses `copy2`, which preserves modes, so the modes are
+    # already right when they arrive. What remains is ownership: the destination
+    # is root-owned runtime state, and the source is a checkout owned by whoever
+    # rendered it.
+    #
+    # The enclosing directory is 0700 root either way, so a widened file here is
+    # readable only by something the daemon bind-mounts it into -- which is the
+    # argument `MIGRATION_FILE_MODE` already makes for the SQL, now applied to
+    # every artefact rather than re-argued per file.
     shutil.copytree(source, staging)
     for path in (staging, *staging.rglob("*")):
         os.chown(path, 0, 0)
-        if _is_migration_artifact(path, staging):
-            # The one exception, and it is narrow: dbmate reads these from
-            # inside a container as uid 65532, and a 0600 file it cannot open
-            # fails as "permission denied" from a service whose whole job is to
-            # be the only thing that touches the schema. The parent directory
-            # stays 0700 root, so nothing here becomes readable to a host user
-            # who could not already traverse into it, and the SQL carries no
-            # secret -- it is derived identifiers over reviewed templates.
-            os.chmod(path, 0o755 if path.is_dir() else 0o644)
-        else:
-            os.chmod(path, 0o700 if path.is_dir() else 0o600)
 
     _write_root_only(staging / "runtime-compose.override.yaml", override_payload)
 
