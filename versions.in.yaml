@@ -423,3 +423,37 @@ packages:
     package: pgbackrest
     version: "2.59.1-1.pgdg12+1"
     index: https://apt.postgresql.org/pub/repos/apt/dists/bookworm-pgdg/main/binary-amd64/Packages.gz
+
+  # The trust store, and the image had none at all (D590).
+  #
+  # Measured: `ca-certificates` is NOT INSTALLED in the base, and it is in
+  # neither pgbackrest's Depends nor its Recommends -- so `--no-install-recommends`
+  # is innocent and no dependency would ever have pulled it in. With no
+  # `/etc/ssl/certs/ca-certificates.crt`, pgBackRest reaches R2, completes the
+  # TCP connection, and refuses the certificate:
+  # `[095]: unable to verify certificate presented by
+  # '<account>.r2.cloudflarestorage.com:443': [20] unable to get local issuer
+  # certificate`.
+  #
+  # **A pinned trust store is a stale trust store, and that is accepted here
+  # rather than glossed.** Everything else in this image is frozen -- the base by
+  # digest, pgBackRest by version-and-digest -- so a floating CA set would be the
+  # one unreproducible thing in a deliberately reproducible image. Bumping it is
+  # a `--packages-only` update, which is the flag that exists so an apt pin can
+  # move without re-adopting three unrelated rolling image tags (D540).
+  #
+  # **`bookworm-security`, not `bookworm`**, and that was measured rather than
+  # assumed: the lock refused the first attempt because plain bookworm carries
+  # only `20230311+deb12u1`. `apt-cache policy` puts the candidate in
+  # debian-security, which is D201 working -- a version that cannot be resolved
+  # is not locked by writing it down.
+  #
+  # A security suite drops superseded versions FASTER than pgdg does, so this pin
+  # expires sooner than `PGBACKREST_APT_VERSION` and in the same way (D533). The
+  # build fails closed when it does, which is the accepted half; nobody has
+  # diarised either.
+  CA_CERTIFICATES_APT_VERSION:
+    registry: apt
+    package: ca-certificates
+    version: "20250419~deb12u1"
+    index: http://deb.debian.org/debian-security/dists/bookworm-security/main/binary-amd64/Packages.xz

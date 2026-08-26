@@ -106,6 +106,7 @@ update() {
 
   "$(python_bin)" - "$CANDIDATES" "$LOCK" "${packages_only}" <<'PY'
 import gzip
+import lzma
 import json
 import os
 import subprocess
@@ -229,10 +230,28 @@ def resolve_apt(name, entry):
     except OSError as error:
         return None, f"{name}: cannot reach the apt index ({error})"
 
+    # **Two compressions, chosen by what the archive serves rather than by the
+    # filename** (D590). Run 4 wrote this for pgdg, which publishes `Packages.gz`.
+    # Debian's SECURITY archive publishes `Packages.xz` and 404s on `.gz` -- so
+    # the first non-pgdg pin needed a second decompressor, and a resolver that
+    # only knew gzip reported "is not gzip", which is true and unhelpful.
+    #
+    # Sniffed by magic bytes: `.gz` is `1f 8b`, `.xz` is `fd 37 7a 58 5a 00`. A
+    # decision made on the URL's suffix would be a second authority over what the
+    # bytes actually are, and would be wrong the first time an archive served one
+    # under the other's name.
     try:
-        text = gzip.decompress(body).decode("utf-8", errors="replace")
-    except (OSError, EOFError) as error:
-        return None, f"{name}: apt index at {index} is not gzip ({error})"
+        if body[:2] == b"\x1f\x8b":
+            text = gzip.decompress(body).decode("utf-8", errors="replace")
+        elif body[:6] == b"\xfd7zXZ\x00":
+            text = lzma.decompress(body).decode("utf-8", errors="replace")
+        else:
+            return None, (
+                f"{name}: apt index at {index} is neither gzip nor xz "
+                f"(first bytes {body[:6]!r})"
+            )
+    except (OSError, EOFError, lzma.LZMAError) as error:
+        return None, f"{name}: apt index at {index} could not be decompressed ({error})"
 
     for stanza in text.split("\n\n"):
         fields = {}

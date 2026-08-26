@@ -18,6 +18,7 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 
 ARG PGBACKREST_APT_VERSION
+ARG CA_CERTIFICATES_APT_VERSION
 
 # Measured in Run 1 against this exact base digest, with a control (the same
 # build at `pgbackrest=0.0.0-doesnotexist`, which exits 100):
@@ -40,11 +41,28 @@ ARG PGBACKREST_APT_VERSION
 # difference between "the package installed" and "the binary runs", which ADR
 # 0083 records as two different claims after `psycopg` installed cleanly and
 # raised ImportError on first use.
+# `ca-certificates` is installed in the SAME layer and is not optional: the
+# repository is reached over HTTPS and this image ships no trust store at all.
+# Measured (D590): `/etc/ssl/certs/ca-certificates.crt` is absent from the base,
+# the package is in neither pgbackrest's Depends nor its Recommends, and without
+# it pgBackRest connects to R2 and then refuses the certificate with
+# `[095] ... [20] unable to get local issuer certificate`.
+#
+# No rig caught this because every rig used a POSIX repository on a local
+# volume, so nothing ever negotiated TLS -- ADR 0065/0066's warning about a
+# proof that reaches the right end state by a route the product does not take.
+#
+# `update-ca-certificates` is not run explicitly: the package's own postinst
+# does it, and the `test -s` below is what proves the bundle exists rather than
+# trusting that.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends "pgbackrest=${PGBACKREST_APT_VERSION}"; \
+    apt-get install -y --no-install-recommends \
+        "pgbackrest=${PGBACKREST_APT_VERSION}" \
+        "ca-certificates=${CA_CERTIFICATES_APT_VERSION}"; \
     rm -rf /var/lib/apt/lists/*; \
-    pgbackrest version
+    pgbackrest version; \
+    test -s /etc/ssl/certs/ca-certificates.crt
 
 # The directories pgBackRest writes to that are NOT the repository: its log and
 # its async spool. Created here, owned by the postmaster's own uid, because the

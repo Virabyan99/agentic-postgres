@@ -169,6 +169,7 @@ services:
       args:
         BASE_IMAGE: ${POSTGRES_IMAGE:?required}
         PGBACKREST_APT_VERSION: ${PGBACKREST_APT_VERSION:?required}
+        CA_CERTIFICATES_APT_VERSION: ${CA_CERTIFICATES_APT_VERSION:?required}
     platform: ${TARGET_PLATFORM:?required}
     profiles: [session3]
     restart: "on-failure:5"
