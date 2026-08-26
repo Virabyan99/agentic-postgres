@@ -35,6 +35,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+from tests.deployment.oversized_request import post_and_read_refusal
 
 from agentic_postgres import auth_limits, jwt_claims
 
@@ -177,15 +178,31 @@ def test_the_published_route_applies_the_input_bounds_before_the_service_allocat
     """
     base = app_base(project_a)
 
-    oversized = api_call(
-        f"{base}/auth/login",
-        method="POST",
-        body={"username": "probe", "password": "x" * (auth_limits.MAX_BODY_BYTES * 4)},
+    # `post_and_read_refusal`, not `api_call`, for this ONE request (D604).
+    # Traefik refuses on Content-Length and closes while the client is still
+    # writing, and urllib then discards the response it had already received --
+    # so this proof reported status 0 on a deployment behaving exactly as
+    # designed, twice in one trip, with ECONNRESET and then EPIPE (D511).
+    #
+    # It is NOT tolerance of a broken pipe: a connection that breaks with
+    # nothing received still comes back as 0 and still fails here, which
+    # `tests/contract/test_oversized_request_client.py` asserts against a server
+    # that closes without answering. Accepting the break as success would make
+    # this green for the very defect it detects (D509).
+    #
+    # The other two calls below stay on `api_call`: their bodies are small, no
+    # write is ever in progress when the answer arrives, and there is nothing
+    # to lose.
+    payload = json.dumps(
+        {"username": "probe", "password": "x" * (auth_limits.MAX_BODY_BYTES * 4)}
+    ).encode("utf-8")
+    oversized = post_and_read_refusal(
+        f"{base}/auth/login", payload, headers={"Content-Type": "application/json"}
     )
     assert oversized.status == 413, (
-        f"a {auth_limits.MAX_BODY_BYTES * 4}-byte body was answered "
-        f"{oversized.status}, not 413. A 400 here means the request reached the "
-        "service and was read in full before being refused, which is D273 -- the "
+        f"a {len(payload)}-byte body was answered {oversized.status}, not 413 "
+        f"({oversized.reason}). A 400 here means the request reached the service "
+        "and was read in full before being refused, which is D273 -- the "
         "buffering middleware is not on this router"
     )
 
