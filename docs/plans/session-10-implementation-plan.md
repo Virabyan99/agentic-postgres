@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D603.**
+**Next free number after this table is D604.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -185,6 +185,8 @@ anything found *during* implementation is appended with the next free number.
 | **D601** | D591: "not fixed yet ... the most consequential thing still open at the end of Run 11." | **Fixed.** The mechanism is a third Compose override carrying one label per service, whose value is a digest of what that service bind-mounts. Compose hashes labels into its config hash, so a service whose mounted *content* changed is recreated and one whose content did not is left alone. `--force-recreate` was rejected: it restarts every container on every deploy, including the ones nothing touched, on a host where three services gate on `postgres: service_healthy`. | **ADR 0155.** `runtime_override.mounted_paths_by_service` / `mounted_digest` / `render_mount_override`, `bin/render-mount-digests.py`, called from `bin/project-runtime.sh` immediately before `up` and loaded last by `bin/compose.sh`. The inventory is read out of the runtime override, never declared (ADR 0133). | **Two battery arms survived, and both were real.** **U2** — a digest over `st_mtime_ns` instead of the bytes — survived because the stability test relied on an atomic replace producing a different timestamp, and **Linux stamps files from a coarse clock with millisecond-order granularity**, so two files written microseconds apart share an mtime. The test could not see the defect it named. **U4** — dropping the `<absent>` marker — survived because the artefact the test created held `{}`, so the digests differed on content regardless; the marker only matters against an **empty** file, which is what a truncated render produces. Both were fixed in the tests, not the batteries, and the second pass killed 4/4. This closes **ADR 0088's residual** as well: the deploy has printed *"every verifier must be RECREATED, not restarted"* on every run since Session 6, then relied on Compose to notice a change it structurally cannot see. | — |
 
 | **D602** | `docs/session-10-operator-guide.md` §4: create the bucket, create the token, paste both halves. | **Pasting the two R2 halves is not enough, and the guide never said so.** Enabling backups declares **three** provider secrets: two operator-supplied (`APG_BACKUP_R2_ACCESS_KEY_ID`, `APG_BACKUP_R2_SECRET_ACCESS_KEY`) and one **generated** — `pgbackrest_repo_cipher_pass`, which only `bootstrap-providers --apply` creates. Until it runs, materialization looks for a value that is not there, and the deploy fails after the operator has correctly done everything the page told them to do. | Sub-step 6, with `--plan` then `--apply`, `sudo` and `--operator-credential-file` (never a value on the command line), and `--plan` again to confirm no changes. The paragraph that already anticipated this failure — *"if a deploy reports a missing repository secret, it is this step that was skipped"* — now names the step and the command. | **The guide anticipated the failure and did not give the cure**, which is a worse state than not mentioning it: a reader who hits the error is told they skipped a step they cannot find. This is D585's shape one step along — *a step that is missing from a guide fails quietly* — and it is the second time in one session that Session 10's own guide sent a correct operator into a wall. Both were found by an operator following the page, not by review of it. The step also carries D538's warning where an operator will actually meet it: **the cipher pass is in `managed_resources`, so `--destroy` may remove it, and a repository reached with a valid token and the wrong cipher pass is not partly readable — it is unreadable.** | — |
+
+| **D603** | ADR 0152 / D529: the drill records "recovery time, measured by the command". | **RTO is not stable, and one measurement of it is not an RTO.** Two drills against **the same backup set** (`20260826-071634F`), the same cluster and the same host: **263.2 s** then **166.4 s** — a 37% swing. Both verdicts passed, both achieved points landed ~6 s before their requested target, and both were at or after the published floor. Nothing about the deployment changed between them except that the second ran after a redeploy. | **Nothing, deliberately.** The evidence document already records the RTO the command measured on *that* run, which is the honest thing for it to hold. What changes is how the number may be *quoted*: a single drill's RTO is a sample, not a guarantee, and `docs/backup-operations.md` should say so before anyone writes it into a commitment. | **The variance is larger than the difference many changes would produce**, which is the point. `process-max` is **1** (D593), so both the backup and the restore are a long serial chain of S3 round trips — 1330 files, ~180–280 ms each — and the total is dominated by whatever R2's per-request latency happens to be. That makes RTO an *estimate with a wide band*, and it means **a future session tuning `process-max` cannot demonstrate the improvement with one before-and-after pair**: the noise floor is wider than the effect it would be trying to show. Two runs is also not a distribution — this row records that the band exists, not how wide it is. |
 
 ---
 
@@ -1320,6 +1322,47 @@ full backup is a command at a TTY that the gate refuses to start without.
 
 
 ### Runs 11+ — The host trip. **Done.**
+
+---
+
+## SESSION 10 IS CLOSED
+
+**Closed 2026-08-26 at `3ab7051`.** `evidence/session-10.json` is merged and
+describes that release: `source_commit` identical in both halves and genuinely
+compared, both project keys present.
+
+```
+claims    51 passed of 53
+host      371 passed, 0 failed, 6 skipped
+external   25 passed, 0 failed, 8 skipped
+
+point_in_time_recovery  passed      restore_verification  passed
+recovery_evidence       passed      wal_archiving_signal  passed
+restore_isolation       passed
+```
+
+**All five Session 10 claims passed.** The two that did not are
+`api_authorization` and `bootstrap_identity`, and **every unrun node id under
+them is a rotation proof** — the three `APG_ROTATED_*` skips. That is the
+carried-in **rotation window**, red for a fifth session; closing it is a rotation
+exercise with no code change, and it belongs to whoever picks it up.
+
+**What is deployed and proved:** two encrypted R2 repositories, a WAL stream, a
+scheduled full and incremental backup, and a restore command that has been run
+against a real deployment twice. The second drill measured **RTO 166.4 s**, an
+achieved recovery point 5.97 s before its requested target, at or after the
+published floor — and carried a non-null `release` for the first time (D600).
+
+**One proof flipped twice and is not repaired** (D511): `test_the_published_route_-
+applies_the_input_bounds_before_the_service_allocates` failed with
+`ECONNRESET` on one run and `EPIPE` on the next, then passed. Traefik answers 413
+and closes while the client is still writing 64 KiB, so reading the refusal is a
+race. **Accepting the broken pipe as success is refused** — it would go green for
+the very defect the test detects (D509's shape). The honest repair is a client
+that reads the response the server already queued and still requires the 413; it
+is a change to a passing Session 6 proof and belongs to API-AUTH-002's owner.
+
+
 
 **Run 11 has started. What is done, and what needs a human at a TTY.**
 
