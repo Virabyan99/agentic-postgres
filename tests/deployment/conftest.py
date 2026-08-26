@@ -39,7 +39,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, secrets_contract
+from agentic_postgres import REPO_ROOT, secret_override, secrets_contract
 from agentic_postgres.naming import HEALTH_ROUTE_PATH
 
 #: Signature of the plain-output command runner returned by the ``sh`` fixture.
@@ -660,11 +660,17 @@ def run_client_fixture(
         secret_files = definition.get("_secret_files", {})
         for entry in definition.get("secrets", []):
             name = entry["source"] if isinstance(entry, dict) else entry
-            filename = entry.get("target", name) if isinstance(entry, dict) else name
             source = secret_files.get(name)
             if not source:
                 pytest.fail(f"{service} is granted {name} and the model names no file for it")
-            arguments += ["--volume", f"{source}:/run/secrets/{filename}:ro"]
+            # `secret_override.mount_target`, never a prefix built here (D597).
+            # ADR 0153 made `target` absolute so a pgbackrest consumer could land
+            # outside /run/secrets, and this line still prefixed it -- mounting
+            # the credential at /run/secrets//run/secrets/<file>, which is
+            # present, correct, and somewhere the entrypoint never looks. Every
+            # client fixture then exited 8 reporting a missing secret, which
+            # reads exactly like a broken materialization.
+            arguments += ["--volume", f"{source}:{secret_override.mount_target(entry)}:ro"]
         arguments += [f"{rendered['compose']['project_name']}-{service}", *command]
 
         result = subprocess.run(arguments, capture_output=True, text=True, check=False, timeout=300)

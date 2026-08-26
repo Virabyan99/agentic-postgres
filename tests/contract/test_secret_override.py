@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, secret_override
+from agentic_postgres import CURRENT_SESSION, REPO_ROOT, secret_override
 from agentic_postgres.secrets_contract import (
     CONTAINER_SECRET_DIR,
     PGBACKREST_INCLUDE_DIR,
@@ -239,3 +239,84 @@ def test_the_writer_is_not_reachable_from_a_project_manifest() -> None:
     assert "--project-key" in source
     assert "--secret-root" not in source
     assert "--source" not in source
+
+
+def test_every_grant_reads_back_to_the_path_the_contract_declared(contract: dict) -> None:
+    """The writer and the reader, round-tripped over every consumer (D597).
+
+    `build_secret_override` decides where a grant lands; `mount_target` reads it
+    back out of the resolved model. They were one fact in two places, and when
+    ADR 0153 made `target` absolute -- so a `pgbackrest` consumer could land in
+    pgBackRest's include directory instead of /run/secrets -- only the writer
+    moved. The reader in `tests/deployment/conftest.py` still prefixed
+    `/run/secrets/`, producing `/run/secrets//run/secrets/<file>`: a mount that
+    exists, holds the right bytes, and sits where the container's entrypoint has
+    no reason to look. Five client fixtures then exited 8 reporting a missing
+    credential, which is indistinguishable from materialization being broken.
+
+    This asserts them equal for **every** consumer in the contract rather than
+    for a chosen example, so a fourth format is covered on the day it is added.
+    """
+    document = secret_override.build_secret_override(
+        project_key=KEY,
+        generation_id=GENERATION,
+        contract=contract,
+        session=CURRENT_SESSION,
+    )
+
+    checked = 0
+    for secret in active_secrets(contract, CURRENT_SESSION):
+        for consumer in secret["consumers"]:
+            if consumer["plane"] == "root":
+                continue
+            grants = document["services"][consumer["service"]]["secrets"]
+            entry = next(
+                (item for item in grants if item["source"] == secret_override.grant_name(consumer)),
+                None,
+            )
+            assert entry is not None, f"{consumer['service']} holds no grant for {secret['name']}"
+            assert secret_override.mount_target(entry) == container_secret_path(consumer), (
+                f"{consumer['service']} reads {secret['name']} back at "
+                f"{secret_override.mount_target(entry)}, but the contract puts it at "
+                f"{container_secret_path(consumer)}"
+            )
+            checked += 1
+
+    assert checked > 0, "no compose consumers were checked, so this asserted nothing"
+
+    # The premise: at least one consumer must land OUTSIDE /run/secrets, or this
+    # test would pass against a reader that hard-codes the prefix -- which is
+    # precisely the defect it exists to catch (D509: a control that cannot fail
+    # for the reason it is watching for is not a control).
+    outside = [
+        container_secret_path(consumer)
+        for secret in active_secrets(contract, CURRENT_SESSION)
+        for consumer in secret["consumers"]
+        if consumer["plane"] != "root"
+        and not container_secret_path(consumer).startswith(CONTAINER_SECRET_DIR + "/")
+    ]
+    assert outside, (
+        "every consumer now lands under /run/secrets, so a reader that hard-coded "
+        "that prefix would pass this test. The pgbackrest consumers are what make "
+        f"it discriminating; if they moved, this needs a new premise. ({PGBACKREST_INCLUDE_DIR})"
+    )
+
+
+def test_the_short_form_still_means_run_secrets() -> None:
+    """Compose's bare-name entry has no `target` and is still a basename.
+
+    Both shapes go through one function so that no caller has to decide which it
+    is holding.
+    """
+    assert secret_override.mount_target("app_runtime_password") == (
+        f"{CONTAINER_SECRET_DIR}/app_runtime_password"
+    )
+    assert secret_override.mount_target({"source": "svc__file"}) == (
+        f"{CONTAINER_SECRET_DIR}/svc__file"
+    )
+    assert (
+        secret_override.mount_target(
+            {"source": "svc__file", "target": "/etc/pgbackrest/conf.d/x.conf"}
+        )
+        == "/etc/pgbackrest/conf.d/x.conf"
+    )

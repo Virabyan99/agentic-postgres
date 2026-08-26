@@ -37,6 +37,7 @@ from typing import Any
 import yaml
 
 from agentic_postgres.secrets_contract import (
+    CONTAINER_SECRET_DIR,
     active_secrets,
     compose_consumers,
     container_secret_path,
@@ -47,11 +48,39 @@ __all__ = [
     "OVERRIDE_FILENAME",
     "build_secret_override",
     "grant_name",
+    "mount_target",
     "render_secret_override",
 ]
 
 #: Written into the project's rendered directory, beside the router override.
 OVERRIDE_FILENAME = "secrets-compose.override.yaml"
+
+
+def mount_target(entry: Any) -> str:
+    """Where one Compose `secrets:` entry lands inside the container.
+
+    The inverse of what :func:`build_secret_override` writes, and it lives here
+    because the module that produces a grant owns the rule for reading it back.
+
+    **`target` is ABSOLUTE since ADR 0153** -- `/run/secrets/<target_file>` for a
+    `raw` or `pgpass` consumer, and pgBackRest's include directory for a
+    `pgbackrest` one, which is the whole reason it stopped being a bare
+    basename. A reader that prefixes `/run/secrets/` onto it produces
+    `/run/secrets//run/secrets/<file>`: a mount that exists, holds the right
+    bytes, and sits at a path the container's own entrypoint has no reason to
+    open (D597).
+
+    Compose's short form -- a bare secret name with no `target` -- is still a
+    basename, and still means `/run/secrets/<name>`. Both are accepted here so
+    that one function answers the question for every entry shape.
+    """
+    if isinstance(entry, dict):
+        target = entry.get("target") or entry["source"]
+    else:
+        target = str(entry)
+    if target.startswith("/"):
+        return target
+    return f"{CONTAINER_SECRET_DIR}/{target}"
 
 
 def grant_name(consumer: dict[str, Any]) -> str:
