@@ -374,12 +374,13 @@ def build_plan(
     if not key:
         raise DrillError("the deployed document names no project key")
 
-    live_volume = ((document.get("compose") or {}).get("volumes") or {}).get("postgres")
-    if not live_volume:
-        raise DrillError(
-            "the deployed document names no postgres volume, so nothing here can say "
-            "which volume the drill must not touch. Refusing rather than guessing."
-        )
+    # Derived from the project key, never read from `compose.volumes` (D598).
+    # Only the RENDERED document carries a `compose` block; the DEPLOYED one --
+    # which is what `--outputs /etc/agentic-postgres/projects/<key>/` names, and
+    # the only kind an operator ever passes -- does not. Reading it there made
+    # the drill refuse every real invocation while passing against a render,
+    # which is D592 one field along in the same command.
+    live_volume = naming.postgres_volume_name(str(key))
 
     image = str(inspect.get("Image") or "")
     if not image:
@@ -396,7 +397,7 @@ def build_plan(
         live_mount_sources=live_mount_sources(inspect),
         inherited=inherited_mounts(inspect, required_container_paths(contract)),
         environment=inherited_environment(inspect),
-        network=(document.get("compose") or {}).get("networks", {}).get("backup"),
+        network=naming.backup_network_name(str(key)),  # D598, same reason
         roles=dict((document.get("database") or {}).get("roles") or {}),
     )
 

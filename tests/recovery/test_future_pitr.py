@@ -49,7 +49,21 @@ from typing import Any
 import pytest
 from tests.recovery.conftest import psql
 
-from agentic_postgres import REPO_ROOT, backup_report
+from agentic_postgres import REPO_ROOT, backup_report, naming
+
+
+def _docker(*arguments: str) -> subprocess.CompletedProcess[str]:
+    """One docker command, unjudged.
+
+    Separate from `psql` because the caller decides what a non-zero exit means:
+    `network disconnect` failing is a broken STIMULUS and must stop the test,
+    while `network connect` failing in a `finally` must not mask the failure
+    that sent control there.
+    """
+    return subprocess.run(
+        ["docker", *arguments], capture_output=True, text=True, check=False, timeout=120
+    )
+
 
 pytestmark = [
     pytest.mark.p0,
@@ -438,13 +452,27 @@ def test_wal_archiving_failure_is_visible(project_b: dict[str, Any], require_roo
     `failed_count` stood at **26 on a healthy, fully caught-up cluster** in rig 7,
     because every project accrues failures before its stanza exists (D553).
 
-    **The break is `ALTER SYSTEM` plus a reload, and its effectiveness is asserted
-    rather than assumed.** `archive_command` is reloadable -- unlike
-    `archive_mode` -- but this deployment sets it on the postmaster's command
-    line, and whether `postgresql.auto.conf` overrides a `-c` option here **has
-    not been measured**. If it does not, the assertion below fails loudly on a
-    cluster that is fine. That is the failure direction to prefer: the alternative
-    is a test reporting a working signal after failing to break anything (D557).
+    **The break is the NETWORK, and that is a measurement rather than a
+    preference (D599).** The first version set `archive_command = '/bin/false'`
+    with `ALTER SYSTEM` and reloaded, and it failed on a healthy cluster --
+    exactly the loud failure its own docstring asked for, because the precedence
+    was written down as unmeasured. Rig 10 then measured it, with the control on
+    a setting the command line does not mention so that "ALTER SYSTEM works here"
+    was established independently: `postgresql.auto.conf` **did** receive
+    `archive_command = '/bin/false'`, and `SHOW archive_command` **stayed**
+    `/bin/true` with `pg_settings.source = 'command line'`, while the control
+    moved from `default` to `configuration file`. A `-c` option overrides
+    `postgresql.auto.conf`, and this deployment passes `archive_command` with
+    `-c` (compose.yaml).
+
+    So the lever is detaching the database container from its backup egress
+    network, which is both effective and closer to the failure being modelled:
+    `REC-WAL-001` is about a repository the archiver cannot reach, and an
+    unreachable repository is what an expired credential, a DNS failure or an R2
+    outage all look like from here. **The stimulus is asserted to have happened**
+    -- `docker network disconnect` must exit 0 -- because an arm that breaks
+    nothing and observes nothing reports `ok` for a state it failed to create
+    (D557).
 
     The repair runs in a `finally` and is asserted afterwards, because a test that
     leaves a project's archiver broken has done more damage than the requirement
@@ -457,33 +485,47 @@ def test_wal_archiving_failure_is_visible(project_b: dict[str, Any], require_roo
         f"below could distinguish its own stimulus from the existing state: {healthy}"
     )
 
+    network = naming.backup_network_name(project_b["project"]["key"])
+    container = project_b["database"]["container"]
+
     broken = None
+    detached = False
     try:
-        psql(project_b, "ALTER SYSTEM SET archive_command = '/bin/false'")
-        psql(project_b, "SELECT pg_reload_conf()")
+        result = _docker("network", "disconnect", network, container)
+        assert result.returncode == 0, (
+            f"could not detach {container} from {network}, so the archiver was never "
+            f"broken and nothing below would be evidence of anything: "
+            f"{result.stderr.strip()}"
+        )
+        detached = True
+
         psql(
             project_b,
             f"INSERT INTO app.notes (owner_id, title) VALUES ('{uuid.uuid4()}', 'wal-signal')",
         )
         psql(project_b, "SELECT pg_switch_wal()")
 
-        deadline = time.monotonic() + 180
+        # Longer than the ALTER SYSTEM version needed: an unreachable endpoint
+        # fails on a connect timeout rather than immediately, and pgBackRest
+        # retries before giving up.
+        deadline = time.monotonic() + 300
         while time.monotonic() < deadline:
             broken = backup_report.parse_archiver(psql(project_b, backup_report.ARCHIVER_QUERY))
             if broken and backup_report.archiving_is_failing(broken):
                 break
-            time.sleep(3)
+            time.sleep(5)
     finally:
-        psql(project_b, "ALTER SYSTEM RESET archive_command")
-        psql(project_b, "SELECT pg_reload_conf()")
+        if detached:
+            _docker("network", "connect", network, container)
 
     assert broken is not None, "pg_stat_archiver stopped answering while the archiver was broken"
     assert backup_report.archiving_is_failing(broken), (
-        "the predicate never went to `failing` after archive_command was set to "
-        "/bin/false and a segment was switched. Either the reload did not take -- "
-        "this deployment sets archive_command on the command line and the precedence "
-        "is unmeasured -- or the signal does not work. Both are real failures, and "
-        f"neither is this test passing.\nbefore={healthy}\nafter={broken}"
+        f"the predicate never went to `failing` in 300s after {container} was detached "
+        f"from {network} and a segment was switched. The detach itself succeeded, so "
+        "either the archiver reaches the repository by some route this test did not "
+        "remove -- which would be its own finding -- or the signal does not work. "
+        f"Both are real failures, and neither is this test passing.\n"
+        f"before={healthy}\nafter={broken}"
     )
     assert broken["last_failed_wal"], "the failing archiver named no segment"
     assert broken["failed_count"] > healthy["failed_count"], (

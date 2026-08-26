@@ -45,7 +45,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, naming, restore_drill, runtime_override
+from agentic_postgres import REPO_ROOT, naming, restore_drill, runtime_override, secrets_contract
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -1188,3 +1188,106 @@ def test_the_control_arm_is_reachable(rig: dict[str, Any]) -> None:
     measuring nothing.
     """
     assert _drive(rig) == 0
+
+
+# ---------------------------------------------------------------------------
+# build_plan, driven from a DEPLOYED-shaped document (D598)
+# ---------------------------------------------------------------------------
+#
+# Everything above builds a `DrillPlan` directly with keyword defaults, which is
+# why D598 survived every offline run: `build_plan` is the function that reads
+# the document, and nothing drove it. The drill refused every real invocation
+# with "the deployed document names no postgres volume" while 107 contract tests
+# stayed green.
+
+
+def _deployed_document() -> dict:
+    """The DEPLOYED shape: what `/etc/agentic-postgres/projects/<key>/` holds.
+
+    The distinguishing feature is what is NOT here. `deployed_output` publishes
+    `project`, `host`, `routes`, `database`, `backup` and the rest, and carries
+    **no `compose` block at all** -- no `project_name`, no `volumes`, no
+    `networks`. Only the render publishes those, and only a test ever passes a
+    render to this command.
+    """
+    return {
+        "project": {"key": "alpha-dev"},
+        "database": {"name": "alpha_dev", "roles": {"backup_user": "apg_alpha_dev_backup"}},
+        "backup": {"enabled": True, "stanza": "alpha-dev"},
+    }
+
+
+def _live_inspect(contract: dict) -> dict:
+    """A `docker inspect` of a database container that IS archiving."""
+    return {
+        "Image": "sha256:" + "b" * 64,
+        "Name": "/apg-alpha-dev-postgres-1",
+        "Mounts": [
+            {"Name": "apg-alpha-dev-postgres", "Destination": "/var/lib/postgresql/data"},
+            *(
+                {"Source": f"/var/lib/agentic-postgres/secrets/x{index}", "Destination": path}
+                for index, path in enumerate(restore_drill.required_container_paths(contract))
+            ),
+        ],
+        "Config": {"Env": ["PGBACKREST_REPO1_S3_BUCKET=apg-alpha-dev-backup", "PGDATA=/x"]},
+    }
+
+
+def test_build_plan_resolves_the_live_volume_from_a_document_with_no_compose_block() -> None:
+    """D598. The volume and the network are DERIVED, not read from the document.
+
+    The premise is asserted first: if `deployed_output` ever starts publishing a
+    `compose` block, this test would stop being about anything and the reasoning
+    behind D592 and D598 should be re-read before anything depends on it again.
+    """
+    source = (REPO_ROOT / "src" / "agentic_postgres" / "deployed_output.py").read_text("utf-8")
+    assert '"compose": {' not in source, (
+        "the deployed document now carries a `compose` block; re-read D592/D598"
+    )
+
+    contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    document = _deployed_document()
+    assert "compose" not in document
+
+    plan = restore_drill.build_plan(
+        document=document,
+        inspect=_live_inspect(contract),
+        drill_id="d0c0ffee",
+        contract=contract,
+    )
+
+    assert plan.live_volume == naming.postgres_volume_name("alpha-dev")
+    assert plan.network == naming.backup_network_name("alpha-dev")
+
+    # And the derivation must agree with what the RENDER actually published, or
+    # one of the two is wrong. This is the join D592 established: `naming` is the
+    # single authority, the render reads it, and so a deployed document needs no
+    # copy of either name. Read from the rendered fixture rather than by calling
+    # `derive` again -- comparing a function to itself would measure nothing.
+    rendered_path = REPO_ROOT / ".generated" / "fixture-alpha-dev" / "outputs.json"
+    if not rendered_path.is_file():
+        pytest.fail(f"{rendered_path} does not exist; render the fixtures first")
+    rendered = json.loads(rendered_path.read_text(encoding="utf-8"))
+    key = rendered["project"]["key"]
+
+    assert naming.postgres_volume_name(key) == rendered["compose"]["volumes"]["postgres"]
+    assert naming.backup_network_name(key) == rendered["compose"]["networks"]["backup"]
+
+
+def test_build_plan_refuses_a_document_that_names_no_project_key() -> None:
+    """The key is the one identity BOTH document kinds carry, so it is required.
+
+    With the volume and network now derived from it, a missing key is no longer a
+    cosmetic omission -- it is the input the whole plan is built from.
+    """
+    document = _deployed_document()
+    del document["project"]
+    contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+
+    with pytest.raises(restore_drill.DrillError, match="names no project key"):
+        restore_drill.build_plan(
+            document=document,
+            inspect=_live_inspect(contract),
+            drill_id="d0c0ffee",
+            contract=contract,
+        )

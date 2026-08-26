@@ -602,6 +602,29 @@ def compose_project_name(key: str) -> str:
     return compose_name(f"apg-{key}", context="compose_project")
 
 
+def postgres_volume_name(key: str) -> str:
+    """The live cluster's data volume, and the ONE place it is derived.
+
+    The third name split out of :func:`derive` for one reason -- more than one
+    reader -- after :func:`backup_network_name` and :func:`compose_project_name`.
+
+    It is the name `bin/restore-test.sh` must never touch, and it used to be
+    read from `compose.volumes.postgres`. **Only the RENDERED document publishes
+    a `compose` block**; the DEPLOYED document -- what
+    `/etc/agentic-postgres/projects/<key>/outputs.json` holds, and what an
+    operator passes to `--outputs` -- does not. So the drill refused every real
+    invocation with "the deployed document names no postgres volume" while
+    passing against a render (D598).
+
+    That is D592 a second time, in the same command, one field along: the repair
+    there was applied to `compose.project_name` because that was the field that
+    failed, and not to every field read out of the same absent block. Calling
+    this is not a second derivation under ADR 0002 -- it IS the authority, and
+    `derive` calls it too.
+    """
+    return compose_name(f"apg-{key}-postgres", context="compose_volume_postgres")
+
+
 def backup_network_name(key: str) -> str:
     """The egress network the cluster reaches its backup repository over.
 
@@ -953,7 +976,7 @@ def derive(
         edge_network=compose_name(f"apg-{key}-edge", context="compose_network_edge"),
         internal_network=compose_name(f"apg-{key}-internal", context="compose_network_internal"),
         backup_network=backup_network_name(key),
-        postgres_volume=compose_name(f"apg-{key}-postgres", context="compose_volume_postgres"),
+        postgres_volume=postgres_volume_name(key),
         postgres_container=compose_name(
             f"apg-{key}-postgres-1", context="compose_container_postgres"
         ),
