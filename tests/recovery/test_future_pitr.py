@@ -147,8 +147,7 @@ def drill(project_b: dict[str, Any], require_root: None) -> dict[str, Any]:
     for index in range(T1_ROWS):
         psql(
             project_b,
-            "INSERT INTO app.notes (owner_id, title, body) VALUES "
-            f"('{owner}', 'drill-t1-{index}', 'restore drill')",
+            f"INSERT INTO app.notes (owner_id, title) VALUES ('{owner}', 'drill-t1-{index}')",
         )
     _wal_switch(project_b)
 
@@ -158,8 +157,7 @@ def drill(project_b: dict[str, Any], require_root: None) -> dict[str, Any]:
 
     psql(
         project_b,
-        "INSERT INTO app.notes (owner_id, title, body) VALUES "
-        f"('{owner}', 'drill-t2-poison', 'must not survive the restore')",
+        f"INSERT INTO app.notes (owner_id, title) VALUES ('{owner}', 'drill-t2-poison')",
     )
     _wal_switch(project_b)
 
@@ -465,8 +463,7 @@ def test_wal_archiving_failure_is_visible(project_b: dict[str, Any], require_roo
         psql(project_b, "SELECT pg_reload_conf()")
         psql(
             project_b,
-            "INSERT INTO app.notes (owner_id, title, body) VALUES "
-            f"('{uuid.uuid4()}', 'wal-signal', 'forcing a segment')",
+            f"INSERT INTO app.notes (owner_id, title) VALUES ('{uuid.uuid4()}', 'wal-signal')",
         )
         psql(project_b, "SELECT pg_switch_wal()")
 
@@ -501,8 +498,7 @@ def test_wal_archiving_failure_is_visible(project_b: dict[str, Any], require_roo
     while time.monotonic() < deadline:
         psql(
             project_b,
-            "INSERT INTO app.notes (owner_id, title, body) VALUES "
-            f"('{uuid.uuid4()}', 'wal-repair', 'forcing a segment')",
+            f"INSERT INTO app.notes (owner_id, title) VALUES ('{uuid.uuid4()}', 'wal-repair')",
         )
         psql(project_b, "SELECT pg_switch_wal()")
         repaired = backup_report.parse_archiver(psql(project_b, backup_report.ARCHIVER_QUERY))
