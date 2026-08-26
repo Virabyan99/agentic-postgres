@@ -59,7 +59,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import backup_report, runtime_override  # noqa: E402
+from agentic_postgres import backup_report, naming, runtime_override  # noqa: E402
 
 EXIT_INPUT = 2
 EXIT_PREREQUISITE = 3
@@ -160,9 +160,15 @@ def database_container(document: dict) -> str:
     not pin it with `container_name:` (D55), so building the name here would
     depend on a convention this repository has chosen not to depend on.
     """
+    # Derived from the project key rather than read from `compose.project_name`
+    # (D592). Only the RENDERED document publishes that field; the DEPLOYED
+    # document -- which is what `--outputs /etc/agentic-postgres/projects/<key>/`
+    # names, and what an operator actually passes -- does not carry a `compose`
+    # block at all. `naming.compose_project_name` is the one authority and
+    # `naming.derive` calls it too, so this is not a second derivation.
     filters = list(
         runtime_override.database_container_filters(
-            (document.get("compose") or {}).get("project_name", "")
+            naming.compose_project_name(project_key(document))
         )
     )
     arguments = ["docker", "ps"]

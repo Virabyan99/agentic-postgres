@@ -147,6 +147,57 @@ def test_the_services_that_do_carry_it_still_do(model: dict[str, Any]) -> None:
     assert runtime_override.DATABASE_SERVICE not in carriers
 
 
+def test_the_deployed_document_carries_no_compose_block() -> None:
+    """The premise of D592, asserted so the tests below cannot pass vacuously.
+
+    The RENDERED document publishes `compose.project_name`; the DEPLOYED one --
+    what `/etc/agentic-postgres/projects/<key>/outputs.json` holds, and what an
+    operator passes to `bin/backup.sh --outputs` -- publishes no `compose` block
+    at all. A selector that read the published value therefore worked from a
+    render and raised from a deployment, which is exactly how step 6c passed and
+    the very next operator command failed.
+    """
+    source = (REPO_ROOT / "src" / "agentic_postgres" / "deployed_output.py").read_text("utf-8")
+    assert '"document_kind": "deployed"' in source, "this test is reading the wrong module"
+    assert '"compose": {' not in source, (
+        "the deployed document now carries a `compose` block. If it publishes "
+        "`project_name`, D592's reasoning should be re-read before anything "
+        "starts depending on it again."
+    )
+
+
+def test_the_selector_needs_only_the_project_key_which_both_kinds_carry() -> None:
+    """One code path for both document kinds (D592).
+
+    Deriving through `naming.compose_project_name` is not a second derivation
+    under ADR 0002 -- it IS the authority, and `naming.derive` calls it too.
+    What ADR 0002 forbids is re-implementing `f"apg-{key}"` elsewhere, which is
+    what this exists to prevent.
+    """
+    from agentic_postgres import naming
+
+    rendered_path = REPO_ROOT / ".generated" / FIXTURE / "outputs.json"
+    if not rendered_path.is_file():
+        pytest.fail(f"{rendered_path} does not exist; render the fixtures first")
+    rendered = json.loads(rendered_path.read_text(encoding="utf-8"))
+
+    key = rendered["project"]["key"]
+    derived = naming.compose_project_name(key)
+
+    # The published value and the derivation must agree, or one of them is wrong.
+    assert derived == rendered["compose"]["project_name"], (
+        "naming.compose_project_name disagrees with what the render published"
+    )
+
+    # And a document shaped like the DEPLOYED one -- no `compose` block at all --
+    # must still produce the same filters.
+    deployed = {"project": {"key": key}, "database": {"name": "x"}}
+    assert "compose" not in deployed
+    assert runtime_override.database_container_filters(
+        naming.compose_project_name(deployed["project"]["key"])
+    ) == runtime_override.database_container_filters(rendered["compose"]["project_name"])
+
+
 def test_the_selector_reads_the_project_name_from_the_document() -> None:
     """The value is the deployed document's, not a second derivation of the key.
 

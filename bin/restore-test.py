@@ -52,7 +52,12 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import backup_report, restore_drill, runtime_override  # noqa: E402
+from agentic_postgres import (  # noqa: E402
+    backup_report,
+    naming,
+    restore_drill,
+    runtime_override,
+)
 from agentic_postgres.secrets_contract import load_secret_contract  # noqa: E402
 
 EXIT_INPUT = 2
@@ -150,11 +155,30 @@ def load_document(project_dir: Path) -> dict[str, Any]:
     return document
 
 
+def project_key(document: dict[str, Any]) -> str:
+    """The project key, which BOTH document kinds carry.
+
+    `bin/backup.py` has the same accessor for the same reason: the deployed
+    document publishes no `compose` block, so the key is the one identity a
+    caller can rely on being there (D592).
+    """
+    key = (document.get("project") or {}).get("key")
+    if not key:
+        raise OperatorError(EXIT_STATE, "the deployed document names no project key")
+    return str(key)
+
+
 def database_container(document: dict[str, Any]) -> str:
     """The running database container, found by label rather than predicted."""
+    # Derived from the project key rather than read from `compose.project_name`
+    # (D592). Only the RENDERED document publishes that field; the DEPLOYED
+    # document -- which is what `--outputs /etc/agentic-postgres/projects/<key>/`
+    # names, and what an operator actually passes -- does not carry a `compose`
+    # block at all. `naming.compose_project_name` is the one authority and
+    # `naming.derive` calls it too, so this is not a second derivation.
     filters = list(
         runtime_override.database_container_filters(
-            (document.get("compose") or {}).get("project_name", "")
+            naming.compose_project_name(project_key(document))
         )
     )
     arguments = ["ps"]

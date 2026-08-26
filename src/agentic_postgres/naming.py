@@ -579,6 +579,29 @@ def backup_bucket_name(key: str, override: str | None = None) -> str:
     return r2_bucket(override if override else f"apg-{key}-backup", context="r2_bucket_backup")
 
 
+def compose_project_name(key: str) -> str:
+    """The Compose project name, and the ONE place it is derived.
+
+    Split out of :func:`derive` for :func:`backup_network_name`'s reason -- one
+    derivation, more than one reader -- and the second reader is what forced it
+    (D592): `runtime_override.database_container_filters` selects a project's
+    database container by `com.docker.compose.project`, and it is called with
+    **both** document kinds.
+
+    The RENDERED document publishes this as `compose.project_name`. The DEPLOYED
+    document does not publish it at all -- it carries `project`, `host`, `routes`,
+    `database` and the rest, and `compose` is not among them. So a selector that
+    read the published value worked from a render and raised from a deployment,
+    which is what `bin/backup.sh --outputs /etc/...` hands it.
+
+    Calling this is not a second derivation under ADR 0002: it *is* the
+    authority, and `derive` calls it too. What ADR 0002 forbids is
+    re-implementing `f"apg-{key}"` somewhere else, which is exactly what this
+    exists to stop.
+    """
+    return compose_name(f"apg-{key}", context="compose_project")
+
+
 def backup_network_name(key: str) -> str:
     """The egress network the cluster reaches its backup repository over.
 
@@ -926,7 +949,7 @@ def derive(
         domain=domain,
         key=key,
         sql_key=key_sql,
-        compose_project_name=compose_name(f"apg-{key}", context="compose_project"),
+        compose_project_name=compose_project_name(key),
         edge_network=compose_name(f"apg-{key}-edge", context="compose_network_edge"),
         internal_network=compose_name(f"apg-{key}-internal", context="compose_network_internal"),
         backup_network=backup_network_name(key),
