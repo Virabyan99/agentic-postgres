@@ -1314,10 +1314,39 @@ Done, over SSH as `op`, with no root and no Docker:
   and both `postgres` containers are on `internal` **alone**, which is the
   pre-Session-10 state confirmed from the host rather than assumed.
 
+**The two R2 buckets now exist.** Created 2026-08-26 with the operator's own
+authenticated `wrangler` against account `ddfa208f…`, which is the same account
+`storage.account_id` already names:
+
+    apg-alpha-dev-backup    created 2026-08-26T04:21:56Z
+    apg-beta-dev-backup     created 2026-08-26T04:22:00Z
+
+That is the operator's step being taken by the operator's tooling, out of band —
+it is not this repository creating a bucket, and ADR 0110 is unchanged.
+
+**The R2 API tokens are NOT done and could not be**, for two independent reasons
+worth keeping apart:
+
+- *Capability.* The available Cloudflare credential is wrangler's OAuth token,
+  and it cannot read or create account API tokens: both
+  `GET /accounts/{id}/tokens` and `.../tokens/permission_groups` answer
+  **`9109: Unauthorized to access requested resource`**. Creating one needs a
+  credential with *API Tokens: Edit*, which this machine does not hold.
+- *Handling.* Even with the permission, an R2 token's secret access key must not
+  be fetched into a terminal, a log or an assistant's context — the standing
+  rule that no secret value reaches a log, and the operator guide's own "do not
+  paste the secret into a terminal". The safe shape, if a permitted credential
+  ever exists, is a **script** that creates the token, computes the SHA-256 the
+  secret access key is defined as, writes both to `0600` files, sets them with
+  `infisical secrets set NAME=@file` — which keeps the value out of process
+  arguments — and shreds the files, printing nothing but a verdict.
+
 Needs a human at a TTY, in this order:
 
-1. **Create an R2 bucket and token per project, at Cloudflare**, and paste both
-   halves into the provider at `/backup`. Nothing here can do it (ADR 0110).
+1. **Issue an R2 API token per bucket, at Cloudflare**, and paste both halves
+   into the provider at `/backup`. The buckets are ready; only the tokens are
+   outstanding. Nothing here can do it (ADR 0110), and this run confirmed that
+   is a permission boundary and not a missing feature.
 2. **Turn `backup.enabled` on** in `project.alpha.yaml` and `project.beta.yaml`
    with `bucket` and a **quoted** `account_id` (D585), then re-render.
 3. `sudo ./deploy.sh … --through-session 10`, per project. Step 6c creates the
