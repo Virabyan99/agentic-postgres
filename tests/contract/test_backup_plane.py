@@ -760,6 +760,95 @@ def test_a_disabled_project_still_renders_a_file_and_it_names_no_repository() ->
     )
 
 
+def test_the_rendered_config_is_readable_by_the_uid_the_archiver_runs_as() -> None:
+    """D588: it was `0600`, and the archiver runs as 999.
+
+    pgBackRest refuses an unreadable config with
+    `[041]: unable to open file ... for read: [13] Permission denied` -- loudly,
+    and **from two places at once**: the deploy's step 6c, and every
+    `archive_command` the postmaster runs afterwards. Rig 9's arm K7 measured
+    that exact exit code for a root-owned file under a container running as 999,
+    and nothing connected it to the rendered config because the rig supplied its
+    own config.
+
+    Asserted as a MODE rather than by reading the file as another uid: the test
+    runs as whoever runs the suite, and `os.access` under root answers yes to
+    everything -- which would make this pass on the one machine where it matters
+    least.
+    """
+    import os
+    import stat
+
+    from agentic_postgres import rendering, runtime_override
+
+    rendered = REPO_ROOT / ".generated" / "fixture-alpha-dev"
+    if not rendered.is_dir():
+        pytest.fail(f"{rendered} does not exist; render the fixtures first")
+
+    path = rendered / runtime_override.PGBACKREST_CONF_FILENAME
+    assert path.is_file(), f"{path} was not rendered"
+
+    mode = os.stat(path).st_mode
+    assert mode & stat.S_IROTH, (
+        f"{path.name} is {oct(mode & 0o777)}; the container that reads it runs as "
+        "999 and is neither its owner nor in its group, so pgBackRest exits 41 -- "
+        "at step 6c AND at every archive_command afterwards (D588)"
+    )
+    assert (mode & 0o777) == rendering.PGBACKREST_CONF_MODE
+
+    # It may be readable because it holds no credential, and that is asserted
+    # beside the mode rather than assumed: widening a file that carried one
+    # would be the same edit with the opposite meaning.
+    text = path.read_text(encoding="utf-8")
+    for option in ("repo1-s3-key", "repo1-s3-key-secret", "repo1-cipher-pass"):
+        assert f"{option}=" not in text, (
+            f"{path.name} is world-readable AND names {option}. One of those two "
+            "has to change, and it is not the mode."
+        )
+
+
+def test_every_rendered_file_a_container_reads_is_readable_by_it() -> None:
+    """The general form, so a fourth artefact cannot repeat this.
+
+    Three rendered artefacts are read by a container rather than by root: the
+    migration set (uid 65532), the OpenAPI snapshots (65532), and the archiver's
+    config (999). Each was given a widened mode separately, and the third was
+    missed for a whole session. This asserts the property over the directory
+    instead of over a list of names.
+    """
+    import os
+    import stat
+
+    rendered = REPO_ROOT / ".generated" / "fixture-alpha-dev"
+    if not rendered.is_dir():
+        pytest.fail(f"{rendered} does not exist; render the fixtures first")
+
+    # What a container mounts, by name. Everything else under .generated/<key>/
+    # is read by root or by the operator and stays 0600.
+    container_read = {
+        "pgbackrest.conf": "postgres, uid 999",
+        "openapi.json": "docs, uid 65532",
+        "app-openapi.json": "docs, uid 65532",
+    }
+    for name, reader in container_read.items():
+        path = rendered / name
+        assert path.is_file(), f"{name} was not rendered"
+        mode = os.stat(path).st_mode
+        assert mode & stat.S_IROTH, (
+            f"{name} is {oct(mode & 0o777)} and is mounted into {reader}, which is "
+            "neither its owner nor in its group"
+        )
+
+    # And the control: a file NOT mounted into any container must stay private,
+    # or this test is asserting that everything is readable.
+    private = rendered / "outputs.json"
+    assert private.is_file()
+    assert not os.stat(private).st_mode & stat.S_IROTH, (
+        "outputs.json is world-readable; it describes a deployment and is read by "
+        "root, so a widened mode here is a real change and not a fix"
+    )
+
+
 def test_the_rendered_config_never_names_an_option_the_credential_files_set() -> None:
     """Run 8b's constraint, and getting it wrong takes every archiver down (ADR 0153 §5).
 

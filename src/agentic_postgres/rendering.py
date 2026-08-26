@@ -76,14 +76,39 @@ SNAPSHOT_FILENAME = "openapi.json"
 CANONICAL_APP_OPENAPI = REPO_ROOT / "contracts" / "app-openapi.canonical.json"
 APP_SNAPSHOT_FILENAME = "app-openapi.json"
 
-#: World-readable, and the only rendered file that is. Every other file here is
-#: `0600` because it describes a deployment; this one is a **published
-#: document** -- it is served to anyone who can reach the page, it is a
-#: committed artefact a human reviewed, and the container that reads it runs as
-#: 65532 rather than as the owner of the rendered directory. A `0600` copy would
-#: reach the mount and be unreadable, which `serve.py` reports as 503: correct,
-#: and permanently.
+#: World-readable, because it is a **published document**: served to anyone who
+#: can reach the page, a committed artefact a human reviewed, and read by a
+#: container running as 65532 rather than as the owner of the rendered directory.
+#: A `0600` copy would reach the mount and be unreadable, which `serve.py`
+#: reports as 503: correct, and permanently.
+#:
+#: It was "the only rendered file that is" until Session 10 Run 11, and that
+#: sentence is deleted rather than qualified -- `PGBACKREST_CONF_MODE` is the
+#: second, and a stale "the only one" is how the next reader concludes there is
+#: nothing else to check.
 SNAPSHOT_MODE = 0o444
+
+#: The archiver's configuration, read by a container running as **999**.
+#:
+#: The third rendered artefact a container reads, after the migration set (uid
+#: 65532) and the OpenAPI snapshots, and it was `0600` until a deploy proved it
+#: (D588). pgBackRest refuses an unreadable config with
+#: `[041]: unable to open file ... for read: [13] Permission denied` -- loudly,
+#: which is the good news, and **from two places at once**: the deploy's step 6c,
+#: and every `archive_command` the postmaster runs afterwards. Rig 9's arm K7
+#: measured that exact code for a root-owned file under a container running as
+#: 999, and nothing connected it to the rendered config because the rig supplied
+#: its own.
+#:
+#: `0444` and not `0640 root:999`: the enclosing directory stays `0700`
+#: root-owned on the host, so widening this does not make the file readable by
+#: anyone who could not already traverse to it -- the argument
+#: `MIGRATION_FILE_MODE` already makes. And **the file carries no credential by
+#: construction**: `build_pgbackrest_conf` omits `repo1-s3-key`,
+#: `repo1-s3-key-secret` and `repo1-cipher-pass`, and
+#: `test_the_rendered_config_never_names_an_option_the_credential_files_set`
+#: asserts it against the contract rather than against a list.
+PGBACKREST_CONF_MODE = 0o444
 
 GENERATED_ROOT = REPO_ROOT / ".generated"
 STAGING_ROOT = GENERATED_ROOT / ".staging"
@@ -1314,6 +1339,21 @@ def project_lock(project_key: str) -> Iterator[None]:
         os.close(handle)
 
 
+def write_readable(path: Path, mode: int, payload: bytes) -> None:
+    """Create a new file at an explicit mode and flush it to disk.
+
+    `write_private`'s sibling, for the rendered artefacts a **container** reads.
+    The mode is a required argument rather than a default: the whole class of
+    defect this exists for is a file whose mode nobody stated (D588).
+    """
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    with os.fdopen(handle, "wb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.chmod(path, mode)
+
+
 def write_private(path: Path, payload: bytes) -> None:
     """Create a new file with owner-only mode and flush it to disk."""
     handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, FILE_MODE)
@@ -1484,8 +1524,9 @@ def render_project(
             # does not exist makes Docker create a DIRECTORY there and the
             # container opens a directory where its config should be (D463).
             backup_block = {**config.BACKUP_DEFAULTS, **(project.get("backup") or {})}
-            write_private(
+            write_readable(
                 staging / runtime_override.PGBACKREST_CONF_FILENAME,
+                PGBACKREST_CONF_MODE,
                 build_pgbackrest_conf(
                     identity,
                     outputs,
