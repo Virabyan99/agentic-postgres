@@ -10,12 +10,30 @@ are the payloads this release rendered and nothing else.
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, migrations, rendering
+from agentic_postgres import REPO_ROOT, migrations, rendering, secrets_contract
+
+
+def _calls(node: ast.Call, name: str) -> bool:
+    """Whether this call is `name(...)` or `something.name(...)`."""
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        return func.attr == name
+    return isinstance(func, ast.Name) and func.id == name
+
+
+def _calls_chmod(node: ast.Call) -> bool:
+    return _calls(node, "chmod")
+
+
+def _calls_chown(node: ast.Call) -> bool:
+    return _calls(node, "chown")
+
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.database]
 
@@ -92,46 +110,122 @@ def test_the_modes_are_the_ones_a_non_root_container_can_read() -> None:
 
 #: The three things in a rendered directory that are not `0600`, and why.
 #:
-#: `migrations` is a directory the installer widens so dbmate can read it.
+#: Every entry a rendered project directory may contain, with the **exact** mode
+#: it must carry — not a list of names to skip (ADR 0154).
+#:
+#: This replaced a `RENDERED_EXEMPTIONS` set when Session 10 added a third mode.
+#: The set had a hole this mapping does not: an exempted name was `continue`d,
+#: so nothing asserted its mode at all and `openapi.json` could have been `0666`
+#: and stayed green. Here every entry states its mode, and a file the mapping
+#: does not name is a failure rather than a silent pass.
+#:
+#: `migrations` is a directory the render widens so dbmate can read it.
 #: `openapi.json` and `app-openapi.json` are the reviewed OpenAPI snapshots the
 #: two documentation surfaces serve (D226): each is a **published document**
 #: rather than a description of a deployment, each is a committed artefact a
 #: human approved, and the container that reads them runs as 65532 rather than
-#: as the owner of this directory (ADR 0069). A `0600` copy would reach the
-#: mount unreadable, which `serve.py` reports as 503 -- correctly, and
-#: permanently.
-RENDERED_EXEMPTIONS = {
-    "migrations",
-    rendering.SNAPSHOT_FILENAME,
-    rendering.APP_SNAPSHOT_FILENAME,
+#: as the owner of this directory (ADR 0069).
+#: `pgbackrest.conf` is the archiver's configuration, read by a container
+#: running as **999**. It was `0600` until a deploy proved it unreadable from
+#: two places at once — step 6c and every `archive_command` after it (D588).
+#:
+#: A `0600` copy of any of the four would reach its mount unreadable. For the
+#: snapshots `serve.py` reports 503; for the config pgBackRest reports
+#: `[041] … Permission denied`. Both are correct, and both are permanent.
+#:
+#: **Every name and every mode here is a literal, and that is deliberate.**
+#: The first draft wrote `rendering.PGBACKREST_CONF_MODE` and friends, and
+#: battery Q1 -- D588 reintroduced, `PGBACKREST_CONF_MODE` set back to `0o600`
+#: -- **survived it**: mutating the constant moved both sides of the assertion
+#: at once. That is §6's *a test comparing two constants is not testing the
+#: thing between them*, and it made the test tautological for exactly the drift
+#: it exists to catch. `rendering.py` holds the reasoning for each mode; this
+#: holds the contract, and the two have to be able to disagree.
+RENDERED_FILE_MODES: dict[str, int] = {
+    "migrations": 0o755,
+    "compose.env": 0o600,
+    "outputs.json": 0o600,
+    "rendered-summary.txt": 0o600,
+    "pgbackrest.conf": 0o444,
+    "openapi.json": 0o444,
+    "app-openapi.json": 0o444,
 }
 
 
-def test_everything_else_in_the_rendered_directory_stays_owner_only() -> None:
-    """The exemption is narrow, and this is what keeps it narrow."""
-    for path in ALPHA.iterdir():
-        if path.name in RENDERED_EXEMPTIONS:
-            continue
-        assert path.stat().st_mode & 0o777 == rendering.FILE_MODE, path.name
+def test_every_rendered_entry_has_a_stated_mode_and_carries_it() -> None:
+    """Both directions, from the directory (ADR 0154).
+
+    The mapping is closed *and* exact: an entry the render produces that nobody
+    stated a mode for fails, and a stated entry whose mode drifted fails. The
+    predecessor asserted only the second, and only for the names it did not skip.
+    """
+    present = {path.name for path in ALPHA.iterdir()}
+    stated = set(RENDERED_FILE_MODES)
+
+    assert present == stated, (
+        f"the render produced {sorted(present - stated)} that no mode is stated for, and "
+        f"states {sorted(stated - present)} that it did not produce. A new rendered "
+        "artefact needs a row in RENDERED_FILE_MODES with the reason for its mode "
+        "(ADR 0154) -- not an exemption."
+    )
+
+    for path in sorted(ALPHA.iterdir()):
+        expected = RENDERED_FILE_MODES[path.name]
+        assert path.stat().st_mode & 0o777 == expected, (
+            f"{path.name} is {path.stat().st_mode & 0o777:04o}, stated {expected:04o}"
+        )
 
 
-def test_the_published_snapshot_is_the_only_world_readable_file() -> None:
-    """The exemption list is closed, asserted from the directory rather than from
-    the list.
+def test_no_world_readable_rendered_file_carries_credential_material() -> None:
+    """The closed list, and then the property the list is standing in for.
 
-    Written this way round on purpose: the test above skips what the list names,
-    so a third entry added to the list would silence it. This one goes red for
-    any world-readable file the list does not name, which is the direction that
-    matters.
+    Written from the directory rather than from the mapping, so a fourth
+    world-readable artefact goes red here even if somebody remembered to give it
+    a row above -- that is the direction that matters.
+
+    And a name on the list is no longer sufficient (ADR 0154). Each
+    world-readable file is *read*, and asserted to contain none of the pgBackRest
+    options the credential files set. Those option names come from the secrets
+    contract rather than from a list written here, so a fourth credential added
+    to `secrets.required.yaml` is covered on the day it is added. The predecessor
+    checked names only, and a correctly-listed file that began carrying a secret
+    would have passed it.
     """
     readable = sorted(
         path.name for path in ALPHA.iterdir() if path.is_file() and path.stat().st_mode & 0o004
     )
-    assert readable == sorted([rendering.SNAPSHOT_FILENAME, rendering.APP_SNAPSHOT_FILENAME]), (
+    # Literals, for the reason RENDERED_FILE_MODES states: a name read from the
+    # renderer moves with the renderer, and the list would agree with itself
+    # through a rename nobody reviewed.
+    assert readable == sorted(["openapi.json", "app-openapi.json", "pgbackrest.conf"]), (
         f"{readable} are world-readable in the rendered directory. Only the two published "
-        "snapshots may be, and only because they are served to whoever holds the "
-        "documentation credential"
+        "snapshots and the archiver's config may be: the snapshots because they are served "
+        "to whoever holds the documentation credential, the config because the archiver "
+        "runs as 999 (ADR 0154)"
     )
+
+    contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    credential_options = {
+        consumer["option"]
+        for secret in contract["secrets"]
+        for consumer in secret.get("consumers", [])
+        if consumer.get("format") == "pgbackrest"
+    }
+    assert credential_options, (
+        "the secrets contract declares no pgbackrest-format consumer, so this test is "
+        "asserting nothing. It reads `option` off every consumer whose format is "
+        "`pgbackrest`; if that format was renamed, rename it here too"
+    )
+
+    for name in readable:
+        payload = (ALPHA / name).read_text(encoding="utf-8", errors="replace")
+        for option in sorted(credential_options):
+            assert option not in payload, (
+                f"{name} is world-readable and names {option!r}, which is an option a "
+                "per-consumer secret file sets under /etc/pgbackrest/conf.d. Either the "
+                "value is in the render -- which is a leak -- or the option is being set "
+                "twice and the last file wins (ADR 0154)"
+            )
 
 
 def test_the_published_snapshot_is_the_reviewed_one() -> None:
@@ -145,17 +239,70 @@ def test_the_published_snapshot_is_the_reviewed_one() -> None:
     assert served == rendering.CANONICAL_OPENAPI.read_bytes()
 
 
-def test_the_install_exemption_is_the_migrations_directory_and_nothing_deeper() -> None:
-    """Source-level, because the installer needs root to run.
+def test_the_install_imposes_no_mode_of_its_own() -> None:
+    """What the code produces, parsed -- not a string that stands for it.
 
-    `"migrations" in path.parts` would widen the mode of anything a future
-    render put under a directory of that name at any depth. The predicate is
-    written against one directory and its immediate children.
+    This replaced a scan asserting that `_is_migration_artifact` *appeared* in
+    `bin/deploy-project.py`. It was D464's shape (two strings standing in for a
+    construct) and it failed for the best possible reason: the correct repair
+    DELETED the function. `install_rendered` used to re-impose `0600` on
+    everything it copied except the migration set, which made it a second
+    authority over a decision `rendering.py` had already taken three times --
+    and this one won, so the archiver's config was rendered `0444` and installed
+    `0600` (D588, D589).
+
+    The property is now the one D589 established, and it is a property of the
+    function rather than of the file's text: `install_rendered` calls no `chmod`
+    at all. `shutil.copytree` uses `copy2`, which preserves modes, so what the
+    render decided is what arrives; the install decides ownership only.
+
+    A rename cannot defeat this and a mention cannot satisfy it (ADR 0154).
     """
     source = (REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8")
-    assert "_is_migration_artifact" in source
-    assert 'staging / "migrations"' in source
-    assert "path.parent == migrations_dir" in source
+    tree = ast.parse(source)
+
+    function = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "install_rendered"
+        ),
+        None,
+    )
+    assert function is not None, (
+        "bin/deploy-project.py defines no `install_rendered`. If it was renamed, this "
+        "test needs the new name -- an absent function is not a passing assertion"
+    )
+
+    # The premise: chmod is spelled somewhere in this module, so a walk that
+    # finds none inside `install_rendered` is finding a real absence rather than
+    # matching nothing. Without this the test would pass if `chmod` were called
+    # something else everywhere (D509: a control that cannot fail for the reason
+    # it is watching for is not a control).
+    module_chmods = [
+        node for node in ast.walk(tree) if isinstance(node, ast.Call) and _calls_chmod(node)
+    ]
+    assert module_chmods, (
+        "no chmod call anywhere in bin/deploy-project.py, so this test cannot tell "
+        "`install_rendered` imposes no mode from its own detector being broken"
+    )
+
+    offenders = [
+        ast.unparse(node.func)
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call) and _calls_chmod(node)
+    ]
+    assert not offenders, (
+        f"install_rendered calls {offenders}. The render decides a rendered file's mode "
+        "and the install decides its owner (ADR 0154). Re-imposing one here makes this a "
+        "second authority, which is how a 0444 config reached the archiver as 0600 (D589)"
+    )
+
+    # And the positive half: it does change ownership, or it is not doing its job.
+    chowns = [
+        node for node in ast.walk(function) if isinstance(node, ast.Call) and _calls_chown(node)
+    ]
+    assert chowns, "install_rendered changes no ownership; the destination is root-owned state"
 
 
 def test_the_verifier_refuses_a_file_edited_after_rendering(tmp_path: Path) -> None:
