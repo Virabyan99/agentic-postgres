@@ -101,6 +101,7 @@ PYTHON_COMMANDS = (
     "bin/render-mcp-catalog.py",
     "bin/render-config.py",
     "bin/render-jwks.py",
+    "bin/render-mount-digests.py",
     "bin/render-secret-override.py",
     "bin/restore-test.py",
     "bin/rotate-signing-key.py",

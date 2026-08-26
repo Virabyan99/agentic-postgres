@@ -118,6 +118,7 @@ MODEL=""
 PROJECT_NAME=""
 OVERRIDE_PATH=""
 SECRETS_OVERRIDE_PATH=""
+MOUNT_OVERRIDE_PATH=""
 declare -a COMPOSE_ARGS=()
 declare -a ENV_FILE_ARGS=()
 declare -a MODEL_FILE_ARGS=()
@@ -362,6 +363,19 @@ configure_project_scope() {
   # single `--file` ordering decides both.
   SECRETS_OVERRIDE_PATH="${PROJECT_DIR}/secrets-compose.override.yaml"
 
+  # The third override: one label per service, whose value is a digest of what
+  # that service bind-mounts (D591). Compose's config hash covers the service
+  # DEFINITION, and a bind source path is the identical string on every deploy
+  # -- so replacing the rendered directory, which `install_rendered` does with
+  # `os.replace` and therefore with new inodes, changes nothing Compose can see
+  # and the running container keeps reading a DELETED inode. Hashing the content
+  # into a label is what makes the change visible, and it recreates exactly the
+  # affected services rather than the world.
+  #
+  # Loaded last, so its labels are merged over the router labels the first
+  # override renders rather than under them.
+  MOUNT_OVERRIDE_PATH="${PROJECT_DIR}/mounts-compose.override.yaml"
+
   if [ "${RUNTIME}" -eq 1 ] && [ -f "${runtime_env}" ]; then
     assert_disjoint "${LOCK_ENV}" "${runtime_env}"
     assert_disjoint "${project_env}" "${runtime_env}"
@@ -372,6 +386,9 @@ configure_project_scope() {
   fi
   if [ "${RUNTIME}" -eq 1 ] && [ -f "${SECRETS_OVERRIDE_PATH}" ]; then
     MODEL_FILE_ARGS+=(--file "${SECRETS_OVERRIDE_PATH}")
+  fi
+  if [ "${RUNTIME}" -eq 1 ] && [ -f "${MOUNT_OVERRIDE_PATH}" ]; then
+    MODEL_FILE_ARGS+=(--file "${MOUNT_OVERRIDE_PATH}")
   fi
 }
 

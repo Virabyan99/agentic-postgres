@@ -16,8 +16,10 @@ middleware chain from its routes.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Iterable
 from ipaddress import ip_address
+from pathlib import Path
 from typing import Any
 
 import yaml
@@ -340,6 +342,8 @@ __all__ = [
     "MCP_SERVICE_PORT",
     "MIGRATIONS_MOUNT",
     "MIGRATION_SERVICE",
+    "MOUNT_DIGEST_LABEL",
+    "MOUNT_OVERRIDE_FILENAME",
     "POOLER_SERVICE",
     "POOLER_SERVICE_PORT",
     "POST_ARTIFACT_SERVICES",
@@ -353,11 +357,15 @@ __all__ = [
     "STORAGE_JWKS_CONTAINER_PATH",
     "STORAGE_SERVICE",
     "STORAGE_SERVICE_PORT",
+    "build_mount_override",
     "build_override",
     "is_loopback",
     "mount_sources",
+    "mounted_digest",
+    "mounted_paths_by_service",
     "override_service_names",
     "publication",
+    "render_mount_override",
     "render_override",
 ]
 
@@ -681,11 +689,6 @@ def mount_sources(payload: bytes, services: Iterable[str]) -> tuple[str, ...]:
     -- including its top-level key -- knowledge this module has and `bin/` does
     not (D464).
 
-    **Takes the rendered bytes, not a parsed document.** The deploy holds the
-    payload it is about to write, and parsing it here keeps the document's shape
-    -- including its top-level key -- knowledge this module has and `bin/` does
-    not (D464).
-
     **Derived, not declared** (ADR 0133). A hand-maintained inventory of mounts
     is precisely the thing that goes stale when a mount is added, which is the
     defect this function exists because of -- so it parses the document the
@@ -696,7 +699,6 @@ def mount_sources(payload: bytes, services: Iterable[str]) -> tuple[str, ...]:
     named services: at step 5 the deferred services' artefacts do not exist yet
     and asking about them would refuse a correct deploy.
     """
-    document = yaml.safe_load(payload.decode("utf-8")) or {}
     document = yaml.safe_load(payload.decode("utf-8")) or {}
     wanted = set(services)
     found: dict[str, None] = {}
@@ -710,6 +712,116 @@ def mount_sources(payload: bytes, services: Iterable[str]) -> tuple[str, ...]:
             if source.startswith("/"):
                 found[source] = None
     return tuple(sorted(found))
+
+
+#: The label whose value is a digest of what a service bind-mounts.
+#:
+#: **This exists so that Compose can see a change it structurally cannot see
+#: otherwise** (D591). `install_rendered` ends in `os.replace(staging,
+#: destination)` -- a new directory with new inodes -- and `project-runtime up`
+#: runs `up -d --build --wait` with no `--force-recreate`. Compose's config hash
+#: covers the service *definition*, and a bind mount's source path is the
+#: identical string on every deploy, so nothing looks changed and the running
+#: container keeps its open file handle on a **deleted inode**.
+#:
+#: Measured on the host: the installed `pgbackrest.conf` was `-r--r--r--` dated
+#: 06:14 while the running container saw `-rw------- 0 root root` dated 05:36 --
+#: link count 0, from a container created before two consecutive correct fixes,
+#: neither of which could reach it. Three deploys went to that one defect.
+#:
+#: Compose hashes labels into the config hash, so a service whose mounted bytes
+#: changed gets recreated and one whose bytes did not does not. That is the
+#: difference between this and `--force-recreate`, which restarts the world on
+#: every deploy including the services nothing touched.
+MOUNT_DIGEST_LABEL = "apg.mounted.sha256"
+
+#: Written beside the runtime and secret overrides, and regenerated immediately
+#: before `up` for the same reason the secret override is: it must describe the
+#: files as they are at the moment the containers are created, which is after
+#: the deploy has written the late artefacts (`jwks.json`, the snapshots) and
+#: after a reboot has changed nothing at all.
+MOUNT_OVERRIDE_FILENAME = "mounts-compose.override.yaml"
+
+
+def mounted_paths_by_service(payload: bytes) -> dict[str, tuple[str, ...]]:
+    """Every bind-mount source, per service, out of the rendered override.
+
+    Derived from the document rather than declared (ADR 0133), for the reason
+    :func:`mount_sources` gives: a hand-maintained inventory of mounts is
+    exactly the thing that goes stale when a mount is added, and a stale
+    inventory here means a service whose content changed is silently not
+    recreated -- which is the defect this is for.
+    """
+    document = yaml.safe_load(payload.decode("utf-8")) or {}
+    found: dict[str, tuple[str, ...]] = {}
+    for name, service in sorted((document.get("services") or {}).items()):
+        sources = sorted(
+            volume.split(":", 1)[0]
+            for volume in (service.get("volumes") or ())
+            # A named volume has no leading `/` and is not a bind mount. Its
+            # content is not something a deploy replaces underneath a container.
+            if volume.split(":", 1)[0].startswith("/")
+        )
+        if sources:
+            found[name] = tuple(sources)
+    return found
+
+
+def mounted_digest(sources: Iterable[str]) -> str:
+    """A digest of the CONTENT at `sources`, stable across identical bytes.
+
+    A file contributes its path and its bytes; a directory contributes every
+    file under it, sorted. **Path as well as bytes**, so that moving a mount to
+    a different destination with identical content still counts as a change --
+    the container would have to be recreated for that too.
+
+    A source that does not exist contributes its path and a marker rather than
+    raising: at step 5 the deferred services' artefacts do not exist yet
+    (`mount_sources` makes the same allowance), and a digest that refused to be
+    computed would turn a correct deploy into a failure. Its **absence is part
+    of the digest**, so the artefact appearing later changes the value and the
+    container is recreated then.
+    """
+    digest = hashlib.sha256()
+    for source in sorted(sources):
+        path = Path(source)
+        digest.update(source.encode("utf-8"))
+        digest.update(b"\0")
+        if path.is_dir():
+            for child in sorted(p for p in path.rglob("*") if p.is_file()):
+                digest.update(str(child.relative_to(path)).encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(child.read_bytes())
+        elif path.is_file():
+            digest.update(path.read_bytes())
+        else:
+            digest.update(b"<absent>")
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def build_mount_override(payload: bytes) -> dict[str, Any]:
+    """One label per service that bind-mounts anything, keyed by its content."""
+    services = {
+        name: {"labels": {MOUNT_DIGEST_LABEL: mounted_digest(sources)}}
+        for name, sources in mounted_paths_by_service(payload).items()
+    }
+    return {"services": services}
+
+
+def render_mount_override(payload: bytes) -> bytes:
+    """The document Compose reads, with the reason it exists at the top."""
+    header = (
+        "# Generated by bin/project-runtime.sh from the runtime override.\n"
+        "# Do not edit; do not shell-source. It is rewritten before every start,\n"
+        "# because it must describe the mounted files as they are at that moment.\n"
+        "#\n"
+        "# Each label is a digest of what that service bind-mounts. Compose hashes\n"
+        "# labels into its config hash, so a service whose mounted CONTENT changed\n"
+        "# is recreated and one whose content did not is left alone (D591).\n"
+    )
+    body = yaml.safe_dump(build_mount_override(payload), sort_keys=True, default_flow_style=False)
+    return (header + body).encode("utf-8")
 
 
 def _docs_labels(

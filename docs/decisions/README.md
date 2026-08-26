@@ -218,3 +218,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0152](0152-what-a-restore-drill-can-honestly-report.md) | What a restore drill can honestly report | 10 | Accepted |
 | [0153](0153-the-archiver-reads-its-credential-from-a-config-include.md) | The archiver reads its credential from a config include, not from an environment | 10 | Accepted |
 | [0154](0154-the-render-decides-a-rendered-files-mode-and-the-install-decides-its-owner.md) | The render decides a rendered file's mode; the install decides its owner | 10 | Accepted |
+| [0155](0155-a-deploy-recreates-a-container-whose-mounted-content-changed.md) | A deploy recreates a container whose mounted content changed | 10 | Accepted |

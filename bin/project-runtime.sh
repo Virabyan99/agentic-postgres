@@ -250,6 +250,17 @@ main() {
         --rendered-dir "${rendered}" \
         || die 8 "the secret grant surface could not be rendered for ${PROJECT_KEY}."
 
+      # AFTER the grant surface and immediately before `up`, because it digests
+      # the files as they are at the moment the containers are created -- which
+      # is after the deploy has written its late artefacts (`jwks.json`, the
+      # snapshots) and after the secret override has repointed the generation.
+      # Rendering it any earlier would digest a state the containers never see,
+      # which is the same class of mistake as rendering the grant surface before
+      # materialization (D591).
+      "$(python_bin)" "${ROOT_DIR}/bin/render-mount-digests.py" \
+        --rendered-dir "${rendered}" \
+        || die 8 "the mount digests could not be rendered for ${PROJECT_KEY}."
+
       # --build, because Compose only builds an image that is missing. Without
       # it a project started once kept its first image for good: a new immutable
       # release could change a service's source and the running container would
