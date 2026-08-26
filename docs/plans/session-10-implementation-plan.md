@@ -72,7 +72,7 @@ Six columns, the house shape. The "Summary says" column quotes
 time; each is confirmed, corrected or replaced during implementation, and
 anything found *during* implementation is appended with the next free number.
 
-**Next free number after this table is D602.**
+**Next free number after this table is D603.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -183,6 +183,8 @@ anything found *during* implementation is appended with the next free number.
 | **D600** | ADR 0152: the drill's evidence document records "the release the restored cluster came from". | **`"release": null`, in every drill document ever written — including the first real one.** `bin/restore-test.py` passed `release=(document.get("release") or {}).get("version")`, and **no document kind has a `release` block**: neither the deployed one (`api backup backup_state bootstrap database deployed_through_session document_kind edge host jwt mcp observed_at project routes runtime schema_version secrets source_commit storage template_version tls`) nor the rendered one. The `or {}` made it silent. | `release=document.get("source_commit")` — what `build_deployed_document` calls *"the commit that deployed it"*, and **the same field `MUST_AGREE` compares** to decide the two evidence halves describe one release, so the drill document now joins to the session document. | **The third instance of one defect, and the one that would never have failed loudly.** D592 raised, D598 exited 5 — both stopped a deploy. This wrote `null` into an evidence record, which is worse than an absent field because *it looks measured*: §6's signature failure, in the one artefact whose entire purpose is being trustworthy. It survived the first real host-mode run, where all five recovery claims passed with a null in the document. **The repair is therefore the class, not the field**: `test_no_operator_command_reads_a_key_the_deployed_document_does_not_have` AST-scans all four modules handed a deployed document for literal `document["x"]` / `document.get("x")` reads and checks each against `$defs.deployedDocument` in the schema — the definition, not a list written in the test. Premise asserted both ways, including that `compose` is **absent** from the deployed definition, without which the guard would accept exactly what it exists to reject. Battery T1–T3: **3/3 killed**, one arm per historical defect. Each of the three would have gone red offline, before any deploy. | — |
 
 | **D601** | D591: "not fixed yet ... the most consequential thing still open at the end of Run 11." | **Fixed.** The mechanism is a third Compose override carrying one label per service, whose value is a digest of what that service bind-mounts. Compose hashes labels into its config hash, so a service whose mounted *content* changed is recreated and one whose content did not is left alone. `--force-recreate` was rejected: it restarts every container on every deploy, including the ones nothing touched, on a host where three services gate on `postgres: service_healthy`. | **ADR 0155.** `runtime_override.mounted_paths_by_service` / `mounted_digest` / `render_mount_override`, `bin/render-mount-digests.py`, called from `bin/project-runtime.sh` immediately before `up` and loaded last by `bin/compose.sh`. The inventory is read out of the runtime override, never declared (ADR 0133). | **Two battery arms survived, and both were real.** **U2** — a digest over `st_mtime_ns` instead of the bytes — survived because the stability test relied on an atomic replace producing a different timestamp, and **Linux stamps files from a coarse clock with millisecond-order granularity**, so two files written microseconds apart share an mtime. The test could not see the defect it named. **U4** — dropping the `<absent>` marker — survived because the artefact the test created held `{}`, so the digests differed on content regardless; the marker only matters against an **empty** file, which is what a truncated render produces. Both were fixed in the tests, not the batteries, and the second pass killed 4/4. This closes **ADR 0088's residual** as well: the deploy has printed *"every verifier must be RECREATED, not restarted"* on every run since Session 6, then relied on Compose to notice a change it structurally cannot see. | — |
+
+| **D602** | `docs/session-10-operator-guide.md` §4: create the bucket, create the token, paste both halves. | **Pasting the two R2 halves is not enough, and the guide never said so.** Enabling backups declares **three** provider secrets: two operator-supplied (`APG_BACKUP_R2_ACCESS_KEY_ID`, `APG_BACKUP_R2_SECRET_ACCESS_KEY`) and one **generated** — `pgbackrest_repo_cipher_pass`, which only `bootstrap-providers --apply` creates. Until it runs, materialization looks for a value that is not there, and the deploy fails after the operator has correctly done everything the page told them to do. | Sub-step 6, with `--plan` then `--apply`, `sudo` and `--operator-credential-file` (never a value on the command line), and `--plan` again to confirm no changes. The paragraph that already anticipated this failure — *"if a deploy reports a missing repository secret, it is this step that was skipped"* — now names the step and the command. | **The guide anticipated the failure and did not give the cure**, which is a worse state than not mentioning it: a reader who hits the error is told they skipped a step they cannot find. This is D585's shape one step along — *a step that is missing from a guide fails quietly* — and it is the second time in one session that Session 10's own guide sent a correct operator into a wall. Both were found by an operator following the page, not by review of it. The step also carries D538's warning where an operator will actually meet it: **the cipher pass is in `managed_resources`, so `--destroy` may remove it, and a repository reached with a valid token and the wrong cipher pass is not partly readable — it is unreadable.** | — |
 
 ---
 
@@ -1317,7 +1319,7 @@ the first deploy, the first deploy fails without them on purpose, and the first
 full backup is a command at a TTY that the gate refuses to start without.
 
 
-### Runs 11+ — The host trip
+### Runs 11+ — The host trip. **Done.**
 
 **Run 11 has started. What is done, and what needs a human at a TTY.**
 
@@ -1428,6 +1430,90 @@ user data. It carries identifiers, timestamps, an LSN, counts and verdicts.
 **What is deliberately absent:** a portable `pg_dump` export, cross-account
 replication, a standby, and automated failover. Recovery here is restore-based
 and has a real RTO — `docs/product-contract.md` has said so since Session 1.
+
+---
+
+**What Run 11 measured, and what it cost.** The trip took **seven deploy attempts
+and four host-mode gate runs**, and *not one* failure was in the backup logic.
+Every one was in the machinery around it, and every one is a divergence row above.
+
+- **Seven deploys, seven different layers.** D586 (a second schema with a
+  disagreeing enum), D587 (`apg.project.key` missing from the `postgres`
+  service), D588 (the rendered config `0600` for an archiver running as 999),
+  D589 (`install_rendered` re-imposing `0600` over D588's repair), D590 (no CA
+  trust store in the derived image), D591 (a container reading a deleted inode),
+  D592 (the deployed document has no `compose` block). **All four rigs used a
+  `posix` repository**, so nothing had ever exercised TLS, real container labels
+  or the real deployed-document shape — ADR 0065/0066 three times over, in one
+  run.
+
+- **The gates then found four more, and the product was right about two of
+  them.** D594: three contract tests encoded a permission policy that had two
+  shapes when written, and Session 10 added a third — replaced by stricter ones
+  under ADR 0154, never relaxed. D596: `app.notes` has had no `body` column since
+  migration **0007**, in five proofs that were placeholders until Run 9 and had
+  **never executed**. D597: ADR 0153 made a secret's `target` absolute and one
+  reader still prefixed `/run/secrets/`, mounting every client fixture's
+  credential at `/run/secrets//run/secrets/…`. D599: **`ALTER SYSTEM` cannot
+  override a `-c` command-line option** — the archiver break did nothing, on a
+  cluster that was fine.
+
+- **§6 question 5 arrived FOUR times**, which is a record and is the finding of
+  this run. *When a decision is implemented, which of its callers got it?* D592,
+  D597, D598 and D600 are all one answer: a decision moved, its writer moved, and
+  a reader did not. D598 is the sharpest — **D592 was itself the answer to this
+  question**, applied to the one field that had failed rather than to every field
+  reading the same absent block. The repair is finally the class, not the field:
+  `test_no_operator_command_reads_a_key_the_deployed_document_does_not_have`
+  scans every module handed a deployed document against the **schema**, and
+  battery T1–T3 confirms all three historical defects go red offline.
+
+- **`"release": null` is the one that should frighten a future reader.** D592
+  raised and D598 exited 5 — both stopped a deploy. D600 wrote a null into an
+  evidence document and **passed the entire host gate with all five recovery
+  claims green**. A null that looks measured is the defect class this project
+  keeps producing, arriving in the one artefact whose only purpose is being
+  trustworthy.
+
+- **The batteries earned their cost, and three survivors were real.** D595: the
+  replacement mode test was **tautological** — the expected modes referenced the
+  very constants under test, so mutating `PGBACKREST_CONF_MODE` moved both sides
+  and the test passed. §6's *a test comparing two constants*, written into the
+  test whose whole job was catching that drift. U2 and U4 (ADR 0155): a stability
+  test that could not see an mtime-based digest, because **Linux stamps files
+  from a coarse clock** and two files written microseconds apart share an mtime;
+  and an absence test that could not see a missing marker, because its artefact
+  was non-empty. **Every survivor this run was a weak test, never an
+  uninformative mutation** — and each was found only because the mutation was
+  applied to shipped code and the fixture re-rendered, rather than to a test.
+
+- **Two rigs' own controls caught two of my mistakes before they became
+  findings.** Rig 10's first control was passed with `-c` like its subject, so it
+  could not move either and the script refused to report anything (D499). The
+  first `git rev-parse --short` guard refused a correct bundle because the host
+  abbreviates to 9 characters and this machine to 7. Both refusals were the rigs
+  working.
+
+**What Run 11 produced.** Both projects deployed through Session 10 with
+encrypted, compressed, verified repositories. `evidence/session-10.json`: **51 of
+53 claims passed**, host 371 passed / 0 failed, external 25 passed / 0 failed,
+`source_commit` identical in both halves and genuinely compared. **All five
+Session 10 claims passed.** The first measured restore: **RTO 263.2 s**
+(restore 237.8 + recovery 25.0), achieved recovery point **5.9 s before** the
+requested target, on timeline 2, at 21 migrations — and **2.5 hours after** the
+published `latest_recoverable_time`, which is D550's floor behaving exactly as
+predicted before the trip.
+
+**The two red claims are not this session's.** Every unrun node id under
+`api_authorization` and `bootstrap_identity` is a rotation proof. That is the
+carried-in **rotation window**, red for a fifth session, and closing it is a
+rotation exercise rather than a code change.
+
+**And a real cost nobody had measured: a 31 MB backup takes six minutes** (D593),
+which is 284 ms per file across 1330 serialised S3 PUTs at `process-max=1`. Two
+wrong explanations preceded that one and a control killed both.
+
+
 
 ---
 

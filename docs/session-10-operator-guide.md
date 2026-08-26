@@ -285,15 +285,56 @@ Per project, in this order:
    backup identity as fifth claimant does not exhaust `max_connections` 56
    against a pooler pool of 20 (D546, closed).
 
+6. **Create the generated repository secret.** Pasting the two R2 halves is
+   **not enough**, and this is the step that was missing from this page until a
+   deploy found it (D602).
+
+   Enabling backups adds *three* secrets, not two. `APG_BACKUP_R2_ACCESS_KEY_ID`
+   and `APG_BACKUP_R2_SECRET_ACCESS_KEY` are operator-supplied and you have just
+   pasted them. **`pgbackrest_repo_cipher_pass` is generated**, and
+   `bootstrap-providers --apply` is the only thing that creates it. Until it
+   runs, materialization looks for a value that is not there.
+
+   ```bash
+   # First --plan, which contacts nothing and writes nothing.
+   sudo bin/bootstrap-providers.sh --host host.yaml \
+        --project project.alpha.yaml --plan
+
+   sudo bin/bootstrap-providers.sh --host host.yaml \
+        --project project.alpha.yaml --apply \
+        --operator-credential-file /root/infisical-operator
+   ```
+
+   Then the same two commands for `project.beta.yaml`.
+
+   `--plan` always names the operator-supplied secrets, whether or not you have
+   pasted them — it never reads a value from the provider, so it cannot know.
+   Seeing them listed is not a warning that something is wrong; a `--plan` that
+   quietly omitted them would be the dishonest version.
+
+   **`--apply` needs `sudo` and the control-plane credential from a file**, never
+   as an argument. Run `--plan` again afterwards: it should report no changes.
+   That is the property worth having — convergence, not idempotence by accident.
+
+   **The cipher pass is destroyable and its loss is total** (D538).
+   `pgbackrest_repo_cipher_pass` is in `bootstrap-state.schema.json`'s
+   `managed_resources` enum because this command creates it, so `--destroy` may
+   remove it. That is correct for a project being torn down and catastrophic for
+   one that is not: a repository reached with a valid token and the wrong cipher
+   pass is not partly readable, it is **unreadable**, and every backup in it is
+   gone.
+
 **There is no migration step this session.** Session 9's guide had one here
 because 0019, 0020 and 0021 were released and applied on no cluster; Session 10
 releases none — Run 5 measured that every privilege an online backup wants is
 refused to a NOSUPERUSER object owner, so all five grants are bootstrap-plane and
 the deploy makes them. Both clusters stay at **21**.
 
-If a deploy in step 5 reports a missing repository secret, it is this step that
-was skipped or half-done. **All three files or none**: a repository reached with a
-valid token and the wrong cipher pass is not partly configured, it is unreadable.
+If a deploy in step 5 reports a missing repository secret, it is **sub-step 6**
+that was skipped or half-done — most likely `--apply` was never run, so the two
+pasted halves are present and the generated cipher pass is not. **All three
+values or none**: a repository reached with a valid token and the wrong cipher
+pass is not partly configured, it is unreadable.
 
 ### Step 5 — Deploy both projects
 
