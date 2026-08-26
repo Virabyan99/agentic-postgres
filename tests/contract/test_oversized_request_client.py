@@ -45,21 +45,39 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 REFUSAL = b"HTTP/1.1 413 Request Entity Too Large\r\nContent-Length: 0\r\n\r\n"
 
-#: Far larger than any socket buffer, so the write is still in progress when the
-#: server answers. 64 KiB -- the size the live proof sends -- is NOT enough here:
-#: on loopback it lands in the buffer whole and the race never happens.
-PAYLOAD = b"x" * (512 * 1024)
-
-#: Set on the listener BEFORE `listen`, so the accepted socket inherits it. This
-#: plus a server that never reads the body is what blocks the client's write.
+#: Requested on the listener BEFORE `listen`, so the accepted socket inherits
+#: it. This plus a server that never reads the body is what blocks the client's
+#: write. **It is a request, not a setting**: the kernel clamps it to its own
+#: minimum and autotunes above it, which is why the payload below is derived
+#: from what was actually granted rather than chosen.
 RECEIVE_BUFFER_BYTES = 1024
 
 
-def _serve(behaviour: str) -> tuple[str, int, threading.Thread]:
+def _payload_that_blocks(granted_receive: int) -> bytes:
+    """A body large enough that the write cannot finish into the buffers.
+
+    **Sized from the kernel, not guessed.** A fixed 512 KiB blocked on WSL2 and
+    did **not** block on the host's Ubuntu 26.04 kernel: there the whole body
+    landed in the socket buffers, `sendall` returned before the server had said
+    anything, urllib recovered the refusal, and three arms went red on a rig
+    that was reproducing nothing. The premise arms caught it, which is what they
+    are for -- but a rig whose behaviour depends on which machine runs it is not
+    a rig.
+
+    The multiplier covers the client's send buffer and the receiver's autotuning
+    headroom, neither of which this side can read. `wrote_whole_body` is
+    asserted in every arm, so if this is ever still too small the arm says so
+    instead of passing for the wrong reason.
+    """
+    return b"x" * max(32 * 1024 * 1024, granted_receive * 64)
+
+
+def _serve(behaviour: str) -> tuple[str, int, threading.Thread, bytes]:
     """One connection, served the chosen way, on a port the OS picks."""
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     listener.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RECEIVE_BUFFER_BYTES)
+    granted = listener.getsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF)
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     host, port = listener.getsockname()
@@ -105,7 +123,7 @@ def _serve(behaviour: str) -> tuple[str, int, threading.Thread]:
 
     thread = threading.Thread(target=run, daemon=True)
     thread.start()
-    return host, port, thread
+    return host, port, thread, _payload_that_blocks(granted)
 
 
 def _urllib_status(url: str, payload: bytes) -> int:
@@ -123,8 +141,8 @@ def _urllib_status(url: str, payload: bytes) -> int:
 @pytest.mark.parametrize("behaviour", ["answer_then_rst", "answer_then_fin"])
 def test_the_refusal_survives_a_connection_broken_mid_write(behaviour: str) -> None:
     """413 in both arms the host produced: ECONNRESET and EPIPE."""
-    host, port, thread = _serve(behaviour)
-    refusal = post_and_read_refusal(f"http://{host}:{port}/auth/login", PAYLOAD)
+    host, port, thread, payload = _serve(behaviour)
+    refusal = post_and_read_refusal(f"http://{host}:{port}/auth/login", payload)
     thread.join(timeout=15)
 
     assert refusal.status == 413, (
@@ -151,8 +169,8 @@ def test_the_current_client_loses_that_refusal(behaviour: str) -> None:
     and `tests/deployment/oversized_request.py` would exist for nothing. Read it
     that way round before assuming a regression.
     """
-    host, port, thread = _serve(behaviour)
-    status = _urllib_status(f"http://{host}:{port}/auth/login", PAYLOAD)
+    host, port, thread, payload = _serve(behaviour)
+    status = _urllib_status(f"http://{host}:{port}/auth/login", payload)
     thread.join(timeout=15)
 
     assert status == 0, (
@@ -169,8 +187,8 @@ def test_a_server_that_answers_nothing_is_not_reported_as_a_refusal() -> None:
     identical, and the live proof would go green for the defect it exists to
     detect: a buffering middleware that is not attached.
     """
-    host, port, thread = _serve("silent_rst")
-    refusal = post_and_read_refusal(f"http://{host}:{port}/auth/login", PAYLOAD)
+    host, port, thread, payload = _serve("silent_rst")
+    refusal = post_and_read_refusal(f"http://{host}:{port}/auth/login", payload)
     thread.join(timeout=15)
 
     assert refusal.status != 413, "a server that said nothing was reported as refusing"
