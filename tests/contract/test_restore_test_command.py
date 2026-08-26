@@ -55,6 +55,7 @@ RESTORE_TEST_PY = str(REPO_ROOT / "bin" / "restore-test.py")
 PROJECT_KEY = "fixture-alpha-dev"
 LIVE_VOLUME = "apg-fixture-alpha-dev-postgres"
 LIVE_CONTAINER = "apg-fixture-alpha-dev-postgres-1"
+COMPOSE_PROJECT = "apg-fixture-alpha-dev"
 STANZA = "fixture-alpha-dev"
 GENERATION = "/var/lib/agentic-postgres/secrets/fixture-alpha-dev/20260825T000000Z-abcd"
 
@@ -863,6 +864,10 @@ def rig(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
                 "backup": {"enabled": True, "stanza": STANZA},
                 "release": {"version": "0.10.0"},
                 "compose": {
+                    # `project_name` is what the database selector filters on
+                    # since D587 -- Compose's own label, because `postgres` does
+                    # not carry `apg.project.key`.
+                    "project_name": COMPOSE_PROJECT,
                     "volumes": {"postgres": LIVE_VOLUME},
                     "networks": {"backup": "apg-fixture-alpha-dev-backup"},
                 },

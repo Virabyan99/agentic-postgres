@@ -34,6 +34,47 @@ POOLER_SERVICE_PORT = 6432
 DATABASE_SERVICE = "postgres"
 DATABASE_SERVICE_PORT = 5432
 
+#: The Compose labels that select one project's database container.
+#:
+#: **`apg.project.key` is NOT among them, and that is the whole of D587.** That
+#: label is a first-party one this model applies to six EDGE-FACING services --
+#: `edge-probe`, `postgrest`, `docs`, `auth`, `storage`, `mcp` -- and not to
+#: `postgres`, `pgbouncer` or `dbmate`. Run 6's `bin/backup.py` selected the
+#: database container with it anyway, Run 8's drill copied that selector, and
+#: **neither could ever match**: measured on the host, `apg.project.key=alpha-dev`
+#: plus `service=postgres` returns 0 containers while the cluster is up and
+#: healthy. It went unnoticed because step 6c had never run against a deployment.
+#:
+#: What is used instead is Compose's own pair, which Compose applies to every
+#: container it creates. Measured in the same invocation: the same query with
+#: `com.docker.compose.project` returns exactly 1.
+#:
+#: **This is not D293 returning.** D293 is about
+#: `com.docker.compose.project.working_dir`, which is a PATH into a release
+#: directory and changes with every release. `com.docker.compose.project` is the
+#: project NAME, which `naming.compose_project_name` derives and `outputs.json`
+#: publishes -- so the value handed in here comes from the deployed document and
+#: is not re-derived (ADR 0002).
+COMPOSE_PROJECT_LABEL = "com.docker.compose.project"
+COMPOSE_SERVICE_LABEL = "com.docker.compose.service"
+
+
+def database_container_filters(compose_project_name: str) -> tuple[str, ...]:
+    """`docker ps --filter` values selecting one project's database container.
+
+    ``compose_project_name`` is ``outputs.json``'s ``compose.project_name``. Read
+    from the document rather than rebuilt from the key: the model deliberately
+    does not pin `container_name:` (D55), and a second derivation here would be
+    the copy that disagrees.
+    """
+    if not compose_project_name:
+        raise ValueError("compose_project_name is required to select a container")
+    return (
+        f"label={COMPOSE_PROJECT_LABEL}={compose_project_name}",
+        f"label={COMPOSE_SERVICE_LABEL}={DATABASE_SERVICE}",
+    )
+
+
 #: The service in `compose.yaml` that carries the public route.
 ROUTED_SERVICE = "edge-probe"
 

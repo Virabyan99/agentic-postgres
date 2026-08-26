@@ -66,11 +66,13 @@ EXIT_PREREQUISITE = 3
 EXIT_STATE = 5
 EXIT_REFUSED = 6
 
-#: The first-party label every container this project owns carries.
+#: The database container is selected by `runtime_override`, not from here.
 #:
-#: Not `com.docker.compose.project.working_dir` -- D293 is the record of that
-#: selector matching nothing on the host while the service was up and healthy.
-PROJECT_KEY_LABEL = "apg.project.key"
+#: This module declared `apg.project.key` and selected the cluster with it until
+#: Session 10 Run 11 measured that **the postgres service does not carry that
+#: label** -- it is on six edge-facing services and on none of `postgres`,
+#: `pgbouncer` or `dbmate`. The selector returned 0 containers on a healthy
+#: cluster, and nothing noticed because step 6c had never run (D587).
 
 #: The uid pgBackRest must run as inside the database container.
 #:
@@ -158,11 +160,11 @@ def database_container(document: dict) -> str:
     not pin it with `container_name:` (D55), so building the name here would
     depend on a convention this repository has chosen not to depend on.
     """
-    key = project_key(document)
-    filters = [
-        f"label={PROJECT_KEY_LABEL}={key}",
-        f"label=com.docker.compose.service={runtime_override.DATABASE_SERVICE}",
-    ]
+    filters = list(
+        runtime_override.database_container_filters(
+            (document.get("compose") or {}).get("project_name", "")
+        )
+    )
     arguments = ["docker", "ps"]
     for value in filters:
         arguments += ["--filter", value]

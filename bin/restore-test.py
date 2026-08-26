@@ -61,17 +61,14 @@ EXIT_STATE = 5
 EXIT_REFUSED = 6
 EXIT_UNSAFE = 7
 
-#: The first-party label every container this project owns carries.
+#: The database container is selected by , not from here.
 #:
-#: Declared here as `bin/backup.py`, `bin/auth-admin.py` and
-#: `bin/storage-admin.py` each declare it. That is five spellings of one string
-#: across `bin/`, which is D264's shape and is recorded rather than repaired
-#: (D566): consolidating it touches five operator commands and none of them is
-#: this run's subject.
-#:
-#: Not `com.docker.compose.project.working_dir` -- D293 is the record of that
-#: selector matching nothing on the host while the service was up and healthy.
-PROJECT_KEY_LABEL = "apg.project.key"
+#: D566 recorded that  was spelled in five  commands and
+#: left it alone. Run 11 measured that **the postgres service does not carry it**
+#: -- so of those five spellings, the two that select a DATABASE container were
+#: both wrong and both unexercised (D587). They now share one function; the three
+#: that select an edge-facing service keep their own, because those services do
+#: carry the label.
 
 #: The uid pgBackRest and the postmaster both run as inside the image.
 POSTGRES_UID = "999"
@@ -155,11 +152,11 @@ def load_document(project_dir: Path) -> dict[str, Any]:
 
 def database_container(document: dict[str, Any]) -> str:
     """The running database container, found by label rather than predicted."""
-    key = (document.get("project") or {}).get("key")
-    filters = [
-        f"label={PROJECT_KEY_LABEL}={key}",
-        f"label=com.docker.compose.service={runtime_override.DATABASE_SERVICE}",
-    ]
+    filters = list(
+        runtime_override.database_container_filters(
+            (document.get("compose") or {}).get("project_name", "")
+        )
+    )
     arguments = ["ps"]
     for value in filters:
         arguments += ["--filter", value]
