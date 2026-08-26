@@ -602,7 +602,7 @@ def evidence_document(
     backup_set: dict[str, str],
     timings: dict[str, float],
     smoke: dict[str, Any],
-    release: str | None = None,
+    release: str | None = None,  # the deploying commit; see D600
 ) -> dict[str, Any]:
     """The drill's record. Every field has a source and none of them is the clock.
 

@@ -27,6 +27,7 @@ rather than measurement, and the host measurement above is what stands behind it
 
 from __future__ import annotations
 
+import ast
 import json
 import subprocess
 from typing import Any
@@ -217,3 +218,102 @@ def test_the_selector_reads_the_project_name_from_the_document() -> None:
 
     with pytest.raises(ValueError, match="required"):
         runtime_override.database_container_filters("")
+
+
+# ---------------------------------------------------------------------------
+# The class guard: D592, D598 and D600 were one defect, three times
+# ---------------------------------------------------------------------------
+
+#: Every module that is handed a DEPLOYED document at runtime.
+#:
+#: `bin/backup.py` and `bin/restore-test.py` take `--outputs
+#: /etc/agentic-postgres/projects/<key>/outputs.json`, which is the deployed
+#: kind and the only kind an operator ever passes. `restore_drill` and
+#: `backup_report` are handed the parsed result.
+DEPLOYED_DOCUMENT_READERS = (
+    "bin/backup.py",
+    "bin/restore-test.py",
+    "src/agentic_postgres/restore_drill.py",
+    "src/agentic_postgres/backup_report.py",
+)
+
+
+def _deployed_document_keys() -> set[str]:
+    """The deployed document's top-level members, from the schema that defines it."""
+    schema = json.loads((REPO_ROOT / "schemas" / "outputs.schema.json").read_text("utf-8"))
+    deployed = schema["$defs"]["deployedDocument"]
+    return set(deployed.get("properties") or {})
+
+
+def _top_level_document_reads(source: str) -> set[str]:
+    """Every literal key read off a name spelled `document`.
+
+    Matches `document["x"]` and `document.get("x")`. A read through an
+    intermediate variable is not matched and is not meant to be -- the defect
+    this catches is the direct one, three times over, and a scan that tried to
+    follow assignments would trade a precise guard for a vague one.
+    """
+    keys: set[str] = set()
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "document"
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
+            keys.add(node.slice.value)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "document"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            keys.add(node.args[0].value)
+    return keys
+
+
+def test_no_operator_command_reads_a_key_the_deployed_document_does_not_have() -> None:
+    """One guard for a defect that arrived three times in one session.
+
+    D592: `bin/backup.py` read `compose.project_name` and raised on every real
+    invocation. D598: `restore_drill.build_plan` read `compose.volumes.postgres`
+    and, one line later, `compose.networks.backup` -- refusing every drill with
+    exit 5. D600: the same command read a `release` block that **no** document
+    kind has, and wrote `"release": null` into every evidence document it ever
+    produced, including the first real one.
+
+    Each was found by a deployment failing, and each repair was scoped to the
+    field that failed rather than to the class. This asks the question of every
+    reader at once, against the schema that defines the document rather than
+    against a list written here -- so a member added to or removed from
+    `deployedDocument` moves this test with it.
+    """
+    deployed = _deployed_document_keys()
+
+    # Premise, in both directions. Without the first this passes vacuously; the
+    # second is what makes it discriminating, since `compose` is precisely the
+    # block D592 and D598 read and the rendered document does publish it.
+    assert len(deployed) > 5, (
+        f"the schema's deployedDocument declares only {sorted(deployed)}; this test "
+        "is reading the wrong definition and would accept anything"
+    )
+    assert "compose" not in deployed, (
+        "the deployed document now declares a `compose` block. If that is intended, "
+        "re-read D592 and D598 before anything starts depending on it again -- this "
+        "test would no longer catch what it was written for"
+    )
+
+    for relative in DEPLOYED_DOCUMENT_READERS:
+        source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        unknown = sorted(_top_level_document_reads(source) - deployed)
+        assert not unknown, (
+            f"{relative} reads {unknown} off a deployed document, and the schema's "
+            f"deployedDocument declares no such member. Only the RENDERED document "
+            f"carries `compose`, and nothing carries `release`. Derive it through "
+            f"`naming` from `project.key`, which both kinds carry (D592/D598/D600)."
+        )

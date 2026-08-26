@@ -726,7 +726,15 @@ def drill(arguments: argparse.Namespace) -> int:
                 "pgbackrest_reported_ms": int(reported.group("ms")) if reported else None,
             },
             smoke=smoke,
-            release=(document.get("release") or {}).get("version"),
+            # `source_commit`, not a `release` block: NO document kind has one
+            # (D600). This read produced `null` in every drill document ever
+            # written, including the first real one, and a null in an evidence
+            # record is worse than an absent field because it looks measured.
+            # `source_commit` is what `build_deployed_document` calls "the commit
+            # that deployed it", and it is the same field the evidence merge
+            # compares to decide both halves describe one release -- so this
+            # makes the drill document join to the session document.
+            release=document.get("source_commit"),
         )
     except restore_drill.DrillError as error:
         raise OperatorError(EXIT_STATE, str(error)) from error
