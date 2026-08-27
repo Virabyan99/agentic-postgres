@@ -193,7 +193,29 @@ PostgREST directly never reaches MCP and has only the second. **Only the
 database's can say `committed`** — a row written in the transaction it describes
 goes with it when that transaction aborts (D489).
 
-**A request id spans MCP → PostgREST → the record**, minted per HTTP request and
-forwarded on every upstream call. It does **not** span ingress — that is
-`OPS-LOG-001`, Session 11's — and the database-written row carries none (D500).
-Nothing prunes the record: retention is undecided and is Session 10's inbox.
+**A request id spans ingress → MCP → PostgREST → both records**, and since
+Session 11 that is four legs rather than three. One id is minted per HTTP request
+by the ASGI layer, stamped on the **response**, and forwarded on every upstream
+call. Traefik's access log keeps it as `downstream_X-Request-Id` — measured
+against the locked digest rather than read off a page — so the edge records an id
+it did not invent (ADR 0160).
+
+**Nothing reads an inbound `X-Request-Id`.** An id a caller chose would let one
+agent stamp its actions with another agent's, so an operator reading the trail by
+request would see the second agent's writes inside the first agent's request. A
+caller may still send the header; the runtime ignores it.
+
+**The database-written row carries the id too** since migration 0022 (D500,
+ADR 0161), so the two records for one write join on it. A malformed header
+records `NULL` and the write proceeds: an unguarded cast rolls the caller's own
+write back to zero rows (D633), and a correlation field must never destroy the
+operation it annotates.
+
+> **Correlating by `request_id`? Read `agent_id` beside it.** A caller reaching
+> PostgREST directly supplies the header that becomes its own `database` row's
+> id, so such a row can carry an id another agent's request also used. It cannot
+> forge `agent_id` or `owner_id` — both come from the GUCs the pre-request hook
+> set — so the mismatch is visible on the row itself rather than hidden
+> (ADR 0161, ADR 0135).
+
+Nothing prunes the record: retention is undecided and remains nobody's decision.

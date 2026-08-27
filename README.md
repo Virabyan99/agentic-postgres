@@ -4,117 +4,53 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 3 of 12 complete.** The repository defines a contract *and*
-deploys. Two isolated projects run on one hardened host behind one shared
-Traefik edge on Let's Encrypt production certificates, each with **its own
-PostgreSQL 18 cluster** — forced row-level security, a locked pgvector, and a
-migration plane that cannot write its own audit record. **Session 4 gave every
-project two database transports** — a PgBouncer pool and the direct endpoint —
-reached by a developer through an SSH tunnel and a privileged broker. Nothing is
-published: Docker installs no rule and no listener for a container on an
-`internal: true` network, so the tunnel targets the container endpoint on the
-host's own bridge. See
-[What is intentionally unavailable](#what-is-intentionally-unavailable).
+**Status: Session 10 of 12 complete. Session 11 is in progress.** Two isolated
+projects run on one hardened host behind one shared Traefik edge on Let's Encrypt
+production certificates. Each has its own PostgreSQL 18 cluster under forced
+row-level security, two database transports, a REST and an application API behind
+its own signing key, object storage, an encrypted off-site backup repository with
+continuous WAL archiving, and an MCP agent plane with a durable audit record.
 
-- [Session 4 operator guide](docs/session-04-operator-guide.md) — **start here to give a project its transports**
-- [Session 5 operator guide](docs/session-05-operator-guide.md) — **start here to give a project its transports**
-- [Database connections](docs/database-connections.md) · [Client compatibility](docs/client-compatibility.md) · [Pool operations](docs/pool-operations.md)
-- [Session 3 operator guide](docs/session-03-operator-guide.md) — deploying a project with its database
-- [The database](docs/database.md) · [Migrations](docs/migrations.md) · [Database security](docs/database-security.md)
-- [Session 2 operator guide](docs/session-02-operator-guide.md) — the host, the edge, and the secret store
-- [Host baseline](docs/host-baseline.md) · [Provider bootstrap](docs/provider-bootstrap.md) · [Project isolation](docs/project-isolation.md) · [Secret handling](docs/secret-handling.md)
-- [Product contract](docs/product-contract.md) — scope, requirement IDs, non-goals, change control
-- [Architecture decisions](docs/decisions/README.md)
-- [Handoff — environment and workflow](docs/handoff.md) — machine specifics, git, known traps
-- [Session 4 implementation plan](docs/plans/session-04-implementation-plan.md) — divergence table, decision log, build order
-- [Session 3 implementation plan](docs/plans/session-03-implementation-plan.md) — the previous session's, still cited by number
+A restore has been rehearsed against a real deployment, not designed on paper.
 
-> `bin/session-01-check.sh` exits 0 from a clean tree, **including on the
-> deployment host with both projects running**. `bin/session-02-check.sh` runs
-> in three environments — `offline`, `host`, `external` — because a port scan
-> run on the host traverses its own routing table and can report "closed" for a
-> port the world can reach. `bin/session-03-check.sh` runs in two: there was
-> nothing new to see from outside a cluster that publishes no port, and a mode
-> that measured nothing would still write evidence saying it had run.
-> `bin/session-04-check.sh` runs in three again, and **needs both halves**: two
-> of its claims are measured from off-host, so a session document cannot be
-> written from a host run alone.
+- **[Documentation index](docs/README.md)** — every page, and what each answers
+- **[New here?](docs/new-team-member.md)** — the path from a clean machine
+- [Product contract](docs/product-contract.md) — scope, requirement IDs, non-goals
+- [Architecture decisions](docs/decisions/README.md) — every ADR, indexed
+- [Handoff](docs/handoff.md) — machine specifics, git, known traps
 
 ---
 
-## Deploying
+## What runs
 
-`--render-only` needs no host and no root, and it remains the whole of what runs
-in a checkout:
+| Plane | What it is | Reached by |
+|---|---|---|
+| Edge | Traefik and a Docker socket proxy, shared by every project | the public internet |
+| Database | PostgreSQL 18, pgvector, forced RLS, one cluster per project | `bin/connect.sh` over an SSH tunnel |
+| Pool | PgBouncer, its own credential and user list | `bin/connect.sh` |
+| REST | PostgREST over `api`, generated from database privileges | `/api/rest` |
+| Application | FastAPI: identity, tokens, admin | `/api/app` |
+| Storage | the same image in its second mode, R2-backed | `/api/app/storage` |
+| Agents | FastMCP, six tools behind seven capabilities | `/mcp` |
+| Reference | a vendored Scalar page, served first-party | `/docs/rest`, `/docs/app` |
+| Backups | pgBackRest to an encrypted R2 repository, WAL archived continuously | `bin/backup.sh` |
 
-```bash
-./deploy.sh --project project.yaml --capabilities capabilities.yaml --render-only
-```
-
-Deploying is an ordered sequence, and no step makes its own preconditions:
-host baseline → edge plane → provider bootstrap → materialize secrets → deploy
-→ verify → promote ACME. The
-[operator guide](docs/session-02-operator-guide.md) carries the commands, the
-two rollback timers that stop host hardening from locking you out, and the
-Let's Encrypt rate limits that cost a week if you retry in a loop.
-
----
-
-## Non-goals
-
-Not deferred — outside the product:
-
-- A shared multi-tenant control plane or any cross-project shared catalog
-- A hosted web console or SaaS offering
-- Autoscaling, scale-to-zero, compute/storage separation
-- Database branching or copy-on-write forks
-- Automatic failover or multi-region replication
-- **Arbitrary SQL execution by an agent, under any authentication**
-
-## Repository map
-
-```text
-bin/                 Operator commands. Every one resolves the repo root from
-                     BASH_SOURCE, so they work from any directory.
-docs/decisions/      ADRs. Required for anything frozen in the runbook §4.
-docs/plans/          Implementation plans, including the decision log.
-schemas/             JSON Schema (Draft 2020-12). Sole authority for numeric
-                     bounds and the capability scope vocabulary.
-src/agentic_postgres/
-  naming.py          Deterministic identity derivation. Load-bearing:
-                     nothing else may re-derive a name.
-  config.py          Strict YAML loading, schema + semantic validation.
-  rendering.py       Transactional staging and publication.
-  evidence.py        Session evidence from test artifacts.
-  evidence_claims.py Claims resolved from the acceptance registry and JUnit.
-infra/host/          Templates provision-host.sh renders into /etc.
-infra/edge/          The shared Traefik + socket-proxy stack.
-libexec/             Launchers systemd runs. Never a working tree.
-systemd/             Installed units, including agentic-postgres-project@.
-compose.yaml         Validation-only model. Never started.
-versions.in.yaml     Human-selected candidates.
-versions.env         Generated digest lock. Never hand-edited.
-tests/contract/      Active Session 1 contract tests.
-tests/{integration,recovery,security}/
-                     Future-session placeholders. Collectible, skipped by
-                     marker, and failing if the marker is removed.
-.generated/          Rendered output. Git-ignored. Never hand-edited.
-evidence/            Generated session evidence. Git-ignored.
-```
+Every name above — role, network, volume, router, route — is derived once by
+`src/agentic_postgres/naming.py` and published in `outputs.json`. Nothing
+re-derives a name anywhere else.
 
 ## Local bootstrap
 
 This repository requires POSIX filesystem semantics: `0600` file modes are a
 tested contract, and `flock` guards render publication. On Windows, develop
-inside WSL2 with the repository on the **Linux** filesystem — not under
-`/mnt/c` and not inside a OneDrive-synced folder. The implementation plan §1
-explains what breaks otherwise, with measurements.
+inside WSL2 with the repository on the **Linux** filesystem — not under `/mnt/c`
+and not inside a OneDrive-synced folder.
 
 ```bash
 # Tools
 sudo apt-get update && sudo apt-get install -y shellcheck jq
 
-# Pinned interpreter and locking tool (uv version is pinned in bin/lock-dev-deps.sh)
+# Pinned interpreter and locking tool
 curl -LsSf https://astral.sh/uv/install.sh | sh
 uv python install 3.12
 
@@ -129,8 +65,9 @@ python -m pip install --require-hashes -r requirements-dev.txt
 bin/doctor.sh
 ```
 
-`bin/doctor.sh` exits `3` and names what is missing. It prints tool versions
-and repository paths only — never the environment, never a secret.
+`bin/doctor.sh` exits `3` and names what is missing. It prints tool versions and
+repository paths only — never the environment, never a secret. `--verbose` adds
+where each tool resolved from.
 
 To change a dependency, edit `requirements-dev.in`, then:
 
@@ -140,6 +77,9 @@ bin/lock-dev-deps.sh --check     # verifies the lock is current; modifies nothin
 ```
 
 ## Rendering a project
+
+`--render-only` needs no host and no root, starts nothing, and contacts no
+provider. It remains the whole of what runs in a checkout:
 
 ```bash
 cp project.example.yaml project.yaml
@@ -152,12 +92,6 @@ cp capabilities.example.yaml capabilities.yaml
   --render-only
 ```
 
-`--render-only` needs no host and no root and starts nothing. To deploy, pass
-`--host` and `--through-session 2` instead — and read the
-[operator guide](docs/session-02-operator-guide.md) first, because that form
-expects the host, the edge, providers and secrets to be ready already. It does
-not partially deploy.
-
 Inspect the result:
 
 ```bash
@@ -165,8 +99,92 @@ jq . .generated/<project-key>/outputs.json
 cat  .generated/<project-key>/rendered-summary.txt
 ```
 
-Output is byte-identical across renders with identical inputs. All three
-generated files are mode `0600`.
+Output is byte-identical across renders with identical inputs.
+`outputs.json`, `compose.env` and `rendered-summary.txt` are mode `0600`;
+`pgbackrest.conf` is `0444`, because it carries no credential by construction and
+the database container reads it as uid 999.
+
+## Deploying
+
+**Deploying is an ordered sequence, and no step makes its own preconditions.** A
+deploy that quietly performed them would be one whose failure halfway leaves
+nobody able to say which half ran.
+
+```bash
+sudo bin/provision-host.sh      --host host.yaml                  # once per host
+sudo bin/edge.sh                --host host.yaml up               # once per host
+sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
+sudo bin/materialize-secrets.sh --project project.yaml --session 10
+sudo ./deploy.sh --host host.yaml --project project.yaml \
+     --capabilities capabilities.yaml --through-session 10
+```
+
+`deploy.sh --through-session` **refuses before it changes anything** when a
+prerequisite is absent, and lists every absent item at once with the command that
+supplies each. It reports what it could not check separately from what it found
+missing, because "the edge is not running" and "the Docker daemon could not be
+reached, so nobody looked" are different sentences (ADR 0157).
+
+The [operator guides](docs/README.md#operator-guides) carry the host sequence per
+session, the two rollback timers that stop host hardening from locking you out,
+and the Let's Encrypt rate limits.
+
+**Failed ACME validations cap at 5 per hour per hostname. Never retry in a loop.**
+
+## Operating a deployment
+
+```bash
+sudo bin/doctor.sh --project <key>            # containers, TLS, database, pool,
+                                              # migrations, backups, WAL, disk
+sudo bin/doctor.sh --project <key> --verbose  # the numbers behind each verdict
+
+sudo bin/migrate.sh --project project.yaml status    # applied and pending
+sudo bin/backup.sh  --outputs <outputs.json> info --json
+sudo bin/restore-test.sh --target-time <iso8601> --project-dir <dir>
+
+# A verified SSH forward, then a session over it. `tunnel` needs the host;
+# everything after it needs only the project key, because the tunnel recorded it.
+bin/connect.sh tunnel    --project <key> --ssh <user>@<host>
+bin/connect.sh print-env --project <key>            # connection variables, no password
+bin/connect.sh psql      --project <key>
+bin/connect.sh stop      --project <key>
+```
+
+**Four ways of naming a project, and the difference is real.** `doctor.sh` and
+`connect.sh` take `--project <key>`, the derived `apg-<slug>-<env>` identity;
+`migrate.sh` takes `--project <manifest file>`; `backup.sh` takes `--outputs`,
+the path to that project's deployed `outputs.json`; `restore-test.sh` takes
+`--project-dir`, the generated project directory. Copying the wrong one produces
+a refusal rather than a wrong action — but it is the first thing a reader trips
+over, and it is worth knowing before you do.
+
+`doctor.sh --project` reads the deployed document for identities only. **Every
+verdict comes from a live read**: that document records what was observed at
+deploy time, so a project whose archiver died yesterday still publishes the status
+it had at its last deploy (ADR 0158).
+
+Read-only diagnosis without a terminal is `apg-diag`, over its own SSH identity:
+
+```bash
+ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@<host> sudo apg-diag containers
+```
+
+## Checks
+
+```bash
+bin/smoke-test.sh                        # fast: active contract tests only
+bin/session-01-check.sh                  # THE gate — needs a clean tree
+bin/session-10-check.sh --mode offline   # the backup plane's checkout-runnable half
+```
+
+Each session has its own gate, `bin/session-01-check.sh` through
+`bin/session-10-check.sh`. Most run in more than one mode: `offline` in a
+checkout, `host` on the deployment host, and `external` from a different network
+— because a port scan run on the host traverses its own routing table and can
+report "closed" for a port the world can reach. A session document cannot be
+written from one half alone.
+
+**The gate is a release control, not a save button.** It re-runs the whole suite.
 
 ## Compose
 
@@ -179,10 +197,7 @@ bin/compose.sh .generated/<project-key> --profile contract config
 bin/compose.sh .generated/<project-key> ps --quiet
 ```
 
-The wrapper's scopes decide which subcommands are permitted; the Session 1
-fixture scope still refuses `up`, `run`, `start`, `create`, `restart`, `exec`,
-`attach` and `cp` with exit `10`. See
-[ADR 0013](docs/decisions/0013-compose-wrapper-scopes.md).
+See [ADR 0013](docs/decisions/0013-compose-wrapper-scopes.md).
 
 ## Version locks
 
@@ -192,19 +207,8 @@ bin/lock-versions.sh --check    # offline; no registry, no credentials
 ```
 
 Every image is pinned to an immutable digest for one declared platform. If a
-digest cannot be resolved for it, that blocks the session — a floating tag is
-not a substitute. See [ADR 0004](docs/decisions/0004-version-lock-format.md).
-
-## Running the checks
-
-```bash
-bin/smoke-test.sh                       # fast: active contract tests only
-bin/session-01-check.sh                 # the Session 1 gate — clean tree required
-bin/session-02-check.sh --mode offline  # Session 2's checkout-runnable half
-```
-
-The other two Session 2 modes need a deployment. See the
-[operator guide](docs/session-02-operator-guide.md) §7.
+digest cannot be resolved, that blocks the session — a floating tag is not a
+substitute. See [ADR 0004](docs/decisions/0004-version-lock-format.md).
 
 ## Exit-code convention
 
@@ -213,10 +217,9 @@ The other two Session 2 modes need a deployment. See the
 | `0` | Success |
 | `2` | Invalid operator input or manifest |
 | `3` | Missing local prerequisite |
-| `4` | Missing bootstrap/runtime prerequisite |
-| `4` | Missing runtime state — the project was never deployed here |
+| `4` | Missing bootstrap/runtime prerequisite, or a project never deployed here |
 | `5` | Contract, lock, collision, or generated-output validation failure |
-| `6` | A host or gate check failed |
+| `6` | A host check, gate check, or diagnostic check failed |
 | `7` | The provider rejected an operation, or state disagrees with it |
 | `8` | A secret could not be fetched or written |
 | `9` | The edge could not be brought to the requested state |
@@ -224,26 +227,67 @@ The other two Session 2 modes need a deployment. See the
 
 ## What is intentionally unavailable
 
-Session 2 deploys an edge, a health route and a secret-materialization proof.
-It does not run a database. Every command that would use the following exits
-`10` rather than reporting success:
+**Session 12 owns the rest.** Removing a project is not built: provider resources
+can be released with `bin/bootstrap-providers.sh --destroy --confirm <key>`, but
+the scoped removal that provably leaves a co-tenant project untouched is
+`DEP-REMOVE-001`, and the two-project runtime isolation matrix is `DEP-ISO-001`.
+Neither is claimed.
 
-- PostgreSQL, PgBouncer, PostgREST, FastAPI, FastMCP — no service starts.
-  Traefik and the Docker socket proxy **do** run; they are the edge plane.
-- Database endpoints — rendered as `status: "unavailable"` with `host`, `port`,
-  `url`, and `password_secret_ref` all `null`. Not placeholders. Session 4.
-- Migrations (`bin/migrate.sh`) — Session 3
-- Connections (`bin/connect.sh`) — Session 4
-- Restore rehearsal (`bin/restore-test.sh`) — Session 10
-- Object storage — Session 7. Backups — Session 10. Both are `null` in every
-  Session 2 project, and two projects that both lack one are not colliding
-  ([ADR 0016](docs/decisions/0016-absence-is-not-a-collision.md)).
-- Agent capabilities — `capabilities.yaml` is empty by default, and an entry
-  marked `enabled: true` fails with exit `5` because no live backing contract
-  exists to validate it against
+Not deferred — **outside the product**:
 
-## Session 3 preview
+- A shared multi-tenant control plane or any cross-project shared catalog
+- A hosted web console or SaaS offering
+- Autoscaling, scale-to-zero, compute/storage separation
+- Database branching or copy-on-write forks
+- Automatic failover or multi-region replication
+- **Arbitrary SQL execution by an agent, under any authentication**
 
-Session 3 adds migrations. `--render-only` is preserved, and Session 3 activates
-its own requirements by removing their `future` markers and implementing the
-bodies — never by weakening an active test.
+## Repository map
+
+```text
+bin/                 Operator commands. Every one resolves the repo root from
+                     BASH_SOURCE, so they work from any directory.
+deploy.sh            The one entry point that renders and deploys.
+docs/                Documentation. Start at docs/README.md.
+docs/decisions/      ADRs. Required for anything the contract freezes.
+docs/plans/          Implementation plans, including the divergence tables.
+schemas/             JSON Schema (Draft 2020-12). Sole authority for numeric
+                     bounds and the capability scope vocabulary.
+src/agentic_postgres/
+  naming.py          Deterministic identity derivation. Load-bearing:
+                     nothing else may re-derive a name.
+  config.py          Strict YAML loading, schema + semantic validation.
+  rendering.py       Transactional staging and publication.
+  preflight.py       What a deploy checks before it changes anything.
+  diagnosis.py       What a deployed project's health is.
+  evidence.py        Session evidence from test artifacts.
+migrations/          Released migrations. Fix-forward only; every down block
+                     raises AP900.
+services/            First-party images: auth/storage, docs, edge-probe,
+                     postgres, and the client examples.
+infra/edge/          The shared Traefik and socket-proxy stack.
+infra/host/          Templates provision-host.sh renders into /etc.
+libexec/             Launchers systemd runs. Never a working tree.
+systemd/             Installed units, including agentic-postgres-project@.
+compose.yaml         Validation-only model. Never started directly.
+versions.in.yaml     Human-selected candidates.
+versions.env         Generated digest lock. Never hand-edited.
+tests/contract/      Runs in a checkout, needs nothing.
+tests/deployment/    Needs a provisioned host.
+tests/external/      Needs a different network.
+.generated/          Rendered output. Git-ignored. Never hand-edited.
+evidence/            Generated session evidence. Git-ignored.
+```
+
+## Non-negotiables
+
+- **No secret value** may enter source control, Compose interpolation, process
+  arguments, image layers, or logs.
+- **A released migration is never amended.** Fix forward.
+- `--render-only` keeps working with no host and no root.
+- `host.yaml`, `capabilities.yaml` and the project manifests are gitignored
+  operator inputs that exist only on the host. **Never commit them.**
+- Transport to the deployment host is `git bundle` and `scp`. **No GitHub
+  credential goes on the host.**
+- `sudo` on the host needs a TTY, so **anything privileged that mutates is run by
+  a human at a terminal**, never piped over SSH. Read-only diagnosis is not.

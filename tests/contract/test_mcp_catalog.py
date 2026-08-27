@@ -312,15 +312,48 @@ def test_the_catalog_says_what_the_surface_deliberately_lacks(catalog: str) -> N
     for gone, why in (
         ("No writes", "the contract has carried two since Run 3"),
         ("No durable audit from the runtime", "Run 6 built it (ADR 0141)"),
+        (
+            "does **not** span ingress",
+            "Session 11 Run 5 closed that leg (ADR 0160)",
+        ),
     ):
         assert gone not in absent, f"the catalog still says {gone!r}, and {why}"
 
-    assert "OPS-LOG-001" in absent, (
-        "the catalog does not say the request id stops short of ingress. Session 9 owns "
-        "MCP -> PostgREST -> the record and does not close Session 11's requirement "
-        "(D478); a document silent about the boundary lets a reader assume it"
-    )
     assert "prunes" in absent, "retention is still undecided and the catalog must say so"
+
+
+def test_the_catalog_describes_the_request_id_span_it_now_has(catalog: str) -> None:
+    """**The third sentence to leave the absence list, and its replacement.**
+
+    Until Session 11 the catalog said the request id *"does not span ingress —
+    that is `OPS-LOG-001`, Session 11's — and the database-written row carries
+    none (D500)"*, and a test asserted that boundary was stated. Both halves are
+    now closed: Run 5 stamps the id on the response, where Traefik's access log
+    keeps it as `downstream_X-Request-Id` (ADR 0160), and Run 6's migration 0022
+    puts it on the `database` row (ADR 0161).
+
+    This is the stricter replacement §6 requires. The old assertion could fail
+    one way — the boundary going unmentioned. This fails three: a catalog that
+    does not describe the span, one that does not say inbound headers are
+    ignored, or one that omits the correlation caveat an operator needs.
+    """
+    assert "ingress" in catalog, "the catalog does not describe the span the id now has"
+
+    assert "inbound" in catalog.lower() and "ignores" in catalog.lower(), (
+        "the catalog does not say an inbound X-Request-Id is ignored. A reader who "
+        "assumed their own header was adopted would correlate against a value this "
+        "deployment never used (ADR 0160)"
+    )
+
+    # D649's obligation, and the reason it is asserted rather than trusted: a
+    # caller reaching PostgREST directly chooses the id on its own `database`
+    # row, so correlating by request id alone can gather one agent's rows under
+    # another agent's request. The row still names its author.
+    assert "agent_id" in catalog, (
+        "the catalog does not tell an operator to read agent_id beside request_id. "
+        "A direct caller supplies the header that becomes its own database row's "
+        "id, and that is only harmless because the mismatch is visible (ADR 0161)"
+    )
 
 
 def test_the_write_tools_details_reach_the_catalog(generated: str, contract: dict) -> None:

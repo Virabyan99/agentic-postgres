@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D650.**
+**Next free number after this table is D654.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -143,6 +143,10 @@ implementation is appended with the next free number.
 | **D647** | This plan's Run 6, and ADR 0161 as first drafted: the guard is a property of the two write RPCs. | **Two copies of one rule is how D500 happened in the first place.** 0019 asked *"does this path record a request id"* of the `agent_plane` writer and not of the `database` writer, and the answer diverged for two sessions. Writing the header read into both RPC bodies would set the same trap for a third write RPC, whose author would inherit whichever copy they read. | **One helper — `app_private.agent_request_id()` — called by both.** `STABLE`, `SECURITY INVOKER`, `REVOKE ALL … FROM PUBLIC`, granted to nobody: it needs no privilege of its own and executes as the owner of the `SECURITY DEFINER` function that calls it. A test asserts neither RPC reads `request.headers` itself. | **Question 5 answered in advance rather than after the fact**, which is the first time this session has managed that. The pattern's five instances in Session 7 and three in Session 9 were all found *after* a decision's second caller had already diverged. | 0161 |
 | **D648** | — | **The rendered fixture is what a cluster receives, and the battery's first design mutated only the template.** The contract tests read `.generated/*/migrations/`, so an arm that edits `migrations/templates/` without re-rendering measures the *previous* bytes — every arm would report a survivor for a mutation that never reached the code under test. | **The render runs inside the battery loop**, once per arm, and again on restore. An arm whose mutated template fails to render is reported as **defective** rather than as a kill: a renderer refusing the input says nothing about whether the tests would have caught it. | D269's shape — *an unapplied mutation reports as "expected FAIL got PASS", which reads as a weak test and means the mutation never happened.* Caught while writing the battery rather than by reading its output, because the same trap cost Run 4 an ERROR-versus-FAILED false kill one run earlier. | — |
 | **D649** | ADR 0160: *"a caller may still send `X-Request-Id` … and **it is used for nothing**."* | **Migration 0022 uses it.** A caller reaching PostgREST directly — bypassing the MCP plane, which ADR 0135 already contemplates — supplies the header that becomes its own `database` row's `request_id`. ADR 0160's sentence was true of the *runtime*, not of the database. | **Recorded as a stated residual in ADR 0161, not silently reconciled.** The caller cannot forge `agent_id` or `owner_id` — both come from GUCs the pre-request hook set, which is the whole of `SEC-PARAM-001` — so this is ADR 0135's conceded *"an agent can add noise to its own audit record"*, and the noise is **visible**: such a row still carries its own `agent_id`, so an operator joining by request id sees the mismatch rather than being fooled by it. | It is strictly narrower than D642's refusal and consistent with it: D642 refused letting a caller's id become **the runtime's own**, because the `agent_plane` row is this deployment's authoritative record of what it did. **The operator guide must say to check `agent_id` beside `request_id`**, and that sentence exists because this row was written rather than because somebody noticed later. | 0161 |
+| **D650** | This plan's Run 7: the README is *"derived by diff, not retyped"* (D505, D507, D602), which reads as a discipline sufficient to avoid those defects. | **The derived README still contained four lines a reader could not run**, and every one was found by *executing* the command rather than by reading it: `migrate.sh --project` takes a manifest **FILE** and the draft passed a key; `connect.sh tunnel` also requires `--ssh USER@HOST`; `restore-test.sh` takes `--project-dir`, not `--outputs`, and prose said otherwise; and one line told a reader to run `--help` instead of the command. | **Fixed, and the class is guarded**: `test_every_flag_the_readme_shows_appears_in_that_commands_usage` runs each named command's `--help` and refuses a flag it does not document. The README also now states, in one paragraph, that four commands name a project four different ways. | *Deriving by diff avoids losing what the previous page said; it does not check what the current page claims.* D505 and D507 were flags **lost**; these were flags **invented or omitted**, which the same discipline does not catch. **The scan catches inventions and cannot catch omissions** — an absence is not a token — and that half is Run 8's rehearsal, said in the test's own docstring so nobody reads it as covering both. | — |
+| **D651** | The README, every session since Session 1: *"All three generated files are mode `0600`."* | **Four files are generated and one is `0444`.** `PGBACKREST_CONF_MODE = 0o444` deliberately — `build_pgbackrest_conf` omits every credential option by construction and uid 999 must read the file. The README's claim was true when three files were generated and false from the moment Session 10 added a fourth. | The README states both modes and why the second is not the first. | Found by running `find -printf '%m'` over the rendered directory rather than by reading the sentence, which is the same method that found D650 four lines earlier. | 0154 |
+| **D652** | `bin/render-config.py`'s closing line — the one sentence printed after **every** render: *"Wrote …/{outputs.json,compose.env,pgbackrest.conf,rendered-summary.txt} (mode 0600)."* | **It names `pgbackrest.conf` and claims a mode the renderer has never given it.** Session 10 added the filename to the list and left the trailing `(mode 0600)` untouched, so every render since has printed a false statement about a file it had just written `0444`. | **The modes are read from `rendering.FILE_MODE` and `rendering.PGBACKREST_CONF_MODE`, never typed**, and a test asserts the two constants differ — otherwise it could not tell a derived claim from a typed one (D374). | **Question 5, in the most-read sentence this repository emits.** The claim was true when written and stopped being true when a file with a different mode joined the list it describes. It survived a full session and a host trip because nobody compares a message against a `stat`. | — |
+| **D653** | `test_the_catalog_says_what_the_surface_deliberately_lacks` asserts `OPS-LOG-001` appears in the catalog's absence list — *"the request id does not span ingress."* | **Runs 5 and 6 closed both halves of that absence**, so the catalog correctly stopped saying it and the test correctly went red. It is the third sentence to leave that list, after *"No writes"* (Session 9 Run 3) and *"No durable audit from the runtime"* (Run 6) — **and each of the three was noticed by this same test firing.** | **Replaced by a stricter one**, authorised by ADR 0160/0161: the catalog must describe the span it now has, say that an inbound `X-Request-Id` is ignored, **and** carry D649's caveat that an operator correlating by request id reads `agent_id` beside it. Three ways to fail against the old one's one. | A test that only ever watches a list shrink is a test that stops meaning anything as the product grows into it. This one earns its keep precisely because it fires on the run that closes each absence — but the replacement has to be the positive claim, or the absence list becomes the only thing anybody asserts about the document. | 0160, 0161 |
 
 ---
 
@@ -670,6 +674,48 @@ README rewritten to Session 11's truth. `docs/README.md` index. Both **derived b
 diff** from what the tree does (D505, D507, D602). Every command the README names
 is executed before the run closes — that is `DEP-001`'s offline node id, and it is
 what stops D623 from happening a second time.
+
+**Done.** `README.md` rewritten, `docs/README.md` created,
+`tests/contract/test_documentation_index.py` (14 tests), the stale request-id
+paragraph in `docs/mcp-tool-catalog.md` corrected with D649's caveat,
+`bin/render-config.py`'s closing message repaired, one catalog test replaced by a
+stricter one, and four divergence rows (**D650**–**D653**).
+
+*What the README said.* **"Status: Session 3 of 12 complete"**, for eight
+sessions — naming `bin/connect.sh` as unavailable while it was 697 lines of
+working code, object storage as a future session, and a restore rehearsal as
+future after it had been run against a real deployment. Nothing failed, because
+nothing checked. `test_the_readme_states_the_session_the_release_implements` is
+the assertion that would have caught it in Session 4.
+
+*What "derived by diff" did not save me from* (D650). The plan's instruction —
+derive, never retype — is a defence against **losing** what the previous page
+said. It is no defence at all against what the *current* page claims. The derived
+README still had four lines a reader could not run, and every one was found by
+**executing** the command: `migrate.sh --project` wants a manifest file, not a
+key; `connect.sh tunnel` also needs `--ssh USER@HOST`; `restore-test.sh` takes
+`--project-dir` and the prose said `--outputs`. The class is now guarded for
+inventions; **omissions are still only catchable by running the path**, which is
+Run 8.
+
+*Two claims that were false the moment a fourth file appeared* (D651, D652). The
+README said every generated file is `0600`; `pgbackrest.conf` is `0444`, by a
+reasoned decision (it carries no credential by construction and uid 999 reads
+it). Worse, **`render-config.py`'s closing line said the same thing** — the one
+sentence printed after every render named `pgbackrest.conf` and claimed `0600`
+for it, and had done since Session 10 added the filename and left the mode. The
+modes are now read from the constants. Found with `find -printf '%m'`, not by
+reading.
+
+*The catalog test that fired* (D653). `OPS-LOG-001` was in the catalog's
+*deliberately absent* list, and Runs 5 and 6 closed it — the third sentence to
+leave that list, each one noticed by this same test going red. Replaced by the
+positive claim, including the caveat D649 obliged: **correlating by `request_id`
+means reading `agent_id` beside it.**
+
+*What is deliberately not claimed.* `DEP-001` stays `future`-marked. A README that
+passes fourteen offline assertions is not a README a stranger has followed on a
+clean machine, and the difference between those two is the entire point of Run 8.
 
 ### Run 8 — The disposable-VM rehearsal
 

@@ -140,9 +140,20 @@ def render(project: Path, capabilities: Path) -> int:
     print(summary, end="")
     # Spelled out rather than globbed, so a file the renderer stops producing is
     # a visible diff here. Session 10 added pgbackrest.conf.
+    #
+    # **The modes are read from the constants rather than typed** (D652). Session
+    # 10 added `pgbackrest.conf` to the list and left the trailing claim at
+    # `(mode 0600)` -- but `PGBACKREST_CONF_MODE` is 0444 deliberately: the file
+    # carries no credential by construction and uid 999 has to read it. So this
+    # line asserted a mode the renderer had never given that file, in the one
+    # sentence a reader sees after every render. Question 5 -- the claim was true
+    # when written and stopped being true when a file with a different mode
+    # joined the list it describes.
     print(
         f"\nWrote {directory}/"
-        "{outputs.json,compose.env,pgbackrest.conf,rendered-summary.txt} (mode 0600)"
+        "{outputs.json,compose.env,rendered-summary.txt} "
+        f"(mode {rendering.FILE_MODE:04o}) and pgbackrest.conf "
+        f"(mode {rendering.PGBACKREST_CONF_MODE:04o}; it carries no credential)"
     )
     print("No service was started, and no provider was contacted.")
     return 0
