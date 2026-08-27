@@ -220,3 +220,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0154](0154-the-render-decides-a-rendered-files-mode-and-the-install-decides-its-owner.md) | The render decides a rendered file's mode; the install decides its owner | 10 | Accepted |
 | [0155](0155-a-deploy-recreates-a-container-whose-mounted-content-changed.md) | A deploy recreates a container whose mounted content changed | 10 | Accepted |
 | [0156](0156-a-refusal-that-arrives-mid-write-is-still-a-refusal.md) | A refusal that arrives mid-write is still a refusal | 10 | Accepted |
+| [0157](0157-a-preflight-reports-every-absent-prerequisite-and-changes-nothing.md) | A preflight reports every absent prerequisite, and says so when it did not look | 11 | Accepted |

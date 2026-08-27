@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D636.**
+**Next free number after this table is D637.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -129,6 +129,7 @@ implementation is appended with the next free number.
 | **D633** | Migration 0020's note: closing D500 "means replacing both write RPCs", framed as a correlation improvement. | **An unguarded cast does not merely fail to correlate — it destroys the write.** Measured: a function that inserts a row and *then* casts a caller-supplied `X-Request-Id: not-a-uuid` raises `22P02`, PostgREST answers **400**, and the table holds **zero rows**. The note is gone. The well-formed control committed 1 note and 1 audit row in the same invocation, and a `NULL` candidate (no header at all) casts to `NULL` at 200 — so only the *malformed* path is dangerous. A regex shape-test before the cast returns 200 with `NULL`. | **Migration 0022 guards the value before it reaches the cast.** A header that is not a uuid records `NULL` and the write proceeds. | **Two independent reasons, and either alone is sufficient.** The audit record's convenience must never be able to fail the operation it audits — ADR 0141 makes a *write* fail closed on *its own* audit record, which is not the same as letting a caller's malformed header roll back a user's note. And ADR 0139 requires a write refusal to be **translated** from the product's own `PT` errcode, never relayed: a raw `22P02`/400 is the relayed status that ADR exists to forbid. **Question 5 in its purest form** — migration 0019 chose `uuid` so a caller could not write prose into the column, and that decision was complete while the only writer was the runtime. It became incomplete the moment the value came from a header the caller controls. | needed |
 | **D634** | Run 1 item 3: "what disk a container reports for a bind-mounted volume, and whether the number a check reads is the number that fills up." | **The container's reading is faithful, and `/` is faithful here for a reason that does not generalise.** Measured: a 512 MiB ballast (`stat` confirmed **536,870,912 bytes** before anything was read back) moved the container's view of the named volume by **exactly 524,288 1K-blocks** — and moved `df /` by the *same* number, because the overlay and the volume sit on one device on this machine. | **The check reads the mount point the database writes to, never `/`.** | D374's family: a proof that passes for an unrelated reason. A check reading `/` is correct here and would be reading a different filesystem the moment a host puts `postgres-data` on its own device — and it would keep reporting a number, which is worse than reporting none. | — |
 | **D635** | — | **The host-versus-container half is not answerable on this machine.** `docker info` reports a root dir of `/var/lib/docker` and this shell **cannot stat it**: Docker Desktop runs the daemon inside its own VM, so a host `df` and a container `df` here are measurements of two different kernels. The rig reported `n/a` rather than a number. | **The comparison moves to Run 9's host trip**, where dockerd runs natively. Run 3 writes the check against the container-side reading, which is measured and faithful; the host cross-check becomes a `host`-mode node id. | D605 once more, one layer up: the environment is where a construction silently fails. **A number measured here and published as "the host's" would be a value that looked measured and was not** — §7's whole defect pattern, and the one this project produces most. Reporting `n/a` is the honest output of a rig that cannot answer. | — |
+| **D636** | ADR 0157 as drafted: the two filesystem checks are "always determinable", because "a filesystem read needs nothing from the daemon". | **`Path.exists()` raises on `EACCES`.** It swallows `ENOENT`, `ENOTDIR`, `EBADF` and `ELOOP` and lets a permission error through. Both state roots are `0700 root`, so a smoke run of `observe_prerequisites` as an unprivileged user did not report four verdicts — it **raised `PermissionError`** on the third and printed nothing at all. | **Every `exists()` in the probe is guarded, and an unreadable file is `undetermined` rather than `absent`.** The vocabulary the ADR introduced for the daemon turned out to be the right vocabulary for a `stat`. | The deploy runs as root, so this could never bite in production — which is precisely §7's pattern: *correct for exactly as long as its wrong answer coincides with the right one*. The honest verdict matters more than the crash: "run `materialize-secrets.sh`" is the wrong instruction for a generation that is present and merely unreadable, and re-materialising is **not free** — it writes a *new* generation. **Found by running the thing, not by reading it**, one step 0 into a run whose whole subject is reading before acting. | 0157 |
 
 ---
 
@@ -361,6 +362,45 @@ satisfied by hanging. A refusal already fails fast and needs nothing.
 
 **Proposed ADR 0157** — *a preflight reports every absent prerequisite and changes
 nothing.*
+
+**Done.** `src/agentic_postgres/preflight.py` (pure), `observe_prerequisites` and
+`_observe_secret_generation` in `bin/deploy-project.py` (the probing), step 0 in
+`main()` above the render, `tests/contract/test_preflight.py` (17 tests),
+**ADR 0157**, and one divergence row (**D636**).
+
+*What it measured.* Nine mutation arms, **9 killed, 0 survived, 0 defective** —
+every control green in the same invocation and every arm `FAILED` rather than
+`ERROR`, so each assertion was reached. The controls were picked to be
+unreachable by their arms (D499): M2 mutates the daemon's *timeout* branch and is
+controlled by a test that only exercises the *refusal* branch;
+`test_a_multi_line_error_is_collapsed_to_one_row` carries three arms because
+`_one_line` is touched by none of them.
+
+*What the design turned into.* The plan asked for an aggregating check. The thing
+that actually decided its shape was a dependency the plan did not name: **the edge
+check is a question you ask the Docker daemon.** A list of booleans cannot
+distinguish *"the edge plane is not running"* from *"nobody could ask"*, and would
+print the first while meaning the second — D600's family, and it would have sent
+an operator to restart a stack nobody examined. Hence three verdicts, and
+`undetermined` blocks a deploy exactly as an absence does.
+
+*What running it found that reading it did not* (D636). The first unprivileged
+smoke run **raised `PermissionError`** instead of printing a report:
+`Path.exists()` swallows `ENOENT` and **raises `EACCES`**, and both state roots
+are `0700 root`. The deploy runs as root, so it could never have failed in
+production — §7's pattern exactly. The repair was not just a `try`: an unreadable
+file is `undetermined`, because "run `materialize-secrets.sh`" is the wrong
+instruction for a generation that is present and merely unreadable, and
+re-materialising writes a **new** generation. **The state introduced for the
+daemon turned out to be the right state for a `stat`**, which is the strongest
+evidence the three-verdict decision was correct rather than ornamental.
+
+*What is deliberately not proved here.* That a refused deploy leaves the
+filesystem byte-identical. That needs root and a host, and it is Run 9's — the
+offline half asserts only the ordering that makes it possible. `DEP-PRE-001`'s
+placeholder is untouched and still `future`-marked; **activation is Run 9's**,
+because a requirement activated before its live half has ever executed is how
+evidence starts lying.
 
 ### Run 3 — `OPS-001` part 1: `doctor.sh` learns about deployments
 

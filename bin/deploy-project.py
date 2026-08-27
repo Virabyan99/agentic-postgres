@@ -63,6 +63,7 @@ from agentic_postgres import (
     observation,
     openapi_normalize,
     port_allocations,
+    preflight,
     rendering,
     runtime_override,
     secrets_contract,
@@ -436,6 +437,138 @@ def install_rendered(source: Path, destination: Path, override_payload: bytes) -
 # ---------------------------------------------------------------------------
 # Preconditions, each named
 # ---------------------------------------------------------------------------
+
+
+def observe_prerequisites(
+    project_key: str,
+    *,
+    host_manifest: str,
+    project_manifest: str,
+    session: int,
+) -> tuple[preflight.Prerequisite, ...]:
+    """Probe every prerequisite once, and let `preflight` say what it means.
+
+    The subprocess and the filesystem reads live here; the verdicts live in
+    `agentic_postgres.preflight` (ADR 0157), which is `database_observation`'s
+    split and for its reason — this file needs root, so nothing in it is
+    testable behaviourally.
+
+    **Nothing here writes.** That is the whole of step 0, and it is why the
+    `require_*` functions below are untouched: they exit on the first absence
+    *and* they return the values `build_deployed_document` is assembled from, so
+    duplicating them here would put two authorities over one document.
+    """
+    reachable = False
+    timed_out = False
+    error = ""
+    names: tuple[str, ...] = ()
+    try:
+        # `timeout=` is the point (D631): `run()` has none, and a daemon that
+        # ACCEPTS a connection and never answers left `docker ps` running past
+        # 20s in Run 1 — no output, no absence reported, and a deploy hung
+        # before it had done anything.
+        probe = subprocess.run(
+            ("docker", "ps", "--format", "{{.Names}}"),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=preflight.DAEMON_TIMEOUT_SECONDS,
+        )
+        reachable = probe.returncode == 0
+        error = probe.stderr
+        names = tuple(probe.stdout.split())
+    except subprocess.TimeoutExpired:
+        timed_out = True
+    except OSError as problem:
+        error = str(problem)
+
+    daemon = preflight.docker_daemon(reachable=reachable, timed_out=timed_out, error=error)
+
+    edge = preflight.edge_plane(
+        daemon=daemon,
+        running_names=names,
+        stack_name=EDGE_STACK_NAME,
+        host_manifest=host_manifest,
+    )
+
+    state = state_path(project_key)
+    bootstrap_error = ""
+    bootstrap_readable = True
+    try:
+        load_state(state)
+    except OSError as problem:
+        # BEFORE the broad clause, and D636 is why: `Path.exists()` swallows
+        # ENOENT and *raises* EACCES, so a state file this process cannot
+        # traverse to is one nobody looked at rather than one that is missing.
+        bootstrap_readable = False
+        bootstrap_error = f"{state} could not be read: {problem}"
+    except Exception as problem:
+        # Broad on purpose: `require_bootstrap` catches the same way. Missing,
+        # malformed JSON and schema-invalid are one absence to an operator, and
+        # all three need the same command.
+        bootstrap_error = f"{state}: {problem}"
+
+    bootstrap = preflight.provider_bootstrap(
+        error=bootstrap_error,
+        state_path=str(state),
+        host_manifest=host_manifest,
+        project_manifest=project_manifest,
+        readable=bootstrap_readable,
+    )
+
+    secret_readable, secret_error, generation = _observe_secret_generation(project_key)
+    secrets = preflight.secret_generation(
+        error=secret_error,
+        generation_id=generation,
+        project_manifest=project_manifest,
+        session=session,
+        readable=secret_readable,
+    )
+
+    return (daemon, edge, bootstrap, secrets)
+
+
+def _observe_secret_generation(project_key: str) -> tuple[bool, str, str]:
+    """`require_secret_generation`'s two reads, reporting instead of exiting.
+
+    Returns ``(readable, error, generation_id)``. Both the pointer and the
+    manifest it names, for the reason that function gives: a pointer naming a
+    generation whose manifest is missing describes a directory nothing can
+    account for.
+
+    **Every `exists()` here is guarded** (D636). The secret root is `0700 root`,
+    so an unprivileged caller gets `EACCES`, and `Path.exists()` raises on it
+    rather than answering False. Uncaught, that turns "report the absence" into
+    a traceback — which is the one outcome step 0 exists to prevent.
+    """
+    project_root = SECRET_ROOT / project_key
+    pointer = project_root / "active-secret-generation.json"
+    try:
+        pointer_exists = pointer.exists()
+    except OSError as problem:
+        return False, f"{pointer} could not be read: {problem}", ""
+    if not pointer_exists:
+        return True, f"no active generation pointer at {pointer}", ""
+
+    try:
+        generation = json.loads(pointer.read_text(encoding="utf-8"))["generation_id"]
+    except OSError as problem:
+        return False, f"{pointer} could not be read: {problem}", ""
+    except (ValueError, KeyError) as problem:
+        return True, f"{pointer} is malformed: {problem}", ""
+
+    manifest_path = project_root / "generations" / generation / "manifest.json"
+    try:
+        manifest_exists = manifest_path.exists()
+    except OSError as problem:
+        return False, f"{manifest_path} could not be read: {problem}", generation
+    if not manifest_exists:
+        return (
+            True,
+            f"generation {generation} has no manifest.json; it predates this release",
+            generation,
+        )
+    return True, "", generation
 
 
 def require_edge_is_up(host: dict[str, Any]) -> dict[str, Any]:
@@ -1463,6 +1596,24 @@ def main(argv: list[str] | None = None) -> int:
 
     project = manifest["project"]
     key = derive_project_key(project["slug"], project["environment"])
+
+    # Step 0, and the number matters: everything above this line reads. The
+    # render below writes `.generated/<key>`, so a refusal arriving after it has
+    # already changed the checkout it was refusing to deploy from (D614).
+    step("0. Preflight — read everything, change nothing")
+    checks = observe_prerequisites(
+        key,
+        host_manifest=str(arguments.host),
+        project_manifest=str(arguments.project),
+        session=arguments.through_session,
+    )
+    print(preflight.report(checks))
+    blocked = preflight.exit_kind(checks)
+    if blocked is not None:
+        fail(
+            EXIT_PREREQUISITE if blocked == preflight.KIND_PREREQUISITE else EXIT_PRECONDITION,
+            "the deploy has not started; supply what is listed above and re-run.",
+        )
 
     step("1. Render, from the manifests as given")
     render = run(
