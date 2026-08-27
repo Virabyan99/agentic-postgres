@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D630.**
+**Next free number after this table is D636.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -123,6 +123,12 @@ implementation is appended with the next free number.
 | **D627** | — | **`.github/workflows/ci.yml:134` still asserts `CURRENT_SESSION == 2`.** D525 recorded it in Session 10; it is now wrong by **eight** sessions, and has reddened nothing. | **Recorded again, not silently bumped.** The repair is to derive the number the way `bin/session-01-check.sh` does, and it belongs with ADR 0019's unbuilt CI job. If Session 11 takes it, it takes it as a named run item with the derivation, not as a literal edit. | A literal that has been wrong for eight sessions and reddened nothing is evidence about the *job*, not about the number. Bumping it destroys the evidence — which is exactly what D525 said, and it is still true. | — |
 | **D628** | — | **The rotation window has kept two claims red for five sessions.** Every unrun node id under `api_authorization` and `bootstrap_identity` is an `APG_ROTATED_*` proof (`tests/conftest.py:117-128`), consumed by `test_session4_convergence.py:455` and `test_session5_convergence.py:437, 498, 549`. | Closed in Run 10, as its own run. Three rotations; each proof is given the value the window **replaced**, so the file is written **before** the rotation. | The known trap is D253 and it has no code fix: **a rotated credential does not reach a running process on its own.** A container that mounts one needs `project-runtime.sh … down` before the deploy, because `resume` runs `compose up` without `--force-recreate`. ADR 0155 closed the *content-digest* half; the credential half is still a step. | — |
 | **D629** | — | **A deployed-document reader is guarded as a class** (D600). `test_no_operator_command_reads_a_key_the_deployed_document_does_not_have` (`tests/contract/test_container_selectors.py:280`) scans every such module against `$defs.deployedDocument` in the schema. | `doctor.sh`'s deployed mode is one of those readers from its first line. It derives from `project.key` through `naming` and reads no key the schema does not have. **If a check needs a value the document does not carry, that is an outputs-version question, not a `.get(…, {})`.** | **D600 is the dangerous member of its family**: a `release` read from a block no document kind has, wrapped in `or {}`, wrote `null` into every drill evidence document and passed the whole host gate with all five recovery claims green. The repair was the class, not the field. | 0146 |
+| **D630** | Run 1 item 4: "what `pg_stat_archiver` looks like on a healthy cluster and on one whose archive command is broken, so the freshness threshold is derived rather than guessed." | **Already measured, and already implemented.** D534 measured it over 60s with a control — `archive_command=/bin/false` gave `failed_count` 11→15→26 with `archived_count` **0** and `pg_wal` 5→6→11, against a `/bin/true` control that stayed flat at 4. D553 refined it. And `backup_report.archiving_is_failing` **already ships the predicate this run was going to derive**, with rig 7 arm G's three rows in its own docstring: *"Timestamps, never the counter."* | **No rig. `doctor.sh` calls `archiving_is_failing`; it does not re-derive a threshold.** D617's "reads `last_archived_time` and `last_failed_time`, never `failed_count`" is not a thing to build — it is a thing to import. | **This is D57/D262's pattern, caught instead of paid for.** Session 8 re-measured how PostgreSQL grants `EXECUTE`; Session 3 had measured it three sessions earlier in more detail. The §5 grep is the only thing standing between this plan and a run spent re-deriving a shipped function, and here it earned its place on the first run of the session. | 0150 |
+| **D631** | Run 1 item 1: "a preflight that cannot reach the daemon must report that as an absence rather than crash." | **`deploy-project.run()` passes no `timeout=`** (`bin/deploy-project.py:159-161`), and *refusal is not the failure mode that matters.* Measured: a non-existent socket, a closed local port and an unroutable address **all fail in ≤0.03s** with a usable stderr — the easy cases are already fine. A listener that **accepts the connection and never answers** hangs `docker ps` **past 20s**, with no output and nothing to report. | **The preflight's daemon call takes an explicit timeout**, and an expired call is reported as an absence with its own wording — "could not reach the Docker daemon within Ns" is a different sentence from "the daemon refused". | A wedged dockerd, a firewall that DROPs, and a daemon under load all present as accept-then-silence, and that is precisely the case a deploy is run during. **The first blackhole arm did not construct a blackhole** — `10.255.255.1` came back in 0.03s — and the rig was rewritten to accept the connection itself and *measure the accept* before trusting the timing. D605's rule, applied to the rig that was written to obey it. | needed |
+| **D632** | Run 1 item 2: whether the forwarded header is readable inside a `SECURITY DEFINER` function with a restricted `search_path`. | **It is, and the absent case is SQL `NULL` rather than the empty string.** Measured through PostgREST at the pinned digest, through a role switch, **behind a `db-pre-request` hook** that sets three GUCs of its own: `x-request-id` reads back exactly; a capitalised lookup key reads `NULL` **in the same request** the lowercase one succeeds; a header sent as `x-ReQuEsT-iD` on the wire still reads under the lowercase key. From `psql`, with no request at all, `current_setting('request.headers', true)` is `NULL` and does not raise. The hook sees the header too, and does not disturb it. | Migration 0022 reads `current_setting('request.headers', true)` — **two-argument form** — and looks up `'x-request-id'`, lowercase, **with no `nullif(…, '')`**. | The repository's standing idiom is `nullif(current_setting(…), '')`, because an unset GUC reads as the empty string. **That is true of a GUC the hook sets and false of a jsonb key lookup**, which returns SQL `NULL` for an absent key — measured, both ways, in one call. Copying the idiom here would guard a case that does not occur and hide the one that does. | — |
+| **D633** | Migration 0020's note: closing D500 "means replacing both write RPCs", framed as a correlation improvement. | **An unguarded cast does not merely fail to correlate — it destroys the write.** Measured: a function that inserts a row and *then* casts a caller-supplied `X-Request-Id: not-a-uuid` raises `22P02`, PostgREST answers **400**, and the table holds **zero rows**. The note is gone. The well-formed control committed 1 note and 1 audit row in the same invocation, and a `NULL` candidate (no header at all) casts to `NULL` at 200 — so only the *malformed* path is dangerous. A regex shape-test before the cast returns 200 with `NULL`. | **Migration 0022 guards the value before it reaches the cast.** A header that is not a uuid records `NULL` and the write proceeds. | **Two independent reasons, and either alone is sufficient.** The audit record's convenience must never be able to fail the operation it audits — ADR 0141 makes a *write* fail closed on *its own* audit record, which is not the same as letting a caller's malformed header roll back a user's note. And ADR 0139 requires a write refusal to be **translated** from the product's own `PT` errcode, never relayed: a raw `22P02`/400 is the relayed status that ADR exists to forbid. **Question 5 in its purest form** — migration 0019 chose `uuid` so a caller could not write prose into the column, and that decision was complete while the only writer was the runtime. It became incomplete the moment the value came from a header the caller controls. | needed |
+| **D634** | Run 1 item 3: "what disk a container reports for a bind-mounted volume, and whether the number a check reads is the number that fills up." | **The container's reading is faithful, and `/` is faithful here for a reason that does not generalise.** Measured: a 512 MiB ballast (`stat` confirmed **536,870,912 bytes** before anything was read back) moved the container's view of the named volume by **exactly 524,288 1K-blocks** — and moved `df /` by the *same* number, because the overlay and the volume sit on one device on this machine. | **The check reads the mount point the database writes to, never `/`.** | D374's family: a proof that passes for an unrelated reason. A check reading `/` is correct here and would be reading a different filesystem the moment a host puts `postgres-data` on its own device — and it would keep reporting a number, which is worse than reporting none. | — |
+| **D635** | — | **The host-versus-container half is not answerable on this machine.** `docker info` reports a root dir of `/var/lib/docker` and this shell **cannot stat it**: Docker Desktop runs the daemon inside its own VM, so a host `df` and a container `df` here are measurements of two different kernels. The rig reported `n/a` rather than a number. | **The comparison moves to Run 9's host trip**, where dockerd runs natively. Run 3 writes the check against the container-side reading, which is measured and faithful; the host cross-check becomes a `host`-mode node id. | D605 once more, one layer up: the environment is where a construction silently fails. **A number measured here and published as "the host's" would be a value that looked measured and was not** — §7's whole defect pattern, and the one this project produces most. Reporting `n/a` is the honest output of a rig that cannot answer. | — |
 
 ---
 
@@ -277,6 +283,65 @@ Throwaway rigs in `/tmp`, each with a control. **Grep the plans before each one*
 
 **A rig that CONSTRUCTS a condition must MEASURE that it constructed it** (D605).
 
+**Done.** Four items, three rigs, six divergence rows (**D630–D635**). No code
+changed; this run's whole output is measurements and the decisions they force.
+
+*What it measured.*
+
+**Item 4 never needed a rig** (D630). The §5 grep found D534's 60-second
+measurement with its `/bin/true` control, D553's refinement, and — decisively —
+`backup_report.archiving_is_failing`, which already ships the exact predicate
+this run was going to derive, with rig 7 arm G's three rows quoted in its own
+docstring. Session 10 built it. `doctor.sh` imports it. **The grep step earned
+its place on the first run of the session**, and the alternative was a run spent
+re-deriving a shipped function.
+
+**Item 1 found a hang, but not where the plan looked** (D631). The easy failures
+are already clean: a missing socket, a closed port and an unroutable address all
+return in ≤0.03s with usable stderr. The dangerous one is *accept-then-silence* —
+a wedged daemon, a DROPping firewall — where `docker ps` was still running after
+20s, because `run()` passes no `timeout=`. **The first attempt at that arm proved
+nothing**: `10.255.255.1` came back in 0.03s, which is a rejection, not a
+blackhole. The rig was rewritten to hold the accepted connection itself and to
+*print whether it had accepted one* before reporting any timing. D605's rule
+applied to a rig written in obedience to D605.
+
+**Item 2 answered cleanly and then produced the run's real finding.** The header
+is readable exactly where migration 0022 needs it — through PostgREST, through a
+role switch, behind a `db-pre-request` hook, inside `SECURITY DEFINER` with
+`SET search_path = pg_catalog, pg_temp` — under the **lowercase** key only, with
+a capitalised lookup and a never-sent key both reading `NULL` in the same request
+as the internal negative control (D632). The absent case is SQL `NULL`, **not**
+the empty string, so the repository's `nullif(…, '')` idiom does not belong here.
+
+Then D633: **an unguarded cast does not fail to correlate, it destroys the
+write.** A malformed `X-Request-Id` on a function that inserts a row and then
+casts left the table with **zero rows** and answered 400. Migration 0022 was
+scoped as a correlation improvement; it is one refactor away from letting any
+caller roll back their own note with a header. Two ADRs already forbid the naive
+version — 0141 (a write fails closed on *its own* audit record, which is not this)
+and 0139 (a refusal is translated, never a relayed status; `22P02`/400 is exactly
+the relayed status). **Question 5 in its purest form:** 0019 chose `uuid` so a
+caller could not write prose into the column, and that decision was complete while
+the only writer was the runtime.
+
+**Item 3 split in half** (D634, D635). The container's reading is faithful — a
+512 MiB ballast, `stat`-confirmed at 536,870,912 bytes before anything was read
+back, moved the volume's available blocks by exactly 524,288. But `df /` moved by
+the *same* number, because the overlay and the volume are one device here: a check
+reading `/` would be right on this machine for a reason that does not generalise
+(D374's family). And the host-versus-container comparison **is not answerable
+here at all** — Docker Desktop runs the daemon in its own VM, so the two `df`
+readings are of two kernels, and the rig reported `n/a` rather than a number.
+That comparison is Run 9's.
+
+*What it changes downstream.* Run 2 gains a timeout and a distinct message for an
+unreachable daemon. Run 3 reads a mount point rather than `/`, imports
+`archiving_is_failing`, and carries a host-mode node id for the disk cross-check.
+**Run 6 gains a guard it was not scoped to have, and D633 is the reason** — the
+ADR there now has to say what a malformed header records, not merely where a good
+one comes from.
+
 ### Run 2 — `DEP-PRE-001`: the preflight
 
 A step 0 in `bin/deploy-project.py` that collects every absent prerequisite and
@@ -288,6 +353,11 @@ Tests: three absences produce three lines; the filesystem is byte-identical befo
 and after a refused run (including `.generated/<key>` and the git index); a
 present prerequisite is not reported. **Mutation battery** with a control the
 mutations cannot reach.
+
+**Amended by D631.** The daemon call takes an explicit `timeout=` and reports an
+expired call in its own words — a daemon that *accepts and never answers* hangs
+`docker ps` past 20s today, and "report the absence rather than crash" is not
+satisfied by hanging. A refusal already fails fast and needs nothing.
 
 **Proposed ADR 0157** — *a preflight reports every absent prerequisite and changes
 nothing.*
@@ -302,6 +372,14 @@ Reuse, do not rebuild: `bin/backup.sh info --json` (ADR 0149), `bin/migrate.sh
 status`, `bin/apg-diag.sh`'s verbs, `deployed_output`'s readers. Derive every name
 from `project.key` through `naming` (ADR 0002). Read state **fields**, never exit
 codes (D548, D145).
+
+**Amended by D630, D634 and D635.** WAL freshness **imports**
+`backup_report.archiving_is_failing` rather than deriving a threshold — Session 10
+already shipped it. The disk check reads **the mount point the database writes
+to, never `/`**: the two coincide on a developer machine, so a check reading `/`
+passes there for a reason that does not generalise. And the host-versus-container
+cross-check is a **`host`-mode node id**, because Docker Desktop's daemon lives in
+its own VM and this machine physically cannot compare the two.
 
 **Proposed ADR 0158** — *the diagnostic command's two modes, and which of them
 needs privilege.*
@@ -333,6 +411,20 @@ row. The deployment test that asserts it `IS NULL` is **replaced by a stricter
 one**, authorised by this run's ADR, with the reason in the new test's docstring
 (§6 non-negotiables). `bin/migrate.sh freeze-lock`. Migration 0020's comment is
 the contract for this run and should be read before it starts.
+
+**Amended by D633, and this is the run's hardest constraint.** The value is
+**guarded before it reaches the cast**: measured, an unguarded `candidate::uuid`
+on a malformed caller-supplied header raises `22P02`, answers 400, and **rolls the
+write back to zero rows**. A header that is not a uuid records `NULL` and the
+write proceeds. The ADR must therefore say what a *malformed* header records, not
+only where a good one comes from — and it inherits two existing decisions rather
+than making a new one: ADR 0141 (a write fails closed on **its own** audit record,
+which a caller's bad header is not) and ADR 0139 (a refusal is translated from the
+product's `PT` errcode, never a relayed `22P02`).
+
+The read itself is settled by D632: `current_setting('request.headers', true)`,
+two-argument form, lowercase `'x-request-id'`, and **no `nullif(…, '')`** — an
+absent jsonb key is SQL `NULL`, not the empty string.
 
 **Proposed ADR 0160** — *the `database`-source audit row records the request that
 caused it.*
