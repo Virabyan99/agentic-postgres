@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D639.**
+**Next free number after this table is D642.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -132,6 +132,9 @@ implementation is appended with the next free number.
 | **D636** | ADR 0157 as drafted: the two filesystem checks are "always determinable", because "a filesystem read needs nothing from the daemon". | **`Path.exists()` raises on `EACCES`.** It swallows `ENOENT`, `ENOTDIR`, `EBADF` and `ELOOP` and lets a permission error through. Both state roots are `0700 root`, so a smoke run of `observe_prerequisites` as an unprivileged user did not report four verdicts — it **raised `PermissionError`** on the third and printed nothing at all. | **Every `exists()` in the probe is guarded, and an unreadable file is `undetermined` rather than `absent`.** The vocabulary the ADR introduced for the daemon turned out to be the right vocabulary for a `stat`. | The deploy runs as root, so this could never bite in production — which is precisely §7's pattern: *correct for exactly as long as its wrong answer coincides with the right one*. The honest verdict matters more than the crash: "run `materialize-secrets.sh`" is the wrong instruction for a generation that is present and merely unreadable, and re-materialising is **not free** — it writes a *new* generation. **Found by running the thing, not by reading it**, one step 0 into a run whose whole subject is reading before acting. | 0157 |
 | **D637** | D600's repair: *"the repair was the class, not the field"* — `test_no_operator_command_reads_a_key_the_deployed_document_does_not_have` scans every reader against the schema. | **The class guard's reader list is hand-maintained.** `DEPLOYED_DOCUMENT_READERS` is a four-entry tuple, and a new reader is covered only if somebody remembers to add it — which is the same failure mode the guard exists to prevent, one level up. **`test_cli_contract` solves exactly this problem one file over**: `test_every_command_in_bin_is_covered_by_this_module` diffs `bin/` against its own lists and fails on anything unlisted. It caught `bin/doctor.py` within a minute of the file existing. | **`bin/doctor.py` is added to the tuple, and the weakness is written down rather than repaired.** Discovery was tried and rejected: **33** files under `bin/` and `src/` read some `document["…"]`, and nearly all read a manifest, a bootstrap state or an OpenAPI document. | A scan matching those would trade a precise guard for a vague one — the exact trade `_top_level_document_reads` already refuses one level down, in a comment. **What is genuinely missing is a completeness check, not a discovery scan**, and `test_cli_contract`'s is the model: it needs a way to say "these files are handed a deployed document" that is cheaper to keep true than the tuple. Nobody has one. | 0158 |
 | **D638** | The plan's Run 3: *"containers and health, TLS and route resolution, database and PgBouncer, migration status, backup and WAL freshness, R2 access, and disk headroom"* — seven families, read as seven live checks. | **Four of the seven already have a `status` field in the deployed document**, and echoing them would have been the obvious implementation: `backup_state.status`, `tls.status`, `mcp.status` and `database.observed` are all published, all well-formed, and all recorded **at deploy time**. A project deployed three weeks ago whose archiver died yesterday publishes `backup_state.status: ok` until its next deploy. | **The document supplies identities; every verdict is a live read** (ADR 0158). `test_the_doctor_reads_no_status_block_off_the_deployed_document` asserts it as a class over `bin/doctor.py`'s AST. | The schema settles it rather than taste: `backupState` carries `wal_archived_count` and `wal_failed_count` and **no timestamps**, so a doctor reading the document for archiver health has only the cumulative counter D553 measured at **26 on a healthy, fully-caught-up cluster**. The document is *structurally incapable* of answering the question it appears to answer — and a check built on it would have been green, plausible, and wrong for as long as nobody redeployed. | 0158 |
+| **D639** | D622: *"the rig plants a known random value in every place a secret lives … and asserts no sentinel appears anywhere in stdout or stderr."* | **The first rig returned non-zero for every stubbed command, so every probe took its early-return branch.** Nothing reached a parsing path, nothing reached a formatting path, and the leak scan was reading seven "could not be measured" strings. **It passed.** | **Every structured channel now answers realistically** — a `docker ps --format` line, a `pg_stat_archiver` row, a `df` table, `backup.sh info --json` — and `test_every_probe_reached_its_parsing_path` asserts the report contains no `UNKNOWN`. A probe that stops parsing fails the premise before the leak scan is consulted. | **D605, in the file written to obey it**: *a rig that CONSTRUCTS a condition must MEASURE that it constructed it.* Caught only because a separate assertion about container names failed for the *right* reason — the leak tests themselves were green and would have stayed green. This is the same shape as ADR 0156's *"six green tests measuring nothing"*, and it is now two sessions running. | 0159 |
+| **D640** | ADR 0159 as first drafted: *"never a byte a third party emitted."* | **Taken literally it forbids the most useful line the tool prints.** An unhealthy container's name arrives as `docker ps` stdout; a `last_archived_time` arrives as `psql` output. Both are bytes a third party emitted, and neither is a place a credential can appear. | **The rule is stated by CHANNEL, not by origin.** Integers, booleans, and fields read *by position* out of structured output whose shape this repository knows may travel. A command's **stderr**, its **unstructured stdout**, its argv and the environment never do. | The distinction is where credentials actually live: prose. `pgbackrest`'s error strings name repository paths and S3 keys; a `--format` column holds a name `naming` derived. A rule that banned both would have been obeyed by deleting the diagnosis — and the first version of the redaction test would have **certified a stricter rule than the code implements**, which is a green test measuring something nobody built. | 0159 |
+| **D641** | — | **`test_commands_do_not_echo_a_planted_environment_variable` was written when `doctor.sh` had one mode**, and it invokes each command bare. `--verbose` — the one flag whose entire purpose is to print more — was outside it. | The test takes invocations rather than command names, and `bin/doctor.sh --verbose` is one of them. | **Question 5, caught by asking it rather than by a leak.** The decision *"no command echoes its environment"* was complete when every command had one mode; it became incomplete the moment one grew a second. Five instances in Session 7, three more in Session 9 — and the cheapest place to find the ninth was a guard that already existed and was quietly covering less than its name claimed. | 0159 |
 
 ---
 
@@ -480,6 +483,47 @@ A `--verbose` that prints more must not print more *secret*. The proof is D622's
 sentinel scan with a deliberately leaky control build. Exit codes follow the
 convention: `3` a missing local prerequisite, `4` missing runtime state, `6` a
 check failed.
+
+**Done.** `--verbose` in both modes, `Check.evidence` and `diagnosis._pairs`,
+`tests/contract/test_doctor_redaction.py` (13 tests), **ADR 0159**, and three
+divergence rows (**D639**, **D640**, **D641**).
+
+*What the rule turned out to be* (D640). "Never a third party's bytes" was the
+draft, and taken literally it forbids the most useful line the tool prints: an
+unhealthy container's name arrives as `docker ps` stdout. So the rule is stated
+**by channel rather than by origin** — integers, booleans and fields read *by
+position* out of structured output may travel; a command's **stderr**, its
+**unstructured stdout**, its argv and the environment never do. That is where
+credentials actually live: prose. Had the draft stood, the redaction test would
+have **certified a stricter rule than the code implements**.
+
+*How it is enforced.* Structurally, not by review. `verbose` reaches the renderer
+and no probe, so a probe cannot print more when verbose because it never learns
+of it. `_pairs(**values)` takes *values* and does the `str()` itself, so a caller
+cannot hand it something it was given. An AST scan refuses `.stdout`/`.stderr`
+reaching any `diagnosis.*` call — which cost `probe_migrations` one extra line,
+deliberately: `int(x.stdout)` cannot leak, but a rule a scan can check without
+judgement is worth more than an exemption.
+
+*What running it found* (D639). **The first rig returned non-zero for every
+stubbed command**, so every probe took its early-return branch, nothing reached a
+formatting path, and the leak scan was reading seven *"could not be measured"*
+strings. **It passed.** It was caught only because a separate assertion about
+container names failed for the right reason. D605 in the file written to obey it,
+and the same shape as ADR 0156's *"six green tests measuring nothing"* — two
+sessions running. `test_every_probe_reached_its_parsing_path` is now the premise,
+and M5 of the battery kills it.
+
+*What the battery established.* Five arms, **5 killed, 0 survived, 0 defective** —
+and the first pass reported **M1 as ERROR rather than FAILED**, which is D386's
+false kill. The mutation was malformed (a duplicate keyword argument), so the
+module never imported and red meant "syntax error", not "leak detected". A
+battery reading only red-versus-green would have counted it a kill. Repaired and
+re-run.
+
+*Also caught* (D641). `test_commands_do_not_echo_a_planted_environment_variable`
+was written when `doctor.sh` had one mode. It now takes invocations, and
+`--verbose` is one of them.
 
 ### Run 5 — `OPS-LOG-001` part 1: the id survives the hop
 

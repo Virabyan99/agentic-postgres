@@ -21,6 +21,18 @@ predicted this requirement would need:
 * ``PROBLEM``  — measured, and wrong.
 * ``UNKNOWN``  — **not measured.** Never a synonym for OK, and never for PROBLEM.
 
+**`--verbose` adds resolution, never a third party's bytes** (ADR 0159). Every
+value it prints is one this program produced: a parsed integer, a boolean, a
+timestamp it read out of a catalog view. No subprocess stdout, no stderr, no
+environment, no path under the secret root.
+
+That is stricter than filtering, and the reason is already written down in this
+repository — `storage_client.redact`: *"Half-redacting is worse than not logging:
+a URL missing only `X-Amz-Signature` still names the bucket, the key and the
+account."* A filter over `pgbackrest`'s stderr would be a denylist against a
+third party's future output, and a test of it would be a test of the denylist
+(D622). Not printing it is a property; filtering it is a hope.
+
 Nothing here reads a file, runs a process or touches the network.
 """
 
@@ -74,13 +86,35 @@ TLS_WARN_DAYS = 21
 
 @dataclass(frozen=True)
 class Check:
+    """One verdict, and the values `--verbose` is allowed to show behind it.
+
+    ``evidence`` holds **only values this program produced** — parsed numbers,
+    booleans and its own enum-ish strings. Never a byte a third party emitted.
+    See the module docstring: half-redacting a subprocess's stderr is worse than
+    omitting it.
+    """
+
     name: str
     verdict: str
     detail: str
+    evidence: tuple[tuple[str, str], ...] = ()
 
 
-def _check(name: str, verdict: str, detail: str) -> Check:
-    return Check(name=name, verdict=verdict, detail=detail)
+def _check(
+    name: str, verdict: str, detail: str, evidence: tuple[tuple[str, str], ...] = ()
+) -> Check:
+    return Check(name=name, verdict=verdict, detail=detail, evidence=evidence)
+
+
+def _pairs(**values: object) -> tuple[tuple[str, str], ...]:
+    """Evidence from named values, rendered here rather than by the caller.
+
+    The rendering is deliberately in this module: a caller that formatted its own
+    strings could format anything, including something it had been handed. Taking
+    values and doing the `str()` here is what makes "only what this program
+    produced" a property of the construction rather than a rule to remember.
+    """
+    return tuple((name, "null" if value is None else str(value)) for name, value in values.items())
 
 
 def containers(*, expected: int, running: tuple[str, ...], unhealthy: tuple[str, ...]) -> Check:
@@ -91,17 +125,21 @@ def containers(*, expected: int, running: tuple[str, ...], unhealthy: tuple[str,
     `docker ps` result and a daemon that answered nothing look identical here,
     and only the caller can tell them apart.
     """
+    facts = _pairs(expected=expected, running=len(running), unhealthy=len(unhealthy))
     if expected <= 0:
-        return _check("containers", UNKNOWN, "could not establish this project's container set")
+        return _check(
+            "containers", UNKNOWN, "could not establish this project's container set", facts
+        )
     if unhealthy:
         return _check(
             "containers",
             PROBLEM,
             f"{len(running)}/{expected} running, unhealthy: {', '.join(sorted(unhealthy))}",
+            facts,
         )
     if len(running) < expected:
-        return _check("containers", PROBLEM, f"{len(running)}/{expected} running")
-    return _check("containers", OK, f"{len(running)}/{expected} running, none unhealthy")
+        return _check("containers", PROBLEM, f"{len(running)}/{expected} running", facts)
+    return _check("containers", OK, f"{len(running)}/{expected} running, none unhealthy", facts)
 
 
 def route(*, name: str, url: str, status: int | None, expected: int) -> Check:
@@ -111,11 +149,14 @@ def route(*, name: str, url: str, status: int | None, expected: int) -> Check:
     route that could not be reached from here may be perfectly well from
     somewhere else, and this command runs on the host.
     """
+    facts = _pairs(url=url, status=status, expected=expected)
     if status is None:
-        return _check(f"route {name}", UNKNOWN, f"{url} did not answer")
+        return _check(f"route {name}", UNKNOWN, f"{url} did not answer", facts)
     if status != expected:
-        return _check(f"route {name}", PROBLEM, f"{url} answered {status}, expected {expected}")
-    return _check(f"route {name}", OK, f"{url} answered {status}")
+        return _check(
+            f"route {name}", PROBLEM, f"{url} answered {status}, expected {expected}", facts
+        )
+    return _check(f"route {name}", OK, f"{url} answered {status}", facts)
 
 
 def tls(*, days_remaining: int | None, not_after: str | None) -> Check:
@@ -125,13 +166,14 @@ def tls(*, days_remaining: int | None, not_after: str | None) -> Check:
     certificate was then — and a certificate's whole failure mode is the passage
     of time (ADR 0158).
     """
+    facts = _pairs(days_remaining=days_remaining, not_after=not_after, warn_below=TLS_WARN_DAYS)
     if days_remaining is None:
-        return _check("tls", UNKNOWN, "no certificate could be read from the edge")
+        return _check("tls", UNKNOWN, "no certificate could be read from the edge", facts)
     if days_remaining < 0:
-        return _check("tls", PROBLEM, f"expired {abs(days_remaining)}d ago ({not_after})")
+        return _check("tls", PROBLEM, f"expired {abs(days_remaining)}d ago ({not_after})", facts)
     if days_remaining < TLS_WARN_DAYS:
-        return _check("tls", WARN, f"{days_remaining}d remaining ({not_after})")
-    return _check("tls", OK, f"{days_remaining}d remaining ({not_after})")
+        return _check("tls", WARN, f"{days_remaining}d remaining ({not_after})", facts)
+    return _check("tls", OK, f"{days_remaining}d remaining ({not_after})", facts)
 
 
 def database(*, reachable: bool, pooler_reachable: bool, detail: str = "") -> Check:
@@ -141,18 +183,19 @@ def database(*, reachable: bool, pooler_reachable: bool, detail: str = "") -> Ch
     cannot reach its cluster and a cluster nobody can reach look the same from a
     client and need different repairs.
     """
+    facts = _pairs(cluster_answered=reachable, pooler_answered=pooler_reachable)
     if reachable and pooler_reachable:
-        return _check("database", OK, "cluster and pooler both answered")
+        return _check("database", OK, "cluster and pooler both answered", facts)
     if reachable and not pooler_reachable:
         return _check(
-            "database", PROBLEM, f"the cluster answered; the pooler did not{_tail(detail)}"
+            "database", PROBLEM, f"the cluster answered; the pooler did not{_tail(detail)}", facts
         )
     if not reachable and pooler_reachable:
         return _check(
-            "database", PROBLEM, f"the pooler answered; the cluster did not{_tail(detail)}"
+            "database", PROBLEM, f"the pooler answered; the cluster did not{_tail(detail)}", facts
         )
     return _check(
-        "database", PROBLEM, f"neither the cluster nor the pooler answered{_tail(detail)}"
+        "database", PROBLEM, f"neither the cluster nor the pooler answered{_tail(detail)}", facts
     )
 
 
@@ -162,18 +205,22 @@ def migrations(*, applied: int | None, released: int) -> Check:
     ``applied is None`` is UNKNOWN: the ledger could not be read, which is not
     the same as a ledger that is behind.
     """
+    facts = _pairs(applied=applied, released=released)
     if applied is None:
-        return _check("migrations", UNKNOWN, "the migration ledger could not be read")
+        return _check("migrations", UNKNOWN, "the migration ledger could not be read", facts)
     if applied < released:
-        return _check("migrations", PROBLEM, f"{applied} of {released} released migrations applied")
+        return _check(
+            "migrations", PROBLEM, f"{applied} of {released} released migrations applied", facts
+        )
     if applied > released:
         return _check(
             "migrations",
             WARN,
             f"the cluster reports {applied} applied and this release has {released}; "
             "it is ahead of this checkout",
+            facts,
         )
-    return _check("migrations", OK, f"all {released} released migrations applied")
+    return _check("migrations", OK, f"all {released} released migrations applied", facts)
 
 
 def repository(*, status: str | None, last_full_backup_at: str | None) -> Check:
@@ -184,13 +231,19 @@ def repository(*, status: str | None, last_full_backup_at: str | None) -> Check:
     same defect as `postgrest --ready` returning 0 while every request 404s
     (D145). Two third parties, five sessions apart, one shape.
     """
+    facts = _pairs(reported_status=status, last_full_backup_at=last_full_backup_at)
     if status is None:
-        return _check("backup repository", UNKNOWN, "the repository could not be queried")
+        return _check("backup repository", UNKNOWN, "the repository could not be queried", facts)
     if status == "ok":
-        return _check("backup repository", OK, f"last full backup {last_full_backup_at}")
+        return _check("backup repository", OK, f"last full backup {last_full_backup_at}", facts)
     if status == "awaiting_first_backup":
-        return _check("backup repository", WARN, "the stanza exists and holds no full backup yet")
-    return _check("backup repository", PROBLEM, f"the repository reports {status}")
+        return _check(
+            "backup repository",
+            WARN,
+            "the stanza exists and holds no full backup yet",
+            facts,
+        )
+    return _check("backup repository", PROBLEM, f"the repository reports {status}", facts)
 
 
 def archiver(*, failing: bool | None, last_archived_time: str | None) -> Check:
@@ -206,11 +259,12 @@ def archiver(*, failing: bool | None, last_archived_time: str | None) -> Check:
     check of its own: a repository full of good backups can sit behind an
     archiver that stopped an hour ago.
     """
+    facts = _pairs(failing=failing, last_archived_time=last_archived_time)
     if failing is None:
-        return _check("wal archiver", UNKNOWN, "pg_stat_archiver could not be read")
+        return _check("wal archiver", UNKNOWN, "pg_stat_archiver could not be read", facts)
     if failing:
-        return _check("wal archiver", PROBLEM, "the most recent archive attempt failed")
-    return _check("wal archiver", OK, f"last archived {last_archived_time}")
+        return _check("wal archiver", PROBLEM, "the most recent archive attempt failed", facts)
+    return _check("wal archiver", OK, f"last archived {last_archived_time}", facts)
 
 
 def disk_headroom(*, cluster_kb: int | None, available_kb: int | None, mount: str) -> Check:
@@ -222,10 +276,19 @@ def disk_headroom(*, cluster_kb: int | None, available_kb: int | None, mount: st
     developer machine, so a check reading `/` passes there for a reason that does
     not generalise (D634).
     """
+    facts = _pairs(
+        mount=mount,
+        cluster_kb=cluster_kb,
+        available_kb=available_kb,
+        problem_below_copies=DISK_PROBLEM_COPIES,
+        warn_below_copies=DISK_WARN_COPIES,
+    )
     if cluster_kb is None or available_kb is None:
-        return _check("disk headroom", UNKNOWN, f"could not measure {mount}")
+        return _check("disk headroom", UNKNOWN, f"could not measure {mount}", facts)
     if cluster_kb <= 0:
-        return _check("disk headroom", UNKNOWN, f"{mount} reported a cluster size of {cluster_kb}")
+        return _check(
+            "disk headroom", UNKNOWN, f"{mount} reported a cluster size of {cluster_kb}", facts
+        )
 
     copies = available_kb / cluster_kb
     summary = (
@@ -233,10 +296,10 @@ def disk_headroom(*, cluster_kb: int | None, available_kb: int | None, mount: st
         f"cluster is {cluster_kb // 1024} MiB ({copies:.1f}x)"
     )
     if copies < DISK_PROBLEM_COPIES:
-        return _check("disk headroom", PROBLEM, f"a restore cannot run: {summary}")
+        return _check("disk headroom", PROBLEM, f"a restore cannot run: {summary}", facts)
     if copies < DISK_WARN_COPIES:
-        return _check("disk headroom", WARN, f"one restore would fit, barely: {summary}")
-    return _check("disk headroom", OK, summary)
+        return _check("disk headroom", WARN, f"one restore would fit, barely: {summary}", facts)
+    return _check("disk headroom", OK, summary, facts)
 
 
 def worst(checks: tuple[Check, ...]) -> str:
@@ -255,7 +318,14 @@ def exit_code(checks: tuple[Check, ...]) -> int:
     return 0 if _SEVERITY[worst(checks)] <= _SEVERITY[WARN] else 6
 
 
-def report(checks: tuple[Check, ...], *, project_key: str) -> str:
+def report(checks: tuple[Check, ...], *, project_key: str, verbose: bool = False) -> str:
+    """The table, and under `--verbose` the values behind each verdict.
+
+    Verbose prints `Check.evidence` and **nothing else** — no subprocess output,
+    no environment, no path under the secret root. What it adds is resolution:
+    the numbers a verdict was computed from, so an operator can see *why* rather
+    than being told to trust it (ADR 0159).
+    """
     counts = {verdict: sum(1 for c in checks if c.verdict == verdict) for verdict in _SEVERITY}
     headline = (
         f"{project_key}: {counts[OK]} ok, {counts[WARN]} warning, "
@@ -263,7 +333,10 @@ def report(checks: tuple[Check, ...], *, project_key: str) -> str:
     )
     label = {OK: "ok", WARN: "WARN", PROBLEM: "PROBLEM", UNKNOWN: "UNKNOWN"}
     lines = [headline, ""]
-    lines.extend(f"  {label[c.verdict]:<8} {c.name} — {c.detail}" for c in checks)
+    for check in checks:
+        lines.append(f"  {label[check.verdict]:<8} {check.name} — {check.detail}")
+        if verbose:
+            lines.extend(f"  {'':<8}   {key} = {value}" for key, value in check.evidence)
     return "\n".join(lines)
 
 

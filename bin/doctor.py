@@ -301,10 +301,15 @@ def probe_migrations(document: dict[str, Any]) -> diagnosis.Check:
     )
     if counted is None or counted.returncode != 0:
         return diagnosis.migrations(applied=None, released=released)
+    # Parsed into a value BEFORE the call, never inside it. `int(...)` could not
+    # leak text either way, but "no `.stdout` appears in a `diagnosis.*` call" is
+    # a rule a scan can check and a reader can apply without judgement, and one
+    # extra line is cheaper than an exemption (ADR 0159).
     try:
-        return diagnosis.migrations(applied=int(counted.stdout.strip()), released=released)
+        applied = int(counted.stdout.strip())
     except ValueError:
         return diagnosis.migrations(applied=None, released=released)
+    return diagnosis.migrations(applied=applied, released=released)
 
 
 def probe_repository(project_key: str) -> diagnosis.Check:
@@ -418,10 +423,15 @@ def diagnose(project_key: str) -> tuple[diagnosis.Check, ...]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--project", required=True)
+    parser.add_argument("--verbose", action="store_true")
     arguments = parser.parse_args(argv)
 
     checks = diagnose(arguments.project)
-    print(diagnosis.report(checks, project_key=arguments.project))
+    # `verbose` reaches the RENDERER and nothing else. There is no verbose branch
+    # in any probe above, which is what keeps "a third party's bytes are never
+    # printed" a property of the shape rather than a rule each probe obeys
+    # (ADR 0159).
+    print(diagnosis.report(checks, project_key=arguments.project, verbose=arguments.verbose))
     return diagnosis.exit_code(checks)
 
 

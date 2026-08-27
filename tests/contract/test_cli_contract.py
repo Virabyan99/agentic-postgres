@@ -540,10 +540,26 @@ def test_render_works_from_another_directory(tmp_path: Path) -> None:
 
 
 def test_commands_do_not_echo_a_planted_environment_variable() -> None:
+    """Every command, and every mode of one that has more than one.
+
+    **`bin/doctor.sh --verbose` is here because this test was written when that
+    command had one mode** (Session 11, ADR 0159). A flag added later is a flag
+    the guard was not covering, and "verbose" is precisely the flag whose whole
+    job is to print more — Question 5's shape, caught by asking it rather than by
+    a leak.
+    """
     planted = "APG_CANARY_VALUE_bH3x9Qf2"
-    for relative in ("bin/doctor.sh", "bin/bootstrap-providers.sh", "bin/connect.sh"):
-        result = run(str(REPO_ROOT / relative), env={"APG_CANARY": planted})
-        assert planted not in result.stdout + result.stderr, f"{relative} leaked its environment"
+    invocations = (
+        ("bin/doctor.sh",),
+        ("bin/doctor.sh", "--verbose"),
+        ("bin/bootstrap-providers.sh",),
+        ("bin/connect.sh",),
+    )
+    for relative, *arguments in invocations:
+        result = run(str(REPO_ROOT / relative), *arguments, env={"APG_CANARY": planted})
+        assert planted not in result.stdout + result.stderr, (
+            f"{relative} {' '.join(arguments)} leaked its environment"
+        )
 
 
 def test_every_command_in_bin_is_covered_by_this_module() -> None:

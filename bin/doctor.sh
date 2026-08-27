@@ -26,11 +26,12 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 
 FAILURES=0
+VERBOSE=""
 
 usage() {
   cat <<'USAGE'
-Usage: bin/doctor.sh [--help]
-       sudo bin/doctor.sh --project <project-key>
+Usage: bin/doctor.sh [--verbose] [--help]
+       sudo bin/doctor.sh --project <project-key> [--verbose]
 
   (no arguments)     Workstation mode. Checks that this machine can run the
                      gate: required tools at usable versions, the pinned
@@ -44,12 +45,19 @@ Usage: bin/doctor.sh [--help]
                      archiver, and disk headroom for a restore. Needs root,
                      because the deployed document is 0600 root.
 
+  --verbose          Show the values behind each answer: resolved tool paths in
+                     workstation mode, the numbers each verdict was computed
+                     from in deployed mode.
+
 Deployed mode reads the deployed document for identities only. Every verdict
 comes from a live read: that document records what was true when it was
 written, and a project whose archiver died yesterday still publishes the
 status it had at its last deploy (ADR 0158).
 
-Prints no environment variables and reads no secret material.
+Prints no environment variables and reads no secret material. --verbose adds
+resolution, never a third party's bytes: no subprocess output, no environment,
+no path under the secret root. Half-redacting a stderr would be worse than
+omitting it, so it is omitted (ADR 0159).
 USAGE
 }
 
@@ -70,11 +78,15 @@ python_bin() {
 
 deployed_mode() {
   local project_key="$1"
+  local verbose="${2-}"
   [ -n "${project_key}" ] || { printf 'doctor: --project requires a project key.\n' >&2; exit 2; }
   [ "$(id -u)" -eq 0 ] || {
     printf 'doctor: --project needs root: the deployed document is 0600 root.\n' >&2
     exit 3
   }
+  if [ -n "${verbose}" ]; then
+    exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}" --verbose
+  fi
   exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}"
 }
 
@@ -82,9 +94,14 @@ ok()   { printf '  ok    %s\n' "$*"; }
 bad()  { printf '  MISS  %s\n' "$*" >&2; FAILURES=$((FAILURES + 1)); }
 
 check_command() {
-  local binary="$1" purpose="$2"
-  if command -v "${binary}" >/dev/null 2>&1; then
+  local binary="$1" purpose="$2" resolved
+  if resolved="$(command -v "${binary}" 2>/dev/null)"; then
     ok "${binary} — ${purpose}"
+    # Verbose adds WHERE the tool resolved from, which is the answer to the
+    # question a failing gate actually raises: two `docker` on one PATH, or a
+    # Windows shim ahead of the Linux one. It adds no environment: the value
+    # comes from `command -v`, not from printing what is set.
+    [ -n "${VERBOSE}" ] && printf '          path = %s\n' "${resolved}"
   else
     bad "${binary} — ${purpose}"
   fi
@@ -137,19 +154,26 @@ check_python_minor() {
 }
 
 main() {
-  case "${1-}" in
-    --help) usage; return 0 ;;
-    --project)
-      # Before any workstation check runs, and that ordering is the contract:
-      # the two modes never execute together (ADR 0158).
-      deployed_mode "${2-}"
-      ;;
-    --project=*)
-      deployed_mode "${1#--project=}"
-      ;;
-    "") ;;
-    *) usage >&2; printf 'doctor: unknown argument: %s\n' "$1" >&2; exit 3 ;;
-  esac
+  local project="" verbose=""
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --help) usage; return 0 ;;
+      --verbose) verbose=1; VERBOSE=1; shift ;;
+      --project)
+        [ "$#" -ge 2 ] || { printf 'doctor: --project requires a project key.\n' >&2; exit 2; }
+        project="$2"; shift 2 ;;
+      --project=*) project="${1#--project=}"; shift ;;
+      *) usage >&2; printf 'doctor: unknown argument: %s\n' "$1" >&2; exit 3 ;;
+    esac
+  done
+
+  # Dispatched before any workstation check runs, and that ordering is the
+  # contract: the two modes never execute together, which is what keeps
+  # check_python_minor's deliberate bare `python` off the sudo path (ADR 0158).
+  if [ -n "${project}" ]; then
+    deployed_mode "${project}" "${verbose}"
+  fi
 
   printf 'Repository: %s\n\n' "${ROOT_DIR}"
 
