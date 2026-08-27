@@ -796,6 +796,14 @@ CLAIM_INTRODUCED_IN = {
     "restore_verification": 10,
     "recovery_evidence": 10,
     "wal_archiving_signal": 10,
+    # Session 11. Four claims for five requirements: DEP-001 is deliberately
+    # unclaimed (D669) and carries to Session 12 beside DX-001. They could not be
+    # registered until CURRENT_SESSION reached 11, which three separate guards
+    # insisted on before any of this could be activated (D670, D672).
+    "deployment_preflight": 11,
+    "deployment_convergence": 11,
+    "operational_diagnosis": 11,
+    "log_correlation": 11,
 }
 
 

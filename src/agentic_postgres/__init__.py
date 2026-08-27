@@ -44,7 +44,22 @@ from pathlib import Path
 #: here on needs the three repository secrets present at the provider, and an R2
 #: bucket and token an operator created out of band. That is Runs 11+, and
 #: ``docs/session-10-operator-guide.md`` is the order to follow.
-CURRENT_SESSION = 10
+#:
+#: **Session 11 arms no new Compose profile either.** `session_profiles` emits
+#: ``--profile session11`` and no service carries it -- exactly as sessions 9 and
+#: 10 do, whose profiles compose.yaml also does not define. What Session 11 adds
+#: is a step 0 preflight, a deployed `doctor.sh`, one request id stamped on every
+#: response, and migration 0022.
+#:
+#: **It moves in Run 9, not Run 11, and the suite is what decided that** (D672).
+#: The plan put the bump in Run 11 and asked Run 9 to redeploy
+#: ``--through-session 11`` -- which `deploy.sh` refuses above this number
+#: (D59). Two more guards agree: `test_every_later_requirement_has_a_placeholder`
+#: keeps a placeholder for any requirement targeting a session past this one, and
+#: `test_every_claim_belongs_to_a_session_the_release_has_reached` refuses a
+#: claim above it. Activation cannot precede the bump, and the trip cannot
+#: precede activation.
+CURRENT_SESSION = 11
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

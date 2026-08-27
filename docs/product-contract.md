@@ -206,10 +206,10 @@ Priorities:
 | `REC-PITR-001` | 10 | A timestamp-targeted restore into a disposable volume succeeds. |
 | `REC-SAFE-001` | 10 | The restore path never mounts, overwrites, or mutates the active volume. |
 | `REC-SMOKE-001` | 10 | The restored instance passes schema, RLS read, and write-RPC checks. |
-| `DEP-001` | 11 | A fresh project deploys on an empty host from documentation alone. |
-| `DEP-002` | 11 | Re-running deployment converges without destroying data. |
-| `DEP-PRE-001` | 11 | A missing prerequisite stops deployment before it changes anything, and lists every absent item. |
-| `OPS-001` | 11 | The diagnostic command reports every required check without secrets. |
+| `DEP-002` | 11 | Re-running deployment converges without destroying data, and the redeploy demonstrably ran: the active secret generation differs from the one recorded before the window. |
+| `DEP-PRE-001` | 11 | A missing prerequisite stops deployment before it changes anything, and lists every absent item with the command that supplies it. What could not be checked is reported separately from what was found missing (ADR 0157). |
+| `OPS-001` | 11 | The diagnostic command reports every required check without secrets, reading the deployed document for identities only and every verdict from a live read (ADR 0158). A check that could not run is reported as unknown and exits non-zero. |
+| `DEP-001` | 12 | A fresh project deploys on an empty host from documentation alone. |
 | `DEP-ISO-001` | 12 | Two projects on one host share no state or authority; shared provider accounts are permitted, shared project scope is not. |
 | `DEP-REMOVE-001` | 12 | Removing one project does not affect another. |
 | `DX-001` | 12 | A developer who did not build the primitive completes the documented path without source edits or undocumented commands. |
@@ -223,7 +223,7 @@ Priorities:
 | `STO-CLEAN-001` | 7 | The cleanup sweep collects a tombstoned object whose write window has closed and records completion only after the provider has been asked. The late-writer arm is proved offline against a real cluster, where the deadline can be moved without the proof arranging the condition it observes. |
 | `STO-COMPLETE-001` | 7 | Only an object verified against the provider becomes downloadable, and a retried completion is a 200 rather than a conflict. Idempotence is a separate arm because migration 0014's CAS was idempotent as a function and not as a path through it (D349). |
 | `REC-WAL-001` | 10 | A WAL archiving failure produces a visible non-zero signal. |
-| `OPS-LOG-001` | 11 | One request ID propagates across ingress, API, agent, and audit records. |
+| `OPS-LOG-001` | 11 | One request ID spans ingress, API, agent and audit records. The runtime mints it and stamps it on the response, where Traefik's access log keeps it as downstream_X-Request-Id; migration 0022 puts the same value on the database-source audit row. No caller-supplied id is ever adopted (ADR 0160). |
 
 Full node IDs are in [the acceptance matrix](acceptance-matrix.md).
 

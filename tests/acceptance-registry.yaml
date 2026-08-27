@@ -1635,7 +1635,22 @@
 
 - id: DEP-001
   priority: P0
-  target_session: 11
+  # Moved from 11 to 12 in Session 11 Run 9, and the move is the honest encoding
+  # of D669 rather than a retreat from it. Session 11 proved the offline half --
+  # every command the README names exists, resolves and answers -- and ran the
+  # host path as far as the baseline and the edge plane on a genuinely fresh
+  # machine. It did not deploy a project there: leg 3 needed scratch Infisical
+  # and R2 state in order to exercise commands the live host already runs on
+  # every deploy, and section 9's stop condition 5 refuses a rehearsal that
+  # touches live provider state.
+  #
+  # `test_no_requirement_at_or_before_the_gate_session_remains_future` is what
+  # forced this to be written down: leaving `target_session: 11` beside a
+  # placeholder, once CURRENT_SESSION reached 11, is a requirement the gate
+  # believes is due and nothing implements.
+  #
+  # DX-001 is a superset of what remains, so the two are best done together.
+  target_session: 12
   test_nodeids:
     - tests/contract/test_future_deployment.py::test_fresh_project_deploys_on_an_empty_host
   description: A fresh project deploys on an empty host from documentation alone.
@@ -1644,31 +1659,64 @@
   priority: P0
   target_session: 11
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_redeploy_is_idempotent_and_preserves_data
-  description: Re-running deployment converges without destroying data.
+    # Two node ids, and the second is the CONTROL. A claim carrying only the
+    # first would pass on a deploy that did nothing, because a no-op preserves
+    # every row perfectly (D509).
+    - tests/deployment/test_session11_operations.py::test_a_redeploy_preserves_rows_written_before_it
+    - tests/deployment/test_session11_operations.py::test_the_redeploy_actually_ran
+  description: >-
+    Re-running deployment converges without destroying data, and the redeploy
+    demonstrably ran: the active secret generation differs from the one recorded
+    before the window.
 
 - id: DEP-PRE-001
   priority: P0
   target_session: 11
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_failed_prerequisite_stops_before_changing_the_deployment
+    # The two halves are separate claims that fail separately (D614): "listed
+    # everything" is provable offline against the verdicts, "changed nothing" is
+    # a statement about a filesystem and needs a host.
+    - tests/contract/test_preflight.py::test_a_refusal_names_every_item_that_is_not_satisfied
+    - tests/contract/test_preflight.py::test_every_absent_item_carries_the_command_that_supplies_it
+    - tests/deployment/test_session11_operations.py::test_a_refused_deploy_writes_nothing
   description: >-
     A missing prerequisite stops deployment before it changes anything, and
-    lists every absent item.
+    lists every absent item with the command that supplies it. What could not be
+    checked is reported separately from what was found missing (ADR 0157).
 
 - id: OPS-001
   priority: P0
   target_session: 11
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_doctor_reports_required_checks_without_secrets
-  description: The diagnostic command reports every required check without secrets.
+    # Coverage, redaction and the live run are different claims. The redaction
+    # one is offline against a planted canary AND on the host against a
+    # credential that genuinely exists in the active generation.
+    - tests/contract/test_diagnosis.py::test_an_unknown_check_does_not_exit_zero
+    - tests/contract/test_doctor_redaction.py::test_no_subprocess_output_reaches_the_report
+    - tests/deployment/test_session11_operations.py::test_the_doctor_reports_every_check_family
+    - tests/deployment/test_session11_operations.py::test_the_doctor_prints_no_live_credential
+    - tests/deployment/test_session11_operations.py::test_the_doctor_refuses_a_project_that_was_never_deployed_here
+  description: >-
+    The diagnostic command reports every required check without secrets, reading
+    the deployed document for identities only and every verdict from a live read
+    (ADR 0158). A check that could not run is reported as unknown and exits
+    non-zero.
 
 - id: OPS-LOG-001
   priority: P1
   target_session: 11
   test_nodeids:
-    - tests/contract/test_future_deployment.py::test_request_id_propagates_across_the_stack
-  description: One request ID propagates across ingress, API, agent, and audit records.
+    # Three legs, three node ids. The ingress leg and the audit leg fail for
+    # different reasons and live in different modules; bundling them would make
+    # a green result silent about which one worked.
+    - tests/contract/test_request_id_stamping.py::test_the_agent_plane_uses_the_id_the_response_will_carry
+    - tests/deployment/test_session11_operations.py::test_the_edge_logs_the_request_id_the_runtime_served
+    - tests/deployment/test_session9_agent_writes.py::test_the_request_id_is_recorded_and_is_this_planes_own_mint
+  description: >-
+    One request ID spans ingress, API, agent and audit records. The runtime
+    mints it and stamps it on the response, where Traefik's access log keeps it
+    as downstream_X-Request-Id; migration 0022 puts the same value on the
+    database-source audit row. No caller-supplied id is ever adopted (ADR 0160).
 
 - id: DEP-ISO-001
   priority: P0

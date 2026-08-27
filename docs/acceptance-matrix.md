@@ -10,7 +10,7 @@ actually collect. That is checked by running a real collection and
 comparing node IDs, not by searching files for function names — a text
 search passes on a commented-out test.
 
-**127 requirements** — 121 P0, 119 active through Session 10, 8 owned by later sessions.
+**127 requirements** — 121 P0, 123 active through Session 11, 4 owned by later sessions.
 
 ## By session
 
@@ -26,8 +26,8 @@ search passes on a commented-out test.
 | 8 | 10 | active |
 | 9 | 5 | active |
 | 10 | 5 | active |
-| 11 | 5 | placeholders owned by Session 11 |
-| 12 | 3 | placeholders owned by Session 12 |
+| 11 | 4 | active |
+| 12 | 4 | placeholders owned by Session 12 |
 
 ## Requirements
 
@@ -204,16 +204,16 @@ search passes on a commented-out test.
 
 | ID | Priority | Guarantee | Proof |
 |---|---|---|---|
-| `DEP-001` | P0 | A fresh project deploys on an empty host from documentation alone. | `tests/contract/test_future_deployment.py::test_fresh_project_deploys_on_an_empty_host` |
-| `DEP-002` | P0 | Re-running deployment converges without destroying data. | `tests/contract/test_future_deployment.py::test_redeploy_is_idempotent_and_preserves_data` |
-| `DEP-PRE-001` | P0 | A missing prerequisite stops deployment before it changes anything, and lists every absent item. | `tests/contract/test_future_deployment.py::test_failed_prerequisite_stops_before_changing_the_deployment` |
-| `OPS-001` | P0 | The diagnostic command reports every required check without secrets. | `tests/contract/test_future_deployment.py::test_doctor_reports_required_checks_without_secrets` |
-| `OPS-LOG-001` | P1 | One request ID propagates across ingress, API, agent, and audit records. | `tests/contract/test_future_deployment.py::test_request_id_propagates_across_the_stack` |
+| `DEP-002` | P0 | Re-running deployment converges without destroying data, and the redeploy demonstrably ran: the active secret generation differs from the one recorded before the window. | `tests/deployment/test_session11_operations.py::test_a_redeploy_preserves_rows_written_before_it`<br>`tests/deployment/test_session11_operations.py::test_the_redeploy_actually_ran` |
+| `DEP-PRE-001` | P0 | A missing prerequisite stops deployment before it changes anything, and lists every absent item with the command that supplies it. What could not be checked is reported separately from what was found missing (ADR 0157). | `tests/contract/test_preflight.py::test_a_refusal_names_every_item_that_is_not_satisfied`<br>`tests/contract/test_preflight.py::test_every_absent_item_carries_the_command_that_supplies_it`<br>`tests/deployment/test_session11_operations.py::test_a_refused_deploy_writes_nothing` |
+| `OPS-001` | P0 | The diagnostic command reports every required check without secrets, reading the deployed document for identities only and every verdict from a live read (ADR 0158). A check that could not run is reported as unknown and exits non-zero. | `tests/contract/test_diagnosis.py::test_an_unknown_check_does_not_exit_zero`<br>`tests/contract/test_doctor_redaction.py::test_no_subprocess_output_reaches_the_report`<br>`tests/deployment/test_session11_operations.py::test_the_doctor_reports_every_check_family`<br>`tests/deployment/test_session11_operations.py::test_the_doctor_prints_no_live_credential`<br>`tests/deployment/test_session11_operations.py::test_the_doctor_refuses_a_project_that_was_never_deployed_here` |
+| `OPS-LOG-001` | P1 | One request ID spans ingress, API, agent and audit records. The runtime mints it and stamps it on the response, where Traefik's access log keeps it as downstream_X-Request-Id; migration 0022 puts the same value on the database-source audit row. No caller-supplied id is ever adopted (ADR 0160). | `tests/contract/test_request_id_stamping.py::test_the_agent_plane_uses_the_id_the_response_will_carry`<br>`tests/deployment/test_session11_operations.py::test_the_edge_logs_the_request_id_the_runtime_served`<br>`tests/deployment/test_session9_agent_writes.py::test_the_request_id_is_recorded_and_is_this_planes_own_mint` |
 
 ### Session 12
 
 | ID | Priority | Guarantee | Proof |
 |---|---|---|---|
+| `DEP-001` | P0 | A fresh project deploys on an empty host from documentation alone. | `tests/contract/test_future_deployment.py::test_fresh_project_deploys_on_an_empty_host` |
 | `DEP-ISO-001` | P0 | Two projects on one host share no state or authority; shared provider accounts are permitted, shared project scope is not. | `tests/contract/test_future_deployment.py::test_two_projects_share_no_state_or_authority` |
 | `DEP-REMOVE-001` | P0 | Removing one project does not affect another. | `tests/contract/test_future_deployment.py::test_removing_the_second_project_does_not_affect_the_first` |
 | `DX-001` | P0 | A developer who did not build the primitive completes the documented path without source edits or undocumented commands. | `tests/contract/test_future_deployment.py::test_new_team_member_completes_the_documented_path` |

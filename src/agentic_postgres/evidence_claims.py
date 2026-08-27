@@ -360,6 +360,32 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "restore_verification": ("REC-SMOKE-001",),
     "recovery_evidence": ("REC-EVID-001",),
     "wal_archiving_signal": ("REC-WAL-001",),
+    # Session 11 adds four, and deliberately does not claim a fifth.
+    #
+    # **The ordering here is enforced, not remembered** (D670, D672).
+    # `test_every_claim_belongs_to_a_session_the_release_has_reached` refuses a
+    # claim whose `claim_session` exceeds `CURRENT_SESSION`, so these could not
+    # exist until that moved to 11 -- which Run 9 did, because
+    # `test_every_later_requirement_has_a_placeholder` refuses to let the node
+    # ids be activated before it either, and `deploy.sh` refuses
+    # `--through-session 11` above it. Three guards, one forced order.
+    #
+    # `deployment_preflight` and `deployment_convergence` are separate rather
+    # than one "deployment" claim, and D119 is the rule: a refusal that changes
+    # nothing and a redeploy that preserves everything are different guarantees,
+    # not one guarantee measured twice. The first is about a deploy that never
+    # starts; the second about one that runs a second time.
+    #
+    # **`DEP-001` is absent, deliberately** (D669). Its offline half is proved
+    # and its live half was not run: Run 8's rehearsal reached the host baseline
+    # and the edge plane on a genuinely fresh machine and stopped, because leg 3
+    # needed scratch provider state to exercise commands the live host already
+    # runs on every deploy. A claim on the offline half alone would promise a
+    # deployment nobody performed. Session 12 inherits it beside `DX-001`.
+    "deployment_preflight": ("DEP-PRE-001",),
+    "deployment_convergence": ("DEP-002",),
+    "operational_diagnosis": ("OPS-001",),
+    "log_correlation": ("OPS-LOG-001",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().

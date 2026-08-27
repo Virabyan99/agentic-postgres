@@ -161,8 +161,14 @@ def test_the_readme_states_the_session_the_release_implements(readme: str) -> No
     gate and `deploy.sh` both read, so it is the number the README must agree
     with.
     """
-    match = re.search(r"Session (\d+) of 12 complete", readme)
-    assert match, "the README has no 'Session N of 12 complete' status line"
+    # "implemented" rather than "complete", and the change is a correction
+    # rather than a loosening (D672). `CURRENT_SESSION` is *what this release
+    # implements* -- the number `deploy.sh` refuses to exceed -- and it moves
+    # when the code lands, which is before the host evidence is published.
+    # "Complete" conflated the two, and the assertion below is unchanged: one
+    # number, and it must equal `CURRENT_SESSION`.
+    match = re.search(r"Session (\d+) of 12 implemented", readme)
+    assert match, "the README has no 'Session N of 12 implemented' status line"
     stated = int(match.group(1))
     assert stated == CURRENT_SESSION, (
         f"the README says Session {stated} is complete and CURRENT_SESSION is "

@@ -4,7 +4,10 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 10 of 12 complete. Session 11 is in progress.** Two isolated
+**Status: Session 11 of 12 implemented.** Session 11's code is in this release —
+a preflight that refuses completely, a deployed `doctor.sh`, one request id
+across four records, migration 0022 — and its host evidence is not yet
+published. Two isolated
 projects run on one hardened host behind one shared Traefik edge on Let's Encrypt
 production certificates. Each has its own PostgreSQL 18 cluster under forced
 row-level security, two database transports, a REST and an application API behind

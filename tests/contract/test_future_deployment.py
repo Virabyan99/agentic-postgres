@@ -17,19 +17,9 @@ def unimplemented(session: int, what: str) -> None:
     pytest.fail(f"Replace this placeholder with the Session {session} implementation: {what}")
 
 
-@pytest.mark.future(session=11, requirement="DEP-001")
+@pytest.mark.future(session=12, requirement="DEP-001")
 def test_fresh_project_deploys_on_an_empty_host() -> None:
-    unimplemented(11, "a clean host reaches a working deployment from the README alone")
-
-
-@pytest.mark.future(session=11, requirement="DEP-002")
-def test_redeploy_is_idempotent_and_preserves_data() -> None:
-    unimplemented(11, "re-running deploy converges without destroying rows")
-
-
-@pytest.mark.future(session=11, requirement="DEP-PRE-001")
-def test_failed_prerequisite_stops_before_changing_the_deployment() -> None:
-    unimplemented(11, "a missing prerequisite lists everything absent and changes nothing")
+    unimplemented(12, "a clean host reaches a working deployment from the README alone")
 
 
 @pytest.mark.future(session=12, requirement="DEP-ISO-001")
@@ -42,14 +32,34 @@ def test_removing_the_second_project_does_not_affect_the_first() -> None:
     unimplemented(12, "destructive removal is scoped to one project")
 
 
-@pytest.mark.future(session=11, requirement="OPS-001")
-def test_doctor_reports_required_checks_without_secrets() -> None:
-    unimplemented(11, "container, TLS, database, backup, and disk checks, all redacted")
-
-
-@pytest.mark.future(session=11, requirement="OPS-LOG-001")
-def test_request_id_propagates_across_the_stack() -> None:
-    unimplemented(11, "one request ID appears in Traefik, MCP, API, and audit records")
+# ---------------------------------------------------------------------------
+# Session 11 — activated in Run 9
+#
+#   DEP-002      -> tests/deployment/test_session11_operations.py
+#   DEP-PRE-001  -> tests/contract/test_preflight.py
+#                   tests/deployment/test_session11_operations.py
+#   OPS-001      -> tests/contract/test_diagnosis.py
+#                   tests/contract/test_doctor_redaction.py
+#                   tests/deployment/test_session11_operations.py
+#   OPS-LOG-001  -> tests/contract/test_request_id_stamping.py
+#                   tests/deployment/test_session11_operations.py    (ingress)
+#                   tests/deployment/test_session9_agent_writes.py   (both rows)
+#
+# Removed rather than kept beside their implementations: a placeholder next to a
+# real test is a second, weaker claim about the same requirement, which is what
+# `test_no_requirement_is_claimed_by_two_placeholders` exists to prevent.
+#
+# DEP-002 and DEP-PRE-001 each gained a node id beyond the obvious one (D70): a
+# preserved row with no control is satisfied by a deploy that did nothing, and
+# "changed nothing" is a different claim from "listed everything".
+#
+# **DEP-001 stays a placeholder, deliberately** (D669). Its offline half is
+# proved and its live half -- a fresh project deploying on an empty host -- was
+# not run: Run 8's rehearsal stopped after the host baseline and the edge plane,
+# because leg 3 needed scratch provider state in order to exercise the commands
+# the live host already runs on every deploy. Session 12 inherits it beside
+# DX-001, which is a superset of it.
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.future(session=12, requirement="DX-001")
