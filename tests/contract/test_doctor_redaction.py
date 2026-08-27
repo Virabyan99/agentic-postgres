@@ -29,7 +29,9 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import os
 import subprocess
+import sys
 import uuid
 from typing import Any
 
@@ -380,4 +382,101 @@ def test_every_sensitive_block_is_actually_poisoned() -> None:
     poisoned = {block for block, value in document().items() if SENSITIVE in json.dumps(value)}
     assert poisoned == SENSITIVE_BLOCKS, (
         f"these sensitive blocks carry no sentinel: {sorted(SENSITIVE_BLOCKS - poisoned)}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# D673 — no probe may read the caller's stdin
+# ---------------------------------------------------------------------------
+
+
+def _run_under_borrowed_stdin(pipe_payload: bytes, invoke) -> tuple[str, bytes]:
+    """Put a real pipe on **fd 0** and hand it to ``invoke``.
+
+    `fd 0`, not `sys.stdin`: a subprocess inherits the file descriptor, and
+    pytest's capture replaces the Python-level object only. A rig that swapped
+    `sys.stdin` would leave the child reading the real terminal and would prove
+    nothing — while looking exactly like this one.
+
+    Returns what the child printed and what is *left* in the pipe afterwards.
+    """
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, pipe_payload)
+    os.close(write_fd)
+    saved = os.dup(0)
+    try:
+        os.dup2(read_fd, 0)
+        printed = invoke()
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+    leftover = os.read(read_fd, len(pipe_payload) + 16)
+    os.close(read_fd)
+    return printed, leftover
+
+
+def test_no_probe_can_consume_the_callers_stdin(doctor: Any) -> None:
+    """D673, and it is the third instance of this class in one session.
+
+    `probe_tls` runs `openssl s_client`, which **reads stdin and does not exit
+    until it closes**. With stdin inherited it blocked until `run`'s own
+    timeout, reported `UNKNOWN tls` — and the `docker exec -i` in
+    `probe_database` immediately after it then failed too, reporting `PROBLEM
+    database` against a cluster whose migrations the very next probe read
+    successfully. One bug, two symptoms, and **the louder symptom was the false
+    one**.
+
+    The same class had already cost the trip twice that day: a `| tee` gave a
+    deploy a terminal stdin and it stopped in `T+` (SIGTTIN) for eight minutes,
+    and `docker exec` without `-i` is the inverse failure this repository has
+    documented since Session 1.
+
+    So the guard is behavioural and about the *class*: whatever any probe shells
+    out to, it may not be able to see the caller's stdin. Asserting
+    `stdin=DEVNULL` appears in the source would be satisfied by dead code
+    (D277).
+
+    **The control runs first and constructs the same condition** (D605): a rig
+    that builds a state must measure that it built it. Without the control, a
+    pipe that was never on fd 0 would report "nothing drained it" forever.
+    """
+    payload = b"apg-stdin-sentinel\n"
+
+    # CONTROL: a subprocess that DOES inherit fd 0 must drain the pipe. This is
+    # the arm's own mechanism, run without the fix, and it cannot pass unless
+    # the borrowed descriptor really reached the child.
+    def inherit() -> str:
+        done = subprocess.run(
+            [sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+        return done.stdout
+
+    printed, leftover = _run_under_borrowed_stdin(payload, inherit)
+    assert printed.encode() == payload, (
+        f"the control did not receive the borrowed stdin (read {printed!r}). The rig never "
+        "constructed the condition it is testing for, so the arm below would pass for a "
+        "reason that has nothing to do with the fix (D605)"
+    )
+    assert leftover == b"", "the control drained the pipe, as it must, but left bytes behind"
+
+    # ARM: the real thing. `doctor.run` must not see any of it.
+    def probe() -> str:
+        done = doctor.run(sys.executable, "-c", "import sys; sys.stdout.write(sys.stdin.read())")
+        assert done is not None, "the probe timed out — which is itself the D673 symptom"
+        return done.stdout
+
+    printed, leftover = _run_under_borrowed_stdin(payload, probe)
+    assert printed == "", (
+        f"a probe read {printed!r} from the caller's stdin. Every probe runs through "
+        "doctor.run, so this is every probe: one that consumes stdin starves the next "
+        "one and reports a healthy subject as broken (D673)"
+    )
+    assert leftover == payload, (
+        f"the probe left {leftover!r} in the pipe instead of {payload!r}. It did not read "
+        "the bytes but it did disturb the descriptor, which is the same defect one "
+        "layer down"
     )

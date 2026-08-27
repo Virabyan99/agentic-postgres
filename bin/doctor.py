@@ -66,9 +66,24 @@ def run(
     None rather than a synthetic failure: a probe that timed out and a probe that
     returned an error are different facts, and the callers below turn the first
     into UNKNOWN rather than PROBLEM.
+
+    **`stdin=DEVNULL`, and the first live run is why** (D673). `probe_tls` runs
+    `openssl s_client`, which READS STDIN and does not exit until it closes. With
+    stdin inherited, that blocked until this function's own timeout and reported
+    `UNKNOWN tls` -- and, worse, the `docker exec -i` in `probe_database`
+    immediately after it then failed too, reporting `PROBLEM database` against a
+    cluster whose migrations the very next probe read successfully. One bug, two
+    symptoms, and the louder symptom was the false one.
     """
     try:
-        return subprocess.run(command, capture_output=True, text=True, check=False, timeout=timeout)
+        return subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return None
 

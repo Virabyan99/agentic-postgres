@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D672.**
+**Next free number after this table is D676.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -165,6 +165,10 @@ implementation is appended with the next free number.
 | **D669** | §0's decision 1 and §2: `DEP-001`'s live node id is *"the rehearsal"* — a fresh project deploying on an empty host — and Run 8's text scoped a deploy. | **Legs 1 and 2 are done; leg 3 is not, by decision.** Leg 3 needs a scratch Infisical project, two R2 buckets with their own tokens, and a DNS record, and it exercises the commands the live host already runs on every deploy. The findings-per-cost is the opposite of legs 1 and 2, which found nine things between them precisely because they touch code a working host never re-runs. And §9's stop condition 5 is explicit: *"a rehearsal that touches live provider state is not a rehearsal."* | **`DEP-001` is not claimed by Session 11.** Its placeholder stays `future`-marked, its offline half is proved and its live half carries to Session 12, where `DX-001` — *a developer who did not build this completes the documented path* — is a superset of it. | **The narrowing is written down rather than assumed**, which is the whole difference between a scoped decision and a quiet one. What Session 11 delivers instead is a documented path that is materially better than the one Session 12 would otherwise have tested: eleven divergence rows from the rehearsal, including a lockout that would have stopped `DX-001` at step 2 and a `status` command that reported a healthy edge as down. | — |
 | **D670** | This plan's §2: *"Claims are a separate act… Session 11's claims are registered in `evidence_claims.CLAIMS` in the run that publishes."* Run 9 activates the node ids, so registering the claims beside them looked like one job. | **It is not, and the suite enforces the ordering.** `test_every_claim_belongs_to_a_session_the_release_has_reached` refuses any claim whose `claim_session` exceeds `CURRENT_SESSION` — which is **10** until Run 11 moves it — so all four Session 11 claims were rejected the moment they were added: *"deployment_preflight belongs to session 11, which this release has not reached."* | **Node ids in Run 9, claims in Run 11.** The intent is left in `CLAIMS` as a comment naming the four and why `DEP-001` is not among them, so Run 11 adds them rather than rediscovering them. | The guard is doing exactly what its docstring says: *a claim owned by a future session would be unprovable and permanently absent from the evidence of every session that can run.* §2 had already said "the run that publishes"; I read it as a note about sequencing rather than a constraint, and the test read it as a constraint. **The plan was right and I was the one who had to be told.** | — |
 | **D671** | This plan's Run 9: *"Read each one's assertions before the trip, not at the terminal."* | **The first draft of `test_session11_operations.py` would have produced three more never-executed defective proofs**, and none of it was visible from reading the tests. `mcp_route`, `mcp_rpc` and `mcp_writer_session` are **module-local** to the Session 8 and 9 modules, not conftest fixtures, so every MCP-based test would have ERRORed on a missing fixture. `materialized_secret` takes **three** arguments, not two. `mint_token` requires a positional `role_name` I omitted. `api_call` returns a frozen `ApiResponse` dataclass and I unpacked it as a tuple. | **Rewritten against the fixtures that exist**, and `OPS-LOG-001` split rather than duplicated: its `agent_plane` ↔ `database` join is already asserted by Run 6's flipped test, and the leg with no proof anywhere — **ingress** — needs no agent, because `StampRequestId` wraps every application response. The audit is `pytest --setup-plan`, which resolves the whole fixture graph without running a body. | **Four wrong assumptions, caught by reading fixtures instead of tests.** This is the item CLAUDE.md calls the most expensive on its list — *nothing knows which proofs have never executed*, five defective across two trips — and the cheap half of the answer turns out to be one command. `--collect-only` would have caught none of them: it parses and resolves nothing. | — |
+| **D672** | This plan's Run 11: *"`CURRENT_SESSION` moves to 11, the registry's five ids are activated, evidence is merged."* The bump was scheduled with the session close. | **The bump has to happen in Run 9, before the trip, and three separate guards say so.** `deploy.sh` refuses `--through-session` above `CURRENT_SESSION` (D59), so a Run 9 that redeploys through 11 cannot run until it moves. `test_every_later_requirement_has_a_placeholder` keeps a placeholder for any requirement targeting a later session, and `test_every_claim_belongs_to_a_session_the_release_has_reached` refuses a claim above it. Activation cannot precede the bump and the trip cannot precede activation. | **`CURRENT_SESSION = 11` in Run 9**, with the ordering written into the constant's own comment so the next session does not re-derive it. Claims still land in Run 11 (D670). | The plan sequenced a constant as bookkeeping when it is a **precondition**: it is what the deploy command reads to decide whether a release can reach a session at all. Nothing was weakened to discover this — three independent guards agreed, which is what a load-bearing constant looks like from outside. | — |
+| **D673** | This plan's Run 3: *"the doctor probes the deployment through the commands an operator already has."* Each probe shells out through one bounded helper. | **`doctor.run` inherited the caller's stdin, and one probe ate another's.** `probe_tls` runs `openssl s_client`, which reads stdin and does not exit until it closes: it blocked until the 20 s timeout and reported `UNKNOWN tls`. Worse, the `docker exec -i` in `probe_database` immediately after it then failed too — so the first live run reported **`PROBLEM database — neither the cluster nor the pooler answered`** against a cluster whose 22 migrations the *very next probe* read successfully through the same `docker exec psql`. | **`stdin=subprocess.DEVNULL` on the single `subprocess.run` every probe goes through**, so the fix is the class rather than the one caller. Proved by `test_no_probe_can_consume_the_callers_stdin`, which borrows **fd 0** (not `sys.stdin` — a subprocess inherits the descriptor, and pytest's capture replaces only the Python object) and runs its construction control first, per D605. | **The louder symptom was the false one.** A tool whose job is to say whether a deployment is well reported a healthy database as broken, and it did so because of a *different* check running before it. That is worse than a missed defect: an operator who trusts it goes looking at Postgres. **Third instance of this class in one session** — a `\| tee` gave a deploy a terminal stdin and stopped it in `T+` for eight minutes, and `docker exec` without `-i` is the inverse this repository has documented since Session 1. | — |
+| **D674** | This plan's Run 3: *"the repository's own reported state, never an exit code (D548)."* The verdict table was written from that principle. | **The vocabulary was guessed, and the guess contained a status nothing emits.** `diagnosis.repository` classified `"ok"` and `awaiting_first_backup`; `backup_report` emits `not_observed`, `unconfigured`, `awaiting_first_backup`, **`ready`** and `failing`, and **has no `ok` at all**. The healthy status fell through to the catch-all, so the first live run reported **`PROBLEM backup repository — the repository reports ready`** against a repository holding a full backup from the previous day. Its test asserted `status="ok"` and passed — D374 exactly: *a test can check a string its target cannot contain*. | **The constants are imported from `backup_report`, not retyped**, and `test_every_status_the_repository_can_emit_is_classified` derives the set by introspection: a sixth status cannot reach the catch-all silently, and a classified status nothing emits reddens too. | Two more literals would have fixed the instance and left the class. This is question 5 with the answer wrong again — a definition with five cases, a reader that knew two — and it was findable offline by one `grep`, which is precisely what D596 says about the five recovery proofs that died on a column renamed six sessions earlier. | — |
+| **D675** | This plan's Run 9: *"a caller reaching PostgREST directly is the path that can carry an arbitrary header."* The proof mints a token for `authenticated` naming a registered subject. | **The deployment answered `401 PT401 "the request identity is no longer current"`**, so the request never reached `api.create_note` and the proof said nothing whatever about migration 0022's guard. This is **D298 verbatim**: migration 0013's `auth_claims_are_current` is an EXISTS over five equalities including `credential_version`, `authz_version` and an exact scope array, and a bootstrap-minted token carries none of the three. `owner_session`'s docstring in `tests/deployment/conftest.py` says so — four sessions before this run rebuilt the defect. | **`owner_session`**, whose token the deployment issued through `POST /auth/login`. The assertion is also split: a `401` now fails with *"repair the identity, not 0022"*, and a second assertion reads the audit row's `request_id` — **`NULL` is the claim**, not merely that nothing crashed. | Two defects, and the second is the one worth keeping. The original assertion conflated *refused for any reason* with *refused by the guard*, so a failure two layers earlier arrived wearing migration 0022's name. **A proof that cannot distinguish which layer refused it is a proof that will misdiagnose the day it goes red** — and "it did not crash" is satisfied by a build where `agent_request_id()` returns NULL unconditionally. | — |
 
 ---
 
@@ -877,6 +881,74 @@ end-to-end request-id correlation are measured here too.
 that only runs on a host will be executing for the first time. That is the shape
 that produced **five defective never-executed proofs across two trips**. Read each
 one's assertions before the trip, not at the terminal.
+
+**Done.** `DEP-002` and `DEP-PRE-001`'s host halves are proved on the deployment,
+`OPS-LOG-001`'s ingress leg is proved live, and **D500 is closed and measured**:
+both audit rows for one MCP write now join on the request id. Seven of the eight
+Session 11 proofs passed on their first execution, together with Run 6's flipped
+`test_the_request_id_is_recorded_and_is_this_planes_own_mint`. The convergence
+deploy exited 0, and the active generation moved `689ea332af2be354` →
+`43c3b92d519a54c9`, which is `DEP-002`'s control: the redeploy demonstrably ran
+rather than being skipped as a no-op.
+
+**What it measured, and the answer is uncomfortable: `doctor.sh`'s first live
+execution found three defects, and all three were mine.** Every one had a green
+offline test.
+
+* **D673 — one probe ate another's stdin.** `PROBLEM database` against a healthy
+  cluster, caused by the TLS probe running before it. The false report was the
+  loud one.
+* **D674 — the repository's status vocabulary was guessed**, and the guess
+  contained a value nothing emits, so the healthy status fell through to the
+  catch-all and a repository with a full backup was called a PROBLEM.
+* **D675 — the malformed-header proof used a bootstrap-minted token** and got
+  `AP401` two layers before the thing it was measuring.
+
+This is the item CLAUDE.md calls the most expensive on its list — *nothing knows
+which proofs have never executed* — arriving for the sixth, seventh and eighth
+time. **But the shape has changed, and that is worth recording.** Run 9's
+pre-flight with `pytest --setup-plan` (D671) caught four wrong fixture
+assumptions *before* the trip, and the three that got through were not fixture
+errors at all: they were **wrong beliefs about a third party's vocabulary and
+about stdin**, which no fixture graph can resolve. `--setup-plan` answers "will
+this proof run"; it cannot answer "is what it asserts true". The second question
+still has no tooling.
+
+Each repair is the class rather than the instance, and each has a battery whose
+arm is **the live defect reinstated verbatim**, with a control the mutation
+cannot reach (D499) and FAILED distinguished from ERROR (D386):
+
+* `test_no_probe_can_consume_the_callers_stdin` borrows **fd 0** — not
+  `sys.stdin`, which a subprocess does not inherit — and runs its construction
+  control first, because a rig that constructs a condition must measure that it
+  constructed it (D605).
+* `test_every_status_the_repository_can_emit_is_classified` derives the set from
+  `backup_report` by introspection, so a sixth status cannot reach the catch-all
+  silently *and* a classified status nothing emits reddens too.
+* The malformed-header proof now fails a 401 with *"repair the identity, not
+  0022"*, and reads the audit row's `request_id` — `NULL` is the claim.
+
+Both batteries are green: every arm killed, every control green in the same
+invocation, both trees byte-identical after restore.
+
+**Two things the trip cost that were not defects in the product.** The first
+deploy stopped for eight minutes in state `T+` (SIGTTIN) because a `| tee` gave
+`docker exec -i psql` a terminal stdin — my pipeline, not the guide's command,
+and the same class as D673 discovered independently the same day. The second
+deploy exited 5 on a `TimeoutError` reading Infisical, a transient in an external
+service; it was fatal only because I had made the second pass unconditional when
+the operator guide conditions it on *"if the first leaves anything unready"*
+(D326). The first left nothing unready.
+
+**And one that was mine twice over.** The first attempt queried `app.users`,
+which has never existed — the table is `app_private.users` — and the user caught
+it. `body` → `content` was migration 0007, six sessions ago, and is D596's exact
+trap. Both were findable by one `grep` and neither was grepped.
+
+**`DEP-001` is not claimed.** Run 8's rehearsal narrowed it rather than closing
+it, and the requirement now targets Session 12. Saying so is the honest half:
+the fresh-host path is rehearsed and documented, and it is not proved end to end
+on a host that started empty.
 
 ### Run 10 — The rotation window
 

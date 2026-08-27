@@ -230,19 +230,35 @@ def repository(*, status: str | None, last_full_backup_at: str | None) -> Check:
     code: `pgbackrest info` exits 0 for a stanza that does not exist (D548), the
     same defect as `postgrest --ready` returning 0 while every request 404s
     (D145). Two third parties, five sessions apart, one shape.
+
+    **The vocabulary is imported, not retyped** (D674). Run 3 wrote `"ok"` and
+    `"awaiting_first_backup"` from memory; `backup_report` emits
+    `not_observed`, `unconfigured`, `awaiting_first_backup`, **`ready`** and
+    `failing`, and **there is no `ok` at all**. So the healthy repository on the
+    live host -- with a full backup from the previous day -- was reported
+    `PROBLEM the repository reports ready` on the first run of this check.
+
+    A guessed enum is the same defect as a guessed column name, and D596 is the
+    standing example: five recovery proofs died on a column renamed six sessions
+    earlier and findable by one grep. This was findable by one grep too.
     """
+    from agentic_postgres import backup_report
+
     facts = _pairs(reported_status=status, last_full_backup_at=last_full_backup_at)
-    if status is None:
+    if status is None or status == backup_report.STATUS_NOT_OBSERVED:
         return _check("backup repository", UNKNOWN, "the repository could not be queried", facts)
-    if status == "ok":
+    if status == backup_report.STATUS_READY:
         return _check("backup repository", OK, f"last full backup {last_full_backup_at}", facts)
-    if status == "awaiting_first_backup":
+    if status == backup_report.STATUS_AWAITING_FIRST_BACKUP:
         return _check(
             "backup repository",
             WARN,
             "the stanza exists and holds no full backup yet",
             facts,
         )
+    # `failing` and `unconfigured`, plus anything a later session adds. An
+    # unknown status is a PROBLEM rather than an OK: a repository this command
+    # cannot classify is not one it may call healthy.
     return _check("backup repository", PROBLEM, f"the repository reports {status}", facts)
 
 

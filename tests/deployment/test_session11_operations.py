@@ -208,8 +208,7 @@ def test_a_malformed_request_id_header_does_not_destroy_the_write(
     rest_base: Callable[[dict[str, Any]], str],
     api_call: Callable[..., Any],
     psql: Callable[..., tuple[int, str, str]],
-    mint_token: Callable[..., str],
-    app_probe_subject: Any,
+    owner_session: Any,
     as_root,
 ) -> None:
     """**D633, on the deployment.** The measurement that shaped migration 0022.
@@ -224,28 +223,35 @@ def test_a_malformed_request_id_header_does_not_destroy_the_write(
     PostgREST directly is the path that can carry an arbitrary header — and it
     is the path ADR 0135 already contemplates.
 
+    **`owner_session`, not `mint_token`** (D675). The first version of this
+    proof minted a token for the `authenticated` role naming a registered
+    subject, and the deployment answered `401 PT401 "the request identity is no
+    longer current"` — the request never reached `api.create_note`, so it said
+    nothing at all about 0022's guard. That is **D298 exactly**: migration
+    0013's `auth_claims_are_current` is an EXISTS over five equalities including
+    `credential_version`, `authz_version` and an exact scope array, and a
+    bootstrap-minted token carries none of the three. `owner_session`'s
+    docstring says so, four sessions before this run rebuilt the defect.
+
     Goes red if: migration 0022's guard is absent or unapplied.
     """
     del as_root
     base = rest_base(project_a)
     title = f"apg-run9-malformed-{secrets_module.token_hex(4)}"
-    # `mint_token(document, role_name, *, subject)`. The role and the subject are
-    # both required and both easy to get wrong: an `anon` token is refused the
-    # write regardless of the header, which would make this pass for the wrong
-    # reason (D374), and a token with no subject reaches the hook with no
-    # identity and raises AP401 before the RPC body runs.
-    token = mint_token(
-        project_a,
-        project_a["database"]["roles"]["authenticated"],
-        subject=app_probe_subject.user_id,
-    )
 
     response = api_call(
         f"{base}/rpc/create_note",
         method="POST",
-        token=token,
+        token=owner_session.token,
         body={"p_title": title, "p_content": "x"},
         headers={"X-Request-Id": "not-a-uuid"},
+    )
+    # 401 is NOT this proof's subject, and conflating the two is what made the
+    # first failure unreadable: the assertion blamed migration 0022 for a
+    # refusal that happened two layers earlier.
+    assert response.status != 401, (
+        f"the token was refused before the RPC ran ({response.body[:200]}). This proof "
+        "measured nothing about the header guard — repair the identity, not 0022"
     )
     assert response.status < 400, (
         f"a malformed X-Request-Id refused the write with {response.status}: "
@@ -257,6 +263,21 @@ def test_a_malformed_request_id_header_does_not_destroy_the_write(
     assert code == 0 and out.strip() == "1", (
         f"the note was not committed (count={out.strip()!r}), so the malformed header "
         "took the write with it — which is exactly D633"
+    )
+
+    # The positive half. "It did not crash" is satisfied by a build where
+    # `agent_request_id()` returns NULL unconditionally, so the audit row has to
+    # be read: a malformed header records NULL, and the write is still audited.
+    code, out, _ = psql(
+        project_a,
+        "SELECT coalesce(request_id::text, 'NULL'), source FROM app_private.agent_audit "
+        f"WHERE owner_id = '{owner_session.user_id}' AND tool = 'create_note' "
+        "ORDER BY completed_at DESC LIMIT 1",
+    )
+    assert code == 0 and out.strip().startswith("NULL|"), (
+        f"the audit row for the malformed write reads {out.strip()!r}. It must be "
+        "NULL: a header that is not a uuid is not a request id, and recording one "
+        "anyway would put a caller-supplied string into a correlation column"
     )
 
 

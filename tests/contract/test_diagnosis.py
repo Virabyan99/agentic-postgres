@@ -18,7 +18,7 @@ import json
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, diagnosis
+from agentic_postgres import REPO_ROOT, backup_report, diagnosis
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -122,17 +122,62 @@ def test_a_ledger_behind_the_release_is_a_problem_and_ahead_is_a_warning() -> No
     assert diagnosis.migrations(applied=None, released=21).verdict == diagnosis.UNKNOWN
 
 
+#: Every status `backup_report` can emit, and the verdict this session gives it.
+#: **The keys are the module's own constants, not typed strings** — see
+#: `test_every_status_the_repository_can_emit_is_classified` for why that
+#: distinction is the whole point of the table.
+REPOSITORY_VERDICTS = {
+    backup_report.STATUS_NOT_OBSERVED: diagnosis.UNKNOWN,
+    backup_report.STATUS_UNCONFIGURED: diagnosis.PROBLEM,
+    backup_report.STATUS_AWAITING_FIRST_BACKUP: diagnosis.WARN,
+    backup_report.STATUS_READY: diagnosis.OK,
+    backup_report.STATUS_FAILING: diagnosis.PROBLEM,
+}
+
+
 def test_a_stanza_with_no_backup_yet_is_a_warning_not_a_problem() -> None:
     """ADR 0149: `awaiting_first_backup` is the honest state of a freshly
     created stanza, and a deploy that just made one is not broken."""
-    assert diagnosis.repository(
-        status="awaiting_first_backup", last_full_backup_at=None
-    ).verdict == (diagnosis.WARN)
-    assert diagnosis.repository(status="ok", last_full_backup_at="t").verdict == diagnosis.OK
-    assert diagnosis.repository(status="failing", last_full_backup_at=None).verdict == (
-        diagnosis.PROBLEM
-    )
+    for status, expected in REPOSITORY_VERDICTS.items():
+        last = "t" if status == backup_report.STATUS_READY else None
+        assert diagnosis.repository(status=status, last_full_backup_at=last).verdict == expected, (
+            f"{status} should be {expected}"
+        )
     assert diagnosis.repository(status=None, last_full_backup_at=None).verdict == diagnosis.UNKNOWN
+
+
+def test_every_status_the_repository_can_emit_is_classified() -> None:
+    """D674 — question 5, answered wrong again.
+
+    The version of this file that shipped in Run 3 asserted `status="ok"` was
+    `OK`. **`backup_report` has never emitted `"ok"`.** Its five statuses are
+    `not_observed`, `unconfigured`, `awaiting_first_backup`, `ready` and
+    `failing`. So the assertion measured a string its target cannot produce
+    (D374), passed for that reason, and the real healthy status fell through to
+    the catch-all: the first live run reported `PROBLEM the repository reports
+    ready` against a repository holding a full backup from the previous day.
+
+    Two more literals would not have repaired the class. **This test derives the
+    set from `backup_report` itself**, so a sixth status added later cannot
+    reach the catch-all silently — it reddens here, offline, and its author has
+    to decide what it means.
+    """
+    emitted = {
+        value
+        for name, value in vars(backup_report).items()
+        if name.startswith("STATUS_") and isinstance(value, str)
+    }
+    assert emitted, "no STATUS_* constants found — this test has lost its subject"
+    unclassified = emitted - set(REPOSITORY_VERDICTS)
+    assert not unclassified, (
+        f"backup_report can emit {sorted(unclassified)}, and diagnosis.repository would send "
+        f"each to the catch-all PROBLEM branch without anyone deciding that is right"
+    )
+    stale = set(REPOSITORY_VERDICTS) - emitted
+    assert not stale, (
+        f"{sorted(stale)} is classified here but nothing emits it — that is the D374 shape "
+        f"this test exists to prevent"
+    )
 
 
 def test_the_archiver_verdict_is_handed_in_not_recomputed() -> None:
