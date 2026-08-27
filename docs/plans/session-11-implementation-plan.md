@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D668.**
+**Next free number after this table is D670.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -161,6 +161,8 @@ implementation is appended with the next free number.
 | **D665** | The arming command `provision-host.sh` prints after skipping SSH hardening. | **I retyped it from the ufw example and dropped its trailing backup-path argument.** The script then refused: *"SKIPPED SSH hardening: no rollback timer is armed"* — correctly, on a timer unit that existed under the right name. Two observations: the guard is real and discriminating, and **`--confirm-ssh-ok` still reported "SSH rollback disarmed" for hardening that never ran**, which is a message an operator could read as confirmation. | The second attempt **extracted the command from the tool's own output** instead of retyping it. The confirm-path message is worth narrowing to say what it confirmed. | **D505/D507's exact failure mode, committed by me, inside the session about it** — and caught by the product rather than by me. That the guard held is the more important half; a rollback that can be armed wrongly and still satisfy its check is the version of this that ends in a dead host. | — |
 | **D666** | `docs/session-02-operator-guide.md` step 2: `bin/edge.sh --host host.yaml status   # redacted; readable without root`. | **Run without root, as documented, it reports `containers (not running)` while both containers are Up and healthy.** One line: `compose ps 2>/dev/null \|\| printf 'containers (not running)'`. Every failure of `compose ps` becomes that sentence — permission denied, no daemon, a malformed project — and `2>/dev/null` discards the reason. The commonest failure is the documented invocation itself: an unprivileged operator cannot reach `/var/run/docker.sock`. **Measured on the rehearsal host**: `docker ps` showed both healthy, `status` said not running. | A failed read reports **`(could not be read -- re-run with sudo)`**, and `test_status_never_reports_an_absence_it_did_not_measure` asserts the wording, because the wording is what an operator acts on. The third party's own text stays unprinted (ADR 0159). | **D145 and D548's shape, in this repository's own code**: `postgrest --ready` returns 0 while every request 404s; `pgbackrest info` exits 0 for a stanza that does not exist. Both were third parties. This one is ours, it is the exact thing ADR 0157's `undetermined` and ADR 0158's `unknown` were written to refuse, and **it predates both by nine sessions**. An operator who reads "not running" restarts an edge that is serving. | 0157, 0158 |
 | **D667** | This run's own framing of leg 2 as *"edge + staging ACME"*, and the plan's *"Staging ACME; stop before promotion."* | **The edge requests no certificate.** `infra/edge/dynamic/baseline.yaml` carries no `certresolver` and no `Host()` rule; the only ACME reference in the edge Compose model is the state-directory mount. A certificate is requested when a **project** router with a TLS resolver exists — which is leg 3. *"The edge starts on staging ACME certificates"* means it is **configured for** staging, not that it obtains one. | **Leg 2 needs no DNS record**, and ran without one. The DNS requirement moves to leg 3, where the first project router appears. | Worth five minutes to establish, because the alternative was asking the operator for a DNS record the run did not need — and then reading a successful `edge.sh up` as evidence that ACME worked, which it is not. `443` answers **404** after leg 2: Traefik's own, with nothing routed, and §7's standing warning is that a routed 404 and Traefik's own are identical from outside. | — |
+| **D668** | Run 2's step 0 preflight (ADR 0157) shipped with a mutation battery and offline tests, and its own `**Done.**` said *"that a refused deploy leaves the filesystem byte-identical needs root and a host, and it is Run 9's."* | **It ran on a real fresh host, and it was right first time.** `sudo ./deploy.sh --through-session 10` with the edge up and no providers: *"2 of 4 prerequisites are not satisfied. Nothing has been changed"*, `docker daemon` and `edge plane` **ok**, both absences reported **together**, each with a copy-pasteable command carrying the actual manifest paths — and `.generated/` empty afterwards. Exit **4** with root, **3** without. | Nothing to repair. Recorded because **a host-only proof that has never executed is this project's most expensive standing item**, and this one cost nothing to execute: the preflight refuses before touching provider state, so it needed none. | The first measurement of that exit code read **0** — the `$?` trap CLAUDE.md documents, hit for the third time in this session. Re-measured three ways with the status captured on the host: 4, 3, 4. **A wrong number that looks plausible is worse than no number**, and the difference between "my code is broken" and "my measurement was" is one careful re-run. | 0157 |
+| **D669** | §0's decision 1 and §2: `DEP-001`'s live node id is *"the rehearsal"* — a fresh project deploying on an empty host — and Run 8's text scoped a deploy. | **Legs 1 and 2 are done; leg 3 is not, by decision.** Leg 3 needs a scratch Infisical project, two R2 buckets with their own tokens, and a DNS record, and it exercises the commands the live host already runs on every deploy. The findings-per-cost is the opposite of legs 1 and 2, which found nine things between them precisely because they touch code a working host never re-runs. And §9's stop condition 5 is explicit: *"a rehearsal that touches live provider state is not a rehearsal."* | **`DEP-001` is not claimed by Session 11.** Its placeholder stays `future`-marked, its offline half is proved and its live half carries to Session 12, where `DX-001` — *a developer who did not build this completes the documented path* — is a superset of it. | **The narrowing is written down rather than assumed**, which is the whole difference between a scoped decision and a quiet one. What Session 11 delivers instead is a documented path that is materially better than the one Session 12 would otherwise have tested: eleven divergence rows from the rehearsal, including a lockout that would have stopped `DX-001` at step 2 and a `status` command that reported a healthy edge as down. | — |
 
 ---
 
@@ -740,6 +742,33 @@ than in a private note. Staging ACME; stop before promotion.
 This run decides whether Run 7's README is true, and it is the run most likely to
 generate rows.
 
+**Done — with leg 3 deliberately not run, and `DEP-001` not claimed** (D669).
+
+Half A, and half B's legs 1 and 2. **Eleven divergence rows, D655–D669**, of
+which nine are defects in this repository's documentation or code and two are
+corrections to my own earlier findings.
+
+**What Session 11 does not get from this run:** `DEP-001`'s live half. Its
+placeholder stays `future`-marked and it carries to Session 12, where `DX-001`
+is a superset of it. Leg 3 was declined because it needs a scratch Infisical
+project, two R2 buckets with tokens and a DNS record, in order to exercise the
+commands the live host already runs on every deploy — the opposite of the
+findings-per-cost that legs 1 and 2 had — and because §9's stop condition 5 says
+a rehearsal touching live provider state is not a rehearsal.
+
+**What it does deliver** is a documented path materially better than the one
+Session 12 would otherwise have tested: a fresh host no longer locks its
+operator out at step 2, the transport step exists, the security baseline no
+longer claims a control it does not have, and `edge.sh status` no longer reports
+a healthy edge as down.
+
+**One free measurement on the way out** (D668): Run 2's preflight ran on the real
+host and was right first time — both absences together, copy-pasteable remedies,
+nothing written, exit 4. A host-only proof that had never executed, executed at
+no cost, because refusing before touching anything is exactly what it does.
+
+---
+
 **Half B, leg 2 done** — the edge plane, on the same fresh host. `edge.sh up`
 exits 0; `traefik:v3.7` and `docker-socket-proxy:0.3.0` are both **healthy**;
 `apg-edge-control` and `apg-edge-egress` created; ACME environment **staging**;
@@ -891,10 +920,17 @@ Every command in it exists and resolves, checked offline on every gate.
 | Claim | offline | host | external |
 |---|---|---|---|
 | `deployment_preflight` | shape and refusal | the refusal against a real host | — |
-| `deployment_convergence` | every README command resolves | the rehearsal and the redeploy | — |
+| `deployment_convergence` | every README command resolves | **`DEP-002` only** — the redeploy, on the live host | — |
 | `operational_diagnosis` | check inventory and redaction | every check against a live deployment | — |
 | `log_correlation` | the runtime's honour-or-mint logic | one id across four records | — |
 | `api_authorization`, `bootstrap_identity` | — | the rotation window | — |
+
+**`DEP-001` is not in this table** (D669). Its offline half is proved and its
+live half — a fresh project deploying on an empty host — was not run: Run 8
+stopped after the host baseline and the edge plane. The placeholder stays
+`future`-marked, and Session 12 inherits it alongside `DX-001`. Registering the
+claim on the offline half alone would be a claim whose id promises a deployment
+nobody performed, which is what ADR 0045 and D70 exist to prevent.
 
 A claim's verdict is computed from the registry's node ids and JUnit results,
 never hand-entered. **A skip is not a pass.** A filtered (`-k`) run writes
@@ -987,6 +1023,21 @@ whose placeholders are in `tests/contract/test_future_deployment.py`.
 It receives from Session 11 a README that has been executed on an empty machine, a
 `doctor.sh` that answers whether a deployment is well, a deploy that refuses
 completely rather than partially, and one request id that spans four records.
+
+**It also inherits `DEP-001`'s live half** (D669). Session 11 proved the offline
+half — every command the README names exists, resolves and answers — and ran the
+host path as far as the baseline and the edge plane, on a genuinely fresh Ubuntu
+26.04 machine. It did not deploy a project there. Leg 3 needed a scratch
+Infisical project, two R2 buckets and a DNS record in order to exercise commands
+the live host already runs on every deploy, and §9's stop condition 5 refuses a
+rehearsal that touches live provider state.
+
+`DX-001` is a superset of what is left, so the two are best done together — and
+they are now being attempted against documentation that a fresh host has already
+corrected eleven times. The most consequential: **`provision-host.sh` names an
+operator user it does not create**, and its second pass installs
+`PermitRootLogin no`. Before Session 11, `DX-001` would have locked its developer
+out of their own machine at step 2 and called it a documentation problem.
 
 It receives three narrowings. **`DEP-001` was proved on a disposable VM, not on
 the production host**, and `DX-001` — a developer who did not build this — is the
