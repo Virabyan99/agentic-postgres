@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D647.**
+**Next free number after this table is D650.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -140,6 +140,9 @@ implementation is appended with the next free number.
 | **D644** | — | **`create_app` returning a wrapped ASGI callable breaks the application contract.** The first implementation returned `StampRequestId(application)` — the same plain-ASGI wrapping `create_mcp_app` uses. `bin/app-contract.py` calls `.openapi()` on that result and six test modules read `.routes`. | **`add_middleware`, and `create_app` still returns the `FastAPI`.** Ordering is explicit: Starlette makes the last-added outermost, so the log is added first and the stamp second. | Caught by running the existing suite rather than by review, and it would have failed at the *contract generation* step — `bin/app-contract.sh --check` — which is one of the things a gate runs and a reader trusts. A test now asserts the return type directly, so the next person who reaches for the ASGI wrapper is told why it is not used here. | 0160 |
 | **D645** | — | **`test_the_id_does_not_survive_the_request` passed for an unrelated reason.** It called the app through `asyncio.run(...)` and then asserted `current_request_id() is None` from the test's own frame — but `asyncio.run` builds a fresh `Context` per call, so that assertion read a variable nothing had ever set. It was green whether or not `_CURRENT.reset` ran. | **Observed inside the same coroutine that set it**, immediately after the middleware returns — the only vantage point from which the reset is observable at all. | **Found by the battery as a SURVIVOR**, which is what a surviving mutation is for: M4 deleted the reset and the test stayed green. D374's shape — *a test can check a string its target cannot contain* — and it would have sat green forever guarding nothing. | 0160 |
 | **D646** | — | **D498 is closed.** *"The id's propagation was proved and its uniqueness was not, because every offline test arranges a fixed id — a mutation replacing `uuid4()` with a constant left the whole suite green."* | Two arms now fail it: `test_two_requests_get_two_different_ids` drives two real requests, and `test_minting_twice_gives_two_values` is the narrow form that survives if the ASGI arms are ever removed. **Battery M2 is D498's exact mutation**, and it dies. | Two agents whose records share a request id are two agents an operator cannot tell apart — the same harm a caller-chosen id would do (D642), arriving from inside rather than outside. A uniqueness claim nothing could falsify was worth exactly nothing. | 0160 |
+| **D647** | This plan's Run 6, and ADR 0161 as first drafted: the guard is a property of the two write RPCs. | **Two copies of one rule is how D500 happened in the first place.** 0019 asked *"does this path record a request id"* of the `agent_plane` writer and not of the `database` writer, and the answer diverged for two sessions. Writing the header read into both RPC bodies would set the same trap for a third write RPC, whose author would inherit whichever copy they read. | **One helper — `app_private.agent_request_id()` — called by both.** `STABLE`, `SECURITY INVOKER`, `REVOKE ALL … FROM PUBLIC`, granted to nobody: it needs no privilege of its own and executes as the owner of the `SECURITY DEFINER` function that calls it. A test asserts neither RPC reads `request.headers` itself. | **Question 5 answered in advance rather than after the fact**, which is the first time this session has managed that. The pattern's five instances in Session 7 and three in Session 9 were all found *after* a decision's second caller had already diverged. | 0161 |
+| **D648** | — | **The rendered fixture is what a cluster receives, and the battery's first design mutated only the template.** The contract tests read `.generated/*/migrations/`, so an arm that edits `migrations/templates/` without re-rendering measures the *previous* bytes — every arm would report a survivor for a mutation that never reached the code under test. | **The render runs inside the battery loop**, once per arm, and again on restore. An arm whose mutated template fails to render is reported as **defective** rather than as a kill: a renderer refusing the input says nothing about whether the tests would have caught it. | D269's shape — *an unapplied mutation reports as "expected FAIL got PASS", which reads as a weak test and means the mutation never happened.* Caught while writing the battery rather than by reading its output, because the same trap cost Run 4 an ERROR-versus-FAILED false kill one run earlier. | — |
+| **D649** | ADR 0160: *"a caller may still send `X-Request-Id` … and **it is used for nothing**."* | **Migration 0022 uses it.** A caller reaching PostgREST directly — bypassing the MCP plane, which ADR 0135 already contemplates — supplies the header that becomes its own `database` row's `request_id`. ADR 0160's sentence was true of the *runtime*, not of the database. | **Recorded as a stated residual in ADR 0161, not silently reconciled.** The caller cannot forge `agent_id` or `owner_id` — both come from GUCs the pre-request hook set, which is the whole of `SEC-PARAM-001` — so this is ADR 0135's conceded *"an agent can add noise to its own audit record"*, and the noise is **visible**: such a row still carries its own `agent_id`, so an operator joining by request id sees the mismatch rather than being fooled by it. | It is strictly narrower than D642's refusal and consistent with it: D642 refused letting a caller's id become **the runtime's own**, because the `agent_plane` row is this deployment's authoritative record of what it did. **The operator guide must say to check `agent_id` beside `request_id`**, and that sentence exists because this row was written rather than because somebody noticed later. | 0161 |
 
 ---
 
@@ -620,6 +623,46 @@ of D500 is unchanged — but what the runtime forwards is its own mint, so the
 `database` row, the `agent_plane` row and Traefik's `downstream_X-Request-Id` are
 one value. A caller that sends its own header still reaches
 `current_setting('request.headers')` and is still used for nothing.
+
+**Done.** `migrations/templates/0022-database-row-request-id.sql`,
+`app_private.agent_request_id()`, both write RPCs replaced, the manifest entry,
+the frozen lock (**22 migrations**), the flipped deployment proof,
+`tests/contract/test_database_row_request_id.py` (16 tests), **ADR 0161**, and
+three divergence rows (**D647**–**D649**).
+
+**D500 is closed.** The two rows for one MCP write now join on `request_id`, and
+that value is the one Traefik logged as `downstream_X-Request-Id` on the way out.
+Four legs, one value.
+
+*What the run actually decided.* Not the read — D632 settled that (lowercase key,
+two-argument `current_setting`, and **no** `nullif(…, '')`, which is the idiom
+this repository uses everywhere and which guards nothing here). Not the guard
+either — D633 settled that, having measured an unguarded cast rolling a caller's
+own write back to **zero rows**. What was left was **where the rule lives**
+(D647): one helper both RPCs call, rather than the expression written twice.
+D500 exists precisely because 0019 asked a question of one path and not the
+other, and two copies would set that trap again for a third write RPC.
+
+*The test that had to flip.* Migration 0020 named it in advance — *"the thing
+that will fail on the day the repair lands"* — and §6 requires the replacement be
+stricter. The old assertion (`request_id IS NULL`) could fail exactly one way,
+and only after somebody had made the repair. The new one asserts the join and
+fails three ways: a missing id, a mismatched id, or an id no `agent-plane` row
+shares.
+
+*What the battery needed before it could measure anything* (D648). The contract
+tests read the **rendered** migration, so an arm that mutates the template
+without re-rendering measures the previous bytes — every arm a survivor for a
+mutation that never happened. The render runs inside the loop, and an arm whose
+mutated template fails to render is reported **defective** rather than killed.
+Final: **7 arms, 7 killed, 0 survived, 0 defective.**
+
+*What it opened* (D649). ADR 0160 said a caller's header *"is used for nothing"*.
+Migration 0022 uses it — a caller reaching PostgREST directly supplies the header
+that becomes its own `database` row's id. Recorded rather than reconciled: the
+caller cannot forge `agent_id` or `owner_id`, so this is ADR 0135's conceded
+case, and the noise is visible because the row still names its author. **The
+operator guide must say to check `agent_id` beside `request_id`.**
 
 ### Run 7 — The README and the documentation index
 

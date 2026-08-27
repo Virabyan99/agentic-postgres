@@ -372,10 +372,19 @@ def test_the_request_id_is_recorded_and_is_this_planes_own_mint(
     identifier rather than a constant somebody wrote down — and the negative
     control that a single-call assertion cannot provide.
 
-    **The `database` row carries none** (D500), and that is asserted rather than
-    left to be discovered: 0019 inserts no `request_id` on that path, so the two
-    records correlate by agent, tool and time. Whoever repairs it needs a
-    migration 0020.
+    **The `database` row carries the SAME id** since migration 0022 (Session 11
+    Run 6, ADR 0161), and the assertion below is the stricter one that replaced
+    D500's.
+
+    Until 0022 this read *"every database row carries `request_id IS NULL`"* — a
+    statement about an absence, which 0019 guaranteed and which 0020's comment
+    named as *"the thing that will fail on the day the repair lands"*. It landed.
+
+    What replaces it is not that claim relaxed. It is the correlation
+    `OPS-LOG-001` asks for, and it fails for strictly more reasons: a database
+    row with no id, a database row whose id no agent-plane row shares, or an id
+    the runtime did not mint. The old assertion could only fail one way, and only
+    when somebody had already made the repair.
     """
     for _ in range(2):
         mcp_rpc(
@@ -399,10 +408,22 @@ def test_the_request_id_is_recorded_and_is_this_planes_own_mint(
     )
 
     database = [row for row in rows if row["source"] == "database"]
-    assert database, "no database row at all; the assertion below would be vacuous"
-    assert all(row["request_id"] is None for row in database), (
-        "a database row carries a request id. Migration 0019 does not write one (D500), so "
-        "this passing means the migration moved and this test's premise with it"
+    assert database, "no database row at all; the assertions below would be vacuous"
+
+    recorded = [row["request_id"] for row in database]
+    assert all(recorded), (
+        f"a database row carries no request id: {database}. Migration 0022 writes one on "
+        "both write RPCs (D500), so a NULL here means the migration did not apply or the "
+        "header did not reach the database"
+    )
+
+    # THE correlation claim. Two rows describing one write, joined by the value
+    # the runtime minted -- which is also the value Traefik logged as
+    # `downstream_X-Request-Id` on the way out (ADR 0160).
+    assert set(recorded) <= set(ids), (
+        f"database rows carry ids {sorted(set(recorded))} that no agent-plane row shares "
+        f"({sorted(set(ids))}). The two records for one write must join on request_id, or "
+        "the id names a request nobody can find"
     )
 
 

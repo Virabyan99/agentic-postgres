@@ -224,3 +224,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0158](0158-the-deployed-document-is-the-address-book-not-the-diagnosis.md) | The deployed document is the address book, not the diagnosis | 11 | Accepted |
 | [0159](0159-verbose-adds-resolution-never-a-third-partys-bytes.md) | `--verbose` adds resolution, never a third party's bytes | 11 | Accepted |
 | [0160](0160-the-request-id-flows-outward-and-no-caller-value-is-trusted.md) | The request id flows outward, and no caller value is ever trusted | 11 | Accepted |
+| [0161](0161-the-database-row-records-the-request-and-a-malformed-header-is-not-a-refusal.md) | The `database` row records the request, and a malformed header is not a refusal | 11 | Accepted |

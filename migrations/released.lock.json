@@ -251,6 +251,16 @@
       "template": "templates/0021-agent-writer-context-grants.sql",
       "template_sha256": "de6ef489bdf4fdf08fbd26b2a349fcd23eb842eb8353a526725db4c73ff04843",
       "version": "20260823120021"
+    },
+    {
+      "canonical_render_sha256": "2c1b6f8bb6f0b7ec272ebc08592922ae64284d35361a5a17d8076aa462ace23d",
+      "name": "database_row_request_id",
+      "placeholders": [
+        "object_owner"
+      ],
+      "template": "templates/0022-database-row-request-id.sql",
+      "template_sha256": "a9e51cf245bc1da57bb969a4b451561bbc328a24b7c55b9e09b8ccd0f3dda5eb",
+      "version": "20260827120022"
     }
   ],
   "schema_version": 1
