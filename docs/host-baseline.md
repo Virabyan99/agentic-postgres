@@ -14,18 +14,43 @@ it as a deviation.
 
 | Area | Policy | Where it comes from |
 |---|---|---|
-| SSH | Key-only. `PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`. Source addresses restricted by `ssh.allowed_source_cidrs`. | `infra/host/00-agentic-postgres-ssh.conf` → `/etc/ssh/sshd_config.d/` |
+| SSH | Key-only. `PermitRootLogin no`, `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `MaxAuthTries 3`. **Source addresses are not restricted** — see below. | `infra/host/00-agentic-postgres-ssh.conf` → `/etc/ssh/sshd_config.d/` |
 | Firewall | UFW default-deny inbound; the configured SSH port, 80 and 443 allowed. | `bin/provision-host.sh` |
 | Container ingress | A `DOCKER-USER` policy that matches the **pre-DNAT** destination port and ends in a drop, so a published container port is not a public one. | `infra/host/docker-user-rules.v{4,6}` → `/etc/agentic-postgres/`, applied by `bin/docker-firewall.sh` |
 | Docker daemon | No TCP socket. Local socket only, read through an allowlisting proxy by anything public-facing. | `infra/host/daemon.json` |
 | Patching | `unattended-upgrades` enabled, and configured **not** to reboot itself. | `infra/host/20auto-upgrades` |
 | Releases | systemd runs `/opt/agentic-postgres/releases/<commit>/`, root-owned and immutable, through a launcher in `/usr/local/libexec/agentic-postgres/`. Never a checkout. | `bin/provision-host.sh`, `libexec/` |
 
-`ssh.allowed_source_cidrs` is defence in depth, not the boundary. The boundary
-is key-only authentication as **OpenSSH actually resolves it** — `sshd -T` for
-the real operator tuple, not what our snippet says, because OpenSSH takes the
-first obtained value across a lexicographic include order and `Match` blocks
-override regardless of position.
+**`ssh.allowed_source_cidrs` restricts nothing, and this table said otherwise
+until Session 11 Run 8** (D661). The field is schema-required, CIDR-validated and
+reported on — and it reaches no firewall rule and no sshd directive:
+`provision-host.sh` runs `ufw allow <port>/tcp` with no source, and the snippet
+carries no `Match Address` block. It is a **declared intent**, kept explicit in
+the manifest so that `0.0.0.0/0` is a written choice rather than an omission.
+
+The code has always said so; only this page did not. `host_config.py`:
+
+> the controls that actually carry the SSH boundary are key-only authentication,
+> `PermitRootLogin no` and `MaxAuthTries`, all of which the live-host suite
+> asserts against `sshd -T`.
+
+And the boundary is those controls as **OpenSSH actually resolves them** —
+`sshd -T` for the real operator tuple, not what our snippet says, because OpenSSH
+takes the first obtained value across a lexicographic include order and `Match`
+blocks override regardless of position.
+
+## Before the three passes: the operator account
+
+`provision-host.sh` names `ssh.operator_user` in a sudoers rule and uses it as
+the `sshd -T` probe — and **does not create it**. Pass 2 installs
+`PermitRootLogin no`, so on a fresh host where root is the only login, pass 2
+removes the only way in. Create the operator and **prove it works while root
+still does**; the procedure is step 0 of the
+[Session 2 operator guide](session-02-operator-guide.md).
+
+Measured on a fresh Ubuntu 26.04 host in Session 11 Run 8: after pass 2, `ssh
+root@host` is refused. The rollback timer is what stands between that and a dead
+machine, which is exactly what it is for.
 
 ## Why a fresh host takes three `--apply` passes
 

@@ -117,6 +117,13 @@ the database container reads it as uid 999.
 deploy that quietly performed them would be one whose failure halfway leaves
 nobody able to say which half ran.
 
+**Two steps come before this list**, and the operator guide's step 0 has them:
+get the release onto the host (`git bundle` + `scp` — never a GitHub credential
+there), and **create the operator user named by `ssh.operator_user`**.
+`provision-host.sh` does not create it and its second pass installs
+`PermitRootLogin no`, so on a fresh host that step removes the only way in
+(D659).
+
 ```bash
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host

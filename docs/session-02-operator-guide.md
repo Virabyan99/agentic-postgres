@@ -34,11 +34,61 @@ preconditions: `deploy.sh --through-session 2` expects the host to be ready, the
 edge to be up, providers bootstrapped and secrets materialized. A deploy that
 silently performed those would leave nobody able to say which half failed.
 
+### 0. Get the release onto the host, and create the operator
+
+**Two steps missing from this guide until Session 11 Run 8 ran it on a fresh
+machine** (D659, D660). Every earlier trip started from a host that already had
+both, and nobody had written either down.
+
+**The release.** `git bundle` + `scp`, under a per-release name — never a GitHub
+credential on the host, and never the generic bundle name (D504: `/tmp` is
+sticky, and a failed `scp` followed by a successful fetch of a stale bundle moves
+a host *backwards* with both commands exiting 0).
+
+```bash
+# on your machine
+SHA="$(git rev-parse HEAD)"
+git bundle create "/tmp/apg-${SHA:0:12}.bundle" --all
+scp "/tmp/apg-${SHA:0:12}.bundle" root@<host>:/tmp/
+
+# on the host
+git clone "/tmp/apg-${SHA:0:12}.bundle" agentic-postgres
+cd agentic-postgres && git rev-parse HEAD    # CONFIRM this equals ${SHA}
+```
+
+Confirm the commit **before** the checkout, never the `release` line after it.
+
+**The operator.** `provision-host.sh` writes a sudoers rule naming
+`ssh.operator_user` and uses it as the `sshd -T` probe user — and **it does not
+create that account.** Step 2 below installs `PermitRootLogin no`, so on a fresh
+host where root is the only login, that step removes the only way in.
+
+```bash
+# on the host, as root, BEFORE step 2
+OPERATOR=deployer                          # must equal ssh.operator_user
+useradd -m -s /bin/bash "${OPERATOR}"
+install -d -m 0700 -o "${OPERATOR}" -g "${OPERATOR}" "/home/${OPERATOR}/.ssh"
+install -m 0600 -o "${OPERATOR}" -g "${OPERATOR}" \
+  /root/.ssh/authorized_keys "/home/${OPERATOR}/.ssh/authorized_keys"
+printf '%s ALL=(ALL) NOPASSWD:ALL\n' "${OPERATOR}" > "/etc/sudoers.d/${OPERATOR}"
+chmod 0440 "/etc/sudoers.d/${OPERATOR}"
+
+# then PROVE it, while root still works
+ssh "${OPERATOR}@<host>" 'id -un && sudo id -un'
+```
+
+Everything from step 1 onward runs as that operator, under `sudo`.
+
 ### 1. Host baseline
 
 Three `--apply` passes with two rollback timers. Full procedure in
 [host baseline](host-baseline.md) — read it before running anything, because
 step 2 and step 3 can lock you out.
+
+**Arm each timer with the command the script prints, copied rather than
+retyped.** The SSH one carries a backup path as its final argument; an arming
+command missing it leaves a timer that exists under the right name and does not
+satisfy the guard, so the script skips hardening and says so (D665).
 
 ```bash
 sudo bin/provision-host.sh --host host.yaml --check      # default; changes nothing
