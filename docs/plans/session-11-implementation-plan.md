@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D654.**
+**Next free number after this table is D659.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -147,6 +147,11 @@ implementation is appended with the next free number.
 | **D651** | The README, every session since Session 1: *"All three generated files are mode `0600`."* | **Four files are generated and one is `0444`.** `PGBACKREST_CONF_MODE = 0o444` deliberately — `build_pgbackrest_conf` omits every credential option by construction and uid 999 must read the file. The README's claim was true when three files were generated and false from the moment Session 10 added a fourth. | The README states both modes and why the second is not the first. | Found by running `find -printf '%m'` over the rendered directory rather than by reading the sentence, which is the same method that found D650 four lines earlier. | 0154 |
 | **D652** | `bin/render-config.py`'s closing line — the one sentence printed after **every** render: *"Wrote …/{outputs.json,compose.env,pgbackrest.conf,rendered-summary.txt} (mode 0600)."* | **It names `pgbackrest.conf` and claims a mode the renderer has never given it.** Session 10 added the filename to the list and left the trailing `(mode 0600)` untouched, so every render since has printed a false statement about a file it had just written `0444`. | **The modes are read from `rendering.FILE_MODE` and `rendering.PGBACKREST_CONF_MODE`, never typed**, and a test asserts the two constants differ — otherwise it could not tell a derived claim from a typed one (D374). | **Question 5, in the most-read sentence this repository emits.** The claim was true when written and stopped being true when a file with a different mode joined the list it describes. It survived a full session and a host trip because nobody compares a message against a `stat`. | — |
 | **D653** | `test_the_catalog_says_what_the_surface_deliberately_lacks` asserts `OPS-LOG-001` appears in the catalog's absence list — *"the request id does not span ingress."* | **Runs 5 and 6 closed both halves of that absence**, so the catalog correctly stopped saying it and the test correctly went red. It is the third sentence to leave that list, after *"No writes"* (Session 9 Run 3) and *"No durable audit from the runtime"* (Run 6) — **and each of the three was noticed by this same test firing.** | **Replaced by a stricter one**, authorised by ADR 0160/0161: the catalog must describe the span it now has, say that an inbound `X-Request-Id` is ignored, **and** carry D649's caveat that an operator correlating by request id reads `agent_id` beside it. Three ways to fail against the old one's one. | A test that only ever watches a list shrink is a test that stops meaning anything as the product grows into it. This one earns its keep precisely because it fires on the run that closes each absence — but the replacement has to be the positive claim, or the absence list becomes the only thing anybody asserts about the document. | 0160, 0161 |
+| **D654** | Run 4 added `--verbose` to `bin/doctor.sh` and the run closed with lint, shellcheck and the affected suites green. | **`bin/doctor.sh` with no arguments exited 1 after four lines**, and had done since that commit. `check_command`'s last statement was `[ -n "${VERBOSE}" ] && printf …`; under `set -e` a function whose last command returns 1 returns 1, so the script died on the first tool it found while `VERBOSE` was empty. **`--verbose` was unaffected** — there the test succeeds — and `--verbose` is the mode Run 4 exercised. | An `if` block, and `test_doctor_reaches_its_own_conclusion` parametrised over **both** modes: exit in `(0, 3)`, a summary line, and the repository-shape section reached. | **Question 1 had no answer for this command's default path.** `test_cli_contract` checks `--help`, which returns before any check runs; the planted-environment test reads the output and not the status. So the README's *"confirm the workstation is ready"* step was broken for a whole run, on my own machine, and **only a rehearsal that ran it found it.** This is the same shape as D639 one run earlier — a mode exercised, a mode not — which makes it twice in five runs. | — |
+| **D655** | README, *"Local bootstrap"*: `sudo apt-get install -y shellcheck jq`. | **The step before it is `git clone`, and a stock Ubuntu Server image has no `git`.** Measured: `bash: line 1: git: command not found` on the README's own first instruction. | `git` joins the install line. | The tool list was written for a machine that already had git, which every machine this repository has ever been developed on does. **A prerequisite you have never lacked is one you cannot see**, and it is the first line of the path a stranger follows. | — |
+| **D656** | README: *"`--render-only` needs no host and no root, starts nothing, and contacts no provider."* Every clause true. | **It needs Docker.** The render validates the staged Compose model before publishing, so on a machine without it the command exits **5** with `compose: docker is not installed` — and publishes nothing. The README never asks for Docker, and `bin/doctor.sh` requires `docker`, `docker compose` and `docker buildx`. | The README asks for Docker and says why, and the `--render-only` paragraph names the dependency and the exit code. | Three true statements about what a command does *not* need read as a complete statement of what it needs. The absent fourth clause is the one that stops a newcomer. | — |
+| **D657** | README: `bin/smoke-test.sh   # fast: active contract tests only`. | **Measured on a developer machine: 4,152 tests, 291 seconds**, and it starts real containers. "Fast" is true only against the gate. | The README states the measured count and duration, says Docker must be running, and shows the single-module invocation for use while working. | A newcomer reading *"fast"* runs it expecting seconds, waits five minutes, and learns the document's adjectives are not measurements. **The number was never measured before it was written down** — which is the same defect as a bound that is validated and reaches nothing (D519), in prose. | — |
+| **D658** | This plan's Run 8: *"Provision a clean VM following only the README."* | **The rehearsal split cleanly in two, and only the first half is answerable without a VM.** Half A — clone, tools, interpreter, environment, `doctor.sh`, render, inspect — ran in a clean `ubuntu:24.04` container and produced D654–D657. Half B — `provision-host.sh`, the edge, providers, secrets, `--through-session` — hardens SSH, installs UFW rules and systemd units, and needs a real machine: a privileged container running systemd is a *different thing*, and a rehearsal against it would measure the proxy. | **Half A is done and its four findings are repaired. Half B needs a VM the operator supplies**, and is raised rather than faked. | D605's rule at the environment layer: *a rig that constructs a condition must measure that it constructed it.* A container cannot construct "a fresh host", and reporting a host rehearsal from one would be a value that looked measured and was not — §7's whole pattern, in the run written to find exactly that. | — |
 
 ---
 
@@ -725,6 +730,54 @@ than in a private note. Staging ACME; stop before promotion.
 
 This run decides whether Run 7's README is true, and it is the run most likely to
 generate rows.
+
+**Half A done.** The README's local path — clone, tools, interpreter,
+environment, `doctor.sh`, render, inspect, checks — followed literally in a clean
+`ubuntu:24.04` container by somebody who had read nothing else. Four divergence
+rows (**D654**–**D657**), all repaired, plus **D658** for the half a container
+cannot answer.
+
+*The construction, stated so it can be judged.* Base `ubuntu:24.04` plus only
+what a stock Ubuntu Server carries and a bare container does not — `sudo`,
+`ca-certificates`, `curl`. **`git` deliberately not pre-installed.** The
+repository arrives by cloning the local checkout rather than a URL: a stated
+deviation, not a finding, since it exercises `git clone` without putting a
+credential in the container.
+
+*What it found, in order of how badly it reads.*
+
+**D654 is mine, and it is the worst of the four.** `bin/doctor.sh` with no
+arguments exited **1 after four lines** — and had done since Run 4, when I added
+`--verbose`. `[ -n "${VERBOSE}" ] && printf` was the last statement of
+`check_command`, so under `set -e` the function returned 1 whenever `VERBOSE` was
+empty. `--verbose` worked, and `--verbose` is the mode Run 4 exercised. The
+README's *"confirm the workstation is ready"* step was broken for a whole run, on
+my own machine, and **nothing in a 4,152-test suite was watching that command's
+default path**. Question 1, unanswered. Now parametrised over both modes.
+
+**D655**: the README's first instruction is `git clone` and its tool list does not
+include `git`. A stock server image has none. *A prerequisite you have never
+lacked is one you cannot see.*
+
+**D656**: *"`--render-only` needs no host and no root"* — three true clauses
+reading as a complete list. It needs **Docker**, and without it exits 5 having
+published nothing.
+
+**D657**: `# fast: active contract tests only`. Measured: **4,152 tests, 291
+seconds**, starting real containers. The number was never measured before it was
+written down.
+
+*Second pass.* The corrected README was followed again end to end: the render
+succeeds, prints the repaired mode line, and the modes on disk are what it says.
+`doctor.sh` still failed in that pass **because the container clones the
+committed tree and the fix was uncommitted** — a rig artifact, verified as such
+rather than assumed.
+
+*What is deliberately not claimed.* The second pass's `smoke-test.sh` failures are
+**not attributed to anything**. That rig shares the host's Docker socket, which is
+a difference I did not isolate, and the same suite is green on this machine
+(4,152 passed). Reporting an unisolated failure as a finding would be the
+opposite of what this run is for.
 
 ### Run 9 — `DEP-001` / `DEP-002`: the host trip
 

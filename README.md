@@ -47,8 +47,13 @@ inside WSL2 with the repository on the **Linux** filesystem — not under `/mnt/
 and not inside a OneDrive-synced folder.
 
 ```bash
-# Tools
-sudo apt-get update && sudo apt-get install -y shellcheck jq
+# Tools. `git` because the step above needed it, and `docker` because
+# --render-only validates the Compose model with it — a checkout that renders
+# nothing is not a checkout that can be checked.
+sudo apt-get update && sudo apt-get install -y git shellcheck jq
+# Docker Engine and the Compose v2 plugin: follow docs.docker.com for your
+# distribution. `docker compose version` and `docker buildx version` must both
+# answer before bin/doctor.sh will pass.
 
 # Pinned interpreter and locking tool
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -79,7 +84,9 @@ bin/lock-dev-deps.sh --check     # verifies the lock is current; modifies nothin
 ## Rendering a project
 
 `--render-only` needs no host and no root, starts nothing, and contacts no
-provider. It remains the whole of what runs in a checkout:
+provider. **It does need Docker**, because it validates the staged Compose model
+before publishing it — `docker` absent is exit `5`, not a partial render. It
+remains the whole of what runs in a checkout:
 
 ```bash
 cp project.example.yaml project.yaml
@@ -172,9 +179,19 @@ ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@<host> sudo apg-diag containers
 ## Checks
 
 ```bash
-bin/smoke-test.sh                        # fast: active contract tests only
+bin/smoke-test.sh                        # the active contract tests
 bin/session-01-check.sh                  # THE gate — needs a clean tree
 bin/session-10-check.sh --mode offline   # the backup plane's checkout-runnable half
+```
+
+**`bin/smoke-test.sh` is not quick.** Measured on a developer machine: **4,152
+tests in about five minutes**, and it starts real containers, so Docker must be
+running. It is faster than the gate — which adds a clean-tree check, static
+analysis, both fixture renders and evidence generation — and it is not a
+seconds-long confidence check. Run a single module while you work:
+
+```bash
+python -m pytest tests/contract/test_preflight.py -q
 ```
 
 Each session has its own gate, `bin/session-01-check.sh` through

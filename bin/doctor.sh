@@ -101,7 +101,16 @@ check_command() {
     # question a failing gate actually raises: two `docker` on one PATH, or a
     # Windows shim ahead of the Linux one. It adds no environment: the value
     # comes from `command -v`, not from printing what is set.
-    [ -n "${VERBOSE}" ] && printf '          path = %s\n' "${resolved}"
+    #
+    # **An `if`, never `[ -n "${VERBOSE}" ] && printf`** (D654). That form was
+    # the last statement in this branch, so under `set -e` the function returned
+    # 1 whenever VERBOSE was empty -- and the whole script died after its first
+    # line. `bin/doctor.sh` with no arguments, which is the README's "confirm the
+    # workstation is ready" step, exited **1 after four lines** for an entire
+    # run. `--verbose` was fine, because there the test succeeds.
+    if [ -n "${VERBOSE}" ]; then
+      printf '          path = %s\n' "${resolved}"
+    fi
   else
     bad "${binary} — ${purpose}"
   fi

@@ -268,6 +268,53 @@ def test_the_readme_states_both_generated_modes(readme: str) -> None:
     )
 
 
+@pytest.mark.parametrize("arguments", [(), ("--verbose",)])
+def test_doctor_reaches_its_own_conclusion(arguments: tuple[str, ...]) -> None:
+    """**D654**, and the README's *"confirm the workstation is ready"* step.
+
+    `bin/doctor.sh` with no arguments exited **1 after four lines** for an entire
+    run. Run 4 added `[ -n "${VERBOSE}" ] && printf` as the last statement of
+    `check_command`; under `set -e` a function whose last command returns 1
+    returns 1, so the script died on the first tool it found while VERBOSE was
+    empty. **`--verbose` was unaffected**, because there the test succeeds — and
+    `--verbose` is the mode Run 4 exercised.
+
+    Nothing caught it. `test_cli_contract` checks `--help`, which returns before
+    any check runs; the planted-environment test reads the output and not the
+    exit code. Question 1 — *what would have to break for this to go red?* —
+    had no answer for this command's default path.
+
+    So the assertion is not about a verdict. It is that the command **reaches
+    its own conclusion**: 0 when satisfied, 3 when something is missing, and its
+    summary line either way. Truncation is the symptom, and both modes are
+    parametrised because a mode added later is a mode a guard was not covering.
+    """
+    result = subprocess.run(
+        [str(REPO_ROOT / "bin" / "doctor.sh"), *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+        cwd=REPO_ROOT,
+    )
+    output = result.stdout + result.stderr
+
+    assert result.returncode in (0, 3), (
+        f"bin/doctor.sh {' '.join(arguments)} exited {result.returncode}. The documented "
+        f"codes are 0 (ready) and 3 (a prerequisite is missing); anything else means it "
+        f"died partway.\n{output}"
+    )
+    assert "prerequisite" in output, (
+        f"bin/doctor.sh {' '.join(arguments)} printed no summary line, so it stopped before "
+        f"reaching its own conclusion:\n{output}"
+    )
+    # The last section it prints. Its absence is what "died after four lines"
+    # looked like, and an exit code alone would not have shown it.
+    assert "Repository shape" in output, (
+        f"bin/doctor.sh {' '.join(arguments)} never reached the repository-shape section"
+    )
+
+
 def test_the_readme_points_at_the_index(readme: str) -> None:
     """An index nothing links to is a page nobody opens."""
     assert "docs/README.md" in readme
