@@ -36,6 +36,7 @@ from app.claims import ClaimError, verify_claims
 from app.mcp_authorization import AgentContextMiddleware, ToolVisibilityMiddleware
 from app.mcp_lock import load_lock
 from app.mcp_origin import RefuseBrowserOrigins
+from app.request_id import StampRequestId
 from app.tokens import LocalKeySet, MalformedToken, pre_parse
 
 if TYPE_CHECKING:  # pragma: no cover -- import-time typing only
@@ -409,4 +410,9 @@ def create_mcp_app() -> Starlette:
     # middleware chain -- it runs after the transport has already accepted the
     # request, which is too late for a check whose value is that the request
     # costs nothing.
-    return RefuseBrowserOrigins(application)
+    #
+    # `StampRequestId` sits INSIDE the origin refusal, and the order is a
+    # decision (ADR 0160): a request refused for carrying `Origin` never reached
+    # the application, so there is nothing to correlate and no id worth minting.
+    # One id per *served* HTTP request, not per byte that arrived.
+    return RefuseBrowserOrigins(StampRequestId(application))

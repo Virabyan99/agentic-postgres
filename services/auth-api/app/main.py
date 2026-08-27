@@ -25,7 +25,9 @@ means the pool hands out a connection that answers.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
@@ -37,6 +39,7 @@ from app import settings as settings_module
 from app.hashing import BoundedHasher
 from app.profile import HASH_CONCURRENCY
 from app.repository import Repository
+from app.request_id import StampRequestId, current_request_id
 from app.service import AuthService
 from app.storage_client import BoundedR2, R2Adapter
 from app.storage_repository import StorageRepository
@@ -251,7 +254,81 @@ def create_app(mode: str | None = None) -> Any:
         return openapi_docs.prune_unreachable_validation_errors(generated(), application.routes)
 
     application.openapi = openapi  # type: ignore[method-assign]
+
+    # One id per HTTP request, stamped on the response (ADR 0160).
+    #
+    # **`add_middleware`, and this function still returns the `FastAPI`.** The
+    # first attempt returned `StampRequestId(application)` -- the same plain-ASGI
+    # wrapping `create_mcp_app` uses -- and that quietly changes what
+    # `create_app` IS. `bin/app-contract.py` calls `.openapi()` on the result and
+    # six test modules read `.routes`; none of them would have survived, and the
+    # compiled application contract is generated from the first.
+    #
+    # Order: Starlette makes the LAST-added middleware outermost, so the log is
+    # added first and the stamp second. The log line carries the id, so the id
+    # has to exist before anything can record it.
+    application.add_middleware(StructuredRequestLog)
+    application.add_middleware(StampRequestId)
     return application
+
+
+class StructuredRequestLog:
+    """One JSON line per served request, in `mcp_telemetry`'s shape.
+
+    The agent plane has had structured logging since Session 9 and this plane has
+    had none -- which is part of why `apg-diag` cannot answer a question about
+    `auth` or `storage` without sending an operator to a terminal (D380). This
+    does not widen that allowlist; it makes there be something worth widening it
+    to.
+
+    **The route template, never the request path.** A path carries whatever the
+    caller put in it -- an object key, an identifier, a token pasted into the
+    wrong field -- and `services/edge-probe/probe.py` already refuses to log
+    `self.path` for exactly this reason: *"a caller cannot write
+    attacker-controlled text into this project's logs."* Traefik drops
+    `RequestPath` for the same reason one layer out (ADR 0019). The template is a
+    constant this repository wrote.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+        self.logger = logging.getLogger("apg.http")
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        started = time.monotonic()
+        observed: dict[str, int] = {}
+
+        async def send_wrapper(message: Any) -> None:
+            if message.get("type") == "http.response.start":
+                observed["status"] = int(message.get("status", 0))
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        finally:
+            # `finally`, so a request that raised is still recorded. A log that
+            # only describes successful requests is one that goes quiet exactly
+            # when somebody needs it.
+            self.logger.info(
+                "apg.http.request %s",
+                json.dumps(
+                    {
+                        "request_id": current_request_id(),
+                        "method": scope.get("method"),
+                        # `getattr` on the matched route: a request that matched
+                        # nothing has none, and "<unmatched>" is the honest
+                        # answer rather than the path the caller asked for.
+                        "route": getattr(scope.get("route"), "path", "<unmatched>"),
+                        "status": observed.get("status"),
+                        "elapsed_ms": int((time.monotonic() - started) * 1000),
+                    },
+                    sort_keys=True,
+                ),
+            )
 
 
 def health_paths() -> tuple[str, ...]:

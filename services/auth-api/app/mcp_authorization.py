@@ -37,6 +37,7 @@ from fastmcp.server.middleware import Middleware as _Middleware
 
 from app.mcp_lock import CapabilityLock, LockError
 from app.mcp_upstream import AgentContext, UpstreamRefusal, resolve_agent_context
+from app.request_id import current_request_id as stamped_request_id
 
 #: The resolved context for the request currently being served, or `None`.
 #:
@@ -135,13 +136,24 @@ def current_request_id() -> str:
 
 
 def _resolve(base_url: str, token: str) -> _Held:
-    """Mint the id, then resolve the context WITH it.
+    """Take the id for this HTTP request, then resolve the context WITH it.
 
     The order is the point (ADR 0141): the context lookup is the first of the
     three or four upstream requests one tool call makes, and an id minted after
     it would leave that request uncorrelated with the rest of its own request.
+
+    **The id comes from the ASGI layer now** (ADR 0160), so the value in the
+    audit row is the same value Traefik logged as `downstream_X-Request-Id` on
+    the way out. Minting here is the fallback for a direct call — in a served
+    request `StampRequestId` has always run first, because it wraps the
+    application rather than sitting in the MCP-message chain.
+
+    It is still never a caller value. Nothing reads an inbound `X-Request-Id`:
+    an id a caller chose would let one agent stamp its actions with another
+    agent's, and an operator reading the trail by request would see the second
+    agent's writes inside the first agent's request.
     """
-    request_id = str(uuid.uuid4())
+    request_id = stamped_request_id() or str(uuid.uuid4())
     return _Held(
         fingerprint=fingerprint(token),
         token=token,

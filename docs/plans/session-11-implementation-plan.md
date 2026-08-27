@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D642.**
+**Next free number after this table is D647.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -135,6 +135,11 @@ implementation is appended with the next free number.
 | **D639** | D622: *"the rig plants a known random value in every place a secret lives … and asserts no sentinel appears anywhere in stdout or stderr."* | **The first rig returned non-zero for every stubbed command, so every probe took its early-return branch.** Nothing reached a parsing path, nothing reached a formatting path, and the leak scan was reading seven "could not be measured" strings. **It passed.** | **Every structured channel now answers realistically** — a `docker ps --format` line, a `pg_stat_archiver` row, a `df` table, `backup.sh info --json` — and `test_every_probe_reached_its_parsing_path` asserts the report contains no `UNKNOWN`. A probe that stops parsing fails the premise before the leak scan is consulted. | **D605, in the file written to obey it**: *a rig that CONSTRUCTS a condition must MEASURE that it constructed it.* Caught only because a separate assertion about container names failed for the *right* reason — the leak tests themselves were green and would have stayed green. This is the same shape as ADR 0156's *"six green tests measuring nothing"*, and it is now two sessions running. | 0159 |
 | **D640** | ADR 0159 as first drafted: *"never a byte a third party emitted."* | **Taken literally it forbids the most useful line the tool prints.** An unhealthy container's name arrives as `docker ps` stdout; a `last_archived_time` arrives as `psql` output. Both are bytes a third party emitted, and neither is a place a credential can appear. | **The rule is stated by CHANNEL, not by origin.** Integers, booleans, and fields read *by position* out of structured output whose shape this repository knows may travel. A command's **stderr**, its **unstructured stdout**, its argv and the environment never do. | The distinction is where credentials actually live: prose. `pgbackrest`'s error strings name repository paths and S3 keys; a `--format` column holds a name `naming` derived. A rule that banned both would have been obeyed by deleting the diagnosis — and the first version of the redaction test would have **certified a stricter rule than the code implements**, which is a green test measuring something nobody built. | 0159 |
 | **D641** | — | **`test_commands_do_not_echo_a_planted_environment_variable` was written when `doctor.sh` had one mode**, and it invokes each command bare. `--verbose` — the one flag whose entire purpose is to print more — was outside it. | The test takes invocations rather than command names, and `bin/doctor.sh --verbose` is one of them. | **Question 5, caught by asking it rather than by a leak.** The decision *"no command echoes its environment"* was complete when every command had one mode; it became incomplete the moment one grew a second. Five instances in Session 7, three more in Session 9 — and the cheapest place to find the ninth was a guard that already existed and was quietly covering less than its name claimed. | 0159 |
+| **D642** | This plan's Run 5: *"the MCP HTTP boundary honours an inbound `X-Request-Id` and mints only when absent."* | **The code had already refused that, with a reason.** `mcp_authorization._Held`'s docstring: *"It is this process's own mint and never a caller value — nothing reads a request id off an inbound header, because an id a caller chose would let two agents' records collide on purpose."* The plan proposed reversing a documented decision without citing it. | **The decision stands and the plan is wrong.** Nothing reads an inbound id. | The stated reason is sharper than it looks: `request_id` is not a key, so a collision corrupts nothing — what it does is let one agent **stamp its actions with another agent's id**, so an operator reading the trail by request sees a second agent's writes inside a first agent's request. Audit-trail poisoning, by a caller, into the record that answers *who did that*. And D633 measured the other half one run earlier. **Two distinct defects from caller-controlled values in this field, in two runs.** | 0160 |
+| **D643** | D478: *"the request id stops short of ingress, deliberately"* — read as a gap needing an inbound header to close. | **It closes on the way OUT, and D141 had already written down the measurement nobody made.** Session 5: *"whether `X-Request-ID` can be retained as a **response** field is measured against the locked digest before it is written, not read from a page."* Nothing measured it in six sessions. Rig E, against the locked `traefik:v3.7`: Traefik emits **three** namespaces — `request_`, `origin_`, `downstream_` — and the **shipped** policy keeps `downstream_X-Request-Id`. Controls: `request_Accept` dropped (drop-by-default in force) and `RequestPath` dropped (the `names:` block applied). | **The runtime stamps the id on the response; the edge needs no change at all.** | The ingress leg closes without trusting one byte a caller sent, and without a Traefik edit — so no edge restart and no ACME exposure on the host trip. The config's `X-Request-ID` matching the wire's `X-Request-Id` is Traefik folding case, **measured** rather than assumed (D274). | 0160 |
+| **D644** | — | **`create_app` returning a wrapped ASGI callable breaks the application contract.** The first implementation returned `StampRequestId(application)` — the same plain-ASGI wrapping `create_mcp_app` uses. `bin/app-contract.py` calls `.openapi()` on that result and six test modules read `.routes`. | **`add_middleware`, and `create_app` still returns the `FastAPI`.** Ordering is explicit: Starlette makes the last-added outermost, so the log is added first and the stamp second. | Caught by running the existing suite rather than by review, and it would have failed at the *contract generation* step — `bin/app-contract.sh --check` — which is one of the things a gate runs and a reader trusts. A test now asserts the return type directly, so the next person who reaches for the ASGI wrapper is told why it is not used here. | 0160 |
+| **D645** | — | **`test_the_id_does_not_survive_the_request` passed for an unrelated reason.** It called the app through `asyncio.run(...)` and then asserted `current_request_id() is None` from the test's own frame — but `asyncio.run` builds a fresh `Context` per call, so that assertion read a variable nothing had ever set. It was green whether or not `_CURRENT.reset` ran. | **Observed inside the same coroutine that set it**, immediately after the middleware returns — the only vantage point from which the reset is observable at all. | **Found by the battery as a SURVIVOR**, which is what a surviving mutation is for: M4 deleted the reset and the test stayed green. D374's shape — *a test can check a string its target cannot contain* — and it would have sat green forever guarding nothing. | 0160 |
+| **D646** | — | **D498 is closed.** *"The id's propagation was proved and its uniqueness was not, because every offline test arranges a fixed id — a mutation replacing `uuid4()` with a constant left the whole suite green."* | Two arms now fail it: `test_two_requests_get_two_different_ids` drives two real requests, and `test_minting_twice_gives_two_values` is the narrow form that survives if the ASGI arms are ever removed. **Battery M2 is D498's exact mutation**, and it dies. | Two agents whose records share a request id are two agents an operator cannot tell apart — the same harm a caller-chosen id would do (D642), arriving from inside rather than outside. A uniqueness claim nothing could falsify was worth exactly nothing. | 0160 |
 
 ---
 
@@ -538,6 +543,52 @@ is stated rather than filled with a plausible value (D600).
 **Proposed ADR 0159** — *a request id is honoured when offered and minted when
 not; nothing at ingress mints one.*
 
+> **Renumbered to ADR 0160.** Run 4's redaction decision took 0159. Run 6's
+> proposed 0160 becomes **0161**.
+
+**Done.** `services/auth-api/app/request_id.py`, `StampRequestId` on both planes,
+`StructuredRequestLog` on the auth/storage plane, `_resolve` reading the stamp,
+`tests/contract/test_request_id_stamping.py` (14 tests), **ADR 0160**, and five
+divergence rows (**D642**–**D646**).
+
+***This run's plan text was wrong, and the code said so before I did*** (D642).
+The plan proposed honouring an inbound `X-Request-Id`. `mcp_authorization._Held`
+had already refused that in a docstring, with a reason: *"an id a caller chose
+would let two agents' records collide on purpose."* That reason is sharper than
+it reads — `request_id` is not a key, so a collision corrupts nothing; what it
+does is let one agent **stamp its actions with another agent's id**. D633
+measured the other half one run earlier. Two distinct defects from
+caller-controlled values in this one field, in two runs.
+
+*So the id flows outward instead* (D643). And D141 had already written down the
+measurement that makes that work, in Session 5: *"whether `X-Request-ID` can be
+retained as a **response** field is measured against the locked digest before it
+is written."* **Nobody measured it for six sessions.** Rig E did: Traefik emits
+`request_`, `origin_` and `downstream_` namespaces, and the **shipped** policy
+keeps `downstream_X-Request-Id` — with `request_Accept` and `RequestPath` dropped
+as controls proving the arms are about the real configuration. **The edge needs
+no change**, so the ingress leg closes with no Traefik edit, no edge restart and
+no ACME exposure on the trip.
+
+*What the suite caught* (D644). The first implementation returned
+`StampRequestId(application)` from `create_app`, which changes what `create_app`
+**is**: `bin/app-contract.py` calls `.openapi()` on it and six modules read
+`.routes`. It would have failed at contract generation — a gate step. Repaired
+with `add_middleware`, and a test now asserts the return type so the next person
+reaching for the ASGI wrapper is told why.
+
+*What the battery caught* (D645). **M4 SURVIVED**, and that is the run's most
+useful result. `test_the_id_does_not_survive_the_request` called the app through
+`asyncio.run` and then asked `current_request_id()` from the test's own frame —
+but `asyncio.run` builds a fresh `Context`, so the assertion read a variable
+nothing had ever set. It was green whether or not the reset ran. D374's shape,
+and it would have guarded nothing forever. Now observed inside the same coroutine
+that set it. Final: **6 arms, 6 killed, 0 survived, 0 defective.**
+
+*And D498 is closed* (D646). Session 9 proved propagation and never proved
+uniqueness; battery M2 is that exact mutation — `mint()` returning a constant —
+and it now dies twice.
+
 ### Run 6 — `OPS-LOG-001` part 2: migration 0022
 
 Both write RPCs read the forwarded header and set `request_id` on the `database`
@@ -560,8 +611,15 @@ The read itself is settled by D632: `current_setting('request.headers', true)`,
 two-argument form, lowercase `'x-request-id'`, and **no `nullif(…, '')`** — an
 absent jsonb key is SQL `NULL`, not the empty string.
 
-**Proposed ADR 0160** — *the `database`-source audit row records the request that
-caused it.*
+**Proposed ADR 0161** — *the `database`-source audit row records the request that
+caused it.* (Renumbered: Run 4 took 0159 and Run 5 took 0160.)
+
+**And the id it records is the runtime's, never the header's** (D642, ADR 0160).
+The forwarded `X-Request-Id` is how the value *reaches* the database — that part
+of D500 is unchanged — but what the runtime forwards is its own mint, so the
+`database` row, the `agent_plane` row and Traefik's `downstream_X-Request-Id` are
+one value. A caller that sends its own header still reaches
+`current_setting('request.headers')` and is still used for nothing.
 
 ### Run 7 — The README and the documentation index
 
