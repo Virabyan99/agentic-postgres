@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D637.**
+**Next free number after this table is D639.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -130,6 +130,8 @@ implementation is appended with the next free number.
 | **D634** | Run 1 item 3: "what disk a container reports for a bind-mounted volume, and whether the number a check reads is the number that fills up." | **The container's reading is faithful, and `/` is faithful here for a reason that does not generalise.** Measured: a 512 MiB ballast (`stat` confirmed **536,870,912 bytes** before anything was read back) moved the container's view of the named volume by **exactly 524,288 1K-blocks** — and moved `df /` by the *same* number, because the overlay and the volume sit on one device on this machine. | **The check reads the mount point the database writes to, never `/`.** | D374's family: a proof that passes for an unrelated reason. A check reading `/` is correct here and would be reading a different filesystem the moment a host puts `postgres-data` on its own device — and it would keep reporting a number, which is worse than reporting none. | — |
 | **D635** | — | **The host-versus-container half is not answerable on this machine.** `docker info` reports a root dir of `/var/lib/docker` and this shell **cannot stat it**: Docker Desktop runs the daemon inside its own VM, so a host `df` and a container `df` here are measurements of two different kernels. The rig reported `n/a` rather than a number. | **The comparison moves to Run 9's host trip**, where dockerd runs natively. Run 3 writes the check against the container-side reading, which is measured and faithful; the host cross-check becomes a `host`-mode node id. | D605 once more, one layer up: the environment is where a construction silently fails. **A number measured here and published as "the host's" would be a value that looked measured and was not** — §7's whole defect pattern, and the one this project produces most. Reporting `n/a` is the honest output of a rig that cannot answer. | — |
 | **D636** | ADR 0157 as drafted: the two filesystem checks are "always determinable", because "a filesystem read needs nothing from the daemon". | **`Path.exists()` raises on `EACCES`.** It swallows `ENOENT`, `ENOTDIR`, `EBADF` and `ELOOP` and lets a permission error through. Both state roots are `0700 root`, so a smoke run of `observe_prerequisites` as an unprivileged user did not report four verdicts — it **raised `PermissionError`** on the third and printed nothing at all. | **Every `exists()` in the probe is guarded, and an unreadable file is `undetermined` rather than `absent`.** The vocabulary the ADR introduced for the daemon turned out to be the right vocabulary for a `stat`. | The deploy runs as root, so this could never bite in production — which is precisely §7's pattern: *correct for exactly as long as its wrong answer coincides with the right one*. The honest verdict matters more than the crash: "run `materialize-secrets.sh`" is the wrong instruction for a generation that is present and merely unreadable, and re-materialising is **not free** — it writes a *new* generation. **Found by running the thing, not by reading it**, one step 0 into a run whose whole subject is reading before acting. | 0157 |
+| **D637** | D600's repair: *"the repair was the class, not the field"* — `test_no_operator_command_reads_a_key_the_deployed_document_does_not_have` scans every reader against the schema. | **The class guard's reader list is hand-maintained.** `DEPLOYED_DOCUMENT_READERS` is a four-entry tuple, and a new reader is covered only if somebody remembers to add it — which is the same failure mode the guard exists to prevent, one level up. **`test_cli_contract` solves exactly this problem one file over**: `test_every_command_in_bin_is_covered_by_this_module` diffs `bin/` against its own lists and fails on anything unlisted. It caught `bin/doctor.py` within a minute of the file existing. | **`bin/doctor.py` is added to the tuple, and the weakness is written down rather than repaired.** Discovery was tried and rejected: **33** files under `bin/` and `src/` read some `document["…"]`, and nearly all read a manifest, a bootstrap state or an OpenAPI document. | A scan matching those would trade a precise guard for a vague one — the exact trade `_top_level_document_reads` already refuses one level down, in a comment. **What is genuinely missing is a completeness check, not a discovery scan**, and `test_cli_contract`'s is the model: it needs a way to say "these files are handed a deployed document" that is cheaper to keep true than the tuple. Nobody has one. | 0158 |
+| **D638** | The plan's Run 3: *"containers and health, TLS and route resolution, database and PgBouncer, migration status, backup and WAL freshness, R2 access, and disk headroom"* — seven families, read as seven live checks. | **Four of the seven already have a `status` field in the deployed document**, and echoing them would have been the obvious implementation: `backup_state.status`, `tls.status`, `mcp.status` and `database.observed` are all published, all well-formed, and all recorded **at deploy time**. A project deployed three weeks ago whose archiver died yesterday publishes `backup_state.status: ok` until its next deploy. | **The document supplies identities; every verdict is a live read** (ADR 0158). `test_the_doctor_reads_no_status_block_off_the_deployed_document` asserts it as a class over `bin/doctor.py`'s AST. | The schema settles it rather than taste: `backupState` carries `wal_archived_count` and `wal_failed_count` and **no timestamps**, so a doctor reading the document for archiver health has only the cumulative counter D553 measured at **26 on a healthy, fully-caught-up cluster**. The document is *structurally incapable* of answering the question it appears to answer — and a check built on it would have been green, plausible, and wrong for as long as nobody redeployed. | 0158 |
 
 ---
 
@@ -423,6 +425,54 @@ its own VM and this machine physically cannot compare the two.
 
 **Proposed ADR 0158** — *the diagnostic command's two modes, and which of them
 needs privilege.*
+
+**Done.** `src/agentic_postgres/diagnosis.py` (pure verdicts), `bin/doctor.py`
+(the probes), `bin/doctor.sh --project` (the operator surface),
+`tests/contract/test_diagnosis.py` (21 tests), **ADR 0158**, and two divergence
+rows (**D637**, **D638**).
+
+*What D616 decided.* **Option (a), and the assertion is kept rather than
+flipped.** `sudo bin/doctor.sh --project <key>` runs the deployed checks *only*;
+no arguments runs the workstation checks, unchanged. `test_root_script_policy`'s
+claim — that no privileged **script** invokes `doctor.sh` — is still true, because
+an operator typing `sudo` is not a script. What stopped being true is the
+comment's premise, so a **stricter** test was added beside it:
+`test_the_deployed_mode_cannot_reach_the_bare_python` asserts the `--project`
+branch dispatches and `exec`s before any workstation check. That matters
+concretely: under `sudo`, `secure_path` hides an activated venv, and
+`check_python_minor` would report a false failure on every host. Option (b) —
+an `apg-diag doctor` verb — was declined and its reason written into the ADR:
+it is an authority decision about what an unprivileged account may see, D380 has
+been open on that question for three sessions, and bundling it here would decide
+it by accident. The checks live in `bin/doctor.py` so that verb stays cheap later.
+
+*What the run actually turned on* (D638). The plan read as seven live checks.
+**Four of the seven already have a `status` field in the deployed document**, and
+echoing them was the obvious implementation — well-formed, plausible, and a
+description of a moment that has passed. The schema is what settles it:
+`backupState` has the two counters and **no timestamps**, so a document-based
+archiver verdict is forced onto the counter D553 measured at 26 on a healthy
+cluster. Hence ADR 0158's rule, and hence a test that asserts it over
+`doctor.py`'s AST rather than trusting the author.
+
+*What it measured.* Nine mutation arms, **9 killed, 0 survived, 0 defective**.
+M1 — *an unknown check starts exiting 0* — is the one that matters: it is the
+single edit that would turn the command back into D600.
+
+*What it found on the way* (D637). D600's repair was "guard the class, not the
+field", and the class guard's reader list is **hand-maintained** — a new reader
+is covered only if somebody remembers. `test_cli_contract` solves exactly this
+one file over, and its completeness check caught `bin/doctor.py` within a minute
+of the file existing. Discovery for the document guard was tried and rejected:
+33 files read some `document["…"]` and nearly all read a manifest. Written down,
+not repaired.
+
+*What is deliberately not proved here.* Every probe. Not one of these checks has
+run against a deployment — they are **Question 2's shape**, and Run 9 is the
+first time they execute. The offline half proves the verdicts and the command's
+shape; nothing yet proves a `docker ps` filter matches a real project's
+containers or that the `du`/`df` parsing survives a real `busybox` versus GNU
+`df`. Read them before the trip.
 
 ### Run 4 — `OPS-001` part 2: verbose mode and redaction
 

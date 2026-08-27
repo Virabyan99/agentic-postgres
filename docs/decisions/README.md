@@ -221,3 +221,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0155](0155-a-deploy-recreates-a-container-whose-mounted-content-changed.md) | A deploy recreates a container whose mounted content changed | 10 | Accepted |
 | [0156](0156-a-refusal-that-arrives-mid-write-is-still-a-refusal.md) | A refusal that arrives mid-write is still a refusal | 10 | Accepted |
 | [0157](0157-a-preflight-reports-every-absent-prerequisite-and-changes-nothing.md) | A preflight reports every absent prerequisite, and says so when it did not look | 11 | Accepted |
+| [0158](0158-the-deployed-document-is-the-address-book-not-the-diagnosis.md) | The deployed document is the address book, not the diagnosis | 11 | Accepted |

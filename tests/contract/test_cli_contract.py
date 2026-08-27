@@ -93,6 +93,7 @@ PYTHON_COMMANDS = (
     "bin/deploy-project.py",
     "bin/dev-token.py",
     "bin/docs.py",
+    "bin/doctor.py",
     "bin/materialize-secrets.py",
     "bin/mcp-contract.py",
     "bin/migrate.py",

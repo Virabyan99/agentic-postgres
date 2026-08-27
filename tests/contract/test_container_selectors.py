@@ -229,9 +229,20 @@ def test_the_selector_reads_the_project_name_from_the_document() -> None:
 #: `bin/backup.py` and `bin/restore-test.py` take `--outputs
 #: /etc/agentic-postgres/projects/<key>/outputs.json`, which is the deployed
 #: kind and the only kind an operator ever passes. `restore_drill` and
-#: `backup_report` are handed the parsed result.
+#: `backup_report` are handed the parsed result. `bin/doctor.py` loads it
+#: itself, from `deployed_output.deployed_path`.
+#:
+#: **This tuple is hand-maintained, and that is a known weakness** (D637). The
+#: guard it feeds is exactly the "guard the class, not the field" repair D600
+#: called for — but a reader added without a line here is a reader the class does
+#: not cover. Discovery was considered and rejected: 33 files under `bin/` and
+#: `src/` read some `document["..."]`, and almost all of them are reading a
+#: manifest, a bootstrap state or an OpenAPI document. A scan matching those
+#: would trade a precise guard for a vague one, which is the trade
+#: `_top_level_document_reads` already refuses one level down.
 DEPLOYED_DOCUMENT_READERS = (
     "bin/backup.py",
+    "bin/doctor.py",
     "bin/restore-test.py",
     "src/agentic_postgres/restore_drill.py",
     "src/agentic_postgres/backup_report.py",

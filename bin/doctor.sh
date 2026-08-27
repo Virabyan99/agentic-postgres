@@ -1,12 +1,24 @@
 #!/usr/bin/env bash
 #
-# Session 1 readiness check: repository shape and local tooling.
+# Two modes, split by argument and never run together (ADR 0158).
 #
-# This command deliberately reports only tool presence, versions, and paths.
-# It never prints the environment (runbook §2, §9 check 7) and never reads a
-# secret. Runbook §8.6 OPS-001 later extends it to a deployed system.
+#   bin/doctor.sh                          workstation: tools, interpreter,
+#                                          repository shape, locks. Unprivileged.
+#   sudo bin/doctor.sh --project <key>      deployed: seven live checks against
+#                                          one project on this host. Needs root.
 #
-# Exit codes: 0 (ready), 3 (missing local prerequisite).
+# **The split is what keeps the bare `python` below correct.** Workstation mode
+# checks the developer's OWN interpreter against `.python-version`, so it must
+# resolve `python` from their PATH. Under `sudo`, `secure_path` makes an
+# activated venv invisible and that check would report a false failure on every
+# host — so `--project` runs the deployed checks ONLY, and never reaches it.
+#
+# This command reports tool presence, versions, paths and live health. It never
+# prints the environment (runbook §2, §9 check 7) and never reads a secret.
+#
+# Exit codes: 0 (ready, warnings allowed), 2 (bad input), 3 (missing local
+# prerequisite), 4 (the project was never deployed here), 6 (a check failed or
+# could not be run).
 
 set -euo pipefail
 
@@ -18,13 +30,52 @@ FAILURES=0
 usage() {
   cat <<'USAGE'
 Usage: bin/doctor.sh [--help]
+       sudo bin/doctor.sh --project <project-key>
 
-Checks that this workstation can run the Session 1 gate: required tools are
-present at usable versions, and the repository has the paths the contract
-expects. Exits 3 if any prerequisite is missing.
+  (no arguments)     Workstation mode. Checks that this machine can run the
+                     gate: required tools at usable versions, the pinned
+                     interpreter, the repository's paths, the version lock.
+                     Needs no root and no deployment. Exits 3 if anything is
+                     missing.
+
+  --project KEY      Deployed mode. Checks one project running on THIS host:
+                     containers, the health route, TLS expiry, the cluster and
+                     the pooler, migrations, the backup repository, the WAL
+                     archiver, and disk headroom for a restore. Needs root,
+                     because the deployed document is 0600 root.
+
+Deployed mode reads the deployed document for identities only. Every verdict
+comes from a live read: that document records what was true when it was
+written, and a project whose archiver died yesterday still publishes the
+status it had at its last deploy (ADR 0158).
 
 Prints no environment variables and reads no secret material.
 USAGE
+}
+
+# Ubuntu ships no bare `python`, and sudo resets PATH to secure_path -- so
+# deployed mode resolves an interpreter the way deploy.sh does rather than
+# trusting the name. Workstation mode deliberately does NOT use this: checking
+# the developer's own `python` is the whole point of check_python_minor.
+python_bin() {
+  if [ -x "${ROOT_DIR}/.venv/bin/python" ]; then
+    printf '%s' "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  else
+    printf 'doctor: no Python interpreter found (looked for .venv/bin/python, python3).\n' >&2
+    exit 3
+  fi
+}
+
+deployed_mode() {
+  local project_key="$1"
+  [ -n "${project_key}" ] || { printf 'doctor: --project requires a project key.\n' >&2; exit 2; }
+  [ "$(id -u)" -eq 0 ] || {
+    printf 'doctor: --project needs root: the deployed document is 0600 root.\n' >&2
+    exit 3
+  }
+  exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}"
 }
 
 ok()   { printf '  ok    %s\n' "$*"; }
@@ -88,6 +139,14 @@ check_python_minor() {
 main() {
   case "${1-}" in
     --help) usage; return 0 ;;
+    --project)
+      # Before any workstation check runs, and that ordering is the contract:
+      # the two modes never execute together (ADR 0158).
+      deployed_mode "${2-}"
+      ;;
+    --project=*)
+      deployed_mode "${1#--project=}"
+      ;;
     "") ;;
     *) usage >&2; printf 'doctor: unknown argument: %s\n' "$1" >&2; exit 3 ;;
   esac
