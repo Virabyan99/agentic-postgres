@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D666.**
+**Next free number after this table is D668.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -159,6 +159,8 @@ implementation is appended with the next free number.
 | **D663** | **D655**, one run earlier: *"A stock Ubuntu Server image has no `git`. The README never asks for it."* | **The second clause is true and the first is wrong.** This Hetzner Ubuntu 26.04 image ships `git`. D655 was measured against `ubuntu:24.04`, the **container** image, which is far more minimal than any server image — and I generalised from one to the other in the sentence that stated the reason. | The repair stands (`git` belongs in the install line: the README asks a reader to clone and never asks for the tool). **The stated reason is corrected here.** | **D531's lesson, exactly**: *a prediction that reaches the right conclusion by the wrong mechanism is the thing this project is worst at noticing — it reads as a confirmed measurement forever after, and the mechanism is the part a future reader reuses.* One run later, in a row written under that discipline. | — |
 | **D664** | Run 8's own prediction, made from reading `provision-host.sh`: it imports `agentic_postgres.config`, which needs `yaml` and `jsonschema`, so the `python3` fallback cannot work on a fresh host. | **Wrong.** Ubuntu's cloud image carries **PyYAML 6.0.3 and jsonschema 4.19.2** in the system interpreter, because cloud-init depends on them. `provision-host.sh` ran end to end on system `python3` with no venv anywhere. | Nothing to repair. **Recorded because a prediction that did not survive contact is evidence too**, and the next reader would otherwise re-derive the same wrong conclusion from the same imports. | The reasoning was sound and the premise was unmeasured. This is what §5 step 2 is for, and it is the cheap direction of being wrong. | — |
 | **D665** | The arming command `provision-host.sh` prints after skipping SSH hardening. | **I retyped it from the ufw example and dropped its trailing backup-path argument.** The script then refused: *"SKIPPED SSH hardening: no rollback timer is armed"* — correctly, on a timer unit that existed under the right name. Two observations: the guard is real and discriminating, and **`--confirm-ssh-ok` still reported "SSH rollback disarmed" for hardening that never ran**, which is a message an operator could read as confirmation. | The second attempt **extracted the command from the tool's own output** instead of retyping it. The confirm-path message is worth narrowing to say what it confirmed. | **D505/D507's exact failure mode, committed by me, inside the session about it** — and caught by the product rather than by me. That the guard held is the more important half; a rollback that can be armed wrongly and still satisfy its check is the version of this that ends in a dead host. | — |
+| **D666** | `docs/session-02-operator-guide.md` step 2: `bin/edge.sh --host host.yaml status   # redacted; readable without root`. | **Run without root, as documented, it reports `containers (not running)` while both containers are Up and healthy.** One line: `compose ps 2>/dev/null \|\| printf 'containers (not running)'`. Every failure of `compose ps` becomes that sentence — permission denied, no daemon, a malformed project — and `2>/dev/null` discards the reason. The commonest failure is the documented invocation itself: an unprivileged operator cannot reach `/var/run/docker.sock`. **Measured on the rehearsal host**: `docker ps` showed both healthy, `status` said not running. | A failed read reports **`(could not be read -- re-run with sudo)`**, and `test_status_never_reports_an_absence_it_did_not_measure` asserts the wording, because the wording is what an operator acts on. The third party's own text stays unprinted (ADR 0159). | **D145 and D548's shape, in this repository's own code**: `postgrest --ready` returns 0 while every request 404s; `pgbackrest info` exits 0 for a stanza that does not exist. Both were third parties. This one is ours, it is the exact thing ADR 0157's `undetermined` and ADR 0158's `unknown` were written to refuse, and **it predates both by nine sessions**. An operator who reads "not running" restarts an edge that is serving. | 0157, 0158 |
+| **D667** | This run's own framing of leg 2 as *"edge + staging ACME"*, and the plan's *"Staging ACME; stop before promotion."* | **The edge requests no certificate.** `infra/edge/dynamic/baseline.yaml` carries no `certresolver` and no `Host()` rule; the only ACME reference in the edge Compose model is the state-directory mount. A certificate is requested when a **project** router with a TLS resolver exists — which is leg 3. *"The edge starts on staging ACME certificates"* means it is **configured for** staging, not that it obtains one. | **Leg 2 needs no DNS record**, and ran without one. The DNS requirement moves to leg 3, where the first project router appears. | Worth five minutes to establish, because the alternative was asking the operator for a DNS record the run did not need — and then reading a successful `edge.sh up` as evidence that ACME worked, which it is not. `443` answers **404** after leg 2: Traefik's own, with nothing routed, and §7's standing warning is that a routed 404 and Traefik's own are identical from outside. | — |
 
 ---
 
@@ -737,6 +739,30 @@ than in a private note. Staging ACME; stop before promotion.
 
 This run decides whether Run 7's README is true, and it is the run most likely to
 generate rows.
+
+**Half B, leg 2 done** — the edge plane, on the same fresh host. `edge.sh up`
+exits 0; `traefik:v3.7` and `docker-socket-proxy:0.3.0` are both **healthy**;
+`apg-edge-control` and `apg-edge-egress` created; ACME environment **staging**;
+no certificate requested, which is correct. From outside, `:80` answers 301 and
+`:443` answers 404 — Traefik's own, with nothing routed. Two rows, **D666** and
+**D667**.
+
+**It needed no DNS record** (D667), and establishing that was worth the five
+minutes: the edge's dynamic configuration has no `certresolver` and no `Host()`
+rule, so nothing requests a certificate until a *project* router exists. The
+guide's *"the edge starts on staging ACME certificates"* means configured for
+staging, not holding one. The DNS requirement belongs to leg 3.
+
+**D666 is a defect in this repository's own code, and the sharpest kind.**
+`bin/edge.sh status`, run without root exactly as the operator guide documents
+it, reported `containers (not running)` while both were Up and healthy —
+because `compose ps 2>/dev/null || printf '(not running)'` turns *every* failure
+into that sentence, and an unprivileged caller cannot reach the Docker socket.
+It is D145's and D548's shape, it is precisely what ADR 0157's `undetermined`
+and ADR 0158's `unknown` exist to refuse, and **it predates both by nine
+sessions**. Repaired, asserted, and verified on the machine that exposed it.
+
+---
 
 **Half B, leg 1 done** — on a genuinely fresh Hetzner **Ubuntu 26.04** host
 (204.168.206.188), measured before anything touched it: 5 minutes' uptime, no

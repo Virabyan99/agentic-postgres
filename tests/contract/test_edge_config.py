@@ -556,3 +556,35 @@ def test_edge_up_reports_why_it_failed(code_only) -> None:
     assert up.index("docker logs") < up.index("did not become healthy"), (
         "the diagnosis is printed after the script has already exited"
     )
+
+
+def test_status_never_reports_an_absence_it_did_not_measure(code_only) -> None:
+    """**D666**, found by running `status` exactly as the guide tells an operator.
+
+    It was `compose ps 2>/dev/null || printf 'containers (not running)'`. Every
+    failure became that one sentence — and the commonest failure is precisely
+    the documented invocation: `bin/edge.sh status` **without root**, where the
+    caller cannot reach the Docker socket. Measured on a fresh host in Session 11
+    Run 8: two containers Up and healthy, and this command reported them not
+    running. An operator who believes it restarts an edge that is serving.
+
+    D145 and D548 are the same defect in two third parties five sessions apart —
+    the state was in a field and never in the exit code. ADR 0157's
+    `undetermined` and ADR 0158's `unknown` are this repository's answer to it,
+    and this command predates both.
+
+    The assertion is on the **wording**, because the wording is what an operator
+    acts on: a failed read may not claim the containers are absent.
+    """
+    body = code_only((REPO_ROOT / "bin" / "edge.sh").read_text(encoding="utf-8"))
+    status = body.split("do_status()", 1)[1].split("\n}", 1)[0]
+
+    assert "compose ps" in status, "status no longer lists containers at all"
+    assert "(not running)" not in status, (
+        "status still says 'not running' on a failed read. `compose ps` fails for "
+        "permission, for a missing daemon and for a malformed project, and only "
+        "one of those means nothing is running (D666)"
+    )
+    assert "could not be read" in status, (
+        "status does not distinguish 'nobody could look' from 'nothing is there'"
+    )

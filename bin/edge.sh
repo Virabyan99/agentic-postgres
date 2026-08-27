@@ -239,7 +239,26 @@ do_status() {
   # Container state only. No certificate contents, no resolver email, no
   # request logs -- status is the command an operator runs while someone is
   # watching their screen.
-  compose ps 2>/dev/null || printf 'containers        (not running)\n'
+  #
+  # **"could not be read" is not "not running"** (D666). This was
+  # `compose ps 2>/dev/null || printf 'containers (not running)'`, so EVERY
+  # failure became that one sentence -- and the commonest failure is the one the
+  # operator guide recommends: `status` without root, where the caller cannot
+  # reach the Docker socket. Measured on a fresh host in Session 11 Run 8: two
+  # containers Up and healthy, and this command reported them not running.
+  #
+  # That is D145's and D548's shape -- `postgrest --ready` returning 0 while
+  # every request 404s, `pgbackrest info` exiting 0 for a stanza that does not
+  # exist -- and it is exactly what ADR 0157's `undetermined` and ADR 0158's
+  # `unknown` exist to refuse. An operator who reads "not running" restarts an
+  # edge that is serving.
+  #
+  # The failure's own text is deliberately not echoed (ADR 0159): a third
+  # party's prose is where a credential surfaces, and the remedy is the same
+  # whatever docker said.
+  if ! compose ps 2>/dev/null; then
+    printf 'containers        (could not be read -- re-run with sudo)\n'
+  fi
 }
 
 do_promote() {
