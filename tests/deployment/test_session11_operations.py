@@ -265,20 +265,35 @@ def test_a_malformed_request_id_header_does_not_destroy_the_write(
         "took the write with it — which is exactly D633"
     )
 
-    # The positive half. "It did not crash" is satisfied by a build where
-    # `agent_request_id()` returns NULL unconditionally, so the audit row has to
-    # be read: a malformed header records NULL, and the write is still audited.
+    # **No audit row, and that is the product being right** (D684).
+    #
+    # The first version of this asserted the row exists and reads `NULL`. It
+    # does not exist: migration 0022 writes the `database`-source row inside
+    # `IF acting_agent IS NOT NULL THEN`, and `owner_session` is a human owner
+    # who logged in through `/auth/login`. That record exists to pair with the
+    # `agent_plane` row an MCP write leaves; a human REST caller has no agent
+    # identity and leaves neither.
+    #
+    # So the assertion is inverted rather than deleted, because the absence is
+    # worth guarding: it is what keeps the audit record about agents. Deleting
+    # it would leave the next reader free to add the original back.
     code, out, _ = psql(
         project_a,
-        "SELECT coalesce(request_id::text, 'NULL'), source FROM app_private.agent_audit "
-        f"WHERE owner_id = '{owner_session.user_id}' AND tool = 'create_note' "
-        "ORDER BY completed_at DESC LIMIT 1",
+        "SELECT count(*) FROM app_private.agent_audit "
+        f"WHERE owner_id = '{owner_session.user_id}' AND tool = 'create_note'",
     )
-    assert code == 0 and out.strip().startswith("NULL|"), (
-        f"the audit row for the malformed write reads {out.strip()!r}. It must be "
-        "NULL: a header that is not a uuid is not a request id, and recording one "
-        "anyway would put a caller-supplied string into a correlation column"
+    assert code == 0 and out.strip() == "0", (
+        f"a non-agent caller left {out.strip()!r} rows in app_private.agent_audit. "
+        "Migration 0022 writes that row only when `acting_agent IS NOT NULL`, and "
+        "the record is about agents: a human REST caller writing one would make "
+        "every agent-audit query answer about somebody else as well"
     )
+
+    # The NULL-request_id half of D633 is proved offline, where a malformed
+    # header can be handed to `app_private.agent_request_id()` directly. It
+    # cannot be proved through this route on the deployment, and reaching for it
+    # here is what produced the wrong assertion above: an agent write mints its
+    # own id and offers no way to inject a malformed one.
 
 
 # ---------------------------------------------------------------------------
