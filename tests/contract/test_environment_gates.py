@@ -28,7 +28,6 @@ import textwrap
 from pathlib import Path
 
 import pytest
-from tests.conftest import ENVIRONMENT_VARIABLES
 
 from agentic_postgres import REPO_ROOT
 
