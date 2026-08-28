@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D683.**
+**Next free number after this table is D684.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -176,6 +176,7 @@ implementation is appended with the next free number.
 | **D680** | This plan's Run 3: *"the doctor probes the deployment through the commands an operator already has."* `_pooler_answers` docstring: *"a TCP probe against the pooler's **published** endpoint."* | **The endpoint is published nowhere, so the probe could never succeed.** Measured on the host with `apg-diag listeners` — which carries its own positive control, *"443 is present, so this listing can see a listener"* — the host listens on 80, 443, 22 and DNS and nothing else. `bin/connect.sh` states the model outright: the database is reached through an SSH local forward bound to `127.0.0.1` via a privileged broker, because publishing it is *"the same mistake ADR 0040 is about, made on the other end of the tunnel."* So `socket.create_connection` from the host reported **`PROBLEM database — the cluster answered; the pooler did not`** against a pooler PostgREST was serving through at that moment. | **Probe the hop the product crosses**: `docker exec` into the project's container and open `/dev/tcp/<host>/<port>`, a bash builtin so nothing is installed into an image. An endpoint the document marks `unavailable`, or a probe that cannot complete, becomes **`UNKNOWN`** via a new `database_pooler_undetermined` — not `PROBLEM`, because neither is *"the pooler is down"*. | **ADR 0065/0066 inverted.** Those say a proof reaching the right end state *by a route the product does not take* proves the end state is reachable, not that the product reaches it. This took a route the product does not take **and that nothing could take** — in the one command whose job is telling an operator whether a deployment is well. It is D673's false `PROBLEM` one probe over, found on the same command's second live run. | — |
 | **D681** | This plan's Run 3 and Run 4: `doctor.sh` is covered by a redaction suite with a poisoned-subprocess rig and a parsing-path control. | **No offline test could catch D680, and a surviving mutation is what established that** rather than an assumption. Reinstating the host-side socket probe left **every** existing test green, including `test_every_probe_reached_its_parsing_path` — which asserts no check is `UNKNOWN` but never looks at the database check's verdict. The fixture had also been **shaped around the defect**: its `pooled` block was `{"host": "127.0.0.1", "port": 1}`, port 1 chosen so the old socket probe would fail fast, with no `status` at all though `$defs.endpoint` requires one. The same rig fed the repository probe `{"status": "ok"}` — **D674's invented vocabulary living on inside the fake**, which is D374 one layer down. | **Three repairs.** `test_the_pooler_is_probed_across_the_network_the_product_uses` asserts the command the code *produces*, carrying the document's own host and port, so a probe hard-coding an address fails too (D277: a scan asking whether a name is *mentioned* is satisfied by dead code). The fixture's `pooled` is shaped like the schema and the fake emits `ready`. Arm B's survival — an `unavailable` endpoint was covered by nothing — was closed rather than merely recorded, with its own test. | **The battery earned its keep by failing.** Arm A was supposed to be a formality and instead reported `PASSED` where `FAILED` was wanted, which is the answer to CLAUDE.md's first question — *what would have to break for this to go red?* — coming back "nothing". A green test nobody has seen fail is a green light measuring nothing, and here there were fourteen of them. | — |
 | **D682** | D680's repair: probe the pooler from inside a container, reading `database.pooled` for the address. | **`database.pooled` is not the pooler's address, so the repair failed on the host too.** `observe_transports` builds that block from the host's `loopback_address` and a **broker-allocated local port** — it is the *near end of an SSH tunnel* that exists only while `connect.sh tunnel` runs. From the host nothing listens there (D680); from inside a container `127.0.0.1` is that container's own loopback. **Two live failures, one wrong idea, and the guard written alongside the first repair asserted the same wrong idea and passed for that reason.** | **`access_broker`'s derivation, which is the product's single authority** (ADR 0002): the cluster's container with `-postgres-1` swapped for `-pgbouncer-1`, resolved on `edge.project_internal_network`, at `CONTAINER_PORTS["pooled"]`. Resolved per call and never recorded (ADR 0044). A pooler that cannot be located is `UNKNOWN`. | **I invented a third idea of where the pooler is, twice, while the single authority sat in `access_broker` the whole time** — the mistake ADR 0002 exists to prevent, committed against the very component that implements it. The fixture had to be repaired twice as well: it first carried no `status`, then carried `port: 6432`, which made the battery's arm **uninformative** (D493) because swapping the wrong source of the port for the right one produced the same number. A real `pooled` block is loopback plus a tunnel port, and the fixture now says so. | — |
+| **D683** | CLAUDE.md §9, open items: *"**The signing-key cutover** — ADR 0088, unblocked since Session 6."* This plan's Run 10 scheduled three rotations on that basis. | **It is blocked, and has been since Session 6.** Measured with a control (two keys accepted, three refused): `build_jwks` raises *"3 verification keys, above the ceiling of 2"*, and `render-jwks.py` appends the **bootstrap issuer's key unconditionally** — the auth key and the prepared key are each guarded by `is_file()`, line 229 is not. So from the moment the auth service existed the set has held two keys permanently, a prepared key would be the third, and the deploy would fail rendering the JWKS. `retire` cannot free the slot either: `retire_after` is `None` on the deployment and `retire_rotation` refuses with *"no rotation is in flight; there is nothing to retire"*. The comment at `render-jwks.py:214` — *"live until §4's retirement"* — points at a plan section, **not at an implementation**. | **Two of the three rotations are performed and proved; the signing key is not attempted.** `SEC-BOOT-001` stays red and `bootstrap_identity` with it, now for a **characterised** reason rather than a carried-in one. Retiring the bootstrap issuer is a new capability in a verifier-critical path — a code change with alternatives, so an ADR and a run of its own. | **Five sessions of "the rotation window is open" concealed that one third of it was not performable at all.** The window was described as an operator exercise; for the signing key it is a missing product capability. Nobody had asked the question, because the item's own wording said "unblocked" and the ceiling is only reachable by counting what `render-jwks` appends — which is exactly CLAUDE.md's rule that *when a file says a value is derived from something, grep for the deriver*. | — |
 
 ---
 
@@ -964,6 +965,51 @@ Three rotations; each proof given the value the window replaced; the file writte
 in `docs/api-operations.md`, and D253's warning is read first.
 
 Turns `api_authorization` and `bootstrap_identity` green.
+
+**Done — two of three rotations, and the third is not performable** (D683).
+
+`SEC-DOCS-001`'s rotation half and `SEC-BOOT-001`'s authenticator half are
+**proved on the deployment**, both passing on their first execution: the new
+credential serves, the value it replaced is refused, and each proof's own
+false-declaration control was satisfied. This is the first time the rotation
+window has completed since it opened in Session 5. **`api_authorization` is
+unblocked** — `SEC-DOCS-001` was its only unmet member.
+
+**`bootstrap_identity` stays red, and D683 is why.** A signing-key rotation
+cannot be prepared: the two-key ceiling is permanently full because
+`render-jwks.py` publishes the bootstrap issuer's key unconditionally, and
+nothing retires it. Measured with a control rather than inferred. That is a
+product gap, not a rotation nobody ran, and it belongs to a run with an ADR.
+
+**What the run actually measured, and it is not what it set out to measure.**
+The four rotation proofs had never executed, so they were read cold first, and
+that found **D676** — the signing-key proof calls a fixture that returns a
+module and would have raised `TypeError` *after* the key was rotated. Then
+`doctor.sh`'s live runs found **D680** and **D682**: the pooler was probed from
+the host, which publishes nothing, and then from inside a container at
+`database.pooled`, which is a tunnel's near end. Both reported `PROBLEM` against
+a healthy pooler. `access_broker` had held the correct derivation the whole
+time, so the repair was to stop inventing a second one (ADR 0002).
+
+**`doctor.sh` now reports `8 ok, 0 warning, 0 problem, 0 unknown` on the live
+deployment**, which closes `OPS-001` end to end.
+
+**The batteries are the retrospective's real content.** Two arms survived that
+were expected to be killed. D681's arm reinstated the host-side socket probe and
+**every offline test stayed green** — including the parsing-path control, which
+asserts no check is `UNKNOWN` but never reads the database verdict. D682's first
+arm survived because the fixture's tunnel port had been set to `6432`, so
+swapping the wrong source of the port for the right one produced the same
+number (D493). Both survivals were the answer to *what would have to break for
+this to go red?* coming back "nothing", and both were only visible because the
+mutation was run.
+
+**Three defects in `doctor.sh` across two days, all mine, every one with a green
+test beforehand.** The pattern is consistent and worth naming: each was a value
+that looked measured and was not — a status vocabulary typed from memory, a
+network route assumed, an address read from the wrong field. The offline suite
+could not catch any of them because in each case the fixture had been built from
+the same assumption as the code.
 
 ### Run 11 — The gate, the evidence, and the close
 
