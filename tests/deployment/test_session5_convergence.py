@@ -44,6 +44,7 @@ from test_session4_convergence import (  # type: ignore[import-not-found]
 )
 
 from agentic_postgres import openapi_normalize
+from agentic_postgres.edge_credentials import DOCS_USER
 
 pytestmark = [pytest.mark.live_host, pytest.mark.p0]
 
@@ -514,6 +515,12 @@ def test_a_rotated_documentation_credential_opens_the_page_and_the_old_one_does_
     because `docs.check` deliberately sends none -- it answers "does this route
     refuse", which is the boundary, not "does this credential work", which is
     the rotation.
+
+    **The username is imported, not retyped** (D677). It was `f"docs:{password}"`
+    here and `DOCS_USER` in `edge_credentials`, which is one constant with two
+    spellings -- the shape that had just cost D674, where a status vocabulary
+    typed from memory contained a value nothing emits. The two happen to agree
+    today; the import is what keeps them agreeing.
     """
     del as_root
     import base64
@@ -527,7 +534,7 @@ def test_a_rotated_documentation_credential_opens_the_page_and_the_old_one_does_
     url = docs_command.docs_url(project_a)
 
     def fetch(password: str) -> int:
-        token = base64.b64encode(f"docs:{password}".encode()).decode()
+        token = base64.b64encode(f"{DOCS_USER}:{password}".encode()).decode()
         request = urllib.request.Request(  # noqa: S310 -- https asserted by docs_url
             url, headers={"Authorization": f"Basic {token}"}
         )
@@ -551,7 +558,7 @@ def test_a_rotated_documentation_credential_opens_the_page_and_the_old_one_does_
 def test_a_rotated_signing_key_is_the_only_one_the_plane_accepts(
     as_root,
     project_a,
-    dev_token,
+    mint_token,
     rest_base,
     api_call,
 ) -> None:
@@ -572,6 +579,18 @@ def test_a_rotated_signing_key_is_the_only_one_the_plane_accepts(
     The retired key is declared as a file path, and the deployed document's
     `jwt.verification_kids` is the independent check: a key still listed there is
     a key the plane still accepts, whatever a token proves in one request.
+
+    **`mint_token`, because `dev_token` is a module** (D676). This proof shipped
+    in Session 5 calling `dev_token(project_a, role)`; the fixture returns
+    `bin/dev-token.py` *loaded as a module*, and every other caller in the suite
+    reaches through it as `dev_token.mint(...)`. Measured rather than reasoned:
+    `TypeError: 'module' object is not callable`.
+
+    It had sat green in the suite for five sessions because it has **never
+    executed** -- `APG_ROTATED_JWT_FROM_FILE` is set only inside a rotation
+    window, and no window has been run. The cost of finding it at the terminal
+    instead of here is the whole point: it would have ERRORed *after* the
+    signing key was already rotated, which is the irreversible half.
     """
     del as_root
     retired_path = Path(os.environ["APG_ROTATED_JWT_FROM_FILE"])
@@ -588,7 +607,7 @@ def test_a_rotated_signing_key_is_the_only_one_the_plane_accepts(
     )
 
     base = rest_base(project_a)
-    active = dev_token(project_a, project_a["database"]["roles"]["authenticated"])
+    active = mint_token(project_a, project_a["database"]["roles"]["authenticated"], subject=None)
     served = api_call(f"{base}/notes?select=id&limit=1", token=active)
     assert served.status == 200, (
         f"a token signed by the active key was refused ({served.status}); the plane is "
