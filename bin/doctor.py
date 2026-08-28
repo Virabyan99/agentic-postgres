@@ -36,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from agentic_postgres import (
     REPO_ROOT,
+    access_broker,
     backup_report,
     deployed_output,
     diagnosis,
@@ -266,8 +267,7 @@ def probe_database(document: dict[str, Any]) -> diagnosis.Check:
     )
     cluster_ok = cluster is not None and cluster.returncode == 0
 
-    pooled = db.get("pooled") or {}
-    pooler_ok = _pooler_answers(pooled, container)
+    pooler_ok = _pooler_answers(document)
     if pooler_ok is None:
         # The document says there is no available pooled endpoint, or the probe
         # could not complete. Neither is "the pooler is down", and saying so
@@ -276,41 +276,61 @@ def probe_database(document: dict[str, Any]) -> diagnosis.Check:
     return diagnosis.database(reachable=cluster_ok, pooler_reachable=pooler_ok)
 
 
-def _pooler_answers(pooled: dict[str, Any], container: str) -> bool | None:
-    """A TCP probe against the pooler, **from inside the network the product uses**.
+def _pooler_answers(document: dict[str, Any]) -> bool | None:
+    """Is the pooler listening, **at the address the product reaches it at**?
 
     Not a SQL round trip: the pooler's credential is a secret and this command
-    reads none. What is asked is whether the pooler is listening, which is the
-    half a doctor can answer while holding nothing.
+    reads none. What is asked is whether it is listening, which is the half a
+    doctor can answer while holding nothing.
 
-    **The route is the whole of D680.** This was `socket.create_connection` from
-    the host, and the host publishes 80, 443, 22 and DNS -- nothing else.
-    `bin/connect.sh` is explicit about why: the endpoint is reachable only
-    through an SSH local forward bound to `127.0.0.1` via a privileged broker,
-    because publishing it is *"the same mistake ADR 0040 is about, made on the
-    other end of the tunnel"*. So the old probe could **never** return True, and
-    it reported `PROBLEM database -- the cluster answered; the pooler did not`
-    against a pooler that PostgREST was serving through at that moment.
+    **The address is derived the way `access_broker` derives it, and D682 is
+    what two wrong guesses cost.** `database.pooled` in the deployed document is
+    *not* the pooler's address: `observe_transports` builds it from the host's
+    `loopback_address` and a broker-allocated local port, so it is **the near
+    end of an SSH tunnel** that exists only while `connect.sh tunnel` is
+    running. Probing it found nothing from the host (D680) and nothing from
+    inside a container either, where `127.0.0.1` is that container's own
+    loopback — two different failures, one wrong idea.
 
-    That is ADR 0065/0066 inverted. Those say a proof reaching the right end
-    state *by a route the product does not take* proves the end state is
-    reachable, not that the product reaches it. This took a route the product
-    does not take and that **nothing** could take, so it proved only that the
-    probe was wrong -- in a command whose entire job is telling an operator
-    whether a deployment is well.
+    `access_broker` already holds the right one, and reusing it is ADR 0002:
+    the pooled transport is the pooler's *container* on the project's internal
+    network, port 6432 from `CONTAINER_PORTS`. A third derivation of "where the
+    pooler is" is exactly the second-authority mistake that made this a defect
+    twice.
 
-    The hop crossed here is the one PostgREST crosses: out of a container on the
-    project's internal network, to the pooler's address. `bash` builtin
-    `/dev/tcp`, so nothing needs to be installed in the image.
+    The address is resolved per call and never recorded (ADR 0044): a container
+    address changes when the container is recreated, and a stored one is right
+    until the next restart.
 
-    Returns None when the document says the endpoint is not there to probe --
-    which is `UNKNOWN`'s job, not `PROBLEM`'s.
+    Returns None when the pooler cannot be located or the probe cannot complete
+    — that is `UNKNOWN`'s job, not `PROBLEM`'s.
     """
-    if pooled.get("status") != "available":
+    db = document.get("database") or {}
+    container = db.get("container")
+    network = ((document.get("edge") or {}).get("project_internal_network")) or ""
+    if not container or not network or "-postgres-1" not in container:
         return None
-    host, port = pooled.get("host"), pooled.get("port")
-    if not host or not port:
+
+    pooler = container.replace("-postgres-1", "-pgbouncer-1")
+    port = access_broker.CONTAINER_PORTS["pooled"]
+
+    address = run(
+        "docker",
+        "inspect",
+        "-f",
+        f'{{{{ (index .NetworkSettings.Networks "{network}").IPAddress }}}}',
+        pooler,
+        timeout=15,
+    )
+    if address is None or address.returncode != 0:
         return None
+    host = address.stdout.strip()
+    if not host or host == "<no value>":
+        return None
+
+    # Out of the cluster's container, across the project network, to the pooler
+    # — the hop PostgREST crosses. `/dev/tcp` is a bash builtin, so nothing has
+    # to be installed into an image.
     probe = run(
         "docker",
         "exec",
@@ -318,7 +338,7 @@ def _pooler_answers(pooled: dict[str, Any], container: str) -> bool | None:
         container,
         "bash",
         "-c",
-        f"exec 3<>/dev/tcp/{host}/{int(port)}",
+        f"exec 3<>/dev/tcp/{host}/{port}",
         timeout=15,
     )
     if probe is None:

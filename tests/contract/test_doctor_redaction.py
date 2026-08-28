@@ -37,7 +37,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, diagnosis
+from agentic_postgres import REPO_ROOT, access_broker, diagnosis
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -107,14 +107,29 @@ def document() -> dict[str, Any]:
             "pooled": {
                 "status": "available",
                 "available_from_session": 4,
-                "host": "apg-canary-dev-pgbouncer",
-                "port": 6432,
-                "url": "postgresql://app_runtime@apg-canary-dev-pgbouncer:6432/apg_canary_dev",
+                # THE NEAR END OF A TUNNEL, which is what `observe_transports`
+                # actually writes: the host's `loopback_address` and a
+                # broker-allocated local port. Not the pooler's address.
+                #
+                # Deliberately not 6432. The first version of this block used
+                # the container port, which made the D682 battery's arm
+                # uninformative (D493) -- swapping one source of the port for
+                # the other produced the same number, so a probe reading the
+                # wrong field looked identical to one reading the right one.
+                "host": "127.0.0.1",
+                "port": 55432,
+                "url": "postgresql://app_runtime@127.0.0.1:55432/apg_canary_dev",
                 "password_secret_ref": "app_runtime_password",
             },
         },
         "host": {"id": "host-1"},
-        "edge": {"stack_name": "apg-edge"},
+        # `project_internal_network` is what `access_broker` resolves the
+        # pooler's address against, and its absence here is what made the first
+        # version of the route guard pass while asserting the wrong thing (D682).
+        "edge": {
+            "stack_name": "apg-edge",
+            "project_internal_network": "apg-canary-dev-internal",
+        },
         "runtime": {"release_path": "/opt/agentic-postgres/releases/abc"},
         # --- everything below is poisoned -----------------------------------
         "bootstrap": {
@@ -155,7 +170,12 @@ def poisoned_run(monkeypatch: pytest.MonkeyPatch, doctor: Any) -> None:
         # everything, so every probe bailed early and the leak test was
         # measuring error branches only -- D605's rule, in the file written to
         # obey it: a rig that constructs a condition must measure that it did.
-        if "ps" in command:
+        if "inspect" in command:
+            # An address on the project network. Without this the probe cannot
+            # locate the pooler and returns None, which is UNKNOWN -- and an
+            # UNKNOWN is what the parsing-path control exists to catch.
+            stdout = "172.31.0.7\n"
+        elif "ps" in command:
             stdout = "apg-canary-dev-postgres-1\trunning\tUp 2 hours (unhealthy)\n"
         elif "SELECT 1" in joined:
             stdout = "1\n"
@@ -278,108 +298,107 @@ def test_every_probe_reached_its_parsing_path(doctor: Any) -> None:
     )
 
 
-def test_the_pooler_is_probed_across_the_network_the_product_uses(
+def test_the_pooler_is_probed_at_the_address_the_product_reaches_it_at(
     doctor: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """D680, and the battery that found this gap is the reason it exists.
+    """D680 and D682 — two wrong addresses before the right one.
 
-    The version of `_pooler_answers` that shipped in Run 3 did
-    `socket.create_connection` **from the host**. The host publishes 80, 443, 22
-    and DNS -- nothing else; `bin/connect.sh` is explicit that the database
-    endpoint is reachable only through an SSH local forward bound to `127.0.0.1`
-    via a privileged broker, because publishing it is *"the same mistake ADR
-    0040 is about, made on the other end of the tunnel"*. So the probe could
-    never return True, and the first live run reported `PROBLEM database -- the
-    cluster answered; the pooler did not` against a pooler PostgREST was serving
-    through at that moment.
+    `_pooler_answers` first did `socket.create_connection` **from the host**.
+    The host publishes 80, 443, 22 and DNS and nothing else, so it could never
+    return True, and it reported `PROBLEM database — the cluster answered; the
+    pooler did not` against a pooler PostgREST was serving through.
 
-    **That is ADR 0065/0066 inverted.** Those say a proof that reaches the right
-    end state by a route the product does not take proves the end state is
-    reachable, not that the product reaches it. This took a route the product
-    does not take and that *nothing* could take.
+    The repair moved the probe inside a container and **kept reading
+    `database.pooled` for the address**, which failed on the host a second time.
+    `database.pooled` is not the pooler: `observe_transports` builds it from the
+    host's `loopback_address` and a broker-allocated local port, so it is the
+    **near end of an SSH tunnel** that exists only while `connect.sh tunnel`
+    runs. From inside a container that address is the container's own loopback.
+    Two different failures, one wrong idea.
 
-    **No offline test caught it, and the mutation battery is how that was
-    established rather than assumed**: reinstating the socket probe left every
-    existing test green, including `test_every_probe_reached_its_parsing_path`,
-    which does not look at the database check's verdict. A surviving mutation is
-    evidence (D498), and this test is what it bought.
+    **The first version of this test asserted the wrong address and passed for
+    that reason** — it encoded the defect. That is why the assertion below is
+    written against `access_broker`'s derivation, which is the product's single
+    authority for where the pooler is (ADR 0002): the cluster's container name
+    with `-postgres-1` swapped for `-pgbouncer-1`, resolved on the project's
+    internal network, at `CONTAINER_PORTS["pooled"]`.
 
-    It asserts what the code **produces** -- the actual command, carrying the
-    document's own host and port -- rather than which names appear in the
-    source, because an AST scan asking whether something is *mentioned* is
-    satisfied by dead code (D277).
+    It asserts what the code **produces** rather than which names appear in it,
+    because an AST scan asking whether something is mentioned is satisfied by
+    dead code (D277).
     """
     seen: list[tuple[str, ...]] = []
 
     def recording(*command: str, timeout: int = 0) -> subprocess.CompletedProcess[str]:
         seen.append(command)
+        stdout = "172.31.0.7\n" if "inspect" in command else "1\n"
         return subprocess.CompletedProcess(
-            args=list(command), returncode=0, stdout="1\n", stderr=""
+            args=list(command), returncode=0, stdout=stdout, stderr=""
         )
 
     monkeypatch.setattr(doctor, "run", recording)
 
     doc = document()
-    pooled = doc["database"]["pooled"]
     doctor.probe_database(doc)
-
     assert seen, "probe_database issued no command at all"
 
-    # The container hop, carrying the endpoint the DOCUMENT names -- not a
-    # constant, so a probe hard-coding an address fails here too.
-    wanted = f"/dev/tcp/{pooled['host']}/{pooled['port']}"
-    crossings = [
+    cluster = doc["database"]["container"]
+    pooler = cluster.replace("-postgres-1", "-pgbouncer-1")
+    network = doc["edge"]["project_internal_network"]
+    port = access_broker.CONTAINER_PORTS["pooled"]
+
+    located = [c for c in seen if c[:2] == ("docker", "inspect") and pooler in c]
+    assert located, (
+        f"the pooler's address was never resolved. {pooler} on {network} is where "
+        "access_broker says it is, and nothing else in the deployed document says "
+        "so -- `database.pooled` is a tunnel's near end (D682). Commands issued:\n  "
+        + "\n  ".join(" ".join(c) for c in seen)
+    )
+    assert any(network in part for c in located for part in c), (
+        f"the address was resolved without naming {network}, so it is not the "
+        "address on the network the product crosses"
+    )
+
+    crossed = [
         c
         for c in seen
         if c[:2] == ("docker", "exec")
-        and doc["database"]["container"] in c
-        and any(wanted in part for part in c)
+        and cluster in c
+        and any(f"/dev/tcp/172.31.0.7/{port}" in part for part in c)
     ]
-    assert crossings, (
-        "no probe crossed into the project's network to reach "
-        f"{pooled['host']}:{pooled['port']}. The commands issued were:\n  "
-        + "\n  ".join(" ".join(c) for c in seen)
-        + "\n\nA pooler probed from the host cannot answer: the host publishes "
-        "80, 443, 22 and DNS, and the endpoint is reachable only from inside the "
-        "project network or through connect.sh's broker (D680)."
+    assert crossed, (
+        f"nothing crossed the project network to the pooler on port {port}. "
+        "Commands issued:\n  " + "\n  ".join(" ".join(c) for c in seen)
     )
 
 
-def test_a_pooled_endpoint_the_document_calls_unavailable_is_not_a_failure(
+def test_a_pooler_that_cannot_be_located_is_unknown_not_a_failure(
     doctor: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An endpoint that is not there to probe was never measured (ADR 0158).
+    """A pooler nobody could find was not measured (ADR 0158).
 
-    A project deployed before the pooler existed records `status: unavailable`,
-    and probing it would find nothing — correctly. Reporting that as `PROBLEM`
-    would be D680 in a quieter voice: a check that cannot succeed, reporting
-    failure about something that is not broken.
+    `docker inspect` answering `<no value>` means the container is not on that
+    network — a project deployed before the pooler existed, or one mid-recreate.
+    Reporting that as `PROBLEM` would be D680 in a quieter voice: a check that
+    could not look, reporting failure about something that may be fine.
 
-    Written because the D680 battery's second arm — removing the `status` gate —
-    **survived**, and a surviving mutation is evidence rather than noise (D498).
-    The fixture's endpoint is available, so nothing exercised the other branch.
+    Written because the D680 battery's second arm survived, and a surviving
+    mutation is evidence rather than noise (D498).
     """
-    seen: list[tuple[str, ...]] = []
 
     def recording(*command: str, timeout: int = 0) -> subprocess.CompletedProcess[str]:
-        seen.append(command)
+        stdout = "<no value>\n" if "inspect" in command else "1\n"
         return subprocess.CompletedProcess(
-            args=list(command), returncode=0, stdout="1\n", stderr=""
+            args=list(command), returncode=0, stdout=stdout, stderr=""
         )
 
     monkeypatch.setattr(doctor, "run", recording)
 
-    doc = document()
-    doc["database"]["pooled"] = dict(doc["database"]["pooled"], status="unavailable")
-    check = doctor.probe_database(doc)
-
+    check = doctor.probe_database(document())
     assert check.verdict == diagnosis.UNKNOWN, (
-        f"an unavailable pooled endpoint was reported {check.verdict}: {check.detail!r}. "
-        "It was not measured, and unknown is not a pass and not a failure"
-    )
-    assert not [c for c in seen if any("/dev/tcp/" in part for part in c)], (
-        "the pooler was probed even though the document says the endpoint is not "
-        "available — its silence would then be reported as a failure"
+        f"a pooler that could not be located was reported {check.verdict}: "
+        f"{check.detail!r}. It was not measured, and unknown is not a pass and "
+        "not a failure"
     )
 
 
