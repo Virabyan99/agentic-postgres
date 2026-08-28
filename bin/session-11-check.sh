@@ -103,6 +103,12 @@
 #   0  every check in the selected mode passed
 #   2  invalid operator input
 #   3  missing prerequisite for the selected mode
+#   5  the evidence was WRITTEN and some claim in it is not `passed` (D686).
+#      Not a failure of the suite -- `write-session-evidence` returns this when
+#      a claim's node ids did not all pass, which includes a node id that
+#      SKIPPED because its flag was not given. A skip is not a pass, and this
+#      exit code is that rule reaching the operator. Read the "not proved by
+#      this run" line: it names them.
 #   6  a check failed
 
 set -euo pipefail
@@ -132,6 +138,7 @@ ADMIN_PASSWORD_FILE=""
 ROTATED_FROM_FILE=""
 ROTATED_AUTHENTICATOR_FROM_FILE=""
 ROTATED_DOCS_FROM_FILE=""
+REDEPLOY_BEFORE_FILE=""
 ROTATED_JWT_FROM_FILE=""
 PUBLIC_IPV4=""
 PUBLIC_IPV6=""
@@ -192,6 +199,10 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
                         it, because a flag mentioned under a command is a flag
                         that does not get passed (D213). Without it the secret
                         leakage proofs skip and the claim reports unproved.
+  --redeploy-before-file  Opened before a redeploy: the generation and the
+                        sentinel row that must survive it. Without it both
+                        DEP-002 proofs skip and `deployment_convergence` is
+                        unproved.
   --admin-password-file The project administrator's password, as written when
                         `bin/auth-admin.sh bootstrap` created it. It cannot be
                         recovered from the host -- only an Argon2id hash is
@@ -326,6 +337,11 @@ parse_arguments() {
       --rotated-docs-from-file)
         [ "$#" -ge 2 ] || die 2 "--rotated-docs-from-file requires a value."
         ROTATED_DOCS_FROM_FILE="$2"
+        shift 2
+        ;;
+      --redeploy-before-file)
+        [ "$#" -ge 2 ] || die 2 "--redeploy-before-file requires a value."
+        REDEPLOY_BEFORE_FILE="$2"
         shift 2
         ;;
       --rotated-jwt-from-file)
@@ -776,7 +792,7 @@ mode_host() {
   local file
   for file in "${SENTINEL_FILE}" "${ADMIN_PASSWORD_FILE}" "${ROTATED_FROM_FILE}" \
               "${ROTATED_AUTHENTICATOR_FROM_FILE}" "${ROTATED_DOCS_FROM_FILE}" \
-              "${ROTATED_JWT_FROM_FILE}"; do
+              "${ROTATED_JWT_FROM_FILE}" "${REDEPLOY_BEFORE_FILE}"; do
     [ -z "${file}" ] || [ -f "${file}" ] || die 2 "not found: ${file}"
   done
 
@@ -826,6 +842,12 @@ mode_host() {
   [ -n "${ROTATED_AUTHENTICATOR_FROM_FILE}" ] &&
     export APG_ROTATED_AUTHENTICATOR_FROM_FILE="${ROTATED_AUTHENTICATOR_FROM_FILE}"
   [ -n "${ROTATED_DOCS_FROM_FILE}" ] && export APG_ROTATED_DOCS_FROM_FILE="${ROTATED_DOCS_FROM_FILE}"
+  # D687. `deployment_convergence` is one of THIS session's four claims and
+  # the gate could not pass the flag that admits it: the variable was read
+  # only by the test, so both DEP-002 proofs skipped and the claim reported
+  # unproved in a run that had otherwise measured everything. Question 5,
+  # committed while writing the gate that records the claim.
+  [ -n "${REDEPLOY_BEFORE_FILE}" ] && export APG_REDEPLOY_BEFORE_FILE="${REDEPLOY_BEFORE_FILE}"
   [ -n "${ROTATED_JWT_FROM_FILE}" ] && export APG_ROTATED_JWT_FROM_FILE="${ROTATED_JWT_FROM_FILE}"
   [ "${AFTER_REBOOT}" -eq 1 ] && export APG_AFTER_REBOOT=1
 

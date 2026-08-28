@@ -126,6 +126,15 @@ ENVIRONMENT_VARIABLES = (
     "APG_ROTATED_AUTHENTICATOR_FROM_FILE",
     "APG_ROTATED_DOCS_FROM_FILE",
     "APG_ROTATED_JWT_FROM_FILE",
+    # Session 11 Run 11. The redeploy window `DEP-002` is measured against: the
+    # generation and the sentinel row that must survive a second deploy.
+    #
+    # **Declared here even though its fixture skips by hand** (D687). It was
+    # read only by `os.environ.get` inside a fixture, so it appeared in no
+    # roster -- and `session-11-check.sh` could not pass it either. Both proofs
+    # skipped, and `deployment_convergence`, one of Session 11's own four
+    # claims, was unproved by the gate that records it.
+    "APG_REDEPLOY_BEFORE_FILE",
 )
 
 

@@ -362,15 +362,22 @@ def redeploy_window() -> dict[str, str]:
     Skips rather than passes when absent. A skip is not a pass, and a proof that
     quietly degraded to "a row exists" would assert nothing about convergence.
     """
-    path = os.environ.get("APG_REDEPLOY_BEFORE_FILE")
-    if not path:
-        pytest.skip("APG_REDEPLOY_BEFORE_FILE is not set; no redeploy window was opened")
+    # **The marker gates this, not a hand-written skip** (D687). It was
+    # `os.environ.get` here, so the variable appeared in no roster and
+    # `test_every_registered_variable_is_used` could not see it -- and nothing
+    # noticed that `session-11-check.sh` had no flag to pass it either. Both
+    # proofs skipped and `deployment_convergence`, one of this session's own
+    # four claims, came back unproved from the gate written to record it.
+    path = os.environ["APG_REDEPLOY_BEFORE_FILE"]
     document = json.loads(Path(path).read_text(encoding="utf-8"))
     for field in ("sentinel_title", "generation_id"):
         assert document.get(field), f"{path} carries no {field!r}"
     return document
 
 
+@pytest.mark.requires_environment(
+    "APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", "APG_REDEPLOY_BEFORE_FILE"
+)
 def test_a_redeploy_preserves_rows_written_before_it(
     project_a: dict[str, Any],
     redeploy_window: dict[str, str],
@@ -392,6 +399,9 @@ def test_a_redeploy_preserves_rows_written_before_it(
     )
 
 
+@pytest.mark.requires_environment(
+    "APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", "APG_REDEPLOY_BEFORE_FILE"
+)
 def test_the_redeploy_actually_ran(
     project_a: dict[str, Any], redeploy_window: dict[str, str], as_root, sh
 ) -> None:

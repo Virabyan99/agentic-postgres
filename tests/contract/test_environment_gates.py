@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 import sys
 import textwrap
 from pathlib import Path
 
 import pytest
+from tests.conftest import ENVIRONMENT_VARIABLES
 
 from agentic_postgres import REPO_ROOT
 
@@ -377,3 +379,39 @@ def test_the_markers_are_declared() -> None:
     for marker in ENVIRONMENT_MARKERS:
         assert f"\n    {marker}:" in text, f"marker {marker} is not declared"
     assert "requires_environment(*names):" in text
+
+
+def test_every_operator_supplied_gate_can_be_supplied_by_a_session_gate() -> None:
+    """D687. A variable no gate can pass is a proof that can only ever skip.
+
+    `APG_REDEPLOY_BEFORE_FILE` was read by a Session 11 fixture and exported by
+    nothing. Both `DEP-002` proofs skipped, and `deployment_convergence` -- one
+    of Session 11's own four claims -- came back unproved from the gate written
+    in the same session to record it. **Question 5**: a claim was added, and the
+    gate, which is a reader of the claim set, did not get the flag.
+
+    A skip is not a pass, so nothing went green that should not have. What went
+    wrong is quieter and worse: the run reported everything it could measure and
+    the missing measurement looked like an operator choice.
+
+    The roster is the declaration of *"this is supplied by an operator"*. This
+    asserts each entry is reachable from at least one `bin/session-*-check.sh`,
+    which is the only way an operator can supply one.
+    """
+    exported: set[str] = set()
+    for path in sorted((REPO_ROOT / "bin").glob("session-*-check.sh")):
+        for match in re.finditer(r"export\s+(APG_[A-Z0-9_]+)", path.read_text(encoding="utf-8")):
+            exported.add(match.group(1))
+
+    # The control. A scan matching no exports would report every name orphaned
+    # and read as a catastrophe rather than as a broken scan (D374).
+    assert "APG_LIVE_HOST" in exported, (
+        "no gate appears to export APG_LIVE_HOST, which every host gate sets. The scan "
+        "is not reading the gates, so its verdict below is about nothing"
+    )
+
+    unsuppliable = sorted(set(ENVIRONMENT_VARIABLES) - exported)
+    assert not unsuppliable, (
+        f"these are declared as operator-supplied and no session gate exports them, so "
+        f"every proof gated on one can only skip: {unsuppliable}"
+    )
