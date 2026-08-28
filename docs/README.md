@@ -32,6 +32,7 @@ all flags or steps lost to retyping the previous session's page.
 | [Session 8](session-08-operator-guide.md) | The agent plane's read half |
 | [Session 9](session-09-operator-guide.md) | Agent writes and the audit record |
 | [Session 10](session-10-operator-guide.md) | Backups, WAL archiving, the restore drill |
+| [Session 11](session-11-operator-guide.md) | The preflight, the deployed doctor, the request id, the rotation windows |
 
 ## Running a deployment
 

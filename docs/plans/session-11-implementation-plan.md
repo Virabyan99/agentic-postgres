@@ -1179,6 +1179,52 @@ conditions fired, and the item that has now cost seven sessions — **nothing kn
 which proofs have never executed.** Session 12 is the last chance to build it, and
 it is still the most expensive item on the list.
 
+### What Runs 9-11 added to this handoff, after it was first written
+
+**`bootstrap_identity` is red for a reason nobody had characterised, and it is a
+product gap rather than an operator omission** (D683). The signing-key rotation
+**cannot be prepared**: `MAX_VERIFICATION_KEYS` is 2, `render-jwks.py` appends
+the bootstrap issuer's key **unconditionally** while the auth key and the
+prepared key are each guarded by `is_file()`, and so the published set has held
+two keys permanently since the auth service existed in Session 6. A prepared key
+would be the third and the deploy would fail rendering the JWKS. `retire` cannot
+free the slot either — `retire_after` is `None` and `retire_rotation` refuses
+with *"no rotation is in flight."* The comment saying that key is *"live until
+§4's retirement"* points at a plan section, not an implementation.
+
+CLAUDE.md's open-items table has said **"the signing-key cutover — unblocked
+since Session 6"** for five sessions. It is not unblocked. **Retiring the
+bootstrap issuer is Session 12's, and it is a code change with alternatives:
+an ADR, a run, and four verifiers recreated afterwards.**
+
+**Two of the three rotations ARE done**, and the window has completed for the
+first time since Session 5. `api_authorization` goes green.
+
+**`doctor.sh` cost three defects in two days, all of them mine, and the shape is
+worth carrying forward.** D673: one probe ate another's stdin, so a healthy
+cluster was reported `PROBLEM` because the TLS probe ran before it. D674: the
+repository's status vocabulary was typed from memory and contained a value
+nothing emits, so `ready` fell through to the catch-all. D680 and D682: the
+pooler was probed from the host, which publishes nothing, and then at
+`database.pooled`, which is a **tunnel's near end** rather than the pooler.
+`access_broker` held the correct derivation throughout.
+
+**Every one had a green offline test beforehand**, and in each case the fixture
+had been built from the same assumption as the code. That is the sharpened form
+of §9's oldest item: *nothing knows which proofs have never executed* is only
+half of it — **nothing knows which proofs share a wrong belief with their
+subject.** `pytest --setup-plan` (D671) answers "will this run"; nothing answers
+"is what it asserts true", and a fixture written by the author of the code under
+test will agree with it.
+
+**Two mutation arms survived that were expected to be formalities** (D681,
+D682). Reinstating the host-side socket probe left the entire offline suite
+green. A fixture whose tunnel port had been set to the container port made a
+mutation uninformative (D493). Both were *what would have to break for this to
+go red?* answered "nothing", and both were visible only because the mutation was
+actually run. **Session 12 should assume the same is true somewhere it has not
+looked.**
+
 ---
 
 ## Appendix — what to consult, and what to measure instead
