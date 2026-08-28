@@ -199,6 +199,29 @@ def database(*, reachable: bool, pooler_reachable: bool, detail: str = "") -> Ch
     )
 
 
+def database_pooler_undetermined(*, reachable: bool) -> Check:
+    """The cluster answered; the pooler could not be asked (D680).
+
+    A distinct verdict rather than a `PROBLEM`, and the distinction is the
+    lesson: an endpoint the document does not publish, and a probe that could
+    not complete, are both *"this was not measured"*. Reporting either as a
+    failing pooler is the false alarm this check just produced on a live host.
+
+    `UNKNOWN` even when the cluster answered, because a `Check` carries one
+    verdict and the unmeasured half is the one an operator must not read as
+    healthy. ADR 0158: `unknown` is not a pass and not a failure.
+    """
+    facts = _pairs(cluster_answered=reachable, pooler_answered=None)
+    if not reachable:
+        return _check(
+            "database",
+            PROBLEM,
+            "the cluster did not answer, and the pooler could not be asked",
+            facts,
+        )
+    return _check("database", UNKNOWN, "the cluster answered; the pooler could not be asked", facts)
+
+
 def migrations(*, applied: int | None, released: int) -> Check:
     """Every released migration applied, from the ledger rather than from a lock.
 

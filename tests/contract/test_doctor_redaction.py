@@ -100,7 +100,18 @@ def document() -> dict[str, Any]:
         "database": {
             "container": "apg-canary-dev-postgres-1",
             "name": "apg_canary_dev",
-            "pooled": {"host": "127.0.0.1", "port": 1},
+            # Shaped like `$defs.endpoint`, which requires `status` (D680). The
+            # version before this was `{"host": "127.0.0.1", "port": 1}` -- port
+            # 1 so the old host-side socket probe would fail fast, which is a
+            # fixture built around a defect rather than around the document.
+            "pooled": {
+                "status": "available",
+                "available_from_session": 4,
+                "host": "apg-canary-dev-pgbouncer",
+                "port": 6432,
+                "url": "postgresql://app_runtime@apg-canary-dev-pgbouncer:6432/apg_canary_dev",
+                "password_secret_ref": "app_runtime_password",
+            },
         },
         "host": {"id": "host-1"},
         "edge": {"stack_name": "apg-edge"},
@@ -162,7 +173,11 @@ def poisoned_run(monkeypatch: pytest.MonkeyPatch, doctor: Any) -> None:
         elif "curl" in command:
             stdout = "200"
         elif "info" in command:
-            stdout = json.dumps({"status": "ok", "last_full_backup_at": "2026-08-27T00:00:00Z"})
+            # `ready`, not `ok` (D674). `backup_report` emits `not_observed`,
+            # `unconfigured`, `awaiting_first_backup`, `ready` and `failing`, and
+            # has never emitted `ok` -- a fake feeding a status the product
+            # cannot produce is D374 inside the rig.
+            stdout = json.dumps({"status": "ready", "last_full_backup_at": "2026-08-27T00:00:00Z"})
         else:
             # UNSTRUCTURED stdout -- an `openssl s_client` handshake is the real
             # case. The probe regexes a date out of it; everything else in it is
@@ -260,6 +275,111 @@ def test_every_probe_reached_its_parsing_path(doctor: Any) -> None:
     assert "UNKNOWN" not in rendered, (
         f"a probe did not reach its parsing path, so the leak scan never exercised "
         f"its formatting:\n{rendered}"
+    )
+
+
+def test_the_pooler_is_probed_across_the_network_the_product_uses(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D680, and the battery that found this gap is the reason it exists.
+
+    The version of `_pooler_answers` that shipped in Run 3 did
+    `socket.create_connection` **from the host**. The host publishes 80, 443, 22
+    and DNS -- nothing else; `bin/connect.sh` is explicit that the database
+    endpoint is reachable only through an SSH local forward bound to `127.0.0.1`
+    via a privileged broker, because publishing it is *"the same mistake ADR
+    0040 is about, made on the other end of the tunnel"*. So the probe could
+    never return True, and the first live run reported `PROBLEM database -- the
+    cluster answered; the pooler did not` against a pooler PostgREST was serving
+    through at that moment.
+
+    **That is ADR 0065/0066 inverted.** Those say a proof that reaches the right
+    end state by a route the product does not take proves the end state is
+    reachable, not that the product reaches it. This took a route the product
+    does not take and that *nothing* could take.
+
+    **No offline test caught it, and the mutation battery is how that was
+    established rather than assumed**: reinstating the socket probe left every
+    existing test green, including `test_every_probe_reached_its_parsing_path`,
+    which does not look at the database check's verdict. A surviving mutation is
+    evidence (D498), and this test is what it bought.
+
+    It asserts what the code **produces** -- the actual command, carrying the
+    document's own host and port -- rather than which names appear in the
+    source, because an AST scan asking whether something is *mentioned* is
+    satisfied by dead code (D277).
+    """
+    seen: list[tuple[str, ...]] = []
+
+    def recording(*command: str, timeout: int = 0) -> subprocess.CompletedProcess[str]:
+        seen.append(command)
+        return subprocess.CompletedProcess(
+            args=list(command), returncode=0, stdout="1\n", stderr=""
+        )
+
+    monkeypatch.setattr(doctor, "run", recording)
+
+    doc = document()
+    pooled = doc["database"]["pooled"]
+    doctor.probe_database(doc)
+
+    assert seen, "probe_database issued no command at all"
+
+    # The container hop, carrying the endpoint the DOCUMENT names -- not a
+    # constant, so a probe hard-coding an address fails here too.
+    wanted = f"/dev/tcp/{pooled['host']}/{pooled['port']}"
+    crossings = [
+        c
+        for c in seen
+        if c[:2] == ("docker", "exec")
+        and doc["database"]["container"] in c
+        and any(wanted in part for part in c)
+    ]
+    assert crossings, (
+        "no probe crossed into the project's network to reach "
+        f"{pooled['host']}:{pooled['port']}. The commands issued were:\n  "
+        + "\n  ".join(" ".join(c) for c in seen)
+        + "\n\nA pooler probed from the host cannot answer: the host publishes "
+        "80, 443, 22 and DNS, and the endpoint is reachable only from inside the "
+        "project network or through connect.sh's broker (D680)."
+    )
+
+
+def test_a_pooled_endpoint_the_document_calls_unavailable_is_not_a_failure(
+    doctor: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An endpoint that is not there to probe was never measured (ADR 0158).
+
+    A project deployed before the pooler existed records `status: unavailable`,
+    and probing it would find nothing — correctly. Reporting that as `PROBLEM`
+    would be D680 in a quieter voice: a check that cannot succeed, reporting
+    failure about something that is not broken.
+
+    Written because the D680 battery's second arm — removing the `status` gate —
+    **survived**, and a surviving mutation is evidence rather than noise (D498).
+    The fixture's endpoint is available, so nothing exercised the other branch.
+    """
+    seen: list[tuple[str, ...]] = []
+
+    def recording(*command: str, timeout: int = 0) -> subprocess.CompletedProcess[str]:
+        seen.append(command)
+        return subprocess.CompletedProcess(
+            args=list(command), returncode=0, stdout="1\n", stderr=""
+        )
+
+    monkeypatch.setattr(doctor, "run", recording)
+
+    doc = document()
+    doc["database"]["pooled"] = dict(doc["database"]["pooled"], status="unavailable")
+    check = doctor.probe_database(doc)
+
+    assert check.verdict == diagnosis.UNKNOWN, (
+        f"an unavailable pooled endpoint was reported {check.verdict}: {check.detail!r}. "
+        "It was not measured, and unknown is not a pass and not a failure"
+    )
+    assert not [c for c in seen if any("/dev/tcp/" in part for part in c)], (
+        "the pooler was probed even though the document says the endpoint is not "
+        "available — its silence would then be reported as a failure"
     )
 
 

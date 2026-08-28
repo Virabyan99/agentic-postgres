@@ -267,27 +267,63 @@ def probe_database(document: dict[str, Any]) -> diagnosis.Check:
     cluster_ok = cluster is not None and cluster.returncode == 0
 
     pooled = db.get("pooled") or {}
-    pooler_ok = _pooler_answers(pooled)
+    pooler_ok = _pooler_answers(pooled, container)
+    if pooler_ok is None:
+        # The document says there is no available pooled endpoint, or the probe
+        # could not complete. Neither is "the pooler is down", and saying so
+        # would be D680 again in a quieter voice.
+        return diagnosis.database_pooler_undetermined(reachable=cluster_ok)
     return diagnosis.database(reachable=cluster_ok, pooler_reachable=pooler_ok)
 
 
-def _pooler_answers(pooled: dict[str, Any]) -> bool:
-    """A TCP probe against the pooler's published endpoint.
+def _pooler_answers(pooled: dict[str, Any], container: str) -> bool | None:
+    """A TCP probe against the pooler, **from inside the network the product uses**.
 
-    Not a SQL round trip: the pooler's credential is a secret, and this command
-    reads none. What is being asked is whether the pooler is listening, which is
-    the half a doctor can answer without holding anything.
+    Not a SQL round trip: the pooler's credential is a secret and this command
+    reads none. What is asked is whether the pooler is listening, which is the
+    half a doctor can answer while holding nothing.
+
+    **The route is the whole of D680.** This was `socket.create_connection` from
+    the host, and the host publishes 80, 443, 22 and DNS -- nothing else.
+    `bin/connect.sh` is explicit about why: the endpoint is reachable only
+    through an SSH local forward bound to `127.0.0.1` via a privileged broker,
+    because publishing it is *"the same mistake ADR 0040 is about, made on the
+    other end of the tunnel"*. So the old probe could **never** return True, and
+    it reported `PROBLEM database -- the cluster answered; the pooler did not`
+    against a pooler that PostgREST was serving through at that moment.
+
+    That is ADR 0065/0066 inverted. Those say a proof reaching the right end
+    state *by a route the product does not take* proves the end state is
+    reachable, not that the product reaches it. This took a route the product
+    does not take and that **nothing** could take, so it proved only that the
+    probe was wrong -- in a command whose entire job is telling an operator
+    whether a deployment is well.
+
+    The hop crossed here is the one PostgREST crosses: out of a container on the
+    project's internal network, to the pooler's address. `bash` builtin
+    `/dev/tcp`, so nothing needs to be installed in the image.
+
+    Returns None when the document says the endpoint is not there to probe --
+    which is `UNKNOWN`'s job, not `PROBLEM`'s.
     """
+    if pooled.get("status") != "available":
+        return None
     host, port = pooled.get("host"), pooled.get("port")
     if not host or not port:
-        return False
-    import socket
-
-    try:
-        with socket.create_connection((str(host), int(port)), timeout=5):
-            return True
-    except OSError:
-        return False
+        return None
+    probe = run(
+        "docker",
+        "exec",
+        "-i",
+        container,
+        "bash",
+        "-c",
+        f"exec 3<>/dev/tcp/{host}/{int(port)}",
+        timeout=15,
+    )
+    if probe is None:
+        return None
+    return probe.returncode == 0
 
 
 def probe_migrations(document: dict[str, Any]) -> diagnosis.Check:
