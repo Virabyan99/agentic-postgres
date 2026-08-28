@@ -181,14 +181,14 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
                    Needs root -- it reaches the Docker daemon and reads
                    root-only state -- and it materialises a SECOND copy of the
                    cluster on disk for the duration of the drill.
-  --mode external  What the public internet reaches. Session 10 adds no external
+  --mode external  What the public internet reaches. Session 11 adds no external
                    claim -- there is nothing about a backup repository a
                    stranger can measure -- but the inherited ones still need it.
                    MUST run from a network that is not the deployment host.
 
   --project-b-outputs   Required in host mode. `project_isolation` is a claim
                         about two projects' identity planes, and one project
-                        cannot be isolated from nothing. **Session 10 runs its
+                        cannot be isolated from nothing. **Session 11 runs its
                         restore drill against BETA**, in the frozen example
                         domain under a drill-only owner id, so this is the
                         project the drill disturbs. Optional in external mode,
@@ -249,7 +249,7 @@ BEFORE host mode, in this order, once per project:
      Until this runs the document says `awaiting_first_backup` and the drill has
      nothing to restore. This gate refuses to start without it.
 
-Each mode writes one evidence half. Session 10 needs BOTH -- the external claims
+Each mode writes one evidence half. Session 11 needs BOTH -- the external claims
 inherited from Sessions 4-9 are measured from off-host -- so merge them with:
   python bin/write-session-evidence.py --session 10 \
     --host-input evidence/session-10-host.json \
@@ -415,7 +415,7 @@ parse_arguments() {
         die 2 "there is no --agent-token: the suite creates an agent through the product's own auth_create_agent and obtains a token from the deployment. See --help."
         ;;
       --baseline-only)
-        die 2 "--baseline-only belongs to bin/session-02-check.sh; Session 10 measures a deployed repository."
+        die 2 "--baseline-only belongs to bin/session-02-check.sh; Session 11 measures a deployed system."
         ;;
       *) usage >&2; die 2 "unknown argument: $1" ;;
     esac
@@ -562,9 +562,9 @@ gitignored and is never transported):
 }
 
 # Inherited from Session 9, unchanged, and still a precondition: the agent plane
-# has to be served for the claims Session 10 carries forward. Session 10 adds no
+# has to be served for the claims Session 11 carries forward. Session 11 adds no
 # requirement over it, and it is kept rather than dropped because a gate that
-# stopped checking it would let a Session 10 document report on a deployment
+# stopped checking it would let a Session 11 document report on a deployment
 # whose agent plane was down.
 #
 # D326's two-stage convergence is the ordinary case, not an error: the deploy

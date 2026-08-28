@@ -95,7 +95,7 @@ brief verbatim. Rows are predictions made at plan time; each is confirmed,
 corrected or replaced during implementation, and anything found *during*
 implementation is appended with the next free number.
 
-**Next free number after this table is D688.**
+**Next free number after this table is D689.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -181,6 +181,7 @@ implementation is appended with the next free number.
 | **D685** | This plan's Run 9: project A is deployed `--through-session 11`; **project B may lag**, because no Session 11 proof reads it and it is passed only so the inherited claims can be measured over two projects. Written into `session-11-check.sh`'s own preconditions. | **The restore drill reads project B, and it compares that cluster against the release's full migration ledger.** It failed with *"restored 21 versions, the release declares 22; only in the release ['20260827120022']"*. Migration 0022 was released in Run 6 and applied to **alpha** in Run 9; **beta never received it**. The drill is entirely project B — its target comes from `psql(project_b, ...)`, `--project-dir` from `APG_PROJECT_B_OUTPUTS`, and its evidence document is keyed to beta. | **Deploy beta `--through-session 11`, then take a full backup of beta**, then re-run. The gate's precondition prose is corrected: *"no Session 11 proof reads project B"* is **false**, and it was my sentence. | **The first explanation was wrong and its repair disproved it** — a full backup of *alpha* was taken and the drill failed identically, because the drill never touches alpha. That is D278's rule running in reverse: a repair that works is not evidence its explanation is right, and here a repair that *failed* was the evidence the explanation was wrong. **The real shape is question 5**: a decision moved (0022 released), one reader got it (alpha), one did not (beta) — and the thing that noticed was a proof about *restores*, three components away. | — |
 | **D686** | `session-11-check.sh`'s header, inherited from Session 10's: *"Exit codes: 0 every check passed · 2 invalid operator input · 3 missing prerequisite · 6 a check failed."* | **The gate returned 5, which it does not document.** `write-session-evidence` returns 5 when the evidence was **written** and some claim in it is not `passed` — which includes a claim whose node id *skipped* because its flag was not given. So 5 is neither "a check failed" nor "invalid input": it is *"a skip is not a pass"* reaching the operator through an exit code, and an operator reading only the header would have to guess. | **Documented, in the header where the other four are**, with what it means and where to read the detail: the `not proved by this run` line names the claims. | Five gates have carried this list and none has listed 5, so it has presumably been returned before and read as an anomaly. It is the most *useful* code the gate has — the run measured everything it could and is naming what it could not — and it was the one an operator could not look up. | — |
 | **D687** | This plan's §2: `DEP-002` is `deployment_convergence`, measured on the host by a sentinel row written before a redeploy and read back after it. | **`session-11-check.sh` had no flag to pass the window, so the claim could not be proved by the gate that records it.** `APG_REDEPLOY_BEFORE_FILE` was read by `os.environ.get` inside a fixture, so it appeared in **no roster**: not in `tests/conftest.py`'s `ENVIRONMENT_VARIABLES`, and not in any gate's exports. Both DEP-002 proofs skipped in a host run that had otherwise measured everything, and the claim came back unproved. | **Threaded through all five sites** — declared, parsed, validated, exported, documented — and the proofs now gate through `@pytest.mark.requires_environment` rather than a hand-written skip, which puts the variable in the registry the other guards already read. **Two class guards close it**: the pre-existing `test_every_registered_variable_is_used`, which the roster entry immediately reddened, and a new `test_every_operator_supplied_gate_can_be_supplied_by_a_session_gate`, which asserts every declared variable is exported by some `bin/session-*-check.sh` and carries its own control against the scan matching nothing. | **Question 5, committed while writing the gate that records the claim.** A claim was added and one of its readers — the gate — did not get the flag. Nothing went green that should not have; a skip is not a pass and the evidence said so. What went wrong is quieter: **the missing measurement was indistinguishable from an operator choosing not to make it.** A rig over the whole suite found 86 `APG_*` names no gate exports, but almost all are product configuration or fixture-local; the useful class is the *declared operator gates*, which is why the guard reads the roster and not the grep. | — |
+| **D688** | CLAUDE.md §9, open items: *"The IPv6 scan — eight `APG_PUBLIC_IPV6` proofs, never run."* Carried for five sessions as work nobody had got to. | **They cannot run against this deployment, and it is not an omission.** `host.public_ipv6` is `null` in both deployed documents, so the gate's optional flag has nothing to pass. Measured independently with `apg-diag listeners`, which carries its own positive control: the host listens on `0.0.0.0:80`, `0.0.0.0:443`, `0.0.0.0:22` and DNS — **`[::]:22` is the only IPv6 listener on the machine.** The edge binds IPv4 only. | **Recorded, not attempted.** Running the scan would need the manifest to declare an IPv6 *and* the edge to bind one, which is a deployment change with its own consequences, not a gate flag. The eight proofs stay skipped and the external half says so. | **The item's wording made it look like a task and it is a precondition.** Five sessions of "never run" concealed that there is nothing for them to scan — the same shape as **D683** in the same session, where "unblocked since Session 6" concealed a full ceiling. **Two of §9's oldest items turned out to be mischaracterised rather than merely undone**, and both took one measurement to establish. That is worth more than either individual finding: the list itself had not been re-measured. | — |
 
 ---
 
@@ -1020,6 +1021,44 @@ the same assumption as the code.
 `bin/session-11-check.sh` in three modes (`offline`, `host`, `external`), both
 halves merged, `evidence/session-11.json` written, `CURRENT_SESSION` moved to 11,
 `docs/session-11-operator-guide.md` derived by diff, §11's handoff written.
+
+**Done. `evidence/session-11.json` is merged: 56 of 57 claims passed.**
+
+All four Session 11 claims are green — `deployment_preflight`,
+`deployment_convergence`, `operational_diagnosis`, `log_correlation` — and so is
+`api_authorization`, which Run 10's rotation unblocked. Session 10 closed at 51
+of 53; this closes at **56 of 57**, and the one red claim is
+`bootstrap_identity`, held by **D683** alone.
+
+`bin/session-11-check.sh` ran in all three modes: offline PASSED (4250 passed, 3
+skipped), host exit 5 with one unproved claim, external PASSED (25 passed, 8
+skipped). Exit 5 is the gate saying *the evidence was written and something in it
+is not `passed`* — which is D686, an exit code five gates have carried and none
+had documented.
+
+**The host half took four passes, and each one bought a defect.** The first found
+D684 (an audit assertion whose premise was wrong) and D685. The second disproved
+D685's own explanation — a full backup of *alpha* changed nothing, because the
+drill is entirely project B and beta had never received migration 0022. The
+third exposed **D687**: `deployment_convergence` is one of this session's four
+claims and the gate had no flag to pass the window that admits it, because the
+variable was read by `os.environ.get` inside a fixture and appeared in no roster
+at all. The fourth passed everything it could.
+
+**Three of this session's defects were the same shape and none was caught
+offline** (D673, D680/D682, D687). Each was a value that looked measured and was
+not — a status vocabulary, a network route, an environment roster — and in each
+case the *fixture agreed with the code*, because the same person wrote both. That
+is the sharpened form of §9's oldest item and it is written into §11's handoff:
+`pytest --setup-plan` answers *will this proof run*; nothing answers *is what it
+asserts true*.
+
+**Two of §9's oldest open items turned out to be mischaracterised** rather than
+merely undone. The signing-key cutover is not "unblocked since Session 6" — the
+two-key ceiling is permanently full (D683). The IPv6 scan has not "never been
+run" for want of effort — the host publishes no IPv6 and the edge binds none
+(D688). Both took one measurement. **The list itself had not been re-measured**,
+which is the finding worth carrying into Session 12.
 
 ---
 
