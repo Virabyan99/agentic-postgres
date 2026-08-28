@@ -66,11 +66,17 @@
 #      a value is not a shape). So unlike Session 10's, this precondition is
 #      already satisfied by any project deployed since v13 shipped.
 #
-#      **What Session 11 needs instead is that project A is deployed
+#      **What Session 11 needs instead is that BOTH projects are deployed
 #      `--through-session 11`**, which is where migration 0022's guard and the
-#      `StampRequestId` middleware come from. Project B may lag: no Session 11
-#      proof reads it, and it is passed because the CUMULATIVE claims inherited
-#      from Sessions 4-10 are measured over two projects.
+#      `StampRequestId` middleware come from.
+#
+#      **Project B may NOT lag, and an earlier version of this comment said it
+#      could** (D685). No Session 11 *proof* reads project B -- but Session 10's
+#      **restore drill does**, and it compares the restored cluster against the
+#      release's full migration ledger. A release that adds a migration and a
+#      project that never receives it fail that comparison, correctly, with
+#      "restored 21 versions, the release declares 22". Then take a **full
+#      backup of project B**: a restore can only contain what a backup does.
 #   3. **The repository must be ready** -- inherited from Session 10 and
 #      unchanged: the stanza exists, at least one full backup exists, and the
 #      archiver is not failing. The deploy's step 6c creates and checks the
