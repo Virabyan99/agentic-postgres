@@ -20,7 +20,7 @@ SESSION 13 IS OPEN.  Nothing built yet; this is the plan.
 HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
 CURRENT_SESSION 12, and it moves to 13 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.1.0-dev -> 0.2.0, Run 7.
-divergences     D719-D729 recorded here. **Next free: D730.**
+divergences     D719-D733 recorded here. **Next free: D734.**
 ADRs            161. This session writes ONE, in Run 3. Next free: 0162.
 gate            session-13-check.sh, derived BY DIFF from session-12's (Run 7).
 host            One trip, READ-ONLY. Runs 9+.
@@ -75,7 +75,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D730.**
+**Next free number after this table is D734.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -90,6 +90,10 @@ the runs follow the same rule (D267).
 | **D727** | `docs/scope-closure.md` §4: *"The guard worth writing first: a test that every registered requirement belongs to exactly one claim. Without it the same gap reopens the next time a session adds a requirement in a hurry."* | **It already exists.** `test_no_new_requirement_goes_unreported_by_every_claim`, in `tests/contract/test_evidence_claims.py`, written in **the same session as the ledger recommending it** — and it carries the staleness check the ledger did not ask for. | The ledger's §4 is corrected in Run 6 alongside its effort estimate (D720). | **A recommendation that outlived its own implementation by one document**, in a repository whose §7 opens with *a value that looked measured and was not*. It is harmless here and it is the same reflex that produced D722: **writing the next step without reading what the last one shipped.** | — |
 | **D728** | Run 6 groups orphaned requirements into claims — including, where natural, into claims that already exist. | **Adding an older requirement to an existing claim can withdraw that claim from an earlier session's evidence**, and `evidence_claims.py` says so from Session 4: `claim_session` is the **max** of its requirements' sessions, so a Session 3 claim gaining a Session 4 requirement *"would move the whole claim to Session 4 — and `claims_through_session(3)` would then stop returning it. Session 3's gate would quietly stop recording a claim it has been recording, and the jq expression its operator guide documents would fail against freshly written evidence."* | **Run 6 adds no orphan to an existing claim.** Every group it makes is a **new** claim whose `claim_session` is the max of its own members — which for Sessions 1–4 orphans means an early session, and `merge`'s unrecorded-claims check must be satisfied by those gates' modes. **Checked per claim before it is written**, not after. | **This is D696 in the other direction and it is worse**, because D696 moved a claim *forward* and a guard caught it. This one moves a claim forward and **the guard is the operator guide's documented jq expression failing on a re-run** — which nobody runs until they need it. The record has existed since Session 4; Run 6's job is to read it before grouping, not after. | 0039 |
 | **D729** | Housekeeping, found by the Stage 2 audit rather than looked for (D718). | **`&1` is a tracked, zero-byte file in the repository root** — a redirect written as `>&1` where the shell took `&1` as a filename. And CLAUDE.md §2's status block names `39d5d01` while HEAD is `89db7fb`; local and `origin/main` agree, so the block is stale rather than the tree. | Both in **Run 8**, with D533's undiarised apt pin. | Small, and the shape that survives because nothing reads a root directory listing. **Zero bytes is the reason it survived**: it shows up in no diff, breaks no build, and appears in `git ls-files` between `README.md` and `VERSION` where an eye slides past it. | — |
+| **D730** | Run 1 reads `alpha-outputs.json` and `beta-outputs.json` from the repository root for D724's *live* half — they are deployed documents for the two projects on the host. | **They are TRACKED in git and they are six sessions stale.** Measured: `schema_version` **10**, `deployed_through_session` **6**, `source_commit` `e842cc05`, `observed_at` **2026-08-15**. The host runs Session 12 at schema v13. **They do not validate against the current schema at all** — Rig A reported both `INVALID` today, before any patch. Four operator guides (Sessions 5, 6, 9, 10) name `./alpha-outputs.json` as the path to pass to `--project-a-outputs`. | **Run 1 does not use them for anything.** They are deleted in **Run 8** beside `&1`, and the operator guides' example paths are left alone — each is a record of its own release. | **`MUST_AGREE` catches it, and only at the merge.** `source_commit` is one of its four fields, so an external half built from these would refuse to merge with a Session 12 host half — **four steps from the cause** (D465's shape). Before that point the external suite runs happily: it reads the document for *identities*, and a Session 6 route still resolves. **A stale observation in source control is worse than an absent one**, because it has the shape of the real thing and a filename that reads as current. | 0465 |
+| **D731** | **D724 answered, offline half.** Constraining `template_version` to semver may reject documents that validate today, and may need `schema_version` 13 → 14. | **It rejects nothing.** Measured (Rig A, control holds): every `template_version` reachable in the tree is `0.1.0-dev` — the `VERSION` file, both stale deployed documents, both rendered fixtures — and `0.1.0-dev` **is** valid semver 2.0.0 with a prerelease. Adding the pattern to both `$defs` members caused **0 regressions** among documents that validate today. **The control discriminates**: a probe with `template_version: "banana"` is **accepted** by the current schema and **refused** by the patched one. | The pattern is safe to add on the evidence available. **Whether it needs a version bump is Run 3's decision, not this measurement's** — a tightening rejects values that *were* legal, and whether that is breaking is a policy question about the contract rather than about the corpus. | **The live half is NOT measured and is not claimed.** `apg-diag`'s eight verbs — `containers labels logs routes listeners edge-log catalog generation` — include **none** that returns a deployed document, so the live values cannot be read without the operator's `sudo install -o op`. Every value in the tree says `0.1.0-dev` and the field is derived from the release's `VERSION`, so the inference is strong — **and an inference is not a measurement** (D267). | 0012, 0027 |
+| **D732** | **D725 answered.** `upgrade plan` diffs the installed **deployed** document against the **rendered** candidate, reusing Session 12's leaf walker. | **The two kinds share 41% of their leaf vocabulary** — 68 shared of 165 in the union; 87 leaves in `renderedDocument`, 146 in `deployedDocument` (Rig B, control holds). Worse than the absences: **six of the seven routes have a different SHAPE in the two kinds.** `routes.app`, `routes.app_docs`, `routes.docs`, `routes.mcp`, `routes.rest` and `routes.storage` are a **string** in the rendered document and an **object `{status, url}`** in the deployed one. Only `routes.health` matches — which is the rig's control, and it is what proves the comparison is about the schema rather than about the walker. | **The plan does not diff the two kinds.** See D733 for what it diffs instead. | A naive leaf diff across the kinds would report **every route as changed on every run**, plus 78 deployed-only leaves as *removed* and 19 rendered-only ones as *added* — a plan whose output is dominated by the fact that it is comparing two vocabularies. **It would look like a working diff**, which is the failure mode: it produces a plausible answer to a question nobody asked. | — |
+| **D733** | The deployed document is the record of what is installed, so it is the left-hand side of an upgrade plan. | **It cannot answer the question an upgrade plan exists to ask.** `renderedDocument.inputs` carries the five digests that say whether the inputs changed — `project_sha256`, `capabilities_sha256`, `secrets_contract_sha256`, `versions_lock_sha256`, `source_specification_sha256` — and **`deployedDocument` has no `inputs` block at all**, measured directly. **But the rendered document of the installed release is on the host**: `deployed_output.rendered_path(key)` is *"the installed rendered directory"*, and `install_rendered` puts it there on every deploy. | **`upgrade plan` diffs `rendered_path(key)/outputs.json` against a freshly rendered candidate.** Two documents of the **same kind**, same vocabulary, same shapes, both carrying the five input digests. The deployed document keeps its own job — ADR 0158's address book, and the *observation* half of `upgrade check`. | **This is ADR 0158 arriving at a new subject.** *The deployed document is the address book, not the diagnosis* — and an upgrade plan is neither: it is a comparison of two **intents**, which is what a rendered document is. The first design reached for the deployed document because it is the one that sounds authoritative. **The measurement is what moved it**, and it moved before Run 4 rather than during it. | 0158 |
 
 ---
 
@@ -172,23 +176,49 @@ break the tests** with a mutation battery whose failures are fatal (D269), whose
 control is a test the mutation cannot reach (D499), and which asserts *how* each
 mutation failed (D386).
 
-### Run 1 — Measure before designing
+### Run 1 — Measure before designing — **Done.**
 
 Two rigs in `/tmp`, each with a control that proves it can tell success from
 failure.
 
-- **D724**: do both **live** deployed documents' `template_version` values satisfy
-  a semver pattern, and does adding the pattern to `schemas/outputs.schema.json`
-  reject any document that validates today? The offline answer is about the
-  checkout; the host answer is about the two documents that exist. **Get both.**
-- **D725**: run `_leaves()` over an installed document and a freshly rendered one
-  for the same project and read what the diff actually contains. **The question is
-  not whether a diff is producible — it is which leaves differ for reasons that
-  are not an upgrade**, and `observed_at` alone will differ on every render.
+- **D724**: does constraining `template_version` to semver reject any document
+  that validates today, and does it need a `schema_version` bump?
+- **D725**: what would an upgrade plan actually diff? Run the leaf walker over
+  the document kinds and read what a diff between them would contain. **The
+  question is not whether a diff is producible — it is which leaves differ for
+  reasons that are not an upgrade.**
 
-**Nothing is designed before this run reports.** Roughly half of Session 5's
-measured claims turned out wrong, and D700 is the case where a measurement
-refuted an explanation already written into a plan.
+**Measured — four rows, D730–D733, and one of them moved the design.**
+
+**D731 — the pattern is free, and half the question is unanswered.** Every
+`template_version` in the tree is `0.1.0-dev`, which is valid semver with a
+prerelease; the pattern causes **0 regressions**. The control discriminates: a
+`banana` probe is accepted by the current schema and refused by the patched one.
+**The live half was not measured and is not claimed** — none of `apg-diag`'s
+eight verbs returns a deployed document, so reading the two live values needs the
+operator. The inference from `VERSION` is strong and it is still an inference
+(D267).
+
+**D732/D733 — the plan was going to diff the wrong pair.** Rendered and deployed
+share **41%** of their leaf vocabulary, six of seven routes are a *string* on one
+side and an *object* on the other, and the deployed document has **no `inputs`
+block** — so the five digests that answer *"did the inputs change"* exist only on
+the rendered side. The diff is **rendered(installed) against rendered(candidate)**,
+and `deployed_output.rendered_path(key)` is where the installed one already lives.
+
+**D730 — and the documents this run was going to measure are six sessions
+stale.** `alpha-outputs.json` and `beta-outputs.json` are tracked, `schema_version`
+10, session 6, and they do not validate against the current schema. Nothing read
+them; Run 8 deletes them.
+
+**Retrospective.** The run's value was almost entirely D733, and it cost two rigs
+and an afternoon to find. **The first design reached for the deployed document
+because it is the one that sounds authoritative** — and ADR 0158 has said since
+Session 11 that the deployed document is the address book, not the diagnosis. The
+measurement moved the design *before* Run 4 rather than during it, which is the
+whole reason this run exists. **Rig B's control is the part worth keeping**:
+`routes.health` matches in both kinds while six others do not, so the 41% is a
+fact about the schema and not an artefact of how the walker descends.
 
 ### Run 2 — D719: one authority for the session bound
 
@@ -225,8 +255,18 @@ machine-readable half, and the exit-code convention.
 write, proved by asserting the refusal *and* that nothing was written — the
 second half being the one that is easy to leave out.
 
-The leaf-walker decision from D725 is taken here, with the categories left where
-they are.
+**The diff is `rendered(installed)` against `rendered(candidate)`** — Run 1's
+correction (D732, D733). `deployed_output.rendered_path(key)/outputs.json` is the
+left-hand side and a fresh render is the right; both are the same document kind,
+so the diff is between two intents rather than between two vocabularies. **The
+deployed document is still read**, for `upgrade check`'s observation half — what
+is *running* — which is ADR 0158's split and not a second opinion about the same
+question.
+
+The leaf walker moves out of the Session 12 test module (D725) and the
+classification lists **stay where they are**: `MUST_DIFFER` / `MUST_MATCH` /
+`RELEASE_STATE` are a judgement about two projects, and reusing them for two
+releases of one project is D702's shape.
 
 ### Run 5 — `bin/apg.sh`, the thin dispatcher
 
