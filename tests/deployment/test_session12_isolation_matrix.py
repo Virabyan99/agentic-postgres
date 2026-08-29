@@ -67,6 +67,15 @@ pytestmark = [pytest.mark.p0, pytest.mark.security]
 #: Read off both deployed documents rather than recalled: every one of these was
 #: observed to differ between `alpha-dev` and `beta-dev`, so the list describes
 #: the deployment rather than an intention about it.
+#:
+#: **And that method has a failure mode this list has already hit** (D702).
+#: A field that differs *at the moment you look* is not necessarily
+#: project-scoped — it may differ because of a partial rollout, a mid-trip
+#: state, or any other accident of when the two documents were written.
+#: `runtime.release_path` was placed here for exactly that reason and had to be
+#: moved. **A list derived from one observation encodes that observation's
+#: accidents**, so each entry needs a reason it is project scope, not just
+#: evidence that it differed once.
 MUST_DIFFER = (
     # Identity
     "project.key",
@@ -108,8 +117,7 @@ MUST_DIFFER = (
     # Object storage
     "storage.bucket",
     "storage.prefix",
-    # On-host state
-    "runtime.release_path",
+    # On-host state. `runtime.release_path` is NOT here -- see RELEASE_STATE.
     "runtime.state_directory",
     "runtime.compose_model_sha256",
     "mcp.capability_lock_sha256",
@@ -145,6 +153,16 @@ MUST_MATCH = (
 #: the control fail during exactly the situation an operator is most likely to be
 #: in when they run the matrix.
 RELEASE_STATE = (
+    # **`runtime.release_path` is the installed release, and it was in
+    # MUST_DIFFER until the first host run said otherwise** (D702). It is
+    # `/opt/agentic-postgres/releases/<sha>` -- the code both projects run, and
+    # identical the moment both are deployed from one release.
+    #
+    # It was classified as project scope because it **differed** when the matrix
+    # was built. It differed because alpha was on Session 11 and beta on Session
+    # 10, which is a partial rollout, not an isolation property. The very first
+    # run in which both projects were current is the run that caught it.
+    "runtime.release_path",
     "schema_version",
     "template_version",
     "document_kind",
