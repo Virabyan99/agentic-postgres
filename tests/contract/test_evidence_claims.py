@@ -140,7 +140,21 @@ def test_claims_are_cumulative_and_a_later_one_is_not_backdated() -> None:
     two = set(claims.claims_through_session(2))
     three = set(claims.claims_through_session(3))
 
-    assert two == {"isolation", "secret_leakage"}
+    # Checked against the HAND-WRITTEN roster, not against `claim_session`.
+    #
+    # `CLAIM_INTRODUCED_IN`'s own docstring warns against deriving an expectation
+    # from the value under test, and this is not that: the roster is written out
+    # by hand and `claims_through_session` is computed from the registry, so this
+    # compares two independent sources and disagreeing is the finding.
+    #
+    # The literal used to be `{"isolation", "secret_leakage"}`, Session 2's whole
+    # claim set until Run 6 retrofitted seven more. A snapshot needs editing
+    # every time the set grows, which is exactly when somebody edits it without
+    # checking that the growth was intended.
+    assert two == {name for name, session in CLAIM_INTRODUCED_IN.items() if session <= 2}
+    assert three == {name for name, session in CLAIM_INTRODUCED_IN.items() if session <= 3}
+
+    assert {"isolation", "secret_leakage"} <= two, "Session 2's original pair is still there"
     assert two < three, "Session 3 must keep making Session 2's promises"
     assert "database_isolation" in three - two
 
@@ -808,24 +822,56 @@ CLAIM_INTRODUCED_IN = {
     "project_removal": 12,
     "documented_path": 12,
     "fresh_host": 12,
+    # Session 13 Run 6: D697's retrofit, as far as the model allows. **Dated to
+    # the sessions their requirements belong to, not to 13** — Session 2's
+    # evidence has never said whether its own host is hardened, and dating these
+    # forward would leave that true while looking closed. Measured first: all
+    # three sessions already carry claims, so each already runs the claims path
+    # in the mode these need.
+    "document_kinds": 2,
+    "provider_convergence": 2,
+    "release_immutability": 2,
+    "docker_api_boundary": 2,
+    "host_baseline": 2,
+    "log_redaction": 2,
+    "published_ports": 2,
+    "database_extensions": 3,
+    "driver_round_trip": 4,
+    "port_allocation": 4,
+    "runtime_role_privilege": 4,
+    "pooled_state_reset": 4,
+    "credential_rotation_planes": 4,
 }
 
 
-#: Requirements no claim reports on, and the reason they are tolerated.
+#: Requirements no claim reports on, and **the measured reason for each**.
 #:
-#: **The claim layer arrived after Sessions 1-4 and these were never retrofitted
-#: into it** (D697). They are not unproved: every one has node ids, those tests
-#: run in the gate, and the gate is green. What is true is narrower and worse to
-#: discover late — the *evidence document* is silent about them, so
-#: "56 of 57 claims passed" describes 90 requirements rather than 127.
+#: D697 found the gap and priced it as bookkeeping: *"group the 37 into claims."*
+#: **Session 13 Run 6 measured that and it is wrong.** Thirteen were grouped; the
+#: remaining twenty-four cannot be, for structural reasons rather than clerical
+#: ones. They are not unproved — every one has node ids, those tests run in the
+#: gate, and the gate is green. What stays true is that the *evidence document*
+#: is silent about them.
 #:
-#: This list is a **debt register, not a permission**. It exists so the guard
-#: below can refuse a *new* orphan while the historical ones are grouped into
-#: claims deliberately — a claim's session decides when it must first be proved,
-#: and D696 is the record of one being moved by accident.
+#: **Twenty-one have no live proof at all.** `claim_mode` raises for a claim
+#: whose every node id runs in a checkout: *"no deployment is being measured."*
+#: Reporting them would need an offline-only claim — a decision about what a
+#: claim IS (ADR 0045/0089), a change to `merge`, and every gate from 1 up
+#: gaining claims to report. That is a session's work, not a morning's, and
+#: nobody has taken it.
+#:
+#: **Three have a live proof and still cannot form one**, each for its own
+#: reason — recorded at the foot of `evidence_claims.CLAIMS`.
+#:
+#: This list is a **register, not a permission**, and the guard below still
+#: refuses a *new* orphan.
 UNCLAIMED_BY_HISTORY = frozenset(
     {
-        # Sessions 1-2: the manifest, the developer surface, the host baseline.
+        # -- No live proof: every node id runs in a checkout. ----------------
+        #
+        # The manifest and the developer surface: properties of parsing, naming,
+        # rendering and the developer's own tooling. None describes a running
+        # system.
         "CFG-001",
         "CFG-002",
         "CFG-003",
@@ -841,30 +887,30 @@ UNCLAIMED_BY_HISTORY = frozenset(
         "CFG-013",
         "CFG-014",
         "CFG-015",
-        "CFG-016",
         "DX-002",
         "DX-003",
-        "SEC-NET-001",
-        "SEC-NET-002",
-        "SEC-HOST-001",
-        "SEC-DOCKER-001",
-        "SEC-TLS-001",
-        "SEC-LOG-001",
-        "DEP-REL-001",
-        "DEP-PROV-001",
-        "OPS-HEALTH-001",
-        # Sessions 3-4: the database and its transports.
-        "DBX-PG-001",
-        "DBX-PG-002",
+        # Render determinism, preflight refusal, and the extension inventory a
+        # checkout can answer. **The note above `CLAIMS` has said DBX-MIG-002 and
+        # DBX-MIG-003 are checkout properties since Session 3** — which D722
+        # records nobody having read before counting them as debt.
         "DBX-MIG-002",
         "DBX-MIG-003",
-        "DBX-PORT-001",
-        "DBX-004",
-        "SEC-DBX-002",
-        "SEC-DBX-003",
-        "SEC-DBX-004",
+        "DBX-PG-002",
         # Session 8.
         "AGT-DRIFT-001",
+        # -- A live proof, and still no claim. Reasons at the foot of CLAIMS. --
+        #
+        # Tried as `public_boundary` and removed: its proofs include an IPv6 scan
+        # no available network can run, so the claim could only ever come out
+        # `failed`. And Session 2 carries no external claim today, so adding one
+        # would make `--external-input` newly required for every Session 2 merge.
+        "SEC-NET-001",
+        # Both span `live_host` AND `external`, which `claim_mode` refuses. A
+        # claim names requirements rather than node ids, so there is no subset to
+        # claim: splitting these means splitting the requirement itself, which
+        # renumbers a Session 2 contract.
+        "OPS-HEALTH-001",
+        "SEC-TLS-001",
     }
 )
 
@@ -910,6 +956,20 @@ def test_no_new_requirement_goes_unreported_by_every_claim() -> None:
     assert not stale, (
         f"UNCLAIMED_BY_HISTORY names requirements the registry no longer has: "
         f"{sorted(stale)}. A debt register that outlives its debt hides the next one"
+    )
+
+    # **The third check, and Run 6's battery is what asked for it.** The two
+    # above catch a requirement in neither list and an entry naming nothing. A
+    # requirement in BOTH -- claimed, and still recorded as unclaimed -- was
+    # caught by neither, so retrofitting one into a claim while leaving its
+    # register entry behind passed silently. That is the same "debt register
+    # that outlives its debt" the assertion above names, on the axis it does not
+    # look at.
+    settled = UNCLAIMED_BY_HISTORY & claimed
+    assert not settled, (
+        f"these are named by a claim AND still recorded as unclaimed: {sorted(settled)}. "
+        "Remove each from UNCLAIMED_BY_HISTORY; a register that keeps settled debts "
+        "stops being readable as a list of what is missing"
     )
 
     # The control. A registry that read empty would make both assertions above

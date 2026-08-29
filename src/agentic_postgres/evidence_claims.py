@@ -409,6 +409,62 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "project_removal": ("DEP-REMOVE-001",),
     "documented_path": ("DX-001",),
     "fresh_host": ("DEP-001",),
+    # -----------------------------------------------------------------------
+    # Session 13 Run 6 -- the retrofit D697 asked for, as far as the model allows
+    # -----------------------------------------------------------------------
+    #
+    # **These are dated to Sessions 2, 3 and 4, not to Session 13**, because
+    # `claim_session` is the max of their requirements' sessions and those
+    # requirements have not moved. That is the point: Session 2's evidence has
+    # never said whether its own host is hardened, and dating these to 13 would
+    # leave that true forever while looking closed.
+    #
+    # **It costs those gates nothing they were not already doing.** Measured
+    # before any of this was written: sessions 2, 3 and 4 already carry claims
+    # (2, 4 and 5 of them), so each already runs the claims path and each already
+    # has the mode these need. A claim here is an extra row in a document that is
+    # already produced -- not a new obligation on a gate that produced none.
+    #
+    # **One claim per requirement, and that is the conservative answer rather
+    # than the lazy one.** Grouping two requirements asserts they are one
+    # guarantee, which is a claim about the product that nothing here makes. Not
+    # grouping asserts nothing. Single-requirement claims are already four of the
+    # entries above.
+    "document_kinds": ("CFG-016",),
+    "provider_convergence": ("DEP-PROV-001",),
+    "release_immutability": ("DEP-REL-001",),
+    "docker_api_boundary": ("SEC-DOCKER-001",),
+    "host_baseline": ("SEC-HOST-001",),
+    "log_redaction": ("SEC-LOG-001",),
+    "published_ports": ("SEC-NET-002",),
+    "database_extensions": ("DBX-PG-001",),
+    "driver_round_trip": ("DBX-004",),
+    "port_allocation": ("DBX-PORT-001",),
+    "runtime_role_privilege": ("SEC-DBX-002",),
+    "pooled_state_reset": ("SEC-DBX-003",),
+    "credential_rotation_planes": ("SEC-DBX-004",),
+    #
+    # **Three of the sixteen candidates are deliberately NOT here**, and each has
+    # a different reason. They stay in `UNCLAIMED_BY_HISTORY`, which now records
+    # why rather than only that.
+    #
+    # `SEC-NET-001` -- a `public_boundary` claim over it was written and removed
+    # once already (the note above this dict): its proofs include an IPv6 scan no
+    # available network can run, so the claim could only ever come out `failed`.
+    # **And a second reason arrived with the measurement**: Session 2 carries no
+    # external claim today, so adding one would make `--external-input` newly
+    # required for every Session 2 merge.
+    #
+    # `OPS-HEALTH-001` and `SEC-TLS-001` -- each carries **both** `live_host` and
+    # `external` markers, and `claim_mode` refuses a claim spanning two modes
+    # because one evidence half would have to report a verdict on tests it could
+    # not run. ADR 0045 split `direct_transport` from `transport_boundary` for
+    # exactly this, and that split worked because the halves were **separate
+    # requirements**. Here it is one requirement whose node ids span two modes,
+    # and a claim names requirements rather than node ids -- so there is no
+    # subset to claim. **Splitting these means splitting the requirement**, which
+    # renumbers a Session 2 contract, and that is a decision with a blast radius
+    # this run has no reason to accept.
 }
 
 #: Worst-first, so combining two observations of one test is a max().

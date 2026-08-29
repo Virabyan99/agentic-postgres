@@ -16,8 +16,8 @@ decision.
 | | Count | Note |
 |---|---|---|
 | Requirements in the acceptance registry | **127** | 121 P0, 6 P1, **0 P2** |
-| Claims in the evidence model | **60** | 56 of 57 passed at Session 11's close |
-| Requirements a claim reports on | **90** | see §4 — this is the gap worth reading |
+| Claims in the evidence model | **74** | 61 at Session 12's close; 13 retrofitted in Session 13 Run 6 |
+| Requirements a claim reports on | **103** | was 90; see §4 — **the gap was repriced, not just narrowed** |
 | Migrations released | **22** | fix-forward only |
 | Architecture decisions recorded | **161** | |
 | Divergences measured | **D1–D696** | |
@@ -83,38 +83,54 @@ registry does.**
 
 ---
 
-## 4. The claim-coverage gap
+## 4. The claim-coverage gap — partly closed, and repriced
 
-**37 of 127 requirements belong to no claim.** They are tested — every one has
-node ids, and those tests run and pass in the gate — but **no evidence document
-reports them**. "56 of 57 claims passed" describes **90 requirements**, not 127.
+> **Corrected in Session 13 Run 6.** This section said the gap was *"small, and
+> it is bookkeeping rather than proof."* **That estimate was never measured and
+> it is wrong.** Thirteen of the thirty-seven were retrofitted; **twenty-four
+> cannot be**, for structural reasons. D720, D721 and D722 record the
+> measurement.
 
-They cluster by session, and that is the explanation: `CFG-001`–`CFG-016`,
-`DX-002`, `DX-003`, the Session 2 security set (`SEC-NET-001`, `SEC-HOST-001`,
-`SEC-TLS-001`, `SEC-LOG-001`, `SEC-DOCKER-001`, `SEC-NET-002`), `DEP-REL-001`,
-`DEP-PROV-001`, `OPS-HEALTH-001`, four Session 3–4 database requirements, three
-`SEC-DBX-*`, `AGT-DRIFT-001` and `DBX-004`. **The claim layer arrived after
-Sessions 1–4 and their requirements were never retrofitted into it.**
+**24 of 127 requirements belong to no claim**, down from 37. The evidence
+document now reports **103**, up from 90. The remainder are tested — every one
+has node ids, and those tests run and pass in the gate — but no evidence document
+reports them.
 
-**What this does and does not mean.** It does not mean 37 requirements are
-unproved: their tests are in the suite and the suite is green. It means the
-*evidence document* — the artefact that says what a release guarantees — is
-silent about them, so a reader of `evidence/session-11.json` learns nothing about
-whether a service port is publicly reachable (`SEC-NET-001`) even though five
-tests answer it.
+**Thirteen were grouped into claims**, dated to Sessions 2, 3 and 4 rather than
+to 13: their requirements have not moved, and dating them forward would leave
+Session 2's evidence permanently silent about its own host while looking closed.
+Measured before any were written — those three sessions already carry claims, so
+each already runs the claims path in the mode the new ones need. A claim there is
+an extra row in a document that is already produced, not a new obligation.
 
-**Nothing detects this**, which is why it went eleven sessions. `CLAIMS` is
-checked for claims naming unknown requirements; nothing checks for requirements
-named by no claim.
+**Why the remaining twenty-four cannot be, and it is not effort:**
 
-* **Effort to close:** small, and it is bookkeeping rather than proof — group the
-  37 into claims and extend the introduced-in table. **The risk is doing it
-  carelessly**: a claim's session decides when it must first be proved, and
-  D696 is the record of a Session 2 claim being accidentally moved to Session 12
-  by a single line.
-* **The guard worth writing first:** a test that every registered requirement
-  belongs to exactly one claim. Without it the same gap reopens the next time a
-  session adds a requirement in a hurry.
+* **Twenty-one have no live proof at all.** `claim_mode` raises for a claim whose
+  every node id runs in a checkout — *"no deployment is being measured."*
+  `CFG-001`–`CFG-015`, `DX-002`, `DX-003`, `DBX-MIG-002`, `DBX-MIG-003`,
+  `DBX-PG-002` and `AGT-DRIFT-001` are properties of parsing, rendering and the
+  developer's own tooling. Reporting them needs an **offline-only claim**, which
+  is a decision about what a claim IS (ADR 0045/0089), a change to `merge`, and
+  every gate from 1 up gaining claims to report. **A session's work, not a
+  morning's.**
+* **`SEC-NET-001` was tried and deliberately removed.** A `public_boundary` claim
+  over it existed and was withdrawn: its proofs include an IPv6 scan no available
+  network can run, so it could only ever come out `failed`. A second reason
+  arrived with the measurement — Session 2 carries no external claim, so adding
+  one would make `--external-input` newly required for every Session 2 merge.
+* **`OPS-HEALTH-001` and `SEC-TLS-001` each span two modes**, which `claim_mode`
+  refuses. ADR 0045 split `direct_transport` from `transport_boundary` for
+  exactly this, and that worked because the halves were *separate requirements*.
+  Here it is one requirement whose node ids span both, and **a claim names
+  requirements rather than node ids** — so splitting these means splitting the
+  requirement, which renumbers a Session 2 contract.
+
+**And the guard this section recommended already existed when it was written.**
+*"The guard worth writing first: a test that every registered requirement belongs
+to exactly one claim"* — that is
+`test_no_new_requirement_goes_unreported_by_every_claim`, written in the same
+session as this page, carrying the staleness check this page did not ask for
+(D727).
 
 ---
 

@@ -16,11 +16,11 @@ repeat them.
 ## Status — read this first
 
 ```
-SESSION 13 IS OPEN.  Runs 1-5 done. Runs 6-9+ ahead.
+SESSION 13 IS OPEN.  Runs 1-6 done. Runs 7-9+ ahead.
 HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
 CURRENT_SESSION 12, and it moves to 13 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.1.0-dev -> 0.2.0, Run 7.
-divergences     D719-D747 recorded here. **Next free: D748.**
+divergences     D719-D750 recorded here. **Next free: D751.**
 ADRs            **162**, 0162 written in Run 3. Next free: 0163.
 gate            session-13-check.sh, derived BY DIFF from session-12's (Run 7).
 host            One trip, READ-ONLY. Runs 9+.
@@ -75,7 +75,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D748.**
+**Next free number after this table is D751.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -108,6 +108,9 @@ the runs follow the same rule (D267).
 | **D745** | `bin/apg.sh` validates a verb with `case "${verb}" in [a-z][a-z0-9-]*)`, which refuses anything that is not lowercase letters, digits and hyphens. | **A `case` pattern is a GLOB, and in glob syntax `*` is not a quantifier on the preceding bracket expression — it matches any string, `/` and `.` included.** Measured against an anchored bash regex over the same inputs, control holding because the two disagreed on exactly one: the glob **accepted `ab../../etc/passwd`**. `../../etc/passwd` was refused only because it starts with `.`, which made the check look like it worked. | **An anchored `[[ =~ ]]` regex**, which refuses all eight hostile inputs and accepts all five real verb names. | **shellcheck pointed at it** — SC2254, *"quote expansions in case patterns to match literally rather than as a glob"* — as an ordinary warning about quoting, and the thing underneath was a validation that did not validate. **Nothing was ever reachable through it**: the `-f` test refused the path that did not exist. Which is precisely the arrangement the file's own header forbids: *a check that built the path first and tested for existence afterwards would be relying on nothing accidentally being there.* **The code contradicted its own docstring.** | 0002 |
 | **D746** | Run 5's traversal proof: eight hostile verb names, each asserted to exit 2. | **It could not tell which refusal it had triggered, and the battery proved it.** Restoring the glob (M1) left it green; **deleting the pattern check outright (M2) also left it green** — because `script_for`'s `-f` test refuses the nonexistent path with exit 2 as well. Two refusals, one exit code, and the test asserted only the code. | **The message is asserted, not just the status**: `is not a verb name` comes only from the pattern, and `no such verb` must be absent. Both mutations then die. | **D374 exactly** — *a test that passes for a reason other than the one it names is worse than a weak assertion* — and it is the third time this session the measurement apparatus was the defect (D736, D742). **The battery is what found it**, on the one arm its own comment called the arm that matters. A traversal proof that cannot fail when the traversal guard is deleted is a green light measuring nothing. | — |
 | **D747** | The dispatcher needs a verb table, and `SHELL_COMMANDS` already lists every command, so it can be derived from that. | **That would be a third authority.** `bin/` is what exists, `SHELL_COMMANDS` is the test module's roster, and a dispatcher roster would be a third — with a stale one meaning a verb that silently stops being reachable. **A verb is a script**: `apg doctor` resolves `bin/doctor.sh` by construction, and the 43 shell commands plus `deploy` are reachable with nothing to keep current. | **No list at all.** `deploy` is the single named exception, with its reason attached (D694), because its script is at the repository root by design. **Proved behaviourally**: a script planted in `bin/` becomes a verb and its exit code reaches the caller; removed, it stops being one. | **The first proof of that was a text scan for verb names in the source, and it failed on the usage text's own example** (`apg doctor --verbose`). D464 — *a text scan standing in for a construct* — failing in both directions at once: it flagged prose, and it would have missed a roster spelled in a way the scan did not anticipate. **Exercising the property costs one file and a `finally`.** | 0002, 0037 |
+| **D748** | D721 said the two dual-mode requirements are *"split where the measurement is, or they stay in the register"*, with ADR 0045's `direct_transport`/`transport_boundary` split as the precedent. | **The precedent does not reach them, and the reason is mechanical.** ADR 0045 split a *drafted claim over four requirements* into two claims over two requirements each — it worked because the halves were **separate requirements**. `OPS-HEALTH-001` and `SEC-TLS-001` are **one requirement each**, whose own node ids span both modes. And `claim_nodeids` resolves a claim through `CLAIMS[claim]` → `requirement_nodeids`: **a claim names requirements, never node ids**, so there is no subset to claim. | **Both stay in the register**, with the mechanism recorded rather than the intention. Splitting them means splitting the **requirement**, which renumbers a Session 2 contract. | **A precedent that fits the shape of a problem is not the same as one that fits its mechanism.** The split that worked was available because somebody had already written two requirements; here nobody has, and doing it now is a registry change with a blast radius no part of Run 6 needs. **The register is now a list of reasons rather than a list of names**, which is the difference between a debt and an unread note. | 0045 |
+| **D749** | The register's guard checks two things: a registered requirement in no claim, and an entry naming a requirement the registry no longer has — *"a debt register that outlives its debt hides the next one."* | **A requirement in BOTH was caught by neither.** `orphaned = registered - claimed - UNCLAIMED_BY_HISTORY` and `stale = UNCLAIMED_BY_HISTORY - registered` leave the intersection of *claimed* and *registered-as-unclaimed* entirely unexamined. **Measured by the battery**: retrofitting `SEC-LOG-001` into a claim while leaving its register entry behind **passed silently**. | **A third assertion**, `UNCLAIMED_BY_HISTORY & claimed`, with the reason attached. All four mutations then die. | **It is the guard's own sentence on the axis the guard does not look at.** A settled debt left in the register makes the list unreadable as a statement of what is missing — which matters most in exactly the run that settles thirteen of them. **The battery asked for it**: this was written because a mutation survived, not because anybody read the guard and noticed. | — |
+| **D750** | Run 6's plan: group the orphans into claims, and the risk is doing it carelessly (D696 — a claim accidentally moved to a later session). | **The opposite risk was the live one, and the measurement is what showed it.** Dating the retrofitted claims to **Session 13** would have been the careless move: their requirements have not moved, so a Session 13 claim would leave Session 2's evidence permanently silent about its own host **while the register looked closed**. Dated correctly to 2, 3 and 4 they cost those gates nothing — measured first: all three already carry claims (2, 4 and 5), so each already runs the claims path in the `host` mode the new ones need. | **Thirteen claims dated 2, 3 and 4.** Session 2's evidence goes from 2 claims to 9; the document now reports **103 of 127** requirements, up from 90. | **D696 is about a claim moving forward by accident; this is about one being *placed* forward on purpose, for tidiness.** Both end with a guarantee excused from the sessions that should have made it. The difference is that the accident had a guard and the tidy version would not have — nothing refuses a new claim dated to the current session. | 0039, 0089 |
 
 ---
 
@@ -438,20 +441,58 @@ text scan for verb names in the source, and it failed on the usage text's own
 example, `apg doctor --verbose`. D464's shape, failing in both directions at
 once. Exercising the property instead cost one planted file and a `finally`.
 
-### Run 6 — The claim register, read before it is edited
+### Run 6 — The claim register, read before it is edited — **Done.**
 
-**Read `evidence_claims.py`'s commentary first** (D722). Then: group the thirteen
-straightforward orphans into **new** claims — never into existing ones (D728);
-decide `OPS-HEALTH-001` and `SEC-TLS-001`, splitting where the measurement is
-(D721, ADR 0045's precedent); leave `SEC-NET-001` where Session 4 put it; and
-rewrite `UNCLAIMED_BY_HISTORY`'s docstring around what was measured.
+**Thirteen claims added, dated 2, 3 and 4.** The evidence document now reports
+**103 of 127** requirements, up from 90; the register is **24**, down from 37;
+`CLAIMS` holds 74. Four mutations, all KILLED. 42 tests pass.
 
-**Then correct `docs/scope-closure.md` §4** — both its effort estimate (D720) and
-its recommendation of a guard that already exists (D727).
+**Measured before a single claim was written**, which is what the plan asked for
+and what decided the shape: sessions 2, 3 and 4 **already carry claims** (2, 4
+and 5 of them), so each already runs the claims path in the `host` mode the new
+ones need. A claim there is an extra row in a document already produced — not a
+new obligation on a gate that produced none.
 
-**For each new claim, check `claim_mode` and `claims_through_session` before
-writing it**, not after: a claim dated Session 2 is one Session 2's gate must
-report, and `merge` refuses a document silent about a claim.
+**One claim per requirement**, which is the conservative answer rather than the
+lazy one: grouping two requirements asserts they are one guarantee, and nothing
+in this repository makes that claim. Not grouping asserts nothing.
+
+`docs/scope-closure.md` §1 and §4 corrected — the numbers, the refuted estimate,
+and its recommendation of a guard that already existed (D727).
+
+**Retrospective — the plan was wrong about which risk was live.**
+
+**D750: the careless move would have been dating them to Session 13.** The plan
+carried D696's warning — a claim accidentally moved *forward* — and the live risk
+was the mirror image: placing them forward **on purpose, for tidiness**, which
+would have left Session 2's evidence permanently silent about its own host while
+the register looked closed. D696's shape had a guard; the tidy version would not
+have, because nothing refuses a claim dated to the current session.
+
+**D748: ADR 0045's precedent does not reach the two dual-mode requirements**, and
+the reason is mechanical rather than editorial. That split worked because its
+halves were *separate requirements*; these are one requirement each, and
+`claim_nodeids` resolves through `CLAIMS[claim]` → `requirement_nodeids`, so **a
+claim names requirements and never node ids.** There is no subset to claim.
+Splitting them means splitting the requirement, which renumbers a Session 2
+contract. Both stay in the register with the mechanism recorded.
+
+**D749: and the register's guard had a hole the battery found.** It checks a
+requirement in *no* list and an entry naming *nothing*; a requirement in **both**
+— claimed, and still recorded as unclaimed — was caught by neither. Retrofitting
+one while leaving its register entry behind passed silently. A third assertion
+now closes it. **That is the guard's own sentence about a debt register outliving
+its debt, on the axis the guard did not look at** — and it matters most in the
+run that settles thirteen of them.
+
+**One test was made stricter rather than updated.**
+`test_claims_are_cumulative_and_a_later_one_is_not_backdated` asserted
+`two == {"isolation", "secret_leakage"}`, a snapshot that needed editing every
+time Session 2 gained a claim — which is exactly when somebody edits it without
+checking the growth was intended. It now derives both boundaries from the
+**hand-written** `CLAIM_INTRODUCED_IN`, which is a cross-check between two
+independent sources rather than the self-comparison that roster's own docstring
+warns against.
 
 ### Run 7 — The bump
 
