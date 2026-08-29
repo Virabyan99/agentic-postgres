@@ -226,3 +226,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0160](0160-the-request-id-flows-outward-and-no-caller-value-is-trusted.md) | The request id flows outward, and no caller value is ever trusted | 11 | Accepted |
 | [0161](0161-the-database-row-records-the-request-and-a-malformed-header-is-not-a-refusal.md) | The `database` row records the request, and a malformed header is not a refusal | 11 | Accepted |
 | [0162](0162-what-a-template-version-bump-permits-and-what-rollback-means.md) | What a `template_version` bump permits, and what rollback does not mean | 13 | Accepted |
+| [0163](0163-a-skipped-proof-is-not-a-failed-one.md) | A skipped proof is not a failed one | 13 | Accepted |

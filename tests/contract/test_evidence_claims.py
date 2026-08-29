@@ -284,16 +284,64 @@ def test_one_bad_result_fails_the_claim(tmp_path: Path, outcome: str) -> None:
     assert claims.claim_result("isolation", claims.junit_outcomes([artifact]))["status"] == "failed"
 
 
-def test_a_skip_is_not_a_pass(tmp_path: Path) -> None:
+def test_a_skip_is_not_a_pass_and_is_not_a_failure_either(tmp_path: Path) -> None:
     """``requires_environment`` skips are how these tests behave in a checkout.
 
     Correct there, and worthless as evidence. Counting a skip as a pass would
     make a full evidence run producible from a laptop.
+
+    **This assertion used to be `== "failed"`, and it is replaced by a stricter
+    one under ADR 0163.** The concern was right and the assertion over-reached: a
+    skip must not be a pass, and `not_run` satisfies that exactly as `failed`
+    does — both are non-`passed`, both make the half unproved, both produce exit
+    5. What `failed` additionally claimed was that *the system is wrong*, which a
+    skip does not say. Session 13's host run published twelve such claims as
+    `failed` off 0 test failures (D755).
+
+    Stricter, not weaker: it pins the status, **and** that the claim still blocks,
+    **and** that the skipped proof is named — none of which the old assertion
+    said.
     """
     outcomes = all_passing("isolation")
-    outcomes[next(iter(outcomes))] = "skipped"
+    skipped = next(iter(outcomes))
+    outcomes[skipped] = "skipped"
     artifact = write_junit(tmp_path / "tests.xml", outcomes)
-    assert claims.claim_result("isolation", claims.junit_outcomes([artifact]))["status"] == "failed"
+
+    result = claims.claim_result("isolation", claims.junit_outcomes([artifact]))
+    assert result["status"] == "not_run"
+    assert result["status"] != "passed", "a skip must never read as a pass"
+    assert result["skipped_node_ids"], "the claim does not name what did not run"
+
+
+def test_a_real_failure_outranks_a_skip(tmp_path: Path) -> None:
+    """ADR 0163. One failure and one skip is `failed`, not `not_run`.
+
+    A skip beside a genuine failure does not soften it, and reporting the pair as
+    "the evidence is missing" would bury the half that says the system is wrong.
+    """
+    outcomes = all_passing("row_level_security")
+    keys = list(outcomes)
+    assert len(keys) >= 2, "this claim needs two proofs to distinguish the two outcomes"
+    outcomes[keys[0]] = "skipped"
+    outcomes[keys[1]] = "failed"
+    artifact = write_junit(tmp_path / "tests.xml", outcomes)
+
+    result = claims.claim_result("row_level_security", claims.junit_outcomes([artifact]))
+    assert result["status"] == "failed"
+    assert result["skipped_node_ids"], "the skip is still recorded, it just does not decide"
+
+
+def test_a_clean_claim_names_nothing_as_unrun(tmp_path: Path) -> None:
+    """The control for the two above: neither member appears when all is well.
+
+    Without this, a `claim_result` that always attached both lists would satisfy
+    every assertion about them.
+    """
+    artifact = write_junit(tmp_path / "tests.xml", all_passing("isolation"))
+    result = claims.claim_result("isolation", claims.junit_outcomes([artifact]))
+    assert result["status"] == "passed"
+    assert "skipped_node_ids" not in result
+    assert "missing_node_ids" not in result
 
 
 def test_a_missing_node_id_is_not_run_and_is_named(tmp_path: Path) -> None:
@@ -324,7 +372,13 @@ def test_the_proofs_may_be_split_across_artifacts(tmp_path: Path) -> None:
         (("passed", "passed"), "passed"),
         # Worst wins: one open port is not softened by the next one being shut.
         (("failed", "passed"), "failed"),
-        (("passed", "skipped"), "failed"),
+        # **`not_run`, not `failed`, since ADR 0163.** The collapsing is what is
+        # under test here and it is unchanged -- the skip still wins over the
+        # pass. What changed is what a claim whose worst outcome is a skip is
+        # CALLED: the evidence is missing, not the system wrong (D755).
+        (("passed", "skipped"), "not_run"),
+        # And a failed case still outranks a skipped one after collapsing.
+        (("failed", "skipped"), "failed"),
     ],
 )
 def test_parameter_cases_collapse_onto_their_node_id(

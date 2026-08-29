@@ -747,31 +747,60 @@ def junit_outcomes(paths: list[Path]) -> dict[tuple[str, str], str]:
 def claim_result(claim: str, outcomes: dict[tuple[str, str], str]) -> dict[str, object]:
     """One claim's verdict, with the node IDs behind it.
 
-    ``not_run`` is a distinct status from ``failed`` and is reported whenever a
-    proof is absent, even if every proof that did run passed. The difference
-    matters to whoever reads the evidence: ``failed`` means the system is wrong,
-    ``not_run`` means the evidence is.
+    ``not_run`` is a distinct status from ``failed``: ``failed`` means the system
+    is wrong, ``not_run`` means the evidence is.
+
+    **Three things can happen to a proof, not two** (ADR 0163). Until Session 13
+    ``not_run`` fired only when a node id was **absent from the JUnit** -- and a
+    *skipped* test is not absent. pytest records it, ``junit_outcomes`` maps it to
+    ``skipped``, and it fell through to ``failed``.
+
+    **It had never been emitted.** Measured across three releases: sessions 11,
+    12 and 13 reported only ``passed`` and ``failed``, zero ``not_run``. The
+    Session 13 host run recorded **330 passed, 28 skipped, 0 failed** and
+    published **twelve claims as `failed`** -- twelve guarantees asserted broken
+    when nobody had looked at them. Four gate scripts documented the behaviour
+    this now implements, and the Session 13 gate *printed* it at the top of the
+    run that contradicted it.
+
+    ``failed`` outranks ``not_run``: a claim with one failure and one skip is
+    ``failed``, because a real failure is the more important thing to report and
+    a skip beside it does not soften it.
+
+    **Nothing about pass/fail semantics changes.** Every consumer tests
+    ``!= "passed"``, so a ``not_run`` claim still makes its half unproved, still
+    makes the merged document ``failed``, and still produces exit 5 (D686). A skip
+    is still not a pass (ADR 0018). What changes is only the word the document
+    uses to say why -- and that word is the whole of what a reader has to go on.
     """
     nodeids = claim_nodeids(claim)
     missing = [nodeid for nodeid in nodeids if junit_key(nodeid) not in outcomes]
+    skipped = [nodeid for nodeid in nodeids if outcomes.get(junit_key(nodeid)) == "skipped"]
+
     worst = "passed"
     for nodeid in nodeids:
         outcome = outcomes.get(junit_key(nodeid))
         if outcome is not None:
             worst = _worst(worst, outcome)
 
-    if missing:
+    if worst == "failed":
+        status = "failed"
+    elif missing or skipped:
         status = "not_run"
     else:
-        status = "passed" if worst == "passed" else "failed"
+        status = "passed"
 
     result: dict[str, object] = {
         "status": status,
         "requirements": list(CLAIMS[claim]),
         "node_ids": list(nodeids),
     }
+    # Named, not just counted. A status that says "the evidence is missing"
+    # without saying WHICH evidence sends its reader back to a JUnit file.
     if missing:
         result["missing_node_ids"] = missing
+    if skipped:
+        result["skipped_node_ids"] = skipped
     return result
 
 
