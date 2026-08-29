@@ -965,6 +965,7 @@ def test_edge_mode_refuses_volume_removal() -> None:
         assert "ACME state" in result.stderr
 
 
+@needs_rendered_fixtures
 def test_project_mode_refuses_volume_removal() -> None:
     """`DEP-REMOVE-001`. The database volume is not removable by any command.
 

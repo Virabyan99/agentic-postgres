@@ -42,7 +42,20 @@ from typing import Any
 
 import pytest
 
-pytestmark = [pytest.mark.live_host, pytest.mark.p0, pytest.mark.security]
+#: **`live_host` is NOT module-level, and the suite is what decided that.**
+#:
+#: `test_the_classifier_can_tell_the_categories_apart` is the control for
+#: `_classify`, and its whole value is that it runs in a checkout — a classifier
+#: returning one category for everything would make the matrix report a clean
+#: bill of health forever. Under a module-level `live_host` it inherited a mark
+#: it does not deserve, and
+#: `test_every_environment_dependent_test_names_its_variables` refused it: a test
+#: marked `live_host` with no `requires_environment` gate runs in a checkout and
+#: fails for the wrong reason.
+#:
+#: So the four host proofs carry `live_host` individually, beside the gate that
+#: makes them skip rather than error, and the control carries neither.
+pytestmark = [pytest.mark.p0, pytest.mark.security]
 
 
 # ---------------------------------------------------------------------------
@@ -224,6 +237,7 @@ def _classify(path: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.live_host
 @pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", "APG_PROJECT_B_OUTPUTS")
 def test_the_two_documents_describe_two_projects_on_one_host(
     project_a: dict[str, Any], project_b: dict[str, Any], as_root
@@ -262,6 +276,7 @@ def test_the_two_documents_describe_two_projects_on_one_host(
         )
 
 
+@pytest.mark.live_host
 @pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", "APG_PROJECT_B_OUTPUTS")
 def test_no_project_scoped_value_is_shared(
     project_a: dict[str, Any], project_b: dict[str, Any], as_root
@@ -293,6 +308,7 @@ def test_no_project_scoped_value_is_shared(
     )
 
 
+@pytest.mark.live_host
 @pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", "APG_PROJECT_B_OUTPUTS")
 def test_neither_projects_scoped_names_appear_in_the_others_document(
     project_a: dict[str, Any], project_b: dict[str, Any], as_root
@@ -324,6 +340,7 @@ def test_neither_projects_scoped_names_appear_in_the_others_document(
         assert not found, f"{label}: {found}"
 
 
+@pytest.mark.live_host
 @pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", "APG_PROJECT_B_OUTPUTS")
 def test_every_leaf_is_classified(
     project_a: dict[str, Any], project_b: dict[str, Any], as_root
