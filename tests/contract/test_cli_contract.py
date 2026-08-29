@@ -80,6 +80,7 @@ SHELL_COMMANDS = (
     "bin/session-12-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
+    "bin/upgrade.sh",
 )
 
 PYTHON_COMMANDS = (
@@ -109,6 +110,7 @@ PYTHON_COMMANDS = (
     "bin/restore-test.py",
     "bin/rotate-signing-key.py",
     "bin/storage-admin.py",
+    "bin/upgrade.py",
     "bin/write-session-evidence.py",
 )
 

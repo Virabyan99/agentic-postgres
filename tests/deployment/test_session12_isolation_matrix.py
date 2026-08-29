@@ -42,6 +42,8 @@ from typing import Any
 
 import pytest
 
+from agentic_postgres import upgrade_plan
+
 #: **`live_host` is NOT module-level, and the suite is what decided that.**
 #:
 #: `test_the_classifier_can_tell_the_categories_apart` is the control for
@@ -208,23 +210,15 @@ NOT_AUTHORITY_PREFIXES = (
 )
 
 
-def _leaves(node: Any, path: str = "") -> dict[str, Any]:
-    """Every scalar in the document, keyed by dotted path.
-
-    List indices are kept (`verification_kids[0]`) because position is meaningful
-    in the one list that matters: `render-jwks.py` orders the key set and a
-    reader is expected to guess in that order.
-    """
-    out: dict[str, Any] = {}
-    if isinstance(node, dict):
-        for key, value in node.items():
-            out.update(_leaves(value, f"{path}.{key}" if path else key))
-    elif isinstance(node, list):
-        for index, value in enumerate(node):
-            out.update(_leaves(value, f"{path}[{index}]"))
-    else:
-        out[path] = node
-    return out
+#: The walker moved to `agentic_postgres.upgrade_plan` in Session 13 Run 4, so
+#: that the upgrade plan and this matrix do not each carry one (D725).
+#:
+#: **Only the walker moved.** `MUST_DIFFER`, `MUST_MATCH` and `RELEASE_STATE`
+#: stay here: they are a judgement about two *projects*, and a diff between two
+#: *releases of one project* asks a different question over the same leaves.
+#: Sharing the walker is right; sharing the categories would be D702 again -- a
+#: list derived from one observation, reused where its accidents do not hold.
+_leaves = upgrade_plan.leaves
 
 
 def _matches(path: str, pattern: str) -> bool:

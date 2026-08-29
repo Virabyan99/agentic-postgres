@@ -16,11 +16,11 @@ repeat them.
 ## Status — read this first
 
 ```
-SESSION 13 IS OPEN.  Runs 1-3 done. Runs 4-9+ ahead.
+SESSION 13 IS OPEN.  Runs 1-4 done. Runs 5-9+ ahead.
 HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
 CURRENT_SESSION 12, and it moves to 13 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.1.0-dev -> 0.2.0, Run 7.
-divergences     D719-D739 recorded here. **Next free: D740.**
+divergences     D719-D744 recorded here. **Next free: D745.**
 ADRs            **162**, 0162 written in Run 3. Next free: 0163.
 gate            session-13-check.sh, derived BY DIFF from session-12's (Run 7).
 host            One trip, READ-ONLY. Runs 9+.
@@ -75,7 +75,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D740.**
+**Next free number after this table is D745.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -100,6 +100,11 @@ the runs follow the same rule (D267).
 | **D737** | Run 3 compares two `template_version` values, so it uses a version parser; `packaging` is installed. | **`packaging` implements PEP 440, not semver 2.0.0, and the difference is not academic.** Measured with a discriminating control (6 agree, 5 disagree): it **rewrites the value this repository publishes** — `0.1.0-dev` → `0.1.0.dev0`, `1.0.0-rc.1` → `1.0.0rc1` — and it **accepts three spellings semver refuses**: `1.0.0.rc1`, `1.2`, and `01.2.3`, which it silently normalises to `1.2.3`. It is also **absent from `requirements-dev.in`**, present in the lock only transitively. | **Parsed here**, in `compatibility.SEMVER_PATTERN`, with `\Z` rather than `$` for `installed_release.COMMIT_PATTERN`'s reason. The measurement is pinned by a test rather than quoted in prose, so a `packaging` that changes behaviour tells somebody. | **Ordering is where the two grammars agree** — `0.1.0-dev < 0.1.0`, `1.0.0-rc.1 < 1.0.0`, `0.2.0 < 0.10.0` all come out right — **which is exactly why reaching for it is tempting.** The failure is not in the comparison. It is that a round trip returns a string the document does not contain, and that the *validity* question, which a refusal rests on, is answered by the wrong grammar in three of nine cases. **A parser that is right about ordering and wrong about membership is the shape §7 warns about.** | 0162 |
 | **D738** | Session 13 builds a way to detect what changed between two releases. | **The detector was built in Session 1 and has never been used as one.** `rendering.input_digests` records five SHA-256 digests and its docstring already states the rule: *"this block names every file the render depends on: a value derived from an undigested file would make two renders differ with no visible reason."* **And the five split two ways**: `project_sha256` and `capabilities_sha256` are the **operator's** files; `secrets_contract_sha256`, `versions_lock_sha256` and `source_specification_sha256` are the **release's**. | **The split is the rule** (ADR 0162): an upgrade moves the release side by definition and **must not move the operator side** — if it does, the operator also edited a manifest, which is a different operation. `compatibility.OPERATOR_DIGESTS` and `RELEASE_DIGESTS` name them, and a test checks the partition **against what `input_digests` actually returns** rather than against itself, so a sixth digest cannot arrive unclassified. | The digests were built to make *an incomplete render* detectable and they answer a second question nobody had asked them. **Three of the five move on almost every release**, so a digest difference is a trigger for the leaf comparison and never a verdict — a rule reading *"`versions_lock_sha256` changed, therefore incompatible"* would refuse every upgrade this repository will ever perform. | 0162 |
 | **D739** | The major/minor line is a new rule this session invents: which changes need operator action before an upgrade. | **It is already implemented, in one place, and the ADR names it rather than inventing it.** `output_migrations.migrate_v1_to_v2` takes `secrets_contract_sha256` as a **required argument and refuses without it** — *"it is a digest of a file that did not exist when a v1 document was written… guessing it would be worse than useless"* — while the module's other transitions complete alone. | **That distinction is the rule**: a migrator that can complete alone is **minor**; one that needs a value only the operator has is **major**. ADR 0162 §2 states it as the general form of what `output_migrations` already does. | **A rule derived from a case the repository already decided is one the repository will keep obeying**; a rule invented beside it is a second authority (ADR 0002). This is the third row in this session where the repair was to *find* the existing decision rather than write a new one — D723, D733 and now this. | 0162, 0012, 0027 |
+| **D740** | Run 1 left one question open: which leaves differ between two renders for reasons that are not an upgrade. The expectation was `observed_at` at least. | **Zero.** Two renders of one unchanged project produced **108 identical leaves** — no timestamp, no counter, no ordering drift — against a control that planted two changes and found exactly two. The *deployed* document, by contrast, carries **24 observation-shaped leaves** (`observed_at`, seven route statuses, `secrets.generation_id`, `database.observed.instance_uuid`) that differ on every comparison by design. | **Nothing is subtracted from the diff.** A `plan` reports every differing leaf as a real difference, because every differing leaf is one. | **This is the measured half of D733's argument.** The kinds question said a deployed-vs-rendered diff compares two vocabularies; this says the alternative costs nothing. **A noise floor of zero is what makes a plan readable**: an operator who sees one line knows one thing changed. Had it been 24, the plan would have needed a subtract-list — and a subtract-list is where a real change goes to hide. | — |
+| **D741** | `bin/upgrade.sh check --project X` on a project that was never deployed here reports it absent and exits 4. | **It exited 1 with a traceback.** `Path.exists()` **raises** on a permission error: it swallows `ENOENT`, `ENOTDIR`, `EBADF` and `ELOOP` and lets `EACCES` through. The project state root on this machine is `drwx------ root root`, so an unprivileged probe of a path beneath it raises `PermissionError` rather than returning `False`. | **`look_for()` returns three answers** — `present`, `absent`, `undetermined` — and `undetermined` exits **3** with *"this is not the same as the project not being deployed here."* | **ADR 0157's own distinction, got wrong in the command that cites it.** The module docstring already said a plan must be able to say *"I could not look"*; the very first thing the command did was ask a question whose API cannot express that answer. **And the test demanded the defect**: its first draft asserted exit 4, which would have been the command claiming to know something it could not see. The environment is what refuted it — `0700 root` is not a fixture anybody wrote. | 0157 |
+| **D742** | Run 4's battery: five mutations, five kills. | **M1 SURVIVED, and the survivor was the battery's fault.** The mutation replaced the *reason string* — `"no installed rendered document to compare against; nobody looked, "` — with a different string that **still contained `nobody looked`**, so the assertion held and the verdict was never touched. | **The mutation was repaired, not the test** (D493): the anchor moved to the branch itself, `if installed is None:` → `if False:`. Re-run: five of five KILLED. | **An uninformative mutation reports as a weak test**, which is the reading that sends somebody to strengthen an assertion that was already right. CLAUDE.md names three causes for a survivor — weak test, uninformative mutation, real gap — and getting the diagnosis right is the whole value of running the battery at all. **This is the second time in Session 13 the measurement apparatus was the defect** (D736 was the first). | — |
+| **D743** | `bin/upgrade.py` derives every change class from the two documents, so `migration_added` is computed like the rest. | **It cannot be.** A rendered document records **no migration count and no API contract digest**, and `migrations/released.lock.json` describes only the checkout in hand — never the release that produced the *installed* document. So the command can read how many migrations **this** checkout has released and cannot read how many the installed one had. | **Declared, not guessed**: a `--also CLASS` flag over an enumerated `DECLARABLE` set, and `classify_document_changes` is documented as deliberately partial. A first draft carried a `released_migration_count()` helper that read the checkout's lock and **was never called** — dead code that looked like a derivation. | **Inferring it from a `schema_version` move would be wrong in the direction that matters**: `migration_added` is the class that makes a bump irreversible by image rollback (ADR 0162 §3). A planner that guessed it would produce a confident answer about the one thing an operator cannot undo. **The gap is real and stays open**: nothing yet gives the plan the installed release's migration count, and until something does, that class is an operator's declaration. | 0162 |
+| **D744** | `src/agentic_postgres/upgrade_plan.py` imports its sibling as `from . import compatibility`, which is ordinary Python and reads fine. | **The full contract suite went red on it**, and the guard was right. `test_no_module_is_imported_only_by_its_own_tests` (D204) scans for `from agentic_postgres import X` and `import agentic_postgres.X`, and a **relative** import matches neither — so `compatibility` appeared to be *"imported by nothing outside its own tests"* while `upgrade_plan` was using it on every call. Measured: it is the **only** relative import in the package; all 30-odd sibling imports use the absolute form. | **Changed to the absolute form**, which is the house style and what the guard can see. | **A relative import makes any module invisible to that guard**, and the guard's whole subject is *"a module with no caller is a feature that does not exist, however well it is tested"*. So the deviation would not merely have annoyed a linter — it would have created a blind spot in the one check that notices dead code, in the same session that wrote two pure modules. The suite caught it on its first full run and nothing else would have. | — |
 
 ---
 
@@ -320,7 +325,49 @@ control from a silent one.
 `` `template_version` `` eaten. CLAUDE.md names five previous runs it has cost.
 Repaired with the Write/Edit tools, which is what that rule says to use.
 
-### Run 4 — `upgrade check | plan | verify`
+### Run 4 — `upgrade check | plan | verify` — **Done.**
+
+**Shipped.** `src/agentic_postgres/upgrade_plan.py` (pure, three verdicts),
+`bin/upgrade.sh` + `bin/upgrade.py` (three verbs, `--json`, the exit-code
+convention), both registered in `SHELL_COMMANDS` and `PYTHON_COMMANDS` — which
+D726 predicted and which reddened the suite until done. The leaf walker moved out
+of the Session 12 matrix and the classification lists stayed.
+
+**`REL-COMPAT-001`'s offline half is proved through the shell entry point**, not
+by importing `main()` (ADR 0065/0066). Every refusal is asserted twice: the exit
+code, **and a digest of `.generated/` taken before the command ran** — with its
+own control, a probe file that proves the digest can move. 34 tests across the
+two new modules; five mutations, all KILLED.
+
+**Retrospective — the run found four things, and two were in its own work.**
+
+**The noise floor is zero** (D740). Two renders of one unchanged project produced
+108 identical leaves. Run 1 said the deployed document was the wrong left-hand
+side; this says the right one costs nothing — no subtract-list, and **a
+subtract-list is where a real change goes to hide.**
+
+**`Path.exists()` raises on `EACCES`** (D741), so `check` exited 1 with a
+traceback where an operator expected a verdict. That is ADR 0157's own
+distinction — *not there* versus *may not look* — got wrong in the command whose
+docstring cites it. **The test demanded the defect**: its first draft asserted
+exit 4, which would have been the command claiming to know something it could not
+see. The environment refuted it — `drwx------ root root` is not a fixture anybody
+wrote.
+
+**The battery's first M1 survived and the survivor was the battery's fault**
+(D742): the mutation swapped one reason string for another that still contained
+the asserted phrase, so the verdict was never touched. Repairing the *mutation*
+rather than the test is the whole value of reading a survivor. **Second time this
+session the measurement apparatus was the defect** (D736 was the first).
+
+**And `migration_added` cannot be derived at all** (D743). A rendered document
+records no migration count, and the checkout's own lock describes the checkout —
+never the release that produced the installed document. A first draft carried a
+`released_migration_count()` helper that read the wrong lock and **was never
+called**: dead code shaped like a derivation. It is now an operator's `--also`
+declaration over an enumerated set, and the gap is named rather than papered.
+
+**Original plan text, for the record:**
 
 `src/agentic_postgres/upgrade_plan.py`, pure, built **on** `preflight`'s
 three-verdict model rather than beside it (D723): a plan must be able to say *"I
