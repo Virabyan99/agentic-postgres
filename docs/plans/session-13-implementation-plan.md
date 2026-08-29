@@ -16,12 +16,12 @@ repeat them.
 ## Status — read this first
 
 ```
-SESSION 13 IS OPEN.  Nothing built yet; this is the plan.
+SESSION 13 IS OPEN.  Runs 1-3 done. Runs 4-9+ ahead.
 HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
 CURRENT_SESSION 12, and it moves to 13 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.1.0-dev -> 0.2.0, Run 7.
-divergences     D719-D736 recorded here. **Next free: D737.**
-ADRs            161. This session writes ONE, in Run 3. Next free: 0162.
+divergences     D719-D739 recorded here. **Next free: D740.**
+ADRs            **162**, 0162 written in Run 3. Next free: 0163.
 gate            session-13-check.sh, derived BY DIFF from session-12's (Run 7).
 host            One trip, READ-ONLY. Runs 9+.
 ```
@@ -75,7 +75,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D737.**
+**Next free number after this table is D740.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -97,6 +97,9 @@ the runs follow the same rule (D267).
 | **D734** | Run 2, as planned: *"widen the existing guard to cover the writer"* — a scan for a session compared against a typed **ceiling**, with floors deliberately allowed. | **The scan was wrong in both directions on its first execution, and its own control caught both.** It missed `session > 12` — a ceiling written as a refusal rather than a bound — and it flagged the three legitimate floors (`bin/bootstrap-providers.py:939`, `bin/materialize-secrets.py:306`, `bin/render-secret-override.py:61`, all `if arguments.session < 1:`). The deeper finding is why: **no textual rule separates a ceiling from a feature gate.** `bin/deploy-project.py:1870` holds `if arguments.through_session >= 3:` — *"session 3 added a step"* — and `session > 12` is a refusal. **Same shape, different things.** | **Rescoped to what is exactly decidable**: does a command have *today's* session number written into it? `TYPES_THE_CURRENT_SESSION` matches a session compared against the literal `CURRENT_SESSION` currently is. **Zero exemptions, zero false positives**, and it would have caught D719 on the day it was written. | **A guard that needs an exemption list longer than its catch list is a guard about its exemptions.** The floor/ceiling version needed five named exemptions to find one defect. And the rescoping has an honest cost that is written into the code: **the scan goes quiet after the bump** — `<= 12` stops matching once `CURRENT_SESSION` is 13. So it is named as *the cheap half*, and the load-bearing guard is `test_the_evidence_writer_accepts_the_session_this_release_is`, which is unconditional and cannot go quiet. | — |
 | **D735** | Every operator command that takes `--session` bounds it. | **Three take a floor and no ceiling at all.** `bootstrap-providers.py`, `materialize-secrets.py` and `render-secret-override.py` each hold `if arguments.session < 1:` and nothing above it, so each accepts `--session 999`. `deploy-project.py` is the only one with both halves. | **Not repaired in Run 2**, and not claimed as a defect: **what a session above `CURRENT_SESSION` actually does to each was not measured**, so the row records the asymmetry and stops there. | It is the same axis D719 sits on and the opposite failure — D719 typed a ceiling, these have none — so noticing one and not the other would be the narrow repair this project keeps making. **Measuring three commands' behaviour on an out-of-range session is a run of its own**, and inventing a bound for them inside Run 2 would be a change nobody asked for to code nobody measured. | 0002 |
 | **D736** | The mutation battery reports `KILLED` when the target goes red and its control stays green, and D499's rule applies: **if both go red, repair the control.** | **All three mutations reported `CONTROL FAILED` and the control was fine.** The battery's *reader* was the defect: it ran pytest with `-q`, which prints **no line for a passing node**, and inferred `PASSED` from the run's totals. A mutation's own failure puts the word *failed* in that output — so the reader could never see a green control **in exactly the runs it exists to read**. | `-rA`, and each node's outcome read **from the per-node summary** rather than inferred from totals. Re-run: three `KILLED`, three green controls, tree green after restore. | **D499's rule pointed at the right half and the cause was one layer further in.** *Repair the control, not the assertion* assumes the control's verdict is trustworthy; here the verdict itself was manufactured. **It fails in the direction that wastes a run rather than passes a defect** — but a battery that cries `CONTROL FAILED` on every mutation is one somebody eventually stops reading, which is D701's *"a signal that is always red is a signal nobody reads"* in the measurement apparatus instead of the product. | — |
+| **D737** | Run 3 compares two `template_version` values, so it uses a version parser; `packaging` is installed. | **`packaging` implements PEP 440, not semver 2.0.0, and the difference is not academic.** Measured with a discriminating control (6 agree, 5 disagree): it **rewrites the value this repository publishes** — `0.1.0-dev` → `0.1.0.dev0`, `1.0.0-rc.1` → `1.0.0rc1` — and it **accepts three spellings semver refuses**: `1.0.0.rc1`, `1.2`, and `01.2.3`, which it silently normalises to `1.2.3`. It is also **absent from `requirements-dev.in`**, present in the lock only transitively. | **Parsed here**, in `compatibility.SEMVER_PATTERN`, with `\Z` rather than `$` for `installed_release.COMMIT_PATTERN`'s reason. The measurement is pinned by a test rather than quoted in prose, so a `packaging` that changes behaviour tells somebody. | **Ordering is where the two grammars agree** — `0.1.0-dev < 0.1.0`, `1.0.0-rc.1 < 1.0.0`, `0.2.0 < 0.10.0` all come out right — **which is exactly why reaching for it is tempting.** The failure is not in the comparison. It is that a round trip returns a string the document does not contain, and that the *validity* question, which a refusal rests on, is answered by the wrong grammar in three of nine cases. **A parser that is right about ordering and wrong about membership is the shape §7 warns about.** | 0162 |
+| **D738** | Session 13 builds a way to detect what changed between two releases. | **The detector was built in Session 1 and has never been used as one.** `rendering.input_digests` records five SHA-256 digests and its docstring already states the rule: *"this block names every file the render depends on: a value derived from an undigested file would make two renders differ with no visible reason."* **And the five split two ways**: `project_sha256` and `capabilities_sha256` are the **operator's** files; `secrets_contract_sha256`, `versions_lock_sha256` and `source_specification_sha256` are the **release's**. | **The split is the rule** (ADR 0162): an upgrade moves the release side by definition and **must not move the operator side** — if it does, the operator also edited a manifest, which is a different operation. `compatibility.OPERATOR_DIGESTS` and `RELEASE_DIGESTS` name them, and a test checks the partition **against what `input_digests` actually returns** rather than against itself, so a sixth digest cannot arrive unclassified. | The digests were built to make *an incomplete render* detectable and they answer a second question nobody had asked them. **Three of the five move on almost every release**, so a digest difference is a trigger for the leaf comparison and never a verdict — a rule reading *"`versions_lock_sha256` changed, therefore incompatible"* would refuse every upgrade this repository will ever perform. | 0162 |
+| **D739** | The major/minor line is a new rule this session invents: which changes need operator action before an upgrade. | **It is already implemented, in one place, and the ADR names it rather than inventing it.** `output_migrations.migrate_v1_to_v2` takes `secrets_contract_sha256` as a **required argument and refuses without it** — *"it is a digest of a file that did not exist when a v1 document was written… guessing it would be worse than useless"* — while the module's other transitions complete alone. | **That distinction is the rule**: a migrator that can complete alone is **minor**; one that needs a value only the operator has is **major**. ADR 0162 §2 states it as the general form of what `output_migrations` already does. | **A rule derived from a case the repository already decided is one the repository will keep obeying**; a rule invented beside it is a second authority (ADR 0002). This is the third row in this session where the repair was to *find* the existing decision rather than write a new one — D723, D733 and now this. | 0162, 0012, 0027 |
 
 ---
 
@@ -270,17 +273,52 @@ bit**; the git index still held `100755`, so staging it would have written
 ceiling at all, so each accepts `--session 999`. What that does to each was not
 measured, so it is a row rather than a fix.
 
-### Run 3 — The compatibility rules, and the ADR
+### Run 3 — The compatibility rules, and the ADR — **Done.**
 
-**ADR 0162**, because it decides something with alternatives: which manifest,
-platform-migration, application-migration, API-contract, capability and
-secret-format changes each of **patch**, **minor** and **major** permits.
+**ADR 0162** — *What a `template_version` bump permits, and what rollback does not
+mean* — and `src/agentic_postgres/compatibility.py`, pure, on `preflight`'s split.
 
-**Rollback boundaries are stated honestly and separately.** Configuration
-rollback, image rollback and database fix-forward are **three different
-operations**; a runbook that conflates them lies in the direction that costs
-data. Migrations remain fix-forward only — every down block raises AP900 — so
-"rollback" never means the database.
+**What it decides.** Semver 2.0.0 parsed here rather than by `packaging` (D737).
+Twelve change classes mapped to the smallest bump each permits, stated as what an
+operator has to do: **patch** needs no operator action, **minor** leaves their
+manifests validating unchanged, **major** requires them to act first. And
+rollback as **three operations** — configuration, image, database fix-forward —
+with the consequence that gets blurred written plainly: *once a release applies a
+migration, that release is the floor*, so **a minor bump carrying a migration is
+not reversible by image rollback.**
+
+**Five mutations, all KILLED, controls green** — and the control is drawn from
+`test_gate_contract.py` because every test in this run's own module imports the
+subject, so a mutation breaking import could reach a control that lived there.
+45 tests pass.
+
+**Retrospective — two of the three rows are the same finding a third time.**
+
+**The measurement earned its rig** (D737). Reaching for `packaging` is the obvious
+move and it is installed. It implements PEP 440: it **rewrites** `0.1.0-dev` to
+`0.1.0.dev0`, accepts `1.2`, `01.2.3` and `1.0.0.rc1`, and silently normalises the
+second to `1.2.3`. **Ordering is where the two agree** — all three tested pairs
+come out right — which is exactly what makes it tempting. A parser right about
+precedence and wrong about membership is §7's shape, and the refusal rests on
+membership.
+
+**Twice more, the rule already existed and the run's job was to find it rather
+than write it.** `rendering.input_digests` has recorded the change detector since
+Session 1, with the rule in its own docstring, and nothing had ever used it as one
+(D738). `output_migrations.migrate_v1_to_v2` has drawn the major/minor line since
+Session 2 by **requiring** a value it cannot derive (D739). **That is D723 and
+D733's pattern for the third and fourth time in one session**: the repair is to
+locate the existing decision, not to author a new authority beside it.
+
+**The battery killed all five on its first execution**, which after Run 2 is worth
+recording rather than assuming — the difference was that Run 2's reader had
+already been repaired, so this run inherited a battery that could tell a green
+control from a silent one.
+
+**And the backtick trap, sixth instance.** The ADR's index row was appended with
+`printf` through the shell tool and arrived as *"What a  bump permits"* —
+`` `template_version` `` eaten. CLAUDE.md names five previous runs it has cost.
+Repaired with the Write/Edit tools, which is what that rule says to use.
 
 ### Run 4 — `upgrade check | plan | verify`
 
