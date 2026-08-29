@@ -20,7 +20,9 @@ what an operator does before asking for a plan.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -110,16 +112,30 @@ def test_the_installed_version_is_machine_readable(as_root: None, project_key: s
 
 
 @pytest.fixture
-def candidate(project_key: str) -> Path:
+def candidate(project_key: str) -> Iterator[Path]:
     """What this checkout would render for the deployed project.
 
     Rendered from the manifest the deployment records rather than from an
     example: a plan computed against a different project's manifest would be a
     plan about nothing.
+
+    **It deletes what it published, and that is a rule rather than tidiness.**
+    Output lands in `.generated/<key>`, and the gate compares every rendered
+    project there for identity collisions — so a rehearsal that renders a *real*
+    project beside the gate's fixtures leaves a directory the next run will
+    compare against. The rule is CLAUDE.md §1's, and this fixture is a rehearsal
+    that calls the renderer.
+
+    **Only what it created.** If `.generated/<key>` was already there when the
+    fixture ran, it is left alone: removing a directory this run did not publish
+    would be a rehearsal deleting an operator's working state.
     """
     manifest = deployed_output.PROJECT_STATE_ROOT / project_key / "manifest.yaml"
     if not manifest.is_file():
         pytest.fail(f"no installed manifest at {manifest}")
+
+    published = REPO_ROOT / ".generated" / project_key
+    ours = not published.exists()
 
     result = subprocess.run(
         [
@@ -136,9 +152,14 @@ def candidate(project_key: str) -> Path:
         check=False,
     )
     assert result.returncode == 0, result.stdout[-3000:] + result.stderr[-3000:]
-    rendered = REPO_ROOT / ".generated" / project_key / "outputs.json"
+    rendered = published / "outputs.json"
     assert rendered.is_file(), f"the render produced no {rendered}"
-    return rendered
+
+    try:
+        yield rendered
+    finally:
+        if ours:
+            shutil.rmtree(published, ignore_errors=True)
 
 
 @pytest.mark.live_host
