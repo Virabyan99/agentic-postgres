@@ -12,33 +12,28 @@ before its live half exists.** Everything else is support.
 ## Status — read this first
 
 ```
-LOCAL           Clean and pushed at the commit that carries this plan. Three
-                commits sit above Session 11's close: the plan + Run 1, Run 2's
-                offline half, and this handoff.
-HOST            **ab3d488** -- Session 11's close. It has NONE of Session 12.
-                Run 4 ships it; nothing before Run 4 needs it.
-CURRENT_SESSION **11**, deliberately. Moving it to 12 activates ALL FOUR
-                Session 12 requirements at once (D690), so it moves in Run 4
-                once every offline half exists -- not before.
-DONE            Run 1 (DEP-ISO-001, five proofs, dry-run clean against both
-                live documents). Run 2's OFFLINE half (one new proof; three
-                already existed unattributed).
-NEXT            Run 3 -- DX-001 and DEP-001 offline halves.
-gate            **session-01-check PASSED at this commit.** Re-run it after any
-                code change; it refuses a dirty tree, so commit first.
-divergences     D689-D692 recorded here. **Next free: D693.**
+SESSION 12 IS CLOSED.  evidence/session-12.json merged: 57 of 61 claims passed.
+LOCAL / HOST    identical, clean, pushed, gates green.
+CURRENT_SESSION 12. There is no session 13; this was the last.
+gate            session-01-check PASSED (4184). session-12-check: offline
+                PASSED (4272/3), host **exit 5** (399 passed, 0 failed, 7
+                skipped), external PASSED (25/8).
+                **Exit 5 is the expected result** (D686): the evidence was
+                written and four claims in it are not `passed`.
+divergences     D689-D702 recorded here. **Next free: D703.**
 ```
 
-**What a fresh reader must not re-derive**, because each cost a measurement:
+**The four claims that did not pass, and none is closable by code:**
 
-1. **The bump is all-or-nothing** (D690). `CURRENT_SESSION = 12` forces every
-   Session 12 requirement to stop being a placeholder in the same commit.
-2. **No shipped command removes a project** (D691). `compose.sh` refuses
-   `--volumes` in project mode; `project-runtime.sh down` preserves the volume
-   on purpose. Do not add a destroy-the-data verb (§9).
-3. **`--destroy`'s confirmation check is unreachable in a checkout** (D692):
-   exit 3 for root fires before `--confirm` is read.
-4. **No third project is created** (§0). That decision is taken.
+| Claim | What it needs |
+|---|---|
+| `bootstrap_identity` | The bootstrap-issuer retirement (D683). An ADR, a run, four verifiers recreated. |
+| `fresh_host` | A host that starts empty. |
+| `documented_path` | Somebody who did not build this, following the documentation. |
+| `project_removal` | A project actually removed. |
+
+**The last three are declarations, not work.** Each has a working proof waiting
+for its evidence file, and §7 forbids an offline half standing in for one.
 
 ---
 
@@ -64,7 +59,7 @@ and that is a question about a person, not a project count.
 
 Six columns, the house shape. Rows are measured facts, not predictions.
 
-**Next free number after this table is D703.**
+**Next free number after this table is D704.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -82,6 +77,7 @@ Six columns, the house shape. Rows are measured facts, not predictions.
 | **D700** | This plan's §10, written from an offline trace: both documents publish `backup_state.status: failing`, and *"`archiving_is_failing` returns true when `last_failed_time > last_archived_time`… both documents were written immediately after a deploy, when the container restart produces a failed archive attempt."* | **The archiver is healthy on both projects and the explanation is wrong.** Measured on the host: alpha `last_archived=2026-08-28 14:14:59`, `last_failed=2026-08-26 06:40:38` — **the last failure is two days OLDER than the last success**, and `failed_count` is 48 in both the document and the live cluster, so it has not moved since. At the moment alpha's document was written the archiver was already not-failing, so **the archiver override cannot have produced its `failing`.** It must come from the repository half — `repository_status`, which returns `failing` when `pgbackrest info` reports `backup_errors` or an unrecognised code. Beta is ambiguous: its `failed_count` moved 7 → 9 after its document was written. | **Not repaired, and the cause is now narrowed rather than guessed.** One read names it: `bin/backup.sh info --json` per project. **The repair is not attempted before that read**, for the reason this session has already paid for twice — D680's fix failed on the host because it was chosen before the address was measured. | **D278 in the direction that stings.** *A repair that works is not evidence its explanation is right*; here a **measurement refuted an explanation that had already been written into a plan.** And the finding underneath is larger than the bug: `backup_state.status` is a deploy-time snapshot nothing refreshes, so it is stale in **both** directions. The README already warns that a project whose archiver died still publishes the old status; the inverse — **a project whose archiver has since recovered still publishes `failing`** — is the one that trains an operator to ignore the field. | — |
 | **D701** | ADR 0149/0150: the repository's own report and `pg_stat_archiver` are two sources that fail independently, and `backup_state` combines them into the deployed document's block. `bin/backup.sh info --json` is documented as *"the summary the deployed document is built from."* | **`backup_state` was being applied to its own output, and the second application always returned `failing`.** `bin/backup.py info --json` prints `json.dumps(backup_state(...))` — the finished block — and `deploy-project.observe_backup` parsed that and called `backup_state` on it **again**. The second call reads `summary["status_code"]`; a *state* block does not carry one, so no branch of `status_for` matched and its final `return STATUS_FAILING` ran. Measured live: `info --json` reported **`ready`** for both projects while both documents said **`failing`**, and a fresh deploy rewrote one of them to `failing` again — so it was **deterministic, not stale**. Confirmed offline with a green control: one application `ready`, applied to its own output `failing`. | **`backup_report.with_archiver`**, which folds an archiver reading into an already-computed block without recomputing the repository half. The archiver can still only make a status worse, and that half is asserted separately — without it the repair would be satisfied by a function that ignores the archiver entirely. | **It failed *safe*, which is why it survived two sessions.** The catch-all exists so an unrecognised pgBackRest code cannot arrive as a green light, and a permanent false alarm is the direction that does not let a real failure through. **It is still a false alarm, and a signal that is always red is a signal nobody reads** — the deployed document's `backup_state.status` is one of the three paths CLAUDE.md §9 names for the archiving signal reaching an operator. Found only because two readers of one subject disagreed and the disagreement was chased rather than explained (D700). | — |
 | **D702** | This plan's Run 1: `MUST_DIFFER` was *"read off both deployed documents rather than recalled: every one of these was observed to differ between `alpha-dev` and `beta-dev`, so the list describes the deployment rather than an intention about it."* | **`runtime.release_path` is not project scope, and the matrix caught it on the first run where both projects were on one release.** It is `/opt/agentic-postgres/releases/<sha>` — the installed code both projects run — and it was placed in `MUST_DIFFER` because it *differed* when the list was built. It differed because alpha was on Session 11 and beta on Session 10: **a partial rollout, not an isolation property.** After D701's fix was deployed to both, it became correctly identical and `test_no_project_scoped_value_is_shared` went red. | **Moved to `RELEASE_STATE`**, beside `schema_version` and `deployed_through_session` — the two fields moved out of `MUST_MATCH` in Run 1 for precisely this reason, and `release_path` is the same class that was missed. The method's failure mode is now written above the list. | **A list derived from one observation encodes that observation's accidents.** Run 1 reasoned carefully about partial rollouts and moved two fields *out* of the control for it — then left a third in the opposite list for the same unexamined reason. **The matrix caught its own author**, which is what a proof over a real deployment is for and what a fixture written by that author would never have done. | — |
+| **D703** | `bin/session-12-check.sh` was derived from Session 11's by diff, and the prose that differs was corrected as a named substitution. | **Two lines the gate PRINTS still said Session 10.** Not comments — the closing message of each mode: *"This is one half. Session 10 also needs `--mode external`."* They came through two derivations untouched, and external mode printed one at the end of the run that produced this session's evidence. | Corrected. | **The derivation caught the prose that explains the gate and missed the prose the gate says out loud**, which is the half an operator actually reads. D505, D507, D678 and D693 are all this shape, and D693's guard scans *documents* — a string inside a shell script is not one. **The check that would catch it is the same idea one layer over**, and it is not built. | — |
 
 ---
 
@@ -400,21 +396,66 @@ characterised (D683, D688).
 
 ## 11. What ships, and what does not
 
-Session 12 is the last session in the plan. There is no §11 handoff to a
-successor; there is a statement of what the artifact is when the work stops.
+Session 12 was the last of the twelve. There is no handoff to a successor;
+this is what the artifact is now that the work has stopped.
 
-**Ships:** an appliance whose four access planes are proved against a live
-deployment, two isolated projects on one host with the isolation measured rather
-than asserted, a rehearsed point-in-time restore, and a documented path whose
-commands all resolve.
+**`evidence/session-12.json`: 57 of 61 claims passed**, merged from a host half
+and an off-host half of one release. 121 P0 requirements and 6 P1, of which the
+evidence reports 90 — see D697 for the 37 it does not, and why they are tested
+but unclaimed.
 
-**Does not ship, and each is named rather than implied:**
+### Ships, and is measured against a live deployment
 
-* **`bootstrap_identity`** — the signing-key rotation cannot be prepared (D683).
-  A located code change, not a mystery.
-* **The outsider's witness** — `DX-001` and `DEP-001`'s live halves. The
-  machinery is finished; nobody who did not build it has followed the path.
-  **An offline half may not stand in for this** (§7).
-* **Two P2 items** — the pgvector example and the `pg_dump` export, droppable by
-  the specification's own rule.
-* **The template-or-control-plane question**, recorded and not resolved.
+* **Four access planes** — a pooled and a direct PostgreSQL transport, a REST
+  surface, an application API, and an MCP interface for agents, behind one edge
+  on production certificates.
+* **Row ownership enforced in the database**, not in application code.
+* **An agent surface that cannot write SQL**: six fixed tools, per-agent
+  identity and scopes, two audit records per write joined by a request id, and
+  revocation that takes effect on the next request.
+* **Two isolated projects on one host**, and the isolation is now measured as a
+  *matrix* rather than as a list of things that differ — it asserts what is
+  permitted to be shared before it asserts what is not (D689).
+* **Encrypted off-site backups with a rehearsed point-in-time restore.**
+* **A documented path that is checked against itself**: every command it names
+  exists and is executable, and every session number it passes is one this
+  release accepts (D693).
+
+### Does not ship, each named rather than implied
+
+* **The signing-key rotation** (D683). Located, not mysterious: the two-key
+  ceiling is permanently full because `render-jwks.py` publishes the bootstrap
+  issuer's key unconditionally and nothing retires it.
+* **The outsider's witness** — `DX-001` and `DEP-001`. The machinery is finished
+  and the proofs are written; nobody who did not build this has walked the path,
+  and no host has started empty. **An offline half may not stand in for either.**
+* **A project actually removed** — `DEP-REMOVE-001`'s live half. No shipped
+  command removes a project (D691), and this session deliberately did not add
+  one.
+* **Two P2 capabilities** — the pgvector example and the `pg_dump` export —
+  which were never registered and so were never available to be dropped under
+  the specification's own rule (D698).
+* **The template-or-control-plane decision**, recorded in
+  `docs/scope-closure.md` and not resolved in a test.
+
+### What the twelve sessions leave behind that is worth more than the code
+
+**The defect this project produces is a value that looked measured and was not**,
+and Session 12 produced five more of them — every one mine, every one with a
+green test beforehand. What changed is that two of them were caught by proofs
+rather than by people:
+
+* **D693** — the guard written in Run 3 caught the entire documented path going
+  stale the moment `CURRENT_SESSION` moved, in the same gate run. Its four
+  predecessors were each found by somebody reading carefully, after shipping.
+* **D702** — the isolation matrix caught **its own author**: `runtime.release_path`
+  was classified as project scope because it differed when the list was built,
+  and it differed only because the two projects were mid-rollout.
+
+**And the sharpened form of the oldest open item.** *Nothing knows which proofs
+have never executed* is only half of it. **Nothing knows which proofs share a
+wrong belief with their subject** — D673, D680/D682 and D687 were all invisible
+offline because the fixture was written by the author of the code under test.
+`pytest --setup-plan` answers *will this run*, cheaply and before a trip (D671,
+D676). Nothing answers *is what it asserts true*, and the only thing that found
+these was running the mutation — twice on arms expected to be formalities.

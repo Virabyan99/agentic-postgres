@@ -907,7 +907,7 @@ mode_host() {
   write_evidence host
 
   printf '\n\033[1msession-12-check: host PASSED\033[0m\n'
-  printf 'This is one half. Session 10 also needs --mode external; see --help.\n'
+  printf 'This is one half. Session 12 also needs --mode external; see --help.\n'
 }
 
 mode_external() {
@@ -958,7 +958,7 @@ mode_external() {
   write_evidence external
 
   printf '\n\033[1msession-12-check: external PASSED\033[0m\n'
-  printf 'This is one half. Session 10 also needs --mode host; see --help.\n'
+  printf 'This is one half. Session 12 also needs --mode host; see --help.\n'
 }
 
 main() {
