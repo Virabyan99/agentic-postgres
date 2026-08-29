@@ -430,6 +430,15 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # guarantee, which is a claim about the product that nothing here makes. Not
     # grouping asserts nothing. Single-requirement claims are already four of the
     # entries above.
+    # Session 13. Four claims, four requirements, each with an offline half that
+    # runs in a checkout and a live half gated on `APG_LIVE_HOST`. `claim_mode`
+    # resolves each to `host` because that is the only environment marker any of
+    # their node ids carries -- the offline halves carry none, which is what lets
+    # one claim hold both.
+    "release_version": ("REL-VER-001",),
+    "upgrade_compatibility": ("REL-COMPAT-001",),
+    "upgrade_plan": ("REL-PLAN-001",),
+    "operator_front_door": ("REL-CLI-001",),
     "document_kinds": ("CFG-016",),
     "provider_convergence": ("DEP-PROV-001",),
     "release_immutability": ("DEP-REL-001",),

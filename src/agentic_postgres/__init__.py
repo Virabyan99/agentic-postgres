@@ -60,18 +60,29 @@ from pathlib import Path
 #: claim above it. Activation cannot precede the bump, and the trip cannot
 #: precede activation.
 #:
-#: **Session 12 arms no new Compose profile and adds no service.** What it
-#: activates is the two-project isolation matrix, a removal scoped to one
-#: project, and the two reuse claims -- and moving this number is what lets the
-#: registry name their node ids at all.
+#: **Session 13 arms no new Compose profile and adds no service.** What it
+#: activates is the release-identity surface: the compatibility rules on
+#: `template_version` (ADR 0162), the `upgrade check | plan | verify` verbs, and
+#: one front door over the commands that already exist.
 #:
 #: **The bump is all-or-nothing** (D690).
 #: `test_no_requirement_at_or_before_the_gate_session_remains_future` refuses any
-#: requirement due by now that is still a placeholder, so all four Session 12
-#: requirements stop being placeholders in the same commit that moves this. That
-#: is a decision about what those requirements MEAN, which is why it did not
-#: happen the first time it was attempted.
-CURRENT_SESSION = 12
+#: requirement due by now that is still a placeholder, so all four `REL-*`
+#: requirements stop being placeholders in the same commit that moves this.
+#:
+#: **Session 13 is the first Stage 2 release, and it is where this constant stops
+#: being the only version.** `VERSION` moved to `0.2.0` in the same commit and now
+#: carries meaning: ADR 0162 says what each bump permits. **Both axes are kept
+#: deliberately** (D705) -- this one is the internal release ordinal the evidence
+#: model is keyed to, and `template_version` is the product version an operator
+#: quotes. Replacing the ordinal would cost a session and buy a number already
+#: published under another name.
+#:
+#: **And moving it is what D719 was waiting for.** `bin/write-session-evidence.py`
+#: held `1 <= session <= 12` as a literal -- correct at every check for twelve
+#: sessions, because the number it named and the number it meant were the same
+#: one. It derives from here now, and so does its `--help`.
+CURRENT_SESSION = 13
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

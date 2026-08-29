@@ -1753,3 +1753,69 @@
   description: >-
     A developer who did not build the primitive completes the documented path
     without source edits or undocumented commands.
+
+# ---------------------------------------------------------------------------
+# Session 13 — release identity and the upgrade path
+#
+# Each of these carries BOTH halves, because "the validator refuses" and "the
+# host runs that validator" are different guarantees measured in different
+# places (D70, D478, ADR 0089). The offline half runs in a checkout; the live
+# half is gated on APG_LIVE_HOST and skips until a trip.
+# ---------------------------------------------------------------------------
+
+- id: REL-VER-001
+  priority: P0
+  target_session: 13
+  test_nodeids:
+    - tests/contract/test_compatibility.py::test_an_accepted_version_round_trips
+    - tests/contract/test_compatibility.py::test_a_refused_version_raises_rather_than_normalising
+    - tests/contract/test_compatibility.py::test_the_measurement_the_adr_rests_on_is_still_true
+    - tests/deployment/test_session13_upgrade_plan.py::test_the_installed_version_is_machine_readable
+  description: >-
+    The platform version is semver, parsed by this release rather than by a
+    PEP 440 parser that rewrites it, and the version a deployed project runs is
+    machine-readable from the host without changing anything.
+
+- id: REL-COMPAT-001
+  priority: P0
+  target_session: 13
+  test_nodeids:
+    - tests/contract/test_compatibility.py::test_an_unclassified_change_raises_rather_than_defaulting_to_patch
+    - tests/contract/test_compatibility.py::test_the_largest_change_decides
+    - tests/contract/test_upgrade_plan.py::test_a_patch_bump_cannot_carry_a_change_that_needs_minor
+    - tests/contract/test_upgrade_plan.py::test_an_upgrade_that_moves_the_operators_inputs_is_blocked
+    - tests/contract/test_upgrade_command.py::test_an_insufficient_bump_is_refused_before_anything_is_written
+    - tests/contract/test_upgrade_command.py::test_a_moved_operator_input_is_refused_before_anything_is_written
+    - tests/deployment/test_session13_upgrade_plan.py::test_an_incompatible_candidate_is_refused_before_anything_changes
+  description: >-
+    An incompatible manifest, capability or secret-format change is refused
+    before any mutation, and the refusal is proved against the tree as well as
+    the exit code. See ADR 0162.
+
+- id: REL-PLAN-001
+  priority: P0
+  target_session: 13
+  test_nodeids:
+    - tests/contract/test_upgrade_plan.py::test_a_missing_installed_document_is_undetermined_and_blocks
+    - tests/contract/test_upgrade_plan.py::test_a_deployed_document_on_either_side_is_undetermined
+    - tests/contract/test_upgrade_plan.py::test_every_non_ok_plan_says_why
+    - tests/contract/test_upgrade_command.py::test_no_verb_writes_even_on_the_happy_path
+    - tests/deployment/test_session13_upgrade_plan.py::test_a_plan_is_produced_without_changing_the_deployment
+  description: >-
+    A deployed project produces a complete upgrade plan without changing its
+    deployment, and a comparison that could not be made is undetermined rather
+    than reported as no changes.
+
+- id: REL-CLI-001
+  priority: P0
+  target_session: 13
+  test_nodeids:
+    - tests/contract/test_apg_dispatcher.py::test_every_shell_command_in_bin_is_reachable_as_a_verb
+    - tests/contract/test_apg_dispatcher.py::test_a_command_added_to_bin_becomes_a_verb_with_nothing_edited
+    - tests/contract/test_apg_dispatcher.py::test_a_verbs_exit_code_reaches_the_caller_unchanged
+    - tests/contract/test_apg_dispatcher.py::test_a_name_that_is_not_a_verb_is_refused_by_the_pattern
+    - tests/deployment/test_session13_upgrade_plan.py::test_the_front_door_reaches_the_verb_and_adds_nothing
+  description: >-
+    Every operator command is reachable through one front door whose verb set is
+    derived rather than kept, which refuses a name before it becomes a path and
+    adds no path, privilege or exit code of its own.

@@ -158,12 +158,12 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
 
 Each mode writes one evidence half. Session 7 needs BOTH -- three of its claims
 are measured from off-host -- so merge them with:
-  python bin/write-session-evidence.py --session 6 \
+  python bin/write-session-evidence.py --session 7 \
     --host-input evidence/session-07-host.json \
     --external-input evidence/session-07-external.json \
     --output evidence/session-07.json
 
-This command verifies and never deploys. Use ./deploy.sh --through-session 6
+This command verifies and never deploys. Use ./deploy.sh --through-session 7
 to deploy, then run this to find out whether it worked.
 USAGE
 }

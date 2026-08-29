@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 121 requirements**
+**P0 — 125 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -213,6 +213,10 @@ Priorities:
 | `DEP-ISO-001` | 12 | Two projects on one host share no state or authority; shared provider accounts are permitted, shared project scope is not. |
 | `DEP-REMOVE-001` | 12 | Removing one project does not affect another. |
 | `DX-001` | 12 | A developer who did not build the primitive completes the documented path without source edits or undocumented commands. |
+| `REL-CLI-001` | 13 | Every operator command is reachable through one front door whose verb set is derived rather than kept, which refuses a name before it becomes a path and adds no path, privilege or exit code of its own. |
+| `REL-COMPAT-001` | 13 | An incompatible manifest, capability or secret-format change is refused before any mutation, and the refusal is proved against the tree as well as the exit code. See ADR 0162. |
+| `REL-PLAN-001` | 13 | A deployed project produces a complete upgrade plan without changing its deployment, and a comparison that could not be made is undetermined rather than reported as no changes. |
+| `REL-VER-001` | 13 | The platform version is semver, parsed by this release rather than by a PEP 440 parser that rewrites it, and the version a deployed project runs is machine-readable from the host without changing anything. |
 
 **P1 — 6 requirements**
 

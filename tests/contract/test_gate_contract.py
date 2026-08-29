@@ -389,3 +389,100 @@ def test_the_evidence_writer_accepts_the_session_this_release_is() -> None:
     assert "between 1 and" not in result.stderr, (
         f"the bound refused the session this release IS:\n{result.stderr}"
     )
+
+
+# ---------------------------------------------------------------------------
+# The prose a gate says out loud (D703, D751)
+# ---------------------------------------------------------------------------
+
+#: Every per-session gate.
+SESSION_GATES = sorted((REPO_ROOT / "bin").glob("session-[0-9][0-9]-check.sh"))
+
+#: A session number an operator is told to TYPE: an evidence filename, a
+#: `--session N`, or a `--through-session N`.
+#:
+#: Deliberately not "any mention of a session". A gate legitimately says *"Session
+#: 10 releases no migration"* -- a fact about history that does not move. What it
+#: must never do is hand an operator a command carrying another session's number,
+#: and those have a shape: they are arguments and filenames.
+TYPED_SESSION_NUMBER = re.compile(
+    r"""
+    (?:
+        evidence/session-(\d\d)          # evidence/session-10.json
+      | --session\s+(\d+)                # --session 10
+      | --through-session\s+(\d+)        # --through-session 10
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+def _gate_session(path: Path) -> int:
+    match = re.search(r"session-(\d\d)-check\.sh$", path.name)
+    assert match, path
+    return int(match.group(1))
+
+
+@pytest.mark.parametrize("gate", SESSION_GATES, ids=lambda path: path.name)
+def test_a_gate_hands_the_operator_no_other_sessions_number(gate: Path) -> None:
+    """D703, and D751 is the same loss two derivations later.
+
+    D703 found two lines a gate PRINTS still naming Session 10, and repaired
+    them by hand. Deriving the Session 13 gate found the whole class again:
+    around thirty stale references, including a merge example telling an
+    operator to write **`evidence/session-10.json` from a Session 12 run**. An
+    operator who copied it would have overwritten an earlier session's evidence
+    with this one's, and both commands would have exited 0.
+
+    **Care did not prevent it and will not.** So the numbers an operator is told
+    to type are interpolated from `${SESSION}` rather than written, and this
+    refuses a literal.
+
+    Scoped to arguments and filenames on purpose. A gate saying *"Session 10
+    releases no migration"* is stating a fact about history, and a guard that
+    flagged it would be wrong about every gate that explains its inheritance.
+    """
+    session = _gate_session(gate)
+    offenders: list[str] = []
+
+    for number, line in enumerate(gate.read_text(encoding="utf-8").splitlines(), start=1):
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            continue
+        for match in TYPED_SESSION_NUMBER.finditer(stripped):
+            found = next(group for group in match.groups() if group is not None)
+            if int(found) != session:
+                offenders.append(f"{gate.name}:{number}  {stripped[:88]}")
+
+    assert not offenders, (
+        f"this gate hands an operator session numbers that are not its own "
+        f"({session}); interpolate ${{SESSION}} instead:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_prose_scan_can_tell_a_typed_number_from_a_historical_one() -> None:
+    """The control, and it fails in both directions (D694, D746).
+
+    A scan matching nothing would report every gate clean forever. A scan
+    matching every mention would be wrong about the gates that explain what they
+    inherited -- and would have to be weakened with exemptions, which is how a
+    guard becomes a guard about its exemptions.
+    """
+    assert SESSION_GATES, "no session gates found; the scan is reading nothing"
+
+    for typed in (
+        "--host-input evidence/session-10-host.json",
+        "python bin/write-session-evidence.py --session 10",
+        "Use ./deploy.sh --through-session 10",
+    ):
+        assert TYPED_SESSION_NUMBER.search(typed), f"the scan misses a typed number: {typed!r}"
+
+    for historical in (
+        "# Session 10 releases NO migration -- Run 5 measured that",
+        "backups are not enabled. Every Session 10 project needs one.",
+        "inherited from Sessions 4-9 are measured from off-host",
+        'printf "--session %s" "${SESSION}"',
+    ):
+        assert not TYPED_SESSION_NUMBER.search(historical), (
+            f"the scan flags a historical statement: {historical!r}"
+        )

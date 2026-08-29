@@ -1,40 +1,47 @@
 #!/usr/bin/env bash
 #
-# The Session 12 gate: two projects on one host sharing no state or authority,
-# a removal scoped to one project, and the reuse claims -- a fresh host, and a
-# developer who did not build this. It does not replace bin/session-01-check.sh,
-# which must still exit 0, nor the Session 2-11 gates, which still own their own
-# sessions' verdicts.
+# The Session 13 gate: the first Stage 2 release. Release identity, the upgrade
+# path, and one front door over the commands that already exist. It does not
+# replace bin/session-01-check.sh, which must still exit 0, nor the Session 2-12
+# gates, which still own their own sessions' verdicts.
 #
-# **Derived from bin/session-11-check.sh by diff, not retyped** (D505, D507,
-# D678, and D693 in this session -- where the README itself passed
-# `--through-session 10` on a Session 11 release, and a topic guide named
-# `bin/deploy.sh`, which has never existed). `readonly SESSION=12` is the only
-# session literal; everything else that differs is a named substitution, and
-# everything unnamed is Session 11's byte for byte.
+# **Derived from bin/session-12-check.sh by diff, not retyped** (D505, D507,
+# D678, D693, D703). `readonly SESSION=13` is the only session literal;
+# everything else that differs is a named substitution, and everything unnamed is
+# Session 12's byte for byte.
+#
+# **And the derivation was worse than D703 recorded.** D703 found two lines the
+# gate PRINTS still saying Session 10, two derivations after the fact. Deriving
+# this one found the same rot through the whole comment header, the whole usage
+# text and the merge example -- around thirty references to Sessions 10 and 11
+# in a gate that had been Session 12's for a full release. **Nothing diffs the
+# prose a gate carries**, which is why this header was rewritten rather than
+# patched, and why every `Session N` below names a session on purpose.
 #
 # Three modes, and the shape is Session 5's deliberately (D221). Five sessions
 # of runbooks have proposed a gate that takes manifests and five gates have
 # implemented one that takes deployed documents: a gate over manifests measures
 # what was asked for, and a gate over deployed documents measures what happened.
 #
-#   --mode offline    a checkout: everything Session 11 checked, plus the
-#                     documented path -- every command it names exists and is
-#                     executable, every session number it passes is one this
-#                     release accepts, and no step asks a reader to edit a file
-#                     this repository ships.
-#   --mode host       the deployment host: the two-project isolation matrix,
-#                     which asserts what is ALLOWED to be shared before it
-#                     asserts what is not, and the reuse claims when their
-#                     declarations are supplied.
-#   --mode external   a different network: what a stranger reaches. Session 12
-#                     adds no external claim of its own -- isolation, removal and
-#                     reuse are all measured from the host or from a record --
-#                     and it still needs this mode, for the reason below.
+#   --mode offline    a checkout: everything Session 12 checked, plus Session
+#                     13's own offline halves -- the semver grammar and what a
+#                     bump permits (ADR 0162), an incompatible change refused
+#                     BEFORE anything is written, and a front door whose verb set
+#                     is derived rather than kept.
+#   --mode host       the deployment host: `upgrade check` and `upgrade plan`
+#                     against a live project, each asserting the deployment is
+#                     unchanged afterwards. **This session mutates nothing on the
+#                     host** -- its whole subject is the plan that precedes a
+#                     mutation.
+#   --mode external   a different network: what a stranger reaches. Session 13
+#                     adds no external claim of its own -- release identity, the
+#                     plan and the dispatcher are measured in a checkout or on
+#                     the host -- and it still needs this mode, for the reason
+#                     below.
 #
-# **Session 12's own claims are `host` and offline.** The gate still has three modes
-# because `claims_through_session(11)` is CUMULATIVE: a Session 11 document must
-# answer for the external claims inherited from Sessions 4-9, including
+# **Session 13's own claims are `host` and offline.** The gate still has three
+# modes because `claims_through_session(13)` is CUMULATIVE: a Session 13 document
+# must answer for the external claims inherited from Sessions 4-9, including
 # `public_agent_boundary`, and the writer refuses a document silent about a
 # claim. A two-mode gate here would have written one, quietly. Run both, merge.
 #
@@ -121,7 +128,7 @@ cd "${ROOT_DIR}"
 
 readonly EVIDENCE_DIR="${ROOT_DIR}/evidence"
 
-readonly SESSION=12
+readonly SESSION=13
 # Derived from SESSION rather than written out, and defined AFTER it. Session
 # 5's copy of this file carries the reason: every other `session-04` in it was
 # renamed when it was copied, and these two were built by concatenating a
@@ -153,8 +160,8 @@ KEYWORD=""
 
 usage() {
   cat <<'USAGE'
-Usage: bin/session-12-check.sh --mode offline
-       sudo bin/session-12-check.sh --mode host --host host.yaml \
+Usage: bin/session-13-check.sh --mode offline
+       sudo bin/session-13-check.sh --mode host --host host.yaml \
             --project-a-outputs /etc/agentic-postgres/projects/alpha-dev/outputs.json \
             --project-b-outputs /etc/agentic-postgres/projects/beta-dev/outputs.json \
             --admin-password-file /root/alpha-dev-administrator \
@@ -172,7 +179,7 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
   DERIVE the sentinel path, never type it: the generation directory changes on
   every start, so a hard-coded one silently names a superseded generation and
   the scan then fails to find what it planted.
-       bin/session-12-check.sh --mode external --public-ipv4 ADDR \
+       bin/session-13-check.sh --mode external --public-ipv4 ADDR \
             --project-a-outputs FILE --ssh-destination op@HOST \
             [--public-ipv6 ADDR] [--project-b-outputs FILE] [-k EXPRESSION]
 
@@ -263,22 +270,34 @@ BEFORE host mode, in this order, once per project:
      Until this runs the document says `awaiting_first_backup` and the drill has
      nothing to restore. This gate refuses to start without it.
 
-Each mode writes one evidence half. Session 11 needs BOTH -- the external claims
-inherited from Sessions 4-9 are measured from off-host -- so merge them with:
-  python bin/write-session-evidence.py --session 12 \
-    --host-input evidence/session-12-host.json \
-    --external-input evidence/session-12-external.json \
-    --output evidence/session-12.json
-
-This command verifies and never deploys. Use ./deploy.sh --through-session 12
-to deploy, then run this to find out whether it worked.
 USAGE
+
+  # **Derived, because this is the half that keeps going stale** (D703, and
+  # D751 in this session). The block above is a quoted heredoc, so a session
+  # number written inside it cannot interpolate -- and three derivations running,
+  # the merge example told an operator to write `evidence/session-10.json` from a
+  # Session 12 gate. An operator who copied it would have overwritten an earlier
+  # session's evidence with this one's, and both commands would have exited 0.
+  #
+  # Every session number an operator is told to type now comes from ${SESSION}.
+  printf '\n'
+  printf 'Each mode writes one evidence half. Session %s needs BOTH -- the external\n' "${SESSION}"
+  printf 'claims inherited from Sessions 4-9 are measured from off-host -- so merge\n'
+  printf 'them with:\n'
+  printf '  python bin/write-session-evidence.py --session %s \\\n' "${SESSION}"
+  printf '    --host-input evidence/session-%02d-host.json \\\n' "${SESSION}"
+  printf '    --external-input evidence/session-%02d-external.json \\\n' "${SESSION}"
+  printf '    --output evidence/session-%02d.json\n' "${SESSION}"
+  printf '\n'
+  printf 'This command verifies and never deploys. Use ./deploy.sh --through-session %s\n' \
+    "${SESSION}"
+  printf 'to deploy, then run this to find out whether it worked.\n'
 }
 
 die() {
   local code="$1"
   shift
-  printf 'session-12-check: %s\n' "$*" >&2
+  printf 'session-13-check: %s\n' "$*" >&2
   exit "$code"
 }
 
@@ -801,7 +820,7 @@ mode_offline() {
   "$(python_bin)" -m pytest -q tests/contract/test_acceptance_registry.py
   "$(python_bin)" bin/render-acceptance-matrix.py --check
 
-  printf '\n\033[1msession-12-check: offline PASSED\033[0m\n'
+  printf '\n\033[1msession-13-check: offline PASSED\033[0m\n'
 }
 
 mode_host() {
@@ -836,7 +855,7 @@ mode_host() {
   # administrator's password to hand is a legitimate run, and the claims it
   # cannot prove will report `not_run` -- which is the evidence model working.
   if [ -z "${ADMIN_PASSWORD_FILE}" ]; then
-    printf 'session-12-check: no --admin-password-file, so the proofs needing an\n'
+    printf 'session-13-check: no --admin-password-file, so the proofs needing an\n'
     printf 'administrator session will skip and four claims will report not_run.\n'
   fi
 
@@ -896,7 +915,7 @@ mode_host() {
 
   if ! evidence_is_supportable; then
     announce_no_evidence
-    printf '\n\033[1msession-12-check: host PASSED\033[0m\n'
+    printf '\n\033[1msession-13-check: host PASSED\033[0m\n'
     return 0
   fi
 
@@ -906,8 +925,8 @@ mode_host() {
   step "7. Host evidence"
   write_evidence host
 
-  printf '\n\033[1msession-12-check: host PASSED\033[0m\n'
-  printf 'This is one half. Session 12 also needs --mode external; see --help.\n'
+  printf '\n\033[1msession-13-check: host PASSED\033[0m\n'
+  printf 'This is one half. Session %s also needs --mode external; see --help.\n' "${SESSION}"
 }
 
 mode_external() {
@@ -927,7 +946,7 @@ mode_external() {
   # operator -- so it is stated rather than checked, and the suite carries its
   # own positive control: 443 must answer, or every "closed" result below is a
   # statement about this network rather than about the host.
-  printf 'session-12-check: this mode is only meaningful from a network that is\n'
+  printf 'session-13-check: this mode is only meaningful from a network that is\n'
   printf 'not the deployment host. A scan run on the host measures its own\n'
   printf 'routing table -- and the agent plane'"'"'s health routes answer 200 there,\n'
   printf 'which is exactly the difference this mode exists to observe.\n'
@@ -947,7 +966,7 @@ mode_external() {
 
   if ! evidence_is_supportable; then
     announce_no_evidence
-    printf '\n\033[1msession-12-check: external PASSED\033[0m\n'
+    printf '\n\033[1msession-13-check: external PASSED\033[0m\n'
     return 0
   fi
 
@@ -957,8 +976,8 @@ mode_external() {
   step "4. External evidence"
   write_evidence external
 
-  printf '\n\033[1msession-12-check: external PASSED\033[0m\n'
-  printf 'This is one half. Session 12 also needs --mode host; see --help.\n'
+  printf '\n\033[1msession-13-check: external PASSED\033[0m\n'
+  printf 'This is one half. Session %s also needs --mode host; see --help.\n' "${SESSION}"
 }
 
 main() {

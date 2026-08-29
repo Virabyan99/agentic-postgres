@@ -828,6 +828,11 @@ CLAIM_INTRODUCED_IN = {
     # forward would leave that true while looking closed. Measured first: all
     # three sessions already carry claims, so each already runs the claims path
     # in the mode these need.
+    # Session 13.
+    "release_version": 13,
+    "upgrade_compatibility": 13,
+    "upgrade_plan": 13,
+    "operator_front_door": 13,
     "document_kinds": 2,
     "provider_convergence": 2,
     "release_immutability": 2,

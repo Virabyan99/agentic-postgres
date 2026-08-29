@@ -16,13 +16,14 @@ repeat them.
 ## Status — read this first
 
 ```
-SESSION 13 IS OPEN.  Runs 1-6 done. Runs 7-9+ ahead.
+SESSION 13 IS OPEN.  Runs 1-7 done. Run 8, then the host trip.
 HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
-CURRENT_SESSION 12, and it moves to 13 in Run 7 -- ALL-OR-NOTHING (D690).
-template_version 0.1.0-dev -> 0.2.0, Run 7.
-divergences     D719-D750 recorded here. **Next free: D751.**
+CURRENT_SESSION **13**, moved in Run 7 with all four REL-* activated (D690).
+template_version **0.2.0**, moved in the same commit (ADR 0162).
+divergences     D719-D753 recorded here. **Next free: D754.**
 ADRs            **162**, 0162 written in Run 3. Next free: 0163.
-gate            session-13-check.sh, derived BY DIFF from session-12's (Run 7).
+gate            session-13-check.sh written, registered, shellcheck clean.
+                Full suite: **4499 passed, 294 skipped, 0 failed.**
 host            One trip, READ-ONLY. Runs 9+.
 ```
 
@@ -75,7 +76,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D751.**
+**Next free number after this table is D754.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -111,6 +112,9 @@ the runs follow the same rule (D267).
 | **D748** | D721 said the two dual-mode requirements are *"split where the measurement is, or they stay in the register"*, with ADR 0045's `direct_transport`/`transport_boundary` split as the precedent. | **The precedent does not reach them, and the reason is mechanical.** ADR 0045 split a *drafted claim over four requirements* into two claims over two requirements each — it worked because the halves were **separate requirements**. `OPS-HEALTH-001` and `SEC-TLS-001` are **one requirement each**, whose own node ids span both modes. And `claim_nodeids` resolves a claim through `CLAIMS[claim]` → `requirement_nodeids`: **a claim names requirements, never node ids**, so there is no subset to claim. | **Both stay in the register**, with the mechanism recorded rather than the intention. Splitting them means splitting the **requirement**, which renumbers a Session 2 contract. | **A precedent that fits the shape of a problem is not the same as one that fits its mechanism.** The split that worked was available because somebody had already written two requirements; here nobody has, and doing it now is a registry change with a blast radius no part of Run 6 needs. **The register is now a list of reasons rather than a list of names**, which is the difference between a debt and an unread note. | 0045 |
 | **D749** | The register's guard checks two things: a registered requirement in no claim, and an entry naming a requirement the registry no longer has — *"a debt register that outlives its debt hides the next one."* | **A requirement in BOTH was caught by neither.** `orphaned = registered - claimed - UNCLAIMED_BY_HISTORY` and `stale = UNCLAIMED_BY_HISTORY - registered` leave the intersection of *claimed* and *registered-as-unclaimed* entirely unexamined. **Measured by the battery**: retrofitting `SEC-LOG-001` into a claim while leaving its register entry behind **passed silently**. | **A third assertion**, `UNCLAIMED_BY_HISTORY & claimed`, with the reason attached. All four mutations then die. | **It is the guard's own sentence on the axis the guard does not look at.** A settled debt left in the register makes the list unreadable as a statement of what is missing — which matters most in exactly the run that settles thirteen of them. **The battery asked for it**: this was written because a mutation survived, not because anybody read the guard and noticed. | — |
 | **D750** | Run 6's plan: group the orphans into claims, and the risk is doing it carelessly (D696 — a claim accidentally moved to a later session). | **The opposite risk was the live one, and the measurement is what showed it.** Dating the retrofitted claims to **Session 13** would have been the careless move: their requirements have not moved, so a Session 13 claim would leave Session 2's evidence permanently silent about its own host **while the register looked closed**. Dated correctly to 2, 3 and 4 they cost those gates nothing — measured first: all three already carry claims (2, 4 and 5), so each already runs the claims path in the `host` mode the new ones need. | **Thirteen claims dated 2, 3 and 4.** Session 2's evidence goes from 2 claims to 9; the document now reports **103 of 127** requirements, up from 90. | **D696 is about a claim moving forward by accident; this is about one being *placed* forward on purpose, for tidiness.** Both end with a guarantee excused from the sessions that should have made it. The difference is that the accident had a guard and the tidy version would not have — nothing refuses a new claim dated to the current session. | 0039, 0089 |
+| **D751** | D703 found **two** printed lines in the Session 12 gate still saying *"Session 10 also needs `--mode external`"*, repaired them, and called the class unguarded. | **The rot went far past two lines, and the merge example was the dangerous part.** Deriving the Session 13 gate found ~30 references to Sessions 10 and 11 through the header, the usage text and the body of a gate that had been Session 12's for a full release — including a `--help` telling an operator to run `write-session-evidence.py --session 10 --output evidence/session-10.json` **from a Session 12 run**. An operator who copied it overwrites an earlier session's evidence with this one's, **and both commands exit 0**. Measured across every gate: **session-07, session-11 and session-12 all carried it**, twelve typed numbers in total. | **Two repairs, and they differ on purpose.** Session 13's gate **derives** every number an operator is told to type from `${SESSION}` — the usage heredoc is quoted, so those lines moved out of it into `printf`. The three released gates have their literals **corrected** rather than restructured: they are shipped artefacts whose behaviour a suite already asserts, and the new guard catches a recurrence in any of them. | **Care did not prevent this and will not.** D505, D507, D678, D693, D703 and now this are one loss six times; the fifth instance was repaired by reading carefully, and the sixth arrived in the very next derivation. **The guard is scoped to what is exactly decidable** — a session number an operator is told to *type*: an evidence filename, a `--session N`, a `--through-session N`. A gate saying *"Session 10 releases no migration"* is stating history, and a guard that flagged it would need exemptions, which Run 5 taught is how a guard becomes a guard about its exemptions. | — |
+| **D752** | D719's class — a typed session ceiling — was repaired in `bin/write-session-evidence.py` and guarded across `bin/*.py` in Run 2. | **Two more members were in `tests/`, which the guard's scope never covered**, and the bump is what surfaced them: `test_acceptance_registry.py` held `assert 1 <= entry["target_session"] <= 12`, and `test_documentation_index.py` matched `Session (\d+) of 12 implemented`. Both were correct for twelve sessions for the same reason the first was. **A fourth literal was in `ID_PATTERN`** — the requirement-prefix enumeration, which had no `REL`. | The registry bound **derives from `CURRENT_SESSION`**. The README pattern drops `of 12` entirely rather than becoming `of 18`: **the total is the next stage's business, and the number that can disagree with the release is the one worth checking.** `REL` joins the prefix enumeration, which stays enumerated (ADR 0006 — a pattern accepting any uppercase word would accept a typo as a family). | **The scan Run 2 wrote could not have caught these even in scope**, because it matches a literal equal to `CURRENT_SESSION` and both said `12` while the constant said `12`. **What caught them was the bump itself**, loudly, which is the behavioural half Run 2 named as load-bearing when it documented that the scan goes quiet. The apparatus worked; the part that worked was the part not written as a scan. | 0002, 0006 |
+| **D753** | Run 7 activates four `REL-*` requirements, and a claim needs a live proof in exactly one mode — so each needs a host-gated test, which needs an environment variable to gate on (D687: a variable no gate exports is a proof that can only skip). | **No new variable was needed, and the reason is ADR 0158.** The live halves take the project key from the **deployed document** — read for identity and nothing else — so `APG_LIVE_HOST` and `APG_PROJECT_A_OUTPUTS` already gate them. The *installed* rendered document, which is what the plan actually compares, is found by `deployed_output.rendered_path(key)` from that key. | Four live proofs in `tests/deployment/test_session13_upgrade_plan.py`, gated on the two existing variables, each asserting **the deployment is unchanged afterwards**. | **The obvious design was a variable pointing at the installed rendered document**, and it would have been a second address for something already derivable — ADR 0002 at the environment layer, and a new entry in a roster D687 exists to keep honest. *The deployed document is the address book* did the work instead. | 0158, 0002, D687 |
 
 ---
 
@@ -494,18 +498,45 @@ checking the growth was intended. It now derives both boundaries from the
 independent sources rather than the self-comparison that roster's own docstring
 warns against.
 
-### Run 7 — The bump
+### Run 7 — The bump — **Done.**
 
-`CURRENT_SESSION` 13, `VERSION` 0.2.0, every `REL-*` placeholder activated, and
-`bin/session-13-check.sh` **derived by diff** from Session 12's — registered in
-`SHELL_COMMANDS`, and **its printed prose read line by line**. D505, D507, D678,
-D693 and D703 are five instances of one loss; D703's half — *the prose a gate says
-out loud* — is still unguarded, and Session 12's external mode printed *"Session
-10 also needs `--mode external`"* at the end of the run that produced its
-evidence.
+**`CURRENT_SESSION` 13 and `VERSION` 0.2.0, in one commit, with all four `REL-*`
+requirements activated** (D690). Four claims — `release_version`,
+`upgrade_compatibility`, `upgrade_plan`, `operator_front_door` — each with an
+offline half that runs in a checkout and a live half gated on `APG_LIVE_HOST`.
+`bin/session-13-check.sh` written, registered, shellcheck clean.
+**Full suite: 4,499 passed, 294 skipped, 0 failed.**
 
-`pytest -m future` goes back to selecting something, so D695's branch flips: the
-assertion already handles both sides and this run confirms it does.
+**Retrospective — the bump's whole value was what it broke.**
+
+**D751: D703's class was six times worse than D703 found it.** Deriving this gate
+turned up ~30 stale references in Session 12's, including a `--help` telling an
+operator to run `write-session-evidence.py --session 10 --output
+evidence/session-10.json` **from a Session 12 run** — which overwrites an earlier
+session's evidence with this one's, both commands exiting 0. **Measured across
+every gate: session-07, session-11 and session-12 all carried it**, twelve typed
+numbers. The new gate now *derives* every number an operator is told to type; the
+three released ones had theirs corrected; and **the guard D703 asked for exists**,
+scoped to what is exactly decidable — an evidence filename, a `--session N`, a
+`--through-session N`. It found all three on its first run.
+
+**D752: D719's class had two more members in `tests/`**, outside Run 2's
+`bin/*.py` scope — the registry's `<= 12` bound and the README's `of 12` pattern.
+**Run 2's scan could not have caught them even in scope**, because it matches a
+literal equal to `CURRENT_SESSION` and both said 12 while the constant said 12.
+What caught them was the bump itself, loudly. **The apparatus worked, and the
+part that worked was the part not written as a scan** — which is what Run 2's own
+note predicted when it called the behavioural test load-bearing.
+
+**D753: no new environment variable was needed**, and the obvious design would
+have added one. The live halves take the project key from the deployed document —
+read for identity and nothing else — and find the installed rendered document by
+deriving from it. *The deployed document is the address book* (ADR 0158) did the
+work that a second address would have done worse.
+
+**`pytest -m future` still selects nothing**, and D695's branch handles it: this
+session activated its requirements directly rather than staging placeholders, so
+the empty case the guard learned to assert in Session 12 remains the true one.
 
 ### Run 8 — Housekeeping
 

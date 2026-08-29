@@ -251,12 +251,12 @@ BEFORE host mode, in this order, once per project:
 
 Each mode writes one evidence half. Session 11 needs BOTH -- the external claims
 inherited from Sessions 4-9 are measured from off-host -- so merge them with:
-  python bin/write-session-evidence.py --session 10 \
-    --host-input evidence/session-10-host.json \
-    --external-input evidence/session-10-external.json \
-    --output evidence/session-10.json
+  python bin/write-session-evidence.py --session 11 \
+    --host-input evidence/session-11-host.json \
+    --external-input evidence/session-11-external.json \
+    --output evidence/session-11.json
 
-This command verifies and never deploys. Use ./deploy.sh --through-session 10
+This command verifies and never deploys. Use ./deploy.sh --through-session 11
 to deploy, then run this to find out whether it worked.
 USAGE
 }

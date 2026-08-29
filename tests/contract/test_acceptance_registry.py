@@ -30,7 +30,10 @@ REGISTRY = REPO_ROOT / "tests" / "acceptance-registry.yaml"
 THREAT_MODEL = REPO_ROOT / "docs" / "threat-model.md"
 
 VALID_PRIORITIES = {"P0", "P1", "P2"}
-ID_PATTERN = re.compile(r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX)-[A-Z0-9]+(-\d+)?$")
+#: `REL` joined in Session 13 — release identity, the upgrade path, and the
+#: operator front door. Enumerated rather than patterned, for ADR 0006's reason:
+#: a rule that accepted any uppercase word would accept a typo as a new family.
+ID_PATTERN = re.compile(r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL)-[A-Z0-9]+(-\d+)?$")
 
 
 def strip_parameters(node_id: str) -> str:
@@ -110,7 +113,12 @@ def test_every_entry_has_complete_metadata(registry: list[dict[str, Any]]) -> No
         )
         assert entry["priority"] in VALID_PRIORITIES, entry["id"]
         assert isinstance(entry["target_session"], int), entry["id"]
-        assert 1 <= entry["target_session"] <= 12, entry["id"]
+        # **The ceiling is derived, and it was a literal `12` until Session 13.**
+        # D719's class, third instance: the evidence writer held the same bound,
+        # and Run 2's scan covered `bin/*.py` and not `tests/`. Nothing was wrong
+        # while the number it named and the number it meant coincided; the bump
+        # is what separated them, and this assertion is what said so.
+        assert 1 <= entry["target_session"] <= CURRENT_SESSION, entry["id"]
         assert entry["description"].strip(), f"{entry['id']} has no description"
 
 

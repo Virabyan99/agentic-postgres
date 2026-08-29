@@ -167,8 +167,14 @@ def test_the_readme_states_the_session_the_release_implements(readme: str) -> No
     # when the code lands, which is before the host evidence is published.
     # "Complete" conflated the two, and the assertion below is unchanged: one
     # number, and it must equal `CURRENT_SESSION`.
-    match = re.search(r"Session (\d+) of 12 implemented", readme)
-    assert match, "the README has no 'Session N of 12 implemented' status line"
+    # **`of 12` was a typed total and Session 13 outlived it.** Stage 1 ran to
+    # twelve and the phrase was true for all of it; Stage 2 runs 13-18, so a
+    # status line reading "Session 13 of 12" is nonsense, and "of 18" would
+    # encode the next stage's length into a guard with no business knowing it.
+    # What this checks is the number that can disagree with the release. D719's
+    # class again: a literal that was right until the world gained a case.
+    match = re.search(r"Session (\d+) implemented", readme)
+    assert match, "the README has no 'Session N implemented' status line"
     stated = int(match.group(1))
     assert stated == CURRENT_SESSION, (
         f"the README says Session {stated} is complete and CURRENT_SESSION is "
