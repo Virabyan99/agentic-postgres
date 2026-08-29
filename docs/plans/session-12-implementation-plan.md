@@ -64,7 +64,7 @@ and that is a question about a person, not a project count.
 
 Six columns, the house shape. Rows are measured facts, not predictions.
 
-**Next free number after this table is D695.**
+**Next free number after this table is D697.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -74,6 +74,8 @@ Six columns, the house shape. Rows are measured facts, not predictions.
 | **D692** | This plan's Run 2: `DEP-REMOVE-001`'s offline half asserts that every removal path is scoped by derivation and that `--destroy` refuses without a matching `--confirm`. Read as four new tests. | **Three of the four already exist**, in `tests/contract/test_bootstrap_state.py`: `test_state_paths_are_project_scoped`, `test_state_may_not_name_another_projects_credential_directory` (*"would make one project authenticate as another"*) and `test_a_managed_client_secret_without_an_id_is_rejected` (*"falling back to a name lookup is how one project deletes another's"*). Writing them again would be a second, weaker claim about one property. **And the confirmation refusal is unreachable in a checkout**: measured, `bootstrap-providers.sh --destroy` answers exit **3** (*requires root*) before it ever reads `--confirm`, so a behavioural test of it would pass on the root check while believing it measured a confirmation. | **The registry points at the three that exist**, and the one genuine gap is closed: `test_project_mode_refuses_volume_removal`. Edge mode had a refusal test since Session 2; **project mode — the one holding customer data — had none.** | **The argument order is load-bearing and was measured, not assumed.** `--runtime` triggers its root check the moment it is parsed, so `--runtime down --volumes` answers exit 3 unprivileged and never reaches the refusal; `--volumes --runtime down` reaches it at exit 2. A privileged caller reaches it in any order, which is the case that matters. **The battery's arm B is that ordering**, and it fails — so a test written the natural way cannot quietly pass on the wrong exit code. The rig that established this produced a **false control** first (`--edge down --volumes` returned exit 2 for a missing `--host`, not the refusal), which is D509 inside the measurement of D692. | — |
 | **D693** | This plan's Run 3: `DX-001`'s offline half proves *"every command the documented path names exists and resolves"* — expected to pass, since the path had been rewritten in Session 11 Run 7 and rehearsed on a fresh machine in Run 8. | **Four defects on the proof's first execution.** `README.md` — the `DX-001` path itself — passed **`--session 10` and `--through-session 10` on a Session 11 release**. `docs/api-operations.md` passed `5` in four places and `docs/pool-operations.md` `4`. And `docs/backup-operations.md` named **`bin/deploy.sh`, which has never existed**: the renderer is `./deploy.sh` at the repository root, so a reader following that line gets *no such file*. | **All four repaired**, and the session-number check is the guard: any `--session N` in a document a reader is pointed at *now* must equal `CURRENT_SESSION`. Session-numbered operator guides are exempt and are not scanned — each describes its own release and rewriting its flags would destroy the record. | **This is D678's class a fourth time** (after D505 and D507), and the first time it has been caught by anything other than a person reading carefully. A stale session number is worse than a missing command: `deploy.sh` refuses a number **above** `CURRENT_SESSION` (D59) and accepts anything below it, so the command runs, exits 0, and deploys an earlier session. **Session 11 Run 8's rehearsal did not catch it** — it stopped at the host baseline and the edge plane, before any `--through-session` was passed. | — |
 | **D694** | This plan's Run 3, as written: four proofs for `DX-001`'s offline half, including *"no step requires editing a source file"* and *"the path stays within fewer than 15 operator steps."* | **Two of the four measured the wrong set, and neither miss was a defect in the documentation.** The edit check flagged `README.md`'s *"To change a dependency, edit `requirements-dev.in`"* — an instruction to somebody **developing the template**, not deploying a project. The step bound scanned all eight documents and reported **26**, counting `rotate-signing-key.sh` and `restore-test.sh`, which are documented operations rather than steps from a clone to a running deployment. | **The edit check exempts `requirements-dev.in` by name with its reason attached**, because a category-shaped exemption would be a loophole and one named file is a decision somebody can disagree with. **The bound is counted over the README's `## Deploying` section**, with its own control: a section that parsed to nothing would satisfy any bound. | **A bound applied to the wrong set is a bound about nothing, and it would have been "fixed" by raising the number** — which is how a specification's constraint quietly becomes whatever the artifact already does. The battery's arm C is the sharper version of the same lesson: with the command scan blinded, the command proof still reported `1 passed`. **A documentation test that reads nothing reports every document clean forever.** | — |
+| **D695** | `tests/contract/test_future_marker_policy.py`: *"no placeholder ever fails; it skips, and removing its marker activates it."* `test_all_future_tests_are_skipped_in_a_normal_run` asserts `pytest -m future` exits **0**. | **Exit 5 is the end state, and the test could not express it.** `pytest` returns 5 when it selects nothing, and activating the last four placeholders left the repository with **no `future` markers at all** — which is what finishing twelve sessions means. The assertion was right for every session with unwritten work and became wrong at the moment the work was finished. | **The assertion branches on the fact**, and asserts the empty case *as empty* rather than tolerating it: a run selecting nothing while markers still existed would be the test looking at the wrong tree. | A guard written across twelve sessions of always-having-placeholders had **no way to say "and now there are none."** It is a small instance of a large shape: an invariant that holds for every observed state can still be a description of the observations rather than of the system. | — |
+| **D696** | This plan's Run 4: *"claims in `evidence_claims.CLAIMS`… `DEP-ISO-001` extends the existing `isolation` claim rather than adding a fourth (ADR 0089 — a claim is a guarantee, not a file)."* | **The reasoning was appealing and the model refused it.** `claim_session` resolves a claim to the session that **introduced** it, so adding a Session 12 requirement to a Session 2 claim moved `isolation` from 2 to 12 — and `test_a_claim_resolves_to_the_session_that_introduced_it` caught it. A claim's session is not a label; it decides when the claim must first be proved, and retroactively moving one would excuse it from every session in between. | **`DEP-ISO-001` gets its own claim, `isolation_matrix`.** The same run also learned that the `DX-001` declaration needed `live_host`: without it, `documented_path` had **no live proof** — every test it named ran in a checkout — and the claims model refused the claim outright. | **Both corrections came from the model rather than from me**, and both were about the difference between a guarantee and where its proof lives. ADR 0089's rule is right and I applied it to the wrong axis: `isolation` and `isolation_matrix` are two guarantees, not one guarantee in two files. | — |
 
 ---
 
@@ -195,6 +197,31 @@ it.
    open item and Run 1's dry-run is not a substitute. Ship by `git bundle` under
    a per-release name, confirm `git rev-parse FETCH_HEAD` **before** the
    checkout (D504), then run all three modes and merge.
+
+**Done. Session 12 is open**: `CURRENT_SESSION = 12`, all four requirements
+activated, `session-01-check` PASSED at 4180 and **`session-12-check --mode
+offline` PASSED at 4272 passed / 3 skipped**.
+
+Three declarations, each admitting a proof of something that *happened*:
+`APG_FRESH_HOST_OUTPUTS`, `APG_REMOVED_PROJECT_FILE`, `APG_DX_RECORD_FILE`. Each
+live proof refuses a false declaration first — the fresh-host one refuses the
+production host's own document, the removal one refuses a record naming the
+project it reads to check survived, and the `DX-001` one refuses a record listing
+**a command the documentation does not name**.
+
+**The moment worth recording.** The bump made every documented session number
+stale, and the guard written in Run 3 an hour earlier caught it in the same gate
+run — all seven, plus the README's status line. D505, D507, D678 and D693 were
+each found by a person reading carefully, and each had already shipped. Here the
+number moved and **the tree refused to be green until the documentation moved
+with it.** That is the difference between repairing instances and writing the
+guard, and it is the first time this class has been caught by a test.
+
+**Two corrections came from the suite** (D695, D696), and both were mine.
+
+**What remains in Run 4: the host trip.** The isolation matrix has never
+executed. Run 1's dry-run against both deployed documents is not a substitute —
+CLAUDE.md's oldest open item is exactly the distance between those two things.
 
 ### Run 5 — scope closure
 
