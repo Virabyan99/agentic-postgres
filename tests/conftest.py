@@ -135,6 +135,14 @@ ENVIRONMENT_VARIABLES = (
     # skipped, and `deployment_convergence`, one of Session 11's own four
     # claims, was unproved by the gate that records it.
     "APG_REDEPLOY_BEFORE_FILE",
+    # Session 12. Three declarations of things that HAPPENED, which is why they
+    # are variables and not assertions: a host that started empty, a project an
+    # operator removed, and a developer who did not build this. Nothing in a
+    # repository can stand in for the third, and a test that tried would be
+    # measuring its own author.
+    "APG_FRESH_HOST_OUTPUTS",
+    "APG_REMOVED_PROJECT_FILE",
+    "APG_DX_RECORD_FILE",
 )
 
 

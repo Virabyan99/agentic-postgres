@@ -386,6 +386,29 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "deployment_convergence": ("DEP-002",),
     "operational_diagnosis": ("OPS-001",),
     "log_correlation": ("OPS-LOG-001",),
+    # Session 12 adds three, and every one is a claim whose live half is an
+    # operator declaration rather than an observation.
+    #
+    # **`DEP-ISO-001` joins `isolation` rather than founding a fourth isolation
+    # claim.** ADR 0089: a claim is a guarantee, not a file. `isolation` already
+    # answers "these two projects do not reach each other"; the matrix makes that
+    # answer complete by asserting what is ALLOWED to be shared, which is the
+    # half that was missing (D689). A separate claim would report the same
+    # guarantee twice and let one of them be green while the other was not.
+    #
+    # **`documented_path` and `fresh_host` are separate, and D119 is the rule.**
+    # "The path resolves and needs no source edit" and "a host that started empty
+    # reached a working deployment" are different guarantees, measured
+    # differently, failing for different reasons. One claim over both would be
+    # provable by neither half alone and reported as though it were.
+    #
+    # **Each will report `not_run` until its declaration is supplied**, and that
+    # is the intended state rather than a gap to be closed by weakening them:
+    # an offline half proves a path resolves, never that anybody walked it.
+    "isolation_matrix": ("DEP-ISO-001",),
+    "project_removal": ("DEP-REMOVE-001",),
+    "documented_path": ("DX-001",),
+    "fresh_host": ("DEP-001",),
 }
 
 #: Worst-first, so combining two observations of one test is a max().

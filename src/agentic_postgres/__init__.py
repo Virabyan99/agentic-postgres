@@ -59,7 +59,19 @@ from pathlib import Path
 #: `test_every_claim_belongs_to_a_session_the_release_has_reached` refuses a
 #: claim above it. Activation cannot precede the bump, and the trip cannot
 #: precede activation.
-CURRENT_SESSION = 11
+#:
+#: **Session 12 arms no new Compose profile and adds no service.** What it
+#: activates is the two-project isolation matrix, a removal scoped to one
+#: project, and the two reuse claims -- and moving this number is what lets the
+#: registry name their node ids at all.
+#:
+#: **The bump is all-or-nothing** (D690).
+#: `test_no_requirement_at_or_before_the_gate_session_remains_future` refuses any
+#: requirement due by now that is still a placeholder, so all four Session 12
+#: requirements stop being placeholders in the same commit that moves this. That
+#: is a decision about what those requirements MEAN, which is why it did not
+#: happen the first time it was attempted.
+CURRENT_SESSION = 12
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

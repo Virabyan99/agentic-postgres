@@ -804,6 +804,10 @@ CLAIM_INTRODUCED_IN = {
     "deployment_convergence": 11,
     "operational_diagnosis": 11,
     "log_correlation": 11,
+    "isolation_matrix": 12,
+    "project_removal": 12,
+    "documented_path": 12,
+    "fresh_host": 12,
 }
 
 

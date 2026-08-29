@@ -243,7 +243,22 @@ def test_no_placeholder_body_calls_skip(future_markers: dict[str, tuple[int, str
     assert not offenders, f"placeholders that skip instead of failing: {offenders}"
 
 
-def test_all_future_tests_are_skipped_in_a_normal_run() -> None:
+def test_all_future_tests_are_skipped_in_a_normal_run(
+    future_markers: dict[str, tuple[int, str]],
+) -> None:
+    """No placeholder ever fails; it skips, and removing its marker activates it.
+
+    **Exit 5 is the end state, not a failure** (D695). `pytest -m future` returns
+    5 when it selects nothing, and this asserted `0` — which was right for every
+    session that still had unwritten work and became wrong the moment Session 12
+    activated the last four placeholders. The repository has **no future markers
+    left**, which is what finishing the twelve sessions means.
+
+    So the assertion branches on the fact rather than assuming one side of it,
+    and the empty case is asserted as *empty* rather than tolerated: a run that
+    selected nothing while markers still existed would be this test looking at
+    the wrong tree.
+    """
     result = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "--no-header", "-m", "future"],
         cwd=REPO_ROOT,
@@ -251,6 +266,14 @@ def test_all_future_tests_are_skipped_in_a_normal_run() -> None:
         text=True,
         check=False,
     )
+    if not future_markers:
+        assert result.returncode == 5, (
+            f"no `future` markers remain, so pytest should select nothing and exit 5. "
+            f"It exited {result.returncode}:\n{result.stdout}"
+        )
+        assert "deselected" in result.stdout, result.stdout
+        return
+
     assert result.returncode == 0, result.stdout
     assert "failed" not in result.stdout.splitlines()[-1]
     assert "skipped" in result.stdout

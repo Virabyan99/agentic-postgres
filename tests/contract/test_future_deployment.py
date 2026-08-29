@@ -17,21 +17,6 @@ def unimplemented(session: int, what: str) -> None:
     pytest.fail(f"Replace this placeholder with the Session {session} implementation: {what}")
 
 
-@pytest.mark.future(session=12, requirement="DEP-001")
-def test_fresh_project_deploys_on_an_empty_host() -> None:
-    unimplemented(12, "a clean host reaches a working deployment from the README alone")
-
-
-@pytest.mark.future(session=12, requirement="DEP-ISO-001")
-def test_two_projects_share_no_state_or_authority() -> None:
-    unimplemented(12, "the full runtime isolation matrix across two live deployments")
-
-
-@pytest.mark.future(session=12, requirement="DEP-REMOVE-001")
-def test_removing_the_second_project_does_not_affect_the_first() -> None:
-    unimplemented(12, "destructive removal is scoped to one project")
-
-
 # ---------------------------------------------------------------------------
 # Session 11 — activated in Run 9
 #
@@ -60,11 +45,6 @@ def test_removing_the_second_project_does_not_affect_the_first() -> None:
 # the live host already runs on every deploy. Session 12 inherits it beside
 # DX-001, which is a superset of it.
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.future(session=12, requirement="DX-001")
-def test_new_team_member_completes_the_documented_path() -> None:
-    unimplemented(12, "a developer who did not build this reaches a working deployment")
 
 
 # ---------------------------------------------------------------------------

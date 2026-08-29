@@ -10,7 +10,7 @@ actually collect. That is checked by running a real collection and
 comparing node IDs, not by searching files for function names — a text
 search passes on a commented-out test.
 
-**127 requirements** — 121 P0, 123 active through Session 11, 4 owned by later sessions.
+**127 requirements** — 121 P0, 127 active through Session 12, 0 owned by later sessions.
 
 ## By session
 
@@ -27,7 +27,7 @@ search passes on a commented-out test.
 | 9 | 5 | active |
 | 10 | 5 | active |
 | 11 | 4 | active |
-| 12 | 4 | placeholders owned by Session 12 |
+| 12 | 4 | active |
 
 ## Requirements
 
@@ -213,10 +213,10 @@ search passes on a commented-out test.
 
 | ID | Priority | Guarantee | Proof |
 |---|---|---|---|
-| `DEP-001` | P0 | A fresh project deploys on an empty host from documentation alone. | `tests/contract/test_future_deployment.py::test_fresh_project_deploys_on_an_empty_host` |
-| `DEP-ISO-001` | P0 | Two projects on one host share no state or authority; shared provider accounts are permitted, shared project scope is not. | `tests/contract/test_future_deployment.py::test_two_projects_share_no_state_or_authority` |
-| `DEP-REMOVE-001` | P0 | Removing one project does not affect another. | `tests/contract/test_future_deployment.py::test_removing_the_second_project_does_not_affect_the_first` |
-| `DX-001` | P0 | A developer who did not build the primitive completes the documented path without source edits or undocumented commands. | `tests/contract/test_future_deployment.py::test_new_team_member_completes_the_documented_path` |
+| `DEP-001` | P0 | A fresh project deploys on an empty host from documentation alone. | `tests/contract/test_session12_documented_path.py::test_every_command_the_documented_path_names_is_shipped_and_executable`<br>`tests/contract/test_session12_documented_path.py::test_the_documented_path_passes_session_numbers_this_release_accepts`<br>`tests/deployment/test_session12_reuse.py::test_a_project_deployed_on_an_empty_host_is_a_working_deployment` |
+| `DEP-ISO-001` | P0 | Two projects on one host share no state or authority; shared provider accounts are permitted, shared project scope is not. | `tests/deployment/test_session12_isolation_matrix.py::test_the_two_documents_describe_two_projects_on_one_host`<br>`tests/deployment/test_session12_isolation_matrix.py::test_no_project_scoped_value_is_shared`<br>`tests/deployment/test_session12_isolation_matrix.py::test_neither_projects_scoped_names_appear_in_the_others_document`<br>`tests/deployment/test_session12_isolation_matrix.py::test_every_leaf_is_classified` |
+| `DEP-REMOVE-001` | P0 | Removing one project does not affect another. | `tests/contract/test_compose_contract.py::test_project_mode_refuses_volume_removal`<br>`tests/contract/test_bootstrap_state.py::test_state_paths_are_project_scoped`<br>`tests/contract/test_bootstrap_state.py::test_state_may_not_name_another_projects_credential_directory`<br>`tests/contract/test_bootstrap_state.py::test_a_managed_client_secret_without_an_id_is_rejected`<br>`tests/deployment/test_session12_reuse.py::test_removing_one_project_leaves_the_other_whole` |
+| `DX-001` | P0 | A developer who did not build the primitive completes the documented path without source edits or undocumented commands. | `tests/contract/test_session12_documented_path.py::test_no_documented_step_asks_a_reader_to_edit_a_tracked_file`<br>`tests/contract/test_session12_documented_path.py::test_the_deploy_sequence_stays_within_the_specifications_bound`<br>`tests/deployment/test_session12_reuse.py::test_a_developer_who_did_not_build_this_completed_the_documented_path` |
 
 ## Requirement ID prefixes
 
