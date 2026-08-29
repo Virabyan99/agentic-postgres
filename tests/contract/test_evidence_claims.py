@@ -811,6 +811,119 @@ CLAIM_INTRODUCED_IN = {
 }
 
 
+#: Requirements no claim reports on, and the reason they are tolerated.
+#:
+#: **The claim layer arrived after Sessions 1-4 and these were never retrofitted
+#: into it** (D697). They are not unproved: every one has node ids, those tests
+#: run in the gate, and the gate is green. What is true is narrower and worse to
+#: discover late — the *evidence document* is silent about them, so
+#: "56 of 57 claims passed" describes 90 requirements rather than 127.
+#:
+#: This list is a **debt register, not a permission**. It exists so the guard
+#: below can refuse a *new* orphan while the historical ones are grouped into
+#: claims deliberately — a claim's session decides when it must first be proved,
+#: and D696 is the record of one being moved by accident.
+UNCLAIMED_BY_HISTORY = frozenset(
+    {
+        # Sessions 1-2: the manifest, the developer surface, the host baseline.
+        "CFG-001",
+        "CFG-002",
+        "CFG-003",
+        "CFG-004",
+        "CFG-005",
+        "CFG-006",
+        "CFG-007",
+        "CFG-008",
+        "CFG-009",
+        "CFG-010",
+        "CFG-011",
+        "CFG-012",
+        "CFG-013",
+        "CFG-014",
+        "CFG-015",
+        "CFG-016",
+        "DX-002",
+        "DX-003",
+        "SEC-NET-001",
+        "SEC-NET-002",
+        "SEC-HOST-001",
+        "SEC-DOCKER-001",
+        "SEC-TLS-001",
+        "SEC-LOG-001",
+        "DEP-REL-001",
+        "DEP-PROV-001",
+        "OPS-HEALTH-001",
+        # Sessions 3-4: the database and its transports.
+        "DBX-PG-001",
+        "DBX-PG-002",
+        "DBX-MIG-002",
+        "DBX-MIG-003",
+        "DBX-PORT-001",
+        "DBX-004",
+        "SEC-DBX-002",
+        "SEC-DBX-003",
+        "SEC-DBX-004",
+        # Session 8.
+        "AGT-DRIFT-001",
+    }
+)
+
+
+def test_no_new_requirement_goes_unreported_by_every_claim() -> None:
+    """D697. A requirement no claim names is tested and never reported.
+
+    `CLAIMS` was already checked for claims naming unknown requirements. The
+    other direction was not checked at all, and **37 of 127 requirements had no
+    claim** — a third of the registry, invisible in every evidence document this
+    project has produced.
+
+    The gap is not that they are unproved: their node ids run in the gate. It is
+    that `evidence/session-NN.json` — the artefact that says what a release
+    guarantees — answers nothing about, for example, whether a service port is
+    publicly reachable, though five tests answer it.
+
+    **The historical set is grandfathered and enumerated**, because grouping 37
+    requirements into claims is a decision per requirement and doing it in bulk
+    is how a Session 2 claim ends up dated Session 12 (D696). What this refuses
+    is a **new** one: a requirement added from here on must belong to a claim, or
+    say in this list why it does not.
+
+    The list is also checked for staleness — an entry that no longer names a
+    registered requirement is removed rather than left to accumulate.
+    """
+    import yaml
+
+    registry = yaml.safe_load(claims.REGISTRY_PATH.read_text(encoding="utf-8"))
+    registered = {entry["id"] for entry in registry}
+    claimed = {
+        requirement for requirements in claims.CLAIMS.values() for requirement in requirements
+    }
+
+    orphaned = registered - claimed - UNCLAIMED_BY_HISTORY
+    assert not orphaned, (
+        f"these requirements belong to no claim, so no evidence document reports them: "
+        f"{sorted(orphaned)}. Add each to a claim, or to UNCLAIMED_BY_HISTORY with the "
+        "reason it is not reportable"
+    )
+
+    stale = UNCLAIMED_BY_HISTORY - registered
+    assert not stale, (
+        f"UNCLAIMED_BY_HISTORY names requirements the registry no longer has: "
+        f"{sorted(stale)}. A debt register that outlives its debt hides the next one"
+    )
+
+    # The control. A registry that read empty would make both assertions above
+    # pass while measuring nothing (D374).
+    assert len(registered) > 100, (
+        f"only {len(registered)} requirements were read; the registry is not being loaded"
+    )
+    covered = len(registered & claimed)
+    assert covered > 80, (
+        f"only {covered} requirements are claimed, which is fewer than this release "
+        "demonstrably reports on — the claim map is not being read"
+    )
+
+
 def test_every_claim_is_declared_here() -> None:
     """The table above and `CLAIMS` name the same claims.
 

@@ -64,7 +64,7 @@ and that is a question about a person, not a project count.
 
 Six columns, the house shape. Rows are measured facts, not predictions.
 
-**Next free number after this table is D697.**
+**Next free number after this table is D699.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -76,6 +76,8 @@ Six columns, the house shape. Rows are measured facts, not predictions.
 | **D694** | This plan's Run 3, as written: four proofs for `DX-001`'s offline half, including *"no step requires editing a source file"* and *"the path stays within fewer than 15 operator steps."* | **Two of the four measured the wrong set, and neither miss was a defect in the documentation.** The edit check flagged `README.md`'s *"To change a dependency, edit `requirements-dev.in`"* — an instruction to somebody **developing the template**, not deploying a project. The step bound scanned all eight documents and reported **26**, counting `rotate-signing-key.sh` and `restore-test.sh`, which are documented operations rather than steps from a clone to a running deployment. | **The edit check exempts `requirements-dev.in` by name with its reason attached**, because a category-shaped exemption would be a loophole and one named file is a decision somebody can disagree with. **The bound is counted over the README's `## Deploying` section**, with its own control: a section that parsed to nothing would satisfy any bound. | **A bound applied to the wrong set is a bound about nothing, and it would have been "fixed" by raising the number** — which is how a specification's constraint quietly becomes whatever the artifact already does. The battery's arm C is the sharper version of the same lesson: with the command scan blinded, the command proof still reported `1 passed`. **A documentation test that reads nothing reports every document clean forever.** | — |
 | **D695** | `tests/contract/test_future_marker_policy.py`: *"no placeholder ever fails; it skips, and removing its marker activates it."* `test_all_future_tests_are_skipped_in_a_normal_run` asserts `pytest -m future` exits **0**. | **Exit 5 is the end state, and the test could not express it.** `pytest` returns 5 when it selects nothing, and activating the last four placeholders left the repository with **no `future` markers at all** — which is what finishing twelve sessions means. The assertion was right for every session with unwritten work and became wrong at the moment the work was finished. | **The assertion branches on the fact**, and asserts the empty case *as empty* rather than tolerating it: a run selecting nothing while markers still existed would be the test looking at the wrong tree. | A guard written across twelve sessions of always-having-placeholders had **no way to say "and now there are none."** It is a small instance of a large shape: an invariant that holds for every observed state can still be a description of the observations rather than of the system. | — |
 | **D696** | This plan's Run 4: *"claims in `evidence_claims.CLAIMS`… `DEP-ISO-001` extends the existing `isolation` claim rather than adding a fourth (ADR 0089 — a claim is a guarantee, not a file)."* | **The reasoning was appealing and the model refused it.** `claim_session` resolves a claim to the session that **introduced** it, so adding a Session 12 requirement to a Session 2 claim moved `isolation` from 2 to 12 — and `test_a_claim_resolves_to_the_session_that_introduced_it` caught it. A claim's session is not a label; it decides when the claim must first be proved, and retroactively moving one would excuse it from every session in between. | **`DEP-ISO-001` gets its own claim, `isolation_matrix`.** The same run also learned that the `DX-001` declaration needed `live_host`: without it, `documented_path` had **no live proof** — every test it named ran in a checkout — and the claims model refused the claim outright. | **Both corrections came from the model rather than from me**, and both were about the difference between a guarantee and where its proof lives. ADR 0089's rule is right and I applied it to the wrong axis: `isolation` and `isolation_matrix` are two guarantees, not one guarantee in two files. | — |
+| **D697** | The evidence model: a claim's verdict is computed from the registry's node ids and JUnit results, never hand-entered, and `evidence/session-NN.json` is what a release guarantees. Session 11 closed at *"56 of 57 claims passed"*. | **37 of 127 requirements belong to no claim**, so no evidence document has ever reported them. *56 of 57 claims* describes **90 requirements**, not 127. They cluster by session — `CFG-001`–`CFG-016`, `DX-002`/`DX-003`, the whole Session 2 security set including `SEC-NET-001`, four Session 3–4 database requirements, three `SEC-DBX-*`, `AGT-DRIFT-001` and `DBX-004` — because **the claim layer arrived after Sessions 1–4 and those requirements were never retrofitted into it**. `CLAIMS` was checked for claims naming unknown requirements; **the other direction was never checked at all.** | **The historical 37 are enumerated and grandfathered; a new one is refused** by `test_no_new_requirement_goes_unreported_by_every_claim`. Grouping them into claims is a decision per requirement, and doing it in bulk is how a Session 2 claim ends up dated Session 12 (D696). The list is checked for staleness too, so a debt register cannot outlive its debt. | **They are not unproved — their node ids run in the gate and the gate is green.** What is true is narrower and worse to find late: the artefact that says what a release guarantees answers nothing about whether a service port is publicly reachable, though five tests answer it. Eleven sessions, and the thing that found it was asking the registry a question nobody had asked: *which requirements does no claim name?* | — |
+| **D698** | The specification's §2.1: two P2 capabilities — a pgvector example with a vector-search RPC, and a portable nightly `pg_dump` export — with the rule that *"P2 items may be dropped before any P0 item if the schedule slips."* | **Neither was ever entered into the acceptance registry.** The registry holds 121 P0 and 6 P1 and **zero P2**. So they are not unbuilt requirements that were dropped under the rule; they are **scope nothing was tracking**. No test, no claim, and no report would have said they were missing. | **Recorded in `docs/scope-closure.md` with their state and an effort estimate**, and dropped explicitly. The pgvector extension is present and proved (`DBX-PG-001`); only the example and the RPC are absent. Nothing references `pg_dump` at all. | **Dropping a P2 item is allowed; dropping it silently is not**, and an empty P2 row in the registry is how the second happens while looking like the first. The specification's rule assumes the item is visible enough to be dropped *from* something. | — |
 
 ---
 
@@ -246,6 +248,33 @@ CLAUDE.md's oldest open item is exactly the distance between those two things.
   customer's stated direction is a hosted service with a UI, which the same
   contract lists under non-goals. **Record the divergence; do not resolve it
   in a test.**
+
+**Done.** `docs/scope-closure.md`, and it is evidence-based rather than a
+restatement: every number in it was measured against the registry, the claim map
+and the merged evidence.
+
+**Two findings that were not in the plan** and are the reason the run was worth
+doing rather than summarising:
+
+* **D697 — 37 of 127 requirements belong to no claim.** A third of the registry
+  is tested and never reported. Nothing detected it because `CLAIMS` was checked
+  in one direction only. The historical set is enumerated and grandfathered;
+  a **new** orphan is now refused, with the arm verified.
+* **D698 — the two P2 capabilities were never registered at all**, so they were
+  never available to be dropped under the specification's own rule.
+
+**P0**: one red claim, characterised (D683). Two awaiting a declaration, two
+awaiting the host trip. **P1**: six registered, five reported, `DBX-004` caught
+by D697. **P2**: zero registered, both items recorded and dropped explicitly.
+
+**Hidden dependencies**: nine, each pinned, declared or named. **One has an end
+date nobody has diarised** — the `pgbackrest=2.59.1-1.pgdg12+1` apt pin, which
+PGDG will eventually stop serving (D533). It fails closed, which is the accepted
+half.
+
+**The template-or-control-plane question is recorded and not resolved**, because
+it is a product decision and §9's third stop condition applies: a test may not
+decide what a requirement means.
 
 ---
 
