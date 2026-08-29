@@ -91,6 +91,13 @@ door, and the D697 claim register. **Its §1 measured that a third of that
 register cannot become claims at all** (D720) and that three of the rest were
 already decided against, in a comment nobody had read (D722).
 
+[`plans/session-14-implementation-plan.md`](plans/session-14-implementation-plan.md)
+is the second: observability, alerting, and the capacity envelope — **the one
+place the Stage 2 audit found genuinely empty.** Its §1 measured that the
+constraint is not effort but **memory**: 3,814 MB, no swap, and 1,536 MB already
+budgeted to two database containers (D761). `/metrics` has been reserved since
+Session 1 and never used (D760).
+
 ---
 
 **Generated pages are marked.** `acceptance-matrix.md` and the table in
