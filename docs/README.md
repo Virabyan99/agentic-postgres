@@ -12,6 +12,7 @@ none, because it tells a reader the set is whole.
 |---|---|
 | [New team member](new-team-member.md) | The path from a clean machine to a rendered project, step by step |
 | [Product contract](product-contract.md) | What this is, what it is not, every requirement id and the session that owns it |
+| [Scope closure](scope-closure.md) | What ships and what does not: the P0/P1/P2 position, every external dependency, and the questions left open |
 | [Handoff](handoff.md) | The machine, git, the environment, and the traps that have cost a run |
 | [Architecture decisions](decisions/README.md) | Every ADR, indexed by number and session |
 
