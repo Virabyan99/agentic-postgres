@@ -138,7 +138,7 @@ differ:
    identical to one that did, and the proof's own control is what catches it.
 3. **Stop the project** if the credential is one a container mounts:
    `sudo bin/project-runtime.sh --host host.yaml --project-key <key>
-   --through-session 11 down`. Volumes are preserved.
+   --through-session 12 down`. Volumes are preserved.
 4. Redeploy through session 5. This materializes a new generation and re-applies
    the credential: the bootstrap plane sets the role's verifier,
    `publish_docs_credential` rewrites the middleware document with the new hash
@@ -154,10 +154,10 @@ Steps 3 and 4 are the same commands every time:
 
 ```bash
 sudo bin/materialize-secrets.sh --project project.alpha.yaml \
-  --requirements secrets.required.yaml --session 11
+  --requirements secrets.required.yaml --session 12
 
 sudo ./deploy.sh --host host.yaml --project project.alpha.yaml \
-  --capabilities capabilities.yaml --through-session 11
+  --capabilities capabilities.yaml --through-session 12
 ```
 
 **The generation directory is derived, never typed.** It changes on every
@@ -205,7 +205,7 @@ sudo bin/session-05-check.sh --mode host --host host.yaml \
 
 ```bash
 sudo bin/project-runtime.sh --host host.yaml --project-key alpha-dev \
-  --through-session 11 down
+  --through-session 12 down
 ```
 
 Without it the deploy leaves PostgREST running on the generation it started

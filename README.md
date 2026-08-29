@@ -4,10 +4,11 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 11 of 12 implemented.** Session 11's code is in this release —
-a preflight that refuses completely, a deployed `doctor.sh`, one request id
-across four records, migration 0022 — and its host evidence is not yet
-published. Two isolated
+**Status: Session 12 of 12 implemented.** Session 12's code is in this release —
+the two-project isolation matrix, a removal scoped to one project, and the
+documented path checked against itself — and its host evidence is not yet
+published. Session 11's is: 56 of 57 claims, measured against a live
+deployment. Two isolated
 projects run on one hardened host behind one shared Traefik edge on Let's Encrypt
 production certificates. Each has its own PostgreSQL 18 cluster under forced
 row-level security, two database transports, a REST and an application API behind
@@ -131,9 +132,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --session 11
+sudo bin/materialize-secrets.sh --project project.yaml --session 12
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 11
+     --capabilities capabilities.yaml --through-session 12
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a
