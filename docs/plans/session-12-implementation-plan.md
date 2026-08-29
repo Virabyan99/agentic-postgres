@@ -9,6 +9,39 @@ before its live half exists.** Everything else is support.
 
 ---
 
+## Status — read this first
+
+```
+LOCAL           Clean and pushed at the commit that carries this plan. Three
+                commits sit above Session 11's close: the plan + Run 1, Run 2's
+                offline half, and this handoff.
+HOST            **ab3d488** -- Session 11's close. It has NONE of Session 12.
+                Run 4 ships it; nothing before Run 4 needs it.
+CURRENT_SESSION **11**, deliberately. Moving it to 12 activates ALL FOUR
+                Session 12 requirements at once (D690), so it moves in Run 4
+                once every offline half exists -- not before.
+DONE            Run 1 (DEP-ISO-001, five proofs, dry-run clean against both
+                live documents). Run 2's OFFLINE half (one new proof; three
+                already existed unattributed).
+NEXT            Run 3 -- DX-001 and DEP-001 offline halves.
+gate            **session-01-check PASSED at this commit.** Re-run it after any
+                code change; it refuses a dirty tree, so commit first.
+divergences     D689-D692 recorded here. **Next free: D693.**
+```
+
+**What a fresh reader must not re-derive**, because each cost a measurement:
+
+1. **The bump is all-or-nothing** (D690). `CURRENT_SESSION = 12` forces every
+   Session 12 requirement to stop being a placeholder in the same commit.
+2. **No shipped command removes a project** (D691). `compose.sh` refuses
+   `--volumes` in project mode; `project-runtime.sh down` preserves the volume
+   on purpose. Do not add a destroy-the-data verb (§9).
+3. **`--destroy`'s confirmation check is unreachable in a checkout** (D692):
+   exit 3 for root fires before `--confirm` is read.
+4. **No third project is created** (§0). That decision is taken.
+
+---
+
 ## 0. Where Session 12 actually starts
 
 Session 11 closed at `ab3d488`, evidence merged at `e49ea6a`: **56 of 57 claims
@@ -90,24 +123,83 @@ removal an operator has declared. Nothing here adds a destroy-the-data verb, and
 
 ### Run 3 — `DX-001` and `DEP-001`, offline halves
 
-`DX-001` offline: every command the documented path names exists and resolves,
-no step requires editing a source file, and the path stays within the
-specification's own **fewer than 15 operator steps**. `DEP-001` offline was
-already proved in Session 11 and is re-pointed rather than rewritten.
+**Not started.** New module: `tests/contract/test_session12_documented_path.py`.
+
+`DX-001`'s offline half, four proofs, each behavioural against files that ship:
+
+1. **Every command the documented path names exists and is executable.** Parse
+   the fenced commands out of `README.md` and
+   `docs/session-11-operator-guide.md`; each `bin/*.sh`, `bin/*.py` or
+   `./deploy.sh` it invokes must be a file with mode `0755` in the git index.
+   *Assert what the documents produce, not which names appear* (D277).
+2. **No step requires editing a source file.** No documented step may instruct
+   the reader to modify anything tracked outside `project.yaml`,
+   `capabilities.yaml` and the manifests. `project.example.yaml`,
+   `project.second.example.yaml` and `capabilities.example.yaml` exist and are
+   the copy sources.
+3. **The path stays within the specification's own bound**: *fewer than 15
+   operator steps* (§1.4). Counted from the README's numbered path, so the
+   number the spec fixed is enforced rather than admired.
+4. **The control.** A scan that matched no commands would report every document
+   clean forever (D374). Assert the parse found a known command — `./deploy.sh`
+   — before asserting anything about the set.
+
+`DEP-001`'s offline half was proved in Session 11 (§11 of that plan) and is
+**re-pointed, not rewritten**.
+
+**Both live halves stay gated**, and §7 is binding: neither may report `passed`
+on its offline half alone.
 
 ### Run 4 — the bump, the registry, the gate
 
-`CURRENT_SESSION = 12`, four requirements activated, placeholders removed,
-`bin/session-12-check.sh` derived **by diff** (D505, D507, D678), evidence
-merged, session closed.
+**Not started.** In this order, because the order is enforced (D672, D690):
+
+1. `CURRENT_SESSION = 12` in `src/agentic_postgres/__init__.py`.
+2. Activate all four requirements in `tests/acceptance-registry.yaml`;
+   remove all four placeholders from `tests/contract/test_future_deployment.py`.
+   `DEP-ISO-001`'s four node ids are listed in §2.
+3. Add the four live-half variables to `ENVIRONMENT_VARIABLES` in
+   `tests/conftest.py` **and** export them from the new gate — D687 is the
+   record of a claim that could not be proved because its gate had no flag, and
+   `test_every_operator_supplied_gate_can_be_supplied_by_a_session_gate` now
+   refuses that.
+4. Claims in `evidence_claims.CLAIMS`: `project_removal`, `documented_path`,
+   `fresh_host`. `DEP-ISO-001` extends the existing `isolation` claim rather
+   than adding a fourth (ADR 0089 — a claim is a guarantee, not a file).
+5. `python bin/render-acceptance-matrix.py --write`, then
+   `bin/session-01-check.sh`.
+6. `bin/session-12-check.sh`, derived **by diff from session-11-check.sh**
+   (D505, D507, D678). Its only session literal is `readonly SESSION=12`.
+   **Register it in `SHELL_COMMANDS` in `tests/contract/test_cli_contract.py`**
+   — Session 11's gate failed its first offline run for exactly this.
+7. **A host trip.** The matrix has never executed; that is CLAUDE.md's oldest
+   open item and Run 1's dry-run is not a substitute. Ship by `git bundle` under
+   a per-release name, confirm `git rev-parse FETCH_HEAD` **before** the
+   checkout (D504), then run all three modes and merge.
 
 ### Run 5 — scope closure
 
-The specification's own final activity: resolve P0 failures, list remaining
-P1/P2 gaps **with evidence and estimated effort**, document every hidden
-dependency. Two P2 items are unbuilt and droppable by the specification's own
-rule — the pgvector example and search RPC (the extension is present and proved;
-the example is not) and the portable `pg_dump` export.
+**Not started.** The specification's own final activity (§2.1, §5 of the brief).
+
+* **Resolve P0 failures, or characterise them.** One P0 claim is red:
+  `bootstrap_identity` (D683). It stays red and the reason is written down.
+* **List remaining P1/P2 gaps with evidence and estimated effort.** Measured:
+  all six P1 requirements are complete. **Two P2 items are unbuilt** and both are
+  droppable by the specification's own rule (*"P2 items may be dropped before any
+  P0 item"*):
+  * **pgvector example and vector-search RPC** — the extension is present and
+    proved at the locked version in the `extensions` schema (`DBX-PG-001`); no
+    example table or search function exists.
+  * **Portable nightly `pg_dump` export** — nothing in `bin/` or `src/`
+    references `pg_dump`.
+* **Document every hidden dependency.** The starting list is CLAUDE.md §9 plus
+  D683, D688 and D691 — each an item whose *premise* was wrong rather than
+  whose work was undone.
+* **The template-or-control-plane decision.** The brief asks Session 12 to
+  decide it. The product contract freezes the answer as *template*; the
+  customer's stated direction is a hosted service with a UI, which the same
+  contract lists under non-goals. **Record the divergence; do not resolve it
+  in a test.**
 
 ---
 
@@ -147,3 +239,54 @@ proof.
    wearing a constant's clothes.
 4. **The matrix's `MUST_DIFFER` list is not narrowed to make a run green.**
    Widening it to a measured set is fine; narrowing it to pass is D300's shape.
+
+---
+
+## 10. Open items carried in, and one opened here
+
+**Opened by this session, unmeasured, and worth a host command:**
+
+> **Both deployed documents publish `backup_state.status: failing` while
+> `bin/backup.sh info --json` reports the repository `ready` and `doctor.sh`
+> reported the archiver `ok`.**
+>
+> Traced offline: `backup_report.backup_state` takes the repository's status and
+> lets `archiving_is_failing` override it, which returns true when
+> `last_failed_time > last_archived_time`. Both documents were written
+> **immediately after a deploy**, when the container restart produces a failed
+> archive attempt and — on an idle cluster with nothing to archive — no success
+> follows to clear the comparison.
+>
+> If that is right, it is a **false alarm in one of the three places the
+> archiving signal is supposed to reach an operator** (CLAUDE.md §9), and it is
+> D673/D680's shape a third time: a status computed at the one moment it cannot
+> be right. **It needs one measurement on the host**: read
+> `pg_stat_archiver.last_failed_time` and `last_archived_time` on a project that
+> has been idle since its last deploy. Not repaired here, because a repair
+> chosen before the measurement is a guess.
+
+**Carried in, unchanged:** CLAUDE.md §9, less the two items Session 11
+characterised (D683, D688).
+
+---
+
+## 11. What ships, and what does not
+
+Session 12 is the last session in the plan. There is no §11 handoff to a
+successor; there is a statement of what the artifact is when the work stops.
+
+**Ships:** an appliance whose four access planes are proved against a live
+deployment, two isolated projects on one host with the isolation measured rather
+than asserted, a rehearsed point-in-time restore, and a documented path whose
+commands all resolve.
+
+**Does not ship, and each is named rather than implied:**
+
+* **`bootstrap_identity`** — the signing-key rotation cannot be prepared (D683).
+  A located code change, not a mystery.
+* **The outsider's witness** — `DX-001` and `DEP-001`'s live halves. The
+  machinery is finished; nobody who did not build it has followed the path.
+  **An offline half may not stand in for this** (§7).
+* **Two P2 items** — the pgvector example and the `pg_dump` export, droppable by
+  the specification's own rule.
+* **The template-or-control-plane question**, recorded and not resolved.
