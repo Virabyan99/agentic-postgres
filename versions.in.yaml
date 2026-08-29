@@ -418,6 +418,24 @@ packages:
   # the running image, not assumed from the tag. If POSTGRES_IMAGE moves to a
   # new Debian release this index moves with it, and the build failing closed is
   # what makes that visible.
+  # **THIS PIN HAS AN END DATE, and Session 13 Run 8 is where it was written
+  # down** (D533).
+  #
+  # PGDG drops superseded versions from the index rather than keeping them, so
+  # `2.59.1-1.pgdg12+1` will one day resolve to nothing and this image will fail
+  # to build with exit 100 -- the same failure Run 1's control deliberately
+  # produced at `pgbackrest=0.0.0-doesnotexist`. **That is the accepted half.**
+  # It is a pin rather than a floating tag, and failing closed is what a pin is
+  # for.
+  #
+  # What was missing is anybody knowing when. The index above is the answer:
+  #
+  #     curl -s <the index URL below> | zcat \
+  #       | grep -A1 '^Package: pgbackrest$' | grep '^Version:'
+  #
+  # **Check it before any session that rebuilds this image**, and move the pin
+  # deliberately if it has gone. A build failing closed because an upstream index
+  # rotated is a bad moment to learn the pin was undiarised for four sessions.
   PGBACKREST_APT_VERSION:
     registry: apt
     package: pgbackrest

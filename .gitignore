@@ -27,3 +27,19 @@ __pycache__/
 /capabilities.yaml
 /project.alpha.yaml
 /project.beta.yaml
+
+# Deployed documents an operator installs from the host to run `--mode external`.
+#
+# **Two of these were tracked for six sessions** (D730). `alpha-outputs.json` and
+# `beta-outputs.json` sat in the repository root at `schema_version` 10,
+# `deployed_through_session` 6, observed 2026-08-15 — and they did not validate
+# against the current schema at all. Four operator guides name them as the path
+# to pass to `--project-a-outputs`, so an external run from a fresh checkout
+# measured a Session 6 deployment while believing it measured the current one.
+# `MUST_AGREE` on `source_commit` refuses the merge, which is four steps from the
+# cause.
+#
+# Ignored rather than merely deleted: the file an operator installs has this name
+# by convention, and a stale observation in source control has the shape of the
+# real thing under a filename that reads as current.
+/*-outputs.json

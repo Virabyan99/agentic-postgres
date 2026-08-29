@@ -15,12 +15,12 @@ decision.
 
 | | Count | Note |
 |---|---|---|
-| Requirements in the acceptance registry | **127** | 121 P0, 6 P1, **0 P2** |
-| Claims in the evidence model | **74** | 61 at Session 12's close; 13 retrofitted in Session 13 Run 6 |
-| Requirements a claim reports on | **103** | was 90; see §4 — **the gap was repriced, not just narrowed** |
+| Requirements in the acceptance registry | **131** | 125 P0, 6 P1, **0 P2** — four `REL-*` added in Session 13 |
+| Claims in the evidence model | **78** | 61 at Session 12's close; 13 retrofitted in Session 13 Run 6, 4 added in Run 7 |
+| Requirements a claim reports on | **107** | was 90; see §4 — **the gap was repriced, not just narrowed** |
 | Migrations released | **22** | fix-forward only |
-| Architecture decisions recorded | **161** | |
-| Divergences measured | **D1–D696** | |
+| Architecture decisions recorded | **162** | 0162 is Session 13's |
+| Divergences measured | **D1–D753** | D704–D718 are the Stage 2 audit; D719–D753 are Session 13 |
 
 ---
 
@@ -91,8 +91,8 @@ registry does.**
 > cannot be**, for structural reasons. D720, D721 and D722 record the
 > measurement.
 
-**24 of 127 requirements belong to no claim**, down from 37. The evidence
-document now reports **103**, up from 90. The remainder are tested — every one
+**24 of 131 requirements belong to no claim**, down from 37 of 127. The evidence
+document now reports **107**, up from 90. The remainder are tested — every one
 has node ids, and those tests run and pass in the gate — but no evidence document
 reports them.
 
@@ -147,7 +147,7 @@ Every third party this deployment needs, with what breaks if it is unavailable.
 | **Cloudflare DNS** | records are DNS-only / grey cloud | No certificate renewal, then no ingress. |
 | **Let's Encrypt** | `letsencrypt` resolver, production | **Failed validations cap at 5/hour/hostname.** Never retry in a loop. |
 | **Container images** (8) | **immutable digests** in `versions.env` | A rebuild cannot resolve; running containers are unaffected. |
-| **PGDG apt** — `pgbackrest=2.59.1-1.pgdg12+1` | exact version pin | **This one has an end date** (D533). PGDG drops superseded versions, so the pin will one day resolve to nothing and the image build fails closed. That is the accepted half — it is a pin, not a floating tag — but **nobody has diarised it**. |
+| **PGDG apt** — `pgbackrest=2.59.1-1.pgdg12+1` | exact version pin | **This one has an end date, and Session 13 Run 8 diarised it** (D533). PGDG drops superseded versions, so the pin will one day resolve to nothing and the image build fails closed at exit 100. That is the accepted half — it is a pin, not a floating tag. The note now sits **at the pin** in `versions.in.yaml` with the one command that answers *"is it still there"*, to be run before any session that rebuilds this image. |
 | **PyPI** | hash-locked `requirements-dev.txt` | Development only; no deployed service installs at runtime. |
 | **GitHub** | **not a host dependency.** Transport is `git bundle` + `scp` | Nothing. No GitHub credential exists on the VPS, by decision. |
 

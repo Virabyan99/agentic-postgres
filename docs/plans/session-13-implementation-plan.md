@@ -16,11 +16,11 @@ repeat them.
 ## Status — read this first
 
 ```
-SESSION 13 IS OPEN.  Runs 1-7 done. Run 8, then the host trip.
+SESSION 13 IS OPEN.  Runs 1-8 done. **Only the host trip remains.**
 HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
 CURRENT_SESSION **13**, moved in Run 7 with all four REL-* activated (D690).
 template_version **0.2.0**, moved in the same commit (ADR 0162).
-divergences     D719-D753 recorded here. **Next free: D754.**
+divergences     D719-D754 recorded here. **Next free: D755.**
 ADRs            **162**, 0162 written in Run 3. Next free: 0163.
 gate            session-13-check.sh written, registered, shellcheck clean.
                 Full suite: **4499 passed, 294 skipped, 0 failed.**
@@ -76,7 +76,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D754.**
+**Next free number after this table is D755.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -115,6 +115,7 @@ the runs follow the same rule (D267).
 | **D751** | D703 found **two** printed lines in the Session 12 gate still saying *"Session 10 also needs `--mode external`"*, repaired them, and called the class unguarded. | **The rot went far past two lines, and the merge example was the dangerous part.** Deriving the Session 13 gate found ~30 references to Sessions 10 and 11 through the header, the usage text and the body of a gate that had been Session 12's for a full release — including a `--help` telling an operator to run `write-session-evidence.py --session 10 --output evidence/session-10.json` **from a Session 12 run**. An operator who copied it overwrites an earlier session's evidence with this one's, **and both commands exit 0**. Measured across every gate: **session-07, session-11 and session-12 all carried it**, twelve typed numbers in total. | **Two repairs, and they differ on purpose.** Session 13's gate **derives** every number an operator is told to type from `${SESSION}` — the usage heredoc is quoted, so those lines moved out of it into `printf`. The three released gates have their literals **corrected** rather than restructured: they are shipped artefacts whose behaviour a suite already asserts, and the new guard catches a recurrence in any of them. | **Care did not prevent this and will not.** D505, D507, D678, D693, D703 and now this are one loss six times; the fifth instance was repaired by reading carefully, and the sixth arrived in the very next derivation. **The guard is scoped to what is exactly decidable** — a session number an operator is told to *type*: an evidence filename, a `--session N`, a `--through-session N`. A gate saying *"Session 10 releases no migration"* is stating history, and a guard that flagged it would need exemptions, which Run 5 taught is how a guard becomes a guard about its exemptions. | — |
 | **D752** | D719's class — a typed session ceiling — was repaired in `bin/write-session-evidence.py` and guarded across `bin/*.py` in Run 2. | **Two more members were in `tests/`, which the guard's scope never covered**, and the bump is what surfaced them: `test_acceptance_registry.py` held `assert 1 <= entry["target_session"] <= 12`, and `test_documentation_index.py` matched `Session (\d+) of 12 implemented`. Both were correct for twelve sessions for the same reason the first was. **A fourth literal was in `ID_PATTERN`** — the requirement-prefix enumeration, which had no `REL`. | The registry bound **derives from `CURRENT_SESSION`**. The README pattern drops `of 12` entirely rather than becoming `of 18`: **the total is the next stage's business, and the number that can disagree with the release is the one worth checking.** `REL` joins the prefix enumeration, which stays enumerated (ADR 0006 — a pattern accepting any uppercase word would accept a typo as a family). | **The scan Run 2 wrote could not have caught these even in scope**, because it matches a literal equal to `CURRENT_SESSION` and both said `12` while the constant said `12`. **What caught them was the bump itself**, loudly, which is the behavioural half Run 2 named as load-bearing when it documented that the scan goes quiet. The apparatus worked; the part that worked was the part not written as a scan. | 0002, 0006 |
 | **D753** | Run 7 activates four `REL-*` requirements, and a claim needs a live proof in exactly one mode — so each needs a host-gated test, which needs an environment variable to gate on (D687: a variable no gate exports is a proof that can only skip). | **No new variable was needed, and the reason is ADR 0158.** The live halves take the project key from the **deployed document** — read for identity and nothing else — so `APG_LIVE_HOST` and `APG_PROJECT_A_OUTPUTS` already gate them. The *installed* rendered document, which is what the plan actually compares, is found by `deployed_output.rendered_path(key)` from that key. | Four live proofs in `tests/deployment/test_session13_upgrade_plan.py`, gated on the two existing variables, each asserting **the deployment is unchanged afterwards**. | **The obvious design was a variable pointing at the installed rendered document**, and it would have been a second address for something already derivable — ADR 0002 at the environment layer, and a new entry in a roster D687 exists to keep honest. *The deployed document is the address book* did the work instead. | 0158, 0002, D687 |
+| **D754** | D533 and D540 are two separate open items: the PGDG pin has an undiarised end date, and `lock-versions.sh --update` *"re-adopts unrelated rolling tags — one apt pin moved three image references."* Run 8 diarises the first. | **They are one item, and diarising the pin triggered the other.** The diary note is a **comment**, and `versions.env` records a SHA-256 of the whole of `versions.in.yaml` — so a comment invalidated the lock, `--update` was the only way to revalidate it, and `--update` re-resolved every rolling tag while it was there. **Three moved**: `POSTGRES_IMAGE` (`pg18`), `PYTHON_RUNTIME_IMAGE` (`3.12-slim`) and `TRAEFIK_IMAGE` (`v3.7`). **The same count Session 10 restored by hand**, reproduced on demand. | **The two lock metadata lines keep their new values; the three image digests were restored from a snapshot taken before the update**, and `--check` passes. The diary note stays at the pin, with the one command that answers *"is it still there"*. | **D540 said the drift is real and nothing prevents the next `--update`.** What was not known is how little it takes: **a comment.** Adopting a new Postgres image in a housekeeping run — in the release that has not yet been to the host — is exactly the unintended change a digest pin exists to prevent, and it would have ridden along under a commit message about tidying. **The repair is still by hand**, and D540 stays open with a sharper statement of its trigger. | — |
 
 ---
 
@@ -538,12 +539,32 @@ work that a second address would have done worse.
 session activated its requirements directly rather than staging placeholders, so
 the empty case the guard learned to assert in Session 12 remains the true one.
 
-### Run 8 — Housekeeping
+### Run 8 — Housekeeping — **Done.**
 
-Remove `&1`. Refresh CLAUDE.md §2's status block. Diarise the PGDG apt pin
-(D533) — `pgbackrest=2.59.1-1.pgdg12+1` will one day resolve to nothing and the
-image build will fail closed, which is the accepted half of a pin with an end
-date nobody has written down.
+`&1` removed. **`alpha-outputs.json` and `beta-outputs.json` removed and
+gitignored** — six sessions stale, tracked, and named by four operator guides as
+the path to pass to `--project-a-outputs` (D730). Ignored rather than merely
+deleted, because the file an operator installs from the host has that name by
+convention. CLAUDE.md §2 rewritten: the twelve-session banner was false, and the
+status block now says local is ahead of the host. `docs/scope-closure.md` §1's
+numbers re-measured rather than incremented — **107 of 131 across 78 claims**,
+which caught my own draft asserting Run 6's figures after Run 7 had moved them.
+
+**Retrospective — the housekeeping found a live one.**
+
+**D754: diarising the pin triggered D540, and it takes a comment.** The note is
+a comment in `versions.in.yaml`; `versions.env` records a digest of that whole
+file; so the lock went invalid, `--update` was the only way to revalidate, and it
+re-resolved every rolling tag while it was there. **Three image digests moved** —
+`pg18`, `3.12-slim`, `v3.7` — which is the same count Session 10 restored by
+hand. Restored from a pre-update snapshot, with only the two lock-metadata lines
+keeping their new values.
+
+**D540 said the drift is real; what was not known is how little it takes.**
+Adopting a new Postgres image in a housekeeping run, in a release that has not
+yet been to the host, is precisely the unintended change a digest pin exists to
+prevent — and it would have ridden along under a commit message about tidying.
+**D540 stays open**, with a sharper statement of its trigger.
 
 ### Runs 9+ — The host trip, read-only
 
