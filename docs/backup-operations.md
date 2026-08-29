@@ -81,7 +81,7 @@ in this repository creates a bucket or issues a token (ADR 0110), and Cloudflare
 shows a secret access key exactly once.
 
 1. **Create the bucket.** The derived name is `apg-<project-key>-backup`;
-   `bin/deploy.sh --render-only` prints it, or read `backup.bucket` from the
+   `./deploy.sh --render-only` prints it, or read `backup.bucket` from the
    project's `outputs.json`. Use the derived name unless you are deliberately
    pointing at a bucket named by somebody else's convention, in which case set
    `backup.bucket` in the manifest and the override is used verbatim.

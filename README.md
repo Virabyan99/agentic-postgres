@@ -131,9 +131,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --session 10
+sudo bin/materialize-secrets.sh --project project.yaml --session 11
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 10
+     --capabilities capabilities.yaml --through-session 11
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a

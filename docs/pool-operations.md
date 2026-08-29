@@ -161,7 +161,7 @@ dangerous: **PostgreSQL holding one password while the pooler holds another.**
    `active-secret-generation.json` at it:
    ```bash
    sudo bin/materialize-secrets.sh --project project.alpha.yaml \
-     --requirements secrets.required.yaml --session 4
+     --requirements secrets.required.yaml --session 11
    ```
 4. Redeploy, so bootstrap sets the role's verifier and the pooler starts against
    the new generation. A bare restart does not run bootstrap.
