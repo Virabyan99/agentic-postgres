@@ -76,7 +76,14 @@ divergence table and is the point of the document**: every conflict between what
 a session was asked for and what was measurably true, with the decision and its
 reason. §5 is the run-by-run build order, each run carrying what it measured.
 
-Nothing indexes those ~650 measured facts by subject, so finding one is a `grep`.
+Nothing indexes those ~700 measured facts by subject, so finding one is a `grep`.
+
+[`plans/stage-2-plan.md`](plans/stage-2-plan.md) sits **above** the six Stage 2
+session plans and owns what all of them would otherwise repeat: where Stage 2
+starts, the four decisions a new body of work must settle, the open items carried
+in from twelve closed sessions, and the thinner shape a Stage 2 session plan
+takes. **Its §1 is the audit of the Stage 2 specification against this
+repository** — D704–D718, and the reason Stage 2 is six sessions and not twelve.
 
 ---
 
