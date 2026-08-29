@@ -313,23 +313,27 @@ exactly the set of capabilities enumerated in `capabilities.yaml`, each bound
 to one pre-existing operation with an approved shape. There is no path by
 which an agent submits a query, a fragment, a column list, or a path.
 
-## 6. Session 12 success criterion
+## 6. Session 12 success criterion, and what was reached
 
 Session 12 succeeds when, on a host that has never run this software:
 
-1. A new team member follows `docs/new-team-member.md` end to end without
-   editing source code.
-2. Two projects deploy to the same host and neither can reach the other's
-   data, roles, secrets, storage objects, or backups — proven by
-   `DEP-ISO-001`, not asserted.
-3. Every P0 requirement has at least one **active** test. None remains
-   `future`.
-4. A point-in-time restore to a specified timestamp is performed against a
-   disposable target and the restored data is verified by query.
-5. An agent with a read-only capability set cannot discover or invoke any
-   write, and every attempt — allowed, denied, or failed — is audited with
-   redaction.
-6. `bin/session-12-check.sh` exits `0` from a clean tracked tree.
+| # | Criterion | Outcome |
+|---|---|---|
+| 1 | A new team member follows `docs/new-team-member.md` end to end without editing source code. | **Not reached.** The path's *offline* half is proved — every command it names exists and is executable, every session number it passes is one this release accepts, and no step asks a reader to edit a shipped file. **Nobody who did not build this has walked it.** `DX-001` reports `not_run`, and an offline half may not stand in for a live one. |
+| 2 | Two projects deploy to the same host and neither can reach the other's data, roles, secrets, storage objects, or backups — proven by `DEP-ISO-001`, not asserted. | **Reached.** `DEP-ISO-001` is closed and measured live over both deployed projects, by a matrix that asserts what is *permitted* to be shared before it asserts what is not. |
+| 3 | Every P0 requirement has at least one **active** test. None remains `future`. | **Reached.** There are no `future` placeholders left in the repository. |
+| 4 | A point-in-time restore to a specified timestamp is performed against a disposable target and the restored data is verified by query. | **Reached.** `point_in_time_recovery`, `recovery_evidence` and `restore_verification` all passed against the live deployment. |
+| 5 | An agent with a read-only capability set cannot discover or invoke any write, and every attempt — allowed, denied, or failed — is audited with redaction. | **Reached.** |
+| 6 | `bin/session-12-check.sh` exits `0` from a clean tracked tree. | **Not reached, and gated on the others.** Offline mode exits `0`; host mode exits **`5`** — the evidence was written and four claims in it are not `passed`. It cannot exit `0` until those four do, and three of them need an *event* rather than code. |
+
+**Four of six reached.** The two that were not are not defects in the artifact:
+criterion 1 needs a person who did not build it, and criterion 6 is the sum of
+that plus the bootstrap-issuer retirement (D683). `docs/scope-closure.md` is the
+full ledger.
+
+**This is recorded rather than reconciled.** A success criterion quietly
+softened to match what was achieved is worth less than one that says plainly
+which half was reached.
 
 ## 7. Change control
 
