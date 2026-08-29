@@ -38,6 +38,7 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 #: directory the first time somebody forgets and says nothing when it does.
 SHELL_COMMANDS = (
     "deploy.sh",
+    "bin/apg.sh",
     "bin/apg-diag.sh",
     "bin/api.sh",
     "bin/api-contract.sh",

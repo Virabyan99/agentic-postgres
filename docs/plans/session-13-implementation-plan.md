@@ -16,11 +16,11 @@ repeat them.
 ## Status — read this first
 
 ```
-SESSION 13 IS OPEN.  Runs 1-4 done. Runs 5-9+ ahead.
+SESSION 13 IS OPEN.  Runs 1-5 done. Runs 6-9+ ahead.
 HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
 CURRENT_SESSION 12, and it moves to 13 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.1.0-dev -> 0.2.0, Run 7.
-divergences     D719-D744 recorded here. **Next free: D745.**
+divergences     D719-D747 recorded here. **Next free: D748.**
 ADRs            **162**, 0162 written in Run 3. Next free: 0163.
 gate            session-13-check.sh, derived BY DIFF from session-12's (Run 7).
 host            One trip, READ-ONLY. Runs 9+.
@@ -75,7 +75,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D745.**
+**Next free number after this table is D748.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -105,6 +105,9 @@ the runs follow the same rule (D267).
 | **D742** | Run 4's battery: five mutations, five kills. | **M1 SURVIVED, and the survivor was the battery's fault.** The mutation replaced the *reason string* — `"no installed rendered document to compare against; nobody looked, "` — with a different string that **still contained `nobody looked`**, so the assertion held and the verdict was never touched. | **The mutation was repaired, not the test** (D493): the anchor moved to the branch itself, `if installed is None:` → `if False:`. Re-run: five of five KILLED. | **An uninformative mutation reports as a weak test**, which is the reading that sends somebody to strengthen an assertion that was already right. CLAUDE.md names three causes for a survivor — weak test, uninformative mutation, real gap — and getting the diagnosis right is the whole value of running the battery at all. **This is the second time in Session 13 the measurement apparatus was the defect** (D736 was the first). | — |
 | **D743** | `bin/upgrade.py` derives every change class from the two documents, so `migration_added` is computed like the rest. | **It cannot be.** A rendered document records **no migration count and no API contract digest**, and `migrations/released.lock.json` describes only the checkout in hand — never the release that produced the *installed* document. So the command can read how many migrations **this** checkout has released and cannot read how many the installed one had. | **Declared, not guessed**: a `--also CLASS` flag over an enumerated `DECLARABLE` set, and `classify_document_changes` is documented as deliberately partial. A first draft carried a `released_migration_count()` helper that read the checkout's lock and **was never called** — dead code that looked like a derivation. | **Inferring it from a `schema_version` move would be wrong in the direction that matters**: `migration_added` is the class that makes a bump irreversible by image rollback (ADR 0162 §3). A planner that guessed it would produce a confident answer about the one thing an operator cannot undo. **The gap is real and stays open**: nothing yet gives the plan the installed release's migration count, and until something does, that class is an operator's declaration. | 0162 |
 | **D744** | `src/agentic_postgres/upgrade_plan.py` imports its sibling as `from . import compatibility`, which is ordinary Python and reads fine. | **The full contract suite went red on it**, and the guard was right. `test_no_module_is_imported_only_by_its_own_tests` (D204) scans for `from agentic_postgres import X` and `import agentic_postgres.X`, and a **relative** import matches neither — so `compatibility` appeared to be *"imported by nothing outside its own tests"* while `upgrade_plan` was using it on every call. Measured: it is the **only** relative import in the package; all 30-odd sibling imports use the absolute form. | **Changed to the absolute form**, which is the house style and what the guard can see. | **A relative import makes any module invisible to that guard**, and the guard's whole subject is *"a module with no caller is a feature that does not exist, however well it is tested"*. So the deviation would not merely have annoyed a linter — it would have created a blind spot in the one check that notices dead code, in the same session that wrote two pure modules. The suite caught it on its first full run and nothing else would have. | — |
+| **D745** | `bin/apg.sh` validates a verb with `case "${verb}" in [a-z][a-z0-9-]*)`, which refuses anything that is not lowercase letters, digits and hyphens. | **A `case` pattern is a GLOB, and in glob syntax `*` is not a quantifier on the preceding bracket expression — it matches any string, `/` and `.` included.** Measured against an anchored bash regex over the same inputs, control holding because the two disagreed on exactly one: the glob **accepted `ab../../etc/passwd`**. `../../etc/passwd` was refused only because it starts with `.`, which made the check look like it worked. | **An anchored `[[ =~ ]]` regex**, which refuses all eight hostile inputs and accepts all five real verb names. | **shellcheck pointed at it** — SC2254, *"quote expansions in case patterns to match literally rather than as a glob"* — as an ordinary warning about quoting, and the thing underneath was a validation that did not validate. **Nothing was ever reachable through it**: the `-f` test refused the path that did not exist. Which is precisely the arrangement the file's own header forbids: *a check that built the path first and tested for existence afterwards would be relying on nothing accidentally being there.* **The code contradicted its own docstring.** | 0002 |
+| **D746** | Run 5's traversal proof: eight hostile verb names, each asserted to exit 2. | **It could not tell which refusal it had triggered, and the battery proved it.** Restoring the glob (M1) left it green; **deleting the pattern check outright (M2) also left it green** — because `script_for`'s `-f` test refuses the nonexistent path with exit 2 as well. Two refusals, one exit code, and the test asserted only the code. | **The message is asserted, not just the status**: `is not a verb name` comes only from the pattern, and `no such verb` must be absent. Both mutations then die. | **D374 exactly** — *a test that passes for a reason other than the one it names is worse than a weak assertion* — and it is the third time this session the measurement apparatus was the defect (D736, D742). **The battery is what found it**, on the one arm its own comment called the arm that matters. A traversal proof that cannot fail when the traversal guard is deleted is a green light measuring nothing. | — |
+| **D747** | The dispatcher needs a verb table, and `SHELL_COMMANDS` already lists every command, so it can be derived from that. | **That would be a third authority.** `bin/` is what exists, `SHELL_COMMANDS` is the test module's roster, and a dispatcher roster would be a third — with a stale one meaning a verb that silently stops being reachable. **A verb is a script**: `apg doctor` resolves `bin/doctor.sh` by construction, and the 43 shell commands plus `deploy` are reachable with nothing to keep current. | **No list at all.** `deploy` is the single named exception, with its reason attached (D694), because its script is at the repository root by design. **Proved behaviourally**: a script planted in `bin/` becomes a verb and its exit code reaches the caller; removed, it stops being one. | **The first proof of that was a text scan for verb names in the source, and it failed on the usage text's own example** (`apg doctor --verbose`). D464 — *a text scan standing in for a construct* — failing in both directions at once: it flagged prose, and it would have missed a roster spelled in a way the scan did not anticipate. **Exercising the property costs one file and a `finally`.** | 0002, 0037 |
 
 ---
 
@@ -392,17 +395,48 @@ classification lists **stay where they are**: `MUST_DIFFER` / `MUST_MATCH` /
 `RELEASE_STATE` are a judgement about two projects, and reusing them for two
 releases of one project is D702's shape.
 
-### Run 5 — `bin/apg.sh`, the thin dispatcher
+### Run 5 — `bin/apg.sh`, the thin dispatcher — **Done.**
 
-`apg <verb>` execs the existing script, unchanged. **No file moves, no renames, no
-rewrites.** Registered in `SHELL_COMMANDS` (D726), and written so
-`test_no_command_defines_anything_after_its_entry_point` passes — which for a
-dispatcher means the verb table and its functions are defined **above** the entry
-point, not below the `case` that calls them (D185).
+**Shipped, and it holds no verb table at all** (D747). The plan said *"the verb
+table and its functions are defined above the entry point"*; the better answer is
+that there is no table. **A verb is a script**: `apg doctor` resolves
+`bin/doctor.sh` by construction, so all 43 shell commands are reachable with
+nothing to keep current, and `deploy` is the single named exception because its
+script is at the repository root. 21 tests, five mutations, all KILLED.
 
-The install-onto-`PATH` question is decided here: a symlink from the release, or
-nothing and `bin/apg.sh` is the spelling. **Whichever, it is derived from the
-release rather than typed** — `libexec/` is the precedent.
+**`--list` is derived, and the derivation is proved by exercising it**: a script
+planted in `bin/` becomes a verb and its exit code reaches the caller; removed, it
+stops being one.
+
+**PATH: nothing is installed, and that is the decision.** A copy outside the
+release is ADR 0037's failure — a host kept running whichever launcher it was
+provisioned with, and a two-session-old copy deployed a project through the wrong
+session before failing. The reason is in `--help`, because it is the operator's
+question, and a test asserts it stays there.
+
+**Retrospective — the run's two findings are both about proofs rather than code.**
+
+**shellcheck found a validation that did not validate** (D745). SC2254 warns that
+an unquoted expansion in a `case` pattern is a glob; underneath that ordinary
+warning was the fact that **`[a-z][a-z0-9-]*` as a glob accepts
+`ab../../etc/passwd`**, because `*` matches any string rather than more of the
+preceding class. Measured against an anchored regex, control holding on exactly
+that one disagreement. Nothing was reachable through it — the `-f` test refused
+the nonexistent path — **which is the arrangement this file's own header
+forbids.** The code contradicted its own docstring.
+
+**And the traversal proof could not fail** (D746). Restoring the glob left it
+green; **deleting the pattern check outright left it green too**, because both
+refusals exit 2 and the test asserted only the code. The battery is what found
+it, on the arm its own comment called the one that matters. **A traversal proof
+that survives deleting the traversal guard is a green light measuring nothing**
+(D374) — and this is the third time in Session 13 that the measurement apparatus
+was the defect rather than the subject (D736, D742).
+
+**A third, smaller:** the first test of "the dispatcher holds no roster" was a
+text scan for verb names in the source, and it failed on the usage text's own
+example, `apg doctor --verbose`. D464's shape, failing in both directions at
+once. Exercising the property instead cost one planted file and a `finally`.
 
 ### Run 6 — The claim register, read before it is edited
 
