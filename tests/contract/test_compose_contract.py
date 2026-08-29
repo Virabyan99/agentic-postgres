@@ -965,6 +965,44 @@ def test_edge_mode_refuses_volume_removal() -> None:
         assert "ACME state" in result.stderr
 
 
+def test_project_mode_refuses_volume_removal() -> None:
+    """`DEP-REMOVE-001`. The database volume is not removable by any command.
+
+    The sibling above covers **edge** mode; until this test, project mode had
+    none — and project mode is the one holding customer data. `deploy.sh` and
+    `project-runtime.sh down` both go through here, and `down` preserves the
+    volume deliberately: *"removing it here would make `systemctl restart` a
+    data-loss command."* This is the guard that makes that a property rather
+    than a convention.
+
+    **The argument order is load-bearing and was measured, not assumed.**
+    `--runtime` triggers a root check the moment it is parsed, so the natural
+    ordering — `--runtime down --volumes` — answers *"requires root"* (exit 3)
+    to an unprivileged caller and never reaches the refusal. Putting `--volumes`
+    first reaches it at exit 2. A privileged caller passes the root check and
+    reaches the refusal in any order, which is the case that matters: the
+    refusal protects the caller who could actually do the damage.
+
+    Written this way rather than skipped for want of root, because a guard on a
+    data volume that nothing has ever executed is the shape of every defect this
+    project has recorded (D211-D214).
+    """
+    for flag in ("-v", "--volumes"):
+        result = subprocess.run(
+            [str(COMPOSE_SH), str(ALPHA), flag, "--runtime", "down"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 2, (
+            f"{flag} in project mode exited {result.returncode}, not 2. If it is 3, the "
+            "root check ran first and this assertion never reached the refusal it names"
+        )
+        assert "database volume" in result.stderr, (
+            f"{flag} was refused for some other reason: {result.stderr.strip()[:200]}"
+        )
+
+
 def test_inherited_edge_stack_name_cannot_override() -> None:
     result = edge("config", env={"EDGE_STACK_NAME": "hijacked"})
     assert result.returncode == 0, result.stderr
