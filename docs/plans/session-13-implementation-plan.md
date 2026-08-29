@@ -17,9 +17,9 @@ repeat them.
 
 ```
 SESSION 13 IS COMPLETE. evidence/session-13.json merged:
-                **66 passed, 12 not_run, 0 failed.** All four of Session 13's
-                own claims passed. The twelve are proofs nobody ran, and they
-                say so since ADR 0163 (D755).
+                **status not_run** — 66 passed, 12 not_run, 0 failed. All four
+                of Session 13's own claims passed. The twelve are proofs nobody
+                ran, and the document says so at both levels (ADR 0163).
 HEAD            8858246+, clean, pushed. Host checkout matches.
 CURRENT_SESSION **13**, moved in Run 7 with all four REL-* activated (D690).
 template_version **0.2.0**, moved in the same commit (ADR 0162).
@@ -82,7 +82,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D760.**
+**Next free number after this table is D760.** D758 closed in Run 11.
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -125,7 +125,7 @@ the runs follow the same rule (D267).
 | **D755** | `claim_result`'s docstring: *"`not_run` is a distinct status from `failed` and is reported whenever a proof is absent, even if every proof that did run passed. The difference matters to whoever reads the evidence: `failed` means the system is wrong, `not_run` means the evidence is."* | **`not_run` has never been emitted, in any session.** It fires only when a node id is **absent from the JUnit** — and a **skipped** test is present, with outcome `skipped`, which falls through to `status = "passed" if worst == "passed" else "failed"`. Measured against the host run's own artefacts: **330 passed, 28 skipped, 0 failed**, and every one of the twelve unproved claims has at least one *skipped* node id. Measured across releases: sessions 11, 12 and 13 report **only** `passed`/`failed`. | **Not repaired in this run.** The evidence model is a contract and changing it changes what a release reports — twelve claims would move from `failed` to `not_run` in this document. **That is a decision, not a repair** (§6: a contract test changes only with an ADR), and it is put to the operator rather than taken. | **This is the canonical shape, in the artefact that exists to prevent it.** `failed` is a verdict about the system; twelve of them here are verdicts about an operator who did not pass `--admin-password-file`. **The gate's own preamble predicts the right thing and the model does not deliver it**: it printed *"four claims will report **not_run**"* and they reported `failed`. A reader of `evidence/session-13.json` cannot distinguish a broken guarantee from an unsupplied flag — which is exactly the distinction the docstring says the status exists to draw. | 0089, 0045 |
 | **D756** | Run 1 measured D724's offline half and **explicitly refused to claim the live half**: none of `apg-diag`'s eight verbs returns a deployed document, so the two live `template_version` values could not be read. The inference from `VERSION` was called strong and still an inference (D267). | **Measured on the trip, and the inference was right.** Both live deployed documents carry `template_version` **`0.1.0-dev`** at `schema_version` 13, `deployed_through_session` 12, `source_commit` `936fe099d0d4`. `0.1.0-dev` is valid semver 2.0.0 with a prerelease, so the pattern ADR 0162 adds rejects nothing on the deployment either. | **D724 is closed on both halves.** The schema may take the semver pattern without a `schema_version` bump for the corpus that exists — the contract question ADR 0162 left open is still open, and still a policy question rather than a measurement. | **Recorded because the refusal was the right call and it cost nothing.** Run 1 could have written *"both live documents say 0.1.0-dev"* from the `VERSION` file and been correct — and a reader could not have told that sentence from a measured one. **The gap between a strong inference and a measurement is one trip, and this is the run that spent it.** | 0162 |
 | **D757** | `bin/session-13-check.sh --mode external` requires `--public-ipv4`, `--project-a-outputs` and `--ssh-destination`. `--project-b-outputs` is documented as *"Required in host mode"*, and `docs/session-11-operator-guide.md`'s external example passes only `-a`. | **An external half built that way cannot be merged.** `write_half` records `project_keys` from every document it was given, and its own docstring says the field *"names the deployment, not the measurement… recording only the projects a half touched would make an asymmetric-but-correct pair of runs look like two different systems to `MUST_AGREE`."* The merge refused: `host=['alpha-dev','beta-dev'] external=['alpha-dev']`. **The argument check and the merge rule disagree**, and the newest operator guide documents the losing side. | **External mode was re-run with both documents** and the merge succeeded. The gate's required set is unchanged in this run; the conflict is recorded rather than resolved. | **The refusal is the mechanism working** — this is the check that catches a stale half (D730's hazard) — and it fired on a correct run. **A required-argument set that permits an unmergeable artefact is a gate that lets an operator do the wrong thing and find out four steps later**, which is D465's shape. The cheap repair is for external mode to require `-b` whenever the deployment has two projects; the honest note is that nothing yet makes the two rules agree. | 0039 |
-| **D758** | ADR 0163 gives a claim three statuses, so `evidence/session-13.json` no longer says anything is broken. | **The document's own top-level `status` still says `failed`, with zero failed claims.** `merge` computes it as `"failed" if [name for name, status in tests.items() if status != "passed"] else "passed"` — a binary summary one level above the per-claim status ADR 0163 just made three-valued. A reader of the top field gets the same conflation the ADR removed underneath it. | **Not changed in this run, and named rather than left.** ADR 0163 scoped itself to the claim status deliberately and said pass/fail semantics do not move; `document["status"] != "passed"` is read by the gates at `write-session-evidence.py:340` and decides an exit code, so widening it is a second decision with its own blast radius. | **It is defensible as it stands** — the field answers *did everything pass*, and `failed` there means *no*. **It is also exactly the shape the ADR was written about**, one level up, and the honest thing is to say so rather than let "66 passed, 12 not_run, 0 failed, status: failed" read as a contradiction a reader has to resolve alone. | 0163 |
+| **D758** | ADR 0163 gives a claim three statuses, so `evidence/session-13.json` no longer says anything is broken. | **The document's own top-level `status` still said `failed`, with zero failed claims.** `merge` computed it as `"failed" if [name for name, status in tests.items() if status != "passed"] else "passed"` — a binary summary one level above the per-claim status ADR 0163 had just made three-valued. The first document written under the new rule read **`66 passed, 12 not_run, 0 failed` … `status: failed`**, so a reader of the top field alone got exactly the wrong answer. | **Closed in Run 11**, by applying ADR 0163's own rule at both levels — which is applying an existing decision to a new subject, not a new decision (ADR 0021). ADR 0163 is **amended** rather than left saying it scoped itself away, because that sentence became wrong within the hour. The document now reads `status: not_run`. | **`not_run` exits 5 exactly as `failed` does**, and that was checked with a script rather than an inline `$?`: D686's contract is untouched. The stderr now separates *these FAILED* from *these were NOT RUN — nobody looked; this is not a verdict about the system*, because those are different messages to an operator deciding what to do next. | 0163, 0021 |
 | **D759** | The trip's evidence records what the run measured, so the halves stand as written. | **They were written by a model that misread them** (D755). The JUnit artefacts are unchanged — 330 passed, 28 skipped, 0 failed — and only the reading was wrong, so both halves were **re-derived from the same artefacts** under ADR 0163 and re-merged. Twelve claims moved `failed` → `not_run`; the headline did not move: **66 of 78** before and after. | **Session 13's halves re-derived. Sessions 11 and 12's documents deliberately NOT touched** — they are records of runs taken under the old model, and re-deriving them would make them say something nobody measured. | **Re-deriving is not re-running, and the distinction is what makes it honest.** No test was re-executed and no outcome changed; a corrected reader read the same bytes. **The alternative was shipping a document known to misreport twelve guarantees**, which is worse than either. ADR 0163 committed to this in writing before it was done. | 0163 |
 
 ---
@@ -549,6 +549,29 @@ work that a second address would have done worse.
 **`pytest -m future` still selects nothing**, and D695's branch handles it: this
 session activated its requirements directly rather than staging placeholders, so
 the empty case the guard learned to assert in Session 12 remains the true one.
+
+### Run 11 — D758: the same rule one level up — **Done.**
+
+**ADR 0163 amended, not superseded.** It had scoped itself to the per-claim
+status and said the document's own `status` stayed binary — and the first
+document written under it read `66 passed, 12 not_run, 0 failed … status:
+failed`. **That sentence was wrong within the hour**, so the ADR now records the
+extension rather than the exclusion.
+
+`merge` computes the document status by the same three-way rule: `failed` if any
+claim failed, `not_run` if none failed and any is not `passed`, `passed`
+otherwise. **`evidence/session-13.json` now reads `status: not_run`.**
+
+**D686 is untouched and was checked, not assumed** — the merge still exits 5, in
+a script file rather than an inline `$?`. Two tests pin it: a `not_run` claim
+makes the document `not_run` *and still exits 5*, and a failure beside it still
+outranks — the second being the control, since a merge that always said `not_run`
+would satisfy the first.
+
+**The stderr now separates the two lists.** *These FAILED* and *these were NOT
+RUN — nobody looked; this is not a verdict about the system* are different
+sentences to an operator deciding what to do next, and one list could only ever
+be one of them.
 
 ### Run 10 — D755: a skipped proof is not a failed one — **Done.**
 

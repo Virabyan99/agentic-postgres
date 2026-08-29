@@ -118,6 +118,33 @@ non-`passed`. Now they must distinguish, which is the point — but a reader who
 does not know that will under-read a `failed`. The status vocabulary is in the
 document and in this ADR; nothing enforces that a consumer understands it.
 
+### Amended in the same session: the document's own status
+
+**This ADR first scoped itself to the per-claim status and left the document's
+top-level `status` binary. That was wrong within the hour** (D758). The first
+document written under the rule read:
+
+```
+66 passed, 12 not_run, 0 failed        status: failed
+```
+
+which is the conflation this ADR removes, surviving one level up — and a reader
+of the top field alone gets exactly the wrong answer. **The same rule applies at
+both levels**, and applying a decision to a new subject is not a new decision
+(ADR 0021):
+
+| Document status | When |
+|---|---|
+| `failed` | **any** claim is `failed` |
+| `not_run` | no claim failed, and at least one is not `passed` |
+| `passed` | every claim passed |
+
+**`not_run` exits 5 exactly as `failed` does.** A proof nobody ran is not a
+release control anybody may proceed past, and D686's contract — *exit 5 means the
+evidence was written and a claim in it is not `passed`* — is unchanged. The
+stderr now separates the two lists, because *these FAILED* and *these were NOT
+RUN* are different messages to an operator deciding what to do next.
+
 ## What this does not decide
 
 **Whether a skipped proof should ever be tolerated.** It should not, and nothing

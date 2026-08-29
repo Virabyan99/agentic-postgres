@@ -224,8 +224,23 @@ def merge(session: int, host_input: Path, external_input: Path | None, output: P
         )
         return 5
 
-    failed = [name for name, status in merged["tests"].items() if status != "passed"]
-    merged["status"] = "failed" if failed else "passed"
+    # **The document's own status is three-valued too** (ADR 0163, D758). It was
+    # binary until Session 13 Run 11, which left it reading `failed` over a claim
+    # set of "66 passed, 12 not_run, 0 failed" -- the exact conflation ADR 0163
+    # removed one level down, surviving one level up.
+    #
+    # Same rule as a claim, and for the same reason: `failed` means the system is
+    # wrong, `not_run` means the evidence is, and a real failure outranks a
+    # missing proof.
+    broken = sorted(name for name, status in merged["tests"].items() if status == "failed")
+    unproved = sorted(name for name, status in merged["tests"].items() if status != "passed")
+
+    if broken:
+        merged["status"] = "failed"
+    elif unproved:
+        merged["status"] = "not_run"
+    else:
+        merged["status"] = "passed"
 
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(canonical_json(merged))
@@ -234,8 +249,19 @@ def merge(session: int, host_input: Path, external_input: Path | None, output: P
     for name, status in sorted(merged["tests"].items()):
         print(f"  {name:<22}  {status}")
 
-    if failed:
-        print(f"write-session-evidence: these did not pass: {failed}", file=sys.stderr)
+    # **`not_run` exits 5 exactly as `failed` does.** A proof nobody ran is not a
+    # release control anybody may proceed past, and D686's contract is that exit
+    # 5 means the evidence was written and a claim in it is not `passed`.
+    if broken:
+        print(f"write-session-evidence: these FAILED: {broken}", file=sys.stderr)
+    if unproved:
+        not_run = [name for name in unproved if name not in broken]
+        if not_run:
+            print(
+                f"write-session-evidence: these were NOT RUN: {not_run}. "
+                "Nobody looked; this is not a verdict about the system.",
+                file=sys.stderr,
+            )
         return 5
     return 0
 
@@ -339,7 +365,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if document["status"] != "passed":
         print(
-            "write-session-evidence: the session did not pass; evidence records the failure.",
+            f"write-session-evidence: the session did not pass (status {document['status']}); "
+            "evidence records it.",
             file=sys.stderr,
         )
         return 5

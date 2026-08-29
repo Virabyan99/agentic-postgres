@@ -786,6 +786,72 @@ def test_a_failed_claim_survives_the_merge_as_a_failure(tmp_path: Path) -> None:
     assert json.loads(merged.read_text(encoding="utf-8"))["status"] == "failed"
 
 
+def test_a_not_run_claim_makes_the_document_not_run_and_still_exits_five(
+    tmp_path: Path,
+) -> None:
+    """ADR 0163's amendment, and D758.
+
+    The document's own status was binary until Session 13 Run 11, so a merge over
+    "66 passed, 12 not_run, 0 failed" published `status: failed` — the conflation
+    the ADR removes per claim, surviving one level up.
+
+    **Two assertions, and the second is the one that matters.** That the word is
+    right, and that a proof nobody ran is still a release control nobody may
+    proceed past: exit 5, exactly as a failure (D686).
+    """
+    host_path = write_host_half(tmp_path, tmp_path / "host.json")
+    host = json.loads(host_path.read_text(encoding="utf-8"))
+    host["tests"]["isolation"] = "not_run"
+    host_path.write_text(json.dumps(host), encoding="utf-8")
+
+    external = write_external_half(tmp_path, tmp_path / "external.json")
+    merged = tmp_path / "session-02.json"
+    result = run_writer(
+        "--session",
+        "2",
+        "--host-input",
+        str(host_path),
+        "--external-input",
+        str(external),
+        "--output",
+        str(merged),
+    )
+
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert json.loads(merged.read_text(encoding="utf-8"))["status"] == "not_run"
+    assert "NOT RUN" in result.stderr
+    assert "these FAILED" not in result.stderr, "nothing failed; the message must not say so"
+
+
+def test_a_failure_outranks_a_not_run_in_the_document_too(tmp_path: Path) -> None:
+    """One of each is `failed`. The control for the test above: without it, a
+    merge that always said `not_run` would satisfy that one."""
+    host_path = write_host_half(tmp_path, tmp_path / "host.json")
+    host = json.loads(host_path.read_text(encoding="utf-8"))
+    names = sorted(host["tests"])
+    assert len(names) >= 2, "this fixture needs two claims to distinguish the two outcomes"
+    host["tests"][names[0]] = "not_run"
+    host["tests"][names[1]] = "failed"
+    host_path.write_text(json.dumps(host), encoding="utf-8")
+
+    external = write_external_half(tmp_path, tmp_path / "external.json")
+    merged = tmp_path / "session-02.json"
+    result = run_writer(
+        "--session",
+        "2",
+        "--host-input",
+        str(host_path),
+        "--external-input",
+        str(external),
+        "--output",
+        str(merged),
+    )
+
+    assert result.returncode == 5
+    assert json.loads(merged.read_text(encoding="utf-8"))["status"] == "failed"
+    assert "these FAILED" in result.stderr
+
+
 # ---------------------------------------------------------------------------
 # ADR 0089 — a claim is built from its own session's requirement IDs
 # ---------------------------------------------------------------------------
