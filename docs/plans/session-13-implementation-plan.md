@@ -16,15 +16,19 @@ repeat them.
 ## Status — read this first
 
 ```
-SESSION 13 IS OPEN.  Runs 1-8 done. **Only the host trip remains.**
-HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
+SESSION 13: the host trip is DONE. evidence/session-13.json merged,
+                **66 of 78 claims passed.** All four of Session 13's own passed.
+HEAD            c447af5, clean, pushed. Host checkout matches.
 CURRENT_SESSION **13**, moved in Run 7 with all four REL-* activated (D690).
 template_version **0.2.0**, moved in the same commit (ADR 0162).
-divergences     D719-D754 recorded here. **Next free: D755.**
+divergences     D719-D757 recorded here. **Next free: D758.**
 ADRs            **162**, 0162 written in Run 3. Next free: 0163.
 gate            session-13-check.sh written, registered, shellcheck clean.
-                Full suite: **4499 passed, 294 skipped, 0 failed.**
-host            One trip, READ-ONLY. Runs 9+.
+                Full suite: **4499 passed, 0 failed.** On the host: offline
+                PASSED, host exit 5 (D686), external PASSED.
+host            One READ-ONLY trip, taken. Host is at c447af5 / Session 13
+                in the CHECKOUT; the installed RELEASE is still 936fe09 /
+                Session 12, because nothing was deployed. That is the point.
 ```
 
 **Three facts change the shape of this session, and all three were measured
@@ -76,7 +80,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D755.**
+**Next free number after this table is D758.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -116,6 +120,9 @@ the runs follow the same rule (D267).
 | **D752** | D719's class — a typed session ceiling — was repaired in `bin/write-session-evidence.py` and guarded across `bin/*.py` in Run 2. | **Two more members were in `tests/`, which the guard's scope never covered**, and the bump is what surfaced them: `test_acceptance_registry.py` held `assert 1 <= entry["target_session"] <= 12`, and `test_documentation_index.py` matched `Session (\d+) of 12 implemented`. Both were correct for twelve sessions for the same reason the first was. **A fourth literal was in `ID_PATTERN`** — the requirement-prefix enumeration, which had no `REL`. | The registry bound **derives from `CURRENT_SESSION`**. The README pattern drops `of 12` entirely rather than becoming `of 18`: **the total is the next stage's business, and the number that can disagree with the release is the one worth checking.** `REL` joins the prefix enumeration, which stays enumerated (ADR 0006 — a pattern accepting any uppercase word would accept a typo as a family). | **The scan Run 2 wrote could not have caught these even in scope**, because it matches a literal equal to `CURRENT_SESSION` and both said `12` while the constant said `12`. **What caught them was the bump itself**, loudly, which is the behavioural half Run 2 named as load-bearing when it documented that the scan goes quiet. The apparatus worked; the part that worked was the part not written as a scan. | 0002, 0006 |
 | **D753** | Run 7 activates four `REL-*` requirements, and a claim needs a live proof in exactly one mode — so each needs a host-gated test, which needs an environment variable to gate on (D687: a variable no gate exports is a proof that can only skip). | **No new variable was needed, and the reason is ADR 0158.** The live halves take the project key from the **deployed document** — read for identity and nothing else — so `APG_LIVE_HOST` and `APG_PROJECT_A_OUTPUTS` already gate them. The *installed* rendered document, which is what the plan actually compares, is found by `deployed_output.rendered_path(key)` from that key. | Four live proofs in `tests/deployment/test_session13_upgrade_plan.py`, gated on the two existing variables, each asserting **the deployment is unchanged afterwards**. | **The obvious design was a variable pointing at the installed rendered document**, and it would have been a second address for something already derivable — ADR 0002 at the environment layer, and a new entry in a roster D687 exists to keep honest. *The deployed document is the address book* did the work instead. | 0158, 0002, D687 |
 | **D754** | D533 and D540 are two separate open items: the PGDG pin has an undiarised end date, and `lock-versions.sh --update` *"re-adopts unrelated rolling tags — one apt pin moved three image references."* Run 8 diarises the first. | **They are one item, and diarising the pin triggered the other.** The diary note is a **comment**, and `versions.env` records a SHA-256 of the whole of `versions.in.yaml` — so a comment invalidated the lock, `--update` was the only way to revalidate it, and `--update` re-resolved every rolling tag while it was there. **Three moved**: `POSTGRES_IMAGE` (`pg18`), `PYTHON_RUNTIME_IMAGE` (`3.12-slim`) and `TRAEFIK_IMAGE` (`v3.7`). **The same count Session 10 restored by hand**, reproduced on demand. | **The two lock metadata lines keep their new values; the three image digests were restored from a snapshot taken before the update**, and `--check` passes. The diary note stays at the pin, with the one command that answers *"is it still there"*. | **D540 said the drift is real and nothing prevents the next `--update`.** What was not known is how little it takes: **a comment.** Adopting a new Postgres image in a housekeeping run — in the release that has not yet been to the host — is exactly the unintended change a digest pin exists to prevent, and it would have ridden along under a commit message about tidying. **The repair is still by hand**, and D540 stays open with a sharper statement of its trigger. | — |
+| **D755** | `claim_result`'s docstring: *"`not_run` is a distinct status from `failed` and is reported whenever a proof is absent, even if every proof that did run passed. The difference matters to whoever reads the evidence: `failed` means the system is wrong, `not_run` means the evidence is."* | **`not_run` has never been emitted, in any session.** It fires only when a node id is **absent from the JUnit** — and a **skipped** test is present, with outcome `skipped`, which falls through to `status = "passed" if worst == "passed" else "failed"`. Measured against the host run's own artefacts: **330 passed, 28 skipped, 0 failed**, and every one of the twelve unproved claims has at least one *skipped* node id. Measured across releases: sessions 11, 12 and 13 report **only** `passed`/`failed`. | **Not repaired in this run.** The evidence model is a contract and changing it changes what a release reports — twelve claims would move from `failed` to `not_run` in this document. **That is a decision, not a repair** (§6: a contract test changes only with an ADR), and it is put to the operator rather than taken. | **This is the canonical shape, in the artefact that exists to prevent it.** `failed` is a verdict about the system; twelve of them here are verdicts about an operator who did not pass `--admin-password-file`. **The gate's own preamble predicts the right thing and the model does not deliver it**: it printed *"four claims will report **not_run**"* and they reported `failed`. A reader of `evidence/session-13.json` cannot distinguish a broken guarantee from an unsupplied flag — which is exactly the distinction the docstring says the status exists to draw. | 0089, 0045 |
+| **D756** | Run 1 measured D724's offline half and **explicitly refused to claim the live half**: none of `apg-diag`'s eight verbs returns a deployed document, so the two live `template_version` values could not be read. The inference from `VERSION` was called strong and still an inference (D267). | **Measured on the trip, and the inference was right.** Both live deployed documents carry `template_version` **`0.1.0-dev`** at `schema_version` 13, `deployed_through_session` 12, `source_commit` `936fe099d0d4`. `0.1.0-dev` is valid semver 2.0.0 with a prerelease, so the pattern ADR 0162 adds rejects nothing on the deployment either. | **D724 is closed on both halves.** The schema may take the semver pattern without a `schema_version` bump for the corpus that exists — the contract question ADR 0162 left open is still open, and still a policy question rather than a measurement. | **Recorded because the refusal was the right call and it cost nothing.** Run 1 could have written *"both live documents say 0.1.0-dev"* from the `VERSION` file and been correct — and a reader could not have told that sentence from a measured one. **The gap between a strong inference and a measurement is one trip, and this is the run that spent it.** | 0162 |
+| **D757** | `bin/session-13-check.sh --mode external` requires `--public-ipv4`, `--project-a-outputs` and `--ssh-destination`. `--project-b-outputs` is documented as *"Required in host mode"*, and `docs/session-11-operator-guide.md`'s external example passes only `-a`. | **An external half built that way cannot be merged.** `write_half` records `project_keys` from every document it was given, and its own docstring says the field *"names the deployment, not the measurement… recording only the projects a half touched would make an asymmetric-but-correct pair of runs look like two different systems to `MUST_AGREE`."* The merge refused: `host=['alpha-dev','beta-dev'] external=['alpha-dev']`. **The argument check and the merge rule disagree**, and the newest operator guide documents the losing side. | **External mode was re-run with both documents** and the merge succeeded. The gate's required set is unchanged in this run; the conflict is recorded rather than resolved. | **The refusal is the mechanism working** — this is the check that catches a stale half (D730's hazard) — and it fired on a correct run. **A required-argument set that permits an unmergeable artefact is a gate that lets an operator do the wrong thing and find out four steps later**, which is D465's shape. The cheap repair is for external mode to require `-b` whenever the deployment has two projects; the honest note is that nothing yet makes the two rules agree. | 0039 |
 
 ---
 
@@ -565,6 +572,57 @@ Adopting a new Postgres image in a housekeeping run, in a release that has not
 yet been to the host, is precisely the unintended change a digest pin exists to
 prevent — and it would have ridden along under a commit message about tidying.
 **D540 stays open**, with a sharper statement of its trigger.
+
+### Runs 9+ — The host trip, read-only — **Done.**
+
+**Transport, and the discipline held.** Bundle under a per-release name, sha256
+confirmed identical local and remote, `FETCH_HEAD` read **before** the checkout.
+Two hops, because a fixture defect was found and fixed between them.
+
+**`--mode offline` PASSED** on the host, twice — once at `95fc456` and again at
+`c447af5` after the fixture fix. **`--mode host` exit 5**, which is the expected
+shape (D686): the evidence was written and claims in it are not `passed`.
+**`--mode external` PASSED.** Merged: **`evidence/session-13.json`, 66 of 78.**
+
+**All four of Session 13's own claims passed** — `release_version`,
+`upgrade_compatibility`, `upgrade_plan`, `operator_front_door` — against a
+deployment running the *previous* release, which is what made the plan a real
+comparison: installed `0.1.0-dev` / Session 12, candidate `0.2.0` / Session 13.
+
+**Nothing on the host was mutated.** The installed release is still `936fe09`.
+Each of the four proofs asserted the deployed document, the installed rendered
+document and the container set were byte-identical afterwards, and they were.
+
+**Retrospective — three findings, and the largest is about the evidence itself.**
+
+**D755: `not_run` has never been emitted, in any session.** Twelve claims in this
+release's document say `failed`; the host run recorded **0 test failures**. Every
+one is a *skipped* proof waiting on an operator-supplied declaration. The status
+the model's own docstring calls the important distinction — *`failed` means the
+system is wrong, `not_run` means the evidence is* — is unreachable, because it
+fires only on a node id **absent** from the JUnit and a skip is present.
+**The gate's preamble predicted `not_run` and the model delivered `failed`.**
+Not repaired here: it changes what a release reports, so it is a decision.
+
+**D756: D724's live half closed, and the Run 1 refusal was worth it.** Both live
+documents carry `0.1.0-dev`. Run 1 could have written that sentence from the
+`VERSION` file and been correct — and no reader could have told it from a
+measurement.
+
+**D757: a correct external run produced an unmergeable half.** External mode
+requires only `--project-a-outputs`, and the newest operator guide's example
+passes only that; the merge then refused because `project_keys` disagreed. The
+argument check and the merge rule disagree, and the guide documents the losing
+side.
+
+**And the apparatus was wrong a fifth time.** My first analysis of the twelve
+unproved claims globbed `.generated/` and read the *offline* gate's JUnit,
+reporting every node id as `<ABSENT FROM JUNIT>` — which would have read as a
+catastrophic evidence failure. The real artefacts are `evidence/session-13-host-*.xml`.
+**The reading was corrected before it was reported**, but it is the fifth time in
+this session that the thing measuring was the thing broken.
+
+**Original plan text, for the record:**
 
 ### Runs 9+ — The host trip, read-only
 
