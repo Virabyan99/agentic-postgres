@@ -85,6 +85,12 @@ in from twelve closed sessions, and the thinner shape a Stage 2 session plan
 takes. **Its §1 is the audit of the Stage 2 specification against this
 repository** — D704–D718, and the reason Stage 2 is six sessions and not twelve.
 
+[`plans/session-13-implementation-plan.md`](plans/session-13-implementation-plan.md)
+is the first Stage 2 session: release identity, the `upgrade` verbs, one front
+door, and the D697 claim register. **Its §1 measured that a third of that
+register cannot become claims at all** (D720) and that three of the rest were
+already decided against, in a comment nobody had read (D722).
+
 ---
 
 **Generated pages are marked.** `acceptance-matrix.md` and the table in
