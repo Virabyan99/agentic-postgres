@@ -20,7 +20,7 @@ SESSION 13 IS OPEN.  Nothing built yet; this is the plan.
 HEAD            89db7fb, clean, pushed. Stage 2 plan at dcd8afc.
 CURRENT_SESSION 12, and it moves to 13 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.1.0-dev -> 0.2.0, Run 7.
-divergences     D719-D733 recorded here. **Next free: D734.**
+divergences     D719-D736 recorded here. **Next free: D737.**
 ADRs            161. This session writes ONE, in Run 3. Next free: 0162.
 gate            session-13-check.sh, derived BY DIFF from session-12's (Run 7).
 host            One trip, READ-ONLY. Runs 9+.
@@ -75,7 +75,7 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 `89db7fb` during planning**, with the file and line behind it. Rows added during
 the runs follow the same rule (D267).
 
-**Next free number after this table is D734.**
+**Next free number after this table is D737.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -94,6 +94,9 @@ the runs follow the same rule (D267).
 | **D731** | **D724 answered, offline half.** Constraining `template_version` to semver may reject documents that validate today, and may need `schema_version` 13 → 14. | **It rejects nothing.** Measured (Rig A, control holds): every `template_version` reachable in the tree is `0.1.0-dev` — the `VERSION` file, both stale deployed documents, both rendered fixtures — and `0.1.0-dev` **is** valid semver 2.0.0 with a prerelease. Adding the pattern to both `$defs` members caused **0 regressions** among documents that validate today. **The control discriminates**: a probe with `template_version: "banana"` is **accepted** by the current schema and **refused** by the patched one. | The pattern is safe to add on the evidence available. **Whether it needs a version bump is Run 3's decision, not this measurement's** — a tightening rejects values that *were* legal, and whether that is breaking is a policy question about the contract rather than about the corpus. | **The live half is NOT measured and is not claimed.** `apg-diag`'s eight verbs — `containers labels logs routes listeners edge-log catalog generation` — include **none** that returns a deployed document, so the live values cannot be read without the operator's `sudo install -o op`. Every value in the tree says `0.1.0-dev` and the field is derived from the release's `VERSION`, so the inference is strong — **and an inference is not a measurement** (D267). | 0012, 0027 |
 | **D732** | **D725 answered.** `upgrade plan` diffs the installed **deployed** document against the **rendered** candidate, reusing Session 12's leaf walker. | **The two kinds share 41% of their leaf vocabulary** — 68 shared of 165 in the union; 87 leaves in `renderedDocument`, 146 in `deployedDocument` (Rig B, control holds). Worse than the absences: **six of the seven routes have a different SHAPE in the two kinds.** `routes.app`, `routes.app_docs`, `routes.docs`, `routes.mcp`, `routes.rest` and `routes.storage` are a **string** in the rendered document and an **object `{status, url}`** in the deployed one. Only `routes.health` matches — which is the rig's control, and it is what proves the comparison is about the schema rather than about the walker. | **The plan does not diff the two kinds.** See D733 for what it diffs instead. | A naive leaf diff across the kinds would report **every route as changed on every run**, plus 78 deployed-only leaves as *removed* and 19 rendered-only ones as *added* — a plan whose output is dominated by the fact that it is comparing two vocabularies. **It would look like a working diff**, which is the failure mode: it produces a plausible answer to a question nobody asked. | — |
 | **D733** | The deployed document is the record of what is installed, so it is the left-hand side of an upgrade plan. | **It cannot answer the question an upgrade plan exists to ask.** `renderedDocument.inputs` carries the five digests that say whether the inputs changed — `project_sha256`, `capabilities_sha256`, `secrets_contract_sha256`, `versions_lock_sha256`, `source_specification_sha256` — and **`deployedDocument` has no `inputs` block at all**, measured directly. **But the rendered document of the installed release is on the host**: `deployed_output.rendered_path(key)` is *"the installed rendered directory"*, and `install_rendered` puts it there on every deploy. | **`upgrade plan` diffs `rendered_path(key)/outputs.json` against a freshly rendered candidate.** Two documents of the **same kind**, same vocabulary, same shapes, both carrying the five input digests. The deployed document keeps its own job — ADR 0158's address book, and the *observation* half of `upgrade check`. | **This is ADR 0158 arriving at a new subject.** *The deployed document is the address book, not the diagnosis* — and an upgrade plan is neither: it is a comparison of two **intents**, which is what a rendered document is. The first design reached for the deployed document because it is the one that sounds authoritative. **The measurement is what moved it**, and it moved before Run 4 rather than during it. | 0158 |
+| **D734** | Run 2, as planned: *"widen the existing guard to cover the writer"* — a scan for a session compared against a typed **ceiling**, with floors deliberately allowed. | **The scan was wrong in both directions on its first execution, and its own control caught both.** It missed `session > 12` — a ceiling written as a refusal rather than a bound — and it flagged the three legitimate floors (`bin/bootstrap-providers.py:939`, `bin/materialize-secrets.py:306`, `bin/render-secret-override.py:61`, all `if arguments.session < 1:`). The deeper finding is why: **no textual rule separates a ceiling from a feature gate.** `bin/deploy-project.py:1870` holds `if arguments.through_session >= 3:` — *"session 3 added a step"* — and `session > 12` is a refusal. **Same shape, different things.** | **Rescoped to what is exactly decidable**: does a command have *today's* session number written into it? `TYPES_THE_CURRENT_SESSION` matches a session compared against the literal `CURRENT_SESSION` currently is. **Zero exemptions, zero false positives**, and it would have caught D719 on the day it was written. | **A guard that needs an exemption list longer than its catch list is a guard about its exemptions.** The floor/ceiling version needed five named exemptions to find one defect. And the rescoping has an honest cost that is written into the code: **the scan goes quiet after the bump** — `<= 12` stops matching once `CURRENT_SESSION` is 13. So it is named as *the cheap half*, and the load-bearing guard is `test_the_evidence_writer_accepts_the_session_this_release_is`, which is unconditional and cannot go quiet. | — |
+| **D735** | Every operator command that takes `--session` bounds it. | **Three take a floor and no ceiling at all.** `bootstrap-providers.py`, `materialize-secrets.py` and `render-secret-override.py` each hold `if arguments.session < 1:` and nothing above it, so each accepts `--session 999`. `deploy-project.py` is the only one with both halves. | **Not repaired in Run 2**, and not claimed as a defect: **what a session above `CURRENT_SESSION` actually does to each was not measured**, so the row records the asymmetry and stops there. | It is the same axis D719 sits on and the opposite failure — D719 typed a ceiling, these have none — so noticing one and not the other would be the narrow repair this project keeps making. **Measuring three commands' behaviour on an out-of-range session is a run of its own**, and inventing a bound for them inside Run 2 would be a change nobody asked for to code nobody measured. | 0002 |
+| **D736** | The mutation battery reports `KILLED` when the target goes red and its control stays green, and D499's rule applies: **if both go red, repair the control.** | **All three mutations reported `CONTROL FAILED` and the control was fine.** The battery's *reader* was the defect: it ran pytest with `-q`, which prints **no line for a passing node**, and inferred `PASSED` from the run's totals. A mutation's own failure puts the word *failed* in that output — so the reader could never see a green control **in exactly the runs it exists to read**. | `-rA`, and each node's outcome read **from the per-node summary** rather than inferred from totals. Re-run: three `KILLED`, three green controls, tree green after restore. | **D499's rule pointed at the right half and the cause was one layer further in.** *Repair the control, not the assertion* assumes the control's verdict is trustworthy; here the verdict itself was manufactured. **It fails in the direction that wastes a run rather than passes a defect** — but a battery that cries `CONTROL FAILED` on every mutation is one somebody eventually stops reading, which is D701's *"a signal that is always red is a signal nobody reads"* in the measurement apparatus instead of the product. | — |
 
 ---
 
@@ -220,16 +223,52 @@ whole reason this run exists. **Rig B's control is the part worth keeping**:
 `routes.health` matches in both kinds while six others do not, so the 41% is a
 fact about the schema and not an artefact of how the walker descends.
 
-### Run 2 — D719: one authority for the session bound
+### Run 2 — D719: one authority for the session bound — **Done.**
 
-Derive `write-session-evidence.py`'s bound from `CURRENT_SESSION`, and **widen
-`test_gate_contract.py`'s existing no-hard-coded-session rule to cover the
-writer** rather than adding a second guard next to it. Small, and every later run
-that writes evidence is behind it.
+**Shipped.** The bound is `1 <= args.session <= CURRENT_SESSION` — a floor that is
+history beside a ceiling that is derived, which is `bin/deploy-project.py:1587`'s
+split and its reason. `--help` derives too. `test_gate_contract.py`'s rule was
+widened rather than duplicated, and its docstring now says the rule was always
+the right one and had been scoped to one file.
 
-**The battery's control is the guard itself**: with the derivation reverted, the
-widened test must go red, and with the *scan* blinded it must go red too — a
-guard that reads nothing reports every file clean forever (D694).
+**Three mutations, all KILLED, each control green in the same invocation** (D499)
+and each outcome read as `FAILED` rather than merely non-zero (D386): reverting
+the derivation to the literal, blinding the scan, and breaking the ceiling by one.
+379 tests pass across the four modules that touch this command.
+
+**Retrospective — the run's value was in what went wrong twice.**
+
+**The guard was wrong in both directions on its first execution** (D734), and its
+own control caught both: it missed `session > 12` and flagged three legitimate
+`session < 1` floors. Chasing that produced the finding — **no textual rule
+separates a ceiling from a feature gate.** `through_session >= 3` means *"session
+3 added a step"*; `session > 12` is a refusal. Same shape, different things. The
+first version needed five named exemptions to catch one defect, which is a guard
+about its exemptions. **Rescoped to what is exactly decidable — does a command
+have today's number written into it — it needs none, and it would have caught
+D719 the day it was written.** The cost is written into the code: it goes quiet
+after the bump, so the load-bearing guard is the unconditional behavioural test
+beside it.
+
+**And the battery lied about its own control** (D736). Three mutations reported
+`CONTROL FAILED`; the control was fine. The reader ran pytest with `-q`, which
+prints no line for a passing node, and inferred `PASSED` from the run's totals —
+so a mutation's own failure put the word *failed* in that output and the reader
+went blind **in exactly the runs it exists to read.** D499 says *repair the
+control, not the assertion*; the rule pointed at the right half and the cause was
+one layer further in.
+
+**Two traps CLAUDE.md documents, both hit anyway.** `echo "$?"` after
+`wsl bash -lc` reported the battery's exit as **0** when it was 1 — Git Bash
+expands `$?` before WSL sees it — so the exit check moved into a script file. And
+editing `bin/write-session-evidence.py` through `\\wsl$` **stripped its executable
+bit**; the git index still held `100755`, so staging it would have written
+`100644` and reddened `test_commands_are_executable_in_the_git_index`.
+`chmod 755 bin/*` before every `git add`.
+
+**D735 recorded and not repaired**: three commands take a session floor and no
+ceiling at all, so each accepts `--session 999`. What that does to each was not
+measured, so it is a row rather than a fix.
 
 ### Run 3 — The compatibility rules, and the ADR
 

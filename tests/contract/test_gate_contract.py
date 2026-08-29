@@ -13,6 +13,20 @@ this machine", which fails on a correct Session 2 deployment.
 
 Neither is checked by reading the script's comments. Both are checked against
 the bytes, and the session-derivation one is also checked by running it.
+
+**The first rule was scoped to one file and the defect was not** (D719).
+``bin/write-session-evidence.py`` held ``if not 1 <= args.session <= 12``, so the
+first Stage 2 session could not write evidence -- refused by a bound that had
+been correct at every previous check, because the number it named and the number
+it meant coincided for twelve sessions. This module's rule was already the right
+one; it named the gates and not the writer, which is question 5 exactly.
+
+So the last section asserts the **class**: no operator command types the ceiling.
+**A floor is not a ceiling and is deliberately allowed** -- ``< 1`` and ``< 2``
+are facts about history that do not move, and ``bin/deploy-project.py`` carries
+both shapes on one line: ``through_session < 2 or through_session >
+CURRENT_SESSION``. Flagging the floor would make the guard wrong about the one
+command that was already right.
 """
 
 from __future__ import annotations
@@ -22,6 +36,7 @@ import re
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -216,3 +231,161 @@ def test_the_gate_reports_the_session_it_measured(source: str) -> None:
         encoding="utf-8"
     ), "pytest no longer reports the gate session in its header"
     del source
+
+
+# ---------------------------------------------------------------------------
+# The class: no operator command types the current session (D719)
+# ---------------------------------------------------------------------------
+
+#: Commands that ARE one session's own artefact, and so legitimately name its
+#: number. A `session-NN-check.sh` is the record of the release it gated, the
+#: same reason D693 exempts session-numbered operator guides: a document about
+#: session 9 rewritten to say 13 would stop being a record of anything.
+PER_SESSION_ARTEFACT = re.compile(r"^session-\d\d-check\.(sh|py)$")
+
+#: A session compared against the literal that `CURRENT_SESSION` currently is.
+#:
+#: **Scoped this narrowly on purpose, and the first draft was not.** It tried to
+#: separate a *ceiling* from a *floor* by the operator, and got both directions
+#: wrong on its first run: it missed `session > 12` and flagged the three
+#: legitimate `session < 1` floors. There is no textual rule that separates
+#: `through_session >= 3` -- a feature gate, meaning "session 3 added a step" --
+#: from `session > 12`, a refusal. They are the same shape and different things.
+#:
+#: What IS exactly decidable is whether a command has today's session number
+#: written in it, and that is the whole defect: the bound in
+#: `write-session-evidence.py` was not wrong because it was a ceiling, it was
+#: wrong because the number it named and the number it meant had coincided for
+#: twelve sessions.
+#:
+#: **This is the cheap half.** It cannot catch a stale bound *after* the bump --
+#: `<= 12` stops matching once CURRENT_SESSION is 13. The load-bearing guard is
+#: `test_the_evidence_writer_accepts_the_session_this_release_is` below, which is
+#: unconditional and cannot go quiet.
+TYPES_THE_CURRENT_SESSION = re.compile(
+    rf"""
+    (?:
+        \w*session\w* \s* (?:<=|>=|==|<|>) \s* {CURRENT_SESSION}(?!\d)
+      | (?<!\d){CURRENT_SESSION} \s* (?:<=|>=|==|<|>) \s* \w*session\w*
+    )
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def _operator_commands() -> list[Path]:
+    return sorted(
+        path
+        for path in (REPO_ROOT / "bin").glob("*.py")
+        if not PER_SESSION_ARTEFACT.match(path.name)
+    )
+
+
+def test_no_operator_command_types_the_current_session() -> None:
+    """D719. A command that serves every session may not name the current one.
+
+    `bin/write-session-evidence.py` refused `--session 13` because it held
+    `if not 1 <= args.session <= 12`. **It had been right at every check for
+    twelve sessions**, because the number it named and the number it meant were
+    the same one -- which is why a bound that fails closed is not therefore safe.
+
+    `bin/deploy-project.py` is the shape that passes and always did:
+    `through_session < 2 or through_session > CURRENT_SESSION`, a floor that is
+    a fact about history beside a ceiling that is derived.
+    """
+    offenders: list[str] = []
+    for path in _operator_commands():
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if TYPES_THE_CURRENT_SESSION.search(stripped):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{number}  {stripped[:80]}")
+
+    assert not offenders, (
+        f"these compare a session against the literal {CURRENT_SESSION}, which is what "
+        "CURRENT_SESSION is today; derive it instead:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_scan_reads_the_commands_and_catches_what_it_is_for() -> None:
+    """The control, in three parts, because each fails differently (D694).
+
+    A scan reading nothing reports every command clean forever. A scan that
+    matched the floors would be wrong about the three commands that carry one
+    legitimately, and about `deploy-project`, which was already correct.
+    """
+    commands = _operator_commands()
+    assert len(commands) > 20, f"the scan sees {len(commands)} commands; it is not reading bin/"
+    assert any(path.name == "write-session-evidence.py" for path in commands), (
+        "the scan excludes the very command D719 was about"
+    )
+
+    # It catches the defect as it was actually written, in every spelling.
+    for offender in (
+        f"if not 1 <= args.session <= {CURRENT_SESSION}:",
+        f"if arguments.session > {CURRENT_SESSION}:",
+        f"if {CURRENT_SESSION} < session:",
+    ):
+        assert TYPES_THE_CURRENT_SESSION.search(offender), f"the scan misses: {offender!r}"
+
+    # It permits a historical floor, a feature gate, a derived ceiling, and a
+    # literal that merely starts with the same digits.
+    for allowed in (
+        "if arguments.session < 1:",
+        "if arguments.through_session >= 3:",
+        "if arguments.through_session < 2 or arguments.through_session > CURRENT_SESSION:",
+        "if not 1 <= args.session <= CURRENT_SESSION:",
+        f"if session_bytes > {CURRENT_SESSION}00:",
+    ):
+        assert not TYPES_THE_CURRENT_SESSION.search(allowed), f"the scan flags: {allowed!r}"
+
+
+@pytest.mark.parametrize("beyond", [1, 2, 87])
+def test_the_evidence_writer_refuses_a_session_this_release_does_not_implement(
+    beyond: int,
+) -> None:
+    """Parametrized on ``CURRENT_SESSION + n`` rather than on a literal.
+
+    The discipline `test_deploy_command` already uses, for the same reason: a
+    test naming 13 would pass today and be a second typed ceiling tomorrow.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "bin" / "write-session-evidence.py"),
+            "--session",
+            str(CURRENT_SESSION + beyond),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert f"between 1 and {CURRENT_SESSION}" in result.stderr, result.stderr
+
+
+def test_the_evidence_writer_accepts_the_session_this_release_is() -> None:
+    """The half that would have caught D719, and the one that cannot go quiet.
+
+    Unlike the scan above, this is unconditional: it asks the command about the
+    session the release actually is, so it stays true through every bump without
+    naming a number. It gets past the bound and fails later on the artifacts it
+    was not given; that it got past is all this asserts.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "bin" / "write-session-evidence.py"),
+            "--session",
+            str(CURRENT_SESSION),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert "between 1 and" not in result.stderr, (
+        f"the bound refused the session this release IS:\n{result.stderr}"
+    )

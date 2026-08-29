@@ -37,8 +37,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from agentic_postgres import CURRENT_SESSION, evidence_claims  # noqa: E402
 from agentic_postgres import evidence as evidence_module  # noqa: E402
-from agentic_postgres import evidence_claims  # noqa: E402
 from agentic_postgres.naming import canonical_json  # noqa: E402
 
 #: Fields that must agree between the host-side and external-side evidence.
@@ -245,7 +245,12 @@ def main(argv: list[str] | None = None) -> int:
         prog="bin/write-session-evidence.py",
         description="Generate evidence/session-NN.json from gate artifacts.",
     )
-    parser.add_argument("--session", type=int, required=True, help="Session number, 1-12.")
+    parser.add_argument(
+        "--session",
+        type=int,
+        required=True,
+        help=f"Session number, 1-{CURRENT_SESSION}.",
+    )
     parser.add_argument(
         "--artifacts",
         type=Path,
@@ -271,8 +276,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if not 1 <= args.session <= 12:
-        parser.error("--session must be between 1 and 12")
+    # The floor is history and the ceiling is derived, which is `deploy-project`'s
+    # split and its reason (D719). Session 1 is the earliest that ever produced
+    # evidence, and that will not change; the highest is whatever this release
+    # implements, and typing it made this command refuse the first Stage 2
+    # session while looking correct -- it had been right at every previous check.
+    if not 1 <= args.session <= CURRENT_SESSION:
+        parser.error(f"--session must be between 1 and {CURRENT_SESSION}")
 
     if args.host_input or args.external_input:
         # --external-input is optional; --host-input is not. Every session that
