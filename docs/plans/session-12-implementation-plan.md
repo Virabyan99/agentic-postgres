@@ -64,7 +64,7 @@ and that is a question about a person, not a project count.
 
 Six columns, the house shape. Rows are measured facts, not predictions.
 
-**Next free number after this table is D701.**
+**Next free number after this table is D702.**
 
 | # | Summary says | Repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -80,6 +80,7 @@ Six columns, the house shape. Rows are measured facts, not predictions.
 | **D698** | The specification's §2.1: two P2 capabilities — a pgvector example with a vector-search RPC, and a portable nightly `pg_dump` export — with the rule that *"P2 items may be dropped before any P0 item if the schedule slips."* | **Neither was ever entered into the acceptance registry.** The registry holds 121 P0 and 6 P1 and **zero P2**. So they are not unbuilt requirements that were dropped under the rule; they are **scope nothing was tracking**. No test, no claim, and no report would have said they were missing. | **Recorded in `docs/scope-closure.md` with their state and an effort estimate**, and dropped explicitly. The pgvector extension is present and proved (`DBX-PG-001`); only the example and the RPC are absent. Nothing references `pg_dump` at all. | **Dropping a P2 item is allowed; dropping it silently is not**, and an empty P2 row in the registry is how the second happens while looking like the first. The specification's rule assumes the item is visible enough to be dropped *from* something. | — |
 | **D699** | CLAUDE.md §9's oldest item: *nothing knows which proofs have never executed* — five defective never-executed proofs across two trips, and Session 12's isolation matrix had never run. | **All four proofs passed on their first execution**, in a host gate of 379 passed / 0 failed. `isolation_matrix` is green and **`DEP-ISO-001` is closed, measured live over both deployed projects.** | **Nothing to repair.** Recorded because the *absence* of a defect here is the evidence: the dry-run against both real deployed documents (Run 1) is what made a first execution uneventful. | **This is the first Session-12-era proof to run clean first time**, against a record of five that did not. The difference is one cheap step: the matrix was exercised offline against the actual documents it would meet, rather than against a fixture written by its author. That is the narrow, buildable half of §9's oldest item, and it cost minutes. | — |
 | **D700** | This plan's §10, written from an offline trace: both documents publish `backup_state.status: failing`, and *"`archiving_is_failing` returns true when `last_failed_time > last_archived_time`… both documents were written immediately after a deploy, when the container restart produces a failed archive attempt."* | **The archiver is healthy on both projects and the explanation is wrong.** Measured on the host: alpha `last_archived=2026-08-28 14:14:59`, `last_failed=2026-08-26 06:40:38` — **the last failure is two days OLDER than the last success**, and `failed_count` is 48 in both the document and the live cluster, so it has not moved since. At the moment alpha's document was written the archiver was already not-failing, so **the archiver override cannot have produced its `failing`.** It must come from the repository half — `repository_status`, which returns `failing` when `pgbackrest info` reports `backup_errors` or an unrecognised code. Beta is ambiguous: its `failed_count` moved 7 → 9 after its document was written. | **Not repaired, and the cause is now narrowed rather than guessed.** One read names it: `bin/backup.sh info --json` per project. **The repair is not attempted before that read**, for the reason this session has already paid for twice — D680's fix failed on the host because it was chosen before the address was measured. | **D278 in the direction that stings.** *A repair that works is not evidence its explanation is right*; here a **measurement refuted an explanation that had already been written into a plan.** And the finding underneath is larger than the bug: `backup_state.status` is a deploy-time snapshot nothing refreshes, so it is stale in **both** directions. The README already warns that a project whose archiver died still publishes the old status; the inverse — **a project whose archiver has since recovered still publishes `failing`** — is the one that trains an operator to ignore the field. | — |
+| **D701** | ADR 0149/0150: the repository's own report and `pg_stat_archiver` are two sources that fail independently, and `backup_state` combines them into the deployed document's block. `bin/backup.sh info --json` is documented as *"the summary the deployed document is built from."* | **`backup_state` was being applied to its own output, and the second application always returned `failing`.** `bin/backup.py info --json` prints `json.dumps(backup_state(...))` — the finished block — and `deploy-project.observe_backup` parsed that and called `backup_state` on it **again**. The second call reads `summary["status_code"]`; a *state* block does not carry one, so no branch of `status_for` matched and its final `return STATUS_FAILING` ran. Measured live: `info --json` reported **`ready`** for both projects while both documents said **`failing`**, and a fresh deploy rewrote one of them to `failing` again — so it was **deterministic, not stale**. Confirmed offline with a green control: one application `ready`, applied to its own output `failing`. | **`backup_report.with_archiver`**, which folds an archiver reading into an already-computed block without recomputing the repository half. The archiver can still only make a status worse, and that half is asserted separately — without it the repair would be satisfied by a function that ignores the archiver entirely. | **It failed *safe*, which is why it survived two sessions.** The catch-all exists so an unrecognised pgBackRest code cannot arrive as a green light, and a permanent false alarm is the direction that does not let a real failure through. **It is still a false alarm, and a signal that is always red is a signal nobody reads** — the deployed document's `backup_state.status` is one of the three paths CLAUDE.md §9 names for the archiving signal reaching an operator. Found only because two readers of one subject disagreed and the disagreement was chased rather than explained (D700). | — |
 
 ---
 
@@ -222,6 +223,22 @@ four proofs passed (D699).
   pass `--sentinel-file`, `--admin-password-file` or `--redeploy-before-file`. A
   gate cannot prove a claim whose flag it was not given — which is D687, in the
   hands of the person who wrote D687.
+
+**The final host run: 52 of 56 claims passed**, 399 passed / 0 failed / 7
+skipped, exit 5.
+
+`deployment_convergence`, `secret_leakage`, `credential_storage` and
+`project_isolation` all went green, confirming the previous run's four reds were
+the trip script's missing flags rather than regressions.
+
+**Four claims remain red and each is the honest result**, awaiting a declaration
+that does not exist: `bootstrap_identity` (D683), `fresh_host`,
+`documented_path`, `project_removal`.
+
+**And the run isolated a real defect** (D701): `backup_state` applied to its own
+output, making **every deployed document publish `failing`** whatever the
+repository said. Repaired, with two guards and the arm verified — reinstating the
+shipped code reddens both.
 
 **Done. Session 12 is open**: `CURRENT_SESSION = 12`, all four requirements
 activated, `session-01-check` PASSED at 4180 and **`session-12-check --mode

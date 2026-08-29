@@ -1069,10 +1069,16 @@ def observe_backup(
         return state
     if summary is None:
         return dict(deployed_output.BACKUP_NOT_OBSERVED)
-    # Run 7: the archiver too. `backup_state` can only make the status worse
-    # with it -- a repository with no backup stays `awaiting_first_backup`
-    # however well WAL is flowing, because there is still nothing to restore.
-    return backup_report.backup_state(summary, archiver)
+    # **`with_archiver`, not `backup_state`** (D701). `summary` here is what
+    # `bin/backup.sh info --json` printed, and that command prints an
+    # already-computed state block -- so calling `backup_state` on it applied
+    # the function to its own output. `status_for` reads `status_code`, the
+    # state block has none, and the catch-all `return STATUS_FAILING` ran every
+    # time: every deployed document published `failing` whatever the repository
+    # actually said, and a redeploy could not correct it.
+    #
+    # The archiver still folds in, and can still only make the status worse.
+    return backup_report.with_archiver(summary, archiver)
 
 
 def read_backup_repository(release: Path, outputs_path: Path) -> dict[str, Any] | None:

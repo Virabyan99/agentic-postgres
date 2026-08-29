@@ -18,7 +18,14 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, config, naming, output_migrations, secrets_contract
+from agentic_postgres import (
+    REPO_ROOT,
+    backup_report,
+    config,
+    naming,
+    output_migrations,
+    secrets_contract,
+)
 from agentic_postgres.config import ManifestError
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
@@ -979,3 +986,113 @@ def test_the_archive_timeout_bounds_the_rpo_of_a_quiet_cluster() -> None:
     values = _compose_env()
     assert values["POSTGRES_ARCHIVE_TIMEOUT"] == f"{config.ARCHIVE_TIMEOUT_SECONDS}s"
     assert config.ARCHIVE_TIMEOUT_SECONDS > 0
+
+
+# ---------------------------------------------------------------------------
+# D701 — the state block is not a summary
+# ---------------------------------------------------------------------------
+
+
+def _healthy_summary() -> dict[str, Any]:
+    """What `read_repository` produces: the raw parse, carrying `status_code`."""
+    return {
+        "status_code": backup_report.REPOSITORY_OK,
+        "stanza_created": True,
+        "last_full_backup_label": "20260828-101405F",
+        "last_full_backup_at": "2026-08-28T10:20:02Z",
+        "latest_recoverable_time": "2026-08-28T10:20:02Z",
+        "backup_errors": None,
+    }
+
+
+def _healthy_archiver() -> dict[str, Any]:
+    """The last failure older than the last success, which is not failing."""
+    return {
+        "archived_count": 132,
+        "failed_count": 48,
+        "last_archived_time": "2026-08-28 14:14:59+00",
+        "last_failed_time": "2026-08-26 06:40:38+00",
+    }
+
+
+def test_a_healthy_repository_is_not_reported_failing_by_the_deploys_path() -> None:
+    """**D701.** The defect that made every deployed document say `failing`.
+
+    `bin/backup.py info --json` prints `backup_state(...)` — the finished block —
+    and `deploy-project.observe_backup` parsed that and called `backup_state` on
+    it **again**. The second call reads `summary["status_code"]`, which a state
+    block does not carry, so no branch of `status_for` matched and its final
+    `return STATUS_FAILING` ran.
+
+    Measured on the live host: `bin/backup.sh info --json` reported `ready` for
+    both projects while both deployed documents said `failing`, and a fresh
+    deploy rewrote one of them to `failing` again. It was deterministic, not
+    stale.
+
+    **It failed safe, which is why it survived two sessions.** The catch-all
+    exists so an unrecognised pgBackRest code cannot arrive as a green light, and
+    a permanent false alarm is the direction that does not let a real failure
+    through. It is still a false alarm, and a signal that is always red is a
+    signal nobody reads.
+    """
+    once = backup_report.backup_state(_healthy_summary(), _healthy_archiver())
+    assert once["status"] == backup_report.STATUS_READY, (
+        "the fixture is not a healthy repository, so the assertion below would "
+        "pass for the wrong reason"
+    )
+
+    folded = backup_report.with_archiver(once, _healthy_archiver())
+    assert folded["status"] == backup_report.STATUS_READY, (
+        f"the deploy's path turned a ready repository into {folded['status']!r}. That is "
+        "D701: a state block is not a summary, and applying the status ladder to one "
+        "falls through to the catch-all"
+    )
+
+
+def test_the_archiver_can_still_make_a_ready_repository_worse() -> None:
+    """The other half, and without it the fix above is satisfied by a function
+    that ignores the archiver entirely.
+
+    ADR 0150: the repository and the archiver fail independently. A repository
+    full of good backups behind an archiver that stopped an hour ago is not
+    healthy, and `with_archiver` exists to say so.
+    """
+    once = backup_report.backup_state(_healthy_summary(), _healthy_archiver())
+    stuck = {
+        "archived_count": 1,
+        "failed_count": 9,
+        "last_archived_time": "2026-08-01 00:00:00+00",
+        "last_failed_time": "2026-08-29 00:00:00+00",
+    }
+    folded = backup_report.with_archiver(once, stuck)
+    assert folded["status"] == backup_report.STATUS_FAILING, (
+        "a repository behind an archiver whose last attempt failed after its last "
+        "success is failing, and with_archiver did not say so"
+    )
+
+
+def test_the_deploy_does_not_recompute_a_status_the_command_already_computed() -> None:
+    """The class, asserted on what the code *produces* rather than on a name.
+
+    `observe_backup` receives whatever `bin/backup.sh info --json` printed. If it
+    ever calls `backup_state` on that again, D701 returns — so the guard is that
+    the healthy summary survives a round trip through the two functions the
+    deploy actually composes.
+
+    Written as a behavioural round trip rather than an AST scan because a scan
+    asking whether `backup_state` is *mentioned* is satisfied by dead code
+    (D277), and `observe_backup` legitimately mentions `backup_report`.
+    """
+    summary = _healthy_summary()
+    archiver = _healthy_archiver()
+
+    # What the command prints.
+    printed = backup_report.backup_state(summary, archiver)
+    # What the deploy makes of it.
+    published = backup_report.with_archiver(printed, archiver)
+
+    assert published["status"] == printed["status"], (
+        f"the command published {printed['status']!r} and the deploy published "
+        f"{published['status']!r} for one repository at one moment. Two readers of the "
+        "same subject disagreeing is what sent this session looking (D700)"
+    )

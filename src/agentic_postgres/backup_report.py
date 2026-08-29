@@ -245,6 +245,42 @@ def archiving_is_failing(archiver: dict[str, Any]) -> bool:
     return str(archiver["last_failed_time"]) > str(archiver["last_archived_time"])
 
 
+def with_archiver(state: dict[str, Any], archiver: dict[str, Any] | None) -> dict[str, Any]:
+    """Fold an archiver reading into a state block that is already computed.
+
+    **D701, and it is the reason this exists rather than a second call to
+    `backup_state`.** `bin/backup.py info --json` prints `backup_state(...)` —
+    the finished block — and `deploy-project.py` parsed that and called
+    `backup_state` on it again. The second call reads `summary["status_code"]`,
+    which the *state* block does not carry, so no branch of `status_for` matched
+    and its final `return STATUS_FAILING` ran.
+
+    That was deterministic: **every deployed document with a backup block
+    published `failing`**, whatever the repository's real state, and a redeploy
+    could not correct it. Measured on the live host — `bin/backup.sh info --json`
+    reported `ready` for both projects while both documents said `failing`, and a
+    fresh deploy rewrote one of them to `failing` again.
+
+    It failed *safe*, which is why it survived two sessions: the catch-all exists
+    so that an unrecognised pgBackRest code cannot arrive as a green light, and a
+    permanent false alarm is the direction that does not let a real failure
+    through. It is still a false alarm, and a signal that is always red is a
+    signal nobody reads.
+
+    The archiver can only make a status worse, never better — a repository with
+    no backup stays `awaiting_first_backup` however well WAL is flowing, because
+    there is still nothing to restore.
+    """
+    if archiver is None:
+        return dict(state)
+    folded = dict(state)
+    if archiving_is_failing(archiver):
+        folded["status"] = STATUS_FAILING
+    folded["wal_archived_count"] = archiver.get("archived_count")
+    folded["wal_failed_count"] = archiver.get("failed_count")
+    return folded
+
+
 def backup_state(summary: dict[str, Any], archiver: dict[str, Any] | None = None) -> dict[str, Any]:
     """The deployed document's `backup_state` block.
 
