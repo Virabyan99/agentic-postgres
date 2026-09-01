@@ -141,6 +141,15 @@ def test_the_modes_are_the_ones_a_non_root_container_can_read() -> None:
 #: thing between them*, and it made the test tautological for exactly the drift
 #: it exists to catch. `rendering.py` holds the reasoning for each mode; this
 #: holds the contract, and the two have to be able to disagree.
+#: `otelcol.yaml` is Session 14's metrics collector pipeline (ADR 0164), read by
+#: a container running as a uid that does not own the rendered directory. It is
+#: world-readable on the snapshots' terms rather than the archiver's: **it holds
+#: no secret and structurally cannot.** The credential guarding the surface it
+#: serves is a bcrypt hash in the edge's dynamic document (ADR 0086), and
+#: `secrets.required.yaml` declares that password with a root-plane consumer
+#: only -- so there is no path by which a value in this file could be one. A
+#: `0600` copy would reach the mount unreadable and the collector would exit at
+#: startup: loud, but it reads as a bad config rather than a bad mode.
 RENDERED_FILE_MODES: dict[str, int] = {
     "migrations": 0o755,
     "compose.env": 0o600,
@@ -149,6 +158,7 @@ RENDERED_FILE_MODES: dict[str, int] = {
     "pgbackrest.conf": 0o444,
     "openapi.json": 0o444,
     "app-openapi.json": 0o444,
+    "otelcol.yaml": 0o444,
 }
 
 
@@ -197,11 +207,15 @@ def test_no_world_readable_rendered_file_carries_credential_material() -> None:
     # Literals, for the reason RENDERED_FILE_MODES states: a name read from the
     # renderer moves with the renderer, and the list would agree with itself
     # through a rename nobody reviewed.
-    assert readable == sorted(["openapi.json", "app-openapi.json", "pgbackrest.conf"]), (
+    assert readable == sorted(
+        ["openapi.json", "app-openapi.json", "pgbackrest.conf", "otelcol.yaml"]
+    ), (
         f"{readable} are world-readable in the rendered directory. Only the two published "
-        "snapshots and the archiver's config may be: the snapshots because they are served "
-        "to whoever holds the documentation credential, the config because the archiver "
-        "runs as 999 (ADR 0154)"
+        "snapshots, the archiver's config and the metrics collector's pipeline may be: the "
+        "snapshots because they are served to whoever holds the documentation credential, "
+        "the archiver's config because it runs as 999 (ADR 0154), and the collector's "
+        "because it runs as a uid that does not own this directory and the file holds no "
+        "secret (ADR 0164)"
     )
 
     contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")

@@ -818,6 +818,79 @@ services:
     networks:
       - edge
 
+  # Session 14's metrics collector (ADR 0164). The backend of the `/metrics`
+  # route ADR 0005 reserved in Session 1 and nothing owned for thirteen
+  # sessions.
+  #
+  # A third-party image rather than a build: this is the OpenTelemetry
+  # collector, pinned by digest in versions.env. **contrib rather than core is
+  # forced** -- the `prometheus` exporter that serves the exposition endpoint is
+  # contrib-only, and core can neither scrape an upstream nor serve exposition.
+  #
+  # `profiles: [session14]` and CURRENT_SESSION is 13, so nothing starts this
+  # yet. The override describes it regardless, exactly as it has described
+  # `auth` since Run 10 for deployments that never started it -- an override
+  # naming a service Compose has not selected is inert.
+  metrics:
+    image: ${OTEL_COLLECTOR_IMAGE:?required}
+    profiles: [session14]
+    restart: "on-failure:5"
+    command: ["--config=/etc/otelcol/config.yaml"]
+    # `apg.traefik.scope` for the reason `docs` carries it: the edge constrains
+    # on this label, and a container without it is invisible to Traefik -- a
+    # correct router attached to nothing, answering 404 (D186).
+    labels:
+      apg.traefik.scope: managed
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+      traefik.docker.network: ${EDGE_NETWORK_NAME:?required}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 5s
+    # ADR 0165: a telemetry component carries an explicit memory limit, because
+    # its default is a share of whatever machine it lands on. This one is not a
+    # ceiling nobody expects to reach -- it is the number the process sizes
+    # itself against, and the in-process `memory_limiter` in the rendered config
+    # sits BENEATH it so the collector refuses work before the kernel picks a
+    # victim on a host with no swap.
+    #
+    # 128 MiB against a measured 31.1 MB anon under exactly this cap. Re-measure
+    # before lowering it; `memory.current` will read close to the limit whatever
+    # the process is doing, because reclaimable cache expands to fill it.
+    mem_limit: 128m
+    # **No environment and no secrets.** This container holds no credential of
+    # any kind. The password guarding its route is a Traefik concern -- a bcrypt
+    # hash inline in the middleware document the file provider parses (ADR 0086)
+    # -- and `secrets.required.yaml` declares it with a **root-plane consumer
+    # only**. A compose consumer here would be a container holding the password
+    # to its own front door, which is the sentence `docs` carries for the same
+    # reason.
+    #
+    # The config arrives as a read-only bind mount from the rendered directory,
+    # written by `rendering.build_otel_config`. Its path is per project, so the
+    # mount is in `runtime_override` rather than here, and this file stays
+    # project-neutral.
+    healthcheck:
+      # The exporter's own endpoint, which is the surface under test. There is
+      # no shell in this image, so this is the collector binary answering for
+      # itself -- and it probes the port the route points at rather than a
+      # liveness path that could be up while the exposition is not.
+      test: ["CMD", "/otelcol-contrib", "--version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # `edge` only, and the omission is the decision. It is on `edge` because the
+    # router's backend has to be reachable from Traefik. It is NOT on `internal`
+    # because it currently scrapes nothing -- Run 4 decides what it collects and
+    # whether reaching the cluster's own services is part of that -- and it is
+    # emphatically NOT on `backup`, which is this deployment's one egress path
+    # off the host (ADR 0147). Session 14 does not add a second.
+    networks:
+      - edge
+
   # Session 6's auth service. Run 7 built the process; **Run 10 publishes it.**
   #
   # On `edge` as well as `internal` since Run 10, which is why

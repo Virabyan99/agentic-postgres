@@ -43,6 +43,8 @@ STORAGE_BUFFERING = "apg-alpha-dev-storage-buffering"
 STORAGE_STRIPPREFIX = "apg-alpha-dev-storage-stripprefix"
 STORAGE_CORS = "apg-alpha-dev-storage-cors"
 MCP_ROUTER = "apg-alpha-dev-mcp"
+METRICS_ROUTER = "apg-alpha-dev-metrics"
+METRICS_AUTH = "apg-alpha-dev-metrics-auth"
 RENDERED = "/var/lib/agentic-postgres/rendered/alpha-dev"
 
 #: Every derived name the override renders into a label key. Collected here so a
@@ -65,6 +67,8 @@ NAMES = {
     "storage_stripprefix_middleware_name": STORAGE_STRIPPREFIX,
     "storage_cors_middleware_name": STORAGE_CORS,
     "mcp_router_name": MCP_ROUTER,
+    "metrics_router_name": METRICS_ROUTER,
+    "metrics_auth_middleware_name": METRICS_AUTH,
 }
 
 
@@ -1226,3 +1230,137 @@ def test_the_deploy_proves_its_mounts_before_each_start(tmp_path: Path) -> None:
     present = tmp_path / "present.json"
     present.write_text("{}", encoding="utf-8")
     module.require_mounts_exist(payload(str(present)), ["probe"], when="test")
+
+
+# ---------------------------------------------------------------------------
+# Session 14's metrics route (ADR 0164)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def metrics_labels() -> dict[str, str]:
+    document = runtime_override.build_override(
+        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
+    return document["services"][runtime_override.METRICS_SERVICE]["labels"]
+
+
+def test_the_metrics_rule_matches_one_path_and_not_its_neighbours(
+    metrics_labels: dict[str, str],
+) -> None:
+    """`Path`, not `PathPrefix`, and D162 is why.
+
+    `PathPrefix(/api/rest)` matches `/api/restaurant` -- Traefik's prefix is a
+    STRING prefix, not a segment-aware one, and this repository has already paid
+    for believing otherwise. Every other route here answers that with the
+    two-matcher form, admitting the exact path and the subtree beneath it.
+
+    This route has no subtree: the collector's exporter serves `/metrics` and
+    404s on everything else, measured against the locked digest. So the answer
+    here is `Path` alone, and a `PathPrefix` appearing in this rule would widen
+    the surface to every path that merely starts with the same characters.
+    """
+    rule = metrics_labels[f"traefik.http.routers.{METRICS_ROUTER}.rule"]
+    assert "Path(`${METRICS_PATH:?required}`)" in rule
+    assert "PathPrefix" not in rule, (
+        "the metrics rule uses PathPrefix, which is a string prefix in Traefik "
+        "and would match /metricsanything (D162)"
+    )
+
+
+def test_the_metrics_credential_is_referenced_across_providers(
+    metrics_labels: dict[str, str],
+) -> None:
+    """`@file`, and without it the surface serves without asking for a password.
+
+    The middleware is defined by Traefik's FILE provider because it carries the
+    bcrypt hash inline (ADR 0086), and a cross-provider reference without the
+    suffix resolves to nothing. Traefik does not fail a router whose middleware
+    is missing -- it serves it. So the omission is not a broken route, it is an
+    OPEN one, which is the failure mode this assertion exists for.
+    """
+    attached = metrics_labels[f"traefik.http.routers.{METRICS_ROUTER}.middlewares"]
+    assert f"{METRICS_AUTH}@file" in attached, (
+        "the metrics credential middleware is not referenced @file. A "
+        "cross-provider reference without the suffix resolves to nothing, and a "
+        "router whose middleware does not resolve serves the surface without "
+        "asking for the password"
+    )
+
+
+def test_the_metrics_route_attaches_the_baseline_before_the_credential(
+    metrics_labels: dict[str, str],
+) -> None:
+    """Order, for the documentation route's reason: a 401 is still a response.
+
+    The baseline chain carries the response policy every other answer gets, so
+    attaching the credential first would make a refusal the one reply that
+    leaves without it.
+    """
+    attached = metrics_labels[f"traefik.http.routers.{METRICS_ROUTER}.middlewares"]
+    parts = attached.split(",")
+    assert parts[0] == "${BASELINE_MIDDLEWARE_CHAIN:?required}"
+    assert parts[1] == f"{METRICS_AUTH}@file"
+
+
+def test_the_metrics_route_has_no_strip_prefix(metrics_labels: dict[str, str]) -> None:
+    """The absence is the decision, and adding one by analogy would 404 the surface.
+
+    Every other routed surface here rewrites the path before its upstream sees
+    it. This one must not: the exporter serves `/metrics` itself, so a strip
+    would deliver `/` -- which the same image answers 404 (measured in
+    `test_image_contracts`). A reader who added a strip for symmetry would take
+    the whole surface away and the label would look right.
+    """
+    stripprefixes = [key for key in metrics_labels if ".stripprefix." in key]
+    assert stripprefixes == [], (
+        f"the metrics route grew {stripprefixes}. The exporter serves /metrics and "
+        "404s on /, so a strip delivers a path it does not serve"
+    )
+
+
+def test_the_metrics_service_points_at_the_exporter_port(
+    metrics_labels: dict[str, str],
+) -> None:
+    """One constant, two readers -- the router's backend and the rendered config.
+
+    `OTEL_EXPORTER_PORT` is written into the collector's own configuration and
+    into this label. If the two disagreed the router would answer 502 with a
+    healthy collector behind it, and neither file would look wrong on its own.
+    """
+    port = metrics_labels[f"traefik.http.services.{METRICS_ROUTER}.loadbalancer.server.port"]
+    assert port == str(runtime_override.OTEL_EXPORTER_PORT)
+
+
+def test_the_metrics_container_mounts_its_rendered_config(tmp_path: Path) -> None:
+    """From the rendered directory, not the release (ADR 0164).
+
+    What a deployment runs is pinned to what it rendered. A release-relative
+    source would make every project on the host mount one file, and a rollback
+    would change the running pipeline without changing the release that is
+    supposedly deployed.
+    """
+    document = runtime_override.build_override(
+        **NAMES, https_entrypoint="websecure", rendered_directory=RENDERED
+    )
+    volumes = document["services"][runtime_override.METRICS_SERVICE]["volumes"]
+    assert volumes == [
+        f"{RENDERED}/{runtime_override.OTEL_CONFIG_FILENAME}"
+        f":{runtime_override.OTEL_CONFIG_CONTAINER_PATH}:ro"
+    ]
+
+
+def test_the_metrics_collector_is_not_deferred() -> None:
+    """It mounts a RENDER-time artefact, so deferring it would be wrong.
+
+    `POST_ARTIFACT_SERVICES` exists for services whose mounts the deploy writes
+    late; `mcp` is there because its key set and capability lock do not exist at
+    step 5. The collector's config is written when the render is published, so
+    it is present before any container starts.
+
+    The two reasons look alike and are not, and D463 is the record of what
+    conflating them cost: `mcp` was excluded from the bootstrap tuple correctly
+    and thereby lost the deferral it did need. This asserts the other direction.
+    """
+    assert runtime_override.METRICS_SERVICE not in runtime_override.POST_ARTIFACT_SERVICES
+    assert runtime_override.METRICS_SERVICE not in runtime_override.DEFERRED_SERVICES

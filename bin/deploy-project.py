@@ -318,6 +318,8 @@ OVERRIDE_NAME_KEYS: dict[str, str] = {
     "storage_stripprefix_middleware_name": "STORAGE_STRIPPREFIX_MIDDLEWARE_NAME",
     "storage_cors_middleware_name": "STORAGE_CORS_MIDDLEWARE_NAME",
     "mcp_router_name": "MCP_ROUTER_NAME",
+    "metrics_router_name": "METRICS_ROUTER_NAME",
+    "metrics_auth_middleware_name": "METRICS_CREDENTIAL_MIDDLEWARE_NAME",
 }
 
 

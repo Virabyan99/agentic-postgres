@@ -209,6 +209,45 @@ DOCS_SERVICE_PORT = 8080
 SNAPSHOT_FILENAME = "openapi.json"
 SNAPSHOT_CONTAINER_PATH = "/app/snapshot/openapi.json"
 
+#: Session 14's metrics collector (ADR 0164), its ports, and where its rendered
+#: configuration is mounted.
+#:
+#: `OTEL_EXPORTER_PORT` is the one the edge router's service points at, and it
+#: is the only one anything outside the project's networks can reach -- and only
+#: through the route, which carries a credential. The two OTLP ports are how
+#: this deployment's own services will push telemetry (Run 3); nothing publishes
+#: them.
+#:
+#: **The port numbers are the collector's defaults for OTLP and the exporter's
+#: conventional one**, written here rather than left implicit, because the
+#: rendered config and the router's `loadbalancer.server.port` have to agree and
+#: a default that moved in an upstream release would break them in different
+#: places. One constant, two readers -- the rule ADR 0002 states for names,
+#: applied to a number.
+METRICS_SERVICE = "metrics"
+OTEL_EXPORTER_PORT = 8889
+OTEL_OTLP_GRPC_PORT = 4317
+OTEL_OTLP_HTTP_PORT = 4318
+OTEL_CONFIG_FILENAME = "otelcol.yaml"
+OTEL_CONFIG_CONTAINER_PATH = "/etc/otelcol/config.yaml"
+
+#: The collector's in-process memory ceiling and its burst allowance, in MiB.
+#:
+#: **Beneath the container limit, deliberately** (ADR 0165). The container limit
+#: is what the collector sizes itself from and what the kernel enforces; this is
+#: what makes the process refuse work at a threshold it chooses, rather than
+#: grow into the limit and be killed by a kernel that picks its own victim on a
+#: host with no swap. Measured under a 128 MiB cap the collector held 31.1 MB
+#: anon, so 96 is a ceiling it has room beneath rather than a target it runs at.
+OTEL_MEMORY_LIMIT_MIB = 96
+OTEL_SPIKE_LIMIT_MIB = 24
+
+#: What the container limit is set to, and the number ADR 0165 requires to
+#: exist. Above `OTEL_MEMORY_LIMIT_MIB` so the in-process limiter is what binds
+#: first: a process killed by its cgroup leaves no explanation, and one that
+#: refuses work says so in its own log.
+METRICS_MEMORY_LIMIT_MB = 128
+
 #: The Compose key that carries the container path into `serve.py`. Named
 #: here so the model and this module agree through one constant rather than
 #: two spellings -- and so a test comparing them need not write the literal,
@@ -425,6 +464,8 @@ def build_override(
     storage_stripprefix_middleware_name: str,
     storage_cors_middleware_name: str,
     mcp_router_name: str,
+    metrics_router_name: str,
+    metrics_auth_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the override document for one project's health route and migrations.
@@ -477,6 +518,10 @@ def build_override(
         raise ValueError("storage_stripprefix_middleware_name is required")
     if not storage_cors_middleware_name:
         raise ValueError("storage_cors_middleware_name is required")
+    if not metrics_router_name:
+        raise ValueError("metrics_router_name is required")
+    if not metrics_auth_middleware_name:
+        raise ValueError("metrics_auth_middleware_name is required")
     if not https_entrypoint:
         raise ValueError("https_entrypoint is required")
     if not rendered_directory or not rendered_directory.startswith("/"):
@@ -597,6 +642,30 @@ def build_override(
                     f"{rendered_directory}/{SNAPSHOT_FILENAME}:{SNAPSHOT_CONTAINER_PATH}:ro",
                     f"{rendered_directory}/{APP_SNAPSHOT_FILENAME}"
                     f":{APP_SNAPSHOT_CONTAINER_PATH}:ro",
+                ],
+            },
+            # Session 14's metrics collector (ADR 0164). One router onto it, and
+            # the container it fronts holds no credential of any kind -- the
+            # password guarding the route is a bcrypt hash in the edge's
+            # dynamic document, and `secrets.required.yaml` declares it with a
+            # root-plane consumer only. A compose consumer here would be a
+            # container holding the password to its own front door, which is the
+            # sentence `docs` already carries and the reason it is repeated.
+            #
+            # The config is mounted from the rendered directory rather than the
+            # release, so what a deployment runs is pinned to what it rendered.
+            # It is written at RENDER time, which is why this service is not in
+            # `POST_ARTIFACT_SERVICES`: the file exists before any container
+            # starts. Confusing that with `mcp`'s late-written artefacts is
+            # D463, and the cost was the agent plane's first start anywhere.
+            METRICS_SERVICE: {
+                "labels": _metrics_labels(
+                    https_entrypoint=https_entrypoint,
+                    metrics_router_name=metrics_router_name,
+                    metrics_auth_middleware_name=metrics_auth_middleware_name,
+                ),
+                "volumes": [
+                    f"{rendered_directory}/{OTEL_CONFIG_FILENAME}:{OTEL_CONFIG_CONTAINER_PATH}:ro",
                 ],
             },
             AUTH_SERVICE: {
@@ -903,6 +972,63 @@ def _docs_labels(
         f"{service}.loadbalancer.server.port": str(DOCS_SERVICE_PORT),
         # The ROOT, not `path`. ADR 0087, and the docstring above says why.
         f"{stripprefix}.stripprefix.prefixes": "${DOCS_ROOT_PATH:?required}",
+    }
+
+
+def _metrics_labels(
+    *,
+    https_entrypoint: str,
+    metrics_router_name: str,
+    metrics_auth_middleware_name: str,
+) -> dict[str, str]:
+    """The metrics route (ADR 0164), and the two things it does NOT have.
+
+    **No strip prefix.** Every other routed surface here rewrites the path
+    before the upstream sees it, because the upstream serves at a root the edge
+    does not publish. The collector's exporter serves `/metrics` and answers 404
+    on `/` -- measured against the locked digest, and asserted by
+    `test_the_metrics_exporter_serves_one_parameterless_path`. So the path the
+    edge matches is the path the upstream wants, and ADR 0087's rewrite has no
+    counterpart. A strip added here by analogy with `docs` would deliver `/` and
+    turn the whole surface into a 404.
+
+    **No buffering middleware.** The API and application routes bound a request
+    BODY because callers send them; a scrape is a GET with no body, so a
+    buffering middleware would be a control over something that does not occur.
+    Rate limiting still applies -- it arrives in the baseline chain.
+
+    The rule is the exact path and nothing below it. `PathPrefix` alone would
+    match `/metricsomething`, which is D162 (`PathPrefix(/api/rest)` matching
+    `/api/restaurant`) at a new route; and unlike the documentation surface
+    there is no subtree to admit, so this is `Path` alone rather than the
+    path-or-prefix pair the other routers use.
+
+    The credential middleware is referenced ``@file`` for
+    ``docs_credential_middleware_name``'s reason, unchanged and load-bearing:
+    since ADR 0086 the middleware carries the bcrypt hash inline, a label
+    carrying it would put a credential into Compose interpolation, and **a
+    cross-provider reference without the suffix resolves to nothing -- which
+    serves the surface without asking for the password.**
+    """
+    router = f"traefik.http.routers.{metrics_router_name}"
+    service = f"traefik.http.services.{metrics_router_name}"
+    return {
+        "traefik.enable": "true",
+        # `Path`, not `PathPrefix`: one path exactly, and nothing beneath it.
+        f"{router}.rule": (
+            "Host(`${PROJECT_DOMAIN:?required}`) && Path(`${METRICS_PATH:?required}`)"
+        ),
+        f"{router}.entrypoints": https_entrypoint,
+        f"{router}.tls.certresolver": "${ACME_RESOLVER_NAME:?required}",
+        # Baseline first, then the credential. Same order as the documentation
+        # route and for the same reason: a 401 carries the response policy every
+        # other answer does, and the refusal does not depend on anything the
+        # baseline chain has not already done.
+        f"{router}.middlewares": (
+            f"${{BASELINE_MIDDLEWARE_CHAIN:?required}},{metrics_auth_middleware_name}@file"
+        ),
+        f"{router}.service": metrics_router_name,
+        f"{service}.loadbalancer.server.port": str(OTEL_EXPORTER_PORT),
     }
 
 
@@ -1282,6 +1408,8 @@ def render_override(
     storage_stripprefix_middleware_name: str,
     storage_cors_middleware_name: str,
     mcp_router_name: str,
+    metrics_router_name: str,
+    metrics_auth_middleware_name: str,
     publications: dict[str, Any] | None = None,
 ) -> bytes:
     """Serialize the override deterministically, with a header saying what it is."""
@@ -1304,6 +1432,8 @@ def render_override(
         storage_stripprefix_middleware_name=storage_stripprefix_middleware_name,
         storage_cors_middleware_name=storage_cors_middleware_name,
         mcp_router_name=mcp_router_name,
+        metrics_router_name=metrics_router_name,
+        metrics_auth_middleware_name=metrics_auth_middleware_name,
         publications=publications,
     )
     header = (

@@ -237,6 +237,64 @@ load, and this run bounds the floor, not the band.
   per project (ADR 0002), and a metrics surface that aggregates two projects is a
   place their identities meet.
 
+**Done.** — D772, ADRs **0164** and **0165**. Both decisions were taken against
+measurements, and the run's first finding was not about metrics at all.
+
+**The route.** `/metrics` under the project's own host, claimed from
+`RESERVED_BASE_PATHS` rather than added to it, behind a per-project basic-auth
+middleware in the documentation route's shape. Per project throughout —
+collector, credential, router, middleware.
+
+**Its backend is the collector, not the store, and that was forced rather than
+preferred.** Prometheus's and VictoriaMetrics' federation endpoints both require
+a `match[]` query parameter and **Traefik has no middleware that can add a query
+string**, so a store-backed route could not be published at all. The collector's
+exporter serves exposition parameterless: measured 200 with the project's series
+against a control whose scrape target does not resolve returning 200 with
+**none**, and 404 on `/`. A consequence fell out that improved the design — the
+store scrapes the collector internally, so **nothing in the metrics plane holds
+the edge credential.**
+
+**What Run 2 did not do, deliberately.** The route is **not published in
+`outputs.json`**. That needs outputs v14 and a migration, and an endpoint's
+`available_from_session` only becomes meaningful when `CURRENT_SESSION` moves —
+which is Run 7. Deferred to the bump rather than omitted, and said here so the
+next reader does not conclude the document was forgotten.
+
+**D772 was found on the way in and repaired here** (§1). Establishing which
+middleware chain the new router should attach turned up that
+`apg-response-policy` had been attached to **no route at all since Session 5**:
+the deployed REST surface answered without `Cache-Control: no-store` on an API
+whose every row is selected per caller. `BASELINE_MIDDLEWARE_CHAIN` is now the
+single name `apg-baseline@file`. **The offline control reproduced the live
+defect exactly**, which is the strongest form the repair could have taken.
+
+**D762 came due and was paid in full.** `--update` re-resolved three rolling
+tags — `pg18`, `3.12-slim` and `v3.7`, the same three D754 measured. Restoring
+`TRAEFIK_IMAGE` mattered most: every Traefik measurement in Runs 1 and 2, and
+the host's own checkout, are on `9c3b91d5`, so adopting the new digest would
+have made this session's measurements describe an image nothing runs.
+
+**Four batteries, thirteen mutations, all killed by assertion with a control the
+mutation cannot reach.** The ones worth naming are the three that produce a
+route which *looks* correct: `Path` becoming `PathPrefix` (D162 — a string
+prefix answers `/metricsanything`), the credential losing its `@file` suffix
+(**an unresolved middleware is served, not refused — the route silently stops
+asking for the password**), and the service pointing at a port the exporter does
+not serve (a 502 behind a healthy collector, with neither file looking wrong).
+
+**Two rig defects, both mine, both caught by the rules that exist for them.** A
+test block written through a shell heredoc had every double quote eaten and left
+the module syntactically broken — reverted and rewritten with the file tools. And
+a `test_connect_command` failure chased for several minutes turned out to be
+`bash -c` instead of `bash -lc`, so `jq` was off the PATH. Both are documented
+traps; neither reached a commit.
+
+**Not measured here:** what the surface actually *carries*. The collector
+receives and exports but scrapes nothing, so a deployed `/metrics` today is an
+authenticated, empty exposition. Run 3 gives it a transport and Run 4 gives it
+metrics; the surface exists first, which is the order this run was for.
+
 ### Run 3 — OpenTelemetry as a transport, not an identifier
 
 The existing request id becomes the trace context (D763). **Nothing re-derives

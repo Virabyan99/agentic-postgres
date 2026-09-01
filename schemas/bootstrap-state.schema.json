@@ -83,6 +83,7 @@
           "pgbouncer_admin_password",
           "bootstrap_jwt_signing_key",
           "docs_basic_auth_password",
+          "metrics_basic_auth_password",
           "postgrest_authenticator_password",
           "auth_service_password",
           "auth_jwt_signing_key",
