@@ -227,3 +227,5 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0161](0161-the-database-row-records-the-request-and-a-malformed-header-is-not-a-refusal.md) | The `database` row records the request, and a malformed header is not a refusal | 11 | Accepted |
 | [0162](0162-what-a-template-version-bump-permits-and-what-rollback-means.md) | What a `template_version` bump permits, and what rollback does not mean | 13 | Accepted |
 | [0163](0163-a-skipped-proof-is-not-a-failed-one.md) | A skipped proof is not a failed one | 13 | Accepted |
+| [0164](0164-the-project-metrics-surface-is-per-project-parameterless-and-not-public.md) | The project metrics surface is per project, parameterless, and not public | 14 | Accepted |
+| [0165](0165-a-telemetry-component-carries-an-explicit-memory-limit.md) | A telemetry component carries an explicit memory limit, because its default is a share of somebody else's machine | 14 | Accepted |
