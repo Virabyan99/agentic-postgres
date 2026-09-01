@@ -55,6 +55,26 @@ FINGERPRINT_LENGTH = 10
 #: cannot claim it and shadow the route the edge plane is verified through.
 HEALTH_ROUTE_PATH = "/__apg/healthz"
 
+#: The metrics surface, reserved in Session 1 and redeemed in Session 14.
+#:
+#: ADR 0005 reserved `/metrics` and called a reserved path *"a promise the
+#: platform makes about a route it will one day own."* Thirteen sessions later
+#: nothing owned it: the string appeared once outside the tests, in
+#: `config.RESERVED_BASE_PATHS`. ADR 0164 makes this route its owner.
+#:
+#: **This is the one derivation of the path.** `config.RESERVED_BASE_PATHS`
+#: holds the same characters because it is the *reservation* and this is the
+#: *route* — the relationship `DOCS_ROOT_PATH` below already has with the same
+#: tuple. `test_the_metrics_route_is_the_path_session_one_reserved` binds them,
+#: so neither can move without the other, which is more than the documentation
+#: root has ever had.
+#:
+#: **There is no root above this page**, unlike the documentation surface. The
+#: collector's Prometheus exporter serves exactly this path and answers 404 on
+#: `/` — measured against the image, not assumed — so nothing here needs a strip
+#: prefix and ADR 0087's rewrite has no counterpart in this route.
+METRICS_ROUTE_PATH = "/metrics"
+
 #: The documentation root, reserved since Session 1 and published by nobody.
 #:
 #: `config.RESERVED_BASE_PATHS` keeps a manifest from claiming it, and Session 11
@@ -335,6 +355,20 @@ def docs_router_name(key: str) -> str:
     return traefik_name(f"apg-{key}-docs", context="traefik_router_docs")
 
 
+def metrics_router_name(key: str) -> str:
+    """The router and service name for one project's metrics surface (ADR 0164).
+
+    Same construction as every other route's, for the reason `docs_router_name`
+    gives: one name shared between `routers.<n>.service` and `services.<n>`, so
+    the two cannot be mismatched.
+
+    Derived per project rather than shared, because the surface is per project.
+    A single host-scoped router would be the one place two projects' telemetry
+    met, and ADR 0164 rejected that shape deliberately rather than by omission.
+    """
+    return traefik_name(f"apg-{key}-metrics", context="traefik_router_metrics")
+
+
 def app_router_name(key: str) -> str:
     """The router and service name for one project's application API route.
 
@@ -497,6 +531,25 @@ def docs_credential_middleware_name(key: str) -> str:
     documentation password opens the other's.
     """
     return traefik_name(f"apg-{key}-docs-auth", context="traefik_middleware_docs_auth")
+
+
+def metrics_credential_middleware_name(key: str) -> str:
+    """The per-project metrics credential middleware (ADR 0164).
+
+    Derived for `docs_credential_middleware_name`'s reason and it is the same
+    reason twice: Traefik's middleware namespace is host-wide, so two projects
+    whose middleware names collided would share one credential, and the symptom
+    would be that one project's metrics password opens the other's telemetry.
+
+    **A separate middleware from the documentation one, not a reuse.** They are
+    both basic-auth over a materialized secret and it is tempting to share, but
+    a shared middleware is a shared credential: rotating the documentation
+    password would silently rotate metrics access, and granting a monitoring
+    system a scrape credential would hand it the documentation too. The two
+    surfaces have different readers and different rotation lifetimes, so they
+    get different credentials.
+    """
+    return traefik_name(f"apg-{key}-metrics-auth", context="traefik_middleware_metrics_auth")
 
 
 def r2_bucket(value: str, *, context: str = "r2_bucket") -> str:
@@ -885,6 +938,19 @@ class ProjectIdentity:
     #: derivation ADR 0061 exists to prevent.
     route_app_docs: str = ""
     route_app_docs_path: str = ""
+    #: Session 14's metrics surface (ADR 0164). URL and path carried as separate
+    #: members for the reason `route_rest`/`route_rest_path` are: one is the
+    #: address a reader is given, the other is what a router rule matches on,
+    #: and D177 is what happened when the two were derived twice.
+    #:
+    #: There is no `metrics_stripprefix_middleware` beside these, and its
+    #: absence is a decision rather than an omission: the collector's exporter
+    #: serves `/metrics` and 404s on `/`, so the path the edge matches is the
+    #: path the upstream wants and there is nothing to rewrite.
+    route_metrics: str = ""
+    route_metrics_path: str = ""
+    metrics_router: str = ""
+    metrics_credential_middleware: str = ""
     docs_router: str = ""
     docs_stripprefix_middleware: str = ""
     api_buffering_middleware: str = ""
@@ -997,6 +1063,12 @@ def derive(
         route_docs_path=DOCS_PAGE_PATH,
         route_app_docs=f"https://{domain}{DOCS_APP_PAGE_PATH}",
         route_app_docs_path=DOCS_APP_PAGE_PATH,
+        # Reserved in Session 1, redeemed in Session 14 (ADR 0164). The path is
+        # the whole route -- no root above it, nothing stripped below it.
+        route_metrics=f"https://{domain}{METRICS_ROUTE_PATH}",
+        route_metrics_path=METRICS_ROUTE_PATH,
+        metrics_router=metrics_router_name(key),
+        metrics_credential_middleware=metrics_credential_middleware_name(key),
         route_health=f"https://{domain}{HEALTH_ROUTE_PATH}",
         health_router=health_router_name(key),
         rest_router=rest_router_name(key),

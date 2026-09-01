@@ -475,3 +475,65 @@ def test_r2_bucket_truncation_stays_valid() -> None:
     result = naming.r2_bucket("b" * 90)
     assert len(result) == 63
     assert result[0].isalnum() and result[-1].isalnum()
+
+
+# ---------------------------------------------------------------------------
+# Session 14's metrics surface (ADR 0164)
+# ---------------------------------------------------------------------------
+
+
+def test_the_metrics_route_is_the_path_session_one_reserved() -> None:
+    """The reservation and the route are one string, and this binds them.
+
+    ADR 0005 reserved ``/metrics`` in Session 1; ADR 0164 redeems it in Session
+    14. The characters now sit in two authorities: ``RESERVED_BASE_PATHS``
+    holds the reservation, ``naming.METRICS_ROUTE_PATH`` holds the route. That
+    is the same duplication ``DOCS_ROOT_PATH`` has always had with the same
+    tuple, and it has never had a test.
+
+    Move the route without moving the reservation and a project manifest can
+    claim the path the platform serves on. Traefik then resolves the collision
+    deterministically and invisibly in favour of the longer rule -- ADR 0005's
+    third rejected alternative, arrived at by accident. Nothing else in this
+    suite would notice.
+    """
+    from agentic_postgres import config
+
+    assert naming.METRICS_ROUTE_PATH in config.RESERVED_BASE_PATHS
+
+
+def test_the_metrics_surface_derives_one_router_and_credential_per_project() -> None:
+    """Per project, because Traefik's middleware namespace is host-wide.
+
+    Two projects sharing a credential middleware name share the credential, and
+    the symptom is that one project's metrics password opens the other's
+    telemetry. That is ``docs_credential_middleware_name``'s recorded failure
+    in a new place, which is why this is derived rather than named.
+    """
+    assert naming.metrics_router_name("alpha-dev") != naming.metrics_router_name("beta-dev")
+
+    alpha_auth = naming.metrics_credential_middleware_name("alpha-dev")
+    beta_auth = naming.metrics_credential_middleware_name("beta-dev")
+    assert alpha_auth != beta_auth
+
+    # And the metrics credential is not the documentation credential. Sharing
+    # would make rotating one silently rotate the other, and would hand a
+    # monitoring system the documentation along with the scrape.
+    assert alpha_auth != naming.docs_credential_middleware_name("alpha-dev")
+
+
+def test_the_derived_metrics_route_matches_its_published_path(
+    alpha: naming.ProjectIdentity,
+) -> None:
+    """URL and path from one expression, which is D177's repair.
+
+    ``route_metrics`` is the address a reader is given; ``route_metrics_path``
+    is what the router rule matches on. Derived twice they drift, and the drift
+    stays invisible until somebody types the URL.
+    """
+    assert alpha.route_metrics_path == naming.METRICS_ROUTE_PATH
+    assert alpha.route_metrics == f"https://fixture-alpha-dev.test{naming.METRICS_ROUTE_PATH}"
+    assert alpha.metrics_router == naming.metrics_router_name(alpha.key)
+    assert alpha.metrics_credential_middleware == naming.metrics_credential_middleware_name(
+        alpha.key
+    )
