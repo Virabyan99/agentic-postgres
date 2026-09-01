@@ -17,10 +17,11 @@ there are six sessions. This document does not repeat it.
 ## Status — read this first
 
 ```
-SESSION 14 IS NOT STARTED. This is the plan.
+SESSION 14 IS IN PROGRESS. Run 1 is COMPLETE; Run 2 is next.
 CURRENT_SESSION 13; it moves to 14 in the bump run -- ALL-OR-NOTHING (D690).
 template_version 0.2.0 -> 0.3.0, and ADR 0162 decides what that permits.
-divergences     D760-D764 recorded here. **Next free: D765.**
+divergences     D760-D771 recorded here (D765-D771 are Run 1's).
+                **Next free: D772.**
 ADRs            163. Next free: 0164. This session writes at least two.
 host            62.238.99.122, still on Session 12's RELEASE (936fe09).
                 3814 MB total, 2171 available, **NO SWAP**. 16 containers.
@@ -76,6 +77,13 @@ the live host at planning time**, not a prediction.
 | **D762** | Session 14 adds at least one container, so it adds at least one pinned image to `versions.in.yaml`. | **That file cannot be touched cheaply.** D754, measured in Session 13 Run 8: `versions.env` records a SHA-256 of the whole of `versions.in.yaml`, so **a comment invalidates the lock**, `--update` is the only way to revalidate it, and `--update` re-resolves every rolling tag while it is there. Three moved on a comment: `POSTGRES_IMAGE` (`pg18`), `PYTHON_RUNTIME_IMAGE` (`3.12-slim`), `TRAEFIK_IMAGE` (`v3.7`). | **Snapshot `versions.env`, run `--update`, restore every digest that is not this session's, `--check`.** The procedure is written into the run rather than left as a caution, and the diff is read line by line. | **D540 has been open for four sessions saying the drift is real.** Session 13 measured how little it takes; Session 14 is the first session since that must add an image, so it is the first that pays. **Adopting a new PostgreSQL image as a side effect of adding a metrics collector is exactly the unintended change a digest pin exists to prevent**, and it would arrive under a commit message about observability. | 0077 |
 | **D763** | The specification: *"Add OpenTelemetry propagation through Traefik, FastAPI, FastMCP, protected downstream HTTP calls…"* — read as building request correlation. | **The correlation exists and is proved.** `OPS-LOG-001` is a Session 11 claim, green in Session 13's evidence, spanning **ingress → FastMCP → PostgREST → `app_private.agent_audit.request_id`** (migration 0022, ADR 0160). `mcp_telemetry.py` already emits one structured record per tool call with a documented forbidden list and a canary scan behind it. | **OTel is adopted as a TRANSPORT for telemetry that already flows**, not as a new identifier. Nothing re-derives a request id; the existing one becomes a trace context. The first exit criterion of the spec's Session 14 — *"one agent write correlated across ingress, FastMCP, downstream API, PostgreSQL and audit"* — **is already met and the plan says so** rather than re-proving it. | **A session that re-derived the request id would produce a second authority for one value** (ADR 0002), and this repository has paid for that twice in one session already (D680, D682). The budget belongs to metrics and alert rules. | 0160, 0002 |
 | **D764** | `MCP_MEMORY_LIMIT_MB` is 384 and ADR 0131 measured the floor as `128 + share × 4`, so the limit is understood. | **It was measured for the INTERPRETER, not the container**, and CLAUDE.md §9 has said so since Session 8: *"reading a running container's resident set is one command, and it is the number a limit actually bounds."* Eight sessions; still unread. `MCP_MEMORY_LIMIT_MB = 384` lives in `rendering.py:727` and is **inherited rather than derived** per its own comment. | **Read in Run 1, beside the host's own memory figures**, because the same command answers both questions. | **It stopped being a tidy loose end the moment memory became the session's constraint** (D761). A plane whose limit was set from an interpreter measurement is a plane whose real headroom nobody knows — and Session 14 proposes to run new processes beside it. **The cheap open item and the expensive design question are the same measurement.** | 0131 |
+| **D765** | Run 1 reads *"what each container actually holds, which needs `docker stats` under root"* — so the measurement is privileged and waits for a human at a TTY. | **It needs none of that.** `/sys/fs/cgroup/system.slice/docker-*.scope/memory.stat` carries `anon`, `file` and `shmem`; `memory.current`, `memory.peak` and `memory.max` sit beside it; `/proc/<pid>/mountinfo` names the bind mounts that say which container is which. All are world-readable. The whole host half of Run 1 ran as **`op` over SSH with no TTY, no `sudo`, and no reachable Docker daemon.** | **The host half of Run 1 is a read-only probe**, and the method is written down here so no future session budgets a trip for it. | **D764 stayed open for eight sessions because CLAUDE.md called it "one command" and that command was believed to need root.** A measurement that needs a human is a measurement that gets taken once. This one needs nobody — and the same read is available to `doctor.sh` and to any future gate. | 0071 |
+| **D766** | *"Sixteen containers run today"*, and `apg-diag containers` agrees. | **The machine runs eighteen.** The cgroup walk found 18 scopes; `apg-diag containers` lists 16. The two it omits are the shared edge — `traefik` (21.6 MB anon) and `haproxy` (4.4 MB) — because `verb_containers` iterates `PROJECT_ROOT` and the edge is host-scoped. The 16 it lists are exactly 8 per project: postgres, pgbouncer, postgrest, auth, storage, mcp, docs, edge-probe. | **Both numbers are right about different questions, and this plan says which it means.** A capacity figure counts 18. | **The count everybody quotes comes from the diagnostic surface everybody reads, and that surface cannot see a host-scoped service by construction.** Small in megabytes, total in kind: any per-project iterator under-reports the machine, and a memory envelope derived from one is short by whatever the edge holds. | 0071, 0158 |
+| **D767** | 1,536 MB is *"already budgeted to two database containers"*, so an observability plane must fit in what is left after it. | **The budget is a cap, nothing is holding it, and the caps already oversubscribe the machine.** Each PostgreSQL container holds **17.6 / 18.5 MB anon plus ~19–20 MB shmem — about 37 MB against a 768 MB cap**. Total anonymous memory across all **18** containers is **573.8 MB** on a 3,814 MB host with 2,110 MB available. Meanwhile the caps that exist sum to **3,840 MB** (2 × 768 + 6 × 384) on a 3,814 MB machine, and ten further containers carry `memory.max=max`. | **The fit question is answered against measured occupancy, and the envelope publishes occupancy and headroom separately.** `memory.max` is a ceiling the kernel permits, never a reservation it makes. | **A budget nothing is holding is not consumed memory — and a set of caps that already exceeds RAM is not a budget at all.** Reading 1,536 MB as spoken-for would have shrunk the surface for room nobody had taken; reading it as free would ignore a ceiling the kernel will honour. **Both readings are wrong in opposite directions**, which is why the envelope quotes two numbers (D593's band, applied to memory). | 0131 |
+| **D768** | Run 1 asks *whether* Traefik publishes metrics at the pinned digest — a yes or a no. | **Yes, and the yes has a window in it.** `traefik:v3.7@sha256:9c3b91d5…` is **3.7.10**, and the host's checkout pins the identical digest. Polled from t=0 with `--metrics.prometheus.entryPoint=metrics`: **refused at +10 ms, HTTP 404 at +154 ms, HTTP 200 at +298 ms** — the entrypoint's TCP server starts before `prometheus@internal` is installed. The control, a metrics-**disabled** Traefik on the same entrypoint, reaches 404 at +215 ms and **stays 404 for ever**. With `entryPoint` unset the surface lands on the internal `traefik` entrypoint at **:8080**, not on `web`. | **Nothing may read a 404 from `/metrics` as "metrics are not configured."** A scrape check, an alert rule and `OPS-METRIC-001`'s proof all discriminate on the body — the `traefik_*` families — never on the status code. | **D145's family at a different vendor.** `postgrest --ready` returned 0 while every request 404'd; here two unrelated states — *scraped 150 ms too early* and *never configured* — are the same three digits. The digest was measured rather than the tag because a feature in `v3.7` generally is not a feature in the digest deployed here. This time they agreed. | 0005 |
+| **D769** | Run 4 names the metrics that answer a question somebody has; Run 5 writes a rule per failure class over them. | **The exported family set is not fixed — it grows with traffic.** At the pinned digest a freshly started Traefik exports **3** `traefik_*` families (`config_last_reload_success`, `config_reloads_total`, `open_connections`). After five requests crossed an entrypoint it exports **7**: the arrivals are `traefik_entrypoint_request_duration_seconds`, `_requests_bytes_total`, `_requests_total` and `_responses_bytes_total`. | **Every alert rule states explicitly what it means by an absent series**, rather than assuming the series exists and reads zero. | **A deployment that has served no request and a deployment whose exporter is broken produce the same empty result.** A rule over `traefik_entrypoint_requests_total` on a quiet deployment is evaluating nothing and reporting healthy. **D553 inverted** — there a cumulative counter answered a point-in-time question; here a point-in-time series does not exist yet — and both are one mistake about when a number means anything. | 0149, 0150 |
+| **D770** | Run 1 measures *"what a collector and a store cost"* — a number per candidate. | **A store's memory is a function of the machine it lands on, not of the workload.** Unbounded on the 7,786 MB rig, VictoriaMetrics logs *"limiting caches to 4898660352 bytes … according to -memory.allowedPercent=60, system memory limit 8164433920"* and climbed past 63 MB still rising. The same image under `--memory=192m` logs *"limiting caches to 120795955 bytes … system memory limit 201326592"* and settles at **45.6 MB**. Bounded, against a real scrape target with ingestion confirmed at both ends of the run: **Prometheus 21.2 MB anon (peak 37.4), otelcol-core 14.3 (16.7), Alertmanager 10.3 (12.3), VictoriaMetrics 45.6 (48.2)**. Nothing was OOM-killed. | **Every store or collector deployed here carries an explicit container memory limit**, and **no unbounded number measured off-host may be quoted for the host.** Which store is Run 2's choice, now a choice between measured numbers. | **An unbounded store on the 3,814 MB host would size caches to roughly 2.3 GB**, on a machine with no swap where the kernel picks the victim. The reputation inverts under measurement too: VictoriaMetrics has the smallest image (17.5 MB against Prometheus's 104.3 MB) and **twice the resident set**. ADR-shaped, and the ADR belongs to Run 2 where the store is chosen. | 0131, 0155 |
+| **D771** | D761: *"No swap means an OOM is a kill, not a slowdown"* — the risk this session is built around. | **Whether it has ever happened here is unknown, and the first reading said it had not.** `grep -c` over `journalctl -k` returned **0** OOM lines, which reads as a clean history. The control — total kernel journal lines over the same window — returned **1**, and that line is *"Hint: You are currently not seeing messages from other users and the system."* followed by `-- No entries --`. `op` is in `op, sudo, users`; the journal is `root:systemd-journal 0640` and `dmesg` is restricted. | **The host's OOM history is recorded as UNKNOWN.** Reading it needs root, or `op` in `adm`/`systemd-journal` — a decision, not a command. | **A zero meaning "no access" and a zero meaning "no kills" are the same character**, and the comforting one is the wrong one. It was caught only because the control counted total lines instead of trusting the filtered count — and it nearly passed anyway, because the threshold asked for *more than zero* and got exactly one. **§7's defect, produced by the rig built to avoid it.** | 0071 |
 
 ---
 
@@ -160,6 +168,61 @@ The session's shape is contingent on this run, so it comes first and it decides.
 does not fit, the surface shrinks — a scrape endpoint with no local retention is
 still `OPS-METRIC-001`, and an envelope measured by an off-host load generator is
 still `CAP-ENV-001`.
+
+**Done.** — D765–D771. **The fit question has a yes, and the surface does not
+have to shrink.**
+
+**The numbers.** A bounded plane of **Prometheus + otelcol-core + Alertmanager
+settles at 45.8 MB anon** (66.4 MB summing peaks) against a host holding
+**573.8 MB across 18 containers** with **2,110 MB available**. Substituting
+VictoriaMetrics makes it 70.2 MB. **None of §9's stop conditions fired**: no
+store had to be dropped, no database budget was touched, and nothing was
+OOM-killed under a deliberately tight cap.
+
+**The database budget was the wrong thing to be afraid of** (D767). The two
+clusters hold ~37 MB each against 768 MB caps; the caps in aggregate already
+exceed the machine's RAM, so they were never a reservation anybody could spend
+against. **The constraint is real but it is not where D761 put it** — it is that
+an *unbounded* store sizes itself from the machine (D770), which is a
+configuration decision rather than a shortage.
+
+**D764 is answered, and it took no root.** The MCP containers hold **89.1 MB
+(alpha) and 88.0 MB (beta) anon, peaks 116.5 / 116.0 MB, against
+`MCP_MEMORY_LIMIT_MB = 384`** — about 3.3× headroom on peak. ADR 0131's
+`128 + share × 4` interpreter floor was not the binding number. The two were
+identified positively, by the capability lock and JWKS they mount: they are the
+only containers on the host that mount **no credential at all**, which is the
+agent plane's invariant turning up in a measurement that was not looking for it.
+
+**What the rig cost, because two of its own parts were the defect** (§7's
+standing pattern, and both were caught by controls rather than by inspection):
+
+- **`date` on this machine is uutils coreutils 0.8.0, not GNU**, and it silently
+  ignores the width in `%3N` — `date +%s%3N` returns seconds followed by *nine*
+  digits. A readiness poller read that as milliseconds, computed an elapsed time
+  of ~1.01 × 10⁹ ms, broke on its first iteration and reported `polls=0`: a rig
+  printing a result while measuring nothing. **The fatal clock preflight is the
+  only reason it did not become a finding.**
+- **The ingestion control produced a false negative and condemned a working
+  store.** It asked `up` through `/api/v1/query`; VictoriaMetrics defaults to
+  `-search.latencyOffset=30s`, so a query at t+25 s evaluates at t−5 s and
+  returns an empty vector. VM had been scraping throughout — 48 samples per
+  scrape, target `health: "up"`. **A control that fails for a reason unrelated to
+  what it watches is D509's rule inverted**, and it is the more dangerous
+  direction: this one would have thrown away a correct measurement rather than
+  passing a wrong one. Rewritten onto `/api/v1/targets` and
+  `/api/v1/status/tsdb`, neither of which is latency-offset.
+
+**What Run 2 inherits as decided-by-measurement rather than open:** the route
+exists and is unredeemed (`/metrics` appears once outside tests, at
+`config.py:66`); Traefik serves the surface at the deployed digest but a 404
+means two different things (D768); the exported family set is dynamic (D769);
+and any store carries an explicit container limit (D770), which is the ADR
+Run 2 writes.
+
+**Not measured, and it is Run 6's problem rather than Run 1's:** every figure
+here is an *idle* plane scraping one target. The envelope's numbers come from
+load, and this run bounds the floor, not the band.
 
 ### Run 2 — The metrics surface, on the route Session 1 reserved
 
