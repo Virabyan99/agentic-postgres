@@ -98,6 +98,38 @@ images:
   NODE_RUNTIME_IMAGE: docker.io/library/node:22-alpine
   INFISICAL_IMAGE: docker.io/infisical/cli:0.41.89
   DBMATE_IMAGE: docker.io/amacneil/dbmate:2.34.1
+  # Session 14. The per-project metrics surface's backend (ADR 0164).
+  #
+  # **contrib, not the core distribution, and that is not a preference.** Both
+  # the `prometheus` receiver and the `prometheus` exporter are contrib-only;
+  # core carries the OTLP receiver and a debug exporter and neither can scrape
+  # an upstream nor serve exposition. Measured cost of choosing contrib:
+  # 31.1 MB anon against core's 14.3 MB, and a 103.6 MB image against 35.0 MB.
+  #
+  # What was measured against THIS digest, on the locked platform, before it was
+  # written here -- and the explicit tag was confirmed to resolve to the same
+  # digest as `latest` at the time, so the measurements are about the pin rather
+  # than about whatever `latest` meant that afternoon:
+  #
+  #   * the `prometheus` exporter serves Prometheus exposition at `/metrics`
+  #     with NO query parameters. That is the whole reason this is the route's
+  #     backend rather than the store: Prometheus's and VictoriaMetrics'
+  #     federation endpoints both require `match[]`, and Traefik has no
+  #     middleware that can add a query string to a request.
+  #   * `/` on the same port answers **404**, so the route needs no strip
+  #     prefix and ADR 0087's rewrite has no counterpart here.
+  #   * scraping a real Traefik it served 20,513 bytes carrying the project's
+  #     `traefik_*` series; an otherwise identical collector whose scrape target
+  #     does not resolve served 1,896 bytes carrying **none**. The control is
+  #     what makes the first number mean "the project's metrics" rather than
+  #     "something answered".
+  #   * under a 128 MB container limit it held 31.1 MB anon and was not
+  #     OOM-killed, while `memory.current` sat at exactly the cap because
+  #     reclaimable cache expands to fill whatever it is given (ADR 0165).
+  #
+  # Re-measure those four when this version moves. The first two are the ones
+  # that would silently take the route away.
+  OTEL_COLLECTOR_IMAGE: docker.io/otel/opentelemetry-collector-contrib:0.159.0
 
 # Minimum versions required for a *feature*, not for an image.
 #

@@ -1432,3 +1432,177 @@ def test_the_readiness_probe_needs_its_own_configuration(postgrest_image: str) -
         "a measurement, not with this test deleted"
     )
     assert "admin-server-port" in (bare.stdout + bare.stderr).lower().replace("_", "-")
+
+
+# ---------------------------------------------------------------------------
+# Session 14: the metrics collector (ADR 0164)
+# ---------------------------------------------------------------------------
+
+#: The port the exporter is configured on below. Not the image's default -- the
+#: exporter has none until a config names one, which is itself the fact that
+#: makes the next constant meaningful.
+OTEL_EXPORTER_PORT = 8889
+
+#: The exporter serves exactly one path and 404s everything else. This is the
+#: property the whole route rests on (ADR 0164): a backend that needed a query
+#: parameter could not be reached through Traefik at all, because no middleware
+#: can add one.
+OTEL_EXPORTER_PATH = "/metrics"
+
+
+@pytest.fixture(scope="module")
+def otel_collector_image() -> str:
+    image = LOCK["OTEL_COLLECTOR_IMAGE"]
+    subprocess.run(
+        ["docker", "pull", "--platform", "linux/amd64", "-q", image],
+        capture_output=True,
+        check=False,
+        timeout=600,
+    )
+    return image
+
+
+@requires_docker
+def test_the_metrics_exporter_serves_one_parameterless_path(
+    otel_collector_image: str, tmp_path: Path
+) -> None:
+    """The measurement the metrics route depends on, run against the locked digest.
+
+    ADR 0164 routes `/metrics` at the collector rather than at the store, and
+    the reason is mechanical rather than aesthetic: Prometheus's and
+    VictoriaMetrics' federation endpoints both require a `match[]` query
+    parameter, and **Traefik has no middleware that can add a query string.** A
+    backend that needed one could not be published at all.
+
+    So two facts are asserted here, and the second is the control for the first:
+
+      * `GET /metrics` with no parameters answers **200**;
+      * `GET /` on the same port answers **404**.
+
+    Without the second, the first is equally explained by a server that answers
+    200 to everything -- and that server would look identical until somebody
+    pointed a real scraper at it. The pair is what makes "serves one path" a
+    measurement rather than an impression.
+
+    The scrape pipeline is deliberately empty. What is under test is the
+    exporter's *addressing*, not what it has collected; the content half was
+    measured in Run 2 with a collector whose scrape target did not resolve
+    serving zero of the project's series against 20,513 bytes when it did.
+    """
+    import urllib.error
+    import urllib.request
+
+    config = tmp_path / "otelcol.yaml"
+    config.write_text(
+        "receivers:\n"
+        "  otlp:\n"
+        "    protocols:\n"
+        "      grpc:\n"
+        "        endpoint: 0.0.0.0:4317\n"
+        "exporters:\n"
+        "  prometheus:\n"
+        f"    endpoint: 0.0.0.0:{OTEL_EXPORTER_PORT}\n"
+        "service:\n"
+        "  telemetry:\n"
+        "    logs:\n"
+        "      level: warn\n"
+        "  pipelines:\n"
+        "    metrics:\n"
+        "      receivers: [otlp]\n"
+        "      exporters: [prometheus]\n",
+        encoding="utf-8",
+    )
+    config.chmod(0o644)
+
+    name = "apg-test-otel-exporter"
+    subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=120)
+    started = subprocess.run(
+        [
+            "docker",
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--platform",
+            "linux/amd64",
+            # Port 0 lets Docker choose. A fixed port makes this test fail for
+            # the one reason that has nothing to do with the image.
+            "-p",
+            f"0:{OTEL_EXPORTER_PORT}",
+            "-v",
+            f"{config}:/etc/otelcol/config.yaml:ro",
+            otel_collector_image,
+            "--config=/etc/otelcol/config.yaml",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=180,
+    )
+    assert started.returncode == 0, started.stderr
+
+    try:
+        mapping = subprocess.run(
+            ["docker", "port", name, f"{OTEL_EXPORTER_PORT}/tcp"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        assert mapping.returncode == 0, mapping.stderr
+        port = mapping.stdout.splitlines()[0].rsplit(":", 1)[1].strip()
+
+        def get(path: str) -> int:
+            url = f"http://127.0.0.1:{port}{path}"
+            try:
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    return int(response.status)
+            except urllib.error.HTTPError as exc:
+                return int(exc.code)
+
+        deadline = time.time() + 60
+        status = None
+        while time.time() < deadline:
+            try:
+                status = get(OTEL_EXPORTER_PATH)
+                break
+            except OSError:
+                time.sleep(0.5)
+
+        assert status == 200, (
+            f"the exporter did not serve {OTEL_EXPORTER_PATH} without parameters "
+            f"(got {status}). The metrics route has no other backend it can use: "
+            "a federation endpoint needs match[], and Traefik cannot add one"
+        )
+
+        # The control. A 200 on one path means nothing if every path answers 200.
+        assert get("/") == 404, (
+            "the exporter answered / as well as /metrics, so 'serves exactly one "
+            "path' is no longer measured by this test -- and the route may need a "
+            "strip prefix that ADR 0164 says it does not"
+        )
+
+        # And the image is the version the lock claims, because a digest that
+        # resolved to something else would pass everything above.
+        version = subprocess.run(
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                "linux/amd64",
+                "--entrypoint",
+                "/otelcol-contrib",
+                otel_collector_image,
+                "--version",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=180,
+        )
+        assert "0.159.0" in (version.stdout + version.stderr), (
+            f"the locked digest is not otelcol-contrib 0.159.0: {version.stdout!r}"
+        )
+    finally:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=120)
