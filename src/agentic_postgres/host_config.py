@@ -165,11 +165,35 @@ RUNTIME_COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "BASELINE_MIDDLEWARE_CHAIN",
 )
 
-#: The middleware every project route passes through, in order. Fixed here
-#: rather than per project: a project that could choose its own chain could
-#: choose to skip the security headers, and the chain is a platform guarantee
-#: rather than a project preference.
-BASELINE_MIDDLEWARE_CHAIN = "apg-security-headers@file,apg-rate-limit@file"
+#: The middleware every project route passes through. Fixed here rather than
+#: per project: a project that could choose its own chain could choose to skip
+#: the security headers, and the chain is a platform guarantee rather than a
+#: project preference.
+#:
+#: **One chain name, not an enumeration, and that is D772's repair.** This
+#: constant used to read `apg-security-headers@file,apg-rate-limit@file` -- two
+#: of the three middlewares `infra/edge/dynamic/baseline.yaml` defines. Session 5
+#: added `apg-response-policy` and the `apg-baseline` chain that contains it, and
+#: **this reader never moved**. From Session 5 until Session 14 no deployed route
+#: attached it: measured live on `alpha-dev`, `GET /api/rest` answered with no
+#: `Cache-Control` and disclosed `server: postgrest/14.16`.
+#:
+#: The enumeration was the wrong *shape*, not merely the wrong value.
+#: `baseline.yaml` names the chain so that *"adding a baseline middleware later
+#: does not require touching any project"* -- and an enumeration here is exactly
+#: the project-side edit that sentence promises nobody has to make, sitting in
+#: the one file nobody re-reads when a middleware is added.
+#:
+#: Referencing a CHAIN across providers from a container label was measured
+#: against the locked Traefik before this changed, because the existing proof
+#: only covered an unsuffixed same-provider reference: the subject drops
+#: `Server` and adds `no-store`, and a control carrying the old enumeration
+#: reproduces the defect exactly.
+#:
+#: `test_every_middleware_baseline_defines_is_attached_to_project_routes` is the
+#: guard that would have caught it, and it reads in the one direction that can
+#: -- from this constant outwards, rather than from the file inwards.
+BASELINE_MIDDLEWARE_CHAIN = "apg-baseline@file"
 
 
 def runtime_compose_env(document: dict[str, Any]) -> bytes:

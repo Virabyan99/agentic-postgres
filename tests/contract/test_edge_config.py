@@ -380,13 +380,70 @@ def test_tls_minimum_version_is_at_least_1_2(dynamic_config: dict[str, Any]) -> 
 def test_the_baseline_chain_exists_and_is_referenced_by_name(
     dynamic_config: dict[str, Any],
 ) -> None:
-    """One name in a project label, so adding a middleware touches no project."""
+    """One name in a project label, so adding a middleware touches no project.
+
+    The name of this test asserted a property that was FALSE for eight sessions
+    (D772): project labels enumerated two middlewares and referenced this chain
+    nowhere. What the body checks is the chain's contents, which was true
+    throughout. The gap between the two is the whole defect, and
+    `test_every_middleware_baseline_defines_is_attached_to_project_routes`
+    below is what closes it.
+    """
     middlewares = dynamic_config["http"]["middlewares"]
     assert middlewares["apg-baseline"]["chain"]["middlewares"] == [
         "apg-security-headers",
         "apg-response-policy",
         "apg-rate-limit",
     ]
+
+
+def test_every_middleware_baseline_defines_is_attached_to_project_routes(
+    dynamic_config: dict[str, Any],
+) -> None:
+    """The guard D772 needed and did not have.
+
+    Two tests already assert things about `apg-baseline`: that it contains the
+    three middlewares, and that every middleware the file defines is a member of
+    it. **Both were green throughout the eight sessions in which
+    `apg-response-policy` was attached to no route at all**, because neither
+    looks at what a project router actually references. They read the file
+    against itself.
+
+    This one starts from `host_config.BASELINE_MIDDLEWARE_CHAIN` -- the value
+    every router label interpolates -- and resolves it against the file. That is
+    the only direction that can see a middleware the platform defines and never
+    attaches, which in this file reads exactly like one that applies everywhere.
+    """
+    middlewares = dynamic_config["http"]["middlewares"]
+
+    def resolve(reference: str) -> set[str]:
+        """Expand one router reference into the middlewares it actually runs."""
+        bare = reference.split("@", 1)[0]
+        if bare not in middlewares:
+            raise AssertionError(
+                f"every project route attaches {reference!r} and "
+                f"infra/edge/dynamic/baseline.yaml defines no such middleware"
+            )
+        definition = middlewares[bare]
+        if "chain" not in definition:
+            return {bare}
+        reached = {bare}
+        for member in definition["chain"]["middlewares"]:
+            reached |= resolve(member)
+        return reached
+
+    attached: set[str] = set()
+    for reference in host_config.BASELINE_MIDDLEWARE_CHAIN.split(","):
+        attached |= resolve(reference.strip())
+
+    unattached = sorted(set(middlewares) - attached)
+    assert not unattached, (
+        f"{unattached} are defined in infra/edge/dynamic/baseline.yaml and reach no "
+        "project route. A middleware defined and never attached reads in that file "
+        "exactly like one that applies to everything -- which is how "
+        "apg-response-policy spent eight sessions not setting Cache-Control on a "
+        "REST surface whose every row is selected per caller (D772)"
+    )
 
 
 def test_hsts_is_absent_from_the_staging_form() -> None:
