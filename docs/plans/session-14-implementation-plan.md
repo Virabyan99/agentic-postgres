@@ -17,14 +17,27 @@ there are six sessions. This document does not repeat it.
 ## Status — read this first
 
 ```
-SESSION 14 IS IN PROGRESS. Run 1 is COMPLETE; Run 2 is next.
-CURRENT_SESSION 13; it moves to 14 in the bump run -- ALL-OR-NOTHING (D690).
-template_version 0.2.0 -> 0.3.0, and ADR 0162 decides what that permits.
+SESSION 14 IS IN PROGRESS. Runs 1, 2 and 3 are DONE. **RUN 4 IS NEXT.**
+HEAD af90f4e, main, clean and pushed.
+CURRENT_SESSION 13; it moves to 14 in Run 7 -- ALL-OR-NOTHING (D690).
+template_version 0.2.0 -> 0.3.0 there too; ADR 0162 says what that permits.
 divergences     D760-D773 (D765-D771 Run 1; D772 Run 2; D773 Run 3).
                 **Next free: D774.**
-ADRs            163. Next free: 0164. This session writes at least two.
-host            62.238.99.122, still on Session 12's RELEASE (936fe09).
-                3814 MB total, 2171 available, **NO SWAP**. 16 containers.
+ADRs            166. **Next free: 0167.** This session has written 0164 (the
+                metrics surface), 0165 (a telemetry component's memory limit)
+                and 0166 (the trace id is the request id).
+outputs schema  still v13. Publishing /metrics needs v14 + a migration and is
+                deferred to Run 7, deliberately (Run 2's Done marker).
+host            62.238.99.122, still on Session 12's RELEASE (936fe09); its
+                CHECKOUT is at 8858246, which is a different thing.
+                3814 MB total, 2110 available, **NO SWAP**.
+                **18 containers, not 16** (D766) -- apg-diag lists 16 because it
+                cannot see the shared edge.
+suite           af90f4e has NOT had the full suite or the gate. Targeted only:
+                tests/contract/ 4477 passed / 3 skipped, ruff clean. Last full
+                run was 4516 / 294 at fd37d53.
+                **Do not gate at a run close.** Before the Run 8 trip, or when
+                asked -- nowhere else.
 evidence        Session 13's merged: status not_run, 66 passed / 12 not_run /
                 0 failed. Session 14 inherits those twelve as not_run.
 ```
