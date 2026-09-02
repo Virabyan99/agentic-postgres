@@ -690,6 +690,15 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # answer `/mcpx` (D162, D408).
     "API_MCP_PATH",
     "MCP_ROUTER_NAME",
+    # Session 14 (ADR 0164). Both were computed by `compose_env`'s values
+    # dict from Run 2 and named in the deploy's OVERRIDE_NAME_KEYS, and
+    # neither was here -- so both were dropped on the way out, because this
+    # list is what `compose_env` iterates. It surfaced as a step-4 refusal
+    # on the host, which is `_env_value` doing its job at the latest
+    # possible moment; `test_every_name_the_deploy_reads_is_a_name_the_render_emits`
+    # is the same finding in a checkout.
+    "METRICS_ROUTER_NAME",
+    "METRICS_CREDENTIAL_MIDDLEWARE_NAME",
     # Session 7, Run 7. The published route, in the same two shapes the
     # application route uses one line-block above: a *path* a router rule
     # matches on, and three *names* `runtime_override.py` renders into label

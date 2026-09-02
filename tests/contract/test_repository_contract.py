@@ -516,6 +516,60 @@ def test_no_module_is_imported_only_by_its_own_tests() -> None:
     )
 
 
+def test_every_name_the_deploy_reads_is_a_name_the_render_emits() -> None:
+    """Two lists that must agree, with nothing comparing them until now (D486).
+
+    `bin/deploy-project.py` reads each `OVERRIDE_NAME_KEYS` value out of a
+    project's `compose.env` through `_env_value`, which **fails on a missing key
+    rather than defaulting** -- deliberately, so that "a name this repository
+    derives and forgets to emit is a refusal at step 4 rather than a router that
+    quietly is not there".
+
+    `rendering.compose_env` emits exactly `COMPOSE_ENV_KEYS`, iterating that
+    tuple. So a value computed into its `values` dict and absent from the tuple
+    is silently dropped, and the two facts meet **on the host**, in the middle of
+    a deploy.
+
+    That is what happened to Session 14's metrics route: Run 2 added
+    `METRICS_ROUTER_NAME` and `METRICS_CREDENTIAL_MIDDLEWARE_NAME` to the values
+    dict and to `OVERRIDE_NAME_KEYS`, and to neither list that emits them. Both
+    were dropped, the offline gate passed, and the first deploy of the release
+    stopped at step 4 with the right message at the wrong time.
+
+    Read from the source of both rather than from a copy: the deploy's mapping is
+    parsed out of its AST, and the renderer's tuple is imported. A test that
+    restated either would be a third list.
+    """
+    import ast
+
+    from agentic_postgres import rendering
+
+    tree = ast.parse((REPO_ROOT / "bin" / "deploy-project.py").read_text(encoding="utf-8"))
+    mapping: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign | ast.AnnAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if getattr(target, "id", "") == "OVERRIDE_NAME_KEYS":
+                    mapping = {
+                        key.value: value.value
+                        for key, value in zip(node.value.keys, node.value.values, strict=True)
+                    }
+
+    assert mapping, (
+        "OVERRIDE_NAME_KEYS was not found in bin/deploy-project.py. Renamed or "
+        "restructured, this test silently stops comparing anything"
+    )
+
+    emitted = set(rendering.COMPOSE_ENV_KEYS)
+    missing = sorted(set(mapping.values()) - emitted)
+    assert not missing, (
+        f"the deploy reads {missing} out of compose.env and the renderer emits "
+        "none of them. `_env_value` fails on a missing key, so each is a step-4 "
+        "refusal on a host -- add it to COMPOSE_ENV_KEYS"
+    )
+
+
 def test_every_bin_call_supplies_the_required_keyword_only_arguments() -> None:
     """A required keyword-only argument added in `src/` reaches its caller in `bin/`.
 
