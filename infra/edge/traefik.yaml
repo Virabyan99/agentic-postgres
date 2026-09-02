@@ -26,9 +26,48 @@ ping:
   # with a read-only root filesystem and no shell utilities.
   entryPoint: ping
 
+metrics:
+  prometheus:
+    # **`entryPoint` is spelled out, and leaving it out is not a tidier
+    # default — it takes the whole shared edge down.** Measured against the
+    # locked digest with this file's own entrypoint layout: unset, Traefik
+    # creates its internal `traefik` entrypoint on :8080, which is `web` here,
+    # and refuses to start with "error while building entryPoint web: ...
+    # listen tcp :8080: bind: address already in use". It fails closed, which
+    # is the good half. The bad half is that the thing failing is shared, so
+    # one omission costs every project its ingress at once (D775).
+    #
+    # The control for that measurement is this same configuration WITH the
+    # entryPoint set: :8080/metrics answers 404 and :8089/metrics answers 200
+    # with the seven base families. So the surface is not on a public port,
+    # and that is measured rather than arranged.
+    entryPoint: apgmetrics
+    # Both label sets on, and each is load-bearing rather than generous.
+    # Without them the exporter publishes seven `traefik_*` families, all
+    # ENTRYPOINT-scoped — and an entrypoint is shared by every project on this
+    # host, so nothing entrypoint-scoped can be attributed to a project or
+    # filtered to one. The router and service labels are what make a per-project
+    # metrics surface possible at all (ADR 0167).
+    #
+    # Measured with a control: the same Traefik with both flags false exports
+    # exactly the seven entrypoint families and zero `traefik_router_*`.
+    addRoutersLabels: true
+    addServicesLabels: true
+    # Entrypoint labels stay OFF. They are the one dimension that cannot be
+    # attributed to a project, so publishing them onto a per-project surface
+    # would put every other project's traffic volume on it in aggregate —
+    # dropping no series that names beta while still describing beta.
+    addEntryPointsLabels: false
+
 entryPoints:
   ping:
     address: ":8082"
+  # The metrics exposition, reachable only from the project edge networks the
+  # proxy is attached to. NOT published to the host in `infra/edge/compose.yaml`
+  # — 80 and 443 remain the only published ports, and this is the same shape
+  # `ping` already has.
+  apgmetrics:
+    address: ":8089"
   web:
     address: ":8080"
     http:

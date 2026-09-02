@@ -34,6 +34,7 @@ from agentic_postgres import (
     auth_limits,
     config,
     deployed_output,
+    host_config,
     naming,
     runtime_override,
     scope_registry,
@@ -897,25 +898,68 @@ def build_pgbackrest_conf(
     return "\n".join(lines).encode("utf-8")
 
 
-def build_otel_config() -> bytes:
-    """The metrics collector's configuration (ADR 0164).
+def _scrape_keep_regex(router_names: tuple[str, ...]) -> str:
+    """The `keep` regex admitting only this project's router and service series.
 
-    **It takes no project.** Every value here is fixed by the design rather than
-    derived from a manifest: the OTLP endpoints the services push to, and the
-    exporter's address, are the same in every deployment. That is deliberate and
-    worth stating, because the obvious next change is to make it per project --
-    and a config that varied per project would need a reason, since the *route*
-    in front of it is already per project and is where the isolation lives.
+    Two branches over `[router, service]` because Prometheus concatenates the
+    source labels with `;` and chains rules with AND. `router` ours, or
+    `service` ours -- and a series carrying neither (Traefik's own Go and
+    process metrics, its config counters, and every ENTRYPOINT family, which is
+    shared by every project on the host) matches neither branch and is dropped.
 
-    What it does NOT contain is the whole of ADR 0164's second half:
+    `(@[a-z]+)?` admits Traefik's provider suffix without naming one. The
+    routers are docker-label-derived today and read `…@docker`; the measurement
+    behind this rule ran against `…@file`. Pinning either would make this rule
+    silently keep nothing the day a route moved providers -- and keeping
+    nothing looks exactly like a route nobody used.
+    """
+    # An identity is interpolated into a regex here, so the charset is asserted
+    # rather than trusted. `_TRAEFIK_NAME` is `^[a-z0-9][a-z0-9-]*$` and holds
+    # no metacharacter, but this function would still be the place a future
+    # identity with a `.` in it became a wildcard.
+    for name in router_names:
+        if not naming.TRAEFIK_NAME_PATTERN.match(name):
+            raise ValueError(
+                f"router name {name!r} is not a Traefik name and may not be "
+                "interpolated into the scrape filter"
+            )
+    alternation = "|".join(router_names)
+    ours = f"({alternation})(@[a-z]+)?"
+    return f"{ours};.*|.*;{ours}"
 
-      * **no scrape targets.** The pipeline receives rather than scrapes, so the
-        collector holds no credential and reaches nothing. What flows in is Run
-        3's transport and Run 4's metric set; the surface exists first.
+
+def build_otel_config(router_names: tuple[str, ...]) -> bytes:
+    """The metrics collector's configuration (ADR 0164, ADR 0167).
+
+    **It took no project until Run 4, and now it does.** The reversal is the
+    scrape filter and nothing else: the OTLP endpoints and the exporter's
+    address are still identical in every deployment, but a collector that
+    scrapes the SHARED edge is reading a surface that describes every project on
+    the host, and what it may keep off that surface is per project by
+    definition. The route in front of the collector is still where the
+    authorisation lives; this is where the *attribution* does.
+
+    Two receivers now, and they answer different questions:
+
+      * **`otlp`** -- what this project's own processes report about themselves.
+        Run 3's transport, carrying Run 4's metric set.
+      * **`prometheus`** -- what the shared edge observed about this project's
+        routes. The edge is the only place a request's status and duration are
+        seen by something other than the service being asked, which is why this
+        is worth a scrape at all rather than more instrumentation.
+
+    **The scrape target holds no credential.** Traefik's exposition endpoint is
+    unauthenticated on an entrypoint reachable only from the project edge
+    networks the proxy is attached to, exactly as `ping` already is. And the
+    direction is the one that already existed: Traefik has reached this
+    collector since Run 2, because the route points at it.
+
+    Still true, and still the second half of ADR 0164:
+
       * **no exporter to anywhere off the host.** The `prometheus` exporter
         serves an endpoint and initiates no connection. The database container's
         egress is this deployment's one named residual (ADR 0147) and Session 14
-        does not add a second.
+        does not add a second. A scrape inside the edge network is not egress.
 
     The exporter's endpoint is `0.0.0.0` inside the container, which is the
     container's own network namespace and not the host's -- the port reaches the
@@ -923,12 +967,15 @@ def build_otel_config() -> bytes:
     decides who may read it, and that decision is a middleware, not a bind
     address.
     """
+    keep = _scrape_keep_regex(router_names)
     lines = [
         "# GENERATED by agentic_postgres.rendering. Do not edit by hand.",
         "#",
-        "# The metrics collector's pipeline (ADR 0164). It receives OTLP and",
-        "# serves Prometheus exposition at /metrics; it scrapes nothing and",
-        "# exports nowhere, so it holds no credential and opens no egress.",
+        "# The metrics collector's pipeline (ADR 0164, ADR 0167). It receives",
+        "# OTLP from this project's own processes, scrapes the shared edge for",
+        "# what the edge observed about this project's routes, and serves",
+        "# Prometheus exposition at /metrics. It exports nowhere and holds no",
+        "# credential.",
         "",
         "receivers:",
         "  otlp:",
@@ -937,6 +984,31 @@ def build_otel_config() -> bytes:
         f"        endpoint: 0.0.0.0:{runtime_override.OTEL_OTLP_GRPC_PORT}",
         "      http:",
         f"        endpoint: 0.0.0.0:{runtime_override.OTEL_OTLP_HTTP_PORT}",
+        "  prometheus:",
+        "    config:",
+        "      scrape_configs:",
+        "        - job_name: edge",
+        f"          scrape_interval: {runtime_override.OTEL_EDGE_SCRAPE_INTERVAL_SECONDS}s",
+        "          static_configs:",
+        "            - targets:",
+        f'                - "{host_config.EDGE_PROXY_ALIAS}:{host_config.EDGE_METRICS_PORT}"',
+        "          metric_relabel_configs:",
+        "            # An ENUMERATION of this project's routers, not a prefix.",
+        "            # A project key permits hyphens, so `alpha` and `alpha-two`",
+        "            # are both lawful on one shared edge and `apg-alpha-.*`",
+        "            # matches both -- measured, at twenty of another project's",
+        "            # series admitted onto this one's surface. The prefix form",
+        "            # is kept as that proof's control because it must still",
+        "            # leak (ADR 0167).",
+        "            #",
+        "            # `up` and the `scrape_*` series are NOT filterable here:",
+        "            # the receiver synthesises them after metric_relabel_configs",
+        "            # runs, measured. That matters, because they are the only",
+        "            # thing that distinguishes a route nobody used from an edge",
+        "            # nobody could reach -- and both are an absent series.",
+        "            - source_labels: [router, service]",
+        f'              regex: "{keep}"',
+        "              action: keep",
         "",
         "processors:",
         "  # A hard stop inside the process, beneath the container limit ADR",
@@ -953,6 +1025,20 @@ def build_otel_config() -> bytes:
         "exporters:",
         "  prometheus:",
         f"    endpoint: 0.0.0.0:{runtime_override.OTEL_EXPORTER_PORT}",
+        "    # Explicit, because the default is five minutes and five minutes is",
+        "    # how long a dead emitter's last value goes on reading as current.",
+        "    # Measured: with the emitter stopped, the default pipeline still",
+        "    # served its gauge at t+40s; a collector configured this way dropped",
+        "    # it between t+5s and t+10s, so the two are distinguishable and this",
+        "    # is a setting rather than a hope.",
+        "    #",
+        "    # It bounds a SILENCE, not a rate. An OTLP series is refreshed every",
+        "    # export interval whether or not anything happened -- a cumulative",
+        "    # counter re-exports the same number -- so a series only stops being",
+        "    # refreshed when the process emitting it has stopped. That is what",
+        "    # this is allowed to notice, and the several missed intervals of",
+        "    # slack are so it notices a dead process and not a slow one.",
+        f"    metric_expiration: {runtime_override.OTEL_METRIC_EXPIRATION_SECONDS}s",
         "",
         "service:",
         "  telemetry:",
@@ -964,7 +1050,7 @@ def build_otel_config() -> bytes:
         "      level: warn",
         "  pipelines:",
         "    metrics:",
-        "      receivers: [otlp]",
+        "      receivers: [otlp, prometheus]",
         "      processors: [memory_limiter, batch]",
         "      exporters: [prometheus]",
         "",
@@ -1650,7 +1736,12 @@ def render_project(
             write_readable(
                 staging / OTEL_CONFIG_FILENAME,
                 OTEL_CONFIG_MODE,
-                build_otel_config(),
+                # The routers this project owns, enumerated by `naming` rather
+                # than assembled here from the identity's fields. `identity`
+                # holds the same eight names, and reading them off it would be
+                # a second place that knows what the set is -- which is the
+                # thing that goes stale when a ninth route is added (ADR 0002).
+                build_otel_config(naming.project_router_names(identity.key)),
             )
             write_private(staging / "rendered-summary.txt", build_summary(outputs))
 

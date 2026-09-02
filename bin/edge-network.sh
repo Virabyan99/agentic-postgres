@@ -31,7 +31,24 @@ readonly PROJECT_RENDERED_ROOT="/var/lib/agentic-postgres/rendered"
 
 # Same shape as schemas/outputs.schema.json's projectKey. Validated before it is
 # used as a path component or a Docker object name.
+#
+# It permits hyphens, and that is not a detail: `alpha` and `alpha-two` are both
+# lawful keys on one host, so no prefix over a derived name distinguishes one
+# project's objects from another's. See naming.project_router_names, which is an
+# enumeration for exactly that measured reason (ADR 0167).
 readonly PROJECT_KEY_PATTERN='^[a-z][a-z0-9-]{4,47}$'
+
+# The name the proxy answers to on a project's edge network, so a per-project
+# metrics collector can scrape it (ADR 0167). Mirrors host_config.EDGE_PROXY_ALIAS,
+# and `test_the_edge_proxy_alias_agrees_between_the_shell_and_the_module` refuses
+# a disagreement: the shell cannot import the module, so the constant is written
+# twice and guarded once.
+#
+# `edge_container` resolves Traefik by Compose LABEL because, in its own words,
+# "a container name is a formatting convention that changes between Compose
+# versions". A scrape target cannot resolve a label -- it can only spell a name.
+# So the attachment registers a name that is ours rather than Compose's.
+readonly EDGE_PROXY_ALIAS='apg-edge-proxy'
 
 ACTION=""
 PROJECT_KEY=""
@@ -87,6 +104,27 @@ is_attached() {
     | grep -q "\"${network}\""
 }
 
+# Attached is no longer enough: the attachment must also carry the alias the
+# metrics scrape resolves (ADR 0167). An alias can only be registered by
+# `docker network connect --alias`, so an endpoint that predates the alias
+# cannot gain one in place.
+#
+# This is what makes the first deploy of that release reconnect each project's
+# endpoint once -- a brief ingress interruption per project, taken deliberately
+# and named here rather than discovered. Every attach after it is a no-op again.
+#
+# Without this check the gap would be SILENT and would look like success:
+# `attach` returns early on an already-attached proxy, so every existing
+# deployment would keep an endpoint with no alias, the scrape would fail to
+# resolve, and the metrics surface would serve a project's own OTLP metrics
+# while quietly carrying none of its edge ones.
+has_alias() {
+  local container="$1" network="$2" alias="$3"
+  docker inspect \
+    --format "{{index .NetworkSettings.Networks \"${network}\" \"Aliases\"}}" \
+    "${container}" 2>/dev/null | grep -q -- "${alias}"
+}
+
 parse_arguments() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -131,7 +169,16 @@ main() {
       local network
       network="$(project_edge_network "${PROJECT_KEY}")"
       if is_attached "${container}" "${network}"; then
-        printf 'attached %s -> %s\n' "${container}" "${network}"
+        if has_alias "${container}" "${network}" "${EDGE_PROXY_ALIAS}"; then
+          printf 'attached %s -> %s (alias %s)\n' \
+            "${container}" "${network}" "${EDGE_PROXY_ALIAS}"
+        else
+          # Reported as its own state rather than folded into "attached".
+          # Ingress works and the metrics scrape does not, and a status that
+          # said only "attached" would describe the half that is fine.
+          printf 'attached %s -> %s (NO alias %s; the metrics scrape cannot resolve the proxy)\n' \
+            "${container}" "${network}" "${EDGE_PROXY_ALIAS}"
+        fi
       else
         printf 'detached %s -> %s\n' "${container}" "${network}"
       fi
@@ -145,12 +192,23 @@ main() {
         || die 9 "edge network does not exist: ${network}. Start the project first."
 
       if is_attached "${container}" "${network}"; then
-        printf 'edge-network: already attached to %s\n' "${network}"
-        return 0
+        if has_alias "${container}" "${network}" "${EDGE_PROXY_ALIAS}"; then
+          printf 'edge-network: already attached to %s\n' "${network}"
+          return 0
+        fi
+        # Attached, but from before the alias existed. An alias is registered
+        # by `connect` and cannot be added to a live endpoint, so the endpoint
+        # is replaced. This runs ONCE per project, on the first start after the
+        # release that introduced the alias, and costs that project its ingress
+        # for the moment between the two calls.
+        printf 'edge-network: attached to %s without alias %s; reconnecting\n' \
+          "${network}" "${EDGE_PROXY_ALIAS}"
+        docker network disconnect "${network}" "${container}" \
+          || die 9 "could not detach ${container} from ${network} to register its alias"
       fi
-      docker network connect "${network}" "${container}" \
+      docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" \
         || die 9 "could not attach ${container} to ${network}"
-      printf 'edge-network: attached to %s\n' "${network}"
+      printf 'edge-network: attached to %s as %s\n' "${network}" "${EDGE_PROXY_ALIAS}"
       ;;
 
     detach)
@@ -172,7 +230,7 @@ main() {
       # to the networks its own Compose model names, which is none of the
       # projects', so without this every project loses ingress on an edge
       # restart and nothing reports it.
-      local attached=0 skipped=0 directory key network
+      local attached=0 skipped=0 realiased=0 directory key network
       for directory in "${PROJECT_RENDERED_ROOT}"/*/; do
         [ -d "${directory}" ] || continue
         key="$(basename "${directory}")"
@@ -187,14 +245,26 @@ main() {
           continue
         fi
         if is_attached "${container}" "${network}"; then
+          # Attached is not sufficient any more; the alias is part of it.
+          # Counted separately from `attached` because the two are different
+          # events: one project gaining ingress, and one project's endpoint
+          # being replaced to register a name (ADR 0167).
+          if has_alias "${container}" "${network}" "${EDGE_PROXY_ALIAS}"; then
+            continue
+          fi
+          docker network disconnect "${network}" "${container}" \
+            || die 9 "could not detach ${container} from ${network} to register its alias"
+          docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" \
+            || die 9 "could not reattach ${container} to ${network}"
+          realiased=$((realiased + 1))
           continue
         fi
-        docker network connect "${network}" "${container}" \
+        docker network connect --alias "${EDGE_PROXY_ALIAS}" "${network}" "${container}" \
           || die 9 "could not attach ${container} to ${network}"
         attached=$((attached + 1))
       done
-      printf 'edge-network: reconciled; %d newly attached, %d not running\n' \
-        "${attached}" "${skipped}"
+      printf 'edge-network: reconciled; %d newly attached, %d realiased, %d not running\n' \
+        "${attached}" "${realiased}" "${skipped}"
       ;;
   esac
 }

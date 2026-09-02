@@ -73,6 +73,15 @@ OUTCOME_SERVED = "served"
 OUTCOME_REFUSED = "refused"
 OUTCOME_FAILED = "failed"
 
+#: The three, as a value something can be checked against.
+#:
+#: Added in Run 4, when the outcome became a metric LABEL as well as a log field
+#: (ADR 0167). A log field may be any string and costs a line; a label is a
+#: series, and on a swapless host an unbounded label set is an OOM whose victim
+#: the kernel picks. So the closed set that was a convention among three
+#: constants is now something `mcp_metrics` can refuse a value against.
+OUTCOMES = (OUTCOME_SERVED, OUTCOME_REFUSED, OUTCOME_FAILED)
+
 
 @dataclass(frozen=True, slots=True)
 class ReadRecord:
@@ -147,15 +156,51 @@ class Timed:
 
     def __exit__(self, kind: Any, value: Any, traceback: Any) -> None:
         del value, traceback
+        # Built ONCE, and both carriers read it. `_record()` calls
+        # `elapsed_ms()`, so building it twice -- or emitting a metric from a
+        # second call to the clock -- would give one tool call two durations
+        # that disagree, which is what `elapsed_ms`' own docstring already
+        # refuses for the audit record.
+        record = self._record()
+
         if kind is not None and self.outcome == OUTCOME_FAILED:
             # An exception the body did not classify. Left as `failed`, and the
             # TYPE is named -- never the message, which is where a caller's
             # value would be if one ever reached an exception string.
-            LOGGER.warning(
-                "apg.mcp.read %s", json.dumps({**self._record(), "error": kind.__name__})
+            LOGGER.warning("apg.mcp.read %s", json.dumps({**record, "error": kind.__name__}))
+        else:
+            LOGGER.info("apg.mcp.read %s", json.dumps(record))
+
+        # After the log line, and on BOTH paths. The early `return` this
+        # replaced would have counted every call except the ones that failed
+        # without being classified -- which are the calls an operator most
+        # wants counted, and whose absence would read as a healthy deployment.
+        self._count(record)
+
+    def _count(self, record: dict[str, Any]) -> None:
+        """Report the same completed call to the metrics carrier (ADR 0167).
+
+        Imported here rather than at module scope: `mcp_metrics` is optional in
+        the sense that nothing else in this module needs it, and a deployment
+        with no collector should not pay an import for a carrier it will not
+        use.
+
+        **A telemetry carrier may not fail a request.** A metric is a report
+        about work, and work that succeeded must not be recorded as having
+        failed because the reporting did. So the failure is caught -- and named
+        by TYPE only, which is this module's existing rule about where a
+        caller's value would be if one ever reached an exception string.
+        """
+        from app import mcp_metrics
+
+        try:
+            mcp_metrics.record(
+                tool=record["tool"],
+                outcome=record["outcome"],
+                elapsed_ms=record["elapsed_ms"],
             )
-            return
-        LOGGER.info("apg.mcp.read %s", json.dumps(self._record()))
+        except Exception as error:
+            LOGGER.warning("apg.mcp.metric_failed %s", json.dumps({"error": type(error).__name__}))
 
     def _record(self) -> dict[str, Any]:
         return ReadRecord(

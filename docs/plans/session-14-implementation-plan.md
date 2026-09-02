@@ -17,15 +17,17 @@ there are six sessions. This document does not repeat it.
 ## Status — read this first
 
 ```
-SESSION 14 IS IN PROGRESS. Runs 1, 2 and 3 are DONE. **RUN 4 IS NEXT.**
+SESSION 14 IS IN PROGRESS. Runs 1-4 are DONE. **RUN 5 IS NEXT.**
 HEAD af90f4e, main, clean and pushed.
 CURRENT_SESSION 13; it moves to 14 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.2.0 -> 0.3.0 there too; ADR 0162 says what that permits.
-divergences     D760-D773 (D765-D771 Run 1; D772 Run 2; D773 Run 3).
-                **Next free: D774.**
-ADRs            166. **Next free: 0167.** This session has written 0164 (the
-                metrics surface), 0165 (a telemetry component's memory limit)
-                and 0166 (the trace id is the request id).
+divergences     D760-D781 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
+                D774-D781 Run 4).
+                **Next free: D782.**
+ADRs            167. **Next free: 0168.** This session has written 0164 (the
+                metrics surface), 0165 (a telemetry component's memory limit),
+                0166 (the trace id is the request id) and 0167 (a metric reads
+                from the decision that owns its value).
 outputs schema  still v13. Publishing /metrics needs v14 + a migration and is
                 deferred to Run 7, deliberately (Run 2's Done marker).
 host            62.238.99.122, still on Session 12's RELEASE (936fe09); its
@@ -81,7 +83,7 @@ correlation). This session extends that family and opens `CAP-*`.
 Six columns, the house shape. **Every row is a fact measured against the tree and
 the live host at planning time**, not a prediction.
 
-**Next free number after this table is D774.**
+**Next free number after this table is D782.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -99,7 +101,14 @@ the live host at planning time**, not a prediction.
 | **D771** | D761: *"No swap means an OOM is a kill, not a slowdown"* — the risk this session is built around. | **Whether it has ever happened here is unknown, and the first reading said it had not.** `grep -c` over `journalctl -k` returned **0** OOM lines, which reads as a clean history. The control — total kernel journal lines over the same window — returned **1**, and that line is *"Hint: You are currently not seeing messages from other users and the system."* followed by `-- No entries --`. `op` is in `op, sudo, users`; the journal is `root:systemd-journal 0640` and `dmesg` is restricted. | **The host's OOM history is recorded as UNKNOWN.** Reading it needs root, or `op` in `adm`/`systemd-journal` — a decision, not a command. | **A zero meaning "no access" and a zero meaning "no kills" are the same character**, and the comforting one is the wrong one. It was caught only because the control counted total lines instead of trusting the filtered count — and it nearly passed anyway, because the threshold asked for *more than zero* and got exactly one. **§7's defect, produced by the rig built to avoid it.** | 0071 |
 | **D772** | Run 2 attaches the platform middleware chain to a new `/metrics` router, and `BASELINE_MIDDLEWARE_CHAIN` is that chain. | **`apg-response-policy` is attached to nothing, on any route, in production — and has been since Session 5 defined it.** `baseline.yaml` defines four middlewares and an `apg-baseline` chain of three, saying the chain is *"what project routers attach"*. **Project routers attach neither.** `host_config.BASELINE_MIDDLEWARE_CHAIN` enumerates `apg-security-headers@file,apg-rate-limit@file` — two of the three — and every router label interpolates that constant. Measured live on `alpha-dev`: the router label is `…middlewares=apg-security-headers@file,apg-rate-limit@file,…api-buffering,…api-stripprefix`, `GET /api/rest` returns **`server: postgrest/14.16` and no `Cache-Control`**, and no entrypoint-level middleware supplies it (`traefik.yaml`'s `websecure` carries only `transport`). | **Repaired in Run 2, by the user's decision.** `BASELINE_MIDDLEWARE_CHAIN` becomes the single name `apg-baseline@file` rather than a corrected enumeration — the enumeration was the wrong *shape*, and naming the chain is what `baseline.yaml` always intended so that *"adding a baseline middleware later does not require touching any project."* Measured first against the locked Traefik, because the existing proof only covered an unsuffixed same-provider reference: subject drops `Server` and adds `no-store`; a control carrying the old enumeration **reproduces the defect offline**. Guarded by `test_every_middleware_baseline_defines_is_attached_to_project_routes`, which reads from the constant outwards. **It reaches the deployment at Run 8, not before** — the host still runs Session 12's release. | **`apg-response-policy` is the middleware that sets `Cache-Control: no-store`**, and `baseline.yaml`'s own rationale says why it exists: *"every row the REST surface returns is selected by a row policy keyed on the requester's identity, so a shared cache holding one is holding one caller's data under a URL another caller will ask for."* That protection is absent from the deployed REST surface. **Two green tests assert the chain's contents and neither can see that nothing attaches it** — `test_the_baseline_chain_exists_and_is_referenced_by_name` is *named for* the property that is false. And `test_edge_behaviour.py`'s fixture attaches `apg-baseline`, so the behavioural proof of `apg-response-policy` runs by a route the product does not take (ADR 0065/0066), written by the author of the code it agrees with (§7 question 6). **Question 5's shape exactly**: Session 5 added a middleware and one reader of the chain never moved. | 0065, 0066, 0009 |
 | **D773** | Run 3 adopts OTel as a transport, with `mcp_telemetry`'s forbidden list *"applying unchanged to whatever the new transport carries."* | **Unchanged is not enough: a span records a caller's value with nobody writing a line of code.** Measured against `opentelemetry-sdk` 1.44.0, with a planted canary and a clean control. An exception merely **escaping** a span makes the SDK attach `exception.message`, `exception.stacktrace`, and a `status.description` of `"ValueError: <the message>"`. `record_exception` and `set_status_on_exception` both default to **on**. The control span, which never saw the value, came back clean — so this is a path rather than rig contamination. | **Both defaults are turned off, and span attributes are ENUMERATED** the way `RECORD_FIELDS` enumerates a log record's. **The canary is extended to spans in this run**, not a later one. | `mcp_telemetry` already refuses precisely this for log lines — *"an unclassified failure is logged with the exception's TYPE and never its message, because a message is where a caller's value would be if one ever reached one."* **The span carrier arrives with that refusal reversed by default.** D449 measured that a logged traceback carries no caller data *because `show_locals` is off*; this is the same question asked of a different framework and answered the other way. §8 predicted it in one line — *a span is a new carrier, and OTel's defaults attach more than a log line does* — and this measurement is what turns that sentence into a control. | 0130, 0164 |
-
+| **D774** | Run 4's metrics are per project, and the collector is per project, so filtering the shared edge's exposition to this project is a matter of matching its names. | **A prefix over the project key admits a DIFFERENT project.** The key pattern is `^[a-z][a-z0-9-]{4,47}$` — it permits hyphens — so `alpha` and `alpha-two` are two lawful keys on one host and every router of both matches `apg-alpha-.*`. Measured against the locked Traefik and the locked collector, four routers across three projects: the prefix form admitted **20 series belonging to `alpha-two`** onto `alpha`'s surface. The enumerated form dropped all 20, kept this project's 20, and dropped `beta`. | **The filter is `naming.project_router_names(key)`** — the exact names, from the same `*_router_name` functions the identity is built from. The prefix form is retained as the proof's control, because it must still leak or the enumeration's refusal is unmeasured. | **D300 reaching a place that looks like string formatting.** *"Never weaken an allowlist to a subset check"* does not stop applying because the allowlist is spelled as a regex — and a prefix over a derived name IS a subset check. The failure mode is the quiet one in both directions: a foreign project's series arrive with nothing marking them foreign, and a router missing from the enumeration produces **no series at all**, which is indistinguishable from a route nobody used. | 0167, 0002 |
+| **D775** | Run 2 measured that Traefik publishes metrics at the pinned digest, and D768 recorded that with `entryPoint` unset the surface lands on the internal `traefik` entrypoint at **:8080**. | **This deployment binds `web` to :8080, so unset is not a default — it is an outage.** Measured against the locked digest with `infra/edge/traefik.yaml`'s own entrypoint layout: Traefik refuses to start with *"error while building entryPoint web: building listener: error opening listener: listen tcp :8080: bind: address already in use"*. The control — the same configuration with `entryPoint` set — answers **404** on :8080/metrics and **200** on :8089/metrics with the seven base families. | **The entrypoint is named explicitly in the static configuration**, with the measurement in a comment beside it, and `test_the_edge_publishes_metrics_on_an_entrypoint_it_names_explicitly` refuses its removal. | **It fails closed and loudly, which is the good half.** The bad half is that the thing that fails is the **shared** edge: one omission in a file that serves every project on the host costs all of them their ingress simultaneously. D768 measured the window and assumed the collision would be a metrics problem; on this host it is an ingress problem. | 0167, 0005 |
+| **D776** | Run 5 writes a rule per failure class over the metrics Run 4 names, so naming a metric fixes what a rule refers to. | **The exposed name is not the name the source writes, and the rename is not cosmetic.** Measured through the locked collector: dots become underscores, a counter gains `_total`, and **the unit abbreviation is EXPANDED into the name**. `agent.tool_calls` (unit `1`) is served as `agent_tool_calls_total`; `agent.tool_call.duration` (unit `ms`) is served as `agent_tool_call_duration_**milliseconds**`. Every series also gains `otel_scope_name`, `otel_scope_version` and `otel_scope_schema_url` — two of them empty — and a synthesised `target_info` carries **every resource attribute verbatim**. | **`mcp_metrics.EXPOSED_METRIC_NAMES` is the mapping, as a declared constant with a test behind it**, and Run 5's rules are written against its right-hand side. Nothing but `service.name` goes in the OTel `Resource`. | **A rule written against the source name matches nothing**, and matching nothing is this family's silent failure — a rule over an absent series evaluates and reports healthy. Changing an instrument's unit is a silent rename of a series something depends on, which is why the mapping is a constant rather than folklore. **And a `Resource` is published, not metadata**: whatever is put there is served as a label to every reader of the route. | 0167 |
+| **D777** | The metrics surface reports what is happening now. | **A series outlives the process emitting it by five minutes.** Measured: with the emitter stopped, the deployed pipeline still served its gauge at **t+40s**; the control, a collector with `metric_expiration: 10s`, dropped the same series between t+5s and t+10s — so the two states are distinguishable and this is a setting rather than a hope. | **`metric_expiration` is explicit at 60s.** An absent series has three meanings — never emitted, nothing to report, emitter stopped — and only `up` separates the third. `up` and the `scrape_*` series survive `metric_relabel_configs` (measured: the receiver synthesises them afterwards), so the distinction stays available to Run 5. | **D145's family in a new place.** `postgrest --ready` returned 0 while every request 404'd; here a gauge reads `2 in flight` from a container that died four minutes ago. The state is in the freshness, never in the value — and the default is five minutes of a dead process reading as current. | 0167, 0149, 0150 |
+| **D778** | D777's expiration makes a stopped emitter visible. | **Set naively it makes a RUNNING emitter flicker.** The OTel SDK's export interval defaults to **60000 ms** — read in its own source, falling back through `OTEL_METRIC_EXPORT_INTERVAL` to `60000` — and `metric_expiration` had been set to 60s. A series would have expired at exactly the cadence it was refreshed, appearing and vanishing according to which timer won. | **The export interval is explicit at 15s, four per expiration window**, and `test_a_metric_series_is_refreshed_several_times_before_it_can_expire` asserts the relationship. | **One property held in two processes' configuration, and nothing else would notice them drifting.** It was caught only because the verification rig read the real exposition and found it empty after 8s — a test asserting `configure()` returned True would have passed, and the flap would have arrived in Run 5 as alert rules that fire and clear at random. **The repair for D777 created this, in the same edit.** | 0167 |
+| **D779** | A counter's series continues across a service restart, so a `rate()` over it is continuous. | **`instance` is a UUID minted per process.** Measured: two emitter runs against one collector produced **two live series for one counter**, both served, distinguished only by an `instance` label neither this deployment nor the collector chose. Combined with D777, a restart leaves a stale twin holding the pre-restart value for a full expiration window. | **Recorded, not repaired.** Run 5's rules aggregate away from `instance`. Nothing tries to make the label stable, because a stable value would have to be derived from something and no second authority is available for it. | **A reset and a fork look alike in a graph and are not alike in a rule.** Worth writing down because the obvious repair — pinning `service.instance.id` to something — would put a new identity in the `Resource`, and D776 measured that everything in the `Resource` is published verbatim. **The tidy fix for this one lands on the surface the redaction rule guards.** | 0167 |
+| **D780** | Run 4 exports pooler saturation, database connections against the five claimants of `max_connections`, and transaction duration. | **All three need a database credential, and a process holding one is a SIXTH claimant.** `config.connection_claimants` sums every claimant and `config.py:1087` raises when they exceed the manifest's ceiling. ADR 0148 took an entire run to move that count from four to five, with a measured `CONNECTION LIMIT` and five named privileges. | **Not built, by the user's decision, and recorded here with the measurement rather than left as an omission.** The three metrics wait for an ADR of their own. | **Acquiring a claimant on a guarded budget as a SIDE EFFECT of a metrics run is exactly what that guard exists to prevent** — and it would arrive under a commit message about observability, which is the sentence D762 uses about adopting a PostgreSQL image while adding a collector. The preflight would have caught an over-commit on a deployment whose ceiling was tight; it would **not** have caught the fact that nobody decided to spend the connection. | 0167, 0070, 0148 |
+| **D781** | The collector scrapes the proxy by name, so registering an alias on the attachment is enough. | **`attach` returns early on an already-attached proxy, and every existing deployment is one.** `is_attached` tested network membership only, and an alias can be registered **only** by `docker network connect --alias` — it cannot be added to a live endpoint. So the alias would have reached exactly the projects created after this release and no others. | **The alias is now part of what "attached" means.** `has_alias` gates `attach`, `reconcile` and `status`; an aliasless endpoint is disconnected and reconnected once, and `status` reports the state separately rather than folding it into "attached". | **The gap would have been SILENT and would have looked like success**: ingress fine, `attach` printing *"already attached"*, the scrape unable to resolve, and the metrics surface serving this project's own OTLP series while carrying none of its edge ones — which reads exactly like a deployment nobody has sent a request to. **Question 5 again**: the decision about what an attachment is gained a case, and the function deciding whether to act did not move. | 0167, 0158 |
 ---
 
 ## 2. What Session 14 adds to the acceptance registry
@@ -399,6 +408,64 @@ backup state comes from `bin/backup.py info --json` (ADR 0149/0150), and the
 archiver from `pg_stat_archiver`. **`failed_count` is cumulative and cannot
 answer a point-in-time question** — it stood at 26 on a healthy cluster (D553),
 and a metric that exports it as a gauge re-creates that defect in a dashboard.
+
+**Done.** — D774–D781, ADR **0167**.
+
+**The design question was never which metrics to collect; it was which decision
+owns each value.** A metric is a new *reader*, and this repository's most common
+defect is a decision whose readers did not all move. Answering that per candidate
+eliminated six of the nine the plan lists, and the eliminations are the result:
+
+- **Backup freshness, WAL archiving and disk headroom** each have exactly one
+  source and it is a root-plane on-demand command. Reaching them from a running
+  exporter means recomputing a finished value — **D701 exactly**, where a deploy
+  called `backup_state` on a state block that already had one and published
+  `failing` for every project — or new host machinery §4 does not list.
+- **Pooler saturation, connection counts and transaction duration** need a
+  database credential, which makes the exporter a **sixth claimant on
+  `max_connections`** (D780) — a budget with a hard preflight that took ADR 0148
+  a whole run to move from four to five. Not built, by decision, recorded with
+  the measurement.
+
+**What ships is two paths, and neither invents a source.** The agent plane's
+counts and durations come off the same `mcp_telemetry.Timed` record that writes
+the log line — built once in `__exit__` and handed to both carriers, because
+`elapsed_ms`' own docstring already refuses computing one duration twice. The
+edge's per-route latency and errors come from Traefik's own exporter, scraped.
+
+**D774 is the run's sharpest finding and it is a security one.** A project key
+permits hyphens, so `alpha` and `alpha-two` are two lawful keys on one shared
+edge and `apg-alpha-.*` matches both: measured, the prefix filter admitted
+**twenty of `alpha-two`'s series** onto `alpha`'s surface. The filter is now an
+enumeration of `naming.project_router_names`, and the prefix form is kept as
+that proof's control because it must still leak. **D300 in a place that looks
+like string formatting** — a prefix over a derived name is a subset check.
+
+**D778 is the one the rig caught rather than the reader.** The repair for D777 —
+setting `metric_expiration` so a dead emitter's value stops reading as current —
+created it in the same edit: the SDK's export interval also defaults to 60s, so
+a series would have expired at exactly the cadence it was refreshed. It surfaced
+only because the verification read the real exposition and found it empty; a
+test asserting `configure()` returned `True` would have passed, and the flap
+would have arrived in Run 5 as rules firing and clearing at random.
+
+**Seven mutations, all killed, every paired control green**, and the six touched
+files restored byte-for-byte. M2 restores the prefix filter, which is not a
+synthetic edit — it is the state of the world had the measurement not been made.
+
+**One existing test was replaced by a stricter one.**
+`test_no_dashboard_entry_point_is_published` asserted which entry points *exist*
+and is named for whether one is *published* — different properties, in different
+files. It has passed for thirteen sessions because no entry point had ever been
+added. It now checks both, and the publication half is derived from the entry
+points rather than from a list of the safe ones.
+
+**Not done, and named rather than implied:** nothing is deployed. The host still
+runs Session 12's release, so **the scrape resolves nothing until Run 8** and
+`apg-edge-proxy` exists on no running network. `configure()` is still not called
+at startup and no collector endpoint is a setting — that is Run 7's activation,
+unchanged from Run 3. Six of the nine candidate metrics are unbuilt, listed
+above with the reason for each.
 
 ### Run 5 — Alert rules, and the quiet half
 

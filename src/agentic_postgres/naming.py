@@ -145,7 +145,14 @@ _COMPOSE_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 #: is embedded in a *label key* (``traefik.http.routers.<name>.rule``), which
 #: Traefik parses by splitting on dots. A name containing one would silently
 #: produce a router nobody asked for, under a name nobody chose.
-_TRAEFIK_NAME = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+#: Public since ADR 0167, because a router name is now interpolated into a
+#: regular expression -- the collector's scrape filter -- and the charset is
+#: what makes that safe. The pattern holds no metacharacter, so the assertion
+#: at the interpolation site is a guard rather than an escape; it exists so
+#: that a future identity gaining a `.` becomes an error and not a wildcard.
+TRAEFIK_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+_TRAEFIK_NAME = TRAEFIK_NAME_PATTERN
 
 #: Every project-scoped PostgreSQL role. Order is stable because it reaches
 #: rendered output; ``object_owner`` is the non-login owner of runbook §3.8.
@@ -461,6 +468,44 @@ def mcp_router_name(key: str) -> str:
     status code.
     """
     return traefik_name(f"apg-{key}-mcp", context="traefik_router_mcp")
+
+
+def project_router_names(key: str) -> tuple[str, ...]:
+    """Every Traefik router name this project owns, enumerated (ADR 0167).
+
+    **An enumeration and not a prefix, because a prefix is a subset check.**
+    A project key is `^[a-z][a-z0-9-]{4,47}$` and that permits hyphens, so
+    `alpha` and `alpha-two` are two lawful keys sitting on one shared edge --
+    and `apg-alpha-.*` matches both. Measured rather than reasoned about: with
+    four routers on one Traefik, a prefix filter admitted **twenty series
+    belonging to `alpha-two`** into `alpha`'s metrics surface, and the
+    enumeration below dropped every one of them while keeping this project's
+    twenty. Both halves ran in one invocation; the prefix form is kept as that
+    proof's control precisely because it must still leak.
+
+    That makes this the allowlist behind the metrics collector's scrape filter,
+    and it is why the rule against loosening an allowlist to a subset check
+    (D300) reaches a function that otherwise looks like string formatting.
+
+    Derived from the same `*_router_name` functions the identity is (ADR 0002),
+    never from a second reading of the key, and
+    `test_the_router_enumeration_names_every_router_the_identity_carries`
+    refuses a router that reaches `identity` without reaching this tuple. That
+    is question 5's shape -- a decision gains a case and one reader does not
+    move -- and a metrics filter is a reader that fails **silently**: a router
+    missing from here is simply a route nobody can see, which looks exactly
+    like a route nobody used.
+    """
+    return (
+        health_router_name(key),
+        rest_router_name(key),
+        docs_router_name(key),
+        metrics_router_name(key),
+        app_router_name(key),
+        app_docs_router_name(key),
+        storage_router_name(key),
+        mcp_router_name(key),
+    )
 
 
 def storage_stripprefix_middleware_name(key: str) -> str:

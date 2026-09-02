@@ -80,8 +80,42 @@ def test_the_api_is_not_insecure_and_the_dashboard_is_off(
 
 
 def test_no_dashboard_entry_point_is_published(static_config: dict[str, Any]) -> None:
-    """Only web, websecure and the container-local ping exist."""
-    assert set(static_config["entryPoints"]) == {"ping", "web", "websecure"}
+    """Only web, websecure and two container-local entry points exist.
+
+    **Widened to a measured set, and made stricter in the same edit** (ADR 0167,
+    which authorises the metrics entry point). `apgmetrics` joined `ping` in
+    Session 14 Run 4. The set stays an exact equality rather than becoming a
+    subset check: widening an allowlist to a measured set is permitted here,
+    loosening it to a containment test is not.
+
+    The second half is new, and it is what the test's NAME always claimed. The
+    assertion above is about which entry points *exist*, which is a different
+    property: `ping` has existed since Session 2 and has never been published.
+    What matters is that nothing beyond 80 and 443 reaches the host — and that
+    is a fact about `compose.yaml`'s `ports`, not about this document. **A test
+    can check a string its target cannot contain** (D374); this one was reading
+    the wrong file for the thing it was named after, and passed for thirteen
+    sessions because no entry point had ever been added.
+    """
+    assert set(static_config["entryPoints"]) == {"apgmetrics", "ping", "web", "websecure"}
+
+    model = yaml.safe_load((REPO_ROOT / "infra" / "edge" / "compose.yaml").read_text("utf-8"))
+    published = model["services"]["traefik"]["ports"]
+    assert published == ["80:8080", "443:8443"]
+
+    # Derived from the entry points rather than from a list of the safe ones,
+    # so a future entry point is covered by this without anybody remembering to.
+    local = {
+        name: spec["address"]
+        for name, spec in static_config["entryPoints"].items()
+        if name not in {"web", "websecure"}
+    }
+    assert local, "no container-local entry point; this half would be measuring nothing"
+    for name, address in local.items():
+        port = address.lstrip(":")
+        assert not any(mapping.endswith(f":{port}") for mapping in published), (
+            f"entry point {name} on {address} is published to the host"
+        )
 
 
 def test_ping_is_on_its_own_entry_point(static_config: dict[str, Any]) -> None:

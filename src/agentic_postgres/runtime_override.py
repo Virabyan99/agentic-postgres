@@ -231,6 +231,30 @@ OTEL_OTLP_HTTP_PORT = 4318
 OTEL_CONFIG_FILENAME = "otelcol.yaml"
 OTEL_CONFIG_CONTAINER_PATH = "/etc/otelcol/config.yaml"
 
+#: How often the collector scrapes the shared edge (ADR 0167).
+#:
+#: The edge's counters are cumulative, so this is a resolution choice and not a
+#: correctness one -- a scrape that arrives late loses no events, it only
+#: reports them later. Chosen at the coarse end for that reason: the surface
+#: exists to answer "is this route erroring" rather than to reconstruct a
+#: request timeline, which the access log already does with a request id.
+OTEL_EDGE_SCRAPE_INTERVAL_SECONDS = 15
+
+#: How long the exposition keeps serving a series nothing has refreshed.
+#:
+#: **The default is five minutes**, measured: with the emitter stopped, the
+#: pipeline still served its gauge at t+40s, while a collector configured with a
+#: short expiration dropped it between t+5s and t+10s. So this bounds how long a
+#: dead process's last value goes on reading as the current one.
+#:
+#: Four missed scrape intervals. Long enough that a slow emitter is not mistaken
+#: for a stopped one, short enough that "stopped" becomes visible before anybody
+#: has acted on the stale number. **What a rule should conclude from the
+#: resulting absence is the rule's business to state** (D769): an absent series
+#: means one of "never emitted", "emitter stopped" and "nothing to report", and
+#: only `up` distinguishes the middle one.
+OTEL_METRIC_EXPIRATION_SECONDS = 60
+
 #: The collector's in-process memory ceiling and its burst allowance, in MiB.
 #:
 #: **Beneath the container limit, deliberately** (ADR 0165). The container limit

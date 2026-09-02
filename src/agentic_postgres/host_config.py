@@ -118,6 +118,39 @@ EDGE_STATE_DIR = "/var/lib/agentic-postgres/edge"
 #: there is exactly one per host, and a derived name would imply otherwise.
 EDGE_STACK_NAME = "apg-edge"
 
+#: The DNS name the shared proxy answers to on a project's edge network, so a
+#: per-project collector can scrape it (ADR 0167).
+#:
+#: **A registered alias rather than the container's name, and `edge-network.sh`
+#: says why in its own words**: *"a container name is a formatting convention
+#: that changes between Compose versions; the label is part of the model."* That
+#: sentence is why `edge_container` resolves Traefik by Compose label — and a
+#: scrape target cannot resolve anything, it can only spell a name. So the
+#: attachment registers one.
+#:
+#: Measured: `docker network connect --alias` on a network the container's own
+#: Compose model does not define resolves from another container on that
+#: network and reaches the right process (its ping entrypoint answered 200),
+#: while an unregistered name does not resolve at all.
+EDGE_PROXY_ALIAS = "apg-edge-proxy"
+
+#: The port the shared proxy serves Prometheus exposition on, inside its own
+#: network namespace. Nothing publishes it to the host.
+#:
+#: **Explicit, and the explicitness is the whole point (D775).** With
+#: `metrics.prometheus.entryPoint` unset, Traefik creates its own `traefik`
+#: entrypoint on **:8080** — which is this deployment's `web`. Measured against
+#: the locked digest and this deployment's own entrypoint layout, Traefik then
+#: refuses to start: *"error while building entryPoint web: ... listen tcp
+#: :8080: bind: address already in use"*. It fails closed and loudly, which is
+#: the good half; the bad half is that the thing that fails is the **shared**
+#: edge, so an unset entryPoint takes ingress down for every project at once.
+EDGE_METRICS_PORT = 8089
+
+#: The entrypoint name carrying `EDGE_METRICS_PORT`. Not `metrics`: that reads
+#: like a Traefik built-in beside `traefik` and `ping`, and this one is ours.
+EDGE_METRICS_ENTRYPOINT = "apgmetrics"
+
 #: The exact key set of the edge `compose.env`. Disjoint from `versions.env` and
 #: from every project `compose.env`, so no --env-file ordering can let one
 #: silently override another.
