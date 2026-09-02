@@ -32,6 +32,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -330,6 +331,18 @@ def test_nothing_fires_that_nobody_induced(as_root: None, project_a: dict[str, A
     induced = set()
     if os.environ.get("APG_INDUCED_ALERT_FILE"):
         induced = {declared("APG_INDUCED_ALERT_FILE").strip()}
+        # An operator inducing something the suite cannot reach on its own is
+        # exactly who needs telling which methods take another proof down with
+        # them. Not a refusal: an alert may legitimately fire for a reason
+        # nobody arranged, and this run is the one that would say so.
+        outside = induced - set(SAFELY_INDUCIBLE)
+        if outside:
+            warnings.warn(
+                f"{sorted(outside)} is outside SAFELY_INDUCIBLE. Read that "
+                "constant before trusting any OTHER failure in this run -- three "
+                "induction methods have each broken a different unrelated proof.",
+                stacklevel=2,
+            )
 
     firing = {row["metric"]["alertname"] for row in store_query(key, 'ALERTS{alertstate="firing"}')}
     unexplained = sorted(firing - induced)
@@ -339,44 +352,98 @@ def test_nothing_fires_that_nobody_induced(as_root: None, project_a: dict[str, A
 
 
 @pytest.mark.live_host
-@pytest.mark.requires_environment(
-    "APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", "APG_INDUCED_ALERT_FILE"
-)
+@pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS")
 def test_an_induced_failure_fires_its_own_rule(as_root: None, project_a: dict[str, Any]) -> None:
-    """The other half, and it needs an operator to induce something.
+    """The other half: break the scrape, watch the rule fire, put it back.
 
-    Declaration-gated for the reason every induced failure is: a test cannot
-    stop a container and survive to report the result, and a test that could
-    would be a test that mutates a deployment to prove a rule.
+    **This proof induces its own failure**, and the reason is three rounds of
+    evidence rather than a preference. An operator-arranged induction persists
+    for the whole gate, and the deployment's invariants are dense enough that
+    every method tried broke a different proof: stopping the collector removed
+    the `/metrics` route's backend (four failures); pausing a routed backend
+    produces no response at all rather than a 5xx; disconnecting the store from
+    its edge network tripped the Session 2 proof that every container is on its
+    own network. **Any state arranged to prove a rule fires is a state some
+    other proof asserts does not exist** — so the abnormality is bounded to the
+    one test that wants it.
 
-    The file names which alert was induced. Asserting *that* alert fired rather
-    than *an* alert is the difference between proving a rule and proving the
-    plane: three of these rules watch different hops, and one firing when
-    another was induced is the conflation D784 measured.
+    The mutation IS the measurement here, it is reversed by the same function,
+    and the restoration is verified rather than assumed. The recovery drill
+    already goes much further, materialising a whole second cluster.
+
+    `ApgCollectorUnreachable` is the rule this can reach: disconnecting the
+    store from the project's edge network makes its scrape of the collector
+    fail, while the collector and its route are untouched — measured, with the
+    route still answering 401 throughout.
     """
     del as_root
     key = project_key(project_a)
-    expected = declared("APG_INDUCED_ALERT_FILE").strip()
-    assert expected, "the induced-alert declaration is empty"
+    network = project_a["edge"]["project_edge_network"]
+    container = f"apg-{key}-{runtime_override.STORE_SERVICE}-1"
 
-    # Not a refusal -- the alert may legitimately have fired for a reason
-    # nobody arranged. What this catches is an induction that takes another
-    # proof down with it, which is how the first host gate of this session
-    # produced four failures that were about the induction rather than the
-    # deployment.
-    if expected not in SAFELY_INDUCIBLE:
-        warnings.warn(
-            f"{expected} is not in SAFELY_INDUCIBLE. Inducing it may break "
-            "other proofs in this same run -- read that module constant "
-            "before trusting any other failure in this gate.",
-            stacklevel=2,
+    def docker(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["docker", *arguments], capture_output=True, text=True, check=False)
+
+    # The store must be scraping BEFORE anything is broken, or a rule firing
+    # afterwards says nothing about what broke it.
+    assert any(row["value"][1] == "1" for row in store_query(key, 'up{job="collector"}')), (
+        "the store is not scraping the collector, so there is nothing to interrupt"
+    )
+
+    try:
+        detached = docker("network", "disconnect", network, container)
+        assert detached.returncode == 0, detached.stderr
+
+        # The construction must be MEASURED, not assumed (D605): a rule that
+        # fires while the scrape is still working would be firing for another
+        # reason entirely.
+        deadline = time.monotonic() + 60
+        interrupted = False
+        while time.monotonic() < deadline:
+            if any(row["value"][1] == "0" for row in store_query(key, 'up{job="collector"}')):
+                interrupted = True
+                break
+            time.sleep(5)
+        assert interrupted, "the scrape did not stop; nothing was induced"
+
+        # `for:` is two evaluation intervals, so allow several.
+        deadline = time.monotonic() + 180
+        fired: set[str] = set()
+        while time.monotonic() < deadline:
+            fired = {
+                row["metric"]["alertname"]
+                for row in store_query(key, 'ALERTS{alertstate="firing"}')
+            }
+            if "ApgCollectorUnreachable" in fired:
+                break
+            time.sleep(10)
+
+        assert "ApgCollectorUnreachable" in fired, (
+            f"the scrape stopped and the rule did not fire; firing: {sorted(fired)}"
+        )
+        # And ONLY that one. Inducing one failure and firing a different rule is
+        # the conflation D784 measured.
+        assert fired == {"ApgCollectorUnreachable"}, (
+            f"breaking one hop fired {sorted(fired)}; a rule is firing for a "
+            "reason this test did not create"
+        )
+    finally:
+        docker("network", "disconnect", "-f", network, container)
+        restored = docker("network", "connect", network, container)
+        assert restored.returncode == 0, (
+            f"the store was NOT put back on {network}: {restored.stderr}. "
+            "Reconnect it by hand before trusting any later run"
         )
 
-    firing = store_query(key, 'ALERTS{alertstate="firing"}')
-    names = {row["metric"]["alertname"] for row in firing}
-    assert expected in names, (
-        f"{expected} was declared induced and is not firing; firing now: {sorted(names)}"
-    )
+    # Verified, not assumed: the whole point of the `finally` is that the
+    # deployment is as it was found.
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        if any(row["value"][1] == "1" for row in store_query(key, 'up{job="collector"}')):
+            break
+        time.sleep(5)
+    else:
+        raise AssertionError("the scrape did not resume after the store was reconnected")
 
 
 # ---------------------------------------------------------------------------
