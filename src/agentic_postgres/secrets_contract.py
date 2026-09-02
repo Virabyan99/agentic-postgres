@@ -118,8 +118,48 @@ def load_secret_contract(path: Path) -> dict[str, Any]:
 
 
 def active_secrets(contract: dict[str, Any], session: int) -> list[dict[str, Any]]:
-    """Secrets introduced by ``session`` or earlier, in declaration order."""
-    return [s for s in contract["secrets"] if s["introduced_in_session"] <= session]
+    """Secrets live at ``session``: introduced by it, and not yet retired.
+
+    ``introduced_in_session <= session < retired_in_session``, where an absent
+    ``retired_in_session`` means "still live" -- which is every secret but one.
+
+    **The upper bound is Session 15's, and it is the half that was missing**
+    (ADR 0170). Retiring the bootstrap issuer's key by guarding the renderer's
+    append accomplished nothing on its own: a secret with no retirement is
+    materialized into every new generation for ever, so the file was present, the
+    guard passed, and the published set stayed full at ``MAX_VERIFICATION_KEYS``
+    exactly as before. It was green in a checkout because a fixture writes only
+    the keys its test wants, and unchanged on a deployment because the
+    materializer writes them all -- the fixture and the code sharing a belief the
+    deployment does not.
+
+    The upper comparison is strict so that **a deploy asking for an earlier
+    session still gets the secret.** A project pinned to Session 14 needs its
+    bootstrap key; retirement says what the RELEASE stops issuing, not what every
+    generation must lose, and a project is not upgraded by this repository
+    deciding that it should be.
+    """
+    return [
+        s
+        for s in contract["secrets"]
+        if s["introduced_in_session"] <= session < s.get("retired_in_session", session + 1)
+    ]
+
+
+def secret_is_active(contract: dict[str, Any], name: str, session: int) -> bool:
+    """Whether ``name`` is materialized at ``session`` (ADR 0170).
+
+    One reading of the retirement, for the readers that need the answer rather
+    than the list. `jwt.temporary` in the deployed document is the first: it says
+    whether the bootstrap issuer is still live, and it was the literal `True` for
+    ten sessions -- with a comment reading *"True until Session 6 replaces the
+    issuer"*, written before Session 6 and never revisited after it.
+
+    Derived here and not beside each reader, because a second expression for
+    "is this credential still issued" is a second authority for the value the
+    contract owns (ADR 0002).
+    """
+    return any(secret["name"] == name for secret in active_secrets(contract, session))
 
 
 def is_operator_supplied(secret: dict[str, Any]) -> bool:

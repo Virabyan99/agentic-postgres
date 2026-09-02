@@ -801,14 +801,17 @@ def test_the_jwt_block_carries_identifiers_and_never_key_material(tmp_path) -> N
     """
     module = deploy_module()
 
-    assert module.observe_jwt({}, tmp_path / "absent.json") == deployed_output.JWT_NOT_PUBLISHED
+    assert (
+        module.observe_jwt({}, tmp_path / "absent.json", issuer_is_temporary=True)
+        == deployed_output.JWT_NOT_PUBLISHED
+    )
 
     jwk = jwt_keys.public_jwk(modulus_hex="00" + "AB" * 256, exponent=65537)
     jwks = tmp_path / "jwks.json"
     jwks.write_text(json.dumps(jwt_keys.build_jwks([jwk]), indent=2), encoding="utf-8")
 
     rendered = {"jwt": {"issuer": "https://example.test/api/app/auth", "audience": "urn:a:b"}}
-    block = module.observe_jwt(rendered, jwks)
+    block = module.observe_jwt(rendered, jwks, issuer_is_temporary=True)
 
     assert block["status"] == "ready"
     assert block["algorithm"] == jwt_keys.ALGORITHM
@@ -1381,7 +1384,7 @@ def test_observe_jwt_produces_every_key_the_schema_requires(tmp_path: Path) -> N
         }
     }
 
-    produced = deploy.observe_jwt(rendered, jwks)
+    produced = deploy.observe_jwt(rendered, jwks, issuer_is_temporary=True)
     assert set(produced) == _schema_properties("deployedJwt"), (
         "observe_jwt does not produce the deployedJwt block the schema describes. A key "
         "added to the schema and to JWT_NOT_PUBLISHED but not here fails only on a "
@@ -1406,7 +1409,9 @@ def test_observe_jwt_and_the_absent_constant_agree_on_shape(tmp_path: Path) -> N
     jwks.write_text(json.dumps({"keys": [{"kid": "b" * 43}]}), encoding="utf-8")
 
     produced = deploy.observe_jwt(
-        {"jwt": {"issuer": "https://example.test/a", "audience": "urn:x:y:z"}}, jwks
+        {"jwt": {"issuer": "https://example.test/a", "audience": "urn:x:y:z"}},
+        jwks,
+        issuer_is_temporary=True,
     )
     assert set(produced) == set(deployed_output.JWT_NOT_PUBLISHED)
 
@@ -1416,7 +1421,7 @@ def test_observe_jwt_reports_absence_when_there_is_no_key_set(tmp_path: Path) ->
     from agentic_postgres import deployed_output
 
     deploy = _load_deploy_command()
-    produced = deploy.observe_jwt({"jwt": {}}, tmp_path / "absent.json")
+    produced = deploy.observe_jwt({"jwt": {}}, tmp_path / "absent.json", issuer_is_temporary=True)
     assert produced == deployed_output.JWT_NOT_PUBLISHED
 
 
@@ -1443,13 +1448,13 @@ def test_the_rotation_state_survives_a_deploy(tmp_path, monkeypatch) -> None:
         "verifier_acknowledgements": {"postgrest": "c" * 64},
     }
 
-    block = module.observe_jwt(rendered, jwks, previous)
+    block = module.observe_jwt(rendered, jwks, previous, issuer_is_temporary=True)
     assert block["retire_after"] == "2026-08-11T12:05:30Z"
     assert block["verifier_acknowledgements"] == {"postgrest": "c" * 64}
 
     # The control: with no previous document there is nothing to carry, and the
     # deploy must not invent a deadline.
-    fresh = module.observe_jwt(rendered, jwks, {})
+    fresh = module.observe_jwt(rendered, jwks, {}, issuer_is_temporary=True)
     assert fresh["retire_after"] is None
     assert fresh["verifier_acknowledgements"] is None
 
@@ -1467,7 +1472,10 @@ def test_a_retired_rotation_does_not_carry_its_deadline_forward(tmp_path) -> Non
     rendered = {"jwt": {"issuer": "https://probe.test/api/app/auth", "audience": "urn:x:y:z"}}
 
     block = module.observe_jwt(
-        rendered, jwks, {"retire_after": "2026-08-11T12:05:30Z", "verifier_acknowledgements": {}}
+        rendered,
+        jwks,
+        {"retire_after": "2026-08-11T12:05:30Z", "verifier_acknowledgements": {}},
+        issuer_is_temporary=True,
     )
     assert block["retire_after"] is None
     assert block["verifier_acknowledgements"] is None
@@ -1766,3 +1774,41 @@ def test_a_full_session_ten_deployment_activates_every_service_identity() -> Non
         LOGIN_ROLES,
     )
     assert result == set(LOGIN_ROLES.values())
+
+
+def test_the_issuer_is_temporary_only_while_its_credential_is_still_issued(
+    tmp_path: Path,
+) -> None:
+    """`jwt.temporary` is published, not asserted (ADR 0170).
+
+    **It was the literal `True` for ten sessions.** The comment above it read
+    "True until Session 6 replaces the issuer" -- written before Session 6, never
+    revisited after it shipped -- so the deployed document called the issuer
+    temporary while its replacement was already live, and `SEC-BOOT-001`'s branch
+    on the false case could not execute. A value that looks measured and is not.
+
+    **Both values are asserted here, and that is the point.** A proof that only
+    ever passed `True` would pass just as happily against the constant this
+    replaces, which is the exact defect it exists to catch. The two calls differ
+    in one argument and nothing else.
+    """
+    module = _load_deploy_command()
+    jwks = tmp_path / "jwks.json"
+    jwks.write_text(json.dumps({"keys": [{"kid": "c" * 43}]}), encoding="utf-8")
+    rendered = {"jwt": {"issuer": "https://probe.test/api/app/auth", "audience": "urn:x:y:z"}}
+
+    live = module.observe_jwt(rendered, jwks, {}, issuer_is_temporary=True)
+    retired = module.observe_jwt(rendered, jwks, {}, issuer_is_temporary=False)
+
+    assert live["temporary"] is True
+    assert retired["temporary"] is False, (
+        "observe_jwt publishes `temporary` regardless of what it was told, which is the "
+        "hard-coded True this replaced"
+    )
+
+    # And nothing else moved: the flag describes the issuer's lifecycle, not the
+    # key set. Two documents differing in more than one field would mean the
+    # retirement had reached something it does not own.
+    assert {k: v for k, v in live.items() if k != "temporary"} == {
+        k: v for k, v in retired.items() if k != "temporary"
+    }

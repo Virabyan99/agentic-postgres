@@ -87,8 +87,15 @@ def test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key(
     Goes red if: the signing key gains a ``plane: compose`` consumer; its mode is
     relaxed; the algorithm becomes symmetric, which would put signing material in
     every verifier; the deployed document starts carrying private key material;
-    or a project is deployed through session 6 or later while still recording a
-    temporary issuer -- the clause that makes this expire rather than go stale.
+    or ``jwt.temporary`` disagrees with whether the key is actually materialized.
+
+    **The temporary clause is real since Session 15 Run 1** (ADR 0170). It read
+    *"a project deployed through session 6 or later while still recording a
+    temporary issuer"* for ten sessions, and no such assertion existed: the deploy
+    hard-coded ``temporary: True``, so the false branch was unreachable and the
+    docstring described a check the body did not make. It is now a comparison
+    against the filesystem, and both branches are live -- ``true`` before the
+    retirement, ``false`` after it.
     """
     del as_root
     jwt = project_a.get("jwt") or {}
@@ -128,37 +135,79 @@ def test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key(
         / (project_a["secrets"]["generation_id"])
     )
     key = generation / secrets_contract.ROOT_PLANE_DIRECTORY / "bootstrap_jwt_signing_key.pem"
-    assert key.is_file(), f"no signing key at {key}"
 
-    mode = key.stat()
-    assert stat.S_IMODE(mode.st_mode) == 0o400, (
-        f"{key} is {stat.S_IMODE(mode.st_mode):04o}, not 0400"
-    )
-    assert (mode.st_uid, mode.st_gid) == (0, 0), f"{key} is owned by {mode.st_uid}:{mode.st_gid}"
-
-    # ADR 0090's clause, and it replaces a comparison against a session number.
+    # **The disk is the independent reading, and the document is compared against
+    # it** (ADR 0170).
     #
-    # The `kid` is DERIVED from the key on disk rather than read from the
-    # document that names it. Nothing had ever checked that the identifiers in
-    # `verification_kids` come from keys this deployment holds -- the document
-    # said which keys verify, and every proof took its word for it. That is
-    # D276's shape, and this is the same question asked of the bootstrap key.
-    modulus, exponent = jwks_command.read_public_parameters(key)
-    bootstrap_kid = jwt_keys.public_jwk(modulus_hex=modulus, exponent=exponent)["kid"]
+    # `jwt.temporary` was the literal `True` for ten sessions -- under a comment
+    # reading "True until Session 6 replaces the issuer", written before Session
+    # 6 and never revisited after it shipped. So the false branch below had never
+    # executed and the field described nothing. The deploy now reads it from the
+    # contract's `retired_in_session`, and **this proof deliberately does not**:
+    # a proof consulting the same declaration as the code under test would agree
+    # with it however wrong both were. That is the sixth question, and D673,
+    # D680 and D687 are what it costs.
+    present = key.is_file()
+    assert jwt["temporary"] is present, (
+        f"the deployed document says temporary={jwt['temporary']!r} while the bootstrap "
+        f"issuer's key is {'present' if present else 'absent'} at {key}. The field and "
+        "the materialization disagree, so one of them describes a deployment that does "
+        "not exist"
+    )
 
-    if jwt["temporary"] is True:
+    if present:
+        mode = key.stat()
+        assert stat.S_IMODE(mode.st_mode) == 0o400, (
+            f"{key} is {stat.S_IMODE(mode.st_mode):04o}, not 0400"
+        )
+        assert (mode.st_uid, mode.st_gid) == (0, 0), (
+            f"{key} is owned by {mode.st_uid}:{mode.st_gid}"
+        )
+
+        # ADR 0090's clause, replacing a comparison against a session number. The
+        # `kid` is DERIVED from the key on disk rather than read from the
+        # document that names it: nothing had ever checked that the identifiers
+        # in `verification_kids` come from keys this deployment holds. D276's
+        # shape, asked of the bootstrap key.
+        modulus, exponent = jwks_command.read_public_parameters(key)
+        bootstrap_kid = jwt_keys.public_jwk(modulus_hex=modulus, exponent=exponent)["kid"]
         assert bootstrap_kid in jwt["verification_kids"], (
-            f"the deployed document records a temporary issuer, but the bootstrap key's "
-            f"own thumbprint ({bootstrap_kid}) is not among the keys it publishes "
-            f"({jwt['verification_kids']}). Either the issuer was retired and the "
-            "document was not updated, or the published set was derived from a key "
-            "this host does not hold"
+            f"the bootstrap issuer's key is still materialized, but its own thumbprint "
+            f"({bootstrap_kid}) is not among the keys this deployment publishes "
+            f"({jwt['verification_kids']}). Either the key was retired and the document "
+            "was not updated, or the published set was derived from a key this host "
+            "does not hold"
         )
     else:
-        assert bootstrap_kid not in jwt["verification_kids"], (
-            f"the issuer is no longer marked temporary, yet its key ({bootstrap_kid}) is "
-            "still published and still verifies tokens. `temporary: false` while the "
-            "bootstrap issuer is live is a value that looks measured and is not"
+        # Retired. The key is gone, so its `kid` cannot be derived in order to
+        # search for it -- the assertion is therefore about what the set IS
+        # rather than what it lacks, which is the stronger claim anyway.
+        auth_key = generation / jwks_command.AUTH_SERVICE / jwks_command.AUTH_SIGNING_KEY_FILE
+        assert auth_key.is_file(), (
+            f"the bootstrap issuer is retired and there is no auth signing key at "
+            f"{auth_key} either. Nothing can sign a token this deployment verifies"
+        )
+        modulus, exponent = jwks_command.read_public_parameters(auth_key)
+        auth_kid = jwt_keys.public_jwk(modulus_hex=modulus, exponent=exponent)["kid"]
+
+        assert jwt["active_kid"] == auth_kid, (
+            f"the retired issuer is gone but active_kid is {jwt['active_kid']!r}, which "
+            f"is not the auth service's key ({auth_kid}). The document names an active "
+            "key this host cannot produce"
+        )
+        assert auth_kid in jwt["verification_kids"]
+
+        # **The slot D683 was blocked on.** Fewer published keys than the ceiling
+        # means a rotation can be PREPARED, which is the entire result of the
+        # retirement and was untrue for nine sessions. A full set is only
+        # legitimate here while a rotation is actually in flight.
+        assert (
+            len(jwt["verification_kids"]) < jwt_keys.MAX_VERIFICATION_KEYS
+            or jwt.get("retire_after") is not None
+        ), (
+            f"the published set is full at {jwt['verification_kids']} with no rotation "
+            "in flight, so a rotation still cannot be prepared. Retiring the bootstrap "
+            "issuer was supposed to free exactly this slot (D683)"
         )
 
     # The AUTH SERVICE's own signing key is not a leak of this one.

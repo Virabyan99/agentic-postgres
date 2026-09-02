@@ -17,12 +17,12 @@ not repeat them.
 ## Status — read this first
 
 ```
-SESSION 15 IS PLANNED, NOT STARTED. **RUN 1 IS NEXT.**
+SESSION 15 IS IN PROGRESS. **RUN 1 IS DONE. RUN 2 IS NEXT.**
 HEAD ad8665f, main, clean and pushed.
 CURRENT_SESSION **14**, template_version **0.3.0**, outputs schema **v14**.
                  It moves to 15 in Run 7, ALL-OR-NOTHING (D690).
-divergences     **Next free: D812.** This document's §1 opens at D812.
-ADRs            169. **Next free: 0170.**
+divergences     **Next free: D826.** D812-D820 planning-time, D821-D825 Run 1.
+ADRs            170. **Next free: 0171.** Run 1 wrote 0170.
 migrations      22 released. **Session 15 adds 0023** (Run 2) and possibly
                 0024 (Run 4). Fix-forward only; every down block raises AP900.
 claims          82, reporting 107 of 131 requirements.
@@ -78,7 +78,7 @@ thing to diagnose.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 planning time**, not a prediction.
 
-**Next free number after this table is D821.**
+**Next free number after this table is D826.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -92,6 +92,11 @@ planning time**, not a prediction.
 | **D819** | The host is a known quantity, so Run 8 is a deploy. | **It is the first trip in four sessions that recreates the verifiers as its point** rather than as a side effect. Run 1 changes the published key set; ADR 0088 requires every verifier recreated after that, and there are **four** — PostgREST, auth, storage, the agent plane. ADR 0155's content digest makes it automatic, and **automatic has never been checked against a key-set change on this host.** | **Run 8 verifies the recreation happened, per verifier, and that each one accepts a token signed by the surviving key** — not that the deploy exited 0. | **ADR 0155 was written in Session 10 and its key-cutover case has never fired on the deployment.** A mechanism whose most important trigger has never occurred live is a mechanism with one untested path, and this is the session that pulls it. **`--setup-plan` before the trip** (D671, D676), because the proofs here run against a key set mid-change. | 0088, 0155 |
 | **D820** | Session 15's new proofs are offline-provable, like most of Session 14's. | **The load-bearing ones are not.** Reuse detection is a property of *two requests arriving in sequence against one row*; a rotation's evidence is *the service still serves afterwards*; and the verifier recreation is a property of the deploy. Each needs a live half, and the offline half proves the logic, never the event. | **§7 fixes each claim's honest verdict now**, before the proofs are written, and no claim spans both `host` and `external` mode. | **Session 13 wrote §7 before its proofs and Session 14 inherited twelve `not_run` claims it could not close** — which ADR 0163 made legible rather than embarrassing. **Deciding what a claim may honestly report before writing its proof is what stops the proof from being shaped to a verdict.** | 0163 |
 
+| **D821** | Run 1 retires the bootstrap issuer's key, which the ledger characterises as inert public material behind one unconditional line. | **The key has a live signer, and the deploy is its consumer.** `bin/dev-token.py` signs with `bootstrap_jwt_signing_key.pem` — measured with a four-arm rig whose fourth arm controls for the omission also dropping the auth key. `deploy-project.py:observe_served_document` mints one **on every deploy**, as the documentation role, to produce `api.served_checksum`, and catches broadly. `bin/api.sh`, `bin/dev-token.sh` and the deployment suite's `dev_token` fixture are the other holders. | **Run 1 became two steps, in this order: move the minter to the issuer's own key, then guard the append.** ADR 0170. The `kid` follows the key path (ADR 0094) and there is one `iss` with several `kid`s, so the switch is claim-neutral. | **Retiring it first would have made every deployed document report `api.status: unavailable`** — silently, through an `except` written to keep a deploy honest rather than to hide a defect. That is D701's shape, a signal always red, and it fails *safe*, which is exactly what would have let it survive. **The ledger was accurate about `render-jwks.py` and incomplete about the system**, which is the difference between reading a file and asking who depends on it. | 0170, 0094 |
+| **D822** | The retirement is symmetry: guard the third append like the two beside it. | **The three were never symmetrical.** `signing_key_path()` **raises** `JwksError(5)` on absence; `auth_key_path()` and `prepared_key_path()` return a path the caller guards. And the first draft of ADR 0170 claimed the ceiling became unreachable once only two keys were publishable — **the rig's control arm measured otherwise**: a generation still holding the bootstrap key beside the auth key and a prepared one offers three, and `build_jwks` refused it there exactly as designed. | **`signing_key_path` returns a path, the caller guards it, and the ceiling's proof stays.** Its test now records why: the state this change passes through is precisely an operator preparing a rotation before the retiring deploy has run. | **A bound whose last violation you have just removed is the bound you are most likely to delete the proof of.** The measurement corrected the ADR's own draft, which is what the control arm was for — and the corrected version is the stronger argument, because during the transition the ceiling is not vacuous, it is load-bearing. | 0170 |
+| **D823** | `promote` advances a prepared rotation, so the retirement only frees a slot for it. | **`promote` infers the incoming key as *"whichever published kid is not the active one"***, with no guard separating a prepared key from the bootstrap one. `promote_rotation` checks that the kid is published, is not active, that consumers are non-empty and that the digest is a sha256 — none of which distinguishes them. **Today it would promote the bootstrap key.** | **Nothing is added there.** The retirement removes the state in which the existing inference is wrong: with the set holding the auth key alone, or beside a genuinely prepared one, *"not active"* is the prepared key by the only arrangement the renderer can produce. | **Safe only because the set's second member had never been anything else and nobody had run it.** A latent defect whose trigger was blocked by the very thing this run removes — so the retirement had to make the inference sound in the same step, or it would have unblocked a wrong promotion instead of a right one. | 0170 |
+| **D824** | Guarding `render-jwks.py`'s append retires the key; that is the one line D814 names. | **It changes nothing on a deployment.** `active_secrets` filters on `introduced_in_session <= session` and **has no upper bound at all**, so a secret introduced in Session 5 is materialized into every generation for ever. Measured: at session 15 the contract still returned **19 secrets, including `bootstrap_jwt_signing_key`**. The file would be on disk, the new guard would pass, and the published set would stay full — the run would have shipped as a no-op. | **`retired_in_session`**: a schema field, an upper bound in `active_secrets`, and `retired_in_session: 15` on the key. Measured after: **session 14 → 19 secrets with the key; session 15 → 18 without it.** The upper bound is strict so a project pinned to an older release keeps the credential its published set still names. | **The whole run was green in a checkout while being a no-op in production**, because a fixture writes only the keys its test wants and the materializer writes them all — **the fixture and the code sharing a belief the deployment does not.** The sixth question, and the fourth time this shape has been the finding (D673, D680/D682, D687). Nothing already offline would have caught it; the mutation that reproduces it (`M5`) is now in the battery. | 0170 |
+| **D825** | `jwt.temporary` records whether the bootstrap issuer is still live, and `SEC-BOOT-001` branches on it. | **It is the literal `True`**, hard-coded in `observe_jwt` under a comment reading *"True until Session 6 replaces the issuer"* — written before Session 6 and never revisited after it shipped. So the field claimed a temporary issuer for **ten sessions** while its replacement was live, and the live proof's false branch **had never executed**. That proof's docstring also described a `deployed_through_session` comparison its body does not make. | **Derived from the contract's retirement** (`secrets_contract.secret_is_active`), passed as a **required** keyword so no caller can publish the claim without deciding it. **The live proof reads the FILESYSTEM instead** and asserts the document agrees — two independent readings, deliberately not the same one. | **A value that looks measured and is not, in the document whose whole job is to say what a deployment established** — §7's standing defect, in the field naming this run's subject. It survived because nothing could reach the branch that would have contradicted it. The offline proof asserts **both** values, because one that only ever passed `True` would pass against the constant it replaced. | 0170 |
 ---
 
 ## 2. What Session 15 adds to the acceptance registry
@@ -163,6 +168,42 @@ verifiers.
 **and** a token signed by the retired key is refused — both, in the same
 invocation. Only one of those going the right way is consistent with having
 broken the key set entirely.
+
+**Done.** — D821–D825, ADR **0170**. **The measurement changed the run before any
+code was written, and then changed it again after the tests were green.**
+
+**Two steps, not one.** `bin/dev-token.py` was the last live signer on the key
+this run retires (D821), and the deploy mints one on every run to fetch its own
+served document — so retiring first would have published `api: unavailable` for
+ever, silently, through a broad `except`. The minter moved to the auth service's
+key; then the append was guarded.
+
+**The finding is D824, and it arrived after the tests were green.**
+`active_secrets` had no upper bound, so the retired key would have been
+materialized into every new generation anyway: the file present, the new guard
+passing, the set still full. **The run was green in a checkout while being a
+no-op in production.** `retired_in_session` is the half that makes it real —
+measured at 19 secrets with the key at session 14 and 18 without it at 15, so an
+older release keeps the credential its own published set still names.
+
+**What is now true, measured through both modules rather than read off either:**
+the published set holds one key; a rotation **can be prepared** (auth + prepared
+= 2, which is D683's slot, free for the first time since Session 6); a legacy
+generation still publishes its bootstrap key while it is on disk; and a set that
+would be empty is refused where the cause is visible.
+
+**Two mutation batteries, eight mutations, all killed with green controls**, and
+both batteries restored their files `cmp` clean against the snapshots. `M5` is
+the one worth keeping: it undeclares the retirement and reproduces exactly the
+state this run was in before D824 was found.
+
+**Not done, and named rather than implied:** `bootstrap_identity` is **still
+`not_run`**. All three of `SEC-BOOT-001`'s node ids are live proofs, and Run 8's
+deploy is what executes them — the retirement does not take effect until
+`CURRENT_SESSION` moves to 15 in Run 7, exactly as Session 14's metrics
+credential worked. `SEC-BOOT-001`'s own proof was rewritten here so that it *can*
+pass afterwards (D825); it has not been run, and nothing in this run has been run
+against a host.
 
 ### Run 2 — the session plane's state
 

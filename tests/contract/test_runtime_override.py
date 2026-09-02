@@ -502,6 +502,17 @@ def _load_render_jwks():
     return module
 
 
+def _load_dev_token():
+    import importlib.util
+
+    source = REPO_ROOT / "bin" / "dev-token.py"
+    specification = importlib.util.spec_from_file_location("apg_dev_token", source)
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
 # ---------------------------------------------------------------------------
 # A router on an invisible container is not a route (D186)
 # ---------------------------------------------------------------------------
@@ -922,57 +933,170 @@ def test_the_key_set_carries_every_live_issuers_key(tmp_path, monkeypatch) -> No
     never been given, and a token signed by a key outside the published set is
     **401** -- measured, with a published key at 200 as the control.
 
-    **This is the second version of this test.** The first asserted that
-    `build`'s source named `auth_key_path`, and the mutation battery found it
-    green with the `keys.append` deleted -- the mutated builder still computed
-    the path and discarded it. A test that a function is mentioned is not a test
-    that a key is published.
+    **This is the third version of this test.** The first asserted that `build`'s
+    source named `auth_key_path`, and the mutation battery found it green with
+    the `keys.append` deleted -- the mutated builder still computed the path and
+    discarded it. A test that a function is mentioned is not a test that a key is
+    published.
+
+    **The second asserted the set carried BOTH issuers, and ADR 0170 replaces it
+    with this stricter one.** Two independently published signing keys are two
+    keys whose compromise is total, and the second stopped having a signer when
+    `dev-token` moved to the issuer's own key (D821). The subject is unchanged --
+    D276, the auth key must be published or every token it signs is refused --
+    but the assertion is now that it is published *and is the only one*, which
+    the previous version would have passed with the retired key still in the set.
     """
     module = _load_render_jwks()
     generation = tmp_path / "probe-dev" / "generations" / "gen"
     monkeypatch.setattr(module, "SECRET_ROOT", tmp_path)
 
-    _write_key(generation / secrets_contract.ROOT_PLANE_DIRECTORY / module.SIGNING_KEY_FILE)
     _write_key(generation / module.AUTH_SERVICE / module.AUTH_SIGNING_KEY_FILE)
 
     document, keys = module.build("probe-dev", "gen")
-    assert len(keys) == 2, "the key set does not carry both issuers"
+    assert len(keys) == 1, "the retired issuer's key is still being published"
     assert [key["kid"] for key in document["keys"]] == [key["kid"] for key in keys]
 
-    # The auth service's key leads: it is the issuer from Session 6 onward, and
-    # `observe_jwt` reads `active_kid` off the head of this list.
+    # The auth service's key leads, and now leads alone: it is the issuer from
+    # Session 6 onward, and `observe_jwt` reads `active_kid` off the head.
     auth_jwk = module._jwk_from(generation / module.AUTH_SERVICE / module.AUTH_SIGNING_KEY_FILE)
     assert keys[0]["kid"] == auth_jwk["kid"], "the auth service's key is not the active one"
 
 
-def test_a_prepared_key_joins_the_published_set(tmp_path, monkeypatch) -> None:
-    """The control for the test above, and prepare's whole observable effect.
+def test_a_generation_that_still_holds_the_retired_key_still_publishes_it(
+    tmp_path, monkeypatch
+) -> None:
+    """The retirement is a GUARD, not a deletion (ADR 0170).
 
-    Without this, a builder that published a fixed two-key set would satisfy
-    every assertion above.
+    A generation materialized before Run 1 still carries
+    `bootstrap_jwt_signing_key.pem` on disk, and until a retiring deploy replaces
+    that generation the key is still there. Publishing a set without it while it
+    is still present would refuse tokens minted with it that are still inside
+    their 930 s lifetime -- so the builder reports what is there rather than
+    enforcing what ought to be.
+
+    **This is the control on the test above.** Without it, a builder that deleted
+    the bootstrap append outright -- rather than guarding it -- would satisfy
+    every other assertion in this module.
     """
     module = _load_render_jwks()
     generation = tmp_path / "probe-dev" / "generations" / "gen"
     monkeypatch.setattr(module, "SECRET_ROOT", tmp_path)
 
-    root = generation / secrets_contract.ROOT_PLANE_DIRECTORY
-    _write_key(root / module.SIGNING_KEY_FILE)
+    _write_key(generation / module.AUTH_SERVICE / module.AUTH_SIGNING_KEY_FILE)
+    _write_key(generation / secrets_contract.ROOT_PLANE_DIRECTORY / module.SIGNING_KEY_FILE)
+
+    _, keys = module.build("probe-dev", "gen")
+    bootstrap = module._jwk_from(
+        generation / secrets_contract.ROOT_PLANE_DIRECTORY / module.SIGNING_KEY_FILE
+    )
+    auth = module._jwk_from(generation / module.AUTH_SERVICE / module.AUTH_SIGNING_KEY_FILE)
+    assert len(keys) == 2, "a bootstrap key still on disk was dropped from the set"
+    assert bootstrap["kid"] in {key["kid"] for key in keys}
+
+    # And the auth key still LEADS. `observe_jwt` takes `active_kid = kids[0]`,
+    # so an order that put the retiring key first would publish a document
+    # naming it as the active one during the whole transition.
+    assert keys[0]["kid"] == auth["kid"], "the retiring key leads the set"
+
+
+def test_a_set_with_no_keys_is_refused_where_the_cause_is_visible(tmp_path, monkeypatch) -> None:
+    """Guarding the last unconditional append made an empty set REACHABLE.
+
+    `build_jwks` already refuses one -- "a key set with no keys verifies
+    nothing" -- and stays the backstop. `build` refuses first because its message
+    names the *cause* rather than the symptom: a generation carrying neither key
+    is a project deployed before Session 6 whose bootstrap key has been retired,
+    and the repair is a redeploy, not an inspection of the published set.
+    ADR 0170.
+    """
+    module = _load_render_jwks()
+    monkeypatch.setattr(module, "SECRET_ROOT", tmp_path)
+    (tmp_path / "probe-dev" / "generations" / "gen").mkdir(parents=True)
+
+    with pytest.raises(Exception, match="no key would be published"):
+        module.build("probe-dev", "gen")
+
+
+def test_a_prepared_key_joins_the_published_set(tmp_path, monkeypatch) -> None:
+    """Prepare's whole observable effect -- and D683, which is why Run 1 exists.
+
+    **This test could not have passed before ADR 0170.** The set was permanently
+    full at `MAX_VERIFICATION_KEYS`: the auth key plus the bootstrap issuer's,
+    appended unconditionally, so a prepared key was the third and `build_jwks`
+    refused the render. That is D683, and it is what kept the signing key
+    unrotatable for nine sessions.
+
+    Its base is now the AUTH key rather than the bootstrap key, which is the same
+    change: the auth service is the issuer, and a rotation prepares a successor
+    to *its* key.
+    """
+    module = _load_render_jwks()
+    generation = tmp_path / "probe-dev" / "generations" / "gen"
+    monkeypatch.setattr(module, "SECRET_ROOT", tmp_path)
+
+    _write_key(generation / module.AUTH_SERVICE / module.AUTH_SIGNING_KEY_FILE)
 
     _, before = module.build("probe-dev", "gen")
     assert len(before) == 1
 
-    _write_key(root / module.PREPARED_KEY_FILE)
+    _write_key(generation / secrets_contract.ROOT_PLANE_DIRECTORY / module.PREPARED_KEY_FILE)
     _, after = module.build("probe-dev", "gen")
-    assert len(after) == 2
+    assert len(after) == 2, "a rotation still cannot be prepared; D683 is not closed"
     assert after[0]["kid"] == before[0]["kid"], "preparing a rotation moved the leading key"
 
 
-def test_a_third_key_is_refused_rather_than_published(tmp_path, monkeypatch) -> None:
-    """The ceiling, reached through the builder.
+def test_every_key_a_minter_signs_with_is_a_key_the_renderer_publishes(
+    tmp_path, monkeypatch
+) -> None:
+    """The guard over D821's CLASS, not over the instance that caused it.
 
-    Two issuers during a transition is what `MAX_VERIFICATION_KEYS` is for. A
-    third is a second rotation begun while the first is in flight, and an
-    unbounded set is one nobody retires from.
+    `bin/dev-token.py` signed with the bootstrap issuer's key for nine sessions,
+    which is why the key could not be retired: the deploy mints one on every run
+    through `observe_served_document`, and a token signed outside the published
+    set is 401. That instance is fixed by pointing it at the auth key.
+
+    **The instance is not the defect.** The defect is that two files decided
+    independently which key was live -- one signing, one publishing -- with
+    nothing comparing them, which is D486's shape and the reason this asserts a
+    relation rather than a filename. It goes red if a minter is repointed at a
+    key the renderer does not publish: the prepared key, whose private half must
+    reach no signer, or a retired one.
+
+    Measured through both modules rather than by reading either.
+    """
+    jwks = _load_render_jwks()
+    dev_token = _load_dev_token()
+    generation = tmp_path / "probe-dev" / "generations" / "gen"
+    monkeypatch.setattr(jwks, "SECRET_ROOT", tmp_path)
+    monkeypatch.setattr(dev_token, "SECRET_ROOT", tmp_path)
+
+    _write_key(generation / jwks.AUTH_SERVICE / jwks.AUTH_SIGNING_KEY_FILE)
+
+    document, _ = jwks.build("probe-dev", "gen")
+    published = {key["kid"] for key in document["keys"]}
+
+    deployed = {"project": {"key": "probe-dev"}, "secrets": {"generation_id": "gen"}}
+    signing = dev_token.signing_key_path("probe-dev", deployed)
+    assert dev_token.key_id(signing) in published, (
+        f"dev-token signs with {signing.name}, whose kid is not in the published set "
+        f"{sorted(published)}. Every token it mints would be refused by every verifier."
+    )
+
+
+def test_a_third_key_is_refused_rather_than_published(tmp_path, monkeypatch) -> None:
+    """The ceiling, still reached through the builder -- and it matters that it is.
+
+    **The first draft of ADR 0170 said this became unreachable**, on the grounds
+    that only the auth key and a prepared key remain publishable. The rig's
+    control arm measured otherwise: a generation that still holds the bootstrap
+    key beside those two offers three, and that is exactly the state this change
+    passes through -- an operator preparing a rotation before the retiring deploy
+    has run.
+
+    So the ceiling is not vacuous, not lowered, and its proof is not deleted
+    because its last violation was removed. That is the shape this repository's
+    §7 defect takes.
     """
     module = _load_render_jwks()
     generation = tmp_path / "probe-dev" / "generations" / "gen"

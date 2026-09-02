@@ -889,3 +889,126 @@ def test_a_secret_with_many_holders_resolves_to_the_one_asked_for(
     assert (pooler["uid"], pooler["gid"]) == (70, 70)
     assert (client["uid"], client["gid"]) == (65532, 65532)
     assert pooler is not client
+
+
+# ---------------------------------------------------------------------------
+# Retirement (Session 15 Run 1, ADR 0170)
+# ---------------------------------------------------------------------------
+
+
+def test_a_retired_secret_stops_being_materialized_from_its_retiring_session(
+    contract: dict[str, Any],
+) -> None:
+    """The half that makes a key retirement real, and it was nearly missed.
+
+    Run 1 guarded `render-jwks.py`'s unconditional append of the bootstrap
+    issuer's key, which is what D683 and D814 both describe as the block. That
+    change alone accomplishes **nothing on a deployment**: a secret with no
+    retirement is materialized into every new generation for ever, so the file
+    would still be on disk, the new guard would pass, and the published set would
+    stay full at `MAX_VERIFICATION_KEYS` exactly as before.
+
+    It was green in a checkout the whole time, because a fixture writes only the
+    keys its test wants and the materializer writes them all -- **the fixture and
+    the code sharing a belief the deployment does not**, which is the sixth
+    question and the shape of D673, D680 and D687.
+    """
+    retired = [s for s in contract["secrets"] if "retired_in_session" in s]
+    assert [s["name"] for s in retired] == ["bootstrap_jwt_signing_key"], (
+        "the retired set moved; a retirement is a credential leaving the deployment "
+        "and belongs to a run that measured it"
+    )
+
+    live = {s["name"] for s in secrets_contract.active_secrets(contract, 15)}
+    assert "bootstrap_jwt_signing_key" not in live, (
+        "the retired key is still materialized at session 15, so every new generation "
+        "carries it, render-jwks publishes it, and the verification set stays full"
+    )
+
+
+def test_a_retirement_does_not_reach_back_into_an_earlier_release(
+    contract: dict[str, Any],
+) -> None:
+    """The CONTROL on the test above, and the reason the bound is strict.
+
+    Without this, a retirement implemented as *"drop it from every session"* --
+    or as deleting the entry outright -- would satisfy every assertion there.
+
+    A project pinned to Session 14 still publishes the bootstrap key in its
+    verification set, so it still needs the key materialized. **Retirement says
+    what this RELEASE stops issuing, not what every existing generation must
+    lose**, and a deployment is not upgraded by this repository deciding that it
+    should be.
+    """
+    at_14 = {s["name"] for s in secrets_contract.active_secrets(contract, 14)}
+    assert "bootstrap_jwt_signing_key" in at_14, (
+        "session 14 stopped materializing a key its own published set still names"
+    )
+
+    # And the introducing session is untouched: retirement is an upper bound.
+    at_5 = {s["name"] for s in secrets_contract.active_secrets(contract, 5)}
+    assert "bootstrap_jwt_signing_key" in at_5
+
+
+def test_a_retirement_comes_after_the_session_that_introduced_the_secret(
+    contract: dict[str, Any],
+) -> None:
+    """A secret retired at or before its own introduction is never materialized.
+
+    Declared rather than assumed, because the window is a half-open interval and
+    an off-by-one closes it: `introduced_in_session <= session <
+    retired_in_session` selects nothing when the two are equal, and the secret
+    would silently never be written -- a grant that reads as declared and behaves
+    as absent.
+    """
+    for secret in contract["secrets"]:
+        retired = secret.get("retired_in_session")
+        if retired is None:
+            continue
+        assert retired > secret["introduced_in_session"], (
+            f"{secret['name']} retires at {retired} and is introduced at "
+            f"{secret['introduced_in_session']}; it would never be materialized"
+        )
+        window = range(secret["introduced_in_session"], retired)
+        assert window, f"{secret['name']} has an empty active window"
+
+
+def test_every_consumer_of_a_retired_secret_is_gone_before_the_secret_is(
+    contract: dict[str, Any],
+) -> None:
+    """The guard over the CLASS, not the instance (D821).
+
+    `bin/dev-token.py` signed with the bootstrap issuer's key for nine sessions,
+    which is the whole reason it could not be retired: retiring a credential
+    something still uses does not remove a dependency, it breaks one, and here it
+    would have broken the deploy's own document observation into a permanent
+    `api: unavailable` (D701's shape).
+
+    So a retired secret must have no reader left in `bin/` or `src/` naming its
+    materialized filename. Asserted against the tree rather than against a list,
+    because a list is a second thing to keep current.
+    """
+    from agentic_postgres import REPO_ROOT as ROOT
+
+    retired = [s for s in contract["secrets"] if "retired_in_session" in s]
+    assert retired, "this guard is vacuous with nothing retired"
+
+    for secret in retired:
+        for consumer in secret["consumers"]:
+            filename = consumer["target_file"]
+            readers = []
+            for directory in ("bin", "src"):
+                for path in (ROOT / directory).rglob("*.py"):
+                    if "__pycache__" in path.parts:
+                        continue
+                    text = path.read_text(encoding="utf-8")
+                    # The renderer still names it: it publishes the key when a
+                    # legacy generation still carries one, which is the guard
+                    # this retirement is built on rather than a leftover reader.
+                    if filename in text and path.name != "render-jwks.py":
+                        readers.append(path.relative_to(ROOT).as_posix())
+            assert not readers, (
+                f"{secret['name']} is retired but {sorted(set(readers))} still name "
+                f"{filename}. Retiring a credential something signs with breaks that "
+                "signer rather than removing a dependency (D821)."
+            )

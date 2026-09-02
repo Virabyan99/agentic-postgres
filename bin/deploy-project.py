@@ -140,6 +140,19 @@ BACKUP_PLANE_SESSION = 10
 #: route, names it in the document, and starts nothing behind it.
 METRICS_PLANE_SESSION = 14
 
+#: The bootstrap issuer's credential, named once because two readers need it:
+#: `jwt.temporary` in the deployed document, and the retirement that decides it
+#: (ADR 0170). Spelled here rather than inline so the document's field and the
+#: contract's entry cannot drift apart under a typo -- a misspelling would make
+#: `secret_is_active` return False for a secret that is very much active, and
+#: publish `temporary: false` about a live issuer.
+#:
+#: (S105 matches the name. This is the secret's *identifier* -- the same string
+#: `secrets.required.yaml` carries in the clear and this repository commits --
+#: not its value. The contract holds identifiers only, and a value here would
+#: mean it did not.)
+BOOTSTRAP_ISSUER_SECRET = "bootstrap_jwt_signing_key"  # noqa: S105
+
 #: The reviewed OpenAPI snapshot, mirroring `bin/api-contract.py`'s own
 #: constant. `test_the_deploy_and_the_contract_command_name_one_snapshot`
 #: asserts the two agree -- a deploy recording the digest of one file while
@@ -2208,6 +2221,14 @@ def main(argv: list[str] | None = None) -> int:
             # still the previous one at this point in the run, and it is the
             # only record of a rotation's deadline and its acknowledgements.
             previous_jwt_block(key),
+            # The bootstrap issuer is live exactly while its credential is still
+            # issued for the session being deployed (ADR 0170). Read from the
+            # contract, so the field and the materializer cannot disagree.
+            issuer_is_temporary=secrets_contract.secret_is_active(
+                secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml"),
+                BOOTSTRAP_ISSUER_SECRET,
+                arguments.through_session,
+            ),
         )
         rest_url = rendered["routes"]["rest"]
         # A route is `ready` when something answers on it, which the served
@@ -2567,7 +2588,11 @@ def previous_jwt_block(key: str) -> dict[str, Any]:
 
 
 def observe_jwt(
-    rendered: dict[str, Any], jwks_path: Path, previous: dict[str, Any] | None = None
+    rendered: dict[str, Any],
+    jwks_path: Path,
+    previous: dict[str, Any] | None = None,
+    *,
+    issuer_is_temporary: bool,
 ) -> dict[str, Any]:
     """The issuer's public metadata, from the key set this deploy just wrote.
 
@@ -2615,11 +2640,22 @@ def observe_jwt(
         "active_kid": kids[0],
         "verification_kids": kids,
         "public_jwks_sha256": hashlib.sha256(raw).hexdigest(),
-        # True until Session 6 replaces the issuer (ADR 0051). `SEC-BOOT-001`
-        # compares this against `deployed_through_session` and goes red on the
-        # deployment that should have retired it, which is what makes it a
-        # value rather than a sentence.
-        "temporary": True,
+        # Whether the bootstrap issuer is still live, READ from the contract's
+        # retirement rather than asserted (ADR 0170).
+        #
+        # **This was the literal `True` for ten sessions**, under a comment
+        # reading "True until Session 6 replaces the issuer" -- written before
+        # Session 6 and never revisited after it shipped. So the field said
+        # `temporary` about an issuer whose replacement was already live, and
+        # `SEC-BOOT-001`'s branch on the false case was unreachable. **A value
+        # that looks measured and is not**, in the document whose whole job is to
+        # describe what a deployment established.
+        #
+        # It now follows `bootstrap_jwt_signing_key`'s `retired_in_session`: a
+        # deploy through session 14 reports `true` and still publishes the key,
+        # one through 15 reports `false` because the credential is no longer
+        # issued. One authority, two readers.
+        "temporary": issuer_is_temporary,
         # Carried forward, not recomputed. A deadline is the moment a promotion
         # chose and nothing on disk remembers it; recomputing it from `now`
         # would move the retirement further away on every deploy, which is a

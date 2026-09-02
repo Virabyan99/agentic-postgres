@@ -102,18 +102,20 @@ def _generation_root(project_key: str, generation: str) -> Path:
 
 
 def signing_key_path(project_key: str, generation: str) -> Path:
-    path = (
+    """The bootstrap issuer's key, or a path that is not there once it is retired.
+
+    **It raised on absence until Session 15 Run 1**, which is what made this the
+    one of the three appends that could not be guarded (D822). Returning a path
+    the caller guards is what makes the three symmetrical, and ADR 0170 is the
+    decision that the key's absence is now a legitimate state rather than a
+    broken deployment: nothing signs with it since `dev-token` moved to the
+    issuer's own key, so a set without it refuses no token anybody holds.
+    """
+    return (
         _generation_root(project_key, generation)
         / secrets_contract.ROOT_PLANE_DIRECTORY
         / SIGNING_KEY_FILE
     )
-    if not path.is_file():
-        raise JwksError(
-            5,
-            f"no signing key at {path}. The bootstrap issuer's key is materialized into "
-            "the root plane by the deploy; a project deployed before session 5 has none.",
-        )
-    return path
 
 
 def auth_key_path(project_key: str, generation: str) -> Path:
@@ -211,14 +213,21 @@ def build(project_key: str, generation: str) -> tuple[dict[str, Any], list[dict[
 
     * **the auth service's key first when it exists**, because it is the issuer
       from Session 6 onward and the key most tokens carry;
-    * the bootstrap issuer's key, which is live until §4's retirement;
+    * the bootstrap issuer's key **while it is still present** -- retired in
+      Session 15 Run 1 (ADR 0170), and guarded here like the two beside it;
     * the prepared key last, when a rotation is in flight.
 
-    The ceiling is two (`MAX_VERIFICATION_KEYS`) and it is not raised. Two
-    issuers during a transition is exactly what it is for; a third key would be
-    a second rotation begun while the first is in flight, and `build_jwks`
-    refuses it here rather than letting the set grow into one nobody retires
-    from.
+    **All three appends are guarded, and that is the change** (D822). The
+    bootstrap append was unconditional for nine sessions, which kept the set full
+    at `MAX_VERIFICATION_KEYS` and made a rotation impossible to prepare -- D683,
+    the block behind `bootstrap_identity`. It could not simply be guarded while
+    `dev-token` still signed with that key (D821); it is guarded now because
+    nothing does.
+
+    The ceiling is two and it is not raised. **Only two keys are publishable
+    here now**, so a render can no longer reach it -- but `build_jwks` still
+    enforces it for every other caller, because a bound that has become
+    unreachable through one path is still the bound.
     """
     keys: list[dict[str, Any]] = []
 
@@ -226,11 +235,28 @@ def build(project_key: str, generation: str) -> tuple[dict[str, Any], list[dict[
     if auth_key.is_file():
         keys.append(_jwk_from(auth_key))
 
-    keys.append(_jwk_from(signing_key_path(project_key, generation)))
+    bootstrap_key = signing_key_path(project_key, generation)
+    if bootstrap_key.is_file():
+        keys.append(_jwk_from(bootstrap_key))
 
     prepared = prepared_key_path(project_key, generation)
     if prepared.is_file():
         keys.append(_jwk_from(prepared))
+
+    # `build_jwks` refuses an empty set too, and stays the backstop. It is
+    # reached here first because its message names the symptom -- "a key set
+    # with no keys verifies nothing" -- and once the last unconditional append
+    # became a guard, an empty set stopped being impossible and started being a
+    # state with a cause worth naming (ADR 0170).
+    if not keys:
+        raise JwksError(
+            5,
+            "no key would be published: this generation has neither the auth service's "
+            f"signing key nor the bootstrap issuer's. A set with no keys refuses every "
+            f"token every verifier receives. Looked in "
+            f"{auth_key.parent} and {bootstrap_key.parent}; redeploy the project rather "
+            "than editing the published set.",
+        )
 
     return jwt_keys.build_jwks(keys), keys
 

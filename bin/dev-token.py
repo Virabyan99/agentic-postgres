@@ -56,7 +56,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import jwt_claims, jwt_keys, scope_registry, secrets_contract
+from agentic_postgres import jwt_claims, jwt_keys, scope_registry
 from agentic_postgres.secret_generation import SECRET_ROOT
 
 #: The three roles a token may name, and the key each resolves through in the
@@ -103,8 +103,35 @@ TOKEN_VARIABLES: dict[str, str] = {
 DEFAULT_TTL_SECONDS = 300
 MAX_TTL_SECONDS = jwt_claims.MAX_TTL_SECONDS
 
-#: The root-plane file the signing key is materialized into (ADR 0054, 0055).
-SIGNING_KEY_FILE = "bootstrap_jwt_signing_key.pem"
+#: The key this command signs with, and the plane it lives on (ADR 0170).
+#:
+#: **It was the bootstrap issuer's root-plane key until Session 15 Run 1**, and
+#: that made this command the last live signer on the key the deployment was
+#: trying to retire (D821). The bootstrap key's whole remaining purpose was that
+#: this file pointed at it: no service receives it, `secrets.required.yaml` gives
+#: it exactly one consumer -- a `0400` root-plane file -- and `render-jwks.py`
+#: read it only to derive public material.
+#:
+#: Signing with the auth service's key instead grants nobody a new capability.
+#: This command runs as root under `sudo`, and root could always read both files;
+#: the `0400 65532` mode bounds *services*, and this is not one. What it changes
+#: is the count: a deployment with two independently published signing keys has
+#: two keys whose compromise is total, and the second existed for no reason once
+#: the auth service became the issuer in Session 6.
+#:
+#: The `kid` follows the key rather than the document (ADR 0094), so pointing
+#: this at another key relabels the token automatically -- the property that
+#: makes this a one-path change rather than a re-labelling. `iss` and `aud` come
+#: from the deployed document's `jwt` block and do not move: there is one issuer
+#: and several signing keys, not two issuers.
+SIGNING_KEY_FILE = "auth_jwt_signing_key.pem"
+
+#: The compose plane's directory for the auth service, which is where its own
+#: credential is materialized. `secrets.required.yaml` declares
+#: `auth_jwt_signing_key` with `plane: compose, service: auth`, and the
+#: generation layout puts a compose consumer's file under the service's name --
+#: so a reader looking in `_root/` finds nothing, which is D276's shape.
+AUTH_SERVICE = "auth"
 
 #: There is no subject namespace any more, and its absence is the decision
 #: (ADR 0095). `SUBJECT_NAMESPACE` and `development_subject()` derived a stable
@@ -139,30 +166,34 @@ def load_deployed(path: Path) -> dict[str, Any]:
 
 
 def signing_key_path(project_key: str, document: dict[str, Any]) -> Path:
-    """The active generation's root-plane copy of the signing key.
+    """The active generation's copy of the issuer's signing key (ADR 0170).
 
     The generation comes from the deployed document, so the key used is the one
     that deployment recorded -- not whatever happens to be newest. D76 is the
     standing lesson: the document's generation is deploy-time history and the
     live pointer moves at the first restart, and reading the wrong one here
     would sign with a key the running service does not verify against.
+
+    **The auth service's key, on its own compose plane, since Session 15 Run 1.**
+    It was the bootstrap issuer's root-plane key for nine sessions, and that made
+    this the last live signer on the key D683 needed to retire (D821). The key it
+    signs with now is the one at the HEAD of the published set -- `render-jwks.py`
+    publishes the auth key first and `observe_jwt` takes `active_kid = kids[0]` --
+    so a token minted here is signed by the deployment's active key rather than
+    by the one behind it.
     """
     generation = (document.get("secrets") or {}).get("generation_id")
     if not generation:
         raise TokenError(5, "the deployed document records no secret generation")
-    path = (
-        SECRET_ROOT
-        / project_key
-        / "generations"
-        / generation
-        / secrets_contract.ROOT_PLANE_DIRECTORY
-        / SIGNING_KEY_FILE
-    )
+    path = SECRET_ROOT / project_key / "generations" / generation / AUTH_SERVICE / SIGNING_KEY_FILE
     if not path.is_file():
         raise TokenError(
             5,
-            f"no signing key at {path}. The bootstrap issuer's key is materialized by "
-            "the deploy into the root plane; a project deployed before session 5 has none.",
+            f"no signing key at {path}. This command signs with the auth service's key "
+            "(ADR 0170), which the deploy materializes onto that service's compose "
+            "plane; a project deployed before session 6 has no auth service and no such "
+            "key, and nothing else in the deployment can mint a token a verifier "
+            "accepts.",
         )
     return path
 
