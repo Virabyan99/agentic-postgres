@@ -1859,7 +1859,7 @@
     # harder and is asserted against a store first proved to be ingesting -- a
     # silent rule set over an empty store is the false quiet half.
     - tests/deployment/test_session14_observability.py::test_the_store_loaded_the_rules_the_release_rendered
-    - tests/deployment/test_session14_observability.py::test_a_healthy_deployment_fires_no_alert
+    - tests/deployment/test_session14_observability.py::test_nothing_fires_that_nobody_induced
     - tests/deployment/test_session14_observability.py::test_an_induced_failure_fires_its_own_rule
   description: >-
     An induced failure fires its own rule and a healthy deployment fires none.

@@ -270,12 +270,23 @@ def test_the_store_loaded_the_rules_the_release_rendered(
 
 @pytest.mark.live_host
 @pytest.mark.requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS")
-def test_a_healthy_deployment_fires_no_alert(as_root: None, project_a: dict[str, Any]) -> None:
+def test_nothing_fires_that_nobody_induced(as_root: None, project_a: dict[str, Any]) -> None:
     """**The harder half** (D70), and the one this repository has learned to demand.
 
     Asserted only after the store is shown to be ingesting: a quiet rule set over
     an empty store is the false quiet half, and it is indistinguishable from the
     real one by the alert query alone.
+
+    **"Nothing is firing" is the wrong sentence, and stating it cost nothing to
+    find only because it was found before a trip.** The gate runs `-m live_host`
+    ONCE, and `OPS-ALERT-001` needs a failure induced in that same run -- so a
+    literal quiet assertion and the firing assertion were mutually exclusive,
+    and the claim could never have come back green.
+
+    The precise sentence is *nothing is firing that nobody induced*, and it is
+    **stricter** rather than weaker: it also refuses the case D784 measured,
+    where inducing one failure fires a different rule, or fires two. With no
+    declaration it reduces to the literal quiet half.
     """
     del as_root
     key = project_key(project_a)
@@ -287,9 +298,15 @@ def test_a_healthy_deployment_fires_no_alert(as_root: None, project_a: dict[str,
         "deployment is well"
     )
 
-    firing = store_query(key, 'ALERTS{alertstate="firing"}')
-    names = sorted(row["metric"]["alertname"] for row in firing)
-    assert names == [], f"a healthy deployment is firing {names}"
+    induced = set()
+    if os.environ.get("APG_INDUCED_ALERT_FILE"):
+        induced = {declared("APG_INDUCED_ALERT_FILE").strip()}
+
+    firing = {row["metric"]["alertname"] for row in store_query(key, 'ALERTS{alertstate="firing"}')}
+    unexplained = sorted(firing - induced)
+    assert unexplained == [], f"these are firing and nobody induced them: {unexplained}" + (
+        f" (declared induced: {sorted(induced)})" if induced else ""
+    )
 
 
 @pytest.mark.live_host
