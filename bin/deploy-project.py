@@ -49,6 +49,8 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import yaml
+
 from agentic_postgres import (
     CURRENT_SESSION,
     api_surface,
@@ -71,7 +73,9 @@ from agentic_postgres import (
 from agentic_postgres.bootstrap_state import load_state, state_path
 from agentic_postgres.config import ManifestError, load_project_manifest
 from agentic_postgres.host_config import (
+    EDGE_METRICS_ENTRYPOINT,
     EDGE_STACK_NAME,
+    EDGE_STATE_DIR,
     load_host_manifest,
     runtime_compose_env,
 )
@@ -578,6 +582,37 @@ def _observe_secret_generation(project_key: str) -> tuple[bool, str, str]:
     return True, "", generation
 
 
+def _edge_serves_the_metrics_entrypoint() -> bool:
+    """Does the RUNNING edge declare the entrypoint this release's collector dials?
+
+    Read from the deployed static configuration, which is root-owned and is what
+    Traefik was actually given -- never from `infra/edge/traefik.yaml`, which is
+    the template this release WOULD render and says nothing about what is
+    serving.
+
+    A property rather than a diff: the template carries `__ACME_EMAIL__` and
+    `__ACME_RESOLVER_NAME__` placeholders that an operator's manifest fills in,
+    so byte equality would refuse every correctly-deployed host. What matters is
+    whether the entrypoint exists, and its name and port are derived from
+    `host_config` so there is one authority for them.
+    """
+    deployed = Path(EDGE_STATE_DIR) / "traefik.yaml"
+    try:
+        document = yaml.safe_load(deployed.read_text(encoding="utf-8")) or {}
+    except OSError:
+        # Unreadable is not absent. Saying "the edge is stale" because a file
+        # could not be opened would send an operator to re-render something that
+        # may be perfectly current -- D600's shape, where an unreadable value
+        # became a confident wrong answer.
+        return True
+
+    entrypoints = document.get("entryPoints") or {}
+    if EDGE_METRICS_ENTRYPOINT not in entrypoints:
+        return False
+    prometheus = (document.get("metrics") or {}).get("prometheus") or {}
+    return prometheus.get("entryPoint") == EDGE_METRICS_ENTRYPOINT
+
+
 def require_edge_is_up(host: dict[str, Any]) -> dict[str, Any]:
     """The edge must already be serving. Its networks are what a project joins.
 
@@ -610,6 +645,38 @@ def require_edge_is_up(host: dict[str, Any]) -> dict[str, Any]:
         # Set truthfully after the runtime attaches it, not here.
         "project_network_attached": False,
     }
+
+
+def require_edge_serves_this_release(session: int) -> None:
+    """An edge running an older static configuration is a precondition, not a bug.
+
+    **D811.** `require_edge_is_up` asks whether the edge is RUNNING and nothing
+    about what it is running, and `deploy.sh --through-session` deliberately does
+    not bring the edge up -- that is `bin/edge.sh`. So a release that changes the
+    edge's static configuration deploys cleanly onto a proxy still serving the
+    previous one.
+
+    Session 14 is the first release whose PROJECT containers depend on that
+    configuration: the collector scrapes the edge's metrics entrypoint, which
+    exists only if the edge declares it. On the first deploy of this session
+    every route came up, the gate ran, and `ApgEdgeUnreachable` reported the
+    incompleteness -- correctly, and an hour later than this could have.
+
+    Checked only from the session that introduces the dependency. A deployment
+    through an earlier session neither needs the entrypoint nor should be told
+    to re-render an edge for it.
+    """
+    if session < METRICS_PLANE_SESSION:
+        return
+    if _edge_serves_the_metrics_entrypoint():
+        return
+    fail(
+        EXIT_PRECONDITION,
+        f"the running edge declares no {EDGE_METRICS_ENTRYPOINT!r} entry "
+        f"point, and a deployment through session {session} scrapes it for every "
+        "project's route metrics. The edge is not brought up by this command.\n"
+        "Run: sudo bin/edge.sh --host host.yaml restart",
+    )
 
 
 def _secrets_the_provider_is_missing(state: dict[str, Any], session: int) -> list[str]:
@@ -1731,6 +1798,7 @@ def main(argv: list[str] | None = None) -> int:
 
     step("2. Preconditions this session does not create")
     edge = require_edge_is_up(host)
+    require_edge_serves_this_release(arguments.through_session)
     bootstrap = require_bootstrap(key, session=arguments.through_session)
     secrets = require_secret_generation(key)
     print(f"  edge up, providers bootstrapped, generation {secrets['generation_id']}")

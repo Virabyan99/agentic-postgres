@@ -17,14 +17,15 @@ there are six sessions. This document does not repeat it.
 ## Status — read this first
 
 ```
-SESSION 14 IS IN PROGRESS. Runs 1-7 are DONE. **RUN 8 -- THE HOST TRIP -- IS NEXT.**
+SESSION 14: ALL EIGHT RUNS ARE DONE. The host runs session 14 on both
+projects; evidence merged at 74 passed / 8 not_run / 0 failed.
 HEAD af90f4e, main, clean and pushed.
 CURRENT_SESSION **14** since Run 7, and template_version **0.3.0**.
 outputs schema **v14**: routes.metrics on both branches (migrate_v13_to_v14).
-divergences     D760-D802 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
+divergences     D760-D811 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
                 D774-D781 Run 4; D782-D789 Run 5; D790-D796 Run 6;
-                D797-D802 Run 7).
-                **Next free: D803.**
+                D797-D802 Run 7; D803-D811 Run 8).
+                **Next free: D812.**
 ADRs            169. **Next free: 0170.** This session has written 0164 (the
                 metrics surface), 0165 (a telemetry component's memory limit),
                 0166 (the trace id is the request id), 0167 (a metric reads
@@ -86,7 +87,7 @@ correlation). This session extends that family and opens `CAP-*`.
 Six columns, the house shape. **Every row is a fact measured against the tree and
 the live host at planning time**, not a prediction.
 
-**Next free number after this table is D803.**
+**Next free number after this table is D812.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -133,6 +134,15 @@ the live host at planning time**, not a prediction.
 | **D800** | Run 7 derives `bin/session-14-check.sh` by diff from Session 13's, whose printed session numbers all derive from `${SESSION}`. | **Eleven references to `session-13-check` came through the diff** — in the usage block an operator copies from, and in every message the gate prints about itself. **D751's guard does not catch them and is right not to**: it is scoped to numbers an operator *types* (`--session N`, an evidence filename), because a gate saying *"Session 10 releases no migration"* is stating a fact about history. | **The gate's own NAME is derived too**: `readonly PROGRAM="session-${SESSION}-check"`, with the usage block's three script-naming lines lifted out of the single-quoted heredoc — which must stay quoted, because it carries a `$(sudo python3 -c …)` example an operator copies and an unquoted heredoc would RUN it while printing help. | **D505, D507, D678 and D693 are four instances of a derivation-by-copy dropping what nobody re-reads, and this is the fifth.** The guard written after the fourth is correctly scoped and therefore silent here: a program's own name is a third category, neither a typed argument nor a historical fact. **A gate that tells an operator to run `bin/session-13-check.sh` from a Session 14 release is the same failure D703 repaired by hand**, in the one place a guard was not looking. | 0006 |
 | **D801** | A mutation battery reports which of a run's assertions can fail. | **The battery's own classifier reported a clean failure as an ERROR and a mis-aimed mutation as a survivor.** It keyed on `"ERROR" in stdout`, which matches any traceback containing `ManifestError`; and one retargeting script exited on a bad anchor *before writing*, so a mutation kept pointing at a test that does not read it. First pass: one killed, four survived, two false kills. | **Classification reads pytest's final counts line and nothing else**, and every mutation was re-aimed at a test that reads the mutated code. Eight of eight killed on the second pass. | **The apparatus was the defect, inside the apparatus written to find defects** (CLAUDE.md §7's standing pattern). **D386 is the rule it broke** — a battery must distinguish FAILED from ERROR, and one reading the wrong text distinguishes neither. The survivors were the informative half regardless: they were mis-aimed, and re-aiming them is what revealed that **Run 7 had repaired D204's recurrence and guarded none of it**. | — |
 | **D802** | Run 7 fixes the metrics middleware, so the repair is done. | **The repair had no test, and four mutations proved it.** The middleware could go undefined again, `removeHeader` could be turned off, the two routes could share a name, and the metrics user could silently become the documentation one — with nothing red for any of it. | **Four tests added**, derived from `naming` on both sides so a rename moves both, and each is now a mutation target that dies. | **A repair is exactly as durable as the memory of having made it.** D204 was repaired in Session 5 and recurred in Session 14 because the *function* was fixed and the *class* was not guarded — and this run reproduced the shape at one remove by fixing the second route and guarding neither. **The battery is the only reason it is not a third recurrence waiting.** | 0086 |
+| **D803** | Run 2 published the metrics route, so the names it needs are rendered. | **Two were computed and dropped.** `METRICS_ROUTER_NAME` and `METRICS_CREDENTIAL_MIDDLEWARE_NAME` were in `compose_env`'s values dict and in the deploy's `OVERRIDE_NAME_KEYS`, and in `COMPOSE_ENV_KEYS` — **the list `compose_env` iterates** — neither. The first deploy of Session 14 stopped at step 4: *"METRICS_ROUTER_NAME is absent from …/compose.env"*. | **Both added, and the CLASS guarded.** `test_every_name_the_deploy_reads_is_a_name_the_render_emits` parses `OVERRIDE_NAME_KEYS` out of the deploy's AST and compares it with the imported tuple, so neither side can be restated into agreement. An audit of all 18 names found exactly these two. | **The refusal was right and its timing was not.** `_env_value` fails on a missing key rather than defaulting precisely so that *"a name this repository derives and forgets to emit is a refusal at step 4 rather than a router that quietly is not there"* — but step 4 is on a host, and the two lists could have been compared in a checkout since Session 2. **D486's shape**: two lists that must agree, with nothing comparing them. | — |
+| **D804** | A deploy through a new session materialises that session's secrets. | **It does — from a provider that has to have them first.** `metrics_basic_auth_password` is `introduced_in_session: 14` and `origin: generated`, and the provider had never been asked to create it. Step 5 got **HTTP 404** mid-`project-runtime up`, with containers already coming up. | **Step 0 compares the committed contract against this project's recorded `managed_resources` and refuses, naming the secrets and the command.** Entirely local: no provider call, no credential. | **D66, recurring, and `add_missing_secrets` exists because of it** — its docstring says *"every later session's credentials had to be created by hand, and the way that surfaced was HTTP 404 from the provider in the middle of Run 7, one command into a deployment."* The remedy was always one command; what was missing was the check that names it. **`--plan` claimed to contact the provider for five sessions and never did** (D334), which is exactly what makes this affordable in the step whose promise is *read everything, change nothing*. | — |
+| **D805** | D803's guard covers the names a deploy reads out of `compose.env`. | **`METRICS_PATH` is read by COMPOSE, not by the deploy**, interpolated into the metrics router's `Path()` matcher — so nothing in `bin/` reads it, no `_env_value` refusal can name it, and D803's guard structurally cannot see it. `compose config` refused the whole model and `project-runtime` reported *"the resolved model names no services"*: a deploy that starts nothing at all. | **A second guard, for the second reader.** It renders the runtime override in-process and checks every `${VAR}` against the union of the three env files (ADR 0013). | **No offline `compose config` covers the override**, because it is generated at DEPLOY time into `/var/lib/…/rendered/<key>/` — `--render-only` writes a fixture directory that never contains one, so the model the contract suite validates is the base model alone. **Question 5 landing on a guard written one round earlier**: the decision moved, and the new reader was not covered by the reader-check just added. | 0013 |
+| **D806** | Stopping the collector induces `ApgCollectorUnreachable` and is contained to one project's metrics plane. | **The collector is also the `/metrics` route's BACKEND.** Traefik's docker provider drops a router whose container is gone, so the route answered **404** and four unrelated proofs failed — a third distinct reason for the status D768 says must never be read as *"metrics are not configured"*. The alert itself fired exactly as designed. | **`SAFELY_INDUCIBLE`, naming the alert AND the method.** Contained method: disconnect the STORE from the project's edge network — the scrape fails, the collector and its route are untouched, measured with the route still answering 401 throughout. | **The alert and the method are different choices, and only the method decides whether an induction is contained.** Nothing had said so, and the run that discovered it was the run whose subject is what a signal means. | 0168 |
+| **D807** | The envelope's live proof runs the renderer to check staleness on the host. | **`subprocess.run(["python", …])` — and `python` is not on `sudo`'s PATH.** `FileNotFoundError: No such file or directory: 'python'`, in a gate that runs as root. | **`sys.executable`**, which is the interpreter already running the test and therefore the venv's. | **The same shape as this session's earlier `bash -c` is not `bash -lc`**, which cost several minutes chasing a missing `jq`. A name resolved through an environment is a name resolved through *somebody's* environment, and root's is not the operator's. | — |
+| **D808** | `SAFELY_INDUCIBLE` records which alerts an operator may induce. | **I wrote it and measured none of it.** `ApgRouteErrorRateHigh` was in it because a 5xx "obviously" follows from breaking a backend. Measured against the locked Traefik with a docker-routed backend: **paused → no response at all for 40 s** (Traefik sets no `responseHeaderTimeout`, so the client gives up and the edge records a 499); **stopped → 404**. Neither is a `5..`. | **Removed, with the measurement in the constant.** The set is now `ApgCollectorUnreachable` alone. | **A value that looked measured and was not — §7's standing defect — committed inside the constant written to prevent the previous one, in the run whose whole subject is measurement.** The tell was that it read as obvious, which is when this project's defects arrive. | 0168 |
+| **D809** | An operator arranges an induction, the gate observes it, the operator undoes it. | **Every arranged induction broke a different unrelated proof.** Stopping the collector broke four; disconnecting the store tripped the Session 2 proof that every container is on its own edge network. **An operator-arranged induction persists for the whole run**, and this deployment's invariants are dense enough that any state arranged to prove a rule fires is a state some other proof asserts does not exist. | **The proof induces its own failure, bounded and reversed.** It disconnects the store, **measures that the scrape actually stopped** before drawing any conclusion from a firing rule (D605), asserts that ONLY that rule fired (D784), and restores in a `finally` — verifying the scrape resumed rather than assuming it. | **The mutation IS the measurement here**, which is what separates it from the shape the earlier docstring refused. The recovery drill already goes much further, materialising a whole second cluster. `APG_INDUCED_ALERT_FILE` stays for what this cannot reach — a certificate deadline, the shared proxy — and the quiet half warns when a declared alert is outside the set. | 0168 |
+| **D810** | `test_a_plan_is_produced_without_changing_the_deployment` asserts a plan mutates nothing. | **It asserted that AND that less than a minute elapsed.** `deployment_state` digests `docker ps --format '{{.Names}} {{.Status}}'`, and `{{.Status}}` reads `Up 11 minutes (healthy)` — a duration that rises on its own. The 12m44s gate crossed a minute boundary between the two snapshots: `- res-1 Up 11 minutes` / `+ res-1 Up 12 minutes`. | **The duration is stripped and the health suffix kept**, because a container that went unhealthy IS a change a plan must not cause. Verified in both directions: time alone no longer moves the digest, and a container going unhealthy, stopping, restarting or appearing is still detected. | **The inverse of this repository's usual defect** — not a proof that passes for the wrong reason but one that FAILS for a reason unrelated to its subject. Both come from including something nobody meant to compare, and the false failure is the cheaper of the two only because somebody looks. **It passed on every faster run**, which is the signature of a clock in a comparison. | — |
+| **D811** | Step 0 checks the edge plane is running, so the edge is a satisfied precondition. | **It checks that the edge is RUNNING and nothing about what it is running.** `deploy.sh --through-session` does not bring the edge up — that is `bin/edge.sh` — so Session 14 deployed cleanly onto a proxy still serving Session 12's static configuration, without the `apgmetrics` entry point the collector scrapes. Every route came up; `up{job="edge"}` was 0. | **Step 0 refuses from the session that introduces the dependency**, naming `bin/edge.sh --host host.yaml restart`. A PROPERTY of the deployed document rather than a diff against the template, whose ACME placeholders would make byte equality refuse every correct host — and **unreadable counts as current**, because an unreadable value must not become a confident wrong answer (D600). | **`ApgEdgeUnreachable` caught this on its first live outing**, which is the best possible result for `OPS-ALERT-001` and an hour later than step 0 could have. Session 14 is the first release whose PROJECT containers depend on the edge's static configuration, so the seam had never carried weight before. | 0168 |
 ---
 
 ## 2. What Session 14 adds to the acceptance registry
@@ -720,6 +730,56 @@ before the trip, not at a run close.
 **Expect more than one round.** Sessions 7 and 8 found seven and eight defects on
 theirs, and this is the first trip in three sessions that changes what runs.
 
+**Done.** — D803–D811. **Eight rounds, and only one finding was the deployment
+misbehaving** — which is itself the result worth recording.
+
+**Session 14's four claims all passed**, on two projects against a live
+deployment: `metrics_surface`, `alerting`, `telemetry_redaction`,
+`capacity_envelope`. Merged evidence is **82 claims — 74 passed, 8 not_run, 0
+failed**, and the document's own status is `not_run` rather than `passed`
+because one unlooked-at claim makes the whole document say so instead of
+averaging it away.
+
+**Four claims that were `not_run` in Session 13 came back `passed` here**:
+`admin_authorization`, `credential_storage`, `project_isolation`,
+`secret_leakage`. **Session 14 did not close them and must not be read as
+having** (D478). They were always provable; this run was given
+`--admin-password-file` and a derived sentinel path and Session 13's was not, so
+somebody looked. That is precisely what ADR 0163 defined `not_run` to mean.
+
+**The eight that remain were `not_run` in both sessions.** `bootstrap_identity`
+needs D683's code; `fresh_host`, `documented_path` and `project_removal` need
+declarations nobody has performed; `api_authorization`, `port_allocation`,
+`credential_rotation_planes` and `deployment_convergence` are flag-gated, and
+the last two describe EVENTS an operator performs rather than states that hold.
+
+**What the eight rounds actually were**, because the count alone is
+uninformative:
+
+- **Two half-written pairs from Run 2** (D803, D805) — values computed and never
+  emitted. Same defect, two different readers, and the guard written for the
+  first could not see the second.
+- **A provider secret nobody had created** (D804) — D66 recurring, at the exact
+  step whose docstring records D66.
+- **An edge still serving Session 12's static configuration** (D811), which
+  **`ApgEdgeUnreachable` caught on its first live outing.** The best possible
+  result for `OPS-ALERT-001`: the rule reported a real incompleteness that every
+  green route had hidden.
+- **Three induction methods of mine, each breaking a different unrelated proof**
+  (D806, D808, D809) — resolved by making the proof induce, measure and reverse
+  its own failure.
+- **A Session 13 proof comparing a clock** (D810).
+
+**D808 is the one to keep.** `SAFELY_INDUCIBLE` was written to prevent D806 and
+then asserted, unmeasured, that a paused backend yields a 5xx. It yields nothing
+at all for 40 seconds. **A value that looked measured and was not — §7's standing
+defect — committed inside the constant written to prevent the previous one, in
+the run whose whole subject is what a signal means.**
+
+**Not done, and named rather than implied:** the eight `not_run` claims are
+unchanged and Session 14 closed none of them. The `--mode external` half ran
+off-host and its IPv6 scan skipped 8 proofs, because `host.public_ipv6` is null
+and the machine binds no IPv6 but `[::]:22` (D688) — unchanged since Session 12.
 ---
 
 ## 7. Evidence and claims — what may honestly be reported
