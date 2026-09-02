@@ -699,6 +699,13 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # is the same finding in a checkout.
     "METRICS_ROUTER_NAME",
     "METRICS_CREDENTIAL_MIDDLEWARE_NAME",
+    # Interpolated by COMPOSE, not read by the deploy -- it is the
+    # `Path()` matcher in the metrics router's rule, and a router label's
+    # VALUE is interpolated where its key is rendered (ADR 0013). So the
+    # round-1 guard over the deploy's own reads cannot see it, and did
+    # not: this surfaced as `METRICS_PATH is missing a value` from
+    # `compose config`, one step later than the pair above.
+    "METRICS_PATH",
     # Session 7, Run 7. The published route, in the same two shapes the
     # application route uses one line-block above: a *path* a router rule
     # matches on, and three *names* `runtime_override.py` renders into label

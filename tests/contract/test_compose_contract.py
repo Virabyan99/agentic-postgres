@@ -506,6 +506,83 @@ def test_rendered_resource_names_match_outputs(project_dir: Path) -> None:
     assert model["volumes"]["postgres-data"]["name"] == declared["volumes"]["postgres"]
 
 
+def test_every_interpolation_the_runtime_override_needs_is_a_name_the_render_emits() -> None:
+    """The runtime override's `${VAR}`s, against the three env files (ADR 0013).
+
+    **The reader here is Compose, not the deploy**, and that is why the guard
+    over `OVERRIDE_NAME_KEYS` could not catch this: `METRICS_PATH` is
+    interpolated into the metrics router's `Path()` matcher, so nothing in
+    `bin/` ever reads it and no `_env_value` refusal names it. It surfaced as
+    `required variable METRICS_PATH is missing a value` from `compose config`,
+    one step later than the pair round 1 found.
+
+    **And no offline `compose config` covers it**, because the override is
+    generated at DEPLOY time into `/var/lib/agentic-postgres/rendered/<key>/`.
+    `--render-only` writes a fixture directory that never contains one, so the
+    model the contract suite validates is the base model alone. This renders the
+    override in-process and checks it against the union of the three env files,
+    which is the same comparison a host makes and the only one available in a
+    checkout.
+
+    Three files, deliberately disjoint so no `--env-file` ordering can let one
+    silently override another: `compose.env` (per project),
+    `versions.env` (the image lock) and the root-owned runtime env.
+    """
+    import re
+
+    from agentic_postgres import host_config, naming, rendering, runtime_override
+
+    identity = naming.derive(
+        slug="fixture-alpha",
+        environment="dev",
+        domain="fixture-alpha-dev.test",
+        api_base_path="/api",
+        mcp_base_path="/mcp",
+    )
+    override = runtime_override.render_override(
+        rendered_directory=f"/var/lib/agentic-postgres/rendered/{identity.key}",
+        https_entrypoint="websecure",
+        router_name=identity.health_router,
+        rest_router_name=identity.rest_router,
+        buffering_middleware_name=identity.api_buffering_middleware,
+        stripprefix_middleware_name=identity.api_stripprefix_middleware,
+        docs_router_name=identity.docs_router,
+        docs_auth_middleware_name=identity.docs_credential_middleware,
+        docs_stripprefix_middleware_name=identity.docs_stripprefix_middleware,
+        app_router_name=identity.app_router,
+        app_buffering_middleware_name=identity.app_buffering_middleware,
+        app_stripprefix_middleware_name=identity.app_stripprefix_middleware,
+        app_docs_router_name=identity.app_docs_router,
+        storage_router_name=identity.storage_router,
+        storage_buffering_middleware_name=identity.storage_buffering_middleware,
+        storage_stripprefix_middleware_name=identity.storage_stripprefix_middleware,
+        storage_cors_middleware_name=identity.storage_cors_middleware,
+        mcp_router_name=identity.mcp_router,
+        metrics_router_name=identity.metrics_router,
+        metrics_auth_middleware_name=identity.metrics_credential_middleware,
+    ).decode("utf-8")
+
+    supplied = set(rendering.COMPOSE_ENV_KEYS) | set(host_config.RUNTIME_COMPOSE_ENV_KEYS)
+    supplied |= {
+        line.split("=", 1)[0].strip()
+        for line in (REPO_ROOT / "versions.env").read_text(encoding="utf-8").splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    }
+
+    referenced = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)(?::[?-][^}]*)?\}", override))
+    assert referenced, (
+        "the override interpolates nothing, so this test is measuring nothing. "
+        "Either the label rendering changed or the pattern no longer matches it"
+    )
+
+    missing = sorted(referenced - supplied)
+    assert not missing, (
+        f"the runtime override interpolates {missing} and no env file supplies them. "
+        "Compose fails the whole model on the first one, so this is a deploy that "
+        "starts no services at all -- add each to COMPOSE_ENV_KEYS"
+    )
+
+
 @needs_rendered_fixtures
 def test_rendered_image_carries_the_locked_digest() -> None:
     image = rendered(ALPHA)["services"]["contract-probe"]["image"]
