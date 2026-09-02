@@ -18,7 +18,7 @@ not repeat them.
 
 ```
 SESSION 15 IS IN PROGRESS. **RUN 1 IS DONE. RUN 2 IS NEXT.**
-HEAD ad8665f, main, clean and pushed.
+HEAD 3b85b5f, main, clean and pushed.
 CURRENT_SESSION **14**, template_version **0.3.0**, outputs schema **v14**.
                  It moves to 15 in Run 7, ALL-OR-NOTHING (D690).
 divergences     **Next free: D826.** D812-D820 planning-time, D821-D825 Run 1.
