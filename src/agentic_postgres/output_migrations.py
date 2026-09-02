@@ -101,7 +101,7 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 13
+CURRENT_VERSION = 14
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -221,6 +221,7 @@ def migrate_rendered(
     backup_bucket: str | None,
     backup_retain_full: int,
     backup_network: str,
+    metrics_url: str,
 ) -> dict[str, Any]:
     """Migrate a ``rendered`` document of any earlier version to the current one.
 
@@ -241,8 +242,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
-        raise MigrationError(f"only versions 1 through 12 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}:
+        raise MigrationError(f"only versions 1 through 13 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -284,12 +285,15 @@ def migrate_rendered(
     if detect_version(document) == 11:
         document = migrate_v11_to_v12(document)
 
-    return migrate_v12_to_v13(
-        document,
-        backup_bucket=backup_bucket,
-        backup_retain_full=backup_retain_full,
-        backup_network=backup_network,
-    )
+    if detect_version(document) == 12:
+        document = migrate_v12_to_v13(
+            document,
+            backup_bucket=backup_bucket,
+            backup_retain_full=backup_retain_full,
+            backup_network=backup_network,
+        )
+
+    return migrate_v13_to_v14(document, metrics_url=metrics_url)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1095,6 +1099,80 @@ def migrate_v12_to_v13(
     migrated["backup"]["retain_full"] = int(backup_retain_full)
     migrated["compose"]["networks"]["backup"] = backup_network
     migrated["schema_version"] = 13
+    return migrated
+
+
+def migrate_v13_to_v14(document: dict[str, Any], *, metrics_url: str) -> dict[str, Any]:
+    """Return a version 14 ``rendered`` document derived from a version 13 one.
+
+    Version 14 adds ``routes.metrics``: the surface ADR 0005 reserved in Session
+    1 and nothing owned for thirteen sessions (D760). The reservation was
+    described there as *"a promise the platform makes about a route it will one
+    day own"*, and a route the deployed document does not name is a promise
+    nothing can find.
+
+    **A bare URL here, and a ``publishedRoute`` on the deployed branch** --
+    which is what `rest`, `docs`, `app`, `app_docs`, `storage` and `mcp` all do.
+    ``health`` is the exception rather than the model: it was built
+    status-carrying in Session 2, before `publishedRoute` existed, and its own
+    schema says so.
+
+    That shape already expresses what `metrics` needs, and precisely: the route
+    is described in every render from this version on, while the collector
+    behind it starts only when a deployment asks for session 14 -- so the
+    deployed branch reports `unavailable` with a null URL until something
+    answers, and `ready` on the deploy that observes it (D326's two-stage
+    convergence, the same path `mcp` took in version 12).
+
+    **A readiness claim does not belong in a planning document.** A rendered
+    document describes what a deployment would create; a status here would be a
+    lie automation would believe, which is the sentence the rendered branch
+    already carries about `health`.
+
+    ``metrics_url`` is supplied rather than derived, for the reason every
+    argument in this module is: ``naming.derive`` is the one authority for a
+    route (ADR 0002), and a migrator that computed it would be a second -- the
+    pair D177 watched drift, where the copy carrying a comment saying it was
+    kept in step was the copy that had.
+    """
+    version = detect_version(document)
+    if version == 14:
+        raise MigrationError("document is already version 14; migration would be a no-op")
+    if version != 13:
+        raise MigrationError(f"only version 13 can be migrated to 14, got {version}")
+
+    require_kind(document, "rendered")
+
+    routes = document.get("routes", {})
+    if "metrics" in routes:
+        raise MigrationError("routes already carries metrics; this is not a version 13 document")
+    if "health" not in routes:
+        raise MigrationError(
+            "routes carries no health; the rendered branch has carried it since Session 2, "
+            "so this document was not written by this project's renderer"
+        )
+
+    if not isinstance(metrics_url, str) or not metrics_url.startswith("https://"):
+        raise MigrationError(f"metrics_url must be an https URL, got {metrics_url!r}")
+
+    # Every other route's address, including the one nested under `health`.
+    # Checked because two routes at one address is a router that answers for
+    # whichever was attached last -- the sentence the v9 step already carries,
+    # and `health` is the reason it needs a shape rather than a comparison.
+    taken = {
+        value if isinstance(value, str) else value.get("url")
+        for key, value in routes.items()
+        if key != "metrics"
+    }
+    if metrics_url in taken:
+        raise MigrationError(
+            f"metrics_url {metrics_url!r} is the URL of another route. Two routes at one "
+            "address is a router that answers for whichever was attached last"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["routes"]["metrics"] = metrics_url
+    migrated["schema_version"] = 14
     return migrated
 
 

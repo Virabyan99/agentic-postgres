@@ -239,6 +239,12 @@ def edge(tmp_path_factory: pytest.TempPathFactory):
             middleware_name=f"{PROJECT_KEY}-docs",
             project_key=PROJECT_KEY,
             hashed=bcrypt_hash(DOCS_PASSWORD),
+            # Version 14. The metrics middleware lives in the same document
+            # now: D204's failure, found again one route along -- a router
+            # naming a middleware nothing defines is not created, and the
+            # route answers Traefik's own 404.
+            metrics_middleware_name=f"{PROJECT_KEY}-metrics",
+            metrics_hashed=bcrypt_hash(DOCS_PASSWORD),
         )
     )
     # A stray `.htpasswd` in the same directory, hashed the way a host tool
@@ -489,6 +495,8 @@ def test_a_rotated_credential_replaces_the_one_before_it(edge: Edge) -> None:
                 middleware_name=f"{PROJECT_KEY}-docs",
                 project_key=PROJECT_KEY,
                 hashed=bcrypt_hash(rotated),
+                metrics_middleware_name=f"{PROJECT_KEY}-metrics",
+                metrics_hashed=bcrypt_hash(rotated),
             )
         )
         deadline = time.monotonic() + 45
@@ -575,7 +583,11 @@ def test_the_generated_middleware_carries_the_hash_inline() -> None:
     """
     document = yaml.safe_load(
         edge_credentials.render_middleware(
-            middleware_name="m", project_key=PROJECT_KEY, hashed=SHAPED_HASH
+            middleware_name="m",
+            project_key=PROJECT_KEY,
+            hashed=SHAPED_HASH,
+            metrics_middleware_name="m-metrics",
+            metrics_hashed=SHAPED_HASH,
         )
     )
     basic = document["http"]["middlewares"]["m"]["basicAuth"]
@@ -600,7 +612,11 @@ def test_the_generated_middleware_defines_no_router_and_no_service() -> None:
     container."""
     document = yaml.safe_load(
         edge_credentials.render_middleware(
-            middleware_name="m", project_key=PROJECT_KEY, hashed=SHAPED_HASH
+            middleware_name="m",
+            project_key=PROJECT_KEY,
+            hashed=SHAPED_HASH,
+            metrics_middleware_name="m-metrics",
+            metrics_hashed=SHAPED_HASH,
         )
     )
     assert set(document["http"]) == {"middlewares"}

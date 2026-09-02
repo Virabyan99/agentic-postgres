@@ -1819,3 +1819,91 @@
     Every operator command is reachable through one front door whose verb set is
     derived rather than kept, which refuses a name before it becomes a path and
     adds no path, privilege or exit code of its own.
+
+- id: OPS-METRIC-001
+  priority: P0
+  target_session: 14
+  test_nodeids:
+    # The offline half: what the surface may carry and whose it may carry.
+    - tests/contract/test_metrics_surface.py::test_the_router_enumeration_names_every_router_the_identity_carries
+    - tests/contract/test_metrics_surface.py::test_the_scrape_filter_admits_this_project_and_refuses_a_prefix_colliding_one
+    - tests/contract/test_metrics_surface.py::test_the_certificate_series_is_kept_by_its_common_name
+    - tests/contract/test_metrics_surface.py::test_the_metrics_entrypoint_is_not_published_to_the_host
+    # The live half. Three legs, three node ids: the route refusing, the route
+    # serving, and one project's surface carrying no other project's series.
+    # They fail for different reasons -- a missing middleware, a wrong
+    # credential, a loose scrape filter -- and bundling them would make a green
+    # result silent about which one worked.
+    - tests/deployment/test_session14_observability.py::test_the_metrics_route_refuses_without_a_credential
+    - tests/deployment/test_session14_observability.py::test_the_metrics_route_serves_this_projects_own_series
+    - tests/deployment/test_session14_observability.py::test_one_projects_metrics_surface_carries_no_other_projects_series
+  description: >-
+    The reserved /metrics route serves a Prometheus surface for a deployed
+    project and refuses anyone without the credential. The surface carries this
+    project's series and no other project's: the scrape filter is an
+    enumeration of the routers naming derives, never a prefix over the project
+    key, because a key may contain a hyphen and a prefix admits a different
+    project. Discriminated on the body rather than the status -- a 404 from this
+    route means the router was not created, and must never be read as metrics
+    not being configured (ADR 0005, ADR 0164, ADR 0167).
+
+- id: OPS-ALERT-001
+  priority: P0
+  target_session: 14
+  test_nodeids:
+    - tests/contract/test_alert_rules.py::test_every_rule_says_what_an_absent_series_means
+    - tests/contract/test_alert_rules.py::test_the_two_hops_have_their_own_rules
+    - tests/contract/test_alert_rules.py::test_no_rule_is_written_over_a_metric_no_deployment_publishes
+    - tests/contract/test_alert_rules.py::test_the_certificate_threshold_is_the_one_the_doctor_already_owns
+    # Both halves, and they are different guarantees (D70). The quiet one is the
+    # harder and is asserted against a store first proved to be ingesting -- a
+    # silent rule set over an empty store is the false quiet half.
+    - tests/deployment/test_session14_observability.py::test_the_store_loaded_the_rules_the_release_rendered
+    - tests/deployment/test_session14_observability.py::test_a_healthy_deployment_fires_no_alert
+    - tests/deployment/test_session14_observability.py::test_an_induced_failure_fires_its_own_rule
+  description: >-
+    An induced failure fires its own rule and a healthy deployment fires none.
+    Every rule states what it means by an absent series, because a rule over a
+    series that does not exist evaluates to nothing and reports healthy for
+    ever; no rule is written over a metric no deployment publishes, for the same
+    reason. The two hops that carry a project's metrics have separate rules,
+    because one rule over both names the wrong subject (ADR 0168).
+
+- id: OPS-REDACT-001
+  priority: P0
+  target_session: 14
+  test_nodeids:
+    - tests/contract/test_mcp_tracing.py::test_an_escaping_exception_puts_no_message_on_a_span
+    - tests/contract/test_metrics_surface.py::test_no_identity_reaches_the_metrics_surface_as_a_label
+    - tests/contract/test_metrics_surface.py::test_an_undeclared_label_value_is_folded_rather_than_published
+    - tests/deployment/test_session14_observability.py::test_no_planted_value_reaches_the_metrics_surface
+  description: >-
+    No token, URL, object key or caller value reaches the telemetry plane, on
+    any of its three carriers. A span attaches no exception message or
+    stacktrace, both SDK defaults being reversed; a metric label is drawn from a
+    closed set and an unexpected value is folded rather than published, because
+    a label is a series and a series is memory; and a value planted where
+    nothing else could produce it does not appear on the deployed surface
+    (ADR 0166, ADR 0167).
+
+- id: CAP-ENV-001
+  priority: P0
+  target_session: 14
+  test_nodeids:
+    - tests/contract/test_capacity_envelope.py::test_every_measurement_states_the_conditions_it_was_sampled_under
+    - tests/contract/test_capacity_envelope.py::test_a_machine_measurement_names_the_machine_it_describes
+    - tests/contract/test_capacity_envelope.py::test_the_envelope_still_says_what_it_did_not_measure
+    - tests/contract/test_capacity_envelope.py::test_the_renderer_refuses_a_document_whose_images_have_moved
+    # The live half is what stops this going green because a document exists.
+    # It compares the envelope's configuration-determined claims against the
+    # deployment's own settings; the milliseconds are deliberately not compared,
+    # because they describe the machine that produced them.
+    - tests/deployment/test_session14_observability.py::test_the_envelopes_configuration_numbers_match_this_deployment
+    - tests/deployment/test_session14_observability.py::test_the_envelope_still_describes_the_release_this_host_runs
+  description: >-
+    A capacity envelope whose every number states the conditions it was sampled
+    under and whether it transfers to another machine, which scenarios were not
+    measured and what unblocks each, and which image digests its numbers
+    describe. The configuration-determined numbers are checked against the
+    deployment they claim to describe, so the claim cannot go green because a
+    document exists (ADR 0169).

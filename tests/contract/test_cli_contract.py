@@ -80,6 +80,7 @@ SHELL_COMMANDS = (
     "bin/session-11-check.sh",
     "bin/session-12-check.sh",
     "bin/session-13-check.sh",
+    "bin/session-14-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
     "bin/upgrade.sh",

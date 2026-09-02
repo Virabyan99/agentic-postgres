@@ -54,6 +54,15 @@ import pytest
 from agentic_postgres import REPO_ROOT, config, naming, output_migrations
 from agentic_postgres.output_migrations import MigrationError
 
+#: The metrics route a v13 -> v14 step is given.
+#:
+#: Supplied rather than derived, for the reason every argument to a migration
+#: step is supplied: `naming` is the one authority for a route (ADR 0002), and a
+#: migrator that computed it would be a second one -- the pair D177 watched
+#: drift, where the copy carrying a comment saying it was kept in step was the
+#: copy that had.
+METRICS_URL_FOR_MIGRATION = "https://fixture-alpha-dev.test/metrics"
+
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 FIXTURE_V1 = REPO_ROOT / "tests" / "fixtures" / "outputs-v1.json"
@@ -354,6 +363,7 @@ def chained(v1: dict[str, Any]) -> dict[str, Any]:
         storage_settings=storage_settings_for(v1),
         backup_bucket=backup_bucket_for(v1),
         backup_retain_full=backup_retain_full_for(v1),
+        metrics_url=METRICS_URL_FOR_MIGRATION,
         backup_network=backup_network_for(v1),
     )
 
@@ -453,6 +463,7 @@ def test_migration_does_not_mutate_its_input(v1: dict[str, Any]) -> None:
         storage_settings=storage_settings_for(v1),
         backup_bucket=backup_bucket_for(v1),
         backup_retain_full=backup_retain_full_for(v1),
+        metrics_url=METRICS_URL_FOR_MIGRATION,
         backup_network=backup_network_for(v1),
     )
     assert json.dumps(v1, sort_keys=True) == before
@@ -530,6 +541,8 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -615,6 +628,7 @@ def test_migration_requires_a_real_contract_digest(v1: dict[str, Any]) -> None:
             storage_settings=storage_settings_for(v1),
             backup_bucket=backup_bucket_for(v1),
             backup_retain_full=backup_retain_full_for(v1),
+            metrics_url=METRICS_URL_FOR_MIGRATION,
             backup_network=backup_network_for(v1),
         )
 
@@ -688,7 +702,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 13"):
+    with pytest.raises(MigrationError, match="already version 14"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -706,6 +720,7 @@ def test_a_current_version_document_is_not_migrated_again(
             storage_settings=storage_settings_for(chained),
             backup_bucket=backup_bucket_for(chained),
             backup_retain_full=backup_retain_full_for(chained),
+            metrics_url=METRICS_URL_FOR_MIGRATION,
             backup_network=backup_network_for(chained),
         )
     with pytest.raises(MigrationError, match="already version 5"):
@@ -720,7 +735,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1 through 12"):
+    with pytest.raises(MigrationError, match="only versions 1 through 13"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -738,6 +753,7 @@ def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
             storage_settings=storage_settings_for(v1),
             backup_bucket=backup_bucket_for(v1),
             backup_retain_full=backup_retain_full_for(v1),
+            metrics_url=METRICS_URL_FOR_MIGRATION,
             backup_network=backup_network_for(v1),
         )
 
@@ -762,6 +778,7 @@ def test_an_incomplete_v1_document_is_refused(v1: dict[str, Any]) -> None:
             storage_settings=storage_settings_for(v1),
             backup_bucket=backup_bucket_for(v1),
             backup_retain_full=backup_retain_full_for(v1),
+            metrics_url=METRICS_URL_FOR_MIGRATION,
             backup_network=backup_network_for(v1),
         )
 
@@ -795,6 +812,7 @@ def test_a_document_with_unexpected_fields_is_refused(v1: dict[str, Any]) -> Non
             storage_settings=storage_settings_for(v1),
             backup_bucket=backup_bucket_for(v1),
             backup_retain_full=backup_retain_full_for(v1),
+            metrics_url=METRICS_URL_FOR_MIGRATION,
             backup_network=backup_network_for(v1),
         )
 
@@ -938,6 +956,8 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1133,6 +1153,8 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1272,6 +1294,8 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1422,6 +1446,8 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1763,6 +1789,8 @@ def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1945,6 +1973,8 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2008,6 +2038,8 @@ def test_the_v9_fixture_is_a_real_render_at_version_9(v9_fixture: dict[str, Any]
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2143,6 +2175,8 @@ def test_the_v10_fixture_is_a_real_render_at_version_10(v10_fixture: dict[str, A
         backup_retain_full=backup_retain_full_for(migrated),
         backup_network=backup_network_for(migrated),
     )
+    assert migrated["schema_version"] == 13
+    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 

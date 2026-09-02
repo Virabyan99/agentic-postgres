@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -296,6 +296,7 @@ def build_deployed_document(
     app_docs_status: str,
     storage_status: str,
     mcp_status: str,
+    metrics_status: str,
     api: dict[str, Any],
     jwt: dict[str, Any],
     mcp: dict[str, Any],
@@ -422,6 +423,14 @@ def build_deployed_document(
             # and it was found by comparing the two route sets AS SETS rather
             # than field by field, before a host trip could find it instead.
             "mcp": published_route(rendered["routes"]["mcp"], mcp_status),
+            # Version 14, and it follows `mcp` exactly -- including the
+            # reason `mcp` carries that comment. The collector runs only
+            # for a deployment through session 14, so a project deployed
+            # through 13 NAMES this route and reports it unavailable.
+            # That pair is the honest one: the address exists and
+            # nothing answers on it, which is a different fact from the
+            # route not existing (ADR 0005's reservation, redeemed).
+            "metrics": published_route(rendered["routes"]["metrics"], metrics_status),
         },
         "api": dict(api),
         "jwt": dict(jwt),

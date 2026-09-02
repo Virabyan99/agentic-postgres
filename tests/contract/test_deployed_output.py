@@ -169,6 +169,11 @@ def build(rendered: dict, **overrides):
         # `MCP_NOT_PUBLISHED` beside it is what every project on every host
         # records until Session 8's Run 7 gives it something to observe.
         "mcp_status": "unavailable",
+        # Version 14, and `unavailable` by default for the plainest reason
+        # of the lot: the `metrics` container carries `profiles:
+        # [session14]`, so a deployment through anything earlier renders
+        # the route, names it, and starts nothing behind it.
+        "metrics_status": "unavailable",
         "api": deployed_output.API_NOT_PUBLISHED,
         "jwt": deployed_output.JWT_NOT_PUBLISHED,
         "mcp": deployed_output.MCP_NOT_PUBLISHED,
@@ -188,6 +193,9 @@ def published(rendered: dict, **overrides):
     arguments = {
         "rest_status": "ready",
         "docs_status": "ready",
+        # Still unavailable: this helper describes a SESSION 5 deployment,
+        # and the collector arrives nine sessions later.
+        "metrics_status": "unavailable",
         "api": PUBLISHED_API,
         "jwt": PUBLISHED_JWT,
         "deployed_through_session": 5,
@@ -199,7 +207,10 @@ def published(rendered: dict, **overrides):
 def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     document = build(rendered)
     assert document["document_kind"] == "deployed"
-    assert document["schema_version"] == 13
+    # Derived rather than spelled: the previous form said 13, which was
+    # right until it was not. A test that names the current version in a
+    # literal has to be found by a failing run rather than by the bump.
+    assert document["schema_version"] == deployed_output.SCHEMA_VERSION
     assert document["project"]["key"] == KEY
 
 
@@ -1037,7 +1048,7 @@ def test_the_documentation_password_never_reaches_a_command_line() -> None:
     function = next(
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "publish_docs_credential"
+        if isinstance(node, ast.FunctionDef) and node.name == "publish_edge_credentials"
     )
     calls = [
         node
@@ -1046,18 +1057,26 @@ def test_the_documentation_password_never_reaches_a_command_line() -> None:
         and isinstance(node.func, ast.Attribute)
         and node.func.attr == "run"
     ]
-    assert len(calls) == 1, f"expected one subprocess.run, found {len(calls)}"
+    # **Every call, not the only one there used to be.** The publisher hashes
+    # two credentials since version 14, and counting was never the property:
+    # what matters is that no invocation puts a password in `argv`. A count
+    # would have made a second CORRECT call look like a regression, while a
+    # second incorrect one failed the same way and taught nobody which.
+    assert calls, "the publisher hashes nothing; there is no credential to protect"
 
-    keywords = {keyword.arg for keyword in calls[0].keywords}
-    assert "input" in keywords, "the password is not passed on stdin"
+    for index, call in enumerate(calls):
+        keywords = {keyword.arg for keyword in call.keywords}
+        assert "input" in keywords, f"call {index}: the password is not passed on stdin"
 
-    argv = calls[0].args[0]
-    assert isinstance(argv, ast.List)
-    literals = [element.value for element in argv.elts if isinstance(element, ast.Constant)]
-    assert "-i" in literals, "docker was not given -i, so stdin is never attached"
-    assert not any("read_text" in ast.dump(element) for element in argv.elts), (
-        "the credential is built into the argument vector"
-    )
+        argv = call.args[0]
+        assert isinstance(argv, ast.List)
+        literals = [element.value for element in argv.elts if isinstance(element, ast.Constant)]
+        assert "-i" in literals, (
+            f"call {index}: docker was not given -i, so stdin is never attached"
+        )
+        assert not any("read_text" in ast.dump(element) for element in argv.elts), (
+            f"call {index}: the credential is built into the argument vector"
+        )
 
 
 def test_the_publisher_writes_one_document_and_retires_the_one_it_replaced() -> None:
@@ -1078,7 +1097,7 @@ def test_the_publisher_writes_one_document_and_retires_the_one_it_replaced() -> 
     function = next(
         node
         for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "publish_docs_credential"
+        if isinstance(node, ast.FunctionDef) and node.name == "publish_edge_credentials"
     )
     body = ast.dump(function)
     assert "middleware_file_name" in body and "retired_users_file_name" in body, (
@@ -1150,6 +1169,12 @@ def test_the_publisher_produces_a_credential_the_edge_can_use(tmp_path, monkeypa
     # publisher has to strip it before hashing -- a hash of "password\n" is a
     # credential no operator can type.
     (root_plane / "docs_basic_auth_password").write_text(password + "\n", encoding="utf-8")
+    # The second credential the publisher reads. A DIFFERENT value on
+    # purpose: two that happened to match would let these pass while the
+    # publisher hashed one password into both middlewares.
+    (root_plane / "metrics_basic_auth_password").write_text(
+        password + "-metrics\n", encoding="utf-8"
+    )
 
     dynamic = tmp_path / "dynamic"
     written: dict[Path, bytes] = {}
@@ -1170,10 +1195,11 @@ def test_the_publisher_produces_a_credential_the_edge_can_use(tmp_path, monkeypa
         if line.startswith("PYTHON_RUNTIME_IMAGE=")
     )
 
-    module.publish_docs_credential(
+    module.publish_edge_credentials(
         project_key=project_key,
         generation_id=generation,
         middleware_name="apg-rehearsal-dev-docs-auth",
+        metrics_middleware_name="apg-rehearsal-dev-metrics-auth",
         runtime_image=image,
     )
 
@@ -1226,6 +1252,12 @@ def test_the_published_hash_verifies_against_its_own_password_and_no_other(
     )
     root_plane.mkdir(parents=True)
     (root_plane / "docs_basic_auth_password").write_text(password + "\n", encoding="utf-8")
+    # The second credential the publisher reads. A DIFFERENT value on
+    # purpose: two that happened to match would let these pass while the
+    # publisher hashed one password into both middlewares.
+    (root_plane / "metrics_basic_auth_password").write_text(
+        password + "-metrics\n", encoding="utf-8"
+    )
 
     dynamic = tmp_path / "dynamic"
 
@@ -1243,10 +1275,11 @@ def test_the_published_hash_verifies_against_its_own_password_and_no_other(
         for line in versions.splitlines()
         if line.startswith("PYTHON_RUNTIME_IMAGE=")
     )
-    module.publish_docs_credential(
+    module.publish_edge_credentials(
         project_key=project_key,
         generation_id=generation,
         middleware_name="m",
+        metrics_middleware_name="m-metrics",
         runtime_image=image,
     )
 

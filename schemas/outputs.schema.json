@@ -35,7 +35,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            13
+            14
           ]
         },
         "document_kind": {
@@ -163,7 +163,8 @@
             "docs",
             "health",
             "app_docs",
-            "storage"
+            "storage",
+            "metrics"
           ],
           "properties": {
             "rest": {
@@ -197,6 +198,10 @@
             },
             "app_docs": {
               "$ref": "#/$defs/httpsUrl"
+            },
+            "metrics": {
+              "$ref": "#/$defs/httpsUrl",
+              "description": "Version 14. The metrics surface ADR 0005 reserved in Session 1 and nothing owned for thirteen sessions (D760) -- a reserved path is a promise the platform makes about a route it will one day own, and a route the deployed document does not name is a promise nothing can find. A bare URL here and a publishedRoute on the deployed branch, like every route added since version 5: the render describes what would be created, and the readiness claim belongs where something can observe it. `health` is the exception rather than the model, and predates publishedRoute."
             },
             "storage": {
               "$ref": "#/$defs/httpsUrl",
@@ -309,7 +314,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            13
+            14
           ]
         },
         "document_kind": {
@@ -429,7 +434,8 @@
             "app",
             "app_docs",
             "storage",
-            "mcp"
+            "mcp",
+            "metrics"
           ],
           "description": "Version 5 added `rest` and `docs` beside `health`, which Session 2 built as a status-carrying object for exactly this (ADR 0053). The rendered branch names the same three URLs and remains their single derivation; this branch records what is being served against them. Version 11 added `storage`. Version 12 added `mcp` -- which the RENDERED branch has named since version 1 and this one had never carried (D395). That is D389's shape exactly, in a second place: a route published in the document a manifest produces and absent from the document every plane reads. It is caught here before a host trip rather than by one. The two branches' route sets are compared AS SETS by a contract test, so the next route added to one and forgotten in the other fails offline.",
           "properties": {
@@ -471,6 +477,10 @@
             "storage": {
               "$ref": "#/$defs/publishedRoute",
               "description": "Version 11. The object-storage surface, and it follows `app` exactly (D326, D230's two-stage convergence): `unavailable` with a null URL until the R2 credential validates, the operator command printed, the deploy exiting 0, and `ready` on the redeploy that observes it. A dedicated `storage_credentials_required` deployment state was considered and refused for `app`'s reason -- `publishedRoute` already expresses this and every reader already understands it, while a second convergence mechanism would need its own tests, its own operator documentation and its own failure modes beside one that is deployed and proved on two projects."
+            },
+            "metrics": {
+              "$ref": "#/$defs/publishedRoute",
+              "description": "Version 14, and it follows `mcp` exactly (D326 two-stage convergence): `unavailable` with a null URL until the collector answers on the route, `ready` on the deploy that observes it. The collector runs only for a deployment through session 14, so a project deployed through 13 names the route and reports it unavailable -- which is the honest pair, and the reason this is a status rather than an absence."
             },
             "mcp": {
               "$ref": "#/$defs/publishedRoute",

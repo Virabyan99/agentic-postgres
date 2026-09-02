@@ -88,7 +88,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 125 requirements**
+**P0 — 129 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -217,6 +217,10 @@ Priorities:
 | `REL-COMPAT-001` | 13 | An incompatible manifest, capability or secret-format change is refused before any mutation, and the refusal is proved against the tree as well as the exit code. See ADR 0162. |
 | `REL-PLAN-001` | 13 | A deployed project produces a complete upgrade plan without changing its deployment, and a comparison that could not be made is undetermined rather than reported as no changes. |
 | `REL-VER-001` | 13 | The platform version is semver, parsed by this release rather than by a PEP 440 parser that rewrites it, and the version a deployed project runs is machine-readable from the host without changing anything. |
+| `CAP-ENV-001` | 14 | A capacity envelope whose every number states the conditions it was sampled under and whether it transfers to another machine, which scenarios were not measured and what unblocks each, and which image digests its numbers describe. The configuration-determined numbers are checked against the deployment they claim to describe, so the claim cannot go green because a document exists (ADR 0169). |
+| `OPS-ALERT-001` | 14 | An induced failure fires its own rule and a healthy deployment fires none. Every rule states what it means by an absent series, because a rule over a series that does not exist evaluates to nothing and reports healthy for ever; no rule is written over a metric no deployment publishes, for the same reason. The two hops that carry a project's metrics have separate rules, because one rule over both names the wrong subject (ADR 0168). |
+| `OPS-METRIC-001` | 14 | The reserved /metrics route serves a Prometheus surface for a deployed project and refuses anyone without the credential. The surface carries this project's series and no other project's: the scrape filter is an enumeration of the routers naming derives, never a prefix over the project key, because a key may contain a hyphen and a prefix admits a different project. Discriminated on the body rather than the status -- a 404 from this route means the router was not created, and must never be read as metrics not being configured (ADR 0005, ADR 0164, ADR 0167). |
+| `OPS-REDACT-001` | 14 | No token, URL, object key or caller value reaches the telemetry plane, on any of its three carriers. A span attaches no exception message or stacktrace, both SDK defaults being reversed; a metric label is drawn from a closed set and an unexpected value is folded rather than published, because a label is a series and a series is memory; and a value planted where nothing else could produce it does not appear on the deployed surface (ADR 0166, ADR 0167). |
 
 **P1 — 6 requirements**
 

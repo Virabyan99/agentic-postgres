@@ -425,6 +425,11 @@ def build_outputs(
             # would create, and the readiness claim lives on the deployed
             # branch (D326).
             "storage": identity.route_storage,
+            # Version 14. The surface ADR 0005 reserved in Session 1 and nothing
+            # owned for thirteen sessions (D760). A bare URL like every route
+            # added since version 5 -- the readiness claim lives on the deployed
+            # branch, where something can observe it.
+            "metrics": identity.route_metrics,
         },
         "jwt": {"issuer": identity.jwt_issuer, "audience": identity.jwt_audience},
         "secrets": {

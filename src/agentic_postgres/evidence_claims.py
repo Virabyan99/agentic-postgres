@@ -453,6 +453,18 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "pooled_state_reset": ("SEC-DBX-003",),
     "credential_rotation_planes": ("SEC-DBX-004",),
     #
+    # Session 14's four, and they are four rather than one for ADR 0045's
+    # reason. `metrics_surface` is proved by reading a route; `alerting` by
+    # reading a store that is routed nowhere; `telemetry_redaction` by planting
+    # a value and failing to find it; `capacity_envelope` by comparing a
+    # document to a deployment. One claim over all four would be measured by
+    # none of those halves, and a single failure would say only that
+    # observability was wrong.
+    "metrics_surface": ("OPS-METRIC-001",),
+    "alerting": ("OPS-ALERT-001",),
+    "telemetry_redaction": ("OPS-REDACT-001",),
+    "capacity_envelope": ("CAP-ENV-001",),
+    #
     # **Three of the sixteen candidates are deliberately NOT here**, and each has
     # a different reason. They stay in `UNCLAIMED_BY_HISTORY`, which now records
     # why rather than only that.

@@ -33,7 +33,7 @@ VALID_PRIORITIES = {"P0", "P1", "P2"}
 #: `REL` joined in Session 13 — release identity, the upgrade path, and the
 #: operator front door. Enumerated rather than patterned, for ADR 0006's reason:
 #: a rule that accepted any uppercase word would accept a typo as a new family.
-ID_PATTERN = re.compile(r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL)-[A-Z0-9]+(-\d+)?$")
+ID_PATTERN = re.compile(r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP)-[A-Z0-9]+(-\d+)?$")
 
 
 def strip_parameters(node_id: str) -> str:

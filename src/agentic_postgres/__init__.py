@@ -82,7 +82,7 @@ from pathlib import Path
 #: held `1 <= session <= 12` as a literal -- correct at every check for twelve
 #: sessions, because the number it named and the number it meant were the same
 #: one. It derives from here now, and so does its `--help`.
-CURRENT_SESSION = 13
+CURRENT_SESSION = 14
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

@@ -297,7 +297,7 @@ def _render(document: dict[str, Any]) -> dict[str, Any]:
 def test_the_rendered_document_names_the_repository_and_the_network(
     alpha_outputs: dict[str, Any],
 ) -> None:
-    assert alpha_outputs["schema_version"] == 13
+    assert alpha_outputs["schema_version"] == output_migrations.CURRENT_VERSION
     assert alpha_outputs["backup"]["bucket"] == "apg-fixture-alpha-dev-backup"
     assert alpha_outputs["compose"]["networks"]["backup"] == "apg-fixture-alpha-dev-backup"
 
@@ -372,7 +372,17 @@ def test_the_v12_step_reaches_a_document_that_validates(v12: dict[str, Any]) -> 
     assert v12["schema_version"] == 12
     migrated = _v13(v12)
     assert migrated["schema_version"] == 13
-    config.validate_against_schema(migrated, "outputs.schema.json")
+
+    # One more step before the schema sees it. The schema's `schema_version`
+    # enum is a single value per branch, so a v13 document stops validating the
+    # moment the current version is 14 -- which is the schema saying a
+    # superseded document is not one this release writes, rather than a
+    # regression. The claim above is unchanged: the v12 step produced a v13.
+    current = output_migrations.migrate_v13_to_v14(
+        migrated, metrics_url="https://fixture-alpha-dev.test/metrics"
+    )
+    assert current["schema_version"] == output_migrations.CURRENT_VERSION
+    config.validate_against_schema(current, "outputs.schema.json")
 
 
 def test_the_migrator_refuses_to_invent_a_bucket_for_an_enabled_repository(

@@ -131,6 +131,11 @@ AGENT_PLANE_SESSION = 8
 #: pgBackRest binary. The repository is reached for the first time in Run 6.
 BACKUP_PLANE_SESSION = 10
 
+#: The session that starts the metrics collector. The `metrics` service
+#: carries `profiles: [session14]`, so a deployment through 13 renders the
+#: route, names it in the document, and starts nothing behind it.
+METRICS_PLANE_SESSION = 14
+
 #: The reviewed OpenAPI snapshot, mirroring `bin/api-contract.py`'s own
 #: constant. `test_the_deploy_and_the_contract_command_name_one_snapshot`
 #: asserts the two agree -- a deploy recording the digest of one file while
@@ -731,10 +736,15 @@ def observe_health(url: str) -> str:
     return "ready" if result.stdout.strip() == "200" else "unavailable"
 
 
-def publish_docs_credential(
-    *, project_key: str, generation_id: str, middleware_name: str, runtime_image: str
+def publish_edge_credentials(
+    *,
+    project_key: str,
+    generation_id: str,
+    middleware_name: str,
+    metrics_middleware_name: str,
+    runtime_image: str,
 ) -> None:
-    """Write the documentation credential and the middleware that checks it.
+    """Write the edge credentials and the middlewares that check them.
 
     **The first caller `edge_credentials` has ever had.** The module was
     complete, tested and referenced by nothing, so the middleware every
@@ -769,21 +779,26 @@ def publish_docs_credential(
     component that re-reads that file. Now the rotation and the document the
     provider parses are the same write.
     """
-    source = (
-        SECRET_ROOT
-        / project_key
-        / "generations"
-        / generation_id
-        / secrets_contract.ROOT_PLANE_DIRECTORY
-        / "docs_basic_auth_password"
-    )
-    if not source.is_file():
-        fail(
-            EXIT_PRECONDITION,
-            f"no documentation credential at {source}. It is declared in "
-            "secrets.required.yaml with a root-plane consumer; re-run "
-            "bin/materialize-secrets.sh.",
+
+    def materialized(name: str, what: str) -> Path:
+        path = (
+            SECRET_ROOT
+            / project_key
+            / "generations"
+            / generation_id
+            / secrets_contract.ROOT_PLANE_DIRECTORY
+            / name
         )
+        if not path.is_file():
+            fail(
+                EXIT_PRECONDITION,
+                f"no {what} at {path}. It is declared in secrets.required.yaml "
+                "with a root-plane consumer; re-run bin/materialize-secrets.sh.",
+            )
+        return path
+
+    source = materialized("docs_basic_auth_password", "documentation credential")
+    metrics_source = materialized("metrics_basic_auth_password", "metrics credential")
 
     hashed = subprocess.run(
         [
@@ -813,6 +828,31 @@ def publish_docs_credential(
         # quoting it would put a password hash in the deploy log.
         fail(EXIT_PRECONDITION, f"could not hash the documentation credential: {hashed.stderr}")
 
+    # The second credential, through the same image and the same stdin rule.
+    # A separate invocation rather than one that hashes both: bcrypt salts
+    # randomly per call, and a helper returning two hashes from one program
+    # would put two passwords in one container's stdin for no gain.
+    metrics_hashed = subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "-i",
+            runtime_image,
+            "python",
+            "-c",
+            "import crypt,sys;"
+            "print(crypt.crypt(sys.stdin.read(), crypt.mksalt(crypt.METHOD_BLOWFISH)))",
+        ],
+        input=metrics_source.read_text(encoding="utf-8").rstrip("\n"),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=120,
+    )
+    if metrics_hashed.returncode != 0:
+        fail(EXIT_PRECONDITION, f"could not hash the metrics credential: {metrics_hashed.stderr}")
+
     EDGE_DYNAMIC_DIR.mkdir(parents=True, exist_ok=True)
     middleware = EDGE_DYNAMIC_DIR / edge_credentials.middleware_file_name(project_key)
     _write_root_only(
@@ -821,6 +861,8 @@ def publish_docs_credential(
             middleware_name=middleware_name,
             project_key=project_key,
             hashed=hashed.stdout.strip(),
+            metrics_middleware_name=metrics_middleware_name,
+            metrics_hashed=metrics_hashed.stdout.strip(),
         ),
     )
 
@@ -835,7 +877,7 @@ def publish_docs_credential(
     retired.unlink(missing_ok=True)
 
     # The path, never the contents.
-    print(f"  {middleware} (0600, bcrypt inline)")
+    print(f"  {middleware} (0600, two middlewares, bcrypt inline)")
     if removed:
         print(f"  {retired} removed (ADR 0086: the hash is inline now)")
 
@@ -1763,11 +1805,14 @@ def main(argv: list[str] | None = None) -> int:
     # -- the provider watches the directory -- but the window is a route that
     # 404s for a reason nobody can distinguish from a missing service.
     if arguments.through_session >= REST_PLANE_SESSION:
-        publish_docs_credential(
+        publish_edge_credentials(
             project_key=key,
             generation_id=secrets["generation_id"],
             middleware_name=_env_value(
                 rendered_directory / "compose.env", "DOCS_CREDENTIAL_MIDDLEWARE_NAME"
+            ),
+            metrics_middleware_name=_env_value(
+                rendered_directory / "compose.env", "METRICS_CREDENTIAL_MIDDLEWARE_NAME"
             ),
             runtime_image=_env_value(release / "versions.env", "PYTHON_RUNTIME_IMAGE"),
         )
@@ -2025,6 +2070,17 @@ def main(argv: list[str] | None = None) -> int:
     # starts the service (D326's two-stage shape, as `routes.app` and
     # `routes.storage` both use).
     mcp_status = "unavailable"
+
+    # Version 14's, and it follows `mcp` exactly. `unavailable` for a
+    # deployment through a session that does not select the `metrics`
+    # container, and for one that does but whose router has not converged
+    # yet -- which is every first deploy (D326's two-stage shape).
+    #
+    # **A 401 is the success condition, not a 200.** The route carries a
+    # basic-auth middleware and this deploy holds no credential for it, so
+    # a challenge is what a working route looks like from here -- the same
+    # condition `observe_docs` already uses, and for the same reason.
+    metrics_status = "unavailable"
     jwt_block = dict(deployed_output.JWT_NOT_PUBLISHED)
     api_block = dict(deployed_output.API_NOT_PUBLISHED)
     mcp_block = dict(deployed_output.MCP_NOT_PUBLISHED)
@@ -2178,6 +2234,21 @@ def main(argv: list[str] | None = None) -> int:
     # has not attached the backend when this first runs -- the route settles on
     # the redeploy, and `await_observation` is what gives it the window rather
     # than a sleep (D326).
+    if arguments.through_session >= METRICS_PLANE_SESSION:
+        # The same predicate `docs` uses, and the same reason it is a 401: this
+        # deploy holds no metrics credential, so a challenge proves the router
+        # exists and the middleware is attached.
+        #
+        # **D204's failure is what this observes**, and it was found again in
+        # Run 7 one route along: a router naming a middleware nothing defines is
+        # not created, and the route answers Traefik's own 404 -- which D768
+        # says must never be read as "metrics are not configured". A 404 leaves
+        # this `unavailable`, which is the honest reading of it.
+        metrics_status = observation.await_observation(
+            lambda: observe_docs(rendered["routes"]["metrics"]),
+            lambda observed: observed == "ready",
+        )
+
     if arguments.through_session >= AGENT_PLANE_SESSION:
         mcp_status, mcp_block = observation.await_observation(
             lambda: observe_mcp(
@@ -2267,6 +2338,7 @@ def main(argv: list[str] | None = None) -> int:
         # answer. `publishedRoute` forces a null URL for it, so an unpublished
         # agent plane names no address.
         mcp_status=mcp_status,
+        metrics_status=metrics_status,
         api=api_block,
         jwt=jwt_block,
         # Version 12, in `api_block`'s role: what the agent plane serves, or

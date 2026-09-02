@@ -17,13 +17,14 @@ there are six sessions. This document does not repeat it.
 ## Status — read this first
 
 ```
-SESSION 14 IS IN PROGRESS. Runs 1-6 are DONE. **RUN 7 IS NEXT.**
+SESSION 14 IS IN PROGRESS. Runs 1-7 are DONE. **RUN 8 -- THE HOST TRIP -- IS NEXT.**
 HEAD af90f4e, main, clean and pushed.
-CURRENT_SESSION 13; it moves to 14 in Run 7 -- ALL-OR-NOTHING (D690).
-template_version 0.2.0 -> 0.3.0 there too; ADR 0162 says what that permits.
-divergences     D760-D796 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
-                D774-D781 Run 4; D782-D789 Run 5; D790-D796 Run 6).
-                **Next free: D797.**
+CURRENT_SESSION **14** since Run 7, and template_version **0.3.0**.
+outputs schema **v14**: routes.metrics on both branches (migrate_v13_to_v14).
+divergences     D760-D802 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
+                D774-D781 Run 4; D782-D789 Run 5; D790-D796 Run 6;
+                D797-D802 Run 7).
+                **Next free: D803.**
 ADRs            169. **Next free: 0170.** This session has written 0164 (the
                 metrics surface), 0165 (a telemetry component's memory limit),
                 0166 (the trace id is the request id), 0167 (a metric reads
@@ -85,7 +86,7 @@ correlation). This session extends that family and opens `CAP-*`.
 Six columns, the house shape. **Every row is a fact measured against the tree and
 the live host at planning time**, not a prediction.
 
-**Next free number after this table is D797.**
+**Next free number after this table is D803.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -126,6 +127,12 @@ the live host at planning time**, not a prediction.
 | **D794** | An envelope reports measured numbers, and a measured number is better than an estimate. | **A measured number taken on the wrong machine is worse than an estimate, because it looks authoritative.** Every number here was taken on an 8 GB development machine; the host is 3,814 MB with no swap and eighteen containers. Some numbers survive that move and some do not, and nothing in the prose distinguishes them. | **A measurement carries a KIND.** `CONFIGURATION` follows from a setting and holds anywhere; `MACHINE` describes the rig. **A `MACHINE` measurement must name its machine among its conditions and a `CONFIGURATION` one must not** -- structural, so it cannot be satisfied by wording. | **D770 in a new place**: a store measured 63 MB and rising on a 7.8 GB rig against 45.6 MB under a real cap, because an unbounded component sizes itself from the machine it lands on. **The first version of the guard was a scan over the measurement's prose and could not tell a stipulated 500 ms input from an observed 476 ms output** -- D464's shape, and it failed on this run's own data before the structural form replaced it. | 0169, 0065, 0066 |
 | **D795** | The envelope is a document in `docs/`, kept current like every other generated page. | **A generated page that goes stale reports the wrong deployment while looking current.** The numbers describe three specific image digests, and `--check` comparing the document to its own renderer cannot see that the images beneath it moved. | **The document records the digests it was measured against, and `--check` fails when one has moved, NAMING which.** Pinned to three images rather than the whole lock -- and a **missing** digest counts as stale rather than as unchanged. | **D700's shape, guarded before the fact rather than after.** A `backup_state` computed twice published `failing` for every project and survived two sessions because it failed safe. This one would fail *comfortably*: an envelope describing a superseded PostgREST reads exactly like an envelope describing the current one. **And the drift is real** -- `traefik:v3.7` moved twice inside this session (D787), while none of the three measured images moved at all, which is precisely why the pin is narrow. | 0169 |
 | **D796** | Run 6 measures pooled clients, REST reads and writes, MCP reads and writes, and backup behaviour under load. | **Two of the four are measurable off-host and two are not.** MCP needs the whole agent plane -- the auth service, a signed token, the capability contract and a live audit table -- which is a deployment rather than a rig. Backup under load needs the R2 repository, reached with a credential this machine does not hold **and must not be given**. | **Two measured, two listed as unmeasured with the reason and what unblocks each**, and a test asserts the list is non-empty. Timeout and pool tuning is a third entry: **nothing was tuned**, deliberately. | **An envelope silently missing the scenarios nobody could run reads as an envelope of the whole system** -- §7's predicted failure, arriving as a document that looks complete rather than as a claim that is false. **The day the list is empty is a claim in itself** and must be made deliberately rather than by deletion, which is why its emptiness is what the test refuses. | 0169 |
+| **D797** | Run 2 published `/metrics` behind a per-project basic-auth middleware, so the route is guarded. | **The middleware was named and never defined.** `naming.metrics_credential_middleware_name` derives it, the router label interpolates it, `secrets.required.yaml` declares `metrics_basic_auth_password` with a root-plane consumer — and `edge_credentials.middleware_document` builds **one** middleware, the documentation one. Measured against the locked Traefik with three live arms: a naked route answers **200**, a route with a defined middleware answers **401**, and a route naming a missing one answers **404** while Traefik logs *"middleware … does not exist"*. | **The document defines both**, each with its own user, hash and realm, and `removeHeader` on both — the collector holds no credential and the header must not reach it. Colliding names are refused: a dict has one entry per key, so a collision would leave one credential guarding both routes with nothing reporting it. | **This is D204 one route along, and the function it happened to is the one written because of it.** `publish_docs_credential`'s own docstring says *"the middleware every documentation router names did not exist — and Traefik does not create a router whose middleware is undefined. The route answered the edge's own 404."* Run 2 added a router; the function written for that failure was not extended. **It fails CLOSED, which is the good half** — the surface was never served unprotected. The bad half is the symptom: a 404, which D768 says must never be read as "metrics are not configured", and which D186/D187 say is indistinguishable from a routed 404 without the access log. | 0086, 0164 |
+| **D798** | The outputs schema is bumped to v14 and the renderer emits the new field. | **There are TWO constants for one version.** `output_migrations.CURRENT_VERSION` is what documents migrate *to*; `deployed_output.SCHEMA_VERSION` is what the renderer *writes*. Moving only the first produced a render that emitted `schema_version: 13` into a schema whose enum is `[14]`. | **Both moved, and `test_current_version_agrees_with_the_renderer` already existed to refuse a disagreement** — it is the guard that would have caught this had the render not caught it first. | **The render DID catch it, and I nearly missed that it had**: `deploy.sh --render-only` exited 2 with a validation error, and the first reading of the output was a `tail` that showed the fixture listing from the *previous* successful render. **That is the same family as CLAUDE.md's "never pipe a gate into `tail`"** — the pipeline's exit status is the tail's, and here the visible output belonged to a run that had already finished. | 0004 |
+| **D799** | A new Compose variable is an ordinary change; the contract fixtures detect their own staleness. | **`rendered_fixtures.py` says in its own docstring that this exact case is the hole**, and D786 recorded it firing for the first time in Run 5. It fired again here, larger: adding `routes.metrics` and `metrics_status` made **71 tests fail and 24 error** across nine modules, in shapes that read as broken code rather than as stale fixtures. | **Re-render, which is the documented remedy**, and the triage was done by grouping failures by distinct message rather than by reading them one at a time — 71 failures came from six distinct causes. | **The hole is that `schema_version` is a PROXY**: it catches a fixture predating an outputs migration and nothing else. A version bump moves it, so this run's fixtures *were* detected — but the same bump also changed a signature, and a `TypeError` from a stale fixture is indistinguishable from a `TypeError` from a wrong edit. **The remedy is cheap and the diagnosis is not**, which is the cost this row records. | 0073 |
+| **D800** | Run 7 derives `bin/session-14-check.sh` by diff from Session 13's, whose printed session numbers all derive from `${SESSION}`. | **Eleven references to `session-13-check` came through the diff** — in the usage block an operator copies from, and in every message the gate prints about itself. **D751's guard does not catch them and is right not to**: it is scoped to numbers an operator *types* (`--session N`, an evidence filename), because a gate saying *"Session 10 releases no migration"* is stating a fact about history. | **The gate's own NAME is derived too**: `readonly PROGRAM="session-${SESSION}-check"`, with the usage block's three script-naming lines lifted out of the single-quoted heredoc — which must stay quoted, because it carries a `$(sudo python3 -c …)` example an operator copies and an unquoted heredoc would RUN it while printing help. | **D505, D507, D678 and D693 are four instances of a derivation-by-copy dropping what nobody re-reads, and this is the fifth.** The guard written after the fourth is correctly scoped and therefore silent here: a program's own name is a third category, neither a typed argument nor a historical fact. **A gate that tells an operator to run `bin/session-13-check.sh` from a Session 14 release is the same failure D703 repaired by hand**, in the one place a guard was not looking. | 0006 |
+| **D801** | A mutation battery reports which of a run's assertions can fail. | **The battery's own classifier reported a clean failure as an ERROR and a mis-aimed mutation as a survivor.** It keyed on `"ERROR" in stdout`, which matches any traceback containing `ManifestError`; and one retargeting script exited on a bad anchor *before writing*, so a mutation kept pointing at a test that does not read it. First pass: one killed, four survived, two false kills. | **Classification reads pytest's final counts line and nothing else**, and every mutation was re-aimed at a test that reads the mutated code. Eight of eight killed on the second pass. | **The apparatus was the defect, inside the apparatus written to find defects** (CLAUDE.md §7's standing pattern). **D386 is the rule it broke** — a battery must distinguish FAILED from ERROR, and one reading the wrong text distinguishes neither. The survivors were the informative half regardless: they were mis-aimed, and re-aiming them is what revealed that **Run 7 had repaired D204's recurrence and guarded none of it**. | — |
+| **D802** | Run 7 fixes the metrics middleware, so the repair is done. | **The repair had no test, and four mutations proved it.** The middleware could go undefined again, `removeHeader` could be turned off, the two routes could share a name, and the metrics user could silently become the documentation one — with nothing red for any of it. | **Four tests added**, derived from `naming` on both sides so a rename moves both, and each is now a mutation target that dies. | **A repair is exactly as durable as the memory of having made it.** D204 was repaired in Session 5 and recurred in Session 14 because the *function* was fixed and the *class* was not guarded — and this run reproduced the shape at one remove by fixing the second route and guarding neither. **The battery is the only reason it is not a third recurrence waiting.** | 0086 |
 ---
 
 ## 2. What Session 14 adds to the acceptance registry
@@ -644,6 +651,66 @@ makes re-measuring visible rather than optional.
 `bin/session-14-check.sh` **derived by diff** from Session 13's — registered in
 `SHELL_COMMANDS`, and **its printed session numbers derived from `${SESSION}`**,
 which Session 13 made possible and which the D751 guard now enforces.
+
+**Done.** — D797–D802. **No new ADR, and that is a decision rather than an
+omission**: ADR 0021 says applying an existing decision to a new subject is not
+a new ADR. The middleware repair applies ADR 0086 (the hash is inline, so a
+rotation changes the document the provider parses) and ADR 0164 (the metrics
+credential, and that nothing in the metrics plane holds it) to the route they
+were written for; ADR 0162 already decides what a minor bump permits.
+
+**The bump landed as one commit, which is what all-or-nothing means** (D690).
+`CURRENT_SESSION` 14, `VERSION` 0.3.0, outputs schema **v14** with a
+`migrate_v13_to_v14` step and `routes.metrics` on both branches, four
+requirements activated with proofs, four claims, and
+`bin/session-14-check.sh` derived by diff and registered in `SHELL_COMMANDS`.
+
+**Each claim is `live_host` and each has a live proof**, which `claim_mode`
+requires: a claim whose every test runs in a checkout raises *"no deployment is
+being measured"*. `CAP-ENV-001`'s live half is what §7 asked for — it compares
+the envelope's **configuration-determined** claims against the deployment's own
+rendered settings, so the claim cannot go green because a document exists. Its
+milliseconds are deliberately not compared; they describe the rig (ADR 0169).
+
+**D797 is the run's finding and it is D204 one route along.** Run 2 named a
+metrics middleware, derived it, declared its secret and interpolated it into the
+router label — and `edge_credentials.middleware_document` built **one**
+middleware, the documentation one. Measured with three live arms against the
+locked Traefik: naked route **200**, defined middleware **401**, missing
+middleware **404** with *"middleware … does not exist"* in the log. **It fails
+closed** — the surface was never served unprotected — but the symptom is a 404,
+exactly what D768 forbids reading as "metrics are not configured". **The
+function this happened to is `publish_docs_credential`, which exists because the
+same thing happened to the documentation route in Session 5.**
+
+**D802 is the same shape at one remove, committed by this run.** The repair had
+no test, and four mutations proved it: the middleware could go undefined again,
+`removeHeader` could be turned off, both routes could share a name, and the
+metrics user could silently become the documentation one — nothing red for any
+of it. **A repair is exactly as durable as the memory of having made it.**
+
+**Eight mutations, all killed — after the battery itself was repaired** (D801).
+The first pass reported one kill, four survivors and two false kills, and every
+one of those was the apparatus: the classifier keyed on `"ERROR" in stdout`,
+which matches any traceback containing `ManifestError`, and a retargeting script
+exited on a bad anchor *before writing*, leaving a mutation aimed at a test that
+does not read it. **The apparatus was the defect inside the apparatus written to
+find defects**, which is §7's standing pattern — and the survivors were the
+informative half anyway, because re-aiming them is what exposed D802.
+
+**Two things the bump broke that were caught rather than discovered.** The two
+version constants (D798) — the renderer writes `deployed_output.SCHEMA_VERSION`
+and migrations reach `output_migrations.CURRENT_VERSION`, and a guard for their
+disagreement already existed. And the contract fixtures (D799): 71 failures and
+24 errors across nine modules, from **six** distinct causes, in the hole
+`rendered_fixtures.py` documents and D786 recorded firing for the first time in
+Run 5.
+
+**Not done, and named rather than implied:** nothing is deployed. The four live
+proofs skip without a host and run at Run 8, which is where `OPS-METRIC-001`'s
+401/200 pair, `OPS-ALERT-001`'s two halves and `CAP-ENV-001`'s comparison are
+first measured against a deployment. **The gate has not been run** — it belongs
+before the trip, not at a run close.
 
 ### Run 8 — The host trip
 

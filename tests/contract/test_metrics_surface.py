@@ -270,6 +270,106 @@ def test_the_metrics_entrypoint_is_not_published_to_the_host() -> None:
 
 
 # ---------------------------------------------------------------------------
+# The credential in front of the route (D204, one route along)
+# ---------------------------------------------------------------------------
+
+BCRYPT_SHAPED = "$2y$05$" + "a" * 53
+
+
+def _document(**overrides):
+    from agentic_postgres import edge_credentials
+
+    arguments = {
+        "middleware_name": naming.docs_credential_middleware_name("alpha"),
+        "project_key": "alpha",
+        "hashed": BCRYPT_SHAPED,
+        "metrics_middleware_name": naming.metrics_credential_middleware_name("alpha"),
+        "metrics_hashed": BCRYPT_SHAPED,
+        **overrides,
+    }
+    return edge_credentials.middleware_document(**arguments)
+
+
+def test_the_metrics_router_names_a_middleware_the_deploy_defines() -> None:
+    """D204, found again one route along, and guarded this time.
+
+    `publish_docs_credential` existed because *"the middleware every
+    documentation router names did not exist -- and Traefik does not create a
+    router whose middleware is undefined."* Run 2 added a metrics router naming
+    a second middleware and the function written for that failure was not
+    extended, so the failure was waiting one route along.
+
+    **Measured, with both controls live**: a router whose middleware is missing
+    is refused and the route answers Traefik's own 404 -- 200 for a naked
+    pass-through, 401 for a defined middleware, 404 for the missing one. It
+    fails CLOSED, which is the good half. The bad half is that a 404 is exactly
+    what D768 forbids reading as "metrics are not configured".
+
+    Derived from `naming` on both sides so a renamed middleware moves both.
+    """
+    defined = set(_document()["http"]["middlewares"])
+    assert naming.metrics_credential_middleware_name("alpha") in defined
+    assert naming.docs_credential_middleware_name("alpha") in defined
+
+
+def test_the_metrics_credential_does_not_reach_the_collector() -> None:
+    """`removeHeader`, and ADR 0164 is why it is not optional.
+
+    The collector holds no credential of any kind. Without this clause the
+    `Authorization` header travels to it on every scrape of the route -- the
+    same clause, and the same reason, that keeps the documentation credential
+    out of the documentation service (SEC-DOCS-001).
+    """
+    from agentic_postgres import edge_credentials
+
+    metrics = _document()["http"]["middlewares"][
+        naming.metrics_credential_middleware_name("alpha")
+    ]["basicAuth"]
+
+    assert metrics["removeHeader"] is True, (
+        "the metrics credential would travel to the collector, which is the one "
+        "container that must hold none"
+    )
+    assert metrics["users"][0].startswith(f"{edge_credentials.METRICS_USER}:"), (
+        "the metrics middleware is checking the documentation user"
+    )
+    assert "usersFile" not in metrics, "the indirection D252 was caused by is back"
+
+
+def test_the_two_credentials_may_not_share_one_middleware_name() -> None:
+    """One would silently replace the other in the document Traefik parses.
+
+    A dict has one entry per key, so a collision is not an error anywhere --
+    the survivor guards both routes with one credential, and the rotation of
+    either appears to work.
+    """
+    from agentic_postgres.config import ManifestError
+
+    shared = naming.docs_credential_middleware_name("alpha")
+    with pytest.raises(ManifestError, match="share the name"):
+        _document(metrics_middleware_name=shared)
+
+
+def test_the_rendered_document_names_the_metrics_route() -> None:
+    """The route reaches `outputs.json`, which is where everything reads it.
+
+    ADR 0005 called a reserved path *"a promise the platform makes about a route
+    it will one day own"*, and a route the deployed document does not name is a
+    promise nothing can find. Read from a real render rather than from the
+    renderer's source, because what matters is the document.
+    """
+    import json
+
+    document = json.loads(
+        (REPO_ROOT / ".generated" / "fixture-alpha-dev" / "outputs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert document["routes"]["metrics"].startswith("https://")
+    assert document["routes"]["metrics"].endswith(naming.METRICS_ROUTE_PATH)
+
+
+# ---------------------------------------------------------------------------
 # What a label may be
 # ---------------------------------------------------------------------------
 

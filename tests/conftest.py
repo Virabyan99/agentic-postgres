@@ -143,6 +143,13 @@ ENVIRONMENT_VARIABLES = (
     "APG_FRESH_HOST_OUTPUTS",
     "APG_REMOVED_PROJECT_FILE",
     "APG_DX_RECORD_FILE",
+    # Session 14. Which alert an operator induced, declared rather than
+    # asserted: a test cannot stop a container and survive to report the
+    # result, and one that could would be a test that mutates a deployment
+    # in order to prove a rule. The file names WHICH alert, because three
+    # rules watch three different hops and one firing when another was
+    # induced is the conflation D784 measured.
+    "APG_INDUCED_ALERT_FILE",
 )
 
 
