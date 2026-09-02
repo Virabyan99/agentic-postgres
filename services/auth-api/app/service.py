@@ -18,6 +18,7 @@ from typing import Any
 from uuid import UUID
 
 import jwt
+import psycopg
 
 from app import claims as claim_contract
 from app import keys as key_module
@@ -67,6 +68,18 @@ class Principal:
     role_name: str
     scopes: list[str]
     state: SubjectState
+
+
+#: How long an agent's secret is accepted, and the bounds a caller may name
+#: inside (ADR 0172). Ninety days.
+#:
+#: **Enforced at VERIFICATION, not at issuance.** An expiry consulted only when a
+#: credential is minted constrains the mint and nothing else -- the credential it
+#: produced outlives the rule. `agent_token` reads `secret_expired`, which the
+#: database computes against its own clock.
+AGENT_SECRET_TTL_SECONDS = 90 * 24 * 60 * 60
+AGENT_SECRET_TTL_MIN_SECONDS = 60 * 60
+AGENT_SECRET_TTL_MAX_SECONDS = 365 * 24 * 60 * 60
 
 
 class AuthService:
@@ -439,10 +452,35 @@ class AuthService:
             raise AuthenticationFailed("secret mismatch")
         if credential.status != "active":
             raise AuthenticationFailed(f"agent is {credential.status}")
+        if credential.secret_expired:
+            # **After the hash comparison, beside the status check** (ADR 0172).
+            # An expired credential costs the same Argon2 verification as a wrong
+            # secret and answers with the same bytes, so it is indistinguishable
+            # from an unknown agent -- which is what the ordering above exists to
+            # guarantee and what a check before the hash would destroy.
+            raise AuthenticationFailed("agent secret has expired")
 
         # (S106 matches on the argument name; "agent" is a token_use
         # discriminator from the claim contract, published in every token.)
         return self.issue(self._as_credential(credential), token_use="agent")  # noqa: S106
+
+    @staticmethod
+    def agent_secret_deadline(ttl_seconds: int | None) -> datetime:
+        """When a secret minted now stops being accepted.
+
+        A caller may name a lifetime inside the bounds, which is what makes the
+        expiry configurable rather than a constant with a comment. Out of bounds
+        is a refusal rather than a clamp: silently shortening a lifetime an
+        administrator asked for would produce agents expiring at a moment nobody
+        chose.
+        """
+        seconds = AGENT_SECRET_TTL_SECONDS if ttl_seconds is None else ttl_seconds
+        if not AGENT_SECRET_TTL_MIN_SECONDS <= seconds <= AGENT_SECRET_TTL_MAX_SECONDS:
+            raise InvalidRequest(
+                f"a secret lifetime of {seconds}s is outside "
+                f"{AGENT_SECRET_TTL_MIN_SECONDS}s..{AGENT_SECRET_TTL_MAX_SECONDS}s"
+            )
+        return datetime.now(UTC) + timedelta(seconds=seconds)
 
     @staticmethod
     def _as_credential(agent: AgentCredential) -> Credential:
@@ -473,6 +511,7 @@ class AuthService:
         role_suffix: str,
         scopes: list[str],
         owner_id: UUID,
+        ttl_seconds: int | None = None,
     ) -> tuple[UUID, str]:
         """Returns the id AND the secret, once.
 
@@ -492,12 +531,24 @@ class AuthService:
             scopes=checked,
             owner_id=owner_id,
             secret_hash=hashed,
+            expires_at=self.agent_secret_deadline(ttl_seconds),
         )
         return agent_id, secret
 
-    async def rotate_agent_secret(self, agent_id: UUID) -> tuple[str, int] | None:
+    async def rotate_agent_secret(
+        self, agent_id: UUID, ttl_seconds: int | None = None
+    ) -> tuple[str, int] | None:
+        """A new secret with a fresh deadline -- and the way back from `revoked`.
+
+        Since ADR 0172 this also clears a revocation, in the same transaction as
+        the new secret. That is what makes refusing `revoked -> active` safe: the
+        agent never becomes active holding the credential its revocation was the
+        response to.
+        """
         secret, hashed = await self._mint_secret()
-        version = await self.repository.rotate_agent_secret(agent_id, hashed)
+        version = await self.repository.rotate_agent_secret(
+            agent_id, hashed, self.agent_secret_deadline(ttl_seconds)
+        )
         return None if version is None else (secret, version)
 
     async def set_agent_authorization(
@@ -517,7 +568,21 @@ class AuthService:
             # credential. Accepting the other vocabulary here would let a caller
             # write a state the column cannot hold and find out from a 500.
             raise InvalidRequest("status must be 'active' or 'revoked'")
-        return await self.repository.set_agent_status(agent_id, status)
+        try:
+            return await self.repository.set_agent_status(agent_id, status)
+        except psycopg.Error as exc:
+            # **Translated from the product's own errcode, never relayed**
+            # (ADR 0139, D433). `PT409` is what 0025 raises for the one refused
+            # transition, and the administrator asking for it is told which
+            # operation does work -- this is the `InvalidRequest` case whose
+            # message is deliberately specific, like the password policy's,
+            # because the caller is an operator acting on their own deployment.
+            if getattr(exc.diag, "sqlstate", None) != "PT409":
+                raise
+            raise InvalidRequest(
+                "a revoked agent is reinstated by rotating its secret, which issues a "
+                "new one and clears the revocation in a single operation (ADR 0172)"
+            ) from exc
 
     async def _mint_secret(self) -> tuple[str, str]:
         """A one-time secret and its verifier.

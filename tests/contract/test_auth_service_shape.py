@@ -887,3 +887,99 @@ def test_the_healthcheck_asks_the_path_the_application_serves(
     assert any(path in command for path in served), (
         f"the healthcheck asks for a path the application does not serve: {command}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Two guards the Run 4 battery asked for (D843)
+#
+# Both mutations SURVIVED, and both survived for the same reason: a docstring
+# claimed a property its body did not check. That is D374's shape -- a test
+# passing for an unrelated reason -- and the battery is the only thing that
+# distinguishes it from coverage.
+# ---------------------------------------------------------------------------
+
+
+def _function(source: ast.Module, name: str) -> ast.AST:
+    for node in ast.walk(source):
+        if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"{name} is gone from the service")
+
+
+def test_every_state_check_happens_after_the_hash_comparison() -> None:
+    """The ordering that makes four failures cost the same (ADR 0172, D843).
+
+    `login` and `agent_token` both verify the credential BEFORE consulting
+    status or expiry, so an unknown subject, a wrong secret, a disabled account
+    and an expired credential all pay one Argon2 comparison and answer in the
+    same time. Reversing it makes the cheap cases measurable from outside, and
+    an attacker who can time a request can then enumerate which agent ids exist.
+
+    **The battery is why this exists.** Moving the expiry check above the hash
+    changed no status code and no response body, so the endpoint test that
+    asserted those two things stayed green -- while the property its docstring
+    claimed was gone. Asserted over the AST rather than the text, because the
+    subject is an ORDER of statements and a string scan cannot see one.
+    """
+    source = ast.parse(
+        (REPO_ROOT / "services" / "auth-api" / "app" / "service.py").read_text("utf-8")
+    )
+
+    for name, checks in (
+        ("login", ("status",)),
+        ("agent_token", ("status", "secret_expired")),
+    ):
+        body = _function(source, name)
+        # `max`, not `min`. `agent_token` verifies TWICE -- once against the
+        # dummy in the non-UUID branch, which exists for this very timing
+        # property -- and that call is earlier than the lookup. Anchoring on the
+        # first one let a state check inserted after the lookup compare as
+        # "after a verify", and the mutation survived. Every state read must
+        # follow EVERY verify.
+        verify_line = max(
+            node.lineno
+            for node in ast.walk(body)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "verify"
+        )
+        for attribute in checks:
+            reads = [
+                node.lineno
+                for node in ast.walk(body)
+                if isinstance(node, ast.Attribute) and node.attr == attribute
+            ]
+            assert reads, f"{name} no longer reads {attribute}"
+            assert min(reads) > verify_line, (
+                f"{name} reads `{attribute}` at line {min(reads)}, before the credential is "
+                f"verified at line {verify_line}. The cheap failures become measurable by "
+                "timing, and an id that exists becomes distinguishable from one that does not"
+            )
+
+
+def test_the_agent_expiry_column_has_no_default_so_it_does_not_backfill() -> None:
+    """The migration's decision, asserted where a future edit would undo it (D843).
+
+    `ADD COLUMN ... DEFAULT` **backfills every existing row** -- so a DEFAULT
+    here would give a deadline to credentials already in use and expire agents
+    whose operators were never told the rule changed. The column is added bare
+    and the two functions that issue a secret supply the value.
+
+    **The battery is why this exists.** Adding a DEFAULT left every endpoint
+    test green, because those fixtures create their agents after the migration
+    has run and never observe a backfill. The only reader that can see this is
+    one that reads the `ALTER`.
+    """
+    migration = (
+        REPO_ROOT / "migrations" / "templates" / "0025-agent-credential-lifecycle.sql"
+    ).read_text(encoding="utf-8")
+
+    alter = re.search(
+        r"ALTER TABLE app_private\.agent_credentials\s*\n\s*ADD COLUMN expires_at[^;]*;",
+        migration,
+    )
+    assert alter, "the expires_at column is no longer added by 0025"
+    assert "DEFAULT" not in alter.group(0), (
+        "expires_at gained a column DEFAULT, which backfills every existing row and "
+        f"expires credentials issued before this release: {alter.group(0)!r}"
+    )

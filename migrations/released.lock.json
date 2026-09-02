@@ -283,6 +283,17 @@
       "template": "templates/0024-refresh-session-functions.sql",
       "template_sha256": "7db5cd4c6e936bd74a288e58f47b7feb81782e7eb1168ce3c17fe1b86dce667e",
       "version": "20260903120024"
+    },
+    {
+      "canonical_render_sha256": "72c3cb5cf43410ede7a9f9f249e9040f23d2aba9e42dd195bf169ce2b311a250",
+      "name": "agent_credential_lifecycle",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0025-agent-credential-lifecycle.sql",
+      "template_sha256": "c847ceeea9ab39849da6dca542408d6596301db3de45c1b9bf499885502b7fae",
+      "version": "20260903120025"
     }
   ],
   "schema_version": 1

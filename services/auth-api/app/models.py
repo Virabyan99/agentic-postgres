@@ -263,6 +263,16 @@ class CreateAgentRequest(_Strict):
     description: str = Field(default="", max_length=DISPLAY_NAME_MAX)
     role: str = Field(min_length=1, max_length=64)
     scopes: list[str] = Field(min_length=1, max_length=32)
+    #: How long this agent's secret is accepted, in seconds. Omitted means the
+    #: deployment's default (ADR 0172). Out of bounds is a refusal rather than a
+    #: clamp: silently shortening a lifetime an administrator asked for produces
+    #: agents expiring at a moment nobody chose.
+    secret_ttl_seconds: int | None = Field(default=None, ge=1)
+    #: How long this agent's secret is accepted, in seconds. Omitted means the
+    #: deployment's default (ADR 0172). Out of bounds is a refusal rather than a
+    #: clamp: silently shortening a lifetime an administrator asked for produces
+    #: agents expiring at a moment nobody chose.
+    secret_ttl_seconds: int | None = Field(default=None, ge=1)
 
 
 class UpdateAgentRequest(_Strict):

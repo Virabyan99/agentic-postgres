@@ -701,6 +701,14 @@ async def list_agents(request: Request) -> Response:
                         "status": row["status"],
                         "authz_version": row["authz_version"],
                         "owner_id": str(row["owner_id"]),
+                        # An expiry an operator cannot see is an outage with a
+                        # countdown (ADR 0172). Null for a credential issued
+                        # before Session 15, which does not expire.
+                        "secret_expires_at": (
+                            row["secret_expires_at"].isoformat()
+                            if row["secret_expires_at"]
+                            else None
+                        ),
                     }
                     for row in rows
                 ]
@@ -739,6 +747,10 @@ async def create_agent(request: Request) -> Response:
             # is accountable for, and taking the owner from the request would let
             # an administrator create one in somebody else's name.
             owner_id=principal.user_id,
+            # Omitted means the deployment's default (ADR 0172). Out of bounds is
+            # refused rather than clamped, so a lifetime an administrator asked
+            # for is never silently shortened.
+            ttl_seconds=payload.secret_ttl_seconds,
         )
         return JSONResponse(
             {

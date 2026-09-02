@@ -463,6 +463,18 @@
                     "minItems": 1,
                     "title": "Scopes",
                     "type": "array"
+                  },
+                  "secret_ttl_seconds": {
+                    "anyOf": [
+                      {
+                        "minimum": 1.0,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Secret Ttl Seconds"
                   }
                 },
                 "required": [

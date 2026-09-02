@@ -64,6 +64,9 @@ class AgentCredential:
     status: str
     authz_version: int
     secret_hash: str | None
+    #: Computed by the DATABASE against its own clock (ADR 0172), never a
+    #: timestamp this process compares. One clock in the decision, no skew.
+    secret_expired: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,8 +232,8 @@ class Repository:
         there is no normalisation here and no guessable half of the credential.
         """
         row = await self._one(
-            "SELECT agent_id, role_name, scopes, status, authz_version, secret_hash "
-            "FROM app_private.auth_lookup_agent(%s)",
+            "SELECT agent_id, role_name, scopes, status, authz_version, secret_hash, "
+            "secret_expired FROM app_private.auth_lookup_agent(%s)",
             (agent_id,),
         )
         if row is None:
@@ -242,6 +245,7 @@ class Repository:
             status=row["status"],
             authz_version=row["authz_version"],
             secret_hash=row["secret_hash"],
+            secret_expired=bool(row["secret_expired"]),
         )
 
     async def list_agents(self) -> list[dict[str, Any]]:
@@ -256,18 +260,27 @@ class Repository:
         scopes: list[str],
         owner_id: UUID,
         secret_hash: str,
+        expires_at: datetime | None,
     ) -> UUID:
         row = await self._one(
-            "SELECT app_private.auth_create_agent(%s, %s, %s, %s, %s, %s) AS agent_id",
-            (name, description, role_name, scopes, owner_id, secret_hash),
+            "SELECT app_private.auth_create_agent(%s, %s, %s, %s, %s, %s, %s) AS agent_id",
+            (name, description, role_name, scopes, owner_id, secret_hash, expires_at),
         )
         assert row is not None
         return row["agent_id"]
 
-    async def rotate_agent_secret(self, agent_id: UUID, secret_hash: str) -> int | None:
+    async def rotate_agent_secret(
+        self, agent_id: UUID, secret_hash: str, expires_at: datetime | None
+    ) -> int | None:
+        """A new secret, its deadline, and the revocation cleared (ADR 0172).
+
+        Clearing the revocation here is what makes refusing `revoked -> active`
+        safe: without it an agent revoked by mistake would be permanently dead
+        (D839).
+        """
         row = await self._one(
-            "SELECT app_private.auth_rotate_agent_secret(%s, %s) AS version",
-            (agent_id, secret_hash),
+            "SELECT app_private.auth_rotate_agent_secret(%s, %s, %s) AS version",
+            (agent_id, secret_hash, expires_at),
         )
         return None if row is None else row["version"]
 

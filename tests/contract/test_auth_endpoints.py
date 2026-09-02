@@ -1688,6 +1688,17 @@ def test_an_unauthenticated_caller_learns_nothing_about_the_parameters(drive: An
 # ---------------------------------------------------------------------------
 
 
+def _agent_status(drive: Any, admin: str, agent_id: str) -> str:
+    """The status as the admin surface reports it.
+
+    Read from the listing rather than from `_agent_claims`, which returns what
+    the ISSUER reads -- role, scopes, authz_version -- and deliberately not a
+    status, because a token's claims are not where a status is checked.
+    """
+    rows = drive("GET", "/admin/agents", headers={"Authorization": f"Bearer {admin}"}).json()
+    return next(r for r in rows["agents"] if r["agent_id"] == agent_id)["status"]
+
+
 def _agent_claims(cluster: dict[str, Any], agent_id: str) -> dict[str, Any]:
     """An agent token's claims, read from the registry the way the issuer reads them.
 
@@ -1760,10 +1771,10 @@ def test_a_revoked_agents_existing_token_stops_at_the_authoritative_check(
     assert "AP401" in after.stderr, after.stderr[:400]
 
 
-def test_the_status_type_admits_no_third_state_and_terminality_is_UNENFORCED(
+def test_the_status_type_admits_no_third_state_and_revocation_is_terminal(
     drive: Any, cluster: dict[str, Any]
 ) -> None:
-    """D472's half that holds, and D503 -- the half that does not.
+    """D472's half that always held, and D503's half -- closed in Session 15.
 
     `app_private.agent_status` is a TWO-value enum, because 0011 decided that
     *"a user is `disabled` by an administrator and can be re-enabled; an agent
@@ -1772,15 +1783,22 @@ def test_the_status_type_admits_no_third_state_and_terminality_is_UNENFORCED(
     migration text: what a release ships is the type, and a comment in a file is
     not a constraint.
 
-    **Which is exactly what this test found.** The enum is what stops a third
-    state existing. Nothing stops the SECOND transition: `auth_set_agent_status`
-    is an unguarded `UPDATE`, so `revoked -> active` is legal and answers 200.
-    "Terminal" was stated in a comment and enforced by nothing, for three
-    sessions, while the requirement whose proof it claims to be sat as a
-    placeholder.
+    **Which is exactly what this test found**, and said what to do about it:
+    the enum stopped a third state existing, and nothing stopped the SECOND
+    transition. `auth_set_agent_status` was an unguarded `UPDATE`, so
+    `revoked -> active` answered 200 -- "terminal" stated in a comment and
+    enforced by nothing for six sessions.
 
-    CLAUDE.md section 6's first question, asked of a comment rather than a test:
-    what would have to break for this to go red? Until Run 7, nothing.
+    **This is the day the previous version named.** It ended *"un-revoking is
+    now refused, which is a product change. If it was intended, invert this
+    assertion and close D503; the guard belongs in a migration."* The guard is
+    migration 0025 and ADR 0172 authorises this replacement -- which is the only
+    way a passing test changes here.
+
+    **What the measurement found before the guard was written** (D838): the
+    transition returned 200 and the ORIGINAL secret authenticated again. So
+    revocation freed no credential, and un-revoking silently restored whatever
+    the revocation was the response to.
     """
     values = cluster["cluster"].psql(
         "SELECT string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder) "
@@ -1807,36 +1825,65 @@ def test_the_status_type_admits_no_third_state_and_terminality_is_UNENFORCED(
         )
         assert response.status_code == 200, response.text
 
-    # **And here is what the product actually does** (D503). Measured in Run 7:
-    # setting a revoked agent back to `active` answers 200 and the agent works
-    # again. Nothing enforces the terminality 0011's comment states -- the enum
-    # stops `disabled` from existing, and `auth_set_agent_status` is a plain
-    # `UPDATE ... SET status = p_status` with no transition guard.
-    #
-    # Asserted as it IS, deliberately. Session 9 Run 7 proves revocation rather
-    # than building it (D471, D472), and a guard is a migration and a product
-    # change. The day one lands, this assertion fails and points at its own
-    # premise -- which is the arrangement D500's deployment test uses for the
-    # same reason.
-    restored = drive(
+    # **The transition is refused** (ADR 0172), translated from the product's own
+    # `PT409` rather than relayed (D433). 422 and not 409: the caller is an
+    # administrator whose request was well formed and refused on its content,
+    # which is what `InvalidRequest` means everywhere else in this service.
+    refused = drive(
         "PATCH",
         f"/admin/agents/{agent_id}",
         headers={"Authorization": f"Bearer {admin}"},
         content=json.dumps({"status": "active"}),
     )
-    assert restored.status_code == 200, (
-        "un-revoking is now refused, which is a product change. If it was intended, "
-        "invert this assertion and close D503; the guard belongs in a migration"
+    assert refused.status_code == 422, refused.text
+    assert "rotating its secret" in refused.text, (
+        "the refusal does not name the operation that works, so an operator is told "
+        "no without being told what to do instead"
     )
 
-    # What revocation DOES guarantee, and it is the half that matters: every
-    # status change moves `authz_version`, so no token issued before either
-    # transition survives. Un-revoking restores the SECRET's usefulness -- which
-    # revocation never invalidated -- and resurrects no token.
-    versions = [int(response.json()["authz_version"]) for response in (restored,)]
-    assert versions[0] > initial_version + 2, (
-        "a status change did not move authz_version, which is the part that stops "
-        f"the token: {versions[0]} against {initial_version}"
+    # And the refusal CHANGED NOTHING. A guard that refused and still moved the
+    # row would be worse than no guard, because the operator would believe the
+    # agent was still revoked.
+    assert _agent_status(drive, admin, agent_id) == "revoked"
+
+    # The way back, and it is one operation: a new secret AND the revocation
+    # cleared. Without this the guard above would strand an agent revoked by
+    # mistake -- rotation alone used to leave it revoked with the new secret
+    # refused, which is what D839 measured.
+    rotated = drive(
+        "POST",
+        f"/admin/agents/{agent_id}/rotate-secret",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert rotated.status_code == 200, rotated.text
+    assert _agent_status(drive, admin, agent_id) == "active", (
+        "rotation did not clear the revocation, so refusing the transition leaves an "
+        "agent permanently dead (D839)"
+    )
+
+    exchanged = drive(
+        "POST",
+        "/auth/agent-token",
+        content=json.dumps({"agent_id": agent_id, "secret": rotated.json()["secret"]}),
+    )
+    assert exchanged.status_code == 200, "the reinstated agent cannot use its new secret"
+
+    # The OLD secret is dead, which is the whole point of reinstating by
+    # rotation rather than by flipping the flag.
+    old = drive(
+        "POST",
+        "/auth/agent-token",
+        content=json.dumps({"agent_id": agent_id, "secret": created["secret"]}),
+    )
+    assert old.status_code == 401, (
+        "the pre-revocation secret still works, so reinstatement restored the very "
+        "credential the revocation was the response to"
+    )
+
+    # What revocation always guaranteed, and still does: every status change
+    # moves `authz_version`, so no token issued before one survives.
+    assert int(_agent_claims(cluster, agent_id)["authz_version"]) > initial_version + 2, (
+        "a status change did not move authz_version, which is the part that stops the token"
     )
 
 
@@ -2125,3 +2172,201 @@ def test_refreshing_needs_no_access_token_at_all(drive: Any) -> None:
         content=json.dumps({"refresh_token": issued["refresh_token"]}),
     )
     assert renewed.status_code == 200, renewed.text
+
+
+# ---------------------------------------------------------------------------
+# IDN-AGENT-001 -- the credential expiry (Session 15 Run 4, ADR 0172)
+# ---------------------------------------------------------------------------
+
+
+def _expire_now(cluster: dict[str, Any], agent_id: str) -> None:
+    """Age a credential past its deadline.
+
+    Moved rather than minted expired: `expires_at` is written by the function
+    that issues the secret, and asking it for a deadline in the past would test
+    the request model rather than the verification path.
+    """
+    cluster["cluster"].psql(
+        f'SET ROLE "{cluster["owner"]}"; '  # noqa: S608
+        "UPDATE app_private.agent_credentials "
+        "SET expires_at = pg_catalog.now() - interval '1 second' "
+        f"WHERE agent_id = '{agent_id}'::uuid"
+    )
+
+
+def test_an_expired_agent_secret_is_refused_at_verification(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """The difference between a control and a policy (ADR 0172).
+
+    The credential was valid when it was minted and the exchange still refuses
+    it, because the deadline is consulted at VERIFICATION. An expiry checked
+    only at issuance constrains the mint and nothing else -- the credential it
+    produced outlives the rule, which is the shape this test exists to refuse.
+
+    **The CONTROL is the same agent one moment earlier.** Without it, a test that
+    only ever saw 401 would pass against an agent that never worked at all.
+    """
+    admin = _login(drive).json()["access_token"]
+    created = _create_agent(drive, admin, "expiring-agent")
+    body = json.dumps({"agent_id": created["agent_id"], "secret": created["secret"]})
+
+    before = drive("POST", "/auth/agent-token", content=body)
+    assert before.status_code == 200, f"CONTROL failed, the agent never worked: {before.text}"
+
+    _expire_now(cluster, created["agent_id"])
+
+    after = drive("POST", "/auth/agent-token", content=body)
+    assert after.status_code == 401, "an expired secret was accepted"
+    assert after.json() == {"error": "authentication_failed"}, (
+        "an expired credential is distinguishable from an unknown one, so the exchange "
+        "tells a caller which of its guesses named something real"
+    )
+
+
+def test_an_expired_agent_is_indistinguishable_from_one_that_never_existed(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """Four causes, one answer -- the ordering property, extended to a fifth.
+
+    The expiry check sits AFTER the hash comparison and beside the status check,
+    so an expired credential costs the same Argon2 verification as a wrong
+    secret. A check before the hash would answer in microseconds and make
+    "expired" measurable from outside by timing alone.
+    """
+    admin = _login(drive).json()["access_token"]
+    created = _create_agent(drive, admin, "expired-vs-unknown")
+    _expire_now(cluster, created["agent_id"])
+
+    expired = drive(
+        "POST",
+        "/auth/agent-token",
+        content=json.dumps({"agent_id": created["agent_id"], "secret": created["secret"]}),
+    )
+    unknown = drive(
+        "POST",
+        "/auth/agent-token",
+        content=json.dumps(
+            {"agent_id": "00000000-0000-4000-8000-000000000000", "secret": "whatever"}
+        ),
+    )
+    wrong = drive(
+        "POST",
+        "/auth/agent-token",
+        content=json.dumps({"agent_id": created["agent_id"], "secret": "not-the-secret"}),
+    )
+
+    assert {r.status_code for r in (expired, unknown, wrong)} == {401}
+    assert len({r.content for r in (expired, unknown, wrong)}) == 1, (
+        "expired, unknown and wrong-secret are distinguishable by their bodies"
+    )
+
+
+def test_rotation_gives_an_expired_agent_a_working_credential_again(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """The documented recovery, and it has to reach the deadline as well.
+
+    Rotation that replaced the secret and left the old deadline would produce a
+    credential born expired -- which would look exactly like the rotation not
+    working, and would be diagnosed as anything but a stale timestamp.
+    """
+    admin = _login(drive).json()["access_token"]
+    created = _create_agent(drive, admin, "expired-then-rotated")
+    _expire_now(cluster, created["agent_id"])
+
+    rotated = drive(
+        "POST",
+        f"/admin/agents/{created['agent_id']}/rotate-secret",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert rotated.status_code == 200, rotated.text
+
+    exchanged = drive(
+        "POST",
+        "/auth/agent-token",
+        content=json.dumps({"agent_id": created["agent_id"], "secret": rotated.json()["secret"]}),
+    )
+    assert exchanged.status_code == 200, (
+        "the rotated secret is refused, so rotation did not move the deadline"
+    )
+
+
+def test_a_creator_may_name_a_lifetime_and_an_impossible_one_is_refused(drive: Any) -> None:
+    """Configurable, and refused rather than clamped (ADR 0172).
+
+    Silently shortening a lifetime an administrator asked for would produce
+    agents expiring at a moment nobody chose -- and the operator would have
+    written down the number they requested.
+    """
+    admin = _login(drive).json()["access_token"]
+
+    accepted = drive(
+        "POST",
+        "/admin/agents",
+        headers={"Authorization": f"Bearer {admin}"},
+        content=json.dumps(
+            {
+                "name": "short-lived",
+                "description": "a fixture",
+                "role": "agent_reader",
+                "scopes": ["notes:read"],
+                "secret_ttl_seconds": 7200,
+            }
+        ),
+    )
+    assert accepted.status_code == 201, accepted.text
+
+    listed = drive("GET", "/admin/agents", headers={"Authorization": f"Bearer {admin}"}).json()
+    entry = next(a for a in listed["agents"] if a["name"] == "short-lived")
+    assert entry["secret_expires_at"], (
+        "the listing does not publish the deadline, so an expiry is invisible until it "
+        "fires -- an outage with a countdown"
+    )
+
+    refused = drive(
+        "POST",
+        "/admin/agents",
+        headers={"Authorization": f"Bearer {admin}"},
+        content=json.dumps(
+            {
+                "name": "absurdly-long-lived",
+                "description": "a fixture",
+                "role": "agent_reader",
+                "scopes": ["notes:read"],
+                "secret_ttl_seconds": 60 * 60 * 24 * 4000,
+            }
+        ),
+    )
+    assert refused.status_code == 422, refused.text
+
+
+def test_a_credential_issued_before_this_release_does_not_expire(
+    drive: Any, cluster: dict[str, Any]
+) -> None:
+    """The migration's decision, asserted where it takes effect (ADR 0172).
+
+    `expires_at` was added nullable with no column DEFAULT, because
+    `ADD COLUMN ... DEFAULT` backfills every existing row -- which would have
+    expired agents whose operators were never told the rule changed. NULL reads
+    as "does not expire", and this is the assertion that would fail if somebody
+    later added a DEFAULT for tidiness.
+    """
+    admin = _login(drive).json()["access_token"]
+    created = _create_agent(drive, admin, "pre-release-agent")
+
+    cluster["cluster"].psql(
+        f'SET ROLE "{cluster["owner"]}"; '  # noqa: S608
+        "UPDATE app_private.agent_credentials SET expires_at = NULL "
+        f"WHERE agent_id = '{created['agent_id']}'::uuid"
+    )
+
+    exchanged = drive(
+        "POST",
+        "/auth/agent-token",
+        content=json.dumps({"agent_id": created["agent_id"], "secret": created["secret"]}),
+    )
+    assert exchanged.status_code == 200, (
+        "a credential with no deadline was refused, so upgrading would break every "
+        "agent issued before this release"
+    )

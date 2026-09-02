@@ -17,15 +17,17 @@ not repeat them.
 ## Status — read this first
 
 ```
-SESSION 15 IS IN PROGRESS. **RUNS 1-3 ARE DONE. RUN 4 IS NEXT.**
+SESSION 15 IS IN PROGRESS. **RUNS 1-4 ARE DONE. RUN 5 IS NEXT.**
 HEAD 7d0f123, main, clean and pushed.
 CURRENT_SESSION **14**, template_version **0.3.0**, outputs schema **v14**.
                  It moves to 15 in Run 7, ALL-OR-NOTHING (D690).
-divergences     **Next free: D838.** D812-D820 planning-time, D821-D825 Run 1,
-                D826-D831 Run 2, D832-D837 Run 3.
-ADRs            171. **Next free: 0172.** Run 1 wrote 0170, Run 2 wrote 0171.
-migrations      **24 released.** Run 2 added 0023, Run 3 added 0024.
-                Run 5 adds 0025 (auth_revoke_user_sessions, D837).
+divergences     **Next free: D844.** D812-D820 planning-time, D821-D825 Run 1,
+                D826-D831 Run 2, D832-D837 Run 3, D838-D843 Run 4.
+ADRs            172. **Next free: 0173.** Run 1 wrote 0170, Run 2 wrote 0171,
+                Run 4 wrote 0172 (which closes D503).
+migrations      **25 released.** Run 2 added 0023, Run 3 added 0024,
+                Run 4 added 0025. Run 5 adds 0026
+                (auth_revoke_user_sessions, D837).
                 Fix-forward only; every down block raises AP900.
 claims          82, reporting 107 of 131 requirements.
                 **8 not_run**, carried from Sessions 13 and 14 unchanged.
@@ -80,7 +82,7 @@ thing to diagnose.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 planning time**, not a prediction.
 
-**Next free number after this table is D838.**
+**Next free number after this table is D844.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -111,6 +113,12 @@ planning time**, not a prediction.
 | **D835** | Adding three routes is adding three routes. | **`test_the_application_serves_exactly_the_declared_paths` refused them**: the application served three paths `main.public_paths()` did not declare. Its docstring gives the reason — *"a new path whose author has not said which side of the edge it belongs on fails here rather than appearing on the internet."* | **All three declared, each with the reason it is on that side**, and the two that require a bearer are separated in the comment from the one that must not. | **A route reaches the internet as soon as the edge publishes it, and nothing else in this repository asks the author to say so.** The guard converts an omission into a decision, and it caught this the first time the session plane grew a surface — which is what it was written for. The same run's regenerated artifacts (`contracts/app-openapi.canonical.json`, both fixture renders) are the rest of what a route change touches. | — |
 | **D836** | The grant test asserts that `auth_service` receives EXECUTE on exactly five functions. | **It asserted three.** Its extractor read the migration line by line, and **three of the five GRANTs wrap across lines** — so the parser saw two of them as unrelated fragments, built a smaller set, and the test failed against a migration that was correct. | **The extractor now matches whole `GRANT … ;` statements**, which is what a grant is. | **A parser that misses part of what it checks reports the smaller set as the answer**, and this one failed loudly only because the expected set was written out. Had it been written as *"at least these"*, or had the migration's grants all been single-line at first and wrapped later, it would have gone quiet and kept passing over a shrinking set. **§7's family, in the proof rather than the product**, and the cheapest possible instance of it. | — |
 | **D837** | 0024 ships the session plane's callable surface, so it ships every function the plane will need. | **One of them had no caller.** `auth_revoke_user_sessions` ends every live session a subject has, which is what Run 5's password reset needs — a reset otherwise leaves a refresh chain outliving the password it was obtained with — and nothing in Run 3 calls it. It was written, granted `EXECUTE`, and reached by no code. | **Removed from 0024, from the repository and from the grant set**, with a comment in the migration saying why and where it goes. Run 5 adds it with migration 0025 and the caller that uses it. | **This is 0011's rule, broken in the run AFTER the one that turned it into a contract test.** Run 2 asserted that 0023 issues no grant *because its caller does not exist*, and one run later I granted EXECUTE on a function nobody calls — in the migration whose own header quotes that rule. **The guard did not catch it**: `test_the_migration_issues_no_grant_because_its_caller_does_not_exist_yet` names 0023, so it is a rule for one file rather than for the class. What caught it was re-reading the header while writing the Done marker, which is not a control. | — |
+| **D838** | `revoked → active` answers 200 and nobody has decided whether it should (D503). The open question is a policy choice. | **It restores the ORIGINAL secret.** Measured end to end through the running service against a live cluster: exchange **200** fresh, **401** revoked, **200 again** after re-activation, with `authz_version` at 1, 2, 3. Revocation frees no credential — it flips a flag. The half D503 always called safe is real: a token issued before the revocation is still refused afterwards, because `authz_version` moved twice. | **The transition is refused** (ADR 0172), `AP409`/`PT409`, and only that transition. | **This is not a policy choice, it is a silent restoration.** An operator who revokes because a secret leaked and later re-activates has handed the leaked secret its authority back, and nothing in the API or the record distinguishes that from a deliberate reinstatement. **The measurement is what changed the question** from *"should un-revoking be allowed"* to *"should a revocation be undoable by flipping a flag"*, and those have different answers. | 0172 |
+| **D839** | Refusing `revoked → active` closes D503; rotation is the documented recovery, so the way back already exists. | **Rotation is not a way back.** Measured: rotating a revoked agent answers 200, replaces the secret, moves `authz_version` — and **leaves the agent revoked**, with the new secret refused. So the only path from `revoked` to a working agent was the transition that restores the old secret. | **Rotation clears the revocation**, in the same transaction as the new secret. One operation, so an agent never becomes active holding the credential its revocation answered. | **Refusing the transition alone would have stranded every agent revoked by mistake**, recoverable only by creating a new one with a new id, new grants and a new owner record — and the ADR would have shipped calling that "the documented recovery". **The second measurement is what stopped a correct-sounding decision from being a harmful one**, and it was only taken because the first one made the decision real enough to ask what came next. | 0172 |
+| **D840** | Adding a returned column to a released function is a `CREATE OR REPLACE`. | **It is a `DROP`.** `CREATE OR REPLACE` refuses to widen a `RETURNS TABLE` — **42P13**, measured, with an identical replace accepted as the control. And **a `DROP` takes the grant with it**: a grantee present in `information_schema.routine_privileges` before was absent after the recreate. | **Four functions dropped and recreated in 0025, every grant re-issued**, and the migration says why beside them. | **Forgetting a grant is silent in the migration and a `permission denied for function` at runtime**, on a path the offline suite does not exercise as the service's role. Two measurements, both cheap, both decided the file's shape — and the second is the one that would have shipped broken, because a migration that drops and recreates *looks* complete without it. | 0172, 0091 |
+| **D841** | The existing test asserting `revoked → active` answers 200 must be replaced, which is a weakening a new ADR has to authorise. | **The test asked for this.** It is named `..._terminality_is_UNENFORCED`, and it ends: *"un-revoking is now refused, which is a product change. If it was intended, **invert this assertion and close D503**; the guard belongs in a migration."* | **Inverted exactly as instructed**, renamed to `..._revocation_is_terminal`, and extended to assert the refusal changes nothing, that rotation is the way back, and that the pre-revocation secret is dead afterwards. | **A test that documents the day it will fail, and what to do then, is the cheapest possible handover** — six sessions later the replacement took no archaeology and no judgement about whether the old assertion was load-bearing. **It is the opposite of the defect this project keeps producing**: not a value that looked measured and was not, but an assertion that stated its own premise and named its own expiry. | 0172 |
+| **D842** | An expiry on a credential is a lifecycle field; checking it where the credential is minted is where it belongs. | **That is a policy, not a control.** An expiry consulted only at issuance constrains the mint and nothing else — the credential it produced outlives the rule, and nothing refuses it. | **Enforced at VERIFICATION**, and the database computes `secret_expired` against its own `now()` so there is one clock in the decision. The check sits **after** the hash comparison and beside the status check, so an expired credential costs the same Argon2 verification as a wrong secret and is indistinguishable from an unknown agent. | **The placement is the whole feature.** A test asserting only that an expired secret is refused would pass against a check anywhere in the function, including one that answers in microseconds and makes "this agent exists" measurable by timing — which is precisely what the battery's `M4` demonstrated when it survived. | 0172, 0171 |
+| **D843** | Two mutations survived the Run 4 battery, so the mutations were uninformative. | **Both survived because a docstring claimed a property its body did not check.** `M4` moved the expiry check above the hash: no status changed, no body changed, and the endpoint test asserting those two things stayed green while the timing property its docstring claimed was gone. `M5` added a column `DEFAULT`: every fixture creates its agents *after* the migration, so none can observe a backfill. | **Two guards, both over the construct.** An AST check that every state read follows every `verify`, and a check that the `ALTER` carries no `DEFAULT`. | **And the first guard was itself blind on its first write.** It anchored on `min(verify)`, and `agent_token` verifies twice — the earlier call being the dummy hash that exists *for this very timing property* — so a check inserted after the lookup still compared as "after a verify" and `M4` survived again. `max` is the anchor. **Three layers of the same defect in one run**, each found only by running the mutation rather than reading the guard. | 0172 |
 ---
 
 ## 2. What Session 15 adds to the acceptance registry
@@ -361,6 +369,54 @@ expiry checked only when the credential is minted is a policy, not a control.
 Then **measure** what `revoked → active` currently restores: the row, or the
 credential's ability to authenticate. ADR **0172** follows the measurement
 (D817). Migration 0024 only if the decision needs state.
+
+**Done.** — D838–D843, ADR **0172**, migration **0025**. **D503 is closed, and
+the measurement is what decided how.**
+
+**The plan required the measurement before the decision, and it earned its
+place twice.** The first (D838) turned the question from *"should un-revoking be
+allowed"* into *"should a revocation be undoable by flipping a flag"*: measured
+end to end, `revoked → active` returns 200 and the **original secret
+authenticates again**. Revocation frees no credential.
+
+**The second (D839) stopped a correct-sounding decision from being a harmful
+one.** Rotating a revoked agent replaces the secret, moves `authz_version` — and
+leaves it revoked with the new secret refused. So refusing the transition *alone*
+would have stranded every agent revoked by mistake, and the ADR would have
+shipped calling rotation "the documented recovery" while measurement showed it
+was not one. Rotation now clears the revocation in the same transaction as the
+new secret: one operation, so an agent never becomes active holding the
+credential its revocation answered.
+
+**The expiry is enforced at verification** (D842), after the hash comparison and
+beside the status check, with the database computing `secret_expired` against its
+own clock. Placement is the whole feature: an expiry consulted at issuance
+constrains the mint and nothing else.
+
+**D841 is the one worth keeping for its own sake.** The test that had to change
+is named `..._terminality_is_UNENFORCED` and ends *"if it was intended, invert
+this assertion and close D503; the guard belongs in a migration."* Six sessions
+later the replacement took no archaeology — **a test that names the day it will
+fail, and what to do then, is the cheapest handover this repository has
+produced.**
+
+**The battery is the rest of the run.** Six mutations; **two survived**, and both
+survived for the same reason — a docstring claiming a property its body did not
+check (D843). `M4` moved the expiry check above the hash and changed no status
+and no body; `M5` added a column `DEFAULT`, which no fixture can observe because
+they all create agents after the migration. Two construct-level guards closed
+them — **and the first guard was blind on its first write**, anchoring on
+`min(verify)` when `agent_token` verifies twice, the earlier call being the dummy
+hash that exists for this very timing property. Three layers of one defect,
+each found by running the mutation rather than reading the guard. All six killed
+after the repair.
+
+**Not done, and named:** `IDN-AGENT-001` is not a registered requirement yet —
+the registry entries land with the `CURRENT_SESSION` bump in Run 7 (D690).
+Nothing here has run against the deployment; migrations 0023–0025 have been
+applied by the contract suite's cluster and by no cluster this repository
+deploys. `auth_revoke_user_sessions` is still absent and still Run 5's, now with
+migration **0026**.
 
 ### Run 5 — admin-controlled password reset
 
