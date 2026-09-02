@@ -159,6 +159,19 @@ RENDERED_FILE_MODES: dict[str, int] = {
     "openapi.json": 0o444,
     "app-openapi.json": 0o444,
     "otelcol.yaml": 0o444,
+    # Session 14 Run 5's store (ADR 0168), on exactly the terms
+    # `otelcol.yaml` is on: the store runs as `nobody`, does not own
+    # this directory, and neither file holds a secret. It scrapes one
+    # target on the project's own network over plain HTTP, and the
+    # credential that guards the metrics ROUTE is a Traefik concern
+    # that nothing in the metrics plane holds (ADR 0164).
+    #
+    # Measured rather than reasoned about: mounting the rendered
+    # DIRECTORY into the store fails with `permission denied` because
+    # it is 0700, and the deployment bind-mounts each file instead --
+    # which is why the file's own mode is what decides readability.
+    "prometheus.yaml": 0o444,
+    "alert-rules.yaml": 0o444,
 }
 
 
@@ -208,14 +221,25 @@ def test_no_world_readable_rendered_file_carries_credential_material() -> None:
     # renderer moves with the renderer, and the list would agree with itself
     # through a rename nobody reviewed.
     assert readable == sorted(
-        ["openapi.json", "app-openapi.json", "pgbackrest.conf", "otelcol.yaml"]
+        [
+            "openapi.json",
+            "app-openapi.json",
+            "pgbackrest.conf",
+            "otelcol.yaml",
+            # Widened in Run 5 to the measured set, with the reason (ADR
+            # 0168) -- and still an exact equality rather than a
+            # containment check, because loosening this to `issubset`
+            # is the move the non-negotiables forbid.
+            "prometheus.yaml",
+            "alert-rules.yaml",
+        ]
     ), (
         f"{readable} are world-readable in the rendered directory. Only the two published "
-        "snapshots, the archiver's config and the metrics collector's pipeline may be: the "
+        "snapshots, the archiver's config and the two telemetry configurations may be: the "
         "snapshots because they are served to whoever holds the documentation credential, "
-        "the archiver's config because it runs as 999 (ADR 0154), and the collector's "
-        "because it runs as a uid that does not own this directory and the file holds no "
-        "secret (ADR 0164)"
+        "the archiver's config because it runs as 999 (ADR 0154), and the collector's and "
+        "the store's because each runs as a uid that does not own this directory and "
+        "neither file holds a secret (ADR 0164, ADR 0168)"
     )
 
     contract = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")

@@ -700,6 +700,18 @@ def compose_project_name(key: str) -> str:
     return compose_name(f"apg-{key}", context="compose_project")
 
 
+def store_volume_name(key: str) -> str:
+    """The metrics store's TSDB volume (ADR 0168).
+
+    Derived here rather than spelled in `compose.yaml`, like every other
+    identity (ADR 0002). It holds no project data -- every series in it
+    describes the deployment rather than anything inside it -- but it is still
+    per project, because two projects sharing a store would be the one place
+    their metrics met and ADR 0164 refused that shape deliberately.
+    """
+    return compose_name(f"apg-{key}-store", context="compose_volume_store")
+
+
 def postgres_volume_name(key: str) -> str:
     """The live cluster's data volume, and the ONE place it is derived.
 
@@ -922,6 +934,7 @@ class ProjectIdentity:
     #: Traefik's public side lives and the database has never been on it.
     backup_network: str
     postgres_volume: str
+    store_volume: str
     #: The name Compose gives the PostgreSQL container: `<project>-<service>-1`.
     #:
     #: This is a *prediction* of Compose's own naming, and it is deliberately
@@ -1088,6 +1101,7 @@ def derive(
         internal_network=compose_name(f"apg-{key}-internal", context="compose_network_internal"),
         backup_network=backup_network_name(key),
         postgres_volume=postgres_volume_name(key),
+        store_volume=store_volume_name(key),
         postgres_container=compose_name(
             f"apg-{key}-postgres-1", context="compose_container_postgres"
         ),

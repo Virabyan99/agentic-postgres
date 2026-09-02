@@ -17,17 +17,18 @@ there are six sessions. This document does not repeat it.
 ## Status — read this first
 
 ```
-SESSION 14 IS IN PROGRESS. Runs 1-4 are DONE. **RUN 5 IS NEXT.**
+SESSION 14 IS IN PROGRESS. Runs 1-5 are DONE. **RUN 6 IS NEXT.**
 HEAD af90f4e, main, clean and pushed.
 CURRENT_SESSION 13; it moves to 14 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.2.0 -> 0.3.0 there too; ADR 0162 says what that permits.
-divergences     D760-D781 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
-                D774-D781 Run 4).
-                **Next free: D782.**
-ADRs            167. **Next free: 0168.** This session has written 0164 (the
+divergences     D760-D789 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
+                D774-D781 Run 4; D782-D789 Run 5).
+                **Next free: D790.**
+ADRs            168. **Next free: 0169.** This session has written 0164 (the
                 metrics surface), 0165 (a telemetry component's memory limit),
-                0166 (the trace id is the request id) and 0167 (a metric reads
-                from the decision that owns its value).
+                0166 (the trace id is the request id), 0167 (a metric reads
+                from the decision that owns its value) and 0168 (a rule states
+                what its silence means).
 outputs schema  still v13. Publishing /metrics needs v14 + a migration and is
                 deferred to Run 7, deliberately (Run 2's Done marker).
 host            62.238.99.122, still on Session 12's RELEASE (936fe09); its
@@ -83,7 +84,7 @@ correlation). This session extends that family and opens `CAP-*`.
 Six columns, the house shape. **Every row is a fact measured against the tree and
 the live host at planning time**, not a prediction.
 
-**Next free number after this table is D782.**
+**Next free number after this table is D790.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -109,6 +110,14 @@ the live host at planning time**, not a prediction.
 | **D779** | A counter's series continues across a service restart, so a `rate()` over it is continuous. | **`instance` is a UUID minted per process.** Measured: two emitter runs against one collector produced **two live series for one counter**, both served, distinguished only by an `instance` label neither this deployment nor the collector chose. Combined with D777, a restart leaves a stale twin holding the pre-restart value for a full expiration window. | **Recorded, not repaired.** Run 5's rules aggregate away from `instance`. Nothing tries to make the label stable, because a stable value would have to be derived from something and no second authority is available for it. | **A reset and a fork look alike in a graph and are not alike in a rule.** Worth writing down because the obvious repair — pinning `service.instance.id` to something — would put a new identity in the `Resource`, and D776 measured that everything in the `Resource` is published verbatim. **The tidy fix for this one lands on the surface the redaction rule guards.** | 0167 |
 | **D780** | Run 4 exports pooler saturation, database connections against the five claimants of `max_connections`, and transaction duration. | **All three need a database credential, and a process holding one is a SIXTH claimant.** `config.connection_claimants` sums every claimant and `config.py:1087` raises when they exceed the manifest's ceiling. ADR 0148 took an entire run to move that count from four to five, with a measured `CONNECTION LIMIT` and five named privileges. | **Not built, by the user's decision, and recorded here with the measurement rather than left as an omission.** The three metrics wait for an ADR of their own. | **Acquiring a claimant on a guarded budget as a SIDE EFFECT of a metrics run is exactly what that guard exists to prevent** — and it would arrive under a commit message about observability, which is the sentence D762 uses about adopting a PostgreSQL image while adding a collector. The preflight would have caught an over-commit on a deployment whose ceiling was tight; it would **not** have caught the fact that nobody decided to spend the connection. | 0167, 0070, 0148 |
 | **D781** | The collector scrapes the proxy by name, so registering an alias on the attachment is enough. | **`attach` returns early on an already-attached proxy, and every existing deployment is one.** `is_attached` tested network membership only, and an alias can be registered **only** by `docker network connect --alias` — it cannot be added to a live endpoint. So the alias would have reached exactly the projects created after this release and no others. | **The alias is now part of what "attached" means.** `has_alias` gates `attach`, `reconcile` and `status`; an aliasless endpoint is disconnected and reconnected once, and `status` reports the state separately rather than folding it into "attached". | **The gap would have been SILENT and would have looked like success**: ingress fine, `attach` printing *"already attached"*, the scrape unable to resolve, and the metrics surface serving this project's own OTLP series while carrying none of its edge ones — which reads exactly like a deployment nobody has sent a request to. **Question 5 again**: the decision about what an attachment is gained a case, and the function deciding whether to act did not move. | 0167, 0158 |
+| **D782** | Run 5 writes a certificate-deadline rule, and the plan says the deadline is *"arithmetic on a date the deployed document already carries."* | **Traefik publishes the date itself, and Run 4's filter was throwing it away.** `traefik_tls_certs_not_after` exists at the locked digest, is **absent** in a control with no certificate loaded, and its value matches `openssl x509 -enddate` **exactly** (1789816229). So the class needs no new source at all. But it is labelled `cn`, `sans` and `serial` — **neither `router` nor `service`** — and Run 4's two-branch keep filter therefore dropped it: measured, `keep.match(";")` is `False`. | **A third branch, on `cn`, matched against this project's own domain.** The domain is `re.escape`d rather than refused, because a hostname's dots are legitimate where a Traefik name's charset forbids a metacharacter. | **Question 5, one run later, on the run's own code.** Run 4's filter was written from the labels it had, and the enumeration it enforces so carefully was an enumeration of *routers*. A certificate is not a route. **The failure would have been perfectly silent**: the rule would have evaluated an absent series and reported healthy for ever, which is exactly what ADR 0167's own docstring warns a missing router looks like. **The next run's requirement is what found it**, not review. | 0168, 0167 |
+| **D783** | `absent()` is the safe way to ask whether a scrape is working, so a rule using it covers the case a plain comparison misses. | **They answer different questions, and the assumption was backwards.** Measured with a configured target **stopped**: `up` becomes **0, not absent**, so `absent(up{job=...})` did **not** fire and the plain `== 0` comparison did. `absent()` fires when the scrape config itself is gone or the store is not evaluating — a different failure entirely. | **Both, as separate rules.** `up == 0` is a configured target that cannot be reached; `absent(up)` is a target nobody is asking about. `ApgStoreScrapeMissing` is the only rule here that fires **on** absence rather than in spite of it. | **Writing only one leaves a gap in whichever direction was chosen, and the gap is silent both ways.** The rig was built to reproduce D769's failure as a control and instead corrected the plan's understanding of which form fails — the control was more informative than the subject. | 0168 |
+| **D784** | One `up` rule reports whether this project's metrics are flowing. | **It reported the wrong subject, and Prometheus's default is why.** `honor_labels` defaults to **false**, so the collector's forwarded `up{job="edge", instance="apg-edge-proxy:8089"}` is restamped `job="collector"` with `exported_job`/`exported_instance` beside it. Measured: `up{job="collector"}` matched **two** series — the store's own scrape of the collector, and the collector's scrape of the proxy wearing a disguise. | **`honor_labels: true`, and three rules where there was one.** The collector is a **carrier**, not an origin. `ApgCollectorUnreachable` is a failure of the *observation*; `ApgEdgeUnreachable` is a failure of the *deployment*. Proved by inducing each separately: stopping the collector fired only the first, stopping the proxy fired only the second. | **D145's family, in a signal built to avoid it.** Two unrelated states behind one name, and the remedy for each is in a different place — an operator told "the store cannot reach the collector" would look at the store while ingress was the thing that had failed. **The default that caused it is invisible in the rendered file**, which is why the setting is now written out with the measurement beside it. | 0168 |
+| **D785** | The scrape filter's regex is emitted into the collector's YAML like every other rendered value. | **A regex is not a YAML string.** The `cn` branch is `re.escape`d, so it carries `\.` and `\-`; in a **double-quoted** YAML scalar those are escape sequences, `\-` is not a valid one, and the collector refuses the entire document — *"yaml: line 39: found unknown escape character"* — and **exits before serving anything**. | **Single-quoted, which performs no escape processing at all.** Written into the renderer with the measurement, because the correct quoting is invisible in a passing test — a config that never parses and a config that parses are both "a string in a file" to anything that does not run it. | **It failed closed and immediately, which is the good half.** The bad half is where it would have failed: the rendered file is written at *render* time and read at *container start*, so the first sign would have been a metrics container that would not start on the host, during the Run 8 trip. **The rig caught it because it ran the rendered file rather than reading it** (D277). | 0168 |
+| **D786** | Adding a Compose variable is an ordinary change; the contract fixtures detect their own staleness. | **They detect it by `schema_version`, and `rendered_fixtures.py` says in its own docstring that this case is the hole**: *"It does not catch a fixture at the current version whose `compose.env` is missing a key, because a Compose variable can be added without an outputs migration."* Adding `STORE_VOLUME_NAME` did exactly that. **Nine tests failed with *"required variable STORE_VOLUME_NAME is missing a value"***, which reads as a broken Compose model. | **Re-render both fixtures, which is the documented remedy.** Recorded rather than repaired: closing it needs the required-interpolation set, which is profile-dependent and deliberately incomplete for the references whose values arrive from root-owned state (ADR 0013). | **The hole fired for the first time, and it presented as the Session 5 experience the module was written about** — a fixture four schema versions old reporting eleven variables "missing a value" as though the model were broken. **A check whose name is wider than its evidence is this repository's standing defect; this one's name is exactly as wide as its evidence, and the cost is that the uncovered half looks like a product bug.** | 0073 |
+| **D787** | D762's procedure is followed when an image is added, and Session 14 has already paid it once in Run 2. | **It is paid EVERY time, and Traefik has moved again since Run 2.** Adding `PROMETHEUS_IMAGE` re-resolved the same three rolling tags for the third consecutive session: `pgvector:pg18`, `python:3.12-slim` and `traefik:v3.7` — and `traefik:v3.7`'s digest is **not** the one Run 2 restored three days earlier. | **Snapshot, `--update`, classify every changed key as intended or drift, restore the drift, then RE-READ the file to prove only the intended key differs.** `--check` exits 0 with 11 images. | **`traefik:v3.7` moving twice inside one session is the measurement D540 has been waiting four sessions for**: the drift is not annual, it is roughly weekly, and a session that adds two images at different times pays it twice. **Adopting an unmeasured Traefik as a side effect of adding a metrics store is exactly the change a digest pin exists to prevent** — and Run 4 had already re-measured this deployment's Traefik behaviour against the *old* digest. | 0077 |
+| **D788** | The drift guard restores every key that is not this run's, which is the whole of D762's procedure. | **A classifier over two categories met a third.** `APG_LOCKED_AT` and `APG_VERSIONS_IN_SHA256` are neither this run's key nor registry drift — they are derived from the *edit itself*, and the second is a hash **of `versions.in.yaml`**, which this run legitimately changed. Restoring them made the lock describe a file that no longer existed, and `--check` said so: *"versions.in.yaml has changed since the lock was generated … run --update"*. | **Recomputed from the source of truth rather than copied from the update's output**, so the repair reads the file rather than a number in a transcript. | **The guard was written to catch a known failure and acquired one of its own, in the same shape it was guarding against**: a rule that was complete when written and became incomplete when the world gained a case. It failed **loudly**, which is the only reason it cost a minute rather than a release — and the loud failure came from `--check`, not from the guard. | 0077 |
+| **D789** | *"A rule per failure class"* — backup, WAL, disk, service health, certificate. | **Five of those classes have no series, because Run 4 deliberately did not build them.** Backup state and the archiver each already have one source and it is a root-plane on-demand command; disk headroom is `diagnosis.disk_headroom`; pooler saturation and connection counts need a database credential and therefore a **sixth claimant on `max_connections`** (D780). What is left with a series is service health (two hops), certificate expiry, route errors and agent-plane failures. | **Six rules over the metrics that exist, and a test that REFUSES a rule naming any of the absent ones.** The plan says which classes are unreported, in the run's own `**Done.**` marker rather than in a footnote. | **A rule over a series nothing publishes is silent in exactly the way a healthy deployment is.** Writing the missing five would have produced a rule set that looked complete, satisfied `OPS-ALERT-001`'s node ids, and measured four of nine classes — **the dangerous half of this claim arriving disguised as the safe half**, and the exact shape of D145. The refusal is a test rather than a review note because the temptation returns every time somebody reads the plan's list. | 0168, 0167 |
 ---
 
 ## 2. What Session 14 adds to the acceptance registry
@@ -478,6 +487,67 @@ be simulated against a threshold rather than by filling a disk, and a certificat
 deadline is arithmetic on a date the deployed document already carries.
 
 **Nothing pages anybody** (§4.4).
+
+**Done.** — D782–D789, ADR **0168**.
+
+**The store is Prometheus, and the choice was between measured numbers** (D770):
+21.2 MB anon against VictoriaMetrics' 45.6 at the same job, plus native rule
+evaluation where the other needs `vmalert` as a second container. It carries an
+explicit memory limit, holds no credential, has **no router label of any kind**,
+and originates no connection off the host. It is on `edge` rather than
+`internal`, which diverges from ADR 0164 §3's wording deliberately — following
+that sentence would have meant putting the *collector* on `internal`, reversing
+Run 2's decision to keep it off. The property §3 protects is that the store holds
+no edge credential and is routed nowhere, and both hold.
+
+**Six rules, and what is NOT here is the point.** Five of the plan's failure
+classes have no series because Run 4 deliberately did not build them (D789), so
+a rule over any of them would be **silent in exactly the way a healthy deployment
+is** — a rule set that looks complete and measures four of nine classes. A test
+refuses any rule naming one of those metrics, because the temptation returns
+every time somebody reads the list above.
+
+**Three measurements changed the design, and two of them corrected this plan.**
+
+- **D783: `up == 0` and `absent(up)` answer different questions, and the
+  assumption was backwards.** With a configured target *stopped*, `up` becomes
+  **0, not absent** — so `absent()` did not fire and the comparison did. The rig
+  was built to reproduce D769's failure as a control and instead corrected what
+  the run believed about which form fails.
+- **D784: one `up` rule named the wrong subject.** `honor_labels` defaults to
+  false, so the collector's forwarded `up{job="edge"}` is restamped
+  `job=collector` beside the store's own and one rule matched both. **The store
+  failing to reach the collector is a failure of the observation; the collector
+  failing to reach the proxy is a failure of the deployment.** Now three rules,
+  each proved by inducing its own failure separately.
+- **D782: the certificate metric exists and Run 4's filter was dropping it.**
+  `traefik_tls_certs_not_after` matches `openssl`'s `notAfter` exactly and is
+  absent without a certificate — but it carries neither `router` nor `service`,
+  so the two-branch keep filter refused it. **Question 5 arriving one run later,
+  on this session's own code**, and found by the next run's requirement rather
+  than by review.
+
+**Nine mutations, all killed — but three survived the first pass and the repair
+was the TESTS.** M1 replaced the rendered `TLS_WARN_DAYS` with a literal `21` and
+the test stayed green, because the constant *is* 21: a test comparing two values
+equal by coincidence. It now moves the constant and requires the rule to follow.
+M8 and M9 removed the `cn` branch and its escaping — the whole of Run 5's filter
+change — and nothing asserted either existed. **A survivor is evidence, and all
+three were real coverage gaps rather than uninformative mutations.**
+
+**Two closed lists were widened to the measured set**, both kept as exact
+equalities rather than containment checks: `prometheus.yaml` and
+`alert-rules.yaml` join `otelcol.yaml` as world-readable, on its terms — the
+store runs as a uid that does not own the rendered directory and neither file
+holds a secret.
+
+**Not done, and named rather than implied:** nothing is deployed, and the store
+runs nowhere. **No Alertmanager and no receiver** — nothing pages anybody (§4.4),
+and `ALERT_FOR_SECONDS` is the first number to re-derive when routing is decided.
+**`ALERT_ERROR_RATIO` is chosen, not measured**: no deployment here has been
+observed under load, which is Run 6's subject. And a certificate covering more
+than one domain is not served by the `cn` equality — the safe direction, with an
+absent certificate series meaning *unknown* rather than *fine*.
 
 ### Run 6 — The capacity envelope
 

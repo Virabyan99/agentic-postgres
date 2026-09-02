@@ -255,6 +255,59 @@ OTEL_EDGE_SCRAPE_INTERVAL_SECONDS = 15
 #: only `up` distinguishes the middle one.
 OTEL_METRIC_EXPIRATION_SECONDS = 60
 
+#: The store (ADR 0168): the component that EVALUATES a rule. The collector
+#: serves exposition and can evaluate nothing, so `OPS-ALERT-001` needs this or
+#: it needs no rules at all.
+STORE_SERVICE = "store"
+STORE_PORT = 9090
+STORE_CONFIG_FILENAME = "prometheus.yaml"
+STORE_CONFIG_CONTAINER_PATH = "/etc/prometheus/prometheus.yaml"
+STORE_RULES_FILENAME = "alert-rules.yaml"
+STORE_RULES_CONTAINER_PATH = "/etc/prometheus/alert-rules.yaml"
+
+#: How often the store scrapes the collector, and how often it evaluates.
+#:
+#: The two are deliberately equal. Evaluating faster than data arrives
+#: re-evaluates identical samples and advances a `for:` clock against no new
+#: evidence; evaluating slower delays every alert by the difference for nothing.
+STORE_SCRAPE_INTERVAL_SECONDS = 15
+
+#: The store's container memory limit, in MiB (ADR 0165).
+#:
+#: Measured in Run 1 against a real scrape target with ingestion confirmed at
+#: both ends: **Prometheus 21.2 MB anon, peak 37.4**. VictoriaMetrics was 45.6
+#: at the same job, which is why the store is this one -- half the memory and,
+#: because Prometheus evaluates rules natively, one fewer container than
+#: `vmalert` would have needed.
+#:
+#: 192 rather than 128: the peak is 37.4 and a store's working set grows with
+#: retention, where the collector's does not. A ceiling with room beneath it,
+#: not a target -- and `memory.current` will read close to it whatever the
+#: process is doing, because reclaimable cache expands to fill it.
+STORE_MEMORY_LIMIT_MIB = 192
+
+#: How long a rule's condition must hold before it fires.
+#:
+#: **Two evaluation intervals.** One would fire on a single scrape, which makes
+#: any momentary blip an alert; much more would delay every alert for a
+#: false-positive rate nobody has measured yet. Nothing pages anybody, so this
+#: is a legibility choice rather than a sleep-protecting one -- when a receiver
+#: is eventually configured, this is the first number to re-derive from what
+#: the deployment actually does.
+ALERT_FOR_SECONDS = STORE_SCRAPE_INTERVAL_SECONDS * 2
+
+#: The window a rate is taken over. Four scrape intervals, so a rate has several
+#: samples to work from and a single missed scrape does not empty it.
+ALERT_RATE_WINDOW_SECONDS = STORE_SCRAPE_INTERVAL_SECONDS * 4
+
+#: The 5xx share of a route's requests above which the route is failing.
+#:
+#: **A ratio and not a count**, so a busy deployment is not noisier than a quiet
+#: one at the same health. Chosen rather than measured, and saying so matters:
+#: no deployment here has ever been observed under load, so this is a starting
+#: point for Run 6's envelope to correct, not a number anything has justified.
+ALERT_ERROR_RATIO = 0.05
+
 #: The collector's in-process memory ceiling and its burst allowance, in MiB.
 #:
 #: **Beneath the container limit, deliberately** (ADR 0165). The container limit
@@ -690,6 +743,28 @@ def build_override(
                 ),
                 "volumes": [
                     f"{rendered_directory}/{OTEL_CONFIG_FILENAME}:{OTEL_CONFIG_CONTAINER_PATH}:ro",
+                ],
+            },
+            # Session 14 Run 5's store (ADR 0168). Two mounts rather than one,
+            # and they are separate files on purpose: the configuration says
+            # where to scrape, the rules say what is wrong, and only the second
+            # changes when a threshold moves. A deploy recreates a container
+            # whose mounted CONTENT changed (ADR 0155), so keeping them apart
+            # means editing a rule does not read as a change to the scrape.
+            #
+            # Both are written at RENDER time, like the collector's config and
+            # for the same reason, so this service is not in
+            # `POST_ARTIFACT_SERVICES` either -- and a mount whose source does
+            # not exist makes Docker create a DIRECTORY there, which is D463.
+            #
+            # NO labels. The store is routed nowhere: it holds this project's
+            # whole metric history and answers arbitrary queries about it, and
+            # ADR 0164 published the COLLECTOR at the edge precisely so that
+            # this never needs to be reachable from outside the deployment.
+            STORE_SERVICE: {
+                "volumes": [
+                    f"{rendered_directory}/{STORE_CONFIG_FILENAME}:{STORE_CONFIG_CONTAINER_PATH}:ro",
+                    f"{rendered_directory}/{STORE_RULES_FILENAME}:{STORE_RULES_CONTAINER_PATH}:ro",
                 ],
             },
             AUTH_SERVICE: {

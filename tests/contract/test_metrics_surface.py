@@ -43,6 +43,9 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+#: Any hostname; the filter escapes it, so the dots are the point.
+DOMAIN = "alpha-dev.example.test"
+
 
 # ---------------------------------------------------------------------------
 # The enumeration, and the prefix it replaced
@@ -93,11 +96,12 @@ def test_the_scrape_filter_admits_this_project_and_refuses_a_prefix_colliding_on
     theirs = naming.project_router_names("alpha-two")
     beta = naming.project_router_names("beta-project")
 
-    enumerated = re.compile(f"^(?:{rendering._scrape_keep_regex(ours)})$")
-    prefix = re.compile(r"^(?:apg-alpha-.*;.*|.*;apg-alpha-.*)$")
+    enumerated = re.compile(f"^(?:{rendering._scrape_keep_regex(ours, DOMAIN)})$")
+    prefix = re.compile(r"^(?:apg-alpha-.*;.*;.*|.*;apg-alpha-.*;.*)$")
 
     def series(router: str) -> str:
-        return f"{router}@docker;{router}@docker"
+        # router;service;cn -- the certificate label joined in Run 5.
+        return f"{router}@docker;{router}@docker;"
 
     # The subject keeps its own.
     for router in ours:
@@ -114,6 +118,55 @@ def test_the_scrape_filter_admits_this_project_and_refuses_a_prefix_colliding_on
     )
 
 
+def test_the_certificate_series_is_kept_by_its_common_name() -> None:
+    """Run 5's branch, and the reason Run 4's filter had to change.
+
+    `traefik_tls_certs_not_after` is labelled `cn`, `sans` and `serial` -- no
+    router and no service -- so the two-branch filter dropped it, and the
+    certificate alert would have been a rule over a series this project's own
+    surface refused to publish. **It would have stayed quiet for ever, which is
+    what a healthy deployment looks like.**
+
+    A mutation removing this branch survived the first version of these tests,
+    which is how the gap was found: the branch was added and nothing asserted
+    it existed.
+    """
+    keep = re.compile(
+        f"^(?:{rendering._scrape_keep_regex(naming.project_router_names('alpha'), DOMAIN)})$"
+    )
+
+    # router and service empty, cn ours -- exactly the certificate series' shape.
+    assert keep.match(f";;{DOMAIN}")
+    # Another project's certificate on the same shared proxy.
+    assert not keep.match(";;beta-dev.example.test")
+
+
+def test_a_domain_is_escaped_before_it_becomes_a_regex() -> None:
+    """A hostname's dots are wildcards if nobody escapes them.
+
+    `alpha-dev.example.test` unescaped matches `alpha-devXexampleYtest`, so a
+    certificate whose common name merely resembled this project's would be
+    admitted onto its surface. The router names are refused rather than escaped
+    because their charset forbids a metacharacter; a domain legitimately
+    contains one, so this is the one identity that is escaped instead.
+
+    A mutation dropping `re.escape` survived the first version of these tests.
+    """
+    keep = re.compile(
+        f"^(?:{rendering._scrape_keep_regex(naming.project_router_names('alpha'), DOMAIN)})$"
+    )
+
+    near_miss = DOMAIN.replace(".", "X")
+    assert keep.match(f";;{DOMAIN}")
+    assert not keep.match(f";;{near_miss}"), (
+        "a domain with its dots treated as wildcards admitted a look-alike "
+        "common name; re.escape is not being applied"
+    )
+
+    with pytest.raises(ValueError, match="is not a hostname"):
+        rendering._scrape_keep_regex(naming.project_router_names("alpha"), "not a domain!")
+
+
 def test_a_series_carrying_neither_a_router_nor_a_service_is_dropped() -> None:
     """Traefik's own and its ENTRYPOINT families describe the shared host.
 
@@ -122,10 +175,12 @@ def test_a_series_carrying_neither_a_router_nor_a_service_is_dropped() -> None:
     aggregate -- naming no other project while still describing them. Dropped
     for that reason and not for tidiness.
     """
-    keep = re.compile(f"^(?:{rendering._scrape_keep_regex(naming.project_router_names('alpha'))})$")
+    keep = re.compile(
+        f"^(?:{rendering._scrape_keep_regex(naming.project_router_names('alpha'), DOMAIN)})$"
+    )
 
-    assert not keep.match(";")  # both labels absent
-    assert not keep.match("websecure;")  # an entrypoint label is not a router
+    assert not keep.match(";;")  # router, service and cn all absent
+    assert not keep.match("websecure;;")  # an entrypoint label is not a router
 
 
 def test_a_router_name_that_could_act_as_a_regex_is_refused_not_escaped() -> None:
@@ -136,7 +191,7 @@ def test_a_router_name_that_could_act_as_a_regex_is_refused_not_escaped() -> Non
     a wildcard that silently admits other projects.
     """
     with pytest.raises(ValueError, match="may not be interpolated"):
-        rendering._scrape_keep_regex(("apg-alpha-rest", "apg-.*"))
+        rendering._scrape_keep_regex(("apg-alpha-rest", "apg-.*"), DOMAIN)
 
 
 # ---------------------------------------------------------------------------
@@ -152,7 +207,7 @@ def test_the_rendered_collector_scrapes_the_edge_by_its_registered_alias() -> No
     label. A scrape target cannot resolve a label, so the attachment registers
     a name and the config spells that one.
     """
-    rendered = rendering.build_otel_config(naming.project_router_names("alpha")).decode()
+    rendered = rendering.build_otel_config(naming.project_router_names("alpha"), DOMAIN).decode()
 
     assert f"{host_config.EDGE_PROXY_ALIAS}:{host_config.EDGE_METRICS_PORT}" in rendered
     assert "prometheus:" in rendered
@@ -308,7 +363,7 @@ def test_the_exposition_expires_a_series_whose_emitter_has_stopped() -> None:
     t+10s -- so the two are distinguishable and this is a setting rather than a
     hope.
     """
-    rendered = rendering.build_otel_config(naming.project_router_names("alpha")).decode()
+    rendered = rendering.build_otel_config(naming.project_router_names("alpha"), DOMAIN).decode()
 
     assert f"metric_expiration: {runtime_override.OTEL_METRIC_EXPIRATION_SECONDS}s" in rendered
 

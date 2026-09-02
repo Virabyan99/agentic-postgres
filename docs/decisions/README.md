@@ -231,3 +231,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0165](0165-a-telemetry-component-carries-an-explicit-memory-limit.md) | A telemetry component carries an explicit memory limit, because its default is a share of somebody else's machine | 14 | Accepted |
 | [0166](0166-the-trace-id-is-the-request-id-and-a-span-carries-only-what-it-was-given.md) | The trace id is the request id, and a span carries only what it was given | 14 | Accepted |
 | [0167](0167-a-metric-reads-from-the-decision-that-owns-its-value-and-its-scope-is-an-enumeration.md) | A metric reads from the decision that owns its value, and its scope is an enumeration | 14 | Accepted |
+| [0168](0168-a-rule-states-what-its-silence-means-and-each-hop-reports-its-own-failure.md) | A rule states what its silence means, and each hop reports its own failure | 14 | Accepted |

@@ -131,6 +131,35 @@ images:
   # that would silently take the route away.
   OTEL_COLLECTOR_IMAGE: docker.io/otel/opentelemetry-collector-contrib:0.159.0
 
+  # Session 14 Run 5's store, and the thing that EVALUATES a rule. The collector
+  # serves exposition and cannot evaluate anything -- an alert needs a range over
+  # time, so `OPS-ALERT-001` needs a store or it needs nothing.
+  #
+  # **Prometheus rather than VictoriaMetrics, on Run 1's measured numbers rather
+  # than on reputation** (D770). Bounded against a real scrape target with
+  # ingestion confirmed at both ends: Prometheus **21.2 MB anon** (peak 37.4),
+  # VictoriaMetrics **45.6** (48.2). The reputation inverts under measurement --
+  # VictoriaMetrics has the far smaller image (17.5 MB against 104.3) and twice
+  # the resident set, and on a swapless host the resident set is the number that
+  # decides an OOM. It also evaluates rules natively, where VictoriaMetrics needs
+  # `vmalert` as a second container: half the memory and one fewer component.
+  #
+  # An explicit container memory limit is not optional here (ADR 0165) and the
+  # figure above is what it is sized against.
+  #
+  # Measured at this version, with a control in each case:
+  #   * a rule set is SILENT on a healthy deployment -- and the store was proved
+  #     to be ingesting before that silence was read, because a quiet rule set
+  #     over an empty store is the false quiet half;
+  #   * `up` goes to **0, not absent**, when a configured target stops. So
+  #     `up == 0` and `absent(up)` answer different questions and both are
+  #     needed -- measured, not assumed, and the assumption was backwards.
+  #
+  # Re-measure both when this version moves. A store that silently stopped
+  # evaluating would leave every rule quiet, which is what a healthy deployment
+  # looks like.
+  PROMETHEUS_IMAGE: docker.io/prom/prometheus:v3.7.3
+
 # Minimum versions required for a *feature*, not for an image.
 #
 # Each key `X_MINIMUM_VERSION` pairs with the image `X_IMAGE`: `--update`

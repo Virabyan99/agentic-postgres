@@ -34,6 +34,7 @@ from agentic_postgres import (
     auth_limits,
     config,
     deployed_output,
+    diagnosis,
     host_config,
     naming,
     runtime_override,
@@ -499,6 +500,7 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     # an empty interpolation as firmly as an unset one (D178, ADR 0062).
     "BACKUP_NETWORK_NAME",
     "POSTGRES_VOLUME_NAME",
+    "STORE_VOLUME_NAME",
     "PROJECT_KEY",
     "PROJECT_ENVIRONMENT",
     "PROJECT_DOMAIN",
@@ -898,20 +900,44 @@ def build_pgbackrest_conf(
     return "\n".join(lines).encode("utf-8")
 
 
-def _scrape_keep_regex(router_names: tuple[str, ...]) -> str:
-    """The `keep` regex admitting only this project's router and service series.
+#: A domain, for the one label whose value is not a Traefik name.
+#:
+#: Deliberately narrow: it is interpolated into a regex, and a hostname is the
+#: first identity here that legitimately contains a `.`.
+_DOMAIN_LABEL = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$")
 
-    Two branches over `[router, service]` because Prometheus concatenates the
-    source labels with `;` and chains rules with AND. `router` ours, or
-    `service` ours -- and a series carrying neither (Traefik's own Go and
-    process metrics, its config counters, and every ENTRYPOINT family, which is
-    shared by every project on the host) matches neither branch and is dropped.
+
+def _scrape_keep_regex(router_names: tuple[str, ...], domain: str) -> str:
+    """The `keep` regex admitting only this project's series.
+
+    Three branches over `[router, service, cn]`, because Prometheus concatenates
+    the source labels with `;` and chains rules with AND. `router` ours, or
+    `service` ours, or the certificate's `cn` ours -- and a series carrying none
+    of them (Traefik's own Go and process metrics, its config counters, and every
+    ENTRYPOINT family, which is shared by every project on the host) matches no
+    branch and is dropped.
+
+    **`cn` is Run 5's addition and it is question 5 arriving one run later.**
+    Run 4 wrote this filter from the labels it had, which were `router` and
+    `service`. `traefik_tls_certs_not_after` carries neither -- it is labelled
+    `cn`, `sans` and `serial` -- so the two-branch form dropped the certificate
+    series entirely, and the certificate alert would have been a rule over a
+    series this project's own surface refused to publish. **The rule would have
+    stayed quiet for ever, which is what a healthy deployment looks like.**
 
     `(@[a-z]+)?` admits Traefik's provider suffix without naming one. The
     routers are docker-label-derived today and read `…@docker`; the measurement
     behind this rule ran against `…@file`. Pinning either would make this rule
     silently keep nothing the day a route moved providers -- and keeping
     nothing looks exactly like a route nobody used.
+
+    **The `cn` branch is an equality, and a certificate covering more than one
+    domain is a case this does not serve.** If a project's domain appeared only
+    in `sans`, its certificate would carry another project's `cn` and be
+    dropped. That is the safe direction -- a missed alert rather than another
+    project's expiry on this surface -- and the rule states that an absent
+    certificate series is `unknown` rather than `fine`, so the gap is visible
+    where it matters.
     """
     # An identity is interpolated into a regex here, so the charset is asserted
     # rather than trusted. `_TRAEFIK_NAME` is `^[a-z0-9][a-z0-9-]*$` and holds
@@ -923,12 +949,22 @@ def _scrape_keep_regex(router_names: tuple[str, ...]) -> str:
                 f"router name {name!r} is not a Traefik name and may not be "
                 "interpolated into the scrape filter"
             )
+    # The domain is the exception: a hostname's dots are legitimate, so this one
+    # is ESCAPED rather than refused. Asserted first all the same -- escaping an
+    # unvalidated value would quietly accept whatever it was handed.
+    if not _DOMAIN_LABEL.match(domain):
+        raise ValueError(
+            f"domain {domain!r} is not a hostname and may not be interpolated "
+            "into the scrape filter"
+        )
+
     alternation = "|".join(router_names)
     ours = f"({alternation})(@[a-z]+)?"
-    return f"{ours};.*|.*;{ours}"
+    cn = re.escape(domain)
+    return f"{ours};.*;.*|.*;{ours};.*|.*;.*;{cn}"
 
 
-def build_otel_config(router_names: tuple[str, ...]) -> bytes:
+def build_otel_config(router_names: tuple[str, ...], domain: str) -> bytes:
     """The metrics collector's configuration (ADR 0164, ADR 0167).
 
     **It took no project until Run 4, and now it does.** The reversal is the
@@ -967,7 +1003,7 @@ def build_otel_config(router_names: tuple[str, ...]) -> bytes:
     decides who may read it, and that decision is a middleware, not a bind
     address.
     """
-    keep = _scrape_keep_regex(router_names)
+    keep = _scrape_keep_regex(router_names, domain)
     lines = [
         "# GENERATED by agentic_postgres.rendering. Do not edit by hand.",
         "#",
@@ -1006,8 +1042,15 @@ def build_otel_config(router_names: tuple[str, ...]) -> bytes:
         "            # runs, measured. That matters, because they are the only",
         "            # thing that distinguishes a route nobody used from an edge",
         "            # nobody could reach -- and both are an absent series.",
-        "            - source_labels: [router, service]",
-        f'              regex: "{keep}"',
+        "            - source_labels: [router, service, cn]",
+        # SINGLE-quoted, and this is not a style choice. A regex is not a YAML
+        # string: the domain branch is `re.escape`d, so it carries `\.` and
+        # `\-`, and a double-quoted YAML scalar processes backslash escapes --
+        # `\-` is not one, and the collector refuses the whole document with
+        # "found unknown escape character" and exits before it serves anything.
+        # A single-quoted scalar performs no escape processing at all, which is
+        # what a regex needs. Measured: the double-quoted form would not start.
+        f"              regex: '{keep}'",
         "              action: keep",
         "",
         "processors:",
@@ -1053,6 +1096,263 @@ def build_otel_config(router_names: tuple[str, ...]) -> bytes:
         "      receivers: [otlp, prometheus]",
         "      processors: [memory_limiter, batch]",
         "      exporters: [prometheus]",
+        "",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def build_prometheus_config() -> bytes:
+    """The store's configuration (ADR 0168).
+
+    **It takes no project, and unlike `build_otel_config` it stays that way.**
+    The store scrapes exactly one target -- this project's own collector, on the
+    project's own network, under a name Compose gives it -- and every value here
+    is identical in every deployment. The per-project attribution was already
+    done upstream, by the collector's `metric_relabel_configs`: what reaches this
+    store is this project's series and nothing else, so there is nothing left
+    here to filter and no identity to derive.
+
+    **The store is a consumer of the collector's exposition, exactly as ADR 0164
+    §3 describes** -- which is what keeps it holding no edge credential. It
+    scrapes over the project's own network and carries no router label, so it is
+    reachable from nothing outside the deployment and is routed nowhere.
+
+    `evaluation_interval` is deliberately equal to `scrape_interval`. Evaluating
+    faster than the data arrives re-evaluates identical samples and moves a
+    `for:` clock against no new evidence; evaluating slower delays every alert by
+    the difference for no benefit.
+    """
+    lines = [
+        "# GENERATED by agentic_postgres.rendering. Do not edit by hand.",
+        "#",
+        "# The metrics store (ADR 0168). It scrapes this project's collector and",
+        "# evaluates this project's alert rules. It is routed nowhere, holds no",
+        "# credential, and initiates no connection off the host.",
+        "",
+        "global:",
+        f"  scrape_interval: {runtime_override.STORE_SCRAPE_INTERVAL_SECONDS}s",
+        f"  evaluation_interval: {runtime_override.STORE_SCRAPE_INTERVAL_SECONDS}s",
+        "",
+        "rule_files:",
+        f"  - {runtime_override.STORE_RULES_CONTAINER_PATH}",
+        "",
+        "scrape_configs:",
+        "  - job_name: collector",
+        "    # The collector is a CARRIER, not an origin: most of what it serves",
+        "    # was scraped from the proxy or pushed by the agent plane, and each",
+        "    # of those already carries its own `job` and `instance`.",
+        "    #",
+        "    # The default (`false`) renames every conflicting label to",
+        "    # `exported_job` / `exported_instance` and stamps `job=collector` on",
+        '    # top. Measured, and it is not cosmetic: it made `up{job="collector"}`',
+        "    # match TWO series -- the store's own scrape of the collector, and",
+        "    # the collector's forwarded scrape of the proxy -- so one rule fired",
+        "    # for two different failures and named the wrong one. **The store",
+        "    # cannot reach the collector** and **the collector cannot reach the",
+        "    # proxy** are different sentences with different remedies.",
+        "    #",
+        "    # With this on, the forwarded series keep `job: edge` and the agent",
+        "    # plane's keep `job: apg-mcp`, so each hop has its own `up` and each",
+        "    # gets its own rule.",
+        "    honor_labels: true",
+        "    static_configs:",
+        "      - targets:",
+        f'          - "{runtime_override.METRICS_SERVICE}:{runtime_override.OTEL_EXPORTER_PORT}"',
+        "",
+    ]
+    return "\n".join(lines).encode("utf-8")
+
+
+def build_alert_rules() -> bytes:
+    """This project's alert rules (ADR 0168), `OPS-ALERT-001`.
+
+    **Every threshold is read from the decision that owns it**, which is ADR
+    0167's rule applied inside a rule file. `diagnosis.TLS_WARN_DAYS` has owned
+    "how many days before a certificate deadline matters" since Session 11, and
+    a rule file spelling `21` would be a second authority on it -- one that
+    could not be found by anybody grepping for the constant.
+
+    **Every rule states what it means by an ABSENT series** (D769), because a
+    rule over a series that does not exist evaluates to nothing and reports
+    healthy for ever. Three things produce an absent series here and they are not
+    the same event: nothing has happened yet, the emitter has stopped, and the
+    series was never published at all.
+
+    **What is NOT here is most of the plan's list**, and it is a decision rather
+    than an omission: Run 4 did not build backup, WAL, disk, pooler or
+    connection metrics, each for a reason recorded there. **A rule over a series
+    no deployment publishes is silent in exactly the way a healthy deployment
+    is**, so writing one would produce a rule set that looks complete and
+    measures a third of what it names. `OPS-ALERT-001` reports the classes that
+    have a series, and the plan says which do not.
+    """
+    lines = [
+        "# GENERATED by agentic_postgres.rendering. Do not edit by hand.",
+        "#",
+        "# `OPS-ALERT-001` (ADR 0168). Every threshold is read from the decision",
+        "# that owns it, and every rule states what an absent series means.",
+        "#",
+        "# Nothing here pages anybody. There is no Alertmanager in this",
+        "# deployment and no receiver configured: a rule with no measured",
+        "# false-positive rate is not a rule anybody should be woken by, and",
+        "# routing one to a human is a later decision (plan section 4.4).",
+        "",
+        "groups:",
+        "  - name: apg",
+        f"    interval: {runtime_override.STORE_SCRAPE_INTERVAL_SECONDS}s",
+        "    rules:",
+        "",
+        "      # HOP 1: the store cannot reach this project's collector.",
+        "      #",
+        "      # Two hops carry this project's metrics -- store to collector, and",
+        "      # collector to proxy -- and they fail for different reasons with",
+        "      # different remedies. They are separate rules because a single",
+        "      # `up` rule was MEASURED to conflate them: without honor_labels",
+        "      # the forwarded `up` is restamped `job=collector` too, so one rule",
+        "      # matched both series and named whichever it happened to catch.",
+        "      #",
+        "      # ABSENT SERIES: cannot happen while the store has this target",
+        "      # configured -- `up` is synthesised on every scrape, success or",
+        "      # failure. Its disappearance is a third failure, below.",
+        "      - alert: ApgCollectorUnreachable",
+        '        expr: up{job="collector"} == 0',
+        f"        for: {runtime_override.ALERT_FOR_SECONDS}s",
+        "        labels:",
+        "          severity: warning",
+        "        annotations:",
+        "          summary: >-",
+        "            The metrics store cannot scrape this project's collector.",
+        "            Nothing is being recorded. The deployment itself may be",
+        "            entirely healthy -- this is a failure of the observation,",
+        "            not of the thing observed.",
+        "",
+        "      # HOP 2: the collector cannot reach the shared proxy.",
+        "      #",
+        "      # This one IS about the deployment: the proxy is the edge every",
+        "      # project's ingress passes through. It is forwarded through the",
+        "      # collector rather than measured here, which is why it needs",
+        "      # honor_labels to keep its own `job` (ADR 0168).",
+        "      #",
+        "      # ABSENT SERIES: means the collector is not scraping at all, which",
+        "      # hop 1 reports. If both are quiet and no route series exist, read",
+        "      # hop 1's rule first.",
+        "      - alert: ApgEdgeUnreachable",
+        '        expr: up{job="edge"} == 0',
+        f"        for: {runtime_override.ALERT_FOR_SECONDS}s",
+        "        labels:",
+        "          severity: warning",
+        "        annotations:",
+        "          summary: >-",
+        "            This project's collector cannot scrape the shared edge",
+        "            proxy. Route metrics stop; ingress may still be working.",
+        "",
+        "      # The scrape configuration is gone, or the store is not evaluating.",
+        "      #",
+        "      # A SEPARATE rule again, because the measurement said so: with a",
+        "      # configured target stopped, `up` becomes **0, not absent**, so",
+        "      # `absent()` did NOT fire and the comparison did. Assuming one",
+        "      # rule covers both is the assumption this run had backwards.",
+        "      #",
+        "      # ABSENT SERIES: that IS the condition. This is the only rule here",
+        "      # that fires on absence rather than in spite of it, and it is the",
+        "      # one that catches every other rule being quiet for the wrong",
+        "      # reason.",
+        "      - alert: ApgStoreScrapeMissing",
+        '        expr: absent(up{job="collector"})',
+        f"        for: {runtime_override.ALERT_FOR_SECONDS}s",
+        "        labels:",
+        "          severity: warning",
+        "        annotations:",
+        "          summary: >-",
+        "            The store has no scrape target for this project's collector.",
+        "            Nothing is being recorded and every other rule here is quiet",
+        "            for the wrong reason.",
+        "",
+        "      # A certificate deadline that renewal should already have met.",
+        "      #",
+        "      # The threshold is `diagnosis.TLS_WARN_DAYS`, rendered rather than",
+        "      # spelled, because that constant already owns this question: 21",
+        '      # days, chosen so the rule means "renewal should have happened and',
+        '      # did not" rather than "renewal is due".',
+        "      #",
+        "      # ABSENT SERIES: means UNKNOWN, not fine. Traefik publishes this",
+        "      # family only once a certificate is loaded (measured, with a",
+        "      # control that had none), so before first issuance there is nothing",
+        "      # to compare and this rule is silent. A deployment whose",
+        "      # certificate never arrives is not reported here -- the route",
+        "      # answering at all is what reports that.",
+        "      - alert: ApgCertificateExpiringSoon",
+        "        expr: >-",
+        "          (traefik_tls_certs_not_after - time()) / 86400",
+        f"          < {diagnosis.TLS_WARN_DAYS}",
+        f"        for: {runtime_override.ALERT_FOR_SECONDS}s",
+        "        labels:",
+        "          severity: warning",
+        "        annotations:",
+        "          summary: >-",
+        "            A certificate for this project expires in under",
+        f"            {diagnosis.TLS_WARN_DAYS} days. Let's Encrypt renews at 30",
+        "            days remaining, so renewal should already have happened.",
+        "",
+        "      # This project's own routes are answering 5xx.",
+        "      #",
+        "      # A RATIO rather than a count, because a count makes a busy",
+        "      # deployment noisier than a quiet one at the same health. The",
+        "      # denominator is this project's routers only -- the filter upstream",
+        "      # already guarantees that, and it is why this rule needs no",
+        "      # project label of its own.",
+        "      #",
+        "      # ABSENT SERIES: means no request has crossed this route since the",
+        "      # exporter started. Traefik publishes a router family only after a",
+        "      # request has crossed it (D769), so a quiet deployment has no",
+        "      # series here and this rule is silent -- correctly. It reports",
+        '      # "requests are failing", never "requests are absent".',
+        "      - alert: ApgRouteErrorRateHigh",
+        "        expr: >-",
+        "          sum by (router) (",
+        '            rate(traefik_router_requests_total{code=~"5.."}'
+        f"[{runtime_override.ALERT_RATE_WINDOW_SECONDS}s])",
+        "          )",
+        "          /",
+        "          sum by (router) (",
+        "            rate(traefik_router_requests_total"
+        f"[{runtime_override.ALERT_RATE_WINDOW_SECONDS}s])",
+        "          )",
+        f"          > {runtime_override.ALERT_ERROR_RATIO}",
+        f"        for: {runtime_override.ALERT_FOR_SECONDS}s",
+        "        labels:",
+        "          severity: warning",
+        "        annotations:",
+        "          summary: >-",
+        "            More than",
+        f"            {int(runtime_override.ALERT_ERROR_RATIO * 100)}% of requests to this"
+        " route are",
+        "            answering 5xx.",
+        "",
+        "      # The agent plane is failing calls it did not classify.",
+        "      #",
+        "      # `failed` and not `refused`: a refusal is the boundary working",
+        "      # (ADR 0139/0140), and alerting on one would page somebody because",
+        "      # an agent asked for something it may not have. `failed` is an",
+        "      # exception the tool path did not classify, which is the shape a",
+        "      # defect takes here.",
+        "      #",
+        "      # ABSENT SERIES: means no tool call has failed since the process",
+        "      # started -- the counter is created on first use, so a healthy",
+        '      # deployment has no `outcome="failed"` series at all rather than a',
+        "      # zero. That is the correct silence, and it is the reason this rule",
+        "      # asks about a RATE rather than a total: a total that has never",
+        "      # existed and a total that stopped growing are the same reading.",
+        "      - alert: ApgAgentPlaneFailing",
+        "        expr: >-",
+        '          rate(agent_tool_calls_total{outcome="failed"}'
+        f"[{runtime_override.ALERT_RATE_WINDOW_SECONDS}s]) > 0",
+        f"        for: {runtime_override.ALERT_FOR_SECONDS}s",
+        "        labels:",
+        "          severity: warning",
+        "        annotations:",
+        "          summary: >-",
+        "            Agent tool calls are failing with unclassified exceptions.",
         "",
     ]
     return "\n".join(lines).encode("utf-8")
@@ -1145,6 +1445,7 @@ def build_compose_env(
         "INTERNAL_NETWORK_NAME": identity.internal_network,
         "BACKUP_NETWORK_NAME": identity.backup_network,
         "POSTGRES_VOLUME_NAME": identity.postgres_volume,
+        "STORE_VOLUME_NAME": identity.store_volume,
         "PROJECT_KEY": identity.key,
         "PROJECT_ENVIRONMENT": identity.environment,
         "PROJECT_DOMAIN": identity.domain,
@@ -1741,7 +2042,30 @@ def render_project(
                 # holds the same eight names, and reading them off it would be
                 # a second place that knows what the set is -- which is the
                 # thing that goes stale when a ninth route is added (ADR 0002).
-                build_otel_config(naming.project_router_names(identity.key)),
+                # The domain joined in Run 5: the certificate series is labelled
+                # by `cn` and carries no router or service, so the two-branch
+                # filter dropped it (ADR 0168).
+                build_otel_config(naming.project_router_names(identity.key), identity.domain),
+            )
+            # The store's configuration and its rules, on the same terms as the
+            # collector's config above: written for EVERY project, including one
+            # whose deploy will never start the container. A mount whose source
+            # does not exist makes Docker create a directory there (D463), and a
+            # conditional write turns "this session is not deployed yet" into
+            # "this container will not start" the moment it is.
+            #
+            # Two files rather than one because only the rules change when a
+            # threshold moves, and a deploy recreates a container whose mounted
+            # content changed (ADR 0155).
+            write_readable(
+                staging / runtime_override.STORE_CONFIG_FILENAME,
+                OTEL_CONFIG_MODE,
+                build_prometheus_config(),
+            )
+            write_readable(
+                staging / runtime_override.STORE_RULES_FILENAME,
+                OTEL_CONFIG_MODE,
+                build_alert_rules(),
             )
             write_private(staging / "rendered-summary.txt", build_summary(outputs))
 

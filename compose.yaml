@@ -891,6 +891,92 @@ services:
     networks:
       - edge
 
+
+  # Session 14 Run 5's metrics store (ADR 0168), and the thing that EVALUATES a
+  # rule. The collector beside it serves exposition and can evaluate nothing --
+  # an alert needs a range over time, so `OPS-ALERT-001` needs this or it needs
+  # no rules at all.
+  #
+  # **Prometheus rather than VictoriaMetrics, on Run 1's measured numbers rather
+  # than reputation** (D770): 21.2 MB anon against 45.6 at the same job. The
+  # reputation inverts under measurement -- VictoriaMetrics ships the far
+  # smaller image and carries twice the resident set, and on a swapless host the
+  # resident set is what decides an OOM. It also evaluates rules natively, where
+  # VictoriaMetrics needs `vmalert` as a second container.
+  #
+  # `profiles: [session14]` and CURRENT_SESSION is 13, so nothing starts this
+  # yet -- the same shape the collector has carried since Run 2.
+  store:
+    image: ${PROMETHEUS_IMAGE:?required}
+    profiles: [session14]
+    restart: "on-failure:5"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      # Retention is a memory and disk decision, not a preference. The envelope
+      # this store exists to inform is Run 6's, and a fortnight is enough to see
+      # a weekly pattern without holding a quarter of samples nobody queries.
+      - --storage.tsdb.retention.time=14d
+      # No remote write, no exemplars, no OTLP receiver. Every one of those is
+      # a way for this container to originate a connection, and the database
+      # container's egress is this deployment's single named residual (ADR
+      # 0147). Session 14 does not add a second.
+      - --web.listen-address=0.0.0.0:9090
+      # It is routed nowhere, so nothing needs the console or the admin API.
+      # `--web.enable-admin-api` would expose a delete-series endpoint on a
+      # port that is unauthenticated inside the network.
+      - --web.external-url=http://localhost:9090
+    # **No labels at all, and the omission is the decision.** The store answers
+    # arbitrary queries over this project's whole metric history. ADR 0164
+    # published the COLLECTOR at the edge exactly so this never has to be
+    # reachable from outside the deployment -- and a store with a router would
+    # be a query interface behind one password.
+    labels:
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 10s
+    # ADR 0165. Measured at 21.2 MB anon, peak 37.4, against a real scrape
+    # target with ingestion confirmed at both ends of the run. 192 rather than
+    # 128 because a store's working set grows with retention where a
+    # collector's does not -- a ceiling with room beneath it, not a target.
+    #
+    # `memory.current` will read close to this whatever the process is doing,
+    # because reclaimable page cache expands to fill a limit (ADR 0165, D767).
+    # Re-measure `anon`, never `current`.
+    mem_limit: 192m
+    # **No environment and no secrets.** This container holds no credential of
+    # any kind. It scrapes one target on this project's own network, over plain
+    # HTTP, and that target requires none -- the edge credential guards the
+    # ROUTE in front of the collector, and nothing in the metrics plane holds it
+    # (ADR 0164).
+    volumes:
+      - store-data:/prometheus
+    healthcheck:
+      # `-Y off` disables the proxy; the image has wget but no shell utilities
+      # worth relying on. `/-/healthy` reports the process, and the readiness
+      # path would report the same thing before the first scrape completes.
+      test: ["CMD", "wget", "-q", "-Y", "off", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # `edge` only, matching the collector it scrapes.
+    #
+    # **ADR 0164 section 3 says "the project's internal network", and this is a
+    # deliberate divergence rather than an oversight.** Following that sentence
+    # literally would mean putting the COLLECTOR on `internal` so the store
+    # could reach it there -- which reverses Run 2's decision to keep the
+    # collector off `internal` entirely, and widens the reach of the container
+    # that is published at the edge. The property section 3 was protecting is
+    # that the store holds no edge credential and is routed nowhere, and both
+    # hold here: this service has no router label and no secret.
+    networks:
+      - edge
+
   # Session 6's auth service. Run 7 built the process; **Run 10 publishes it.**
   #
   # On `edge` as well as `internal` since Run 10, which is why
@@ -1488,3 +1574,13 @@ networks:
 volumes:
   postgres-data:
     name: ${POSTGRES_VOLUME_NAME:?required}
+  # The store's TSDB. A named volume rather than a tmpfs: an alert rule
+  # evaluated over a range needs history across a restart, and a store that
+  # forgets on every deploy would report every rule quiet immediately after
+  # one -- which is what a healthy deployment looks like.
+  #
+  # It holds no project data. Every series in it describes the deployment
+  # rather than anything in it, which is why this volume is not on the list
+  # `bin/compose.sh` refuses to remove.
+  store-data:
+    name: ${STORE_VOLUME_NAME:?required}
