@@ -17,18 +17,19 @@ there are six sessions. This document does not repeat it.
 ## Status — read this first
 
 ```
-SESSION 14 IS IN PROGRESS. Runs 1-5 are DONE. **RUN 6 IS NEXT.**
+SESSION 14 IS IN PROGRESS. Runs 1-6 are DONE. **RUN 7 IS NEXT.**
 HEAD af90f4e, main, clean and pushed.
 CURRENT_SESSION 13; it moves to 14 in Run 7 -- ALL-OR-NOTHING (D690).
 template_version 0.2.0 -> 0.3.0 there too; ADR 0162 says what that permits.
-divergences     D760-D789 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
-                D774-D781 Run 4; D782-D789 Run 5).
-                **Next free: D790.**
-ADRs            168. **Next free: 0169.** This session has written 0164 (the
+divergences     D760-D796 (D765-D771 Run 1; D772 Run 2; D773 Run 3;
+                D774-D781 Run 4; D782-D789 Run 5; D790-D796 Run 6).
+                **Next free: D797.**
+ADRs            169. **Next free: 0170.** This session has written 0164 (the
                 metrics surface), 0165 (a telemetry component's memory limit),
                 0166 (the trace id is the request id), 0167 (a metric reads
-                from the decision that owns its value) and 0168 (a rule states
-                what its silence means).
+                from the decision that owns its value), 0168 (a rule states
+                what its silence means) and 0169 (an envelope number declares
+                whether it transfers).
 outputs schema  still v13. Publishing /metrics needs v14 + a migration and is
                 deferred to Run 7, deliberately (Run 2's Done marker).
 host            62.238.99.122, still on Session 12's RELEASE (936fe09); its
@@ -84,7 +85,7 @@ correlation). This session extends that family and opens `CAP-*`.
 Six columns, the house shape. **Every row is a fact measured against the tree and
 the live host at planning time**, not a prediction.
 
-**Next free number after this table is D790.**
+**Next free number after this table is D797.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -118,6 +119,13 @@ the live host at planning time**, not a prediction.
 | **D787** | D762's procedure is followed when an image is added, and Session 14 has already paid it once in Run 2. | **It is paid EVERY time, and Traefik has moved again since Run 2.** Adding `PROMETHEUS_IMAGE` re-resolved the same three rolling tags for the third consecutive session: `pgvector:pg18`, `python:3.12-slim` and `traefik:v3.7` — and `traefik:v3.7`'s digest is **not** the one Run 2 restored three days earlier. | **Snapshot, `--update`, classify every changed key as intended or drift, restore the drift, then RE-READ the file to prove only the intended key differs.** `--check` exits 0 with 11 images. | **`traefik:v3.7` moving twice inside one session is the measurement D540 has been waiting four sessions for**: the drift is not annual, it is roughly weekly, and a session that adds two images at different times pays it twice. **Adopting an unmeasured Traefik as a side effect of adding a metrics store is exactly the change a digest pin exists to prevent** — and Run 4 had already re-measured this deployment's Traefik behaviour against the *old* digest. | 0077 |
 | **D788** | The drift guard restores every key that is not this run's, which is the whole of D762's procedure. | **A classifier over two categories met a third.** `APG_LOCKED_AT` and `APG_VERSIONS_IN_SHA256` are neither this run's key nor registry drift — they are derived from the *edit itself*, and the second is a hash **of `versions.in.yaml`**, which this run legitimately changed. Restoring them made the lock describe a file that no longer existed, and `--check` said so: *"versions.in.yaml has changed since the lock was generated … run --update"*. | **Recomputed from the source of truth rather than copied from the update's output**, so the repair reads the file rather than a number in a transcript. | **The guard was written to catch a known failure and acquired one of its own, in the same shape it was guarding against**: a rule that was complete when written and became incomplete when the world gained a case. It failed **loudly**, which is the only reason it cost a minute rather than a release — and the loud failure came from `--check`, not from the guard. | 0077 |
 | **D789** | *"A rule per failure class"* — backup, WAL, disk, service health, certificate. | **Five of those classes have no series, because Run 4 deliberately did not build them.** Backup state and the archiver each already have one source and it is a root-plane on-demand command; disk headroom is `diagnosis.disk_headroom`; pooler saturation and connection counts need a database credential and therefore a **sixth claimant on `max_connections`** (D780). What is left with a series is service health (two hops), certificate expiry, route errors and agent-plane failures. | **Six rules over the metrics that exist, and a test that REFUSES a rule naming any of the absent ones.** The plan says which classes are unreported, in the run's own `**Done.**` marker rather than in a footnote. | **A rule over a series nothing publishes is silent in exactly the way a healthy deployment is.** Writing the missing five would have produced a rule set that looked complete, satisfied `OPS-ALERT-001`'s node ids, and measured four of nine classes — **the dangerous half of this claim arriving disguised as the safe half**, and the exact shape of D145. The refusal is a test rather than a review note because the temptation returns every time somebody reads the plan's list. | 0168, 0167 |
+| **D790** | Run 6 measures the pooled path's capacity, so the numbers are throughput and latency. | **The number that matters is which ERROR a caller gets, and the pooler names the wrong cause.** Measured at the rendered settings (transaction mode, `default_pool_size` 20, `query_wait_timeout` 20 s): 30 clients each holding a slot for 25 s produced **exactly 20 completions and 10 refusals**, and the refusal reaches the caller as **`ProtocolViolation: query_wait_timeout`**. A capacity condition arrives as a **protocol** error, so a client catching `OperationalError` -- the usual "connection trouble, retry" -- does not catch it. | **Recorded in the envelope as a configuration-determined fact**, beside the REST path's honest version of the same failure, because the pair is what makes it legible. Nothing is changed in the pooler: the setting is right and the vendor's error class is not ours to fix. | **D145's family.** `postgrest --ready` returned 0 while every request 404'd; here a full queue reports a protocol violation. **The state is real and the signal describes something else** -- and the consequence is concrete rather than aesthetic: anything classifying failures by exception class treats a saturated pooler as a bug in the client library. | 0169 |
+| **D791** | Both components sit behind the same kind of pool, so both fail the same way at saturation. | **PostgREST gets it right, which is what makes D790 visible.** At `PGRST_DB_POOL` 10 and a 5 s acquisition timeout, excess callers receive **HTTP 504** with `{"code":"PGRST003","message":"Timed out acquiring connection from connection pool."}` -- a machine-readable code, a message naming the actual cause, and a status a caller already classifies as a gateway timeout. | **Both recorded, adjacent.** One failure, two reports, and only one can be acted on without reading this document. | **The comparison is the finding, not either half.** Measured separately, each looks like a reasonable vendor choice; measured together, the pooled path's report is revealed as the outlier. **This is the kind of thing a per-component measurement cannot produce** -- it needed both paths in one run and one document. | 0169 |
+| **D792** | Capacity is expressed in requests -- how many concurrent callers the REST surface serves. | **The limit is connection-SECONDS.** Measured: at 240 concurrent, **130 of the 500 ms requests were refused**; at the *same* 240 concurrent, **every fast request was served**. Neither the HTTP layer nor the caller count is the constraint. What saturates is callers *holding* a connection. | **The envelope states the limit in connection-seconds** and says so explicitly, because the corollary is actionable: **halving a query's duration is worth as much as doubling the pool.** | **A requests-per-second figure would have been wrong in the most useful direction.** It would have implied the remedy is a bigger pool -- which costs a claimant on `max_connections` (D780) and therefore an ADR -- when the cheaper remedy is a faster query and costs nothing. The separating control is what produced this; without the fast-request arm the plateau reads as a request ceiling. | 0169 |
+| **D793** | The pooled endpoint and the REST surface share the pooler, so one envelope covers both. | **PostgREST connects DIRECTLY to the cluster.** `PGRST_DB_URI` names `POSTGRES_SERVICE_HOST:5432`, not the pooler. So a REST caller and a pooled client contend for `max_connections` -- and for nothing else. Two independent pools, two independent limits, two different failures. | **Two sets of numbers, labelled by path**, and the envelope says they are independent rather than leaving a reader to assume a shared one. | **An operator diagnosing one learns nothing about the other**, and the natural assumption is the wrong one: a pooler exists, so surely everything is pooled. `connection_claimants` has always summed them separately (ADR 0070) -- **the arithmetic already knew, and no document said it out loud.** | 0169, 0070 |
+| **D794** | An envelope reports measured numbers, and a measured number is better than an estimate. | **A measured number taken on the wrong machine is worse than an estimate, because it looks authoritative.** Every number here was taken on an 8 GB development machine; the host is 3,814 MB with no swap and eighteen containers. Some numbers survive that move and some do not, and nothing in the prose distinguishes them. | **A measurement carries a KIND.** `CONFIGURATION` follows from a setting and holds anywhere; `MACHINE` describes the rig. **A `MACHINE` measurement must name its machine among its conditions and a `CONFIGURATION` one must not** -- structural, so it cannot be satisfied by wording. | **D770 in a new place**: a store measured 63 MB and rising on a 7.8 GB rig against 45.6 MB under a real cap, because an unbounded component sizes itself from the machine it lands on. **The first version of the guard was a scan over the measurement's prose and could not tell a stipulated 500 ms input from an observed 476 ms output** -- D464's shape, and it failed on this run's own data before the structural form replaced it. | 0169, 0065, 0066 |
+| **D795** | The envelope is a document in `docs/`, kept current like every other generated page. | **A generated page that goes stale reports the wrong deployment while looking current.** The numbers describe three specific image digests, and `--check` comparing the document to its own renderer cannot see that the images beneath it moved. | **The document records the digests it was measured against, and `--check` fails when one has moved, NAMING which.** Pinned to three images rather than the whole lock -- and a **missing** digest counts as stale rather than as unchanged. | **D700's shape, guarded before the fact rather than after.** A `backup_state` computed twice published `failing` for every project and survived two sessions because it failed safe. This one would fail *comfortably*: an envelope describing a superseded PostgREST reads exactly like an envelope describing the current one. **And the drift is real** -- `traefik:v3.7` moved twice inside this session (D787), while none of the three measured images moved at all, which is precisely why the pin is narrow. | 0169 |
+| **D796** | Run 6 measures pooled clients, REST reads and writes, MCP reads and writes, and backup behaviour under load. | **Two of the four are measurable off-host and two are not.** MCP needs the whole agent plane -- the auth service, a signed token, the capability contract and a live audit table -- which is a deployment rather than a rig. Backup under load needs the R2 repository, reached with a credential this machine does not hold **and must not be given**. | **Two measured, two listed as unmeasured with the reason and what unblocks each**, and a test asserts the list is non-empty. Timeout and pool tuning is a third entry: **nothing was tuned**, deliberately. | **An envelope silently missing the scenarios nobody could run reads as an envelope of the whole system** -- §7's predicted failure, arriving as a document that looks complete rather than as a claim that is false. **The day the list is empty is a claim in itself** and must be made deliberately rather than by deletion, which is why its emptiness is what the test refuses. | 0169 |
 ---
 
 ## 2. What Session 14 adds to the acceptance registry
@@ -563,6 +571,72 @@ the envelope says so or it is a number about nothing.
 
 **No replica and no cache.** This run produces the evidence that would justify
 one later; that is the whole of its relationship to them.
+
+**Done.** — D790–D796, ADR **0169**.
+
+**Two of the four scenarios were measurable off-host and two were not**, and the
+envelope says which. Pooled clients and REST callers were measured against the
+pinned images at the **rendered** settings — a rig at a different `pool_size`
+measures a different pooler (ADR 0065/0066). MCP round trips need the whole agent
+plane and backup-under-load needs the R2 repository, so both are listed as
+unmeasured with what unblocks them. **Nothing was tuned**, deliberately: changing
+a setting on the strength of a development machine's latency would be tuning the
+deployment to a measurement that is not about it.
+
+**The design problem was never the numbers — it was which of them survive being
+quoted.** Every measurement now carries a KIND. `CONFIGURATION` follows from a
+setting and holds wherever the deployment runs; `MACHINE` describes the 8 GB rig
+and not the 3,814 MB host. A `MACHINE` measurement must name its machine among
+its conditions and a `CONFIGURATION` one must not — structural, because the first
+version of that guard scanned the measurement's prose and could not tell a
+*stipulated* 500 ms input from an *observed* 476 ms output (D794, D464's shape).
+**It failed on this run's own data**, which is how it was found.
+
+**The sharpest finding is a pair, and neither half is interesting alone.**
+pgbouncer reports a full queue as **`ProtocolViolation: query_wait_timeout`** — a
+capacity condition arriving as a *protocol* error, so a client catching
+`OperationalError` does not catch it (D790). PostgREST reports the identical
+failure as **HTTP 504 with `PGRST003`** and a message naming the cause (D791).
+Measured separately each looks like a reasonable vendor choice; measured together
+the pooled path's report is the outlier, and anything classifying failures by
+exception class treats a saturated pooler as a client-library bug.
+
+**Capacity here is connection-seconds, not requests** (D792). At 240 concurrent,
+130 of the 500 ms requests were refused — and at the *same* 240 concurrent, every
+fast request was served. **Halving a query's duration is worth as much as
+doubling the pool**, and a requests-per-second figure would have pointed at the
+expensive remedy: a bigger pool costs a claimant on `max_connections` (D780) and
+therefore an ADR, while a faster query costs nothing.
+
+**And the two paths are independent** (D793). PostgREST connects directly to the
+cluster, not through the pooler, so an operator diagnosing one learns nothing
+about the other. `connection_claimants` has summed them separately since ADR
+0070 — the arithmetic already knew and no document said it out loud.
+
+**The envelope is pinned to the three images it measured** and `--check` fails
+when one moves, naming which (D795). Narrow on purpose: `traefik:v3.7` moved
+twice inside this session while none of the three moved at all, and a guard that
+cries wolf gets regenerated without reading. A **missing** digest counts as stale
+rather than as unchanged (D600's shape).
+
+**Seven mutations, all killed — after two were repaired.** M3 was a FALSE KILL:
+the edit was a `SyntaxError`, so the module did not import and the control died
+with the subject. D499 is explicit that when both go red the repair is the
+mutation, and the behavioural edit is to empty the list rather than to break the
+file. **M6 genuinely survived**, and it was the run's own question 5: every test
+exercised `stale_against` directly and nothing exercised the renderer that calls
+it, so disabling the call inside `--check` left the suite green. The unproved
+caller was the only thing a gate ever runs.
+
+**Two registrations the guards caught**, both named in CLAUDE.md as recurring:
+`bin/render-capacity-envelope.py` in `SHELL_COMMANDS`, and
+`docs/capacity-envelope.md` in the documentation index — plus the git *index*
+mode, which is what `test_cli_contract` reads rather than the working tree's.
+
+**Not done, and named rather than implied:** nothing is deployed, so every number
+here is off-host. The `CONFIGURATION` numbers should reproduce on the host at Run
+8; **if they do not, the difference is the finding**, and the pinning is what
+makes re-measuring visible rather than optional.
 
 ### Run 7 — The bump
 

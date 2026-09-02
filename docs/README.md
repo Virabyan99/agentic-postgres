@@ -42,6 +42,7 @@ all flags or steps lost to retyping the previous session's page.
 | [API operations](api-operations.md) | The connection budget, statement timeouts, restarting, rotating a credential |
 | [Pool operations](pool-operations.md) | PgBouncer: its pool, its users, what a restart costs |
 | [Backup operations](backup-operations.md) | The repository, the schedule, and how a restore is rehearsed |
+| [Capacity envelope](capacity-envelope.md) | What the deployment does at its limits, which numbers transfer to another machine, and what has not been measured |
 | [Database connections](database-connections.md) | Both transports, the tunnel, and the profiles |
 | [Client compatibility](client-compatibility.md) | Which clients work against which transport, measured |
 | [Migrations](migrations.md) | How a migration is written, rendered, released and applied |
