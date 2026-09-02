@@ -261,6 +261,17 @@
       "template": "templates/0022-database-row-request-id.sql",
       "template_sha256": "a9e51cf245bc1da57bb969a4b451561bbc328a24b7c55b9e09b8ccd0f3dda5eb",
       "version": "20260827120022"
+    },
+    {
+      "canonical_render_sha256": "67f5ba1f0f8308003b9180a6608f9ca23810e0c04622baaedf7d8467bcc8a9a1",
+      "name": "refresh_session_plane",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0023-refresh-session-plane.sql",
+      "template_sha256": "e2bed250654f5903981be84b1b4e5e0d6f03d0806defbab0c66e3d1d98190a59",
+      "version": "20260902120023"
     }
   ],
   "schema_version": 1

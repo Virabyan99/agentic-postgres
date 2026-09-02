@@ -234,3 +234,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0168](0168-a-rule-states-what-its-silence-means-and-each-hop-reports-its-own-failure.md) | A rule states what its silence means, and each hop reports its own failure | 14 | Accepted |
 | [0169](0169-an-envelope-number-declares-whether-it-transfers-and-the-document-is-pinned-to-what-it-measured.md) | An envelope number declares whether it transfers, and the document is pinned to what it measured | 14 | Accepted |
 | [0170](0170-the-deployment-has-one-signer-and-the-retired-key-leaves-the-published-set.md) | The deployment has one signer, and the retired key leaves the published set | 15 | Accepted |
+| [0171](0171-a-refresh-family-is-the-session-and-one-live-token-per-family-is-a-catalog-invariant.md) | A refresh family is the session, and one live token per family is a catalog invariant | 15 | Accepted |

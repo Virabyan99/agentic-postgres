@@ -17,13 +17,14 @@ not repeat them.
 ## Status — read this first
 
 ```
-SESSION 15 IS IN PROGRESS. **RUN 1 IS DONE. RUN 2 IS NEXT.**
+SESSION 15 IS IN PROGRESS. **RUNS 1-2 ARE DONE. RUN 3 IS NEXT.**
 HEAD 3b85b5f, main, clean and pushed.
 CURRENT_SESSION **14**, template_version **0.3.0**, outputs schema **v14**.
                  It moves to 15 in Run 7, ALL-OR-NOTHING (D690).
-divergences     **Next free: D826.** D812-D820 planning-time, D821-D825 Run 1.
-ADRs            170. **Next free: 0171.** Run 1 wrote 0170.
-migrations      22 released. **Session 15 adds 0023** (Run 2) and possibly
+divergences     **Next free: D832.** D812-D820 planning-time, D821-D825 Run 1,
+                D826-D831 Run 2.
+ADRs            171. **Next free: 0172.** Run 1 wrote 0170, Run 2 wrote 0171.
+migrations      **23 released.** Run 2 added 0023; possibly
                 0024 (Run 4). Fix-forward only; every down block raises AP900.
 claims          82, reporting 107 of 131 requirements.
                 **8 not_run**, carried from Sessions 13 and 14 unchanged.
@@ -78,7 +79,7 @@ thing to diagnose.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 planning time**, not a prediction.
 
-**Next free number after this table is D826.**
+**Next free number after this table is D832.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -97,6 +98,12 @@ planning time**, not a prediction.
 | **D823** | `promote` advances a prepared rotation, so the retirement only frees a slot for it. | **`promote` infers the incoming key as *"whichever published kid is not the active one"***, with no guard separating a prepared key from the bootstrap one. `promote_rotation` checks that the kid is published, is not active, that consumers are non-empty and that the digest is a sha256 — none of which distinguishes them. **Today it would promote the bootstrap key.** | **Nothing is added there.** The retirement removes the state in which the existing inference is wrong: with the set holding the auth key alone, or beside a genuinely prepared one, *"not active"* is the prepared key by the only arrangement the renderer can produce. | **Safe only because the set's second member had never been anything else and nobody had run it.** A latent defect whose trigger was blocked by the very thing this run removes — so the retirement had to make the inference sound in the same step, or it would have unblocked a wrong promotion instead of a right one. | 0170 |
 | **D824** | Guarding `render-jwks.py`'s append retires the key; that is the one line D814 names. | **It changes nothing on a deployment.** `active_secrets` filters on `introduced_in_session <= session` and **has no upper bound at all**, so a secret introduced in Session 5 is materialized into every generation for ever. Measured: at session 15 the contract still returned **19 secrets, including `bootstrap_jwt_signing_key`**. The file would be on disk, the new guard would pass, and the published set would stay full — the run would have shipped as a no-op. | **`retired_in_session`**: a schema field, an upper bound in `active_secrets`, and `retired_in_session: 15` on the key. Measured after: **session 14 → 19 secrets with the key; session 15 → 18 without it.** The upper bound is strict so a project pinned to an older release keeps the credential its published set still names. | **The whole run was green in a checkout while being a no-op in production**, because a fixture writes only the keys its test wants and the materializer writes them all — **the fixture and the code sharing a belief the deployment does not.** The sixth question, and the fourth time this shape has been the finding (D673, D680/D682, D687). Nothing already offline would have caught it; the mutation that reproduces it (`M5`) is now in the battery. | 0170 |
 | **D825** | `jwt.temporary` records whether the bootstrap issuer is still live, and `SEC-BOOT-001` branches on it. | **It is the literal `True`**, hard-coded in `observe_jwt` under a comment reading *"True until Session 6 replaces the issuer"* — written before Session 6 and never revisited after it shipped. So the field claimed a temporary issuer for **ten sessions** while its replacement was live, and the live proof's false branch **had never executed**. That proof's docstring also described a `deployed_through_session` comparison its body does not make. | **Derived from the contract's retirement** (`secrets_contract.secret_is_active`), passed as a **required** keyword so no caller can publish the claim without deciding it. **The live proof reads the FILESYSTEM instead** and asserts the document agrees — two independent readings, deliberately not the same one. | **A value that looks measured and is not, in the document whose whole job is to say what a deployment established** — §7's standing defect, in the field naming this run's subject. It survived because nothing could reach the branch that would have contradicted it. The offline proof asserts **both** values, because one that only ever passed `True` would pass against the constant it replaced. | 0170 |
+| **D826** | Reuse detection is logic: consume the token, and if it was already consumed, revoke the family. | **The outcome is decided by the isolation level, and the two answers are different kinds of thing.** Measured against the pinned image with a control that proves the rig has a real race — both transactions win when the guard is removed. Under `read committed`, which is what the deployment runs: **the loser gets 0 rows and no error**, after **blocking 0.61 s** until the winner commits. Under `repeatable read` the identical statement raises **`40001`**. | **The plane is specified against `read committed` and reads its outcome from the row count**, with the measurement recorded in ADR 0171 and in the column comment rather than beside a query. | **`40001` means "reuse" here and looks like a transient error a client should retry — and retrying presents the replay a second time.** A serialization failure is the one error class whose standard handling is exactly wrong for this path. Nothing today raises the isolation level, so this is a decision that could quietly stop holding rather than a bug; recording it where the next reader of the column will be is the difference between a measured value and a remembered one. | 0171 |
+| **D827** | The partial unique index enforces "one live token per family", which is the invariant reuse detection rests on. | **It enforces more than that: it makes the write ORDER a catalog constraint.** Measured in one transaction against the pinned image, then re-measured against the rendered migration after it was applied by the server: **consume-then-insert is accepted, insert-then-consume is refused `23505`.** | **Kept and documented as the constraint it is.** The rotation cannot be written in the wrong order by accident — it fails at the database in every environment rather than passing review and being correct only where somebody remembered. | **The invariant was the goal and the ordering is a free strengthening, so it is worth naming before somebody "simplifies" the index.** Without it, two live tokens per family would mean a thief and the legitimate client each hold a valid token and **neither presentation looks like a replay** — every guarantee in ADR 0171 would reduce to a comment. | 0171 |
+| **D828** | Credential material in `app_private` is argon2; both neighbouring tables `CHECK (... LIKE '$argon2id$%')`. | **A refresh token cannot be stored that way, for a structural reason rather than a preference.** An agent presents `agent_id` **and** a secret, and a person presents a username **and** a password — so those rows are found by an identifier and the hash is only ever *verified*. **A refresh token presents only itself**, so the row must be found **by** the stored value, and argon2's per-row salt makes that a full scan with a KDF per row. | **A deterministic hex SHA-256, with `CHECK (token_hash ~ '^[0-9a-f]{64}$')`** stating the shape so a row holding a raw token or an argon2 string is refused at write time. | **A KDF's expense buys resistance to guessing a low-entropy secret**, and this value is 32 bytes from `os.urandom` — the property is not one it needs. Recording the reasoning matters because the table now looks inconsistent with its two neighbours, and the next reader's correct instinct will be that somebody took a shortcut. | 0171 |
+| **D829** | Session listing needs enough to identify a session, which conventionally means a device or a location. | **Every candidate field is a caller-supplied string.** A user agent, an address and a device label are all values the client chooses, and the agent plane's standing rule is that a caller value is not recorded. | **None of them is stored.** A session is identified by its id, `created_at` and `last_used_at`. | **This costs something real and it is the point of writing it down**: Run 3's listing cannot say *"Firefox, in Berlin"*, which is a worse product than the obvious alternative. A display string carries the same escaping and redaction questions as any caller value, and *"it is only shown back to its own owner"* is the argument that ends with somebody rendering it in an operator console. If a later session decides the listing needs more, that is an ADR rather than a column added because it seemed useful. | 0171 |
+| **D830** | Migration 0023 creates the session plane, so it grants the auth service what it needs. | **0011 already set the terms for its own successors**, in its own words: *"the service reaches this data through SECURITY DEFINER functions that arrive in the same commit as the code that calls them. A grant issued now would be a grant nobody can audit against a caller that does not exist."* | **0023 creates no function and issues no grant**, and a contract test asserts both against the shipped SQL. The functions and their grants arrive in Run 3 with the endpoints that call them. | **The rule is five sessions old and this is the first migration since that could have quietly broken it**, because the tables are useless without a grant and adding one is the obvious next keystroke. **A guard that names the rule is worth more than a comment restating it**, since the failure is invisible: a grant to a caller that does not exist looks exactly like a grant to a caller that does. | 0171 |
+| **D831** | Run 2 puts the pure state machine in `src/`, per the session plan's own wording. | **`test_no_module_is_imported_only_by_its_own_tests` refused it** — *"a module with no caller is a feature that does not exist, however well it is tested"* (D204). True, and unavoidable: Run 2 deliberately touches no endpoint, so the caller does not arrive until Run 3. | **The module moved to `services/auth-api/app/refresh_sessions.py`**, beside `claims.py`, `tokens.py`, `scopes.py` and `hashing.py` — the auth service's own pure modules. No allowlist entry, and the guard is untouched. | **The guard was right about the package, not just about the timing.** `agentic_postgres` is what `bin/` and the deploy share, and the session plane is read by the auth service and nothing else — no operator command, no deploy step, no renderer. The plan's *"in `src/`"* was a reasonable default written before anyone asked who would import it. **A guard that produces the correct design rather than an exemption is the outcome worth recording**, because the tempting repair was an allowlist and it would have left the module in the wrong package for ever. | 0171 |
 ---
 
 ## 2. What Session 15 adds to the acceptance registry
@@ -222,6 +229,50 @@ Pure logic first, in `src/`, with the state machine testable without a database.
 refresh token. Two requests racing on one row is the case reuse detection exists
 for, and it is decided by the isolation level and the lock, not by the Python.
 Build the rig with a control that proves it can observe the race at all.
+
+**Done.** — D826–D831, ADR **0171**, migration **0023**. **The state, and the
+part of the logic that is neither SQL nor HTTP.**
+
+**Three measurements, each with a control, and the third is the one that
+counts.** The first two used a schema typed into a rig; the third rendered
+migration 0023 through `render_migration`, applied it to the pinned image, and
+re-asked the same questions of the artifact that actually ships — because a rig
+that tests its own copy of the subject is testing the copy.
+
+- **The reuse signal is an empty result, and the isolation level decides that**
+  (D826). Under `read committed` the loser gets 0 rows, no error, after blocking
+  0.61 s; under `repeatable read` the same statement raises `40001`. The control
+  — both transactions winning with the guard removed — is what makes "exactly
+  one" attributable to the guard rather than to a rig that never had a race.
+- **The partial unique index makes the rotation ORDER a catalog constraint**
+  (D827): consume-then-insert accepted, insert-then-consume refused `23505`.
+- **The shipped migration applies and enforces every claim ADR 0171 makes**,
+  including the half-revocation `CHECK` and the cascade from `users`.
+
+**What shipped:** migration 0023 (two tables, one enum, the partial unique index,
+no function and no grant), `app.refresh_sessions` (mint, digest, and a five-outcome
+state machine with an explicit precedence), and 21 contract assertions.
+
+**D831 is the one to keep.** The plan said the pure logic goes in `src/`, and
+`test_no_module_is_imported_only_by_its_own_tests` refused it: *"a module with no
+caller is a feature that does not exist."* That is true and unavoidable here, since
+Run 2 touches no endpoint. **The guard was right about the package, not merely
+about the timing** — the session plane is read by the auth service and nothing
+else, so it belongs beside `claims.py` and `tokens.py`. The tempting repair was an
+allowlist entry, and it would have left the module in the wrong package for ever.
+
+**Seven mutations, all killed with green controls**, files restored `cmp` clean,
+and the released lock re-verified afterwards because the migration was among the
+mutated files. `M1` is the sharpest: it checks the family before the replay, which
+silences the alarm in exactly the case where somebody is actively replaying a
+stolen chain.
+
+**Not done, and named rather than implied:** nothing is renewable yet. There is no
+route, no SECURITY DEFINER function and no grant, so `IDN-SESSION-001` and
+`IDN-SESSION-002` cannot pass — their live halves are Run 3's work and Run 8's
+deploy. **Migration 0023 has not been applied to a cluster this repository
+deploys**; it has been applied only to a rig, and the first real application is
+Run 8's trip.
 
 ### Run 3 — the endpoints
 
