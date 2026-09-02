@@ -20,6 +20,7 @@ what an operator does before asking for a plan.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from collections.abc import Iterator
@@ -52,6 +53,20 @@ def deployment_state(key: str) -> str:
     The deployed document, the installed rendered document, and the container
     set. Not `.generated/`: that is the checkout's staging area and a render into
     it is the operator's own step, not a change to the deployment.
+
+    **The container status carries a CLOCK, and it is stripped.** `{{.Status}}`
+    reads `Up 11 minutes (healthy)`, and the duration rises on its own -- so
+    comparing two snapshots asserted *nothing changed AND less than a minute
+    elapsed*, and the second half has nothing to do with what any caller claims.
+    It failed on a 12-minute host gate and passed on every faster one, which is
+    the signature of a clock in a comparison.
+
+    This is the inverse of this repository's usual defect: not a proof that
+    passes for the wrong reason, but one that FAILS for a reason unrelated to
+    its subject. Both come from including something nobody meant to compare.
+
+    The health half is KEPT -- a container that went unhealthy is a change an
+    upgrade plan must not cause -- so only the duration goes.
     """
     parts: list[str] = []
     for path in (
@@ -70,8 +85,23 @@ def deployment_state(key: str) -> str:
         text=True,
         check=False,
     )
-    parts.append(containers.stdout)
+    parts.append(_without_uptime(containers.stdout))
     return "\n".join(parts)
+
+
+#: `Up 11 minutes`, `Up About an hour`, `Up 2 days`, `Restarting (1) 3 seconds ago`.
+#: Everything between the state word and an optional `(healthy)` is a duration.
+_UPTIME = re.compile(r"\b(Up|Exited|Created|Restarting|Paused)\b[^(]*")
+
+
+def _without_uptime(listing: str) -> str:
+    """`name Up 11 minutes (healthy)` -> `name Up (healthy)`.
+
+    Keeps the state word and the health suffix, drops the duration between them.
+    A container that is up, and one that is up and healthy, remain different
+    strings; the same container a minute later does not.
+    """
+    return "\n".join(_UPTIME.sub(r"\1 ", line).rstrip() for line in listing.splitlines())
 
 
 @pytest.fixture
