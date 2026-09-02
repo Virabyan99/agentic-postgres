@@ -31,9 +31,11 @@ import base64
 import json
 import os
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +50,29 @@ pytestmark = [pytest.mark.p0, pytest.mark.deployment]
 # values inside it never reach this module, which reads them through
 # `materialized_secret`.
 SECRET_ROOT = "/var/lib/agentic-postgres/secrets"  # noqa: S105
+
+#: Which alerts an operator may induce without breaking another proof.
+#:
+#: **This is a property of the topology, not a preference**, and the first
+#: host gate of Session 14 paid for its absence. `ApgCollectorUnreachable` is
+#: induced by stopping the collector -- which is also the `/metrics` route's
+#: BACKEND. Traefik's docker provider drops a router whose container is gone,
+#: so the route answered **404** and four unrelated proofs failed. The alert
+#: itself fired correctly; the induction was not contained.
+#:
+#: `ApgRouteErrorRateHigh` is inducible cleanly: PAUSE a routed backend that
+#: is not the collector -- the container stays present, so the router
+#: survives and Traefik answers 504 rather than removing the route.
+#:
+#: The three that are NOT here each break something: `ApgEdgeUnreachable`
+#: needs the shared proxy stopped, which is every project's ingress;
+#: `ApgStoreScrapeMissing` needs the scrape config gone, which is a hand-edit
+#: to a rendered file; and `ApgCertificateExpiringSoon` needs a certificate
+#: inside its window, which is not something to arrange on a live deployment.
+SAFELY_INDUCIBLE = (
+    "ApgRouteErrorRateHigh",
+    "ApgAgentPlaneFailing",
+)
 
 
 def fetch(url: str, *, credential: tuple[str, str] | None = None) -> tuple[int, str]:
@@ -330,6 +355,19 @@ def test_an_induced_failure_fires_its_own_rule(as_root: None, project_a: dict[st
     expected = declared("APG_INDUCED_ALERT_FILE").strip()
     assert expected, "the induced-alert declaration is empty"
 
+    # Not a refusal -- the alert may legitimately have fired for a reason
+    # nobody arranged. What this catches is an induction that takes another
+    # proof down with it, which is how the first host gate of this session
+    # produced four failures that were about the induction rather than the
+    # deployment.
+    if expected not in SAFELY_INDUCIBLE:
+        warnings.warn(
+            f"{expected} is not in SAFELY_INDUCIBLE. Inducing it may break "
+            "other proofs in this same run -- read that module constant "
+            "before trusting any other failure in this gate.",
+            stacklevel=2,
+        )
+
     firing = store_query(key, 'ALERTS{alertstate="firing"}')
     names = {row["metric"]["alertname"] for row in firing}
     assert expected in names, (
@@ -433,7 +471,12 @@ def test_the_envelope_still_describes_the_release_this_host_runs(as_root: None) 
     """
     del as_root
     result = subprocess.run(
-        ["python", str(REPO_ROOT / "bin" / "render-capacity-envelope.py"), "--check"],
+        # `sys.executable`, never the name. The gate runs as root and
+        # `python` is not on sudo's PATH -- measured, as
+        # `FileNotFoundError: No such file or directory: 'python'` on the
+        # first host gate of this session. The interpreter running this test
+        # is the venv's, which is the one that can import the module.
+        [sys.executable, str(REPO_ROOT / "bin" / "render-capacity-envelope.py"), "--check"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
