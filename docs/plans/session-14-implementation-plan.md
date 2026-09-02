@@ -20,8 +20,8 @@ there are six sessions. This document does not repeat it.
 SESSION 14 IS IN PROGRESS. Run 1 is COMPLETE; Run 2 is next.
 CURRENT_SESSION 13; it moves to 14 in the bump run -- ALL-OR-NOTHING (D690).
 template_version 0.2.0 -> 0.3.0, and ADR 0162 decides what that permits.
-divergences     D760-D772 recorded here (D765-D771 are Run 1's; D772 is Run 2's
-                first finding). **Next free: D773.**
+divergences     D760-D773 (D765-D771 Run 1; D772 Run 2; D773 Run 3).
+                **Next free: D774.**
 ADRs            163. Next free: 0164. This session writes at least two.
 host            62.238.99.122, still on Session 12's RELEASE (936fe09).
                 3814 MB total, 2171 available, **NO SWAP**. 16 containers.
@@ -68,7 +68,7 @@ correlation). This session extends that family and opens `CAP-*`.
 Six columns, the house shape. **Every row is a fact measured against the tree and
 the live host at planning time**, not a prediction.
 
-**Next free number after this table is D773.**
+**Next free number after this table is D774.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -85,6 +85,7 @@ the live host at planning time**, not a prediction.
 | **D770** | Run 1 measures *"what a collector and a store cost"* — a number per candidate. | **A store's memory is a function of the machine it lands on, not of the workload.** Unbounded on the 7,786 MB rig, VictoriaMetrics logs *"limiting caches to 4898660352 bytes … according to -memory.allowedPercent=60, system memory limit 8164433920"* and climbed past 63 MB still rising. The same image under `--memory=192m` logs *"limiting caches to 120795955 bytes … system memory limit 201326592"* and settles at **45.6 MB**. Bounded, against a real scrape target with ingestion confirmed at both ends of the run: **Prometheus 21.2 MB anon (peak 37.4), otelcol-core 14.3 (16.7), Alertmanager 10.3 (12.3), VictoriaMetrics 45.6 (48.2)**. Nothing was OOM-killed. | **Every store or collector deployed here carries an explicit container memory limit**, and **no unbounded number measured off-host may be quoted for the host.** Which store is Run 2's choice, now a choice between measured numbers. | **An unbounded store on the 3,814 MB host would size caches to roughly 2.3 GB**, on a machine with no swap where the kernel picks the victim. The reputation inverts under measurement too: VictoriaMetrics has the smallest image (17.5 MB against Prometheus's 104.3 MB) and **twice the resident set**. ADR-shaped, and the ADR belongs to Run 2 where the store is chosen. | 0131, 0155 |
 | **D771** | D761: *"No swap means an OOM is a kill, not a slowdown"* — the risk this session is built around. | **Whether it has ever happened here is unknown, and the first reading said it had not.** `grep -c` over `journalctl -k` returned **0** OOM lines, which reads as a clean history. The control — total kernel journal lines over the same window — returned **1**, and that line is *"Hint: You are currently not seeing messages from other users and the system."* followed by `-- No entries --`. `op` is in `op, sudo, users`; the journal is `root:systemd-journal 0640` and `dmesg` is restricted. | **The host's OOM history is recorded as UNKNOWN.** Reading it needs root, or `op` in `adm`/`systemd-journal` — a decision, not a command. | **A zero meaning "no access" and a zero meaning "no kills" are the same character**, and the comforting one is the wrong one. It was caught only because the control counted total lines instead of trusting the filtered count — and it nearly passed anyway, because the threshold asked for *more than zero* and got exactly one. **§7's defect, produced by the rig built to avoid it.** | 0071 |
 | **D772** | Run 2 attaches the platform middleware chain to a new `/metrics` router, and `BASELINE_MIDDLEWARE_CHAIN` is that chain. | **`apg-response-policy` is attached to nothing, on any route, in production — and has been since Session 5 defined it.** `baseline.yaml` defines four middlewares and an `apg-baseline` chain of three, saying the chain is *"what project routers attach"*. **Project routers attach neither.** `host_config.BASELINE_MIDDLEWARE_CHAIN` enumerates `apg-security-headers@file,apg-rate-limit@file` — two of the three — and every router label interpolates that constant. Measured live on `alpha-dev`: the router label is `…middlewares=apg-security-headers@file,apg-rate-limit@file,…api-buffering,…api-stripprefix`, `GET /api/rest` returns **`server: postgrest/14.16` and no `Cache-Control`**, and no entrypoint-level middleware supplies it (`traefik.yaml`'s `websecure` carries only `transport`). | **Repaired in Run 2, by the user's decision.** `BASELINE_MIDDLEWARE_CHAIN` becomes the single name `apg-baseline@file` rather than a corrected enumeration — the enumeration was the wrong *shape*, and naming the chain is what `baseline.yaml` always intended so that *"adding a baseline middleware later does not require touching any project."* Measured first against the locked Traefik, because the existing proof only covered an unsuffixed same-provider reference: subject drops `Server` and adds `no-store`; a control carrying the old enumeration **reproduces the defect offline**. Guarded by `test_every_middleware_baseline_defines_is_attached_to_project_routes`, which reads from the constant outwards. **It reaches the deployment at Run 8, not before** — the host still runs Session 12's release. | **`apg-response-policy` is the middleware that sets `Cache-Control: no-store`**, and `baseline.yaml`'s own rationale says why it exists: *"every row the REST surface returns is selected by a row policy keyed on the requester's identity, so a shared cache holding one is holding one caller's data under a URL another caller will ask for."* That protection is absent from the deployed REST surface. **Two green tests assert the chain's contents and neither can see that nothing attaches it** — `test_the_baseline_chain_exists_and_is_referenced_by_name` is *named for* the property that is false. And `test_edge_behaviour.py`'s fixture attaches `apg-baseline`, so the behavioural proof of `apg-response-policy` runs by a route the product does not take (ADR 0065/0066), written by the author of the code it agrees with (§7 question 6). **Question 5's shape exactly**: Session 5 added a middleware and one reader of the chain never moved. | 0065, 0066, 0009 |
+| **D773** | Run 3 adopts OTel as a transport, with `mcp_telemetry`'s forbidden list *"applying unchanged to whatever the new transport carries."* | **Unchanged is not enough: a span records a caller's value with nobody writing a line of code.** Measured against `opentelemetry-sdk` 1.44.0, with a planted canary and a clean control. An exception merely **escaping** a span makes the SDK attach `exception.message`, `exception.stacktrace`, and a `status.description` of `"ValueError: <the message>"`. `record_exception` and `set_status_on_exception` both default to **on**. The control span, which never saw the value, came back clean — so this is a path rather than rig contamination. | **Both defaults are turned off, and span attributes are ENUMERATED** the way `RECORD_FIELDS` enumerates a log record's. **The canary is extended to spans in this run**, not a later one. | `mcp_telemetry` already refuses precisely this for log lines — *"an unclassified failure is logged with the exception's TYPE and never its message, because a message is where a caller's value would be if one ever reached one."* **The span carrier arrives with that refusal reversed by default.** D449 measured that a logged traceback carries no caller data *because `show_locals` is off*; this is the same question asked of a different framework and answered the other way. §8 predicted it in one line — *a span is a new carrier, and OTel's defaults attach more than a log line does* — and this measurement is what turns that sentence into a control. | 0130, 0164 |
 
 ---
 
@@ -305,6 +306,73 @@ whatever the new transport carries.
 **The redaction canary is extended to the new surface in the same run**, not a
 later one: a telemetry plane that ships spans is a second place a presigned URL
 can reach, and Session 7's canary exists because one did.
+
+**Done.** — D773, ADR **0166**.
+
+**The trace id IS the request id, and no second value exists.** A W3C trace id
+is 16 bytes and a `uuid4` is 16 bytes, so this is an identity rather than a
+mapping: the span's trace id renders as the request id's hex and parses back to
+the same UUID. D763's *"nothing re-derives it"* is satisfied by construction —
+there is nothing to keep in step, because there are not two values.
+
+**Nothing reads an inbound `traceparent`.** W3C propagation works by continuing
+a caller's trace, which would have reversed ADR 0160 as a side effect of picking
+a format. ADR 0160's reason has not changed: an id a caller chose lets one agent
+stamp its actions with another agent's id. §9's stop condition — *"OTel
+propagation would introduce a second request identifier"* — was the live risk
+all run and it did not fire.
+
+**D773 is the run's real finding, and it inverts the plan's own sentence.** The
+plan expected the forbidden list to apply *"unchanged"*. Unchanged is not
+enough: measured against `opentelemetry-sdk` 1.44.0, an exception merely
+**escaping** a span attaches `exception.message`, `exception.stacktrace` and a
+`status.description` carrying the message — `record_exception` and
+`set_status_on_exception` both default to **on**. `mcp_telemetry` refuses
+exactly this for log records; the span carrier arrives with that refusal
+reversed. Both defaults are now off and attributes are enumerated.
+
+**The canary observes a real span, and its control requires the leak to
+appear.** The SDK is in the dev environment for that reason: a test asserting
+`record_exception=False` appears in the source would be checking which names
+appear rather than what the code produces (D277). The control drives the tracer
+directly with the SDK's defaults and **fails if the canary is absent** — so it
+can fail for the reason it watches, which the absence-only version could not
+(D509).
+
+**Four mutations, all killed.** M1 and M2 restore the two SDK defaults, which is
+not a synthetic edit — it is the state of the world had this module never been
+written.
+
+**Two things the run found by running rather than reading:**
+
+- **The SDK's `IdGenerator` interface has three methods, not two.**
+  `TracerProvider` calls `is_trace_id_random()` on every root span, and a
+  duck-typed generator without it raises `AttributeError` inside span creation.
+  Every offline test that did not build a real span passed. That is *will this
+  run* versus *is what it asserts true*, and only the real library closed it.
+- **A span named `agent.upstream_call` tripped a security guard.**
+  `test_nothing_dials_the_locks_published_upstream` refuses any `.upstream` in
+  an `mcp_*.py` line (ADR 0126), and a string literal matched it — D464's text
+  scan again. **The name moved rather than the scan**, deliberately: loosening a
+  guard over a real boundary to admit a name this module chose freely would
+  trade a control for a preference, and `outbound` is the clearer word anyway
+  because `upstream` already means something else here.
+
+**Packages cost nothing this time.** `--packages-only` carried all ten image
+digests forward unchanged, so Run 3 pays none of Run 2's D762 price. Two pins,
+not three: `opentelemetry-sdk` declares `opentelemetry-api` with an exact
+equality, so naming the api would be a second authority — psycopg-binary's rule.
+Co-resolution with the twelve locked versions was measured with a control
+(`pyjwt==2.13.999` → `ResolutionImpossible`) proving the rig detects conflict.
+
+**Not done, and named rather than implied:** `configure()` is not called at
+startup and no collector endpoint is a setting, so **no span leaves the process
+yet**. `McpSettings` requires every field and defaults none — adding the first
+optional one needs its own justification, and a required endpoint would make a
+session-13 deployment export into a host that does not resolve. The endpoint
+belongs with the session-14 activation in Run 7. What ships here is the
+transport, wired into the tool path at zero cost because a span is a no-op
+without a tracer, and the image carries the packages.
 
 ### Run 4 — Metrics that answer a question somebody has
 

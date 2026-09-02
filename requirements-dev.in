@@ -106,3 +106,28 @@ botocore==1.43.72
 # file, because the number is load-bearing for ADR 0121's one-image model rather
 # than merely current.
 fastmcp==3.4.0
+
+# ---------------------------------------------------------------------------
+# Session 14, Run 3. The telemetry transport, here for the reason every block
+# above is here: the canary has to observe a REAL span.
+#
+# D773 is why this is not optional. Measured against opentelemetry-sdk 1.44.0:
+# an exception merely ESCAPING a span makes the SDK attach `exception.message`,
+# `exception.stacktrace` and a `status.description` carrying the message --
+# `record_exception` and `set_status_on_exception` both default to ON. A test
+# asserting that `record_exception=False` appears in the source would be
+# checking which names appear rather than what the code produces, and this
+# repository has a divergence number for that (D277).
+#
+# So the SDK is installed here, the canary builds a span through
+# `mcp_tracing.span()` with a planted value in an escaping exception, and its
+# CONTROL builds one through the SDK's own defaults and REQUIRES the leak to
+# appear. A mocked SDK could not do that: the whole question is what the real
+# library does when nobody tells it otherwise (ADR 0065, arriving again).
+#
+# Both pinned to versions.in.yaml like everything above, which
+# `test_the_development_environment_installs_the_locked_service_versions`
+# enforces. opentelemetry-api is deliberately absent -- the sdk declares it with
+# an exact equality, so naming it here would be a second authority.
+opentelemetry-sdk==1.44.0
+opentelemetry-exporter-otlp-proto-http==1.44.0

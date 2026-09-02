@@ -381,6 +381,43 @@ packages:
     version: "0.50.2"
 
   # ---------------------------------------------------------------------------
+  # Session 14, Run 3. OpenTelemetry, adopted as a TRANSPORT for correlation
+  # that already exists and is proved (ADR 0166, D763).
+  #
+  # **Two entries and not three, and the omission is the decision.** Measured
+  # from the packages' own metadata rather than assumed:
+  #
+  #   exporter-otlp-proto-http 1.44.0 requires proto==1.44.0 and
+  #     exporter-otlp-proto-common==1.44.0 EXACTLY, and sdk~=1.44.0 -- a range,
+  #     so the sdk can still float within 1.44.x and needs its own pin.
+  #   sdk 1.44.0 requires api==1.44.0 and semantic-conventions==0.65b0 EXACTLY.
+  #
+  # So pinning these two fixes all six. `opentelemetry-api` is deliberately NOT
+  # an entry, for psycopg-binary's reason: something else already declares it
+  # with an exact equality, and a second pin here would be a copy that can drift
+  # from the copy that is actually enforced.
+  #
+  # Co-resolution was measured against the locked python:3.12-slim digest, with
+  # the twelve versions this service already pins, because nine individually
+  # real versions can still have no solution together (Session 6, Run 7). The
+  # arms: the locked set alone resolves; the locked set plus these resolves; and
+  # the CONTROL -- the locked set plus `pyjwt==2.13.999` -- fails with
+  # ResolutionImpossible, which is what makes the first two mean anything.
+  # Installed for real, the whole set imports.
+  #
+  # No instrumentation package is locked, and that is ADR 0166's decision rather
+  # than an omission: they attach `http.url` to client spans as a matter of
+  # course, and a URL is on the redaction canary's list.
+  OTEL_SDK_VERSION:
+    registry: pypi
+    package: opentelemetry-sdk
+    version: "1.44.0"
+  OTEL_EXPORTER_OTLP_HTTP_VERSION:
+    registry: pypi
+    package: opentelemetry-exporter-otlp-proto-http
+    version: "1.44.0"
+
+  # ---------------------------------------------------------------------------
   # Session 7. The object-storage client.
   #
   # Measured against the locked python:3.12-slim digest before either number was

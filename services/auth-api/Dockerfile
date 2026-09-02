@@ -22,6 +22,12 @@ ARG PYDANTIC_SETTINGS_VERSION
 ARG PYDANTIC_VERSION
 ARG PYJWT_VERSION
 ARG UVICORN_VERSION
+# Session 14, Run 3. The telemetry transport (ADR 0166). Two arguments and not
+# three: opentelemetry-sdk declares opentelemetry-api with an exact equality, so
+# naming the api here would be a second authority for a version something else
+# already fixes -- psycopg-binary's rule, applied again.
+ARG OTEL_SDK_VERSION
+ARG OTEL_EXPORTER_OTLP_HTTP_VERSION
 
 # 65532:65532 is the conventional "nonroot" pair and matches the `user:` in
 # compose.yaml and the numeric ownership secrets.required.yaml declares for
@@ -77,8 +83,11 @@ RUN set -eu; \
       "uvicorn==${UVICORN_VERSION}" \
       "boto3==${BOTO3_VERSION}" \
       "botocore==${BOTOCORE_VERSION}" \
-      "fastmcp==${FASTMCP_VERSION}"; \
-    python -c "import argon2, boto3, botocore, fastapi, fastmcp, jwt, mcp, psycopg, psycopg_pool, pydantic, uvicorn"
+      "fastmcp==${FASTMCP_VERSION}" \
+      "opentelemetry-sdk==${OTEL_SDK_VERSION}" \
+      "opentelemetry-exporter-otlp-proto-http==${OTEL_EXPORTER_OTLP_HTTP_VERSION}"; \
+    python -c "import argon2, boto3, botocore, fastapi, fastmcp, jwt, mcp, psycopg, psycopg_pool, pydantic, uvicorn"; \
+    python -c "from opentelemetry.sdk.trace import TracerProvider; from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter"
 
 WORKDIR /app
 COPY app /app/app

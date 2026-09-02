@@ -46,6 +46,7 @@ import asyncio
 import json
 from typing import Any
 
+from app import mcp_tracing
 from app.mcp_audit import AuditRefusal
 from app.mcp_audit import begin as audit_begin
 from app.mcp_audit import complete as audit_complete
@@ -524,7 +525,18 @@ def register(
         failure, and reporting a failure that did not occur would make the
         record less true rather than more.
         """
-        with Timed(tool, resource=resource) as timed:
+        # The span wraps the SAME block the telemetry record measures, so the
+        # two describe one call rather than two overlapping ones. It carries no
+        # request id attribute: on a span the request id IS the trace id
+        # (ADR 0166), and writing it twice would put one value in two places
+        # that could later disagree.
+        #
+        # A no-op until a collector is configured, which is why it can sit in
+        # the hot path from this run rather than waiting for one.
+        with (
+            mcp_tracing.span("agent.tool_call", tool=tool, resource=resource),
+            Timed(tool, resource=resource) as timed,
+        ):
             audit_id: str | None = None
             token: str | None = None
             try:
