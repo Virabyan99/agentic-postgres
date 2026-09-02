@@ -99,6 +99,15 @@ constraint is not effort but **memory**: 3,814 MB, no swap, and 1,536 MB already
 budgeted to two database containers (D761). `/metrics` has been reserved since
 Session 1 and never used (D760).
 
+[`plans/session-15-implementation-plan.md`](plans/session-15-implementation-plan.md)
+is the third: identity lifecycle and credential rotation. **Its §1 measured that
+the plane it was briefed to extend does not exist** — no refresh route, no table,
+no column across 22 released migrations, and `refresh_token` present in the tree
+only as a value the redaction denylist forbids (D812). A token lives at most
+930 s and nothing renews it, so the gap is **credential retention rather than
+convenience** (D813). Run 1 is D683's one unconditional line, and it closes
+`bootstrap_identity`.
+
 ---
 
 **Generated pages are marked.** `acceptance-matrix.md` and the table in
