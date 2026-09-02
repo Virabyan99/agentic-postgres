@@ -51,28 +51,32 @@ pytestmark = [pytest.mark.p0, pytest.mark.deployment]
 # `materialized_secret`.
 SECRET_ROOT = "/var/lib/agentic-postgres/secrets"  # noqa: S105
 
-#: Which alerts an operator may induce without breaking another proof.
+#: Which alerts an operator may induce, and by what METHOD.
 #:
-#: **This is a property of the topology, not a preference**, and the first
-#: host gate of Session 14 paid for its absence. `ApgCollectorUnreachable` is
-#: induced by stopping the collector -- which is also the `/metrics` route's
-#: BACKEND. Traefik's docker provider drops a router whose container is gone,
-#: so the route answered **404** and four unrelated proofs failed. The alert
-#: itself fired correctly; the induction was not contained.
+#: **The alert and the method are different choices, and only the method decides
+#: whether an induction is contained.** The first host gate of Session 14 induced
+#: `ApgCollectorUnreachable` by stopping the collector; the alert fired exactly
+#: as designed, and four unrelated proofs failed because the collector is also
+#: the `/metrics` route's backend, so Traefik dropped the router and the route
+#: answered 404.
 #:
-#: `ApgRouteErrorRateHigh` is inducible cleanly: PAUSE a routed backend that
-#: is not the collector -- the container stays present, so the router
-#: survives and Traefik answers 504 rather than removing the route.
+#: Contained method: **disconnect the STORE from the project's edge network.**
+#: The scrape fails, `up` goes to 0 and the rule fires, while the collector and
+#: its route are untouched. The store is routed nowhere and nothing else talks
+#: to it, and the proofs here reach it with `docker exec` rather than over that
+#: network. Reversed with `docker network connect`.
 #:
-#: The three that are NOT here each break something: `ApgEdgeUnreachable`
-#: needs the shared proxy stopped, which is every project's ingress;
-#: `ApgStoreScrapeMissing` needs the scrape config gone, which is a hand-edit
-#: to a rendered file; and `ApgCertificateExpiringSoon` needs a certificate
-#: inside its window, which is not something to arrange on a live deployment.
-SAFELY_INDUCIBLE = (
-    "ApgRouteErrorRateHigh",
-    "ApgAgentPlaneFailing",
-)
+#: **`ApgRouteErrorRateHigh` is NOT here, and it was, for one round, on nothing
+#: but reasoning.** Measured against the locked Traefik with a docker-routed
+#: backend: paused, the request returns nothing at all for 40 s, because Traefik
+#: sets no `responseHeaderTimeout` by default -- so the client gives up and the
+#: edge records a 499, which is not a `5..`. Stopped, the router is dropped and
+#: the route answers 404. Neither produces the 5xx the rule counts.
+#:
+#: The other three need something worse than they are worth: the shared proxy
+#: stopped, which is every project's ingress; a hand-edit to a rendered scrape
+#: config; or a certificate inside its expiry window on a live deployment.
+SAFELY_INDUCIBLE = ("ApgCollectorUnreachable",)
 
 
 def fetch(url: str, *, credential: tuple[str, str] | None = None) -> tuple[int, str]:
