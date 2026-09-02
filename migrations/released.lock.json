@@ -272,6 +272,17 @@
       "template": "templates/0023-refresh-session-plane.sql",
       "template_sha256": "e2bed250654f5903981be84b1b4e5e0d6f03d0806defbab0c66e3d1d98190a59",
       "version": "20260902120023"
+    },
+    {
+      "canonical_render_sha256": "3525e6dcefd7752166a97a5115942ac5a17d46b8408ca2c2acbd4a49c0d1cff6",
+      "name": "refresh_session_functions",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0024-refresh-session-functions.sql",
+      "template_sha256": "7db5cd4c6e936bd74a288e58f47b7feb81782e7eb1168ce3c17fe1b86dce667e",
+      "version": "20260903120024"
     }
   ],
   "schema_version": 1

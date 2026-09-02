@@ -1874,3 +1874,254 @@ def test_a_revoked_agent_cannot_exchange_its_secret_for_a_fresh_token(drive: Any
     refused = exchange()
     assert refused.status_code == 401, refused.text
     assert refused.json() == _errors_module().AUTHENTICATION_FAILED
+
+
+# ---------------------------------------------------------------------------
+# IDN-SESSION-001 / IDN-SESSION-002 -- the session plane (Session 15, ADR 0171)
+#
+# Against the same live cluster every test above uses, with all 24 migrations
+# applied through the product's own render path. These are the behavioural
+# assertions: what a refresh DOES, and -- the run's actual subject -- what every
+# refusal looks like from outside.
+# ---------------------------------------------------------------------------
+
+
+def _new_subject(drive: Any, username: str, password: str) -> None:
+    """A subject of this test's own, so sessions do not accumulate across tests."""
+    token = _login(drive).json()["access_token"]
+    created = drive(
+        "POST",
+        "/admin/users",
+        headers={"Authorization": f"Bearer {token}"},
+        content=json.dumps(
+            {
+                "username": username,
+                "display_name": username.title(),
+                "role": "authenticated",
+                "scopes": ["notes:read"],
+                "password": password,
+            }
+        ),
+    )
+    assert created.status_code == 201, created.text
+
+
+def _refresh(drive: Any, token: str) -> httpx.Response:
+    return drive("POST", "/auth/refresh", content=json.dumps({"refresh_token": token}))
+
+
+def test_a_login_carries_a_refresh_token_and_it_rotates(drive: Any) -> None:
+    """The exchange, and the fact that makes it single-use.
+
+    The successor differs from what was presented, and the presented one is
+    refused from that moment. A rotation that returned the same value, or left
+    the old one live, would be a long-lived credential wearing a short-lived
+    name.
+    """
+    _new_subject(drive, "rita", "a-passphrase-for-rita-here")
+    first = _login(drive, "rita", "a-passphrase-for-rita-here").json()
+    assert first["refresh_token"], "login issued no refresh token"
+
+    rotated = _refresh(drive, first["refresh_token"])
+    assert rotated.status_code == 200, rotated.text
+    second = rotated.json()
+
+    assert second["refresh_token"] != first["refresh_token"], "the token did not rotate"
+    assert second["access_token"] != first["access_token"]
+    assert second["expires_at"] >= first["expires_at"], "the new token expires no later"
+
+    spent = _refresh(drive, first["refresh_token"])
+    assert spent.status_code == 401, "a consumed refresh token was accepted again"
+
+
+def test_a_client_renews_across_the_token_lifetime_without_the_password(drive: Any) -> None:
+    """IDN-SESSION-001, and D813 is the reason it is a security property.
+
+    `MAX_TTL_SECONDS` is 900 and the service issues at the ceiling, so before
+    this plane existed a client that wanted to stay logged in past fifteen
+    minutes had to keep the PASSWORD and replay it. This asserts the half that
+    makes the short TTL affordable: holding the refresh token ALONE, a client
+    obtains a working access token and reaches an authenticated route with it.
+
+    **The boundary is crossed by discarding the password, not by waiting 930
+    seconds.** A test that slept would assert the same thing and cost fifteen
+    minutes; what it would additionally prove -- that an expired access token is
+    refused -- is already `test_a_password_change_invalidates_a_token_issued
+    _before_it`'s territory and the claim contract's.
+    """
+    _new_subject(drive, "sonia", "a-passphrase-for-sonia-here")
+    issued = _login(drive, "sonia", "a-passphrase-for-sonia-here").json()
+
+    # Everything the client keeps. The password is deliberately not carried
+    # past this line, which is the property under test.
+    held = issued["refresh_token"]
+
+    renewed = _refresh(drive, held)
+    assert renewed.status_code == 200, renewed.text
+    access = renewed.json()["access_token"]
+
+    me = drive("GET", "/auth/me", headers={"Authorization": f"Bearer {access}"})
+    assert me.status_code == 200, me.text
+    assert me.json()["username"] == "sonia"
+
+
+def test_a_replayed_refresh_token_ends_the_whole_session(drive: Any) -> None:
+    """Reuse detection, and the reason the plane has families at all.
+
+    The server cannot tell a replay by the owner from a replay by a thief, so
+    it assumes the chain leaked and closes it. **The successor is the control**:
+    without asserting that the still-unused token stops working, this would pass
+    against an implementation that merely refused the replayed value and left
+    the thief's copy live.
+    """
+    _new_subject(drive, "tamsin", "a-passphrase-for-tamsin-x")
+    first = _login(drive, "tamsin", "a-passphrase-for-tamsin-x").json()
+
+    second = _refresh(drive, first["refresh_token"]).json()
+    assert second["refresh_token"]
+
+    replay = _refresh(drive, first["refresh_token"])
+    assert replay.status_code == 401, "a replayed token was accepted"
+
+    # The CONTROL. The live successor was never presented by an attacker and is
+    # still refused, because the family ended.
+    successor = _refresh(drive, second["refresh_token"])
+    assert successor.status_code == 401, (
+        "the replay refused the presented token and left the live successor working, "
+        "so a thief who replayed once would still hold a usable session"
+    )
+
+
+def test_every_refresh_failure_is_the_same_response(drive: Any) -> None:
+    """The run's subject: four causes, one answer, byte for byte.
+
+    Unknown, replayed, revoked and malformed reach the caller as the same 401
+    and the same body. Distinguishing them would tell whoever presented a guess
+    whether it named something real -- which is exactly what
+    `test_every_authentication_failure_is_the_same_response` withholds on the
+    login path, for the same reason.
+    """
+    _new_subject(drive, "ursula", "a-passphrase-for-ursula-y")
+    issued = _login(drive, "ursula", "a-passphrase-for-ursula-y").json()
+    spent = issued["refresh_token"]
+    live = _refresh(drive, spent).json()["refresh_token"]
+
+    # Replayed: consumes the family, so `live` becomes a revoked-family case.
+    replayed = _refresh(drive, spent)
+    revoked = _refresh(drive, live)
+    unknown = _refresh(drive, "A" * 43)
+    malformed = _refresh(drive, "not-a-token")
+
+    answers = {
+        "replayed": replayed,
+        "revoked": revoked,
+        "unknown": unknown,
+        "malformed": malformed,
+    }
+    for name, response in answers.items():
+        assert response.status_code == 401, f"{name} answered {response.status_code}"
+
+    bodies = {name: response.content for name, response in answers.items()}
+    assert len(set(bodies.values())) == 1, f"the four refusals are distinguishable: {bodies}"
+
+    headers = {name: response.headers.get("www-authenticate") for name, response in answers.items()}
+    assert len(set(headers.values())) == 1, f"the challenge differs between causes: {headers}"
+
+
+def test_sessions_are_listable_and_ending_one_refuses_its_token(drive: Any) -> None:
+    """IDN-SESSION-002, both halves, and the second is what makes it real.
+
+    A listing that named sessions but could not end them would be a report. The
+    assertion that matters is that the refresh token of a terminated session
+    stops working -- ending a session has to reach the credential, not just a
+    row somebody reads.
+    """
+    _new_subject(drive, "vera", "a-passphrase-for-vera-zzz")
+    first = _login(drive, "vera", "a-passphrase-for-vera-zzz").json()
+    second = _login(drive, "vera", "a-passphrase-for-vera-zzz").json()
+    access = second["access_token"]
+
+    listed = drive("GET", "/auth/sessions", headers={"Authorization": f"Bearer {access}"})
+    assert listed.status_code == 200, listed.text
+    sessions = listed.json()
+    assert len(sessions) == 2, f"expected two sessions, got {sessions}"
+    assert all(row["revoked_at"] is None for row in sessions)
+    # No caller-supplied string is stored (D829), so the listing cannot name a
+    # device. Asserted so that adding one later is a decision rather than a drift.
+    assert set(sessions[0]) == {
+        "session_id",
+        "created_at",
+        "last_used_at",
+        "revoked_at",
+        "revoked_reason",
+    }
+
+    ended = drive(
+        "DELETE",
+        f"/auth/sessions/{sessions[0]['session_id']}",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert ended.status_code == 204, ended.text
+
+    # One of the two refresh tokens is now dead and the other is not. Which one
+    # is decided by `last_used_at DESC`, so both are tried and exactly one must
+    # survive -- an assertion that does not depend on the ordering being what
+    # this test guessed.
+    outcomes = [
+        _refresh(drive, first["refresh_token"]).status_code,
+        _refresh(drive, second["refresh_token"]).status_code,
+    ]
+    assert sorted(outcomes) == [200, 401], (
+        f"ending one session left {outcomes}; exactly one refresh token should survive"
+    )
+
+
+def test_one_subject_cannot_end_another_subjects_session(drive: Any) -> None:
+    """The scoping is in SQL, and this is what would notice if it moved.
+
+    `auth_revoke_session` filters on the owner, so naming somebody else's family
+    id is the same answer as naming one that does not exist. The response is 204
+    either way -- the caller learns nothing -- and the CONTROL is that the
+    victim's session still works afterwards.
+    """
+    _new_subject(drive, "wanda", "a-passphrase-for-wanda-ab")
+    _new_subject(drive, "xenia", "a-passphrase-for-xenia-cd")
+
+    victim = _login(drive, "wanda", "a-passphrase-for-wanda-ab").json()
+    victim_access = victim["access_token"]
+    victim_sessions = drive(
+        "GET", "/auth/sessions", headers={"Authorization": f"Bearer {victim_access}"}
+    ).json()
+    target = victim_sessions[0]["session_id"]
+
+    attacker = _login(drive, "xenia", "a-passphrase-for-xenia-cd").json()
+    attempt = drive(
+        "DELETE",
+        f"/auth/sessions/{target}",
+        headers={"Authorization": f"Bearer {attacker['access_token']}"},
+    )
+    assert attempt.status_code == 204, "the attempt answered differently and so confirmed the id"
+
+    survived = _refresh(drive, victim["refresh_token"])
+    assert survived.status_code == 200, (
+        "one subject ended another's session; the SQL scoping is not holding"
+    )
+
+
+def test_refreshing_needs_no_access_token_at_all(drive: Any) -> None:
+    """A renewal that required a live access token would only work while unneeded.
+
+    Asserted rather than left implicit, because the obvious way to write this
+    endpoint -- behind the same `authenticate` call every other route uses --
+    would pass every other test in this file and be useless in the only
+    situation the plane exists for.
+    """
+    _new_subject(drive, "yolanda", "a-passphrase-for-yolanda")
+    issued = _login(drive, "yolanda", "a-passphrase-for-yolanda").json()
+
+    renewed = drive(
+        "POST",
+        "/auth/refresh",
+        content=json.dumps({"refresh_token": issued["refresh_token"]}),
+    )
+    assert renewed.status_code == 200, renewed.text

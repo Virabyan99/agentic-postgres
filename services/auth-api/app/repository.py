@@ -28,6 +28,7 @@ already has a type for.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -63,6 +64,28 @@ class AgentCredential:
     status: str
     authz_version: int
     secret_hash: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RefreshAttempt:
+    """What `auth_consume_refresh_token` reports: facts, never a verdict.
+
+    `rotated` says whether the transition happened. The rest describe the row
+    for a caller that did not win, and `app.refresh_sessions.classify` is what
+    turns them into one of five outcomes -- the precedence lives there and in no
+    other place (ADR 0171).
+
+    `family_id` and `user_id` are NULL when nothing carries the presented
+    digest, which is the one case where no session exists to name.
+    """
+
+    rotated: bool
+    found: bool
+    was_consumed: bool
+    family_revoked: bool
+    expires_at: Any
+    family_id: UUID | None
+    user_id: UUID | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,3 +312,60 @@ class Repository:
             "SELECT * FROM app_private.auth_list_agent_audit(%s, %s, %s)",
             (agent_id, owner_id, limit),
         )
+
+    # -- the session plane (Session 15 Run 3, ADR 0171) ---------------------
+
+    async def open_session(self, user_id: UUID, token_hash: str, expires_at: datetime) -> UUID:
+        """Create a session and its first refresh token. Returns the family id."""
+        row = await self._one(
+            "SELECT app_private.auth_open_session(%s, %s, %s) AS family_id",
+            (user_id, token_hash, expires_at),
+        )
+        assert row is not None
+        return row["family_id"]
+
+    async def consume_refresh_token(
+        self, token_hash: str, new_hash: str, expires_at: datetime
+    ) -> RefreshAttempt:
+        """Present a refresh token. Returns FACTS; `classify` names the outcome.
+
+        The three-condition guard inside the function is what makes this atomic,
+        and `rotated` is the whole race outcome: under `read committed` the
+        loser of two concurrent presentations blocks until the winner commits
+        and then matches nothing, which was measured with a control (D826).
+        Nothing here retries, and that is deliberate -- a retry would present
+        the same token a second time, which is what a replay looks like.
+        """
+        row = await self._one(
+            "SELECT rotated, found, was_consumed, family_revoked, expires_at, "
+            "family_id, user_id "
+            "FROM app_private.auth_consume_refresh_token(%s, %s, %s)",
+            (token_hash, new_hash, expires_at),
+        )
+        assert row is not None
+        return RefreshAttempt(
+            rotated=row["rotated"],
+            found=row["found"],
+            was_consumed=row["was_consumed"],
+            family_revoked=row["family_revoked"],
+            expires_at=row["expires_at"],
+            family_id=row["family_id"],
+            user_id=row["user_id"],
+        )
+
+    async def list_sessions(self, user_id: UUID) -> list[dict[str, Any]]:
+        return await self._all("SELECT * FROM app_private.auth_list_sessions(%s)", (user_id,))
+
+    async def revoke_session(self, user_id: UUID, family_id: UUID, reason: str) -> bool:
+        """End one session, scoped to its owner.
+
+        False for an unknown family, another subject's family, and one already
+        ended. Three cases and one answer, because distinguishing them would
+        tell a caller whether a family id it guessed belongs to somebody.
+        """
+        row = await self._one(
+            "SELECT app_private.auth_revoke_session(%s, %s, %s) AS ended",
+            (user_id, family_id, reason),
+        )
+        assert row is not None
+        return bool(row["ended"])

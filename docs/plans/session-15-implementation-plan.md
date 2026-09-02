@@ -17,15 +17,16 @@ not repeat them.
 ## Status — read this first
 
 ```
-SESSION 15 IS IN PROGRESS. **RUNS 1-2 ARE DONE. RUN 3 IS NEXT.**
+SESSION 15 IS IN PROGRESS. **RUNS 1-3 ARE DONE. RUN 4 IS NEXT.**
 HEAD 66c1f2f, main, clean and pushed.
 CURRENT_SESSION **14**, template_version **0.3.0**, outputs schema **v14**.
                  It moves to 15 in Run 7, ALL-OR-NOTHING (D690).
-divergences     **Next free: D832.** D812-D820 planning-time, D821-D825 Run 1,
-                D826-D831 Run 2.
+divergences     **Next free: D838.** D812-D820 planning-time, D821-D825 Run 1,
+                D826-D831 Run 2, D832-D837 Run 3.
 ADRs            171. **Next free: 0172.** Run 1 wrote 0170, Run 2 wrote 0171.
-migrations      **23 released.** Run 2 added 0023; possibly
-                0024 (Run 4). Fix-forward only; every down block raises AP900.
+migrations      **24 released.** Run 2 added 0023, Run 3 added 0024.
+                Run 5 adds 0025 (auth_revoke_user_sessions, D837).
+                Fix-forward only; every down block raises AP900.
 claims          82, reporting 107 of 131 requirements.
                 **8 not_run**, carried from Sessions 13 and 14 unchanged.
                 Run 1 is the only one of the eight this session can close by
@@ -79,7 +80,7 @@ thing to diagnose.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 planning time**, not a prediction.
 
-**Next free number after this table is D832.**
+**Next free number after this table is D838.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -104,6 +105,12 @@ planning time**, not a prediction.
 | **D829** | Session listing needs enough to identify a session, which conventionally means a device or a location. | **Every candidate field is a caller-supplied string.** A user agent, an address and a device label are all values the client chooses, and the agent plane's standing rule is that a caller value is not recorded. | **None of them is stored.** A session is identified by its id, `created_at` and `last_used_at`. | **This costs something real and it is the point of writing it down**: Run 3's listing cannot say *"Firefox, in Berlin"*, which is a worse product than the obvious alternative. A display string carries the same escaping and redaction questions as any caller value, and *"it is only shown back to its own owner"* is the argument that ends with somebody rendering it in an operator console. If a later session decides the listing needs more, that is an ADR rather than a column added because it seemed useful. | 0171 |
 | **D830** | Migration 0023 creates the session plane, so it grants the auth service what it needs. | **0011 already set the terms for its own successors**, in its own words: *"the service reaches this data through SECURITY DEFINER functions that arrive in the same commit as the code that calls them. A grant issued now would be a grant nobody can audit against a caller that does not exist."* | **0023 creates no function and issues no grant**, and a contract test asserts both against the shipped SQL. The functions and their grants arrive in Run 3 with the endpoints that call them. | **The rule is five sessions old and this is the first migration since that could have quietly broken it**, because the tables are useless without a grant and adding one is the obvious next keystroke. **A guard that names the rule is worth more than a comment restating it**, since the failure is invisible: a grant to a caller that does not exist looks exactly like a grant to a caller that does. | 0171 |
 | **D831** | Run 2 puts the pure state machine in `src/`, per the session plan's own wording. | **`test_no_module_is_imported_only_by_its_own_tests` refused it** — *"a module with no caller is a feature that does not exist, however well it is tested"* (D204). True, and unavoidable: Run 2 deliberately touches no endpoint, so the caller does not arrive until Run 3. | **The module moved to `services/auth-api/app/refresh_sessions.py`**, beside `claims.py`, `tokens.py`, `scopes.py` and `hashing.py` — the auth service's own pure modules. No allowlist entry, and the guard is untouched. | **The guard was right about the package, not just about the timing.** `agentic_postgres` is what `bin/` and the deploy share, and the session plane is read by the auth service and nothing else — no operator command, no deploy step, no renderer. The plan's *"in `src/`"* was a reasonable default written before anyone asked who would import it. **A guard that produces the correct design rather than an exemption is the outcome worth recording**, because the tempting repair was an allowlist and it would have left the module in the wrong package for ever. | 0171 |
+| **D832** | Reuse detection catches a stolen chain: a replayed token means a thief has it. | **It also catches a client racing itself.** Measured through the shipped function: two concurrent presentations of one live token resolve to one winner, and the loser reads the row it lost to as consumed — so **the family is revoked for `reuse_detected` and a legitimate client is logged out.** Two browser tabs, a double-tapped button or a retry wrapper is enough. | **No grace window. The behaviour stands and is written down** — in ADR 0171, in the endpoint's published description, and here. A client must serialise its own refreshes. | **The server cannot distinguish a replay by the owner from a replay by a thief**, which is the whole reason the family is revoked rather than the token alone. A grace window that returned the same successor to a second presenter would hand a thief a valid token for the width of the window, and sizing it would be choosing how long to be exploitable. **The cost is real and lands on a client bug rather than an attack**, which is exactly why it belongs in a divergence row instead of being discovered by a user who was logged out for double-clicking. | 0171 |
+| **D833** | The transition lives in SQL and its meaning lives in `classify`, so there is one authority for each. | **They overlap on three facts and cannot avoid it.** The consuming UPDATE guards on consumed, expired and revoked; `classify` refuses on the same three. Only consumption RACES, so only consumption needs the database — but a guard checking consumption alone would **CONSUME an expired token before refusing it**, and the next presentation of that token would read as a replay and revoke the family. | **The overlap is declared and TESTED as a correspondence**, not removed: `test_the_sql_guard_and_the_state_machine_refuse_on_the_same_three_facts` reads the guard out of the migration and compares it against `TokenState`'s fields, the way `jwt_claims.sql_required_claims()` is compared against 0011's literal. | **A false reuse alarm on a legitimate late retry is worse than the duplication**, and that is the trade the design makes. The mutation that drops the expiry condition (`M3`) is what proves the test covers it — without that arm the guard could quietly lose a condition and every endpoint test would stay green, because the outcome a caller sees is a 401 either way. **The failure is invisible from outside; only the family's fate differs.** | 0171 |
+| **D834** | `/auth/refresh` is an auth route, so it sits behind the same `authenticate` call every other route uses. | **That implementation passes every other test in the file and is useless.** A renewal requiring a live access token only works while the access token is live — which is precisely when nothing needs renewing. The route is reached with an expired token or none at all. | **The refresh token IS the credential**, carried in the body rather than a header or a path so no proxy, access log or `Referer` records it, and `test_refreshing_needs_no_access_token_at_all` exists specifically to fail the obvious version. | **The obvious wrong implementation is invisible to every test that logs in first**, because they all hold a fresh token. Nothing in the suite would have noticed, and the defect would surface as *"users are logged out after fifteen minutes"* — the exact symptom the plane was built to remove, now with a session table to make it look solved. | 0171 |
+| **D835** | Adding three routes is adding three routes. | **`test_the_application_serves_exactly_the_declared_paths` refused them**: the application served three paths `main.public_paths()` did not declare. Its docstring gives the reason — *"a new path whose author has not said which side of the edge it belongs on fails here rather than appearing on the internet."* | **All three declared, each with the reason it is on that side**, and the two that require a bearer are separated in the comment from the one that must not. | **A route reaches the internet as soon as the edge publishes it, and nothing else in this repository asks the author to say so.** The guard converts an omission into a decision, and it caught this the first time the session plane grew a surface — which is what it was written for. The same run's regenerated artifacts (`contracts/app-openapi.canonical.json`, both fixture renders) are the rest of what a route change touches. | — |
+| **D836** | The grant test asserts that `auth_service` receives EXECUTE on exactly five functions. | **It asserted three.** Its extractor read the migration line by line, and **three of the five GRANTs wrap across lines** — so the parser saw two of them as unrelated fragments, built a smaller set, and the test failed against a migration that was correct. | **The extractor now matches whole `GRANT … ;` statements**, which is what a grant is. | **A parser that misses part of what it checks reports the smaller set as the answer**, and this one failed loudly only because the expected set was written out. Had it been written as *"at least these"*, or had the migration's grants all been single-line at first and wrapped later, it would have gone quiet and kept passing over a shrinking set. **§7's family, in the proof rather than the product**, and the cheapest possible instance of it. | — |
+| **D837** | 0024 ships the session plane's callable surface, so it ships every function the plane will need. | **One of them had no caller.** `auth_revoke_user_sessions` ends every live session a subject has, which is what Run 5's password reset needs — a reset otherwise leaves a refresh chain outliving the password it was obtained with — and nothing in Run 3 calls it. It was written, granted `EXECUTE`, and reached by no code. | **Removed from 0024, from the repository and from the grant set**, with a comment in the migration saying why and where it goes. Run 5 adds it with migration 0025 and the caller that uses it. | **This is 0011's rule, broken in the run AFTER the one that turned it into a contract test.** Run 2 asserted that 0023 issues no grant *because its caller does not exist*, and one run later I granted EXECUTE on a function nobody calls — in the migration whose own header quotes that rule. **The guard did not catch it**: `test_the_migration_issues_no_grant_because_its_caller_does_not_exist_yet` names 0023, so it is a rule for one file rather than for the class. What caught it was re-reading the header while writing the Done marker, which is not a control. | — |
 ---
 
 ## 2. What Session 15 adds to the acceptance registry
@@ -284,6 +291,67 @@ translated from the product's own errcode.
 
 **The proof `IDN-SESSION-001` needs is behavioural**: a client crosses the 930 s
 boundary without the password. It cannot be a unit test about a table.
+
+**Done.** — D832–D836, migration **0024**. **The plane renews now, and the
+refusal path is what was built.**
+
+**What shipped:** five SECURITY DEFINER functions and their grants (0024, 24
+released), the repository and service layers, `POST /auth/refresh`,
+`GET /auth/sessions`, `DELETE /auth/sessions/{session_id}`, and `/auth/login`
+now carrying the session's first refresh token. No new ADR: 0171 already decided
+the model, and applying a decision to the surface it was written for is not a new
+one (ADR 0021).
+
+**Seven behavioural proofs against a live cluster**, in `test_auth_endpoints.py`
+with all 24 migrations applied through the product's own render path — so 0023
+and 0024 have now been applied by a server, not only by a rig. The one the plan
+asked for is `test_a_client_renews_across_the_token_lifetime_without_the_password`:
+holding the refresh token **alone**, a client obtains a working access token and
+reaches an authenticated route with it. The boundary is crossed by discarding the
+password rather than by sleeping 930 seconds, and the docstring says so.
+
+**The refusal path carries the run.** Unknown, replayed, revoked and malformed
+answer 401 with the same bytes and the same challenge — asserted as a set of four
+rather than one at a time, because the property is that they are
+*indistinguishable*. Nothing relays a status (D433): there is no upstream here,
+and the outcome is computed from facts this deployment holds.
+
+**Three findings worth the rows.** **D832**: two concurrent *legitimate*
+presentations revoke the family — a client racing itself is logged out, no grace
+window, and the reason is that the server cannot tell that race from a thief.
+**D833**: the SQL guard and `classify` overlap on three facts and cannot avoid it,
+so the overlap is a tested correspondence rather than a second authority — and
+`M3` is what proves the test covers it, since a guard silently losing a condition
+looks identical from outside. **D834**: the obvious implementation, behind the
+same `authenticate` every other route uses, passes every other test in the file
+and is useless, because a renewal needing a live access token only works while
+nothing needs renewing.
+
+**Six mutations, all killed with green controls**, four of them against a real
+cluster; files restored `cmp` clean and the lock re-verified.
+
+**Not done, and named:** `IDN-SESSION-001` and `IDN-SESSION-002` are **not
+registered requirements yet** — the registry entries and their claims land with
+the `CURRENT_SESSION` bump in Run 7, which is all-or-nothing (D690), so the
+proofs exist and report into no claim until then. **Nothing here has run against
+the deployment**; the live halves are Run 8's. Password reset does not yet end a
+subject's sessions — `auth_revoke_user_sessions` exists and has no caller, which
+is Run 5's work and is deliberately not wired here.
+
+**One more, and it is the run's sharpest.** **D837**: `auth_revoke_user_sessions`
+shipped granted and callerless -- 0011's rule, broken in the run *after* the one
+that turned it into a contract test, in the migration whose own header quotes it.
+The guard could not see it because it named 0023. So the rule is now guarded as a
+class: `test_every_granted_function_has_a_caller` scans every migration's grants
+against every Python and SQL caller.
+
+**And that guard was defective when written.** Verifying it -- by injecting
+exactly the grant this run shipped by mistake -- left it **green**, because 0024's
+`--` comment explaining the omission mentions the name and the caller haystack
+kept comment lines. A comment cannot call anything. **A text scan standing in for
+a construct, twice in one run**, both times silenced by prose written to document
+the decision being checked. It fires now, and it was verified firing rather than
+read.
 
 ### Run 4 — agent credential lifecycle, and the D503 decision
 

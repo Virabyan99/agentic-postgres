@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -412,4 +413,68 @@ def test_a_changed_renderer_moves_the_canonical_digest(manifest: dict[str, Any])
         item["canonical_render_sha256"]
         for item in built["migrations"]
         if item["version"] == entry["version"]
+    )
+
+
+def test_every_granted_function_has_a_caller() -> None:
+    """0011's rule, guarded as a CLASS rather than for one file (D837).
+
+    *"A grant issued now would be a grant nobody can audit against a caller that
+    does not exist."* Session 15 Run 2 turned that into a test naming migration
+    0023, and Run 3 then granted `EXECUTE` on a function nothing called -- in the
+    migration whose own header quotes the rule. The guard could not see it,
+    because it was a rule for one file.
+
+    This is the rule for the class. A caller is Python **or SQL**: the second
+    matters and the first version of this measurement missed it, reporting
+    `agent_claims_are_current` as an orphan when 0018 calls it from inside
+    another function's body. A guard that had shipped with that gap would have
+    demanded an allowlist entry for a function that was never orphaned.
+
+    Goes red when a migration grants EXECUTE on a function no code and no other
+    migration calls -- which is a grant nobody can audit, and the shape of a
+    plane half-built one run early.
+    """
+    granted: dict[str, str] = {}
+    for template in sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql")):
+        text = template.read_text(encoding="utf-8")
+        for statement in re.findall(r"GRANT EXECUTE ON FUNCTION\s+(.*?);", text, re.DOTALL):
+            for name in re.findall(r"app_private\.(\w+)\s*\(", statement):
+                granted.setdefault(name, template.name)
+    assert granted, "no granted functions found; this compared nothing"
+
+    callers: list[str] = [
+        path.read_text(encoding="utf-8")
+        for directory, pattern in (
+            (REPO_ROOT / "services" / "auth-api" / "app", "*.py"),
+            (REPO_ROOT / "bin", "*.py"),
+            (REPO_ROOT / "src" / "agentic_postgres", "*.py"),
+        )
+        for path in directory.glob(pattern)
+    ]
+
+    # SQL callers count, and the lines that merely NAME a function do not. A
+    # GRANT, a REVOKE, a COMMENT, the CREATE itself -- and **a `--` comment**,
+    # which is the one this guard shipped without and which made it useless:
+    # 0024 explains in prose why `auth_revoke_user_sessions` is absent, the
+    # haystack kept that sentence, and injecting the exact grant Run 3 shipped by
+    # mistake left this test green. A comment cannot call anything.
+    #
+    # Found by verifying the guard rather than by reading it, which is the only
+    # thing that finds this: a guard nobody has seen fail measures nothing.
+    for template in sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql")):
+        body = "\n".join(
+            line
+            for line in template.read_text(encoding="utf-8").splitlines()
+            if not line.lstrip().startswith("--")
+            and not re.match(r"^\s*(GRANT|REVOKE|COMMENT ON|CREATE (OR REPLACE )?FUNCTION)", line)
+            and not re.match(r"^\s*app_private\.\w+\([^)]*\)\s*(TO|FROM|IS)?\s*", line)
+        )
+        callers.append(body)
+
+    haystack = "\n".join(callers)
+    orphans = sorted(name for name in granted if name not in haystack)
+    assert not orphans, (
+        f"granted with no caller: {[(name, granted[name]) for name in orphans]}. "
+        "A grant nobody can audit against a caller that does not exist (0011's rule)."
     )

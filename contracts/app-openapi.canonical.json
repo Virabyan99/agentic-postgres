@@ -169,6 +169,89 @@
         "title": "ObjectUnavailableResponse",
         "type": "object"
       },
+      "SessionResponse": {
+        "description": "One row of the session listing.\n\nNo device, no address, no user agent: none is stored (D829), so a listing\nidentifies a session by its id and its times and cannot name a machine.\n`revoked_reason` is present because a session that ended in\n`reuse_detected` is the row its owner most needs to see.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "last_used_at": {
+            "title": "Last Used At",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "revoked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked Reason"
+          },
+          "session_id": {
+            "title": "Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "created_at",
+          "last_used_at",
+          "revoked_at",
+          "revoked_reason"
+        ],
+        "title": "SessionResponse",
+        "type": "object"
+      },
+      "SessionTokenResponse": {
+        "description": "What `/auth/login` and `/auth/refresh` return.\n\nCarries the successor refresh token, because rotation is the point: the\npresented one is consumed by the exchange and is refused from that moment,\nso a client that did not keep this value has no session left.",
+        "properties": {
+          "access_token": {
+            "title": "Access Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "title": "Expires At",
+            "type": "integer"
+          },
+          "refresh_token": {
+            "title": "Refresh Token",
+            "type": "string"
+          },
+          "token_type": {
+            "const": "Bearer",
+            "default": "Bearer",
+            "title": "Token Type",
+            "type": "string"
+          },
+          "token_use": {
+            "title": "Token Use",
+            "type": "string"
+          }
+        },
+        "required": [
+          "access_token",
+          "expires_at",
+          "token_use",
+          "refresh_token"
+        ],
+        "title": "SessionTokenResponse",
+        "type": "object"
+      },
       "SubjectResponse": {
         "description": "What `/auth/me` reflects. Current state, never the token's copy of it.",
         "properties": {
@@ -1141,11 +1224,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TokenResponse"
+                  "$ref": "#/components/schemas/SessionTokenResponse"
                 }
               }
             },
-            "description": "A signed access token."
+            "description": "A signed access token and the session's first refresh token."
           },
           "400": {
             "content": {
@@ -1208,6 +1291,141 @@
           }
         },
         "summary": "The bearer's current state"
+      }
+    },
+    "/auth/refresh": {
+      "post": {
+        "description": "Single-use. The presented token is consumed by this exchange and is refused from that moment, so the successor returned here is the client's only way to refresh again. Presenting a consumed token ends the whole session: the server cannot tell a replay by its owner from a replay by a thief, so it assumes the chain leaked. Every refusal answers identically.",
+        "operationId": "refresh_auth_refresh_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "One field, and there is deliberately no second.\n\nA refresh token names a session; it is not a request for a role, a scope or\na lifetime, and a caller who could ask for any of those would be a caller\nwho could widen its own authority by refreshing. `login` has the same shape\nfor the same reason.",
+                "properties": {
+                  "refresh_token": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "title": "Refresh Token",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "refresh_token"
+                ],
+                "title": "RefreshRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokenResponse"
+                }
+              }
+            },
+            "description": "A new access token and its successor."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          }
+        },
+        "summary": "Exchange a refresh token for a new access token and its successor"
+      }
+    },
+    "/auth/sessions": {
+      "get": {
+        "description": "Live and ended alike. A session carries no device, address or user agent because none is stored, so it is identified by its id and its times.",
+        "operationId": "list_sessions_auth_sessions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            },
+            "description": "Every session this subject has."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          }
+        },
+        "summary": "List this subject's sessions"
+      }
+    },
+    "/auth/sessions/{session_id}": {
+      "delete": {
+        "description": "Scoped to the caller. An unknown session, another subject's session and one already ended are one answer, because distinguishing them would say whether a guessed id belongs to somebody.",
+        "operationId": "end_session_auth_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "The session is ended, or was already."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "End one of this subject's sessions"
       }
     },
     "/storage/objects/{object_id}": {

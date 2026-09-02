@@ -28,6 +28,9 @@ from app.models import (
     CreateAgentRequest,
     CreateUserRequest,
     LoginRequest,
+    RefreshRequest,
+    SessionResponse,
+    SessionTokenResponse,
     SubjectResponse,
     TokenResponse,
     UpdateAgentRequest,
@@ -67,8 +70,54 @@ DOC_LOGIN = openapi_docs.described(
     request_model=LoginRequest,
 )
 RESP_LOGIN = {
-    200: openapi_docs.ok("A signed access token.", TokenResponse),
+    200: openapi_docs.ok(
+        "A signed access token and the session's first refresh token.",
+        SessionTokenResponse,
+    ),
     400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_REFRESH = openapi_docs.described(
+    summary="Exchange a refresh token for a new access token and its successor",
+    description=(
+        "Single-use. The presented token is consumed by this exchange and is refused "
+        "from that moment, so the successor returned here is the client's only way to "
+        "refresh again. Presenting a consumed token ends the whole session: the server "
+        "cannot tell a replay by its owner from a replay by a thief, so it assumes the "
+        "chain leaked. Every refusal answers identically."
+    ),
+    request_model=RefreshRequest,
+)
+RESP_REFRESH = {
+    200: openapi_docs.ok("A new access token and its successor.", SessionTokenResponse),
+    400: openapi_docs.MALFORMED,
+    401: openapi_docs.UNAUTHENTICATED,
+}
+
+DOC_LIST_SESSIONS = openapi_docs.described(
+    summary="List this subject's sessions",
+    description=(
+        "Live and ended alike. A session carries no device, address or user agent "
+        "because none is stored, so it is identified by its id and its times."
+    ),
+)
+RESP_LIST_SESSIONS = {
+    200: openapi_docs.ok("Every session this subject has.", SessionResponse),
+    401: openapi_docs.UNAUTHENTICATED,
+}
+
+DOC_END_SESSION = openapi_docs.described(
+    summary="End one of this subject's sessions",
+    description=(
+        "Scoped to the caller. An unknown session, another subject's session and one "
+        "already ended are one answer, because distinguishing them would say whether a "
+        "guessed id belongs to somebody."
+    ),
+)
+RESP_END_SESSION = {
+    204: {"description": "The session is ended, or was already."},
     401: openapi_docs.UNAUTHENTICATED,
     422: openapi_docs.INVALID,
 }
@@ -349,18 +398,92 @@ async def login(request: Request) -> Response:
     async def run() -> Response:
         payload = await _body(request, LoginRequest)
         assert isinstance(payload, LoginRequest)
-        issued = await _service(request).login(payload.username, payload.password)
+        issued, refresh = await _service(request).login(payload.username, payload.password)
         return JSONResponse(
             {
                 "access_token": issued.token,
                 "token_type": "Bearer",
                 "expires_at": issued.expires_at,
                 "token_use": issued.token_use,
+                "refresh_token": refresh,
             },
             # No-store on every response carrying a token. A token in a shared
             # cache is a token issued to whoever the cache serves next.
             headers={"Cache-Control": "no-store"},
         )
+
+    return await _guard(run)
+
+
+@router.post("/auth/refresh", openapi_extra=DOC_REFRESH, responses=RESP_REFRESH)
+async def refresh(request: Request) -> Response:
+    """IDN-SESSION-001. Rotates, or refuses identically four ways.
+
+    The refusal path is the subject. An unknown token, a replayed one, a
+    revoked family and an expired token all answer 401 with the same bytes,
+    and the reason reaches the log alone -- which is `login`'s shape and the
+    same argument: telling whoever presented a guess whether it named something
+    real is the whole thing being withheld.
+
+    **Nothing here relays a status** (D433). There is no upstream to relay one
+    from; the outcome is computed from facts this deployment holds, and the
+    refusal is this product's own.
+    """
+
+    async def run() -> Response:
+        payload = await _body(request, RefreshRequest)
+        assert isinstance(payload, RefreshRequest)
+        issued, successor = await _service(request).refresh(payload.refresh_token)
+        return JSONResponse(
+            {
+                "access_token": issued.token,
+                "token_type": "Bearer",
+                "expires_at": issued.expires_at,
+                "token_use": issued.token_use,
+                "refresh_token": successor,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    return await _guard(run)
+
+
+@router.get("/auth/sessions", openapi_extra=DOC_LIST_SESSIONS, responses=RESP_LIST_SESSIONS)
+async def list_sessions(request: Request) -> Response:
+    """IDN-SESSION-002. This subject's sessions, live and ended."""
+
+    async def run() -> Response:
+        principal = await _service(request).authenticate(request.headers.get("authorization"))
+        return JSONResponse(
+            await _service(request).list_sessions(principal),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    return await _guard(run)
+
+
+@router.delete(
+    "/auth/sessions/{session_id}",
+    openapi_extra=DOC_END_SESSION,
+    responses=RESP_END_SESSION,
+    status_code=204,
+)
+async def end_session(request: Request, session_id: str) -> Response:
+    """IDN-SESSION-002. Ends one session, and answers the same either way.
+
+    204 whether or not a row moved. The alternative -- 404 for a family that is
+    not this subject's -- would confirm which ids exist, and the caller's
+    intent is satisfied identically in both cases: that session is not usable.
+    """
+
+    async def run() -> Response:
+        principal = await _service(request).authenticate(request.headers.get("authorization"))
+        try:
+            family = UUID(session_id)
+        except ValueError as exc:
+            raise errors.InvalidRequest("session_id is not a uuid") from exc
+        await _service(request).terminate_session(principal, family)
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     return await _guard(run)
 

@@ -13,6 +13,7 @@ import secrets
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -20,6 +21,7 @@ import jwt
 
 from app import claims as claim_contract
 from app import keys as key_module
+from app import refresh_sessions
 from app import scopes as scope_map
 from app.errors import AuthenticationFailed, AuthorizationFailed, InvalidRequest
 from app.hashing import BoundedHasher, PasswordRejected, StoredHashRejected, assess, normalize
@@ -113,7 +115,7 @@ class AuthService:
 
     # -- login -------------------------------------------------------------
 
-    async def login(self, username: str, password: str) -> IssuedToken:
+    async def login(self, username: str, password: str) -> tuple[IssuedToken, str]:
         """Authenticate, then issue. Four failures, one outcome.
 
         **The order is the security property.** The password is verified before
@@ -144,7 +146,13 @@ class AuthService:
         # discriminator from the claim contract, published in every token.)
         issued = self.issue(credential, token_use="access")  # noqa: S106
         await self.repository.record_login(credential.user_id)
-        return issued
+
+        # The session opens here rather than on first refresh, so that a client
+        # holds a renewable credential from the moment it authenticates. Before
+        # Session 15 there was none, and a client staying logged in past 930
+        # seconds had to keep the PASSWORD and replay it (D813).
+        refresh = await self.open_session(credential)
+        return issued, refresh
 
     # -- issuance ----------------------------------------------------------
 
@@ -531,3 +539,120 @@ class AuthService:
             # silently produces eleven variations of the same weak password.
             raise InvalidRequest(str(exc)) from exc
         return await self.hasher.hash(screened)
+
+    # -- the session plane (Session 15 Run 3, ADR 0171) ---------------------
+
+    async def open_session(self, credential: Credential) -> str:
+        """Mint the first refresh token of a session and store only its digest.
+
+        Called after `login` has already authenticated. The token is returned to
+        exactly one HTTP response and retained nowhere: this method is the only
+        place in the service that holds one, and it holds it for the length of a
+        return statement.
+        """
+        token, digest = refresh_sessions.mint()
+        expires_at = datetime.now(UTC) + timedelta(seconds=refresh_sessions.REFRESH_TTL_SECONDS)
+        await self.repository.open_session(credential.user_id, digest, expires_at)
+        return token
+
+    async def refresh(self, presented: str) -> tuple[IssuedToken, str]:
+        """Exchange a refresh token for an access token and its successor.
+
+        **Every refusal answers identically**, which is `login`'s shape and is
+        the same reason: an unknown token, a replayed one, a revoked family and
+        an expired token are four causes a caller does not need distinguished,
+        and distinguishing them would tell whoever presented a guess whether it
+        named something real. The reason travels to the log, as
+        `AuthenticationFailed` has always carried one.
+
+        **A refused refresh is translated, never relayed** (D433, ADR 0139).
+        There is no upstream status here to pass on and there will not be one:
+        the outcome is computed from facts this deployment holds.
+        """
+        if not refresh_sessions.is_wellformed(presented):
+            # Refused before a query. Not a security boundary -- the digest
+            # lookup is that -- but a value this plane could not have minted is
+            # a caller error, and answering it without a round trip is honest.
+            raise AuthenticationFailed("malformed refresh token")
+
+        token, digest = refresh_sessions.mint()
+        expires_at = datetime.now(UTC) + timedelta(seconds=refresh_sessions.REFRESH_TTL_SECONDS)
+        attempt = await self.repository.consume_refresh_token(
+            refresh_sessions.hash_token(presented), digest, expires_at
+        )
+
+        if not attempt.rotated:
+            outcome = refresh_sessions.classify(
+                refresh_sessions.TokenState(
+                    found=attempt.found,
+                    consumed=attempt.was_consumed,
+                    family_revoked=attempt.family_revoked,
+                    expires_at=int(attempt.expires_at.timestamp())
+                    if attempt.expires_at is not None
+                    else 0,
+                ),
+                now=int(datetime.now(UTC).timestamp()),
+            )
+            # The family was already revoked inside the function when the
+            # outcome is REUSE -- detection and response are one transaction,
+            # because a service that found a leaked chain and died before
+            # revoking it would have left the chain live.
+            raise AuthenticationFailed(f"refresh refused: {outcome.value}")
+
+        # Rotated. The subject's CURRENT authority is read again rather than
+        # carried in the refresh token: a refresh token names a session, and a
+        # session is not a claim about what its owner may do. So a disable, a
+        # role change or a scope change takes effect at the next refresh, which
+        # is the same property `authenticate` gives an access token.
+        state = await self.repository.state(attempt.user_id)
+        if state is None or state.status != "active":
+            raise AuthenticationFailed("subject is not active at refresh")
+
+        issued = self.issue(
+            Credential(
+                user_id=attempt.user_id,
+                role_name=state.role_name,
+                scopes=state.scopes,
+                status=state.status,
+                credential_version=state.credential_version,
+                authz_version=state.authz_version,
+                password_hash=None,
+            ),
+            token_use="access",  # noqa: S106
+        )
+        return issued, token
+
+    async def list_sessions(self, principal: Principal) -> list[dict[str, Any]]:
+        """Every session this subject has, live or ended.
+
+        Ended families are included rather than filtered: a session that ended
+        in `reuse_detected` is the row its owner most needs to see, and hiding
+        it would make the alarm visible only to an operator.
+        """
+        rows = await self.repository.list_sessions(principal.user_id)
+        return [
+            {
+                "session_id": str(row["family_id"]),
+                "created_at": row["created_at"].isoformat(),
+                "last_used_at": row["last_used_at"].isoformat(),
+                "revoked_at": row["revoked_at"].isoformat() if row["revoked_at"] else None,
+                "revoked_reason": row["revoked_reason"],
+            }
+            for row in rows
+        ]
+
+    async def terminate_session(self, principal: Principal, session_id: UUID) -> bool:
+        """End one of this subject's sessions. Scoped in SQL, not here.
+
+        `auth_revoke_session` filters on the owner, so a caller naming another
+        subject's family id gets the same `false` as one naming a family that
+        does not exist. The scoping is in the function rather than in a check
+        here because a second caller added later would have to remember this
+        one, and D204's lesson is that the guard belongs where every caller
+        passes through it.
+        """
+        return await self.repository.revoke_session(
+            principal.user_id,
+            session_id,
+            refresh_sessions.RevocationReason.LOGGED_OUT.value,
+        )

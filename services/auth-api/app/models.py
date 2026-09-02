@@ -92,6 +92,50 @@ class TokenResponse(BaseModel):
     token_use: str
 
 
+class RefreshRequest(_Strict):
+    """One field, and there is deliberately no second.
+
+    A refresh token names a session; it is not a request for a role, a scope or
+    a lifetime, and a caller who could ask for any of those would be a caller
+    who could widen its own authority by refreshing. `login` has the same shape
+    for the same reason.
+    """
+
+    refresh_token: str = Field(min_length=1, max_length=512)
+
+
+class SessionTokenResponse(BaseModel):
+    """What `/auth/login` and `/auth/refresh` return.
+
+    Carries the successor refresh token, because rotation is the point: the
+    presented one is consumed by the exchange and is refused from that moment,
+    so a client that did not keep this value has no session left.
+    """
+
+    access_token: str
+    # (S105 matches the field name. `Bearer` is RFC 6750's scheme name.)
+    token_type: Literal["Bearer"] = "Bearer"  # noqa: S105
+    expires_at: int
+    token_use: str
+    refresh_token: str
+
+
+class SessionResponse(BaseModel):
+    """One row of the session listing.
+
+    No device, no address, no user agent: none is stored (D829), so a listing
+    identifies a session by its id and its times and cannot name a machine.
+    `revoked_reason` is present because a session that ended in
+    `reuse_detected` is the row its owner most needs to see.
+    """
+
+    session_id: str
+    created_at: str
+    last_used_at: str
+    revoked_at: str | None
+    revoked_reason: str | None
+
+
 class SubjectResponse(BaseModel):
     """What `/auth/me` reflects. Current state, never the token's copy of it."""
 

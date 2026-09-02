@@ -366,6 +366,21 @@ def public_paths() -> tuple[str, ...]:
         "/auth/jwks.json",
         "/auth/login",
         "/auth/me",
+        # Session 15 Run 3 (ADR 0171). The session plane, and all three are
+        # published: a refresh a client cannot reach is a session it cannot
+        # keep, which is the defect this plane exists to fix (D813).
+        #
+        # `/auth/refresh` carries no bearer requirement -- it is reached with an
+        # expired access token or none at all, because a renewal that needs a
+        # live access token only works while it is not needed. The refresh token
+        # IS the credential, and it travels in the body rather than a header or
+        # a path so that no proxy, access log or `Referer` records it.
+        "/auth/refresh",
+        # These two DO require a live access token: reading and ending sessions
+        # are things a subject does while logged in, and a refresh token names a
+        # session rather than asserting an identity.
+        "/auth/sessions",
+        "/auth/sessions/{session_id}",
     )
 
 

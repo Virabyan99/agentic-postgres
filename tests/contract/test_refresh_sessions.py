@@ -18,6 +18,7 @@ and re-asked the same questions.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from pathlib import Path
 
@@ -273,3 +274,177 @@ def test_the_migration_is_registered_and_its_template_exists() -> None:
     assert Path(MIGRATION).is_file()
     assert entry["version"] == "20260902120023"
     assert entry["placeholders"] == ["object_owner", "auth_service"]
+
+
+# ---------------------------------------------------------------------------
+# 0024: the callable surface, and the one overlap it declares (Run 3)
+# ---------------------------------------------------------------------------
+
+FUNCTIONS_MIGRATION = REPO_ROOT / "migrations" / "templates" / "0024-refresh-session-functions.sql"
+
+
+@pytest.fixture(scope="module")
+def functions() -> str:
+    return FUNCTIONS_MIGRATION.read_text(encoding="utf-8")
+
+
+def test_the_sql_guard_and_the_state_machine_refuse_on_the_same_three_facts(
+    functions: str,
+) -> None:
+    """The one place the transition and its meaning overlap, made a checked
+    correspondence instead of a second authority (ADR 0171).
+
+    `auth_consume_refresh_token`'s UPDATE guards on three conditions and
+    `classify` refuses on three facts, and they have to be the same three. The
+    duplication is not removable: only consumption RACES, so only consumption
+    needs the database -- but a guard that checked consumption alone would
+    CONSUME an expired token before refusing it, and the next presentation of
+    that token would read as a replay and revoke the family. **A false reuse
+    alarm on a legitimate late retry is worse than the duplication.**
+
+    So this asserts the correspondence rather than the wording, in the way
+    `jwt_claims.sql_required_claims()` is asserted against 0011's literal. It
+    goes red if a condition is dropped from the SQL, which is the change that
+    would silently make one of `classify`'s outcomes unreachable.
+    """
+    guard = re.search(
+        r"UPDATE app_private\.refresh_tokens t\s*\n\s*SET consumed_at.*?RETURNING",
+        functions,
+        re.DOTALL,
+    )
+    assert guard, "the consuming UPDATE is gone or no longer shaped as expected"
+    body = guard.group(0)
+
+    assert "t.consumed_at IS NULL" in body, "the guard no longer excludes a consumed token"
+    assert "t.expires_at   > pg_catalog.now()" in body, (
+        "the guard no longer excludes an expired one"
+    )
+    assert "f.revoked_at  IS NULL" in body, "the guard no longer excludes a revoked family"
+
+    # And the state machine refuses on exactly those three, plus absence. The
+    # fields of TokenState are the enumeration both sides have to agree on.
+    fields = {f.name for f in dataclasses.fields(refresh_sessions.TokenState)}
+    assert fields == {"found", "consumed", "family_revoked", "expires_at"}, (
+        f"TokenState carries {sorted(fields)}; the SQL guard checks three conditions plus "
+        "the row's existence, and a fourth fact here would be one the guard does not know"
+    )
+
+
+def test_the_function_revokes_the_family_where_it_detects_the_replay(functions: str) -> None:
+    """Detection and response in one transaction, not two calls.
+
+    A service that classified a replay, logged it, and died before issuing the
+    revocation would have found a leaked chain and left it live. This is the one
+    action the SQL takes on its own reading of a fact, and it is deliberate.
+    """
+    assert "revoked_reason = 'reuse_detected'" in functions
+    revoke = re.search(
+        r"UPDATE app_private\.refresh_families f\s*\n\s*SET revoked_at.*?f\.revoked_at   IS NULL;",
+        functions,
+        re.DOTALL,
+    )
+    assert revoke, "the reuse revocation is gone or no longer guarded"
+    assert "t.consumed_at  IS NOT NULL" in revoke.group(0), (
+        "the revocation no longer requires that the presented token was consumed, so it "
+        "would end a family on any failed presentation"
+    )
+
+
+def test_listing_and_revoking_are_scoped_to_the_owner_in_sql(functions: str) -> None:
+    """A caller cannot read or end another subject's session by naming its id.
+
+    Both functions take `p_user_id` and filter on it. Passing the family id
+    alone would make this an unauthenticated object reference, which is the
+    shape ADR 0029 refuses everywhere else in this schema -- and a check in the
+    service instead would hold only for the callers that remembered it.
+    """
+    for signature, filter_clause in [
+        (
+            r"CREATE FUNCTION app_private\.auth_list_sessions\(p_user_id uuid\)",
+            "f.user_id = p_user_id",
+        ),
+        (r"CREATE FUNCTION app_private\.auth_revoke_session\(", "AND user_id = p_user_id"),
+    ]:
+        assert re.search(signature, functions), f"{signature} is gone"
+        assert filter_clause in functions, f"{filter_clause!r} is not in 0024"
+
+
+def test_the_service_is_granted_execute_and_no_table_privilege(functions: str) -> None:
+    """The property is the ABSENCE, so it is asserted rather than assumed.
+
+    `auth_service` holds EXECUTE on four functions and SELECT on neither table,
+    which is what makes "the auth service cannot read a token digest it was not
+    handed" a fact of the catalog rather than of the service's code.
+    """
+    # Whole statements, not lines: three of the five GRANTs wrap, and a
+    # line-based reader silently saw two of them. A parser that misses part of
+    # what it checks reports a smaller set as agreement.
+    statements = re.findall(
+        r"GRANT EXECUTE ON FUNCTION\s+(.*?)TO \{\{auth_service\}\};",
+        functions,
+        re.DOTALL,
+    )
+    granted = {
+        name
+        for statement in statements
+        for name in re.findall(r"app_private\.(auth_\w+)\(", statement)
+    }
+    assert granted == {
+        "auth_open_session",
+        "auth_consume_refresh_token",
+        "auth_list_sessions",
+        "auth_revoke_session",
+    }, f"the granted set moved: {sorted(granted)}"
+
+    # `auth_revoke_user_sessions` is absent on purpose (D837). Ending every
+    # session a subject has is what Run 5's password reset needs, and granting
+    # EXECUTE on it before that caller exists is the grant 0011's rule -- and
+    # this module's own test over 0023 -- refuses.
+    # The CONSTRUCT, not the string. `not in functions` matched the comment that
+    # explains the omission -- D464's family, fired by the sentence documenting
+    # the decision it was checking.
+    assert "CREATE FUNCTION app_private.auth_revoke_user_sessions" not in functions, (
+        "a function arrived before its caller, one run after the test that forbids it"
+    )
+    assert "auth_revoke_user_sessions" not in " ".join(statements), (
+        "auth_revoke_user_sessions is granted before Run 5's caller exists"
+    )
+
+    table_grants = [
+        line.strip()
+        for line in functions.splitlines()
+        if line.strip().startswith("GRANT")
+        and ("refresh_tokens" in line or "refresh_families" in line)
+    ]
+    assert not table_grants, f"0024 grants a table privilege: {table_grants}"
+
+
+def test_every_session_function_is_security_definer_with_a_fixed_search_path(
+    functions: str,
+) -> None:
+    """Five functions, five identical preambles.
+
+    A SECURITY DEFINER function without `SET search_path` resolves unqualified
+    names through the caller's path, which is how a definer function ends up
+    running somebody else's `now()`. Asserted per function rather than counted,
+    so a sixth added later without it fails here.
+    """
+    declared = re.findall(r"CREATE FUNCTION app_private\.(auth_\w+)\(", functions)
+    assert len(declared) == 4, f"expected four functions, found {declared}"
+
+    blocks = functions.split("CREATE FUNCTION app_private.")[1:]
+    for block in blocks:
+        name = block.split("(")[0]
+        assert "SECURITY DEFINER" in block, f"{name} is not SECURITY DEFINER"
+        assert "SET search_path = pg_catalog, pg_temp" in block, f"{name} has no fixed search_path"
+
+
+def test_the_functions_migration_is_registered_and_follows_the_tables() -> None:
+    from agentic_postgres import migrations as migration_module
+
+    manifest = migration_module.load_manifest()
+    names = [entry["name"] for entry in manifest["migrations"]]
+    assert "refresh_session_functions" in names
+    assert names.index("refresh_session_plane") < names.index("refresh_session_functions"), (
+        "the functions would be created before the tables they read"
+    )
