@@ -612,7 +612,31 @@ def require_edge_is_up(host: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def require_bootstrap(project_key: str) -> dict[str, Any]:
+def _secrets_the_provider_is_missing(state: dict[str, Any], session: int) -> list[str]:
+    """Declared, required and generatable through `session`, minus what we own.
+
+    The same set difference `bootstrap-providers.sh --plan` reports, computed
+    from the same two local sources: the committed contract and this project's
+    recorded `managed_resources`. **No provider call and no credential** --
+    `--plan` claimed to contact the provider for five sessions and never did
+    (D334), which is what makes this affordable inside step 0.
+
+    Operator-supplied secrets are excluded rather than reported missing for
+    ever: this project never created them, so they are not in
+    `managed_resources` and a set difference would name them on every run.
+    """
+    managed = set(state.get("managed_resources", []))
+    declared = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    return sorted(
+        secret["name"]
+        for secret in secrets_contract.active_secrets(declared, session)
+        if secret.get("required")
+        and secret.get("origin") == "generated"
+        and secret["name"] not in managed
+    )
+
+
+def require_bootstrap(project_key: str, *, session: int) -> dict[str, Any]:
     path = state_path(project_key)
     try:
         state = load_state(path)
@@ -621,6 +645,29 @@ def require_bootstrap(project_key: str) -> dict[str, Any]:
             EXIT_PRECONDITION,
             f"no usable provider bootstrap for {project_key}: {error}. "
             f"Run: sudo bin/bootstrap-providers.sh --host host.yaml --project <manifest> --apply",
+        )
+
+    # **D66, and this check is where it should always have been.** A project
+    # bootstrapped at an earlier session owns that session's secrets and no
+    # later one's, so a deploy through a session that introduced a required
+    # generated secret reaches the provider, gets HTTP 404, and fails at step 5
+    # -- mid-start, with containers already coming up. Session 14's
+    # `metrics_basic_auth_password` is the second instance.
+    #
+    # The comparison is local and cheap, so it belongs in the step whose whole
+    # promise is "read everything, change nothing".
+    missing = _secrets_the_provider_is_missing(state, session)
+    if missing:
+        fail(
+            EXIT_PRECONDITION,
+            f"the provider does not have {', '.join(missing)} for {project_key}, and a "
+            f"deploy through session {session} requires them. They are declared "
+            "`origin: generated`, so nothing is pasted by hand -- the bootstrap creates "
+            "them.\n"
+            "Run: sudo bin/bootstrap-providers.sh --host host.yaml "
+            "--project <manifest> --apply \\\n"
+            "       --operator-credential-file "
+            "/root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential",
         )
 
     return {
@@ -1684,7 +1731,7 @@ def main(argv: list[str] | None = None) -> int:
 
     step("2. Preconditions this session does not create")
     edge = require_edge_is_up(host)
-    bootstrap = require_bootstrap(key)
+    bootstrap = require_bootstrap(key, session=arguments.through_session)
     secrets = require_secret_generation(key)
     print(f"  edge up, providers bootstrapped, generation {secrets['generation_id']}")
 
