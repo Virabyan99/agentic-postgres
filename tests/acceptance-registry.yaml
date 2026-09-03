@@ -1079,17 +1079,22 @@
     - tests/contract/test_jwt_keys.py::test_retirement_may_not_run_early
     - tests/contract/test_jwt_keys.py::test_a_second_rotation_cannot_be_prepared_while_one_is_published
     - tests/deployment/test_session6_tokens.py::test_the_cutover_is_built_and_deliberately_unexercised
-    - tests/deployment/test_session6_tokens.py::test_the_two_issuers_are_both_published_during_the_overlap
+    - tests/deployment/test_session6_tokens.py::test_the_published_set_holds_exactly_the_signer_outside_a_rotation
   description: >-
     Prepare, acknowledge, promote, retire: promotion is blocked until every
     verifier has acknowledged the prepared public generation, and retirement
     may not run before the deadline. The transition itself is NOT exercised in
-    Session 6 and that is a decision (ADR 0088): two live issuers fill a
-    two-key ceiling, and the transition between them is the first rotation the
-    machinery exists for. What the live proofs assert is everything that holds
-    without starting one -- the deployed key state satisfies the model's own
-    validator, no rotation is in flight, and the acknowledgement record is
-    null rather than empty.
+    Session 6 and that is a decision (ADR 0088): the transition is the first
+    rotation the machinery exists for, and Session 6 builds the machinery
+    rather than driving it. What the live proofs assert is everything that
+    holds without starting one -- the deployed key state satisfies the model's
+    own validator, no rotation is in flight, the acknowledgement record is null
+    rather than empty, and the published set holds exactly the key that signs.
+    That last one replaced a two-key assertion when ADR 0170 retired the
+    bootstrap issuer: until Session 15 two live issuers filled the two-key
+    ceiling, which was the reason no rotation could be prepared at all (D683).
+    The slot is now free, so the ceiling is no longer the reason -- the scope of
+    Session 6 is.
 - id: SEC-BOOT-002
   priority: P0
   target_session: 6

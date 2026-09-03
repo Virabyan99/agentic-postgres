@@ -414,10 +414,22 @@ def test_the_rotation_surface_describes_this_deployments_generation(
 
     The offline half asserts the surface refuses what it cannot rotate, which is
     a property of the contract and would hold against a deployment that had none
-    of these files. **This checks the plan against what is on disk**: every
-    secret the surface says replacement would reach has a materialized file in
-    the active generation. A refusal about a file that does not exist would be a
-    refusal about nothing.
+    of these files. **This checks the plan against what is on disk.**
+
+    **`required` is the field that decides it**, and the first version of this
+    proof did not read it. A secret declared `required: false` may legitimately
+    have no file: `auth_jwt_prepared_key` is a rotation's INCOMING key, so
+    outside a rotation it does not exist, and `render-jwks.py` guards it with
+    `is_file()` for that reason. The surface is right to plan it -- it is
+    rotatable by replacement -- and a deployment with no rotation in flight is
+    right not to hold it. Asserting "planned implies materialized" over both
+    kinds was asserting a universal the contract already contradicts, which is
+    D816's point turned back on the run that raised it.
+
+    So the claim is split, and **the required half carries a control**: the
+    repair here is a filter, and a filter that excluded everything would leave
+    this passing having examined nothing (D509). The number of required consumer
+    files actually checked is asserted non-zero.
     """
     del as_root
     from agentic_postgres import REPO_ROOT, rotation
@@ -438,14 +450,28 @@ def test_the_rotation_surface_describes_this_deployments_generation(
     assert planned, "the surface plans nothing for this deployment's session"
 
     missing: list[str] = []
+    not_a_file: list[str] = []
+    checked = 0
     for secret in contract["secrets"]:
         if secret["name"] not in planned:
             continue
         for consumer in secret["consumers"]:
             path = Path(generation) / consumer_directory(consumer) / consumer["target_file"]
-            if not path.is_file():
-                missing.append(f"{secret['name']} -> {path}")
+            if secret.get("required", True):
+                checked += 1
+                if not path.is_file():
+                    missing.append(f"{secret['name']} -> {path}")
+            elif path.exists() and not path.is_file():
+                not_a_file.append(f"{secret['name']} -> {path}")
+
     assert not missing, (
-        "the rotation surface names secrets whose consumer files do not exist in the "
-        f"deployed generation, so the plan describes files nothing wrote: {missing}"
+        "the rotation surface names REQUIRED secrets whose consumer files do not exist "
+        f"in the deployed generation, so the plan describes files nothing wrote: {missing}"
+    )
+    assert not not_a_file, f"an optional secret's path exists and is not a file: {not_a_file}"
+    # The control. Without it the filter above could exclude every secret and
+    # this proof would report success having opened nothing.
+    assert checked, (
+        "no required consumer file was examined, so the two assertions above passed "
+        "vacuously. Either the plan is empty or `required` is now false everywhere"
     )

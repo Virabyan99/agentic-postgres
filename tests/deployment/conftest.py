@@ -1908,12 +1908,16 @@ def agent_session(
     role_name = project_a["database"]["roles"]["agent_writer"]
 
     psql(project_a, f"DELETE FROM app_private.agents WHERE name = '{name}';")
+    # NULL is the seventh argument: no deadline, which is what this agent had
+    # before Run 4 added `p_expires_at` (ADR 0172). A timestamp here would
+    # quietly turn this into a credential-lifetime proof instead of the one it
+    # is -- so the repair to a stale call site preserves what it measured.
     code, agent_id, error = psql(
         project_a,
         "SELECT app_private.auth_create_agent("
         f"'{name}', 'Storage refusal probe', '{role_name}', "
         f"ARRAY['notes:read']::text[], '{storage_probe_subject.user_id}', "
-        f"'{hashing.Hasher().hash(secret)}');",
+        f"'{hashing.Hasher().hash(secret)}', NULL);",
     )
     if code != 0 or not agent_id:
         pytest.skip(f"could not create the probe agent: {error}")

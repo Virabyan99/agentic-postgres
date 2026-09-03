@@ -390,24 +390,53 @@ def test_the_cutover_is_built_and_deliberately_unexercised(
     )
 
 
-def test_the_two_issuers_are_both_published_during_the_overlap(
+def test_the_published_set_holds_exactly_the_signer_outside_a_rotation(
     project_a: dict[str, Any],
 ) -> None:
-    """The state Session 6 deliberately ends in, asserted rather than assumed.
+    """One issuer, and it is the one that signs. **Replaces** the two-issuer proof.
 
-    Two keys, no deadline. ``validate_key_state`` admits it (ADR 0088 widened it
-    to, and ``test_two_keys_without_a_deadline_is_accepted`` is the contract
-    proof), and it is the shape the next session's first rotation starts from.
+    **ADR 0170 authorises the replacement.** Until Session 15 this asserted that
+    the deployment publishes exactly two keys -- the bootstrap issuer and the
+    auth service -- which was the state Session 6 deliberately ended in. Run 1
+    retired the bootstrap issuer, so that assertion now describes a deployment
+    the release has intentionally stopped producing. Its own docstring named this
+    case: one key *"would mean either that the auth service's key is missing
+    (D276) or that the bootstrap issuer was retired without a cutover."* The
+    second happened, with a cutover.
 
-    Written as a positive assertion because the alternative is invisible: a
-    deployment that published one key would look healthy from every other proof
-    in this module, and would mean either that the auth service's key is missing
-    (D276) or that the bootstrap issuer was retired without a cutover.
+    **This is stricter, not weaker.** The old proof counted two keys and never
+    said which two, so it was satisfied by any pair -- including the bootstrap
+    key beside a stranger's, or the auth key beside a stale one. This fixes the
+    set's exact membership by tying it to ``active_kid``: the key this deployment
+    publishes is the key it signs with, and there is nothing else in the set.
+    D276's question -- *which* issuer went missing -- is answered by the identity
+    rather than by the count.
+
+    Two keys are still legitimate **while a rotation is in flight**, which is the
+    state the retirement exists to make reachable at all (D683). A proof that
+    went red during the operation the change was made to permit would be a bad
+    proof of a good change, so the branch is on ``retire_after`` rather than on a
+    session number.
     """
-    kids = project_a["jwt"]["verification_kids"]
-    assert len(kids) == 2, (
-        f"this deployment publishes {len(kids)} verification key(s). Session 6 ends with "
-        "two live issuers -- the bootstrap issuer and the auth service -- so one key "
-        "means one of them cannot be verified. Which one is the question D276 answers"
+    jwt = project_a["jwt"]
+    kids = jwt["verification_kids"]
+
+    assert len(set(kids)) == len(kids), f"the same key is published twice: {kids}"
+    assert jwt["active_kid"] in kids, (
+        f"active_kid {jwt['active_kid']!r} is not published ({kids}), so this deployment "
+        "signs with a key its own verifiers do not accept"
     )
-    assert len(set(kids)) == 2, f"the same key is published twice: {kids}"
+
+    if jwt["retire_after"] is None:
+        assert kids == [jwt["active_kid"]], (
+            f"outside a rotation this deployment must publish exactly its signer, and it "
+            f"publishes {kids} with active_kid {jwt['active_kid']!r}. Two keys here means "
+            "either the bootstrap issuer was never retired (D683) or a rotation was left "
+            "half-finished without recording a deadline"
+        )
+    else:
+        assert len(kids) == 2, (
+            f"a rotation is in flight (retire_after={jwt['retire_after']!r}) but the "
+            f"published set is {kids}. A cutover needs the outgoing and incoming keys "
+            "both verifiable, or every token signed by one of them is refused"
+        )
