@@ -24,22 +24,43 @@ decision.
 
 ---
 
-## 2. P0 — one red, two awaiting a witness
+## 2. P0 — one unproved, two awaiting a witness
 
-**`bootstrap_identity` is the single red claim, and it is characterised rather
-than open** (D683). The signing-key rotation **cannot be prepared**:
-`MAX_VERIFICATION_KEYS` is 2, `build_jwks` refuses a third, and
-`render-jwks.py` appends the bootstrap issuer's key **unconditionally** while
-the auth key and the prepared key are each guarded by `is_file()`. The set has
-been full since the auth service existed in Session 6. `retire` cannot free the
-slot either — `retire_after` is `None` and it refuses with *"no rotation is in
-flight."*
+**`bootstrap_identity` is `not_run`, and what it needs is a ROTATION PERFORMED,
+not code** (D860). **The blocker was removed in Session 15 and the claim did not
+move**, which is the distinction this entry got wrong for four sessions.
 
-* **Effort to close:** one run. An ADR for the bootstrap-issuer retirement, a
-  guarded omission in `render-jwks.py`, a deploy, and all four verifiers
-  recreated afterwards (ADR 0088).
-* **Risk of not closing it:** the signing key cannot be rotated. Nothing is
-  currently compromised; the *response* to a compromise is unavailable.
+D683 was real and is now closed: `render-jwks.py` appended the bootstrap
+issuer's key unconditionally, `MAX_VERIFICATION_KEYS` is 2, and the set had been
+full since the auth service existed in Session 6, so **no rotation could be
+prepared at all**. Session 15 Run 1 retired the key (ADR 0170), and the
+deployment was measured afterwards: each project publishes **exactly one
+verification key**, read from off-host and from the one inode its three
+non-issuing verifiers share, with all four verifiers recreated. **The slot is
+free.**
+
+The claim is still unproved because it is `SEC-BOOT-001`, and **two of that
+requirement's three node ids are rotation proofs**:
+`test_a_rotated_signing_key_is_the_only_one_the_plane_accepts` and
+`test_a_rotated_authenticator_serves_the_plane_and_the_old_password_does_not`,
+gated on `APG_ROTATED_JWT_FROM_FILE` and `APG_ROTATED_AUTHENTICATOR_FROM_FILE`.
+Nobody has ever rotated a signing key on this deployment. **That was true before
+D683 and it is true after it** — the two were inseparable, so the ledger read
+one as the other.
+
+* **Effort to close:** an operator sequence, not a run. A new key placed at
+  `APG_AUTH_JWT_PREPARED_KEY` at the provider, a redeploy, then
+  `bin/rotate-signing-key.sh` `acknowledge` → `promote` → `retire` — `promote`
+  is **irreversible** and needs a human at a TTY — plus an authenticator
+  rotation for the second proof. Possible for the first time in nine sessions.
+* **Risk of not closing it:** unchanged in substance and better understood. The
+  signing key *can* now be rotated; what is unproved is that rotating it works
+  on this deployment. Nothing is compromised; the *rehearsal* of the response is
+  what is missing.
+* **What this entry teaches:** **a blocker removed is not a proof obtained.**
+  Session 15 planned a whole run against the belief that closing D683 closed the
+  claim, and read the effort as *"one run"*. It was one run — and the claim was
+  never what that run was measuring.
 
 **`DEP-001` and `DX-001` await a declaration, not code.** Both offline halves are
 proved. Neither may report `passed` on that alone — an offline half proves the

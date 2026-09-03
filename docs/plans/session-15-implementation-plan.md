@@ -21,11 +21,12 @@ SESSION 15 IS IN PROGRESS. **RUNS 1-7 ARE DONE. RUN 8 -- THE HOST TRIP -- IS NEX
 HEAD c3b004c, main, clean and pushed.
 CURRENT_SESSION **15** since Run 7, template_version **0.4.0**.
                  outputs schema **stays v14**: nothing needed publishing (D855).
-divergences     **Next free: D860.** D812-D820 planning-time, D821-D825 Run 1,
+divergences     **Next free: D861.** D812-D820 planning-time, D821-D825 Run 1,
                 D826-D831 Run 2, D832-D837 Run 3, D838-D843 Run 4,
                 D844-D848 Run 5, D849-D852 Run 6, D853-D856 Run 7,
-                D857-D859 Run 8 -- all three found by the HOST gate and
-                none of them offline.
+                D857-D860 Run 8 -- three found by the HOST gate and none
+                of them offline, and D860 is the plan's own Run 1 headline
+                measured false.
 ADRs            174. **Next free: 0175.** Run 1 wrote 0170, Run 2 wrote 0171,
                 Run 4 wrote 0172 (which closes D503), Run 5 wrote 0173,
                 Run 6 wrote 0174.
@@ -87,7 +88,7 @@ thing to diagnose.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 planning time**, not a prediction.
 
-**Next free number after this table is D860.**
+**Next free number after this table is D861.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -141,6 +142,7 @@ planning time**, not a prediction.
 | **D857** | Run 4 adds `p_expires_at` to `auth_create_agent`; the callers are the auth service's repository, which the run updates. | **Four PROOF call sites also call it**, directly and deliberately, so that a proof about the agent plane is not conditional on the endpoint that makes agents. None was updated. The host gate produced **21 errors and one skip** — `function app_private.auth_create_agent(unknown, unknown, unknown, text[], unknown, unknown) does not exist` — after 13 minutes of host time, in a suite green offline for four runs. **The product was correct throughout**: `repository.py` passes seven placeholders and `POST /admin/agents` works. | **The four call sites pass `NULL`** — no deadline, which is what those agents had before Run 4, so the repair preserves what each proof measured rather than giving it a new subject. **And the class is guarded**: `test_every_call_to_a_released_function_uses_a_released_arity` compares every call to a released `app_private` function against the arity its migrations declare, across `tests/`, `bin/`, `services/` and `src/`. ADR 0175. | **Question 5, and the ninth instance.** A decision moved, its writer moved, four readers did not — and nothing offline could see it, because those fixtures only execute against a live host and the failure was inside a fixture BODY rather than in its graph, where `--setup-plan` would have found it. **The information was in the tree the whole time** and nothing compared the two halves. Guarding it per-instance is what produced D697; the guard is the repair, and two mutations plus an unreachable control establish that it fires. | 0175, 0172 |
 | **D858** | Run 1 retires the bootstrap issuer, and D821 enumerates its dependants — every holder that SIGNS with the key. | **Enumerating signers and enumerating ASSERTERS are different searches, and only the first was made.** `test_session6_tokens.py::test_the_two_issuers_are_both_published_during_the_overlap` asserted `len(verification_kids) == 2`, and its own docstring named the case it would fail on: one key *"would mean either that the auth service's key is missing (D276) or that the bootstrap issuer was retired without a cutover."* Run 1 did the second, with a cutover. Session 5's module WAS updated thoroughly — a whole `present`/`else` branch reading the filesystem — so the omission is one module, not an oversight of the topic. | **Replaced, not weakened, under ADR 0170**, and the replacement is stricter: the old proof counted two keys and never said WHICH two, so any pair satisfied it. `test_the_published_set_holds_exactly_the_signer_outside_a_rotation` fixes the set's exact membership against `active_kid`, and branches on `retire_after` because two keys remain legitimate mid-rotation. `SEC-KEY-002`'s node id and its *"two live issuers fill a two-key ceiling"* argument both corrected. | **A test invalidated by an intended change is not a failing test, and treating it as one is how a proof gets weakened to green.** The non-negotiable is that it may be replaced by a stricter one when an ADR authorises it — so the question was never "delete or keep" but "what does this deployment now guarantee that is harder to satisfy." The count was the weak part all along. | 0170 |
 | **D859** | Run 6's live proof checks the rotation plan against what is on disk: every planned secret has a materialized consumer file. | **`auth_jwt_prepared_key` is declared `required: false`** and legitimately has no file — it is a rotation's INCOMING key, so outside a rotation it does not exist, and `render-jwks.py` guards it with `is_file()` for that reason. The proof asserted a universal the contract already contradicts, and went red against a correct deployment. | **The claim is split by `required`**: a required planned secret must have every consumer file; an optional one may be absent, and if a path exists it must be a file. **With a control** — the count of required files actually examined is asserted non-zero, because the repair is a filter and a filter that excluded everything would pass having opened nothing. | **D816's own point, turned back on the run that raised it.** That row says a declared field with no reader is an unverified field; this proof read the fields it wanted and not the one that decided the answer. **The deployment was right and the proof was wrong**, which is the reading a red host gate makes easy to get backwards — the first instinct on this failure was that a secret was missing. | 0174 |
+| **D860** | Run 1 closes `bootstrap_identity` — stated in D814, in §2, in §7's table (*"not_run until Run 1's deploy"*) and in the repository's own handoff. | **It does not, and could not.** `bootstrap_identity` is `SEC-BOOT-001`, which has **three** node ids. Run 1's work rewrote the first — `test_the_bootstrap_issuer_is_temporary_and_holds_the_only_private_key`, which passed. The other two are `test_a_rotated_signing_key_is_the_only_one_the_plane_accepts` and `test_a_rotated_authenticator_serves_the_plane_and_the_old_password_does_not`, gated on `APG_ROTATED_JWT_FROM_FILE` and `APG_ROTATED_AUTHENTICATOR_FROM_FILE`. **The claim needs two rotations ACTUALLY PERFORMED**, and Session 15 performed neither. Merged evidence: **86 claims, 78 passed, 8 not_run, 0 failed** — the same eight Session 14 carried. | **Recorded, not repaired.** Moving the two rotation proofs off `SEC-BOOT-001` would make the claim green by removing what it claims, which is the weakening the non-negotiables forbid. The rotation is now POSSIBLE for the first time in nine sessions — `bin/rotate-signing-key.sh` has a free slot to prepare into — and performing it is an operator decision with a provider step, a redeploy and an irreversible `promote`. | **Run 1 removed the blocker and the blocker was never the claim.** D683 was read as *"this is what keeps `bootstrap_identity` red"*, and it was the reason the rotation was impossible — not the reason the claim was unproved. The claim was unproved because **nobody had ever rotated a signing key on this deployment**, which is still true. The distinction was invisible while the two were inseparable, and the retirement is what separated them. **A blocker removed is not a proof obtained**, and reading the ledger's characterisation of D683 as if it were the claim's definition is the same error §9 warns about three entries higher: check a ledger entry's premise before planning against it. | 0170 |
 
 ## 2. What Session 15 adds to the acceptance registry
 
@@ -622,6 +624,40 @@ first (D671, D676) — the proofs run against a key set that changed in Run 1.
 
 **Verify the four verifiers were recreated, per verifier** (D819), and that each
 accepts a token signed by the surviving key. Not the deploy's exit code.
+
+
+**Done.** The trip ran twice, and the second run is the one that counts.
+
+**Deployed and measured.** Both projects at `--through-session 15`, migrations
+0023–0026 applied on each. **All four verifiers recreated per project** —
+`postgrest`, `auth`, `storage`, `mcp` at 10:43/10:44 — with **postgres as the
+control at ~1009 minutes**, untouched, which is what makes the reading "the key
+change propagated" rather than "the stack bounced" (D819, ADR 0155). Each
+project publishes **exactly one key**, read three ways: from off-host through
+`/api/app/auth/jwks.json`, and from the bind-mount source that `postgrest`,
+`storage` and `mcp` all resolve to — **one inode, three readers** (ADR 0113).
+Down from two, so **D683's slot is free**, measured rather than inferred.
+
+**The first gate came back 2 failed / 21 errors against a correct deployment.**
+All three defects were in proofs and none was visible offline — D857, D858,
+D859. The repairs are test-only, so the deployment did not move: the checkout
+went to `501ae30` and the release stayed `dfc09b3`, which is what the evidence
+honestly records.
+
+**Second gate: host 528 passed / 0 failed / 0 errors; external 25 passed / 0
+failed.** Merged: **86 claims, 78 passed, 8 not_run, 0 failed.** All four claims
+this session registered passed — `session_lifecycle`,
+`agent_credential_lifecycle`, `password_reset`, `credential_rotation_surface` —
+plus `identity_endpoints`.
+
+**And `bootstrap_identity` did not close (D860).** The plan said Run 1 would;
+it could not, because the claim needs two rotations actually performed. The
+eight `not_run` are the same eight Session 14 carried.
+
+**What the run cost, and why.** Thirteen minutes of host time spent on a defect
+that was decidable in a checkout the whole time — the migrations declared the
+signature and the call sites used it, and nothing compared them. ADR 0175 is
+that comparison, and it is the run's most reusable output.
 
 ---
 
