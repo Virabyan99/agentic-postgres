@@ -367,17 +367,27 @@ def test_the_floor_moves_with_concurrency_rather_than_being_a_constant() -> None
 def test_only_a_caller_facing_token_can_be_raised_as_visible() -> None:
     """The set is closed, so adding one is an edit somebody reviews."""
     for token in CALLER_FACING_TOKENS:
-        AgentVisible(token, "detail")
+        AgentVisible(token, "detail", mcp_errors.SCOPE_NOT_HELD_REASON)
+
+    # The reason vocabulary is closed in the same call and refused the same
+    # way (ADR 0178). Asserted beside the token so a future widening of one
+    # cannot be mistaken for a widening of both.
+    with pytest.raises(ValueError, match="not a denial reason"):
+        AgentVisible(mcp_errors.SCOPE_NOT_HELD, "detail", "credential")
 
     with pytest.raises(ValueError, match="not a caller-facing token"):
-        AgentVisible("something_new", "detail")
+        AgentVisible("something_new", "detail", mcp_errors.SCOPE_NOT_HELD_REASON)
 
 
 def test_a_visible_refusal_becomes_the_type_the_framework_lets_through() -> None:
     """Measured: `ToolError` bypasses `mask_error_details`; a plain one does not."""
     from fastmcp.exceptions import ToolError
 
-    error = as_tool_error(AgentVisible(mcp_errors.SCOPE_NOT_HELD, "needs notes:read"))
+    error = as_tool_error(
+        AgentVisible(
+            mcp_errors.SCOPE_NOT_HELD, "needs notes:read", mcp_errors.SCOPE_NOT_HELD_REASON
+        )
+    )
 
     assert isinstance(error, ToolError)
     assert "scope_not_held" in str(error)
