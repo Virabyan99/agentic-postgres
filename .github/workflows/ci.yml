@@ -204,8 +204,22 @@ jobs:
           docker build -q --build-arg "BASE_IMAGE=${PYTHON_RUNTIME_IMAGE}" services/edge-probe
           docker build -q --build-arg "BASE_IMAGE=${PYTHON_RUNTIME_IMAGE}" services/secret-check
 
+      # **This step has never passed.** It arrived with the units in 78cc37b on
+      # 2026-08-04, the day of CI's last green run, and `systemd-analyze verify`
+      # resolves every `ExecStart` -- so it failed on
+      # `/usr/local/libexec/agentic-postgres/*`, which nothing in a checkout
+      # installs, from its first execution (D878). §7's second question, asked
+      # of the check rather than of the code: has it run at all, in this
+      # environment, since the thing it measures last changed?
+      #
+      # The launchers are installed the way a host installs them, through the
+      # one command that owns the `agentic-postgres-<name>` -> `<name>` mapping.
+      # Restating that mapping here would be a second authority over it, which
+      # is ADR 0002, and it is the mapping most likely to be got subtly wrong.
       - name: Unit files are valid
-        run: systemd-analyze verify systemd/*.service
+        run: |
+          sudo bin/provision-host.sh --install-launchers
+          systemd-analyze verify systemd/*.service
 
   future-inventory:
     name: P0 inventory

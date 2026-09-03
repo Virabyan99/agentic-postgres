@@ -67,12 +67,20 @@ CONFIRM_FIREWALL_OK=0
 usage() {
   cat <<'USAGE'
 Usage: sudo bin/provision-host.sh --host FILE [--check | --apply]
+       sudo bin/provision-host.sh --install-launchers
        sudo bin/provision-host.sh --host FILE --confirm-ssh-ok
        sudo bin/provision-host.sh --host FILE --confirm-firewall-ok
 
   --check   Report every deviation from the Session 2 baseline and change
             nothing. This is the default.
   --apply   Bring the host to the baseline.
+  --install-launchers
+            Install ONLY the release launchers into /usr/local/libexec, which
+            is what every unit's ExecStart names. Reads no manifest, because
+            the launchers are the indirection and are identical everywhere.
+            This is the whole of what `systemd-analyze verify` needs before it
+            can resolve a unit, and the units had named paths nothing in a
+            checkout installs since the day they were added (D878).
   --confirm-ssh-ok
             Disarm the SSH rollback timer. Run this only after opening a NEW
             SSH session with a key and confirming it works. It is separate on
@@ -138,6 +146,7 @@ parse_arguments() {
       --help|-h) usage; exit 0 ;;
       --check) MODE="check"; shift ;;
       --apply) MODE="apply"; shift ;;
+      --install-launchers) MODE="install-launchers"; shift ;;
       --confirm-ssh-ok) CONFIRM_SSH_OK=1; shift ;;
       --confirm-firewall-ok) CONFIRM_FIREWALL_OK=1; shift ;;
       --host)
@@ -148,6 +157,15 @@ parse_arguments() {
       *) usage >&2; die 2 "unknown argument: $1" ;;
     esac
   done
+
+  # --install-launchers reads no manifest and returns before anything else: the
+  # launchers are the *indirection*, identical on every host, and requiring a
+  # manifest to install them would mean a machine that has no host.yaml -- CI,
+  # which is where `systemd-analyze verify` runs -- could not put the units'
+  # ExecStart in place without inventing one.
+  if [ "${MODE}" = "install-launchers" ]; then
+    return 0
+  fi
 
   [ -n "${HOST_MANIFEST}" ] || die 2 "--host is required."
   [ -f "${HOST_MANIFEST}" ] || die 2 "host manifest not found: ${HOST_MANIFEST}"
@@ -910,6 +928,7 @@ main() {
   case "${MODE}" in
     check) check_baseline ;;
     apply) apply_baseline ;;
+    install-launchers) install_launchers ;;
   esac
 }
 
