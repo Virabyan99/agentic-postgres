@@ -144,6 +144,54 @@ the class guard for D862 rather than the instance.
 **Done when a run on `main` is green**, observed through the API and not assumed
 from a local gate.
 
+**Done.** Run `33783525090` on `75e5e57`: all three jobs green, 2026-09-03. The
+first green run since 2026-08-04, and the 315th attempt.
+
+**Six causes, not three, and the run's real shape was a stack rather than a
+list.** Four of the Session 2 job's six steps had been skipped behind an earlier
+failure for a month, so each repair *revealed* the next. That is why this cost
+what it did, and it is the thing to expect the next time a long-red pipeline is
+opened: the visible failure is the top of a pile, and its depth is unknowable
+until it is dismantled.
+
+| # | Cause | Why it survived | D |
+|---|---|---|---|
+| 1 | `assert CURRENT_SESSION == 2` | a literal under a comment forbidding literals | D862 |
+| 2 | `pytest -m future` exits 5 on an empty selection | D695 repaired the test and left the step running the same command | D862 |
+| 3 | shellcheck unpinned — runner 0.9.0, workstation 0.11.0 | §5.3's pin rule was applied to uv and never to the linter | D875 |
+| 4 | two proofs asserting `/var/lib/agentic-postgres` is unreadable | true here since a deploy in August; false on a fresh machine | D876 |
+| 5 | the suite ran before the fixtures were rendered | `.generated/` survives between local gate runs; 88 errors, one `FileNotFoundError` | D877 |
+| 6 | `systemd-analyze verify` had **never passed** | the step exists only in the workflow, so nobody ever ran it | D878 |
+
+**Three of the six are one sentence: the developer machine carries state a fresh
+one does not.** Which makes the durable finding of this run not any of the
+repairs but the instrument — **CI is the only place this project's contract
+suite runs on a machine that has never deployed anything.** That is
+`fresh_host`'s property applied to the suite, and eight sessions of green offline
+runs never touched causes 4 or 5. §7's sixth question asks whether a proof shares
+a belief with its subject because one author wrote both; here the belief was
+shared with the *machine*, and no author was involved.
+
+**Cause 6 is the one to carry forward.** It ran roughly three hundred times and
+succeeded zero, which is the answer §7's second question exists to get — *has it
+run at all, in this environment, since the thing it measures last changed?* **A
+check that has never passed and a check that has never run are indistinguishable
+from outside**, and this repository had both, in the same job, for a month.
+
+**One diagnosis was wrong and is recorded rather than quietly dropped** (D875).
+The clean-clone reproduction died at step 2 on the lock check and was treated as
+the cause; the runner was dying one command earlier, on the linter. ADR 0065/0066
+inverted — the rig reached the same end state by a route the runner does not
+take, and it was believed because its verdict agreed. ADR 0176 is kept because
+the defect it repairs is real and would have surfaced the moment the linter was
+pinned.
+
+**What made the second half fast was a credential.** Job logs and the evidence
+artifact need `Actions: read`; without it, five causes were being inferred from
+artifact counts and step conclusions. With it, causes 4, 5 and 6 took ten minutes
+between them. **A pipeline whose failures cannot be read is not a signal**, and
+the first thing a future session should check is whether that token still exists.
+
 ### Run 2 — capability schema v2: version, deprecation, risk
 
 `schema_version` 1 → 2. Three fields, and **each arrives with its reader in the
