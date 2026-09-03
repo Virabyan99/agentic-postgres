@@ -1,111 +1,93 @@
 #!/usr/bin/env bash
 #
-# The Session 14 gate: observability, alerting, and the capacity envelope. It
-# does not replace bin/session-01-check.sh, which must still exit 0, nor the
-# Session 2-13 gates, which still own their own sessions' verdicts.
+# The Session 15 gate: identity lifecycle and credential rotation. The session
+# plane, agent credential expiry, admin-controlled password reset, and the
+# rotation surface. It does not replace bin/session-01-check.sh, which must
+# still exit 0, nor the Session 2-14 gates, which still own their sessions.
 #
-# **Derived from bin/session-13-check.sh by diff, not retyped** (D505, D507,
-# D678, D693, D703). `readonly SESSION=14` is the only session literal;
+# **Derived from bin/session-14-check.sh by diff, not retyped** (D505, D507,
+# D678, D693, D703). `readonly SESSION=15` is the only session literal;
 # everything else that differs is a named substitution.
 #
-# **This opening was corrected in Session 15** (D853). It read "The Session 13
-# gate ... derived from bin/session-12-check.sh" -- Session 13's prose, copied
-# whole, in the file whose next paragraph warns that nothing diffs the prose a
-# gate carries. The body was always Session 14's; only these lines lied.
+# **And the header this replaces was Session 13's.** Session 13 rewrote it,
+# recording that "nothing diffs the prose a gate carries" and that around thirty
+# references to Sessions 10 and 11 had survived two derivations. Session 14 then
+# copied that header unchanged, so the Session 14 gate opened with the words
+# "The Session 13 gate" and claimed to be derived from Session 12's -- the exact
+# defect the paragraph warns about, in the file that carries the warning, one
+# derivation later (D853).
 #
-# **And the derivation was worse than D703 recorded.** D703 found two lines the
-# gate PRINTS still saying Session 10, two derivations after the fact. Deriving
-# this one found the same rot through the whole comment header, the whole usage
-# text and the merge example -- around thirty references to Sessions 10 and 11
-# in a gate that had been Session 12's for a full release. **Nothing diffs the
-# prose a gate carries**, which is why this header was rewritten rather than
-# patched, and why every `Session N` below names a session on purpose.
+# D693's guard is scoped to the `--session N` an operator TYPES and is right not
+# to flag prose. So this header is rewritten rather than patched, again, and the
+# next derivation should expect to do the same.
 #
-# Three modes, and the shape is Session 5's deliberately (D221). Five sessions
-# of runbooks have proposed a gate that takes manifests and five gates have
-# implemented one that takes deployed documents: a gate over manifests measures
-# what was asked for, and a gate over deployed documents measures what happened.
+# Three modes, and the shape is Session 5's deliberately (D221). A gate over
+# manifests measures what was asked for; a gate over deployed documents measures
+# what happened.
 #
-#   --mode offline    a checkout: everything Session 12 checked, plus Session
-#                     13's own offline halves -- the semver grammar and what a
-#                     bump permits (ADR 0162), an incompatible change refused
-#                     BEFORE anything is written, and a front door whose verb set
-#                     is derived rather than kept.
-#   --mode host       the deployment host: `upgrade check` and `upgrade plan`
-#                     against a live project, each asserting the deployment is
-#                     unchanged afterwards. **This session mutates nothing on the
-#                     host** -- its whole subject is the plan that precedes a
-#                     mutation.
-#   --mode external   a different network: what a stranger reaches. Session 13
-#                     adds no external claim of its own -- release identity, the
-#                     plan and the dispatcher are measured in a checkout or on
-#                     the host -- and it still needs this mode, for the reason
-#                     below.
+#   --mode offline    a checkout: everything Session 14 checked, plus Session
+#                     15's own offline halves -- the refresh state machine and
+#                     its precedence, the SQL guard's correspondence with it,
+#                     the agent expiry's placement AFTER the hash comparison,
+#                     the reset's ordering, and the rotation surface's refusals.
+#   --mode host       the deployment: the identity plane through its published
+#                     route. Every `IDN-*` claim has a live half here, because
+#                     `claim_mode` refuses a claim whose every proof is offline
+#                     -- an identity plane never exercised through its own front
+#                     door has not been exercised (ADR 0065/0066).
+#   --mode external   a different network: what a stranger reaches. Session 15
+#                     adds no external claim of its own, and still needs this
+#                     mode for the cumulative reason below.
 #
-# **Session 13's own claims are `host` and offline.** The gate still has three
-# modes because `claims_through_session(13)` is CUMULATIVE: a Session 13 document
+# **Session 15's own claims are `host` and offline.** The gate still has three
+# modes because `claims_through_session(15)` is CUMULATIVE: a Session 15 document
 # must answer for the external claims inherited from Sessions 4-9, including
 # `public_agent_boundary`, and the writer refuses a document silent about a
-# claim. A two-mode gate here would have written one, quietly. Run both, merge.
+# claim. A two-mode gate would have written one, quietly. Run both, merge.
 #
 # **Inventing an external claim to make the shape symmetric was refused** (ADR
 # 0065): a proof that reaches an end state by a route the product does not take
-# proves the end state is reachable, not that the product reaches it. Session 11
-# has its own instance of that rule going wrong in the other direction -- D680,
-# where the pooler was probed by a route *nothing* could take and a healthy
-# pooler was reported as a PROBLEM.
+# proves the end state is reachable, not that the product reaches it.
 #
-# **D404 is this gate's shape rather than a note in a runbook.** The runbook
-# proposed `--project project.yaml --peer-project ...`, which is a gate over
-# manifests and does not exist here -- and that is the SECOND time the runbook
-# family has proposed the wrong invocation (D316). Every flag a claim depends on
-# is written INTO the documented command below, not mentioned underneath it:
-# D213 recorded thirteen secret proofs gated on a flag that was not passed once
-# all session, one of which had been checking one consumer of thirteen while
-# reporting success.
+# **Every flag a claim depends on is written INTO the documented command below**,
+# not mentioned underneath it. D213 recorded thirteen secret proofs gated on a
+# flag that was not passed once all session.
 #
-# **Three things must be true of the deployment before host mode means anything**,
-# and they are checked rather than assumed:
+# **What must be true of the deployment before host mode means anything**, and
+# these are checked rather than assumed:
 #
-#   1. `routes.mcp` must be `ready`. D326's two-stage convergence means the
-#      FIRST deploy that starts an MCP container publishes `unavailable` and the
-#      redeploy publishes `ready`. **Deploy twice.**
-#   2. The deployed document must be at the current outputs version, because
-#      `evidence.py` refuses one that is not. **This session does NOT move the
-#      version: it stays at v13.** Session 11 adds a step 0 preflight, a
-#      deployed `doctor.sh`, one request id stamped on every response and
-#      migration 0022 -- none of which is a member on the document (D485's rule:
-#      a value is not a shape). So unlike Session 10's, this precondition is
-#      already satisfied by any project deployed since v13 shipped.
+#   1. `routes.mcp` and `routes.app` must be `ready`. D326's two-stage
+#      convergence means the FIRST deploy that starts a container publishes
+#      `unavailable` and the redeploy publishes `ready`. **Deploy twice.**
+#      `routes.app` matters more this session than any before it: every `IDN-*`
+#      live proof reaches the identity plane through it, and `app_base` refuses
+#      a route that is not ready rather than composing a URL from the domain --
+#      where every negative assertion would pass against a 404.
+#   2. Both projects deployed `--through-session 15`. Migrations 0023-0026 are
+#      this session's, and the identity plane is not there without them.
+#      **Project B may NOT lag**: Session 10's restore drill compares a restored
+#      cluster against the release's full migration ledger, and a release that
+#      adds four migrations to a project that never received them fails that
+#      comparison, correctly. Then take a **full backup of project B**.
+#   3. **The repository must be ready** -- inherited and unchanged: the stanza
+#      exists, at least one full backup exists, and the archiver is not failing.
+#   4. **`--admin-password-file` is required for every `IDN-*` live proof.**
+#      All five claims open an administrator session through the published
+#      route; without it they skip, and a skip is not a pass -- the document
+#      comes back `not_run` and this gate exits 5. That is D686 reaching the
+#      operator, not a suite failure.
+#   5. **`--rotated-jwt-from-file` is now passable, and was not before.** The
+#      signing key could not be rotated for nine sessions because the two-key
+#      ceiling was permanently full and nothing retired the bootstrap issuer
+#      (D683). Run 1 retired it, so the slot is free. The flag is still only
+#      passed if a rotation actually happened in the window: a declaration
+#      without the act is what D478 refuses.
 #
-#      **What Session 11 needs instead is that BOTH projects are deployed
-#      `--through-session 11`**, which is where migration 0022's guard and the
-#      `StampRequestId` middleware come from.
-#
-#      **Project B may NOT lag, and an earlier version of this comment said it
-#      could** (D685). No Session 11 *proof* reads project B -- but Session 10's
-#      **restore drill does**, and it compares the restored cluster against the
-#      release's full migration ledger. A release that adds a migration and a
-#      project that never receives it fail that comparison, correctly, with
-#      "restored 21 versions, the release declares 22". Then take a **full
-#      backup of project B**: a restore can only contain what a backup does.
-#   3. **The repository must be ready** -- inherited from Session 10 and
-#      unchanged: the stanza exists, at least one full backup exists, and the
-#      archiver is not failing. The deploy's step 6c creates and checks the
-#      stanza; the **first full backup is an operator command at a TTY**.
-#      Without it, four inherited requirements fail on one missing thing.
-#
-#   4. **The three rotation declarations, if the window rotated anything.**
-#      Session 11's Run 10 rotated the authenticator and the documentation
-#      credential, so `--rotated-authenticator-from-file` and
-#      `--rotated-docs-from-file` are what admit those two proofs.
-#      `--rotated-jwt-from-file` is NOT passed and its proof will skip:
-#      the signing key could not be rotated, because the two-key ceiling is
-#      permanently full and nothing retires the bootstrap issuer (D683). **A
-#      skip is not a pass**, and `bootstrap_identity` reports accordingly.
-#
-# The outputs version is NOT this session's; it is checked because a stale
-# document makes every other check measure the wrong deployment.
+# **The outputs version is NOT this session's; it stays at v14.** Nothing this
+# session built needs publishing: every new endpoint sits under the `routes.app`
+# prefix the document already carries, and a schema bump out of habit would be a
+# migration nobody needed. It is still checked, because a stale document makes
+# every other check measure the wrong deployment.
 #
 # It VERIFIES. It does not deploy. A gate that deploys the system it measures
 # cannot be re-run to confirm a fix, and its result depends on whether it was
@@ -131,7 +113,7 @@ cd "${ROOT_DIR}"
 
 readonly EVIDENCE_DIR="${ROOT_DIR}/evidence"
 
-readonly SESSION=14
+readonly SESSION=15
 
 # The gate's own name, derived rather than written. Eleven references to the
 # previous session's name survived the diff into this file -- in the usage

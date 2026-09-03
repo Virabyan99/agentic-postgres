@@ -4,7 +4,7 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 14 implemented**, the first Stage 2 release, at
+**Status: Session 15 implemented**, the third Stage 2 release, at
 `template_version` **0.2.0**. Session 13's code is in this release —
 compatibility rules on the version this repository already published (ADR 0162),
 the `upgrade check | plan | verify` verbs that produce a plan before any
@@ -134,9 +134,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --session 14
+sudo bin/materialize-secrets.sh --project project.yaml --session 15
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 14
+     --capabilities capabilities.yaml --through-session 15
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a

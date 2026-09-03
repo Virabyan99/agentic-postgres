@@ -465,6 +465,25 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "telemetry_redaction": ("OPS-REDACT-001",),
     "capacity_envelope": ("CAP-ENV-001",),
     #
+    # Session 15. The identity lifecycle, and every one of the four carries a
+    # live node id because `claim_mode` refuses a claim whose every proof is
+    # offline -- rightly: an identity plane that has never been exercised
+    # through its own front door has not been exercised (ADR 0065/0066).
+    #
+    # `session_lifecycle` holds BOTH session requirements, because they are one
+    # subject: a session is a refresh family, and listing or ending one is the
+    # same object seen from the other end (ADR 0171). Splitting them would make
+    # two claims that can never disagree.
+    "session_lifecycle": ("IDN-SESSION-001", "IDN-SESSION-002"),
+    "agent_credential_lifecycle": ("IDN-AGENT-001",),
+    "password_reset": ("IDN-RESET-001",),
+    #
+    # **NOT `credential_rotation_planes`**, which is an existing `not_run` claim
+    # describing an EVENT an operator performs. This one describes a SURFACE the
+    # repository ships. Two claims one word apart is how D696 starts, so they
+    # are named apart deliberately.
+    "credential_rotation_surface": ("IDN-ROT-001",),
+    #
     # **Three of the sixteen candidates are deliberately NOT here**, and each has
     # a different reason. They stay in `UNCLAIMED_BY_HISTORY`, which now records
     # why rather than only that.

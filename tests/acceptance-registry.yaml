@@ -1907,3 +1907,134 @@
     describe. The configuration-determined numbers are checked against the
     deployment they claim to describe, so the claim cannot go green because a
     document exists (ADR 0169).
+
+- id: IDN-SESSION-001
+  priority: P0
+  target_session: 15
+  test_nodeids:
+    - tests/contract/test_refresh_sessions.py::test_each_state_classifies_to_one_outcome
+    - tests/contract/test_refresh_sessions.py::test_a_replay_outranks_a_revocation_because_it_is_the_alarm
+    - tests/contract/test_refresh_sessions.py::test_an_unknown_token_is_not_a_replay
+    - tests/contract/test_refresh_sessions.py::test_the_one_live_token_invariant_is_in_the_catalog_not_in_a_comment
+    - tests/contract/test_refresh_sessions.py::test_the_sql_guard_and_the_state_machine_refuse_on_the_same_three_facts
+    - tests/contract/test_auth_endpoints.py::test_a_login_carries_a_refresh_token_and_it_rotates
+    - tests/contract/test_auth_endpoints.py::test_a_client_renews_across_the_token_lifetime_without_the_password
+    - tests/contract/test_auth_endpoints.py::test_a_replayed_refresh_token_ends_the_whole_session
+    - tests/contract/test_auth_endpoints.py::test_every_refresh_failure_is_the_same_response
+    - tests/contract/test_auth_endpoints.py::test_refreshing_needs_no_access_token_at_all
+    # The live half. `claim_mode` needs one, and the reason is ADR 0065/0066:
+    # a refresh that works against a fixture cluster on localhost says nothing
+    # about whether the published route answers.
+    - tests/deployment/test_session15_identity.py::test_login_through_the_edge_carries_a_refresh_token
+    - tests/deployment/test_session15_identity.py::test_a_client_renews_through_the_edge_without_the_password
+    - tests/deployment/test_session15_identity.py::test_a_replayed_refresh_token_ends_the_session_on_the_deployment
+  description: >-
+    A client maintains a session across the access token's lifetime without
+    retaining the password, and a refresh token is single-use: presenting one
+    twice ends the whole family. Before this session a token lived at most 930
+    seconds and nothing renewed it, so any client staying logged in had to keep
+    the password and replay it - a credential-retention defect rather than a
+    convenience one (D813). Reuse is detected because at most one token per
+    family is live, which a partial unique index enforces for every writer, and
+    the family is revoked in the same transaction as the detection because a
+    service that found a leaked chain and died before revoking it would have
+    left the chain live (ADR 0171).
+
+- id: IDN-SESSION-002
+  priority: P0
+  target_session: 15
+  test_nodeids:
+    - tests/contract/test_auth_endpoints.py::test_sessions_are_listable_and_ending_one_refuses_its_token
+    - tests/contract/test_auth_endpoints.py::test_one_subject_cannot_end_another_subjects_session
+    - tests/contract/test_refresh_sessions.py::test_listing_and_revoking_are_scoped_to_the_owner_in_sql
+    - tests/deployment/test_session15_identity.py::test_sessions_are_listable_and_terminable_on_the_deployment
+  description: >-
+    A subject's sessions are listable and individually terminable, and a
+    terminated session's refresh token is refused from that moment - ending a
+    session reaches the credential rather than only a row somebody reads. Both
+    operations are scoped to the owner in SQL rather than in the service, so a
+    caller naming another subject's session id gets the same answer as one
+    naming a session that does not exist. A session carries no caller-supplied
+    string - no device, no address, no user agent - so a listing identifies it
+    by its id and its times and cannot name a machine (D829).
+
+- id: IDN-AGENT-001
+  priority: P0
+  target_session: 15
+  test_nodeids:
+    - tests/contract/test_auth_endpoints.py::test_the_status_type_admits_no_third_state_and_revocation_is_terminal
+    - tests/contract/test_auth_endpoints.py::test_an_expired_agent_secret_is_refused_at_verification
+    - tests/contract/test_auth_endpoints.py::test_an_expired_agent_is_indistinguishable_from_one_that_never_existed
+    - tests/contract/test_auth_endpoints.py::test_rotation_gives_an_expired_agent_a_working_credential_again
+    - tests/contract/test_auth_endpoints.py::test_a_creator_may_name_a_lifetime_and_an_impossible_one_is_refused
+    - tests/contract/test_auth_endpoints.py::test_a_credential_issued_before_this_release_does_not_expire
+    - tests/contract/test_auth_service_shape.py::test_every_state_check_happens_after_the_hash_comparison
+    - tests/contract/test_auth_service_shape.py::test_the_agent_expiry_column_has_no_default_so_it_does_not_backfill
+    - tests/deployment/test_session15_identity.py::test_a_revoked_agent_is_not_reinstated_by_flipping_the_flag
+    - tests/deployment/test_session15_identity.py::test_the_deployment_publishes_an_expiry_for_every_agent_credential
+  description: >-
+    An agent credential carries an expiry that is enforced at VERIFICATION
+    rather than at issuance - an expiry consulted only when a credential is
+    minted constrains the mint and nothing else - and the check sits after the
+    hash comparison so an expired credential costs the same Argon2 verification
+    as a wrong secret and is indistinguishable from an unknown agent. D503 is
+    closed: revoked to active is refused, because it was measured to restore the
+    ORIGINAL secret and so freed no credential, and reinstatement is rotation,
+    which issues a new secret and clears the revocation in one operation. That
+    pairing is the decision - rotating a revoked agent previously left it revoked
+    with the new secret refused, so refusing the transition alone would have
+    stranded every agent revoked by mistake (ADR 0172).
+
+- id: IDN-RESET-001
+  priority: P0
+  target_session: 15
+  test_nodeids:
+    - tests/contract/test_auth_endpoints.py::test_an_administrator_resets_a_password_without_learning_it
+    - tests/contract/test_auth_endpoints.py::test_every_token_issued_before_the_reset_is_refused_afterwards
+    - tests/contract/test_auth_endpoints.py::test_a_reset_ends_the_refresh_sessions_the_old_password_produced
+    - tests/contract/test_auth_endpoints.py::test_a_reset_token_is_single_use_and_every_refusal_is_the_same
+    - tests/contract/test_auth_endpoints.py::test_a_second_reset_supersedes_the_first
+    - tests/contract/test_auth_endpoints.py::test_a_weak_password_does_not_spend_the_reset
+    - tests/contract/test_auth_endpoints.py::test_only_an_administrator_can_issue_a_reset
+    - tests/deployment/test_session15_identity.py::test_a_reset_on_the_deployment_learns_no_password_and_ends_the_sessions
+  description: >-
+    An administrator resets a subject's password without learning it: the
+    response carries a one-time token and no password, because none exists until
+    the subject chooses one when they spend it. credential_version moves, so
+    every access token issued before the reset is refused - and every refresh
+    session the subject had is ended in the same transaction, because a refresh
+    token names a session rather than a credential and a chain obtained with the
+    old password would otherwise keep minting access tokens (D845). The reset is
+    single use, expires in an hour because the value is in transit between two
+    people, and every refusal answers identically. The password is screened
+    before the token is spent, so a refused password leaves the subject able to
+    try again rather than holding a spent token and an unchanged credential
+    (ADR 0173).
+
+- id: IDN-ROT-001
+  priority: P0
+  target_session: 15
+  test_nodeids:
+    - tests/contract/test_rotation_surface.py::test_a_value_read_once_is_not_claimed_to_rotate
+    - tests/contract/test_rotation_surface.py::test_every_refusal_names_the_operation_that_does_work
+    - tests/contract/test_rotation_surface.py::test_the_two_refusals_do_not_share_one_explanation
+    - tests/contract/test_rotation_surface.py::test_a_value_from_a_third_party_is_not_offered_as_generatable
+    - tests/contract/test_rotation_surface.py::test_must_refresh_on_start_is_not_reported_while_its_alternative_does_not_exist
+    - tests/contract/test_rotation_surface.py::test_the_surface_writes_nothing_anywhere
+    - tests/contract/test_rotation_surface.py::test_a_retired_secret_is_not_in_the_rotation_surface
+    - tests/contract/test_rotation_surface.py::test_a_value_read_once_cannot_also_claim_to_rotate_by_replacement
+    - tests/deployment/test_session15_identity.py::test_the_rotation_surface_describes_this_deployments_generation
+  description: >-
+    The rotation surface says what replacing a declared secret would achieve and
+    refuses when the answer is nothing. Seventeen secrets rotate by replacement
+    and two do not, and the two look exactly like the seventeen - same shape,
+    same consumers, same plane - so a plan that printed their files would be
+    describing in detail a rotation that does not happen, which is D56. Each
+    refusal names the operation that does work rather than only refusing, and
+    the two do not share an explanation because one flag covers two different
+    phenomena: one value is read once and nothing is bound to it, the other IS
+    bound, to a repository, at stanza-create (D850). must_refresh_on_start is
+    deliberately not reported: it selects between failing closed and a cached
+    last-known-good start, and the materializer has no cache, so six false
+    declarations describe leniency that does not exist (D849). No verb in the
+    surface writes anything, anywhere (ADR 0174).

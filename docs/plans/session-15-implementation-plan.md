@@ -17,23 +17,25 @@ not repeat them.
 ## Status — read this first
 
 ```
-SESSION 15 IS IN PROGRESS. **RUNS 1-6 ARE DONE. RUN 7 IS NEXT.**
+SESSION 15 IS IN PROGRESS. **RUNS 1-7 ARE DONE. RUN 8 -- THE HOST TRIP -- IS NEXT.**
 HEAD d67cb44, main, clean and pushed.
-CURRENT_SESSION **14**, template_version **0.3.0**, outputs schema **v14**.
-                 It moves to 15 in Run 7, ALL-OR-NOTHING (D690).
-divergences     **Next free: D853.** D812-D820 planning-time, D821-D825 Run 1,
+CURRENT_SESSION **15** since Run 7, template_version **0.4.0**.
+                 outputs schema **stays v14**: nothing needed publishing (D855).
+divergences     **Next free: D857.** D812-D820 planning-time, D821-D825 Run 1,
                 D826-D831 Run 2, D832-D837 Run 3, D838-D843 Run 4,
-                D844-D848 Run 5, D849-D852 Run 6.
+                D844-D848 Run 5, D849-D852 Run 6, D853-D856 Run 7.
 ADRs            174. **Next free: 0175.** Run 1 wrote 0170, Run 2 wrote 0171,
                 Run 4 wrote 0172 (which closes D503), Run 5 wrote 0173,
                 Run 6 wrote 0174.
 migrations      **26 released.** Runs 2-5 added 0023, 0024, 0025, 0026.
                 D837's function landed in 0026 with its caller, ungranted.
                 Fix-forward only; every down block raises AP900.
-claims          82, reporting 107 of 131 requirements.
-                **8 not_run**, carried from Sessions 13 and 14 unchanged.
-                Run 1 is the only one of the eight this session can close by
-                writing code.
+claims          **86** since Run 7, and five `IDN-*` requirements are
+                registered. The four new ones are `not_run` until Run 8's
+                trip: each needs a live half, which `claim_mode` requires
+                and D856 records.
+                **8 inherited not_run**, unchanged from Sessions 13 and 14.
+                Run 1 closes `bootstrap_identity` when Run 8 deploys.
 evidence        evidence/session-14.json merged: 74 passed / 8 not_run /
                 0 failed. Session 15 inherits those eight as not_run.
 host            62.238.99.122. **Runs Session 14 on both projects** -- the
@@ -83,7 +85,7 @@ thing to diagnose.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 planning time**, not a prediction.
 
-**Next free number after this table is D853.**
+**Next free number after this table is D857.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -129,6 +131,10 @@ planning time**, not a prediction.
 | **D850** | `one_time_initialization` is one property: the value is read once at initialization. | **It covers two different phenomena.** `postgres_init_superuser_password` is read once and **nothing is bound to it** — the cluster keeps whatever initdb set, and the file is never read again. `pgbackrest_repo_cipher_pass` is the opposite: the value **is** bound, to the repository, at `stanza-create`. Replacing it does not leave the system using the old value; it leaves the reader holding the wrong one for every backup ever taken. | **The consequence is shared and the mechanism is spelled per secret.** The flag stays — it is right that replacement achieves no rotation — and the surface refuses with the sentence that actually describes each. | **One sentence covering both is plausible and wrong for one of them**, which is D278: a repair that works is not evidence its explanation is right. The first draft of the surface printed the `initdb` sentence for the cipher pass, and it read perfectly — an operator would have learned a wrong mechanism from a correct refusal. | 0174 |
 | **D851** | The two observable flags are assumed correct because the contract is careful and five sessions old. | **Both measured against the pinned image, and both hold.** Replacing `postgres_init_superuser_password` over the same data directory: the replacement is **refused** and the original **still works** — new=False, old=True. A database role password rotates end to end, with the rollback rehearsed *before* the rotation and working after it. | **Recorded as measured rather than assumed**, and the surface is driven by flags that were checked. | **The control is what makes the first one evidence.** "The new password does not work" is equally consistent with a container that failed to start; "and the old one still does" is what makes it a live cluster keeping its original credential. **The rig also had two of my own bugs first** — a bare `-e POSTGRES_PASSWORD` shadowing the value, and the data volume mounted at the wrong path, which would have compared two unrelated clusters and produced a clean-looking refutation of a true flag. | 0174 |
 | **D852** | A mutation that disables the `one_time_initialization` branch should make the surface claim a rotation. | **It survived.** Every secret declaring `one_time_initialization: true` **also** declares `rotate_by_replacement: false`, so the second branch still refuses and the property holds. The mutation is uninformative (D493) — the refusal is over-determined by the data. | **Recorded as uninformative, and the gap it exposed is closed.** Nothing required the two flags to agree: the contract permitted `one_time_initialization: true` beside `rotate_by_replacement: true`. That guard now exists and was **verified firing** by injecting the contradiction. | **The survivor was worth more than a kill.** It did not find a weak test; it found that two independent conditions have always agreed, that nothing required them to, and that a contradictory declaration would produce a plan reporting a rotation the secret's own entry denies. **Asserted as an implication rather than an equality**, deliberately — `rotate_by_replacement: false` without `one_time_initialization` is a legitimate "replacement does not rotate this, for some other reason", and forcing the converse would make a future entry lie to satisfy a test. | 0174 |
+| **D853** | A session gate is derived from its predecessor by diff, which D505, D507, D678 and D703 made a rule and Session 13 rewrote its header to honour. | **`bin/session-14-check.sh` opens with "The Session 13 gate" and claims to be derived from `session-12-check.sh`.** Session 14 copied Session 13's header whole and changed only `readonly SESSION=14` — in the file whose next paragraph records that *"nothing diffs the prose a gate carries"* and that around thirty stale references had survived two derivations. **The warning and the defect are eleven lines apart.** | **Session 15's header is rewritten, and Session 14's is corrected in place** rather than left as a record: a wrong header is not a record of a release, it is an error the next derivation copies. | **D693's guard is scoped to the `--session N` an operator TYPES**, and it is right not to flag prose — the numbers a reader would act on are checked, and it caught seven of them this run. What nothing checks is a gate's own account of itself, which has now been wrong in three consecutive derivations. **The chain is broken here by fixing both files rather than only the new one**, because fixing only the new one is precisely what Session 14 did. | — |
+| **D854** | The `IDN-*` live proofs read `APG_ADMIN_PASSWORD_FILE`, open a session and reach the identity plane. | **My first draft built all of that itself**, and the deployment suite already had it: `admin_password`, `administrator_username` (read from `outputs.json`, never re-derived), `app_login`, `api_call`, `app_base` and `admin_session`. The draft re-derived the username, composed URLs from the domain, and read the password file with **`.strip()`** where `conftest` deliberately uses `.removesuffix("\n")`. | **Rewritten against the suite's fixtures.** Nothing in the file reads an environment variable or builds a URL. | **`.strip()` is the one that would have shipped.** `conftest`'s comment says why: *a password may legitimately end in a space, and `.strip()` would silently authenticate as something the operator did not type* — which fails as a wrong password and reads as a broken deployment. **Question 6 in the fixture I was writing rather than one I inherited**: the belief was mine, the code under test was mine, and only the suite's existing answer disagreed. `app_base` also refuses a route that is not `ready`, where my version would have composed a URL against which every negative assertion passes on a 404. | 0002, 0158 |
+| **D855** | The bump moves `CURRENT_SESSION` and `template_version`, and the outputs schema follows as it did in Session 14. | **Nothing this session built needs publishing.** Session 14 moved to v14 because a *route* had to reach `outputs.json`. Every endpoint Session 15 added — `/auth/refresh`, `/auth/sessions`, `/auth/reset-password` and the admin reset — sits under the `routes.app` prefix the document already carries, and the plan said in advance that the schema moves *only if something needs publishing*. | **The schema stays at v14**, and the gate's header says so rather than leaving the absence to be noticed. | **A schema bump out of habit is a migration nobody needed**, and every deployed document would have had to be migrated to record no new fact. **The plan pre-committed the test for this before the run could rationalise one** — which is the value of deciding it at planning time rather than when the diff is in front of you and v15 looks tidier. | — |
+| **D856** | The five requirements activate with their proofs, which Runs 2–6 wrote. | **Every one of those proofs is offline**, including the ones standing up a real cluster in `test_auth_endpoints.py` — and `claim_mode` refuses a claim whose every node id is offline. Four claims would have been unprovable at the moment they were registered. | **`tests/deployment/test_session15_identity.py`**: eight live proofs, at least one per claim, each reaching the identity plane through the published route. | **A cluster this repository stands up is not the deployment an operator runs**, which is ADR 0065/0066 stated the other way round. The contract tests prove the logic; only these prove the edge routes to it, the migrations are applied there, and the credentials that deployment holds work. **The bump is what forced the distinction**: the proofs existed for four runs and nothing required them to reach a front door until a claim had to name them. | 0065, 0066 |
 ---
 
 ## 2. What Session 15 adds to the acceptance registry
@@ -556,6 +562,53 @@ Outputs schema moves to **v15 only if something needs publishing.** Session 14's
 v14 existed because a route had to reach `outputs.json`; if nothing here does,
 the schema does not move, and the plan says so now so that a bump does not
 happen out of habit.
+
+**Done.** — D853–D856. **One commit, which is what all-or-nothing means** (D690).
+
+`CURRENT_SESSION` **15**, `VERSION` **0.4.0**, five `IDN-*` requirements
+activated with their proofs, four claims and their session map, `IDN` registered
+as a requirement family, `bin/session-15-check.sh` derived by diff and
+registered, the documented path moved, and the acceptance matrix regenerated.
+
+**The outputs schema stays at v14** (D855). Every endpoint this session added
+sits under the `routes.app` prefix the document already carries, and the plan
+pre-committed the test — *v15 only if something needs publishing* — before the
+run could rationalise one. Deciding it at planning time is the point: with the
+diff in front of you, v15 looks tidier.
+
+**D856 is what the bump forced.** Every proof Runs 2–6 wrote is offline,
+including the ones that stand up a real cluster — and `claim_mode` refuses a
+claim whose every node id is offline. So four claims would have been unprovable
+at the moment they were registered. `tests/deployment/test_session15_identity.py`
+is the answer: eight live proofs, at least one per claim, each reaching the
+identity plane through the published route. **The proofs existed for four runs
+and nothing required them to reach a front door until a claim had to name them.**
+
+**D854 is the one I would keep.** My first draft of those live proofs built its
+own fixtures — read `APG_ADMIN_PASSWORD_FILE`, re-derived the administrator's
+username, composed URLs from the domain, and used **`.strip()`** on the password
+file where `conftest` deliberately uses `.removesuffix("\n")` because *a
+password may legitimately end in a space*. That draft would have authenticated as
+something the operator did not type and reported it as a broken deployment.
+Question 6 in a fixture I was writing rather than one I inherited: my belief, my
+code under test, and only the suite's existing answer disagreeing.
+
+**D853: the gate header chain.** `bin/session-14-check.sh` opens with *"The
+Session 13 gate"* and claims descent from Session 12's — Session 13's header
+copied whole, eleven lines above the paragraph recording that nothing diffs the
+prose a gate carries. Session 15's is rewritten and **Session 14's is corrected
+in place**, because fixing only the new one is exactly what Session 14 did.
+
+**Three guards fired and each was right**: the requirement-prefix registry
+refused `IDN` until it was declared, D693's documented-path check named seven
+stale `--session 14` flags, and the README's own session statement. None was
+worked around.
+
+**Not done, and named:** **nothing here has run against the deployment.** All
+eight live proofs skip in a checkout, correctly — `--setup-plan` resolves their
+whole fixture graph and every fixture is wired (D671), which answers *will this
+run* and not *is what it asserts true*. The five claims are `not_run` until Run
+8's trip. **The gate has not been run in any mode**; it is Run 8's first act.
 
 ### Run 8 — the host trip
 
