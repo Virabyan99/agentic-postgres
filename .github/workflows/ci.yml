@@ -163,6 +163,22 @@ jobs:
           fi
           PYTHONPATH=src python -c 'from agentic_postgres import CURRENT_SESSION as s; assert isinstance(s, int) and s >= 1, s; print(f"acceptance session {s}, derived from the package")'
 
+      # **Rendering comes BEFORE the suite, as it does in the gate** (D877).
+      # Ninety proofs read `.generated/fixture-alpha-dev/outputs.json` -- 88 of
+      # them through a module fixture that starts a cluster first -- and this job
+      # rendered afterwards. On a developer machine `.generated/` survives from
+      # the last gate run, so the ordering never showed; on a fresh runner it
+      # produced 88 errors and two failures, all one FileNotFoundError.
+      # `bin/session-01-check.sh` renders at its step 3 and runs the suite at
+      # step 4, and this is the same order.
+      - name: Edge and project Compose models resolve
+        run: |
+          . .venv/bin/activate
+          ./deploy.sh --project project.example.yaml \
+            --capabilities capabilities.example.yaml --render-only >/dev/null
+          bin/compose.sh .generated/fixture-alpha-dev --profile contract config >/dev/null
+          bin/compose.sh --edge --host host.example.yaml config >/dev/null
+
       - name: Offline Session 2 contract suite
         run: |
           . .venv/bin/activate
@@ -177,14 +193,6 @@ jobs:
           python -m pytest -q -m "live_host or external" | tee /tmp/gated.txt
           grep -qE '[0-9]+ skipped' /tmp/gated.txt
           ! grep -qE '[0-9]+ (failed|error)' /tmp/gated.txt
-
-      - name: Edge and project Compose models resolve
-        run: |
-          . .venv/bin/activate
-          ./deploy.sh --project project.example.yaml \
-            --capabilities capabilities.example.yaml --render-only >/dev/null
-          bin/compose.sh .generated/fixture-alpha-dev --profile contract config >/dev/null
-          bin/compose.sh --edge --host host.example.yaml config >/dev/null
 
       # BASE_IMAGE is passed explicitly because neither Dockerfile declares a
       # default: a FROM line naming a tag would be a second, unlocked version

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -162,22 +163,52 @@ def test_a_missing_candidate_refuses_rather_than_rendering_one(tmp_path: Path) -
     assert "renders nothing" in result.stderr
 
 
-def test_check_unprivileged_says_it_could_not_look_rather_than_absent() -> None:
-    """ADR 0157's distinction, and the environment makes it real.
+def test_check_reports_what_the_state_root_actually_permits() -> None:
+    """ADR 0157's distinction, asserted against the root the machine has.
 
-    The project state root is `drwx------ root root`, so an unprivileged process
-    **cannot tell** whether a project is deployed there. "Not deployed here" and
-    "you may not look" are different answers, and only one of them is a fact
-    about the deployment.
+    "Not deployed here" and "you may not look" are different answers, and only
+    one of them is a fact about the deployment.
 
-    This test expected exit 4 in its first draft. It was wrong: exit 4 would have
-    been the command claiming to know something it could not see -- and asserting
-    it would have made this proof demand the defect.
+    **This asserted exit 3 unconditionally, and that was a description of the
+    developer's workstation** (D876). `/var/lib/agentic-postgres` is
+    `drwx------ root root` here, left by a deploy in August, so `check` answers
+    *"cannot tell"*. On a machine that has never deployed anything the directory
+    is **absent**, `check` answers `UNDETERMINED` with *"nobody looked"* -- also
+    correct, also ADR 0157 -- and the assertion demanded the wrong one. It went
+    red on a runner the first time CI ever got far enough to run it.
+
+    So it now asserts the **mapping**: whichever state the root is in, the code
+    and the message must be the ones that state calls for. That is falsifiable on
+    both machines, and it reaches a branch that until now was chosen by accident
+    -- neither environment had ever run the other's.
     """
+    root = Path("/var/lib/agentic-postgres/rendered")
+    try:
+        unreadable = root.exists() and not os.access(root, os.R_OK | os.X_OK)
+    except PermissionError:
+        # ADR 0157's distinction, arriving in this test's own inspection: the
+        # PARENT is `drwx------ root root`, so even asking whether the rendered
+        # root exists is refused. "Cannot look" is what that is.
+        unreadable = True
+
     result = refuses_without_writing("check", "--project", "no-such-project-anywhere")
-    assert result.returncode == EXIT_PREREQUISITE, result.stdout + result.stderr
-    assert "cannot tell whether" in result.stderr
-    assert "not the same as the project not being deployed" in result.stderr
+    output = result.stdout + result.stderr
+
+    # The control: the two answers are different codes, so an implementation
+    # returning one of them always fails one branch of this test wherever it runs.
+    assert EXIT_PREREQUISITE != EXIT_MISSING
+
+    if unreadable:
+        assert result.returncode == EXIT_PREREQUISITE, output
+        assert "cannot tell whether" in result.stderr
+        assert "not the same as the project not being deployed" in result.stderr
+    else:
+        assert result.returncode == EXIT_MISSING, output
+        assert "nothing installed for no-such-project-anywhere" in output
+        assert "nobody looked" in output, (
+            "the command reports absence without saying it looked, which is the "
+            "claim ADR 0157 refuses"
+        )
 
 
 def test_a_supplied_installed_path_that_does_not_exist_is_missing(tmp_path: Path) -> None:

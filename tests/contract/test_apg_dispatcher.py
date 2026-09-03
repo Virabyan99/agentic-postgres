@@ -191,13 +191,23 @@ def test_a_verbs_exit_code_reaches_the_caller_unchanged() -> None:
 
 def test_arguments_reach_the_verb_untouched_including_one_with_spaces() -> None:
     """A dispatcher that lost quoting would corrupt exactly the arguments an
-    operator is most likely to have quoted deliberately."""
-    result = run("upgrade", "plan", "--project", "a b c")
+    operator is most likely to have quoted deliberately.
+
+    **The verb changed from `plan` to `check` because the old one only echoed the
+    path by accident** (D876). `plan` refuses with *"--candidate is required"*
+    before it derives anything, and that refusal names no path -- so this passed
+    only where `check`'s permission-denied message happened to be reachable, and
+    went red on a runner where the state root does not exist at all. `check`
+    names the derived path in **both** of its answers, so the quoting claim no
+    longer rides on a directory this machine has and a fresh one does not.
+    """
+    result = run("upgrade", "check", "--project", "a b c")
     # The verb echoes the path it derived from the project key, and that path
     # contains `a b c` as ONE component. Three arguments would have produced
     # `.../a/outputs.json` and an "unrecognized arguments" error instead.
-    assert "/a b c/outputs.json" in result.stderr, result.stdout + result.stderr
-    assert "unrecognized arguments" not in result.stderr
+    output = result.stdout + result.stderr
+    assert "/a b c/outputs.json" in output, output
+    assert "unrecognized arguments" not in output
 
 
 def test_it_uses_exec_so_it_cannot_alter_what_the_verb_does() -> None:
