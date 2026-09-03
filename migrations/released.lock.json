@@ -294,6 +294,17 @@
       "template": "templates/0025-agent-credential-lifecycle.sql",
       "template_sha256": "c847ceeea9ab39849da6dca542408d6596301db3de45c1b9bf499885502b7fae",
       "version": "20260903120025"
+    },
+    {
+      "canonical_render_sha256": "3e6c8a554ab9e16ec0b48ba5c3dba29a8f1aeae5b386d4dbbde4c68877beffdf",
+      "name": "password_reset_plane",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0026-password-reset-plane.sql",
+      "template_sha256": "b801da9fbc821c84a1f5e14006e065bf16bd10168610e60fdaf2c8c7aeac2943",
+      "version": "20260903120026"
     }
   ],
   "schema_version": 1

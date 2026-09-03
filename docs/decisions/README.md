@@ -236,3 +236,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0170](0170-the-deployment-has-one-signer-and-the-retired-key-leaves-the-published-set.md) | The deployment has one signer, and the retired key leaves the published set | 15 | Accepted |
 | [0171](0171-a-refresh-family-is-the-session-and-one-live-token-per-family-is-a-catalog-invariant.md) | A refresh family is the session, and one live token per family is a catalog invariant | 15 | Accepted |
 | [0172](0172-a-revoked-agent-is-reinstated-by-rotating-its-secret-and-a-credential-expires.md) | A revoked agent is reinstated by rotating its secret, and a credential expires | 15 | Accepted |
+| [0173](0173-a-reset-issues-a-token-the-administrator-conveys-and-a-credential-change-ends-the-sessions.md) | A reset issues a token the administrator conveys, and a credential change ends the sessions | 15 | Accepted |

@@ -30,11 +30,16 @@ session guarded a value that did not exist (D812).
 
 from __future__ import annotations
 
-import hashlib
-import re
-import secrets
 from dataclasses import dataclass
 from enum import StrEnum
+
+from app.one_time_tokens import (
+    TOKEN_ENTROPY_BYTES,
+    TOKEN_PATTERN,
+    hash_token,
+    is_wellformed,
+    mint,
+)
 
 __all__ = [
     "FAMILY_REVOCATION_REASONS",
@@ -51,17 +56,15 @@ __all__ = [
     "sql_revocation_reasons",
 ]
 
-#: 32 bytes from the system CSPRNG, rendered by ``secrets.token_urlsafe`` as 43
-#: url-safe characters. The size is what makes the stored digest a deterministic
-#: SHA-256 rather than an argon2 hash (ADR 0171): a KDF's expense buys resistance
-#: to guessing a *low-entropy* secret, and 256 bits is not one.
-TOKEN_ENTROPY_BYTES = 32
-
-#: What a minted token looks like, so a value that this plane cannot have issued
-#: is refused before it reaches a query. Not a security boundary -- the digest
-#: lookup is that -- but a malformed token is a caller error and answering it
-#: without a database round trip is the honest shape.
-TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
+#: The token primitive is `app.one_time_tokens`, re-exported here so every
+#: existing caller and test keeps working. It moved in Run 5, when the
+#: password-reset plane needed the same three functions: **copying them would
+#: have been the second implementation ADR 0002 forbids**, and the second one is
+#: always slightly weaker with nothing comparing them.
+#:
+#: What stayed here is what knows the tokens are SESSION tokens -- the outcome
+#: enumeration, the precedence, the revocation reasons. What a presented token
+#: means is this module's; what one IS belongs to the primitive.
 
 #: How long a single refresh token stays presentable: 30 days.
 #:
@@ -128,38 +131,6 @@ class TokenState:
     consumed: bool = False
     family_revoked: bool = False
     expires_at: int = 0
-
-
-def is_wellformed(token: str) -> bool:
-    """Whether this could be a token this plane minted."""
-    return bool(TOKEN_PATTERN.match(token))
-
-
-def mint() -> tuple[str, str]:
-    """A new token and the digest to store. **The token is a credential.**
-
-    Returned rather than logged, printed or defaulted anywhere: the caller hands
-    it to exactly one HTTP response and keeps the digest.
-    """
-    token = secrets.token_urlsafe(TOKEN_ENTROPY_BYTES)
-    return token, hash_token(token)
-
-
-def hash_token(token: str) -> str:
-    """The value the database stores: a hex SHA-256, never the token.
-
-    **Deterministic, and that is structural rather than a preference** (ADR
-    0171). A refresh token is presented *alone* -- unlike an agent secret, which
-    arrives beside its ``agent_id``, and unlike a password, which arrives beside
-    a username -- so the row has to be found BY this value. A per-row salt makes
-    that a full scan with a KDF on every row.
-
-    No constant-time comparison here, and its absence is deliberate: this digest
-    is looked up through a unique index, so nothing in this plane compares two
-    hashes in Python. A ``compare_digest`` call would imply a comparison that
-    does not happen and suggest the timing question had been handled somewhere.
-    """
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def classify(state: TokenState, *, now: int) -> Outcome:

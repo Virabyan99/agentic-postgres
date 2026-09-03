@@ -169,6 +169,30 @@
         "title": "ObjectUnavailableResponse",
         "type": "object"
       },
+      "PasswordResetResponse": {
+        "description": "What issuing a reset returns. Carries no password, because none exists yet.",
+        "properties": {
+          "expires_at": {
+            "title": "Expires At",
+            "type": "string"
+          },
+          "reset_token": {
+            "title": "Reset Token",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "reset_token",
+          "expires_at"
+        ],
+        "title": "PasswordResetResponse",
+        "type": "object"
+      },
       "SessionResponse": {
         "description": "One row of the session listing.\n\nNo device, no address, no user agent: none is stored (D829), so a listing\nidentifies a session by its id and its times and cannot name a machine.\n`revoked_reason` is present because a session that ended in\n`reuse_detected` is the row its owner most needs to see.",
         "properties": {
@@ -1099,6 +1123,59 @@
         "summary": "Change a subject's authority, status or password"
       }
     },
+    "/admin/users/{user_id}/reset-password": {
+      "post": {
+        "description": "Requires the `admin:users` scope. Returns a token the administrator conveys to the subject, who chooses the password when they spend it -- so the administrator never learns the resulting credential. Issuing changes no credential and ends no session; an administrator who needs the subject out now disables the account, which is a different act with a different record. A second reset supersedes the first.",
+        "operationId": "open_password_reset_admin_users__user_id__reset_password_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResetResponse"
+                }
+              }
+            },
+            "description": "A one-time reset token, shown once."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizationFailedResponse"
+                }
+              }
+            },
+            "description": "Authenticated, and the required scope is not held. Role names never grant."
+          },
+          "404": {
+            "description": "No such subject."
+          }
+        },
+        "summary": "Issue a one-time password reset for a subject"
+      }
+    },
     "/auth/agent-token": {
       "post": {
         "description": "Decides whether this credential is current. The agent's authority comes from the registry, and an agent cannot ask for a role or a scope any more than a person can.",
@@ -1366,6 +1443,84 @@
           }
         },
         "summary": "Exchange a refresh token for a new access token and its successor"
+      }
+    },
+    "/auth/reset-password": {
+      "post": {
+        "description": "Unauthenticated: the token IS the credential, and requiring a live session to recover from a lost password would only work for callers who did not need it. Single use. On success `credential_version` moves, so every token issued before the reset is refused, and every refresh session the subject had is ended. Every refusal answers identically.",
+        "operationId": "consume_password_reset_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "The token and the password the SUBJECT chose.\n\nTwo fields and no user id: the token names the subject, and accepting one\nbeside it would let a caller present a valid token against a different\naccount. The identity comes from the credential, never from the request.",
+                "properties": {
+                  "password": {
+                    "maxLength": 1024,
+                    "minLength": 1,
+                    "title": "Password",
+                    "type": "string"
+                  },
+                  "reset_token": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "title": "Reset Token",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "reset_token",
+                  "password"
+                ],
+                "title": "ConsumePasswordResetRequest",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The password is set and the subject's sessions are ended."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MalformedRequestResponse"
+                }
+              }
+            },
+            "description": "Refused before any domain logic ran: oversized body, duplicate JSON member, non-object root, unknown field, or a field outside its bounds."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthenticationFailedResponse"
+                }
+              }
+            },
+            "description": "No usable credential. Unknown subject, wrong password, disabled subject and malformed token are all this answer, and they cost the same."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvalidRequestResponse"
+                }
+              }
+            },
+            "description": "Individually well formed and jointly refused -- a scope outside the role's ceiling, a username already taken. The caller is an authenticated administrator, so the reason is returned."
+          }
+        },
+        "summary": "Spend a reset token and choose a new password"
       }
     },
     "/auth/sessions": {

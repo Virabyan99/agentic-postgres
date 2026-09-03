@@ -17,17 +17,17 @@ not repeat them.
 ## Status — read this first
 
 ```
-SESSION 15 IS IN PROGRESS. **RUNS 1-4 ARE DONE. RUN 5 IS NEXT.**
+SESSION 15 IS IN PROGRESS. **RUNS 1-5 ARE DONE. RUN 6 IS NEXT.**
 HEAD e30c7c4, main, clean and pushed.
 CURRENT_SESSION **14**, template_version **0.3.0**, outputs schema **v14**.
                  It moves to 15 in Run 7, ALL-OR-NOTHING (D690).
-divergences     **Next free: D844.** D812-D820 planning-time, D821-D825 Run 1,
-                D826-D831 Run 2, D832-D837 Run 3, D838-D843 Run 4.
-ADRs            172. **Next free: 0173.** Run 1 wrote 0170, Run 2 wrote 0171,
-                Run 4 wrote 0172 (which closes D503).
-migrations      **25 released.** Run 2 added 0023, Run 3 added 0024,
-                Run 4 added 0025. Run 5 adds 0026
-                (auth_revoke_user_sessions, D837).
+divergences     **Next free: D849.** D812-D820 planning-time, D821-D825 Run 1,
+                D826-D831 Run 2, D832-D837 Run 3, D838-D843 Run 4,
+                D844-D848 Run 5.
+ADRs            173. **Next free: 0174.** Run 1 wrote 0170, Run 2 wrote 0171,
+                Run 4 wrote 0172 (which closes D503), Run 5 wrote 0173.
+migrations      **26 released.** Runs 2-5 added 0023, 0024, 0025, 0026.
+                D837's function landed in 0026 with its caller, ungranted.
                 Fix-forward only; every down block raises AP900.
 claims          82, reporting 107 of 131 requirements.
                 **8 not_run**, carried from Sessions 13 and 14 unchanged.
@@ -82,7 +82,7 @@ thing to diagnose.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 planning time**, not a prediction.
 
-**Next free number after this table is D844.**
+**Next free number after this table is D849.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -119,6 +119,11 @@ planning time**, not a prediction.
 | **D841** | The existing test asserting `revoked → active` answers 200 must be replaced, which is a weakening a new ADR has to authorise. | **The test asked for this.** It is named `..._terminality_is_UNENFORCED`, and it ends: *"un-revoking is now refused, which is a product change. If it was intended, **invert this assertion and close D503**; the guard belongs in a migration."* | **Inverted exactly as instructed**, renamed to `..._revocation_is_terminal`, and extended to assert the refusal changes nothing, that rotation is the way back, and that the pre-revocation secret is dead afterwards. | **A test that documents the day it will fail, and what to do then, is the cheapest possible handover** — six sessions later the replacement took no archaeology and no judgement about whether the old assertion was load-bearing. **It is the opposite of the defect this project keeps producing**: not a value that looked measured and was not, but an assertion that stated its own premise and named its own expiry. | 0172 |
 | **D842** | An expiry on a credential is a lifecycle field; checking it where the credential is minted is where it belongs. | **That is a policy, not a control.** An expiry consulted only at issuance constrains the mint and nothing else — the credential it produced outlives the rule, and nothing refuses it. | **Enforced at VERIFICATION**, and the database computes `secret_expired` against its own `now()` so there is one clock in the decision. The check sits **after** the hash comparison and beside the status check, so an expired credential costs the same Argon2 verification as a wrong secret and is indistinguishable from an unknown agent. | **The placement is the whole feature.** A test asserting only that an expired secret is refused would pass against a check anywhere in the function, including one that answers in microseconds and makes "this agent exists" measurable by timing — which is precisely what the battery's `M4` demonstrated when it survived. | 0172, 0171 |
 | **D843** | Two mutations survived the Run 4 battery, so the mutations were uninformative. | **Both survived because a docstring claimed a property its body did not check.** `M4` moved the expiry check above the hash: no status changed, no body changed, and the endpoint test asserting those two things stayed green while the timing property its docstring claimed was gone. `M5` added a column `DEFAULT`: every fixture creates its agents *after* the migration, so none can observe a backfill. | **Two guards, both over the construct.** An AST check that every state read follows every `verify`, and a check that the `ALTER` carries no `DEFAULT`. | **And the first guard was itself blind on its first write.** It anchored on `min(verify)`, and `agent_token` verifies twice — the earlier call being the dummy hash that exists *for this very timing property* — so a check inserted after the lookup still compared as "after a verify" and `M4` survived again. `max` is the anchor. **Three layers of the same defect in one run**, each found only by running the mutation rather than reading the guard. | 0172 |
+| **D844** | Run 5 builds admin-controlled password reset, so the administrator gains the ability to reset a password. | **An administrator has been able to set one since Session 6.** `PATCH /admin/users/{user_id}` accepts a `password` member, and an administrator using it **chooses the value and therefore knows it** — and can log in as that subject afterwards. The capability the run was framed as adding already existed; what did not exist is the half where the administrator does *not* learn the credential. | **The reset issues a TOKEN and the subject chooses the password** (ADR 0173). The direct set stays, because provisioning needs it — somebody has to set the first password. | **"Without learning it" is a contrast, and the thing it contrasts with had to be found before the sentence meant anything.** The residual is stated rather than implied: an administrator who issues a reset could spend it themselves. That is inherent to any administrator-initiated recovery and is not new — the same role can already set a password, disable an account or change its scopes. **What changes is that the ordinary path no longer requires it.** | 0173 |
+| **D845** | `credential_version` moves on a password change and refuses every token issued before it, so a reset invalidates the old credential's access. | **It refuses every ACCESS token and reaches no refresh chain.** Session 15 Run 2 added a plane in which **a refresh token names a session rather than a credential**, so a chain obtained with the old password would keep minting access tokens after the password changed. The reset would look complete and leave a live way in. | **`auth_consume_password_reset` ends every session in the same transaction**, with `credential_changed`, calling 0012's `auth_set_password` rather than restating it. | **This is question 5 arriving on the same session's own work.** `credential_version` was complete when it was written in Session 6 and became incomplete three runs ago, when this session gave the deployment a second kind of credential. **The decision did not change; the world gained a case** — and the run that added the case is the run that had to notice. | 0173, 0078 |
+| **D846** | `auth_revoke_user_sessions` was removed in Run 3 for having no caller, so Run 5 restores it. | **It is not restored — it is written where its caller is**, in 0026, and it is **not granted to the auth service** at all. Its only caller is inside `auth_consume_password_reset`, so it needs no grant. | **Kept ungranted.** A grant the service does not need is a capability it does not hold, and the class guard added in Run 3 only checks that *granted* functions have callers. | **D837 closes here, and the shape it closes into is better than the one it was removed from.** Run 3 would have granted it to the service beside four others; Run 5 gives it exactly one caller and no grant. **The rule that forced the removal produced a smaller privilege surface than the version that broke it**, which is the argument for enforcing it as a class rather than treating it as bookkeeping. | 0173 |
+| **D847** | The reset needs a single-use token, and Run 2 already built one for sessions. | **Reusing it meant deciding where the primitive lives.** `mint`, `hash_token` and `is_wellformed` were in `refresh_sessions`, named for the plane that happened to need them first, and a reset importing `refresh_sessions.mint` reads as the wrong module doing the wrong job. | **Extracted to `app.one_time_tokens`**, with `refresh_sessions` re-exporting them so every existing caller and Run 2's 27 tests keep working unchanged. | **The alternative was a second minting routine**, and two implementations of one value is precisely what ADR 0002 exists to prevent: the second is always slightly weaker and nothing compares them. **The split is also the honest one** — what a token IS belongs to the primitive, and what a presented token MEANS stays with the plane that can answer it. | 0173, 0002 |
+| **D848** | A reset's failure modes are: unknown, spent, expired. | **There is a fourth, and it is the one that strands somebody.** If the token is spent *before* the chosen password is screened, a subject who picks a weak password holds a consumed reset and an unchanged credential — **unable to log in and unable to reset**, which is strictly worse than the refusal that produced it. | **The password is screened before the token is spent**, and `test_a_weak_password_does_not_spend_the_reset` asserts the token still works afterwards. | **The ordering is invisible in every response.** Both versions answer 422 to the weak password; they differ only in what the subject can do next, which no status code carries. It is the same class as Run 4's expiry-before-hash mutation — **a property that lives entirely in the order of two statements and shows up in no observable output** — and both were found by mutating rather than by reading. | 0173 |
 ---
 
 ## 2. What Session 15 adds to the acceptance registry
@@ -426,6 +431,55 @@ uses it rather than inventing a second authority (ADR 0002).
 
 **The proof is the negative one:** every token issued before the reset is
 refused afterwards.
+
+**Done.** — D844–D848, ADR **0173**, migration **0026**. **The reset exists, and
+the run's finding is that `credential_version` no longer finishes the job.**
+
+**What shipped:** `app_private.password_resets`, three functions (one of them
+ungranted), `POST /admin/users/{user_id}/reset-password`,
+`POST /auth/reset-password`, and `app.one_time_tokens` — the single-use token
+primitive extracted so the reset did not grow a second copy of it.
+
+**D845 is the row that matters.** `credential_version` moves on a password change
+and refuses every ACCESS token issued before it — 0012's design, and it was
+complete when written. **It became incomplete three runs ago**, when this session
+gave the deployment a second kind of credential: a refresh token names a session
+rather than a credential, so a chain obtained with the old password would have
+kept minting access tokens after the reset. Question 5, arriving on the same
+session's own work — the decision did not change, the world gained a case, and
+the run that added the case is the run that had to notice.
+
+**D844 is why the phrase needed measuring.** "Without learning it" is a contrast,
+and the thing it contrasts with already existed: `PATCH /admin/users/{user_id}`
+has accepted a `password` member since Session 6, and an administrator using it
+chooses the value. That surface stays — provisioning needs it — and the reset is
+the other half. The residual is stated rather than implied: an administrator who
+issues a reset could spend it themselves, which is inherent to any
+administrator-initiated recovery and not new.
+
+**D846 closes D837, and into a better shape than the one it was removed from.**
+Run 3 would have granted `auth_revoke_user_sessions` to the service beside four
+others; here it has exactly one caller, inside another function, and **no grant
+at all**. The rule that forced its removal produced a smaller privilege surface
+than the version that broke it.
+
+**Seven behavioural proofs against a live cluster**, including the negative one
+the plan asked for — every token issued before the reset is refused afterwards,
+with the same token working beforehand as the control.
+
+**Six mutations, all killed with green controls.** The battery's own pre-flight
+refused to run first, because `M5`'s replacement was a tuple: a stray comma after
+a closing string. That is the check working — nothing ran until every anchor was
+sound. **D848 is `M5`'s subject**: screening the password before spending the
+token is a property that lives entirely in the order of two statements and shows
+up in no response, the same class as Run 4's expiry-before-hash.
+
+**Not done, and named:** `IDN-RESET-001` is not a registered requirement yet —
+Run 7's bump (D690). Nothing here has run against the deployment. **Whether
+`PATCH … {"password"}` should also end sessions is open** and recorded in ADR
+0173: a direct set moves `credential_version` and leaves the refresh chains
+alone, which falls out of that surface predating the session plane rather than
+from a decision anybody made.
 
 ### Run 6 — the rotation surface
 

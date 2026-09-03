@@ -14,6 +14,7 @@ because their caller has already proved who it is.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -25,9 +26,11 @@ from app import errors, openapi_docs, strict_query
 from app import scopes as scope_map
 from app.models import (
     AgentTokenRequest,
+    ConsumePasswordResetRequest,
     CreateAgentRequest,
     CreateUserRequest,
     LoginRequest,
+    PasswordResetResponse,
     RefreshRequest,
     SessionResponse,
     SessionTokenResponse,
@@ -36,7 +39,7 @@ from app.models import (
     UpdateAgentRequest,
     UpdateUserRequest,
 )
-from app.service import AuthService
+from app.service import PASSWORD_RESET_TTL_SECONDS, AuthService
 from app.strict_json import MalformedBody, parse_object
 
 if TYPE_CHECKING:
@@ -118,6 +121,42 @@ DOC_END_SESSION = openapi_docs.described(
 )
 RESP_END_SESSION = {
     204: {"description": "The session is ended, or was already."},
+    401: openapi_docs.UNAUTHENTICATED,
+    422: openapi_docs.INVALID,
+}
+
+DOC_OPEN_RESET = openapi_docs.described(
+    summary="Issue a one-time password reset for a subject",
+    description=(
+        "Requires the `admin:users` scope. Returns a token the administrator conveys to "
+        "the subject, who chooses the password when they spend it -- so the administrator "
+        "never learns the resulting credential. Issuing changes no credential and ends no "
+        "session; an administrator who needs the subject out now disables the account, "
+        "which is a different act with a different record. A second reset supersedes the "
+        "first."
+    ),
+)
+RESP_OPEN_RESET = {
+    201: openapi_docs.ok("A one-time reset token, shown once.", PasswordResetResponse),
+    401: openapi_docs.UNAUTHENTICATED,
+    403: openapi_docs.UNAUTHORIZED,
+    404: {"description": "No such subject."},
+}
+
+DOC_CONSUME_RESET = openapi_docs.described(
+    summary="Spend a reset token and choose a new password",
+    description=(
+        "Unauthenticated: the token IS the credential, and requiring a live session to "
+        "recover from a lost password would only work for callers who did not need it. "
+        "Single use. On success `credential_version` moves, so every token issued before "
+        "the reset is refused, and every refresh session the subject had is ended. Every "
+        "refusal answers identically."
+    ),
+    request_model=ConsumePasswordResetRequest,
+)
+RESP_CONSUME_RESET = {
+    200: openapi_docs.ok("The password is set and the subject's sessions are ended."),
+    400: openapi_docs.MALFORMED,
     401: openapi_docs.UNAUTHENTICATED,
     422: openapi_docs.INVALID,
 }
@@ -484,6 +523,77 @@ async def end_session(request: Request, session_id: str) -> Response:
             raise errors.InvalidRequest("session_id is not a uuid") from exc
         await _service(request).terminate_session(principal, family)
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
+    return await _guard(run)
+
+
+@router.post(
+    "/admin/users/{user_id}/reset-password",
+    openapi_extra=DOC_OPEN_RESET,
+    responses=RESP_OPEN_RESET,
+    status_code=201,
+)
+async def open_password_reset(request: Request, user_id: str) -> Response:
+    """IDN-RESET-001. The administrator arranges a recovery and learns no password.
+
+    Contrast `PATCH /admin/users/{user_id}` with a `password` member, which has
+    existed since Session 6 and is the right operation for PROVISIONING: somebody
+    has to set the first password. It is the wrong one for recovery, because the
+    ordinary case of "this person cannot get in" should not end with an operator
+    holding a credential that opens somebody else's account.
+    """
+
+    async def run() -> Response:
+        service = _service(request)
+        principal = await service.authenticate(request.headers.get("authorization"))
+        AuthService.require_scope(principal, scope_map.ADMIN_USERS_WRITE)
+        try:
+            target = UUID(user_id)
+        except ValueError as exc:
+            raise errors.InvalidRequest("user_id is not a uuid") from exc
+
+        token = await service.open_password_reset(target, principal.user_id)
+        if token is None:
+            return JSONResponse({"error": "not_found"}, status_code=404)
+
+        return JSONResponse(
+            {
+                "user_id": user_id,
+                "reset_token": token,
+                "expires_at": (
+                    datetime.now(UTC) + timedelta(seconds=PASSWORD_RESET_TTL_SECONDS)
+                ).isoformat(),
+            },
+            status_code=201,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    return await _guard(run)
+
+
+@router.post(
+    "/auth/reset-password",
+    openapi_extra=DOC_CONSUME_RESET,
+    responses=RESP_CONSUME_RESET,
+)
+async def consume_password_reset(request: Request) -> Response:
+    """IDN-RESET-001's other half. The SUBJECT chooses the password.
+
+    Unauthenticated, and that is the point: a recovery that required a live
+    session would work only for callers who did not need it -- the same argument
+    `/auth/refresh` makes (D834). The token is the credential.
+    """
+
+    async def run() -> Response:
+        payload = await _body(request, ConsumePasswordResetRequest)
+        assert isinstance(payload, ConsumePasswordResetRequest)
+        version = await _service(request).consume_password_reset(
+            payload.reset_token, payload.password
+        )
+        return JSONResponse(
+            {"credential_version": version},
+            headers={"Cache-Control": "no-store"},
+        )
 
     return await _guard(run)
 

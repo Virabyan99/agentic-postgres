@@ -362,6 +362,7 @@ def public_paths() -> tuple[str, ...]:
         "/admin/audit",
         "/admin/users",
         "/admin/users/{user_id}",
+        "/admin/users/{user_id}/reset-password",
         "/auth/agent-token",
         "/auth/jwks.json",
         "/auth/login",
@@ -375,6 +376,10 @@ def public_paths() -> tuple[str, ...]:
         # live access token only works while it is not needed. The refresh token
         # IS the credential, and it travels in the body rather than a header or
         # a path so that no proxy, access log or `Referer` records it.
+        # Session 15 Run 5 (ADR 0173). Unauthenticated for `/auth/refresh`'s
+        # reason: a recovery that required a live session would work only for
+        # callers who did not need it.
+        "/auth/reset-password",
         "/auth/refresh",
         # These two DO require a live access token: reading and ending sessions
         # are things a subject does while logged in, and a refresh token names a

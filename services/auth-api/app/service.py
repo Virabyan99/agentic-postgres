@@ -22,7 +22,7 @@ import psycopg
 
 from app import claims as claim_contract
 from app import keys as key_module
-from app import refresh_sessions
+from app import one_time_tokens, refresh_sessions
 from app import scopes as scope_map
 from app.errors import AuthenticationFailed, AuthorizationFailed, InvalidRequest
 from app.hashing import BoundedHasher, PasswordRejected, StoredHashRejected, assess, normalize
@@ -80,6 +80,16 @@ class Principal:
 AGENT_SECRET_TTL_SECONDS = 90 * 24 * 60 * 60
 AGENT_SECRET_TTL_MIN_SECONDS = 60 * 60
 AGENT_SECRET_TTL_MAX_SECONDS = 365 * 24 * 60 * 60
+
+
+#: How long a password reset can be presented. One hour.
+#:
+#: Short, and much shorter than a refresh token's thirty days, because the two
+#: are different kinds of credential: a refresh token is held by the subject who
+#: earned it, and a reset token is **in transit** between an administrator and a
+#: subject, through whatever channel the deployment uses. The window is the time
+#: that value spends somewhere neither of them controls.
+PASSWORD_RESET_TTL_SECONDS = 60 * 60
 
 
 class AuthService:
@@ -721,3 +731,54 @@ class AuthService:
             session_id,
             refresh_sessions.RevocationReason.LOGGED_OUT.value,
         )
+
+    # -- the password-reset plane (Session 15 Run 5, ADR 0173) --------------
+
+    async def open_password_reset(self, user_id: UUID, issued_by: UUID) -> str | None:
+        """Issue a reset token. **The administrator sees this and no password.**
+
+        Returned to exactly one HTTP response and retained nowhere. The subject
+        chooses the password when they spend it, so the administrator who
+        arranged the recovery never learns the credential it produces.
+        """
+        token, digest = one_time_tokens.mint()
+        expires_at = datetime.now(UTC) + timedelta(seconds=PASSWORD_RESET_TTL_SECONDS)
+        reset_id = await self.repository.open_password_reset(user_id, issued_by, digest, expires_at)
+        return None if reset_id is None else token
+
+    async def consume_password_reset(self, presented: str, password: str) -> int:
+        """Spend a reset and set the password. Returns the new credential_version.
+
+        **Every refusal answers identically**, which is `login`'s shape and
+        `refresh`'s: an unknown token, a spent one and an expired one are three
+        causes a caller does not need distinguished, and distinguishing them
+        would tell whoever presented a guess whether it named something real.
+
+        The password is screened before the token is spent. A weak password that
+        was going to be refused should not consume the one credential the
+        subject holds -- they would be left unable to log in and unable to reset,
+        which is a worse outcome than the refusal it came from.
+        """
+        if not one_time_tokens.is_wellformed(presented):
+            raise AuthenticationFailed("malformed reset token")
+
+        # `_hash` raises InvalidRequest with the specific reason, which is right
+        # here for the same reason it is right on a password change: the subject
+        # already knows the value they chose, so saying why leaks nothing.
+        hashed = await self._hash(password, forbidden=())
+
+        attempt = await self.repository.consume_password_reset(
+            one_time_tokens.hash_token(presented), hashed
+        )
+        if not attempt.consumed:
+            reason = (
+                "unknown"
+                if not attempt.found
+                else "already spent"
+                if attempt.was_consumed
+                else "expired"
+            )
+            raise AuthenticationFailed(f"password reset refused: {reason}")
+
+        assert attempt.credential_version is not None
+        return attempt.credential_version

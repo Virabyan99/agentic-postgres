@@ -92,6 +92,24 @@ class RefreshAttempt:
 
 
 @dataclass(frozen=True, slots=True)
+class ResetAttempt:
+    """What `auth_consume_password_reset` reports: facts, never a verdict.
+
+    `consumed` says whether the password actually changed. The rest describe the
+    row for a caller that did not spend it, and the service names the outcome --
+    the same division `RefreshAttempt` has, and for the same reason.
+    """
+
+    consumed: bool
+    found: bool
+    was_consumed: bool
+    expires_at: Any
+    user_id: UUID | None
+    credential_version: int | None
+    sessions_ended: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class SubjectState:
     """What `/auth/me` reflects, and what a token is checked against."""
 
@@ -382,3 +400,40 @@ class Repository:
         )
         assert row is not None
         return bool(row["ended"])
+
+    # -- the password-reset plane (Session 15 Run 5, ADR 0173) --------------
+
+    async def open_password_reset(
+        self, user_id: UUID, issued_by: UUID, token_hash: str, expires_at: datetime
+    ) -> UUID | None:
+        """Issue a one-time reset. None for an unknown subject, never an exception."""
+        row = await self._one(
+            "SELECT app_private.auth_open_password_reset(%s, %s, %s, %s) AS reset_id",
+            (user_id, issued_by, token_hash, expires_at),
+        )
+        assert row is not None
+        return row["reset_id"]
+
+    async def consume_password_reset(self, token_hash: str, password_hash: str) -> ResetAttempt:
+        """Spend a reset: the password, its version, and the subject's sessions.
+
+        One call, because the three are one transaction in SQL. A service that
+        set the password and then ended the sessions would leave an interval in
+        which a chain obtained with the old password still minted access tokens.
+        """
+        row = await self._one(
+            "SELECT consumed, found, was_consumed, expires_at, user_id, "
+            "credential_version, sessions_ended "
+            "FROM app_private.auth_consume_password_reset(%s, %s)",
+            (token_hash, password_hash),
+        )
+        assert row is not None
+        return ResetAttempt(
+            consumed=row["consumed"],
+            found=row["found"],
+            was_consumed=row["was_consumed"],
+            expires_at=row["expires_at"],
+            user_id=row["user_id"],
+            credential_version=row["credential_version"],
+            sessions_ended=row["sessions_ended"],
+        )

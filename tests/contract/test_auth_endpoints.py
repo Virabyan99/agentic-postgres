@@ -2370,3 +2370,215 @@ def test_a_credential_issued_before_this_release_does_not_expire(
         "a credential with no deadline was refused, so upgrading would break every "
         "agent issued before this release"
     )
+
+
+# ---------------------------------------------------------------------------
+# IDN-RESET-001 -- admin-controlled password reset (Session 15 Run 5, ADR 0173)
+# ---------------------------------------------------------------------------
+
+
+def _open_reset(drive: Any, admin: str, user_id: str) -> httpx.Response:
+    return drive(
+        "POST",
+        f"/admin/users/{user_id}/reset-password",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+
+
+def _spend_reset(drive: Any, token: str, password: str) -> httpx.Response:
+    return drive(
+        "POST",
+        "/auth/reset-password",
+        content=json.dumps({"reset_token": token, "password": password}),
+    )
+
+
+def _user_id(drive: Any, admin: str, username: str) -> str:
+    listed = drive("GET", "/admin/users", headers={"Authorization": f"Bearer {admin}"}).json()
+    rows = listed["users"] if isinstance(listed, dict) else listed
+    return next(u for u in rows if u["username"] == username)["user_id"]
+
+
+def test_an_administrator_resets_a_password_without_learning_it(drive: Any) -> None:
+    """IDN-RESET-001, and the whole point is what the administrator does NOT get.
+
+    The response carries a reset token and no password, because none exists yet
+    -- the subject chooses it when they spend the token. Contrast
+    `PATCH /admin/users/{user_id}` with a `password` member, which has existed
+    since Session 6 and is the right operation for PROVISIONING: there, the
+    administrator picks the value and therefore knows it.
+    """
+    admin = _login(drive).json()["access_token"]
+    _new_subject(drive, "zara", "a-passphrase-for-zara-abc")
+    user_id = _user_id(drive, admin, "zara")
+
+    issued = _open_reset(drive, admin, user_id)
+    assert issued.status_code == 201, issued.text
+    body = issued.json()
+
+    assert set(body) == {"user_id", "reset_token", "expires_at"}
+    assert "password" not in issued.text, "the reset response carries a password"
+    assert body["reset_token"], "no reset token was issued"
+
+    spent = _spend_reset(drive, body["reset_token"], "a-new-passphrase-zara-99")
+    assert spent.status_code == 200, spent.text
+
+    # The subject can log in with what THEY chose, and not with the old one.
+    assert _login(drive, "zara", "a-new-passphrase-zara-99").status_code == 200
+    assert _login(drive, "zara", "a-passphrase-for-zara-abc").status_code == 401
+
+
+def test_every_token_issued_before_the_reset_is_refused_afterwards(drive: Any) -> None:
+    """The negative proof the plan asked for, and the CONTROL is the same token.
+
+    `credential_version` moves when the password changes (0012), and
+    `authenticate` compares it against current state inside the request -- so a
+    token minted before the reset is refused after it. Without the control,
+    a token that never worked would satisfy this.
+    """
+    admin = _login(drive).json()["access_token"]
+    _new_subject(drive, "yuki", "a-passphrase-for-yuki-abc")
+    user_id = _user_id(drive, admin, "yuki")
+
+    session = _login(drive, "yuki", "a-passphrase-for-yuki-abc").json()
+    access = session["access_token"]
+
+    before = drive("GET", "/auth/me", headers={"Authorization": f"Bearer {access}"})
+    assert before.status_code == 200, f"CONTROL failed, the token never worked: {before.text}"
+
+    token = _open_reset(drive, admin, user_id).json()["reset_token"]
+    assert _spend_reset(drive, token, "a-new-passphrase-yuki-77").status_code == 200
+
+    after = drive("GET", "/auth/me", headers={"Authorization": f"Bearer {access}"})
+    assert after.status_code == 401, (
+        "an access token issued before the reset still works, so credential_version "
+        "did not move or the hook is not comparing it"
+    )
+
+
+def test_a_reset_ends_the_refresh_sessions_the_old_password_produced(drive: Any) -> None:
+    """The half `credential_version` does NOT reach, and D837's function is why.
+
+    A refresh token names a SESSION rather than a credential, so a chain
+    obtained with the old password would keep minting access tokens after the
+    password changed -- the reset would look complete and leave a live way in.
+    `auth_revoke_user_sessions` is called inside the same transaction as the
+    password change, which is the run this session finally gave it a caller.
+
+    **The CONTROL is the refresh working beforehand**, because a chain that was
+    already dead would satisfy the assertion for the wrong reason.
+    """
+    admin = _login(drive).json()["access_token"]
+    _new_subject(drive, "xiomara", "a-passphrase-for-xio-abcd")
+    user_id = _user_id(drive, admin, "xiomara")
+
+    session = _login(drive, "xiomara", "a-passphrase-for-xio-abcd").json()
+    refresh_token = session["refresh_token"]
+
+    rotated = _refresh(drive, refresh_token)
+    assert rotated.status_code == 200, f"CONTROL failed: {rotated.text}"
+    live = rotated.json()["refresh_token"]
+
+    token = _open_reset(drive, admin, user_id).json()["reset_token"]
+    assert _spend_reset(drive, token, "a-new-passphrase-xio-1234").status_code == 200
+
+    assert _refresh(drive, live).status_code == 401, (
+        "a refresh chain obtained with the old password survived the reset, so the "
+        "subject's session outlives the credential it was obtained with"
+    )
+
+
+def test_a_reset_token_is_single_use_and_every_refusal_is_the_same(drive: Any) -> None:
+    """Three causes, one answer -- `login`'s shape, and `refresh`'s.
+
+    Spent, unknown and malformed reach the caller identically. Distinguishing
+    them would tell whoever presented a guess whether it named something real,
+    and a reset token names an account somebody is trying to take over.
+    """
+    admin = _login(drive).json()["access_token"]
+    _new_subject(drive, "wren", "a-passphrase-for-wren-abc")
+    user_id = _user_id(drive, admin, "wren")
+
+    token = _open_reset(drive, admin, user_id).json()["reset_token"]
+    assert _spend_reset(drive, token, "a-new-passphrase-wren-55").status_code == 200
+
+    spent = _spend_reset(drive, token, "another-passphrase-wren-6")
+    unknown = _spend_reset(drive, "A" * 43, "another-passphrase-wren-6")
+    malformed = _spend_reset(drive, "not-a-token", "another-passphrase-wren-6")
+
+    assert {r.status_code for r in (spent, unknown, malformed)} == {401}
+    assert len({r.content for r in (spent, unknown, malformed)}) == 1, (
+        "the three refusals are distinguishable"
+    )
+
+    # And the password the second attempt named was never set.
+    assert _login(drive, "wren", "another-passphrase-wren-6").status_code == 401
+    assert _login(drive, "wren", "a-new-passphrase-wren-55").status_code == 200
+
+
+def test_a_second_reset_supersedes_the_first(drive: Any) -> None:
+    """At most one live reset per subject, and the older one stops working.
+
+    Two outstanding resets would mean two values open the account and neither
+    presentation looks unusual. Superseding is explicit in SQL rather than left
+    to the partial unique index, which would answer 23505 about a state the
+    administrator cannot see.
+    """
+    admin = _login(drive).json()["access_token"]
+    _new_subject(drive, "vidya", "a-passphrase-for-vidya-ab")
+    user_id = _user_id(drive, admin, "vidya")
+
+    first = _open_reset(drive, admin, user_id).json()["reset_token"]
+    second = _open_reset(drive, admin, user_id)
+    assert second.status_code == 201, second.text
+
+    assert _spend_reset(drive, first, "a-new-passphrase-vidya-11").status_code == 401, (
+        "a superseded reset still works, so two values open the account"
+    )
+    assert (
+        _spend_reset(drive, second.json()["reset_token"], "a-new-pass-vidya-22").status_code == 200
+    )
+
+
+def test_a_weak_password_does_not_spend_the_reset(drive: Any) -> None:
+    """The ordering that keeps a refused attempt recoverable.
+
+    The password is screened BEFORE the token is spent. Reversed, a subject who
+    chose a weak password would be left unable to log in and unable to reset --
+    holding a spent token and an unchanged credential, which is a worse outcome
+    than the refusal it came from.
+    """
+    admin = _login(drive).json()["access_token"]
+    _new_subject(drive, "ulla", "a-passphrase-for-ulla-abc")
+    user_id = _user_id(drive, admin, "ulla")
+
+    token = _open_reset(drive, admin, user_id).json()["reset_token"]
+
+    weak = _spend_reset(drive, token, "password")
+    assert weak.status_code == 422, weak.text
+
+    # The token still works, which is the property under test.
+    assert _spend_reset(drive, token, "a-new-passphrase-ulla-88").status_code == 200
+    assert _login(drive, "ulla", "a-new-passphrase-ulla-88").status_code == 200
+
+
+def test_only_an_administrator_can_issue_a_reset(drive: Any) -> None:
+    """A reset is an administrative act on somebody else's account.
+
+    An ordinary subject holding a valid token is refused by scope, not by role:
+    `admin:users` is what the route requires, and a role name does not grant it.
+    """
+    _new_subject(drive, "tova", "a-passphrase-for-tova-abc")
+    admin = _login(drive).json()["access_token"]
+    user_id = _user_id(drive, admin, "tova")
+
+    ordinary = _login(drive, "tova", "a-passphrase-for-tova-abc").json()["access_token"]
+    refused = drive(
+        "POST",
+        f"/admin/users/{user_id}/reset-password",
+        headers={"Authorization": f"Bearer {ordinary}"},
+    )
+    assert refused.status_code == 403, refused.text
+
+    unauthenticated = drive("POST", f"/admin/users/{user_id}/reset-password")
+    assert unauthenticated.status_code == 401

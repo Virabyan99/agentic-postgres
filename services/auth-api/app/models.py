@@ -120,6 +120,26 @@ class SessionTokenResponse(BaseModel):
     refresh_token: str
 
 
+class ConsumePasswordResetRequest(_Strict):
+    """The token and the password the SUBJECT chose.
+
+    Two fields and no user id: the token names the subject, and accepting one
+    beside it would let a caller present a valid token against a different
+    account. The identity comes from the credential, never from the request.
+    """
+
+    reset_token: str = Field(min_length=1, max_length=512)
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX)
+
+
+class PasswordResetResponse(BaseModel):
+    """What issuing a reset returns. Carries no password, because none exists yet."""
+
+    user_id: str
+    reset_token: str
+    expires_at: str
+
+
 class SessionResponse(BaseModel):
     """One row of the session listing.
 
