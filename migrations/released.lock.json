@@ -317,6 +317,18 @@
       "template": "templates/0027-agent-audit-denial-taxonomy.sql",
       "template_sha256": "ef6dc06627ebf918cf7e53d50165488bac11a8c7aa66f16c0d649fd458d6f357",
       "version": "20260903120027"
+    },
+    {
+      "canonical_render_sha256": "2b2630b62b6064e9bfbb9aa320f9da711aacb1b899e4d465b72e62c9d1dd7341",
+      "name": "agent_windowed_quota",
+      "placeholders": [
+        "agent_reader",
+        "agent_writer",
+        "object_owner"
+      ],
+      "template": "templates/0028-agent-windowed-quota.sql",
+      "template_sha256": "c20327ad2b6badc1c37132074fffc35feb3753b8eb311bd4488e17aad9074501",
+      "version": "20260904120028"
     }
   ],
   "schema_version": 1

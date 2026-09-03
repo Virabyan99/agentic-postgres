@@ -138,7 +138,7 @@ def begin(
     parameters: dict[str, Any],
     capability_version: str | None,
     contract_hash: str | None,
-) -> str:
+) -> str | None:
     """Open one record and return its id, or refuse.
 
     Measured: the response is a **bare JSON string**, because `RETURNS uuid` is
@@ -164,6 +164,19 @@ def begin(
         },
         request_id,
     )
+    # **`None` is the quota refusal, and it is the only other thing accepted**
+    # (ADR 0180). This function had never returned NULL: a caller with no agent
+    # identity is refused with PT403, so the only paths out were a record id or
+    # an error.
+    #
+    # It means the refusal has ALREADY been recorded, complete, by that same
+    # transaction -- there is nothing here to close, and closing something would
+    # be closing a record this process did not open. Returned rather than raised,
+    # because it is a verdict about the CALLER and not a failure of the audit
+    # plane -- which is what `AuditRefusal` means to everything upstream, where a
+    # read carries on past one and a write fails closed. Both would be wrong.
+    if opened is None:
+        return None
     if not isinstance(opened, str) or not opened.strip():
         raise AuditRefusal(f"agent_audit_begin returned {type(opened).__name__}, not a record id")
     return opened

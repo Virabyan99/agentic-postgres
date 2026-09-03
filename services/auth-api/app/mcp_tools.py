@@ -670,6 +670,7 @@ def register(
         ):
             audit_id: str | None = None
             token: str | None = None
+            quota_spent = False
             try:
                 context = current_agent_context()
                 timed.principal(agent_id=context.agent_id, owner_id=context.owner_id)
@@ -680,7 +681,7 @@ def register(
 
             if kind in AUDITED_KINDS and token is not None and timed.request_id is not None:
                 try:
-                    audit_id = await asyncio.to_thread(
+                    opened = await asyncio.to_thread(
                         audit_begin,
                         base_url,
                         token,
@@ -690,6 +691,8 @@ def register(
                         capability_version=_sole_capability_version(lock, tool),
                         contract_hash=lock.canonical_sha256,
                     )
+                    audit_id = opened
+                    quota_spent = opened is None
                 except (AuditRefusal, UpstreamRefusal) as error:
                     if kind in FAIL_CLOSED_KINDS:
                         # The record is the point for a write: a change nothing
@@ -704,6 +707,33 @@ def register(
                     LOGGER.warning(
                         "apg.mcp.audit %s",
                         json.dumps({"tool": tool, "phase": "begin", "error": type(error).__name__}),
+                    )
+
+                # **The quota refused, and the record already says so** (ADR
+                # 0180). `begin` counted the call, found it over the agent's
+                # window and wrote a complete `refused` row in the same
+                # transaction, so there is nothing to close.
+                #
+                # **`quota_spent` is a separate flag and not `audit_id is None`**,
+                # which is the same value for two different events: a READ whose
+                # `begin` raised also leaves `audit_id` at `None` and carries on
+                # by design (ADR 0141), and testing the id would turn every
+                # audit-plane outage into a quota refusal for every read. One
+                # value, two meanings -- D495's shape, and it was in the first
+                # draft of this block.
+                #
+                # Raised as `AgentVisible` rather than structurally: this is the
+                # one budget a caller can act on, by waiting. The other four
+                # bound a single call; this one bounds a rate, so "try later" is
+                # advice rather than a guess about state.
+                if quota_spent:
+                    timed.refused()
+                    raise as_tool_error(
+                        AgentVisible(
+                            BUDGET_EXCEEDED,
+                            "this agent's call quota for the current window is spent",
+                            BUDGET_EXCEEDED_REASON,
+                        )
                     )
 
             try:

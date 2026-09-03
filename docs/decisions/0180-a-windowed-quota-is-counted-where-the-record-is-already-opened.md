@@ -142,8 +142,21 @@ one path where latency is paid.
   block was measured and is short, but it interacts with ADR 0179's
   per-capability concurrency: a capability permitted two in flight will have
   those two queue at the counter. Small, real, and stated rather than discovered.
-- The quota bound itself is a capability-manifest field, so it is a **narrowing**
-  under ADR 0179's rule and a `schema_version` question — which is why it is
-  declared at v3's fields rather than adding a v4 (D892's rule, applied again).
+- **The bound lives on `app_private.agents`, not in the capability manifest**
+  (D906). An earlier draft of this ADR said the opposite and it was wrong:
+  `AGT-QUOTA-001` bounds *an agent* across requests, not a capability. A
+  per-capability bound is ADR 0179's shape and is decided by the manifest; this
+  one is decided by whoever issued the agent, and it belongs beside the scopes
+  and the status already decided there. **It is therefore not a
+  `schema_version` question at all**, which is what makes D892's two-formats
+  arithmetic hold rather than needing a v4.
+- Both columns are nullable and NULL means **unbounded**. Not a default: this
+  deployment has agents today with no quota, and giving them a number nobody
+  chose would be inventing a policy — ADR 0177's rule about a capability's
+  lifecycle, applied to an identity.
+- **The signature does not change.** A refusal is a `NULL` return, because a
+  `RAISE` would roll back the audit row written in the same transaction (D489)
+  and leave the denial unrecorded — the one thing ADR 0141 put `begin` before
+  the scope check to prevent.
 - `AGT-QUOTA-001` needs a live half: a bound crossed across two requests, proved
   against a real cluster, and surviving a restart.

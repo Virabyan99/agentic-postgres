@@ -1231,3 +1231,268 @@ def test_complete_refuses_a_reason_that_does_not_match_the_outcome(
     )
     assert ok.returncode == 0, ok.stderr
     assert ok.stdout.strip().splitlines()[-1].strip() == "t"
+
+
+# ---------------------------------------------------------------------------
+# Migration 0028: the fifth budget (ADR 0180)
+# ---------------------------------------------------------------------------
+
+
+def _returned(result: Any) -> str:
+    """The statement's own output from an `as_agent` call.
+
+    `as_agent` sets two GUCs with `set_config(..., true)` inside the transaction,
+    and `set_config` RETURNS the value it set -- so the agent id and the owner id
+    precede the result on stdout. Reading the whole buffer compares three uuids
+    against whatever was expected, which is what the first draft of the quota
+    proofs did.
+    """
+    # **`.strip()` before `.splitlines()` deletes the answer** when the answer
+    # is NULL. psql prints an empty line for a NULL scalar; stripping the buffer
+    # removes it, and `[-1]` then returns the OWNER ID left behind by the second
+    # `set_config` -- a plausible uuid, which is why three proofs reported that a
+    # correctly-refusing function had returned a record id (D908).
+    #
+    # The function was right the whole time: `RAISE NOTICE` inside it read
+    # `bound=2 used=3 over=t` on the call this helper described as served.
+    lines = result.stdout.splitlines()
+    return lines[-1].strip() if lines else ""
+
+
+def _quota_agent(cluster: dict[str, Any], *, calls: int, window: int) -> tuple[str, str]:
+    """One agent with a quota, and its owner. Returns (agent_id, owner_id)."""
+    owner = str(uuid.uuid4())
+    agent = str(uuid.uuid4())
+    su(
+        cluster,
+        f"INSERT INTO app_private.users "
+        f"(id, username, display_name, role_name, scopes, status) VALUES "
+        f"('{owner}', 'u{agent[:8]}', 'Quota Owner', 'apg_authenticated', "
+        f"ARRAY['notes:read']::text[], 'active');",
+    )
+    su(
+        cluster,
+        "INSERT INTO app_private.agents "
+        "(id, name, role_name, scopes, owner_id, quota_calls, quota_window_seconds) "
+        f"VALUES ('{agent}', 'quota-{agent[:8]}', 'r', ARRAY['notes:read']::text[], "
+        f"'{owner}', {calls}, {window});",
+    )
+    return agent, owner
+
+
+def test_an_agent_without_a_quota_is_unbounded(cluster: dict[str, Any]) -> None:
+    """**The control for every arm below**, and the state the deployment is in.
+
+    Both columns are NULL for every agent that exists today, and NULL means
+    unbounded rather than zero -- inventing a number for agents somebody already
+    issued would be a policy nobody chose (ADR 0180).
+    """
+    owner = str(uuid.uuid4())
+    agent = str(uuid.uuid4())
+    su(
+        cluster,
+        f"INSERT INTO app_private.users "
+        f"(id, username, display_name, role_name, scopes, status) VALUES "
+        f"('{owner}', 'u{agent[:8]}', 'Quota Owner', 'apg_authenticated', "
+        f"ARRAY['notes:read']::text[], 'active');",
+    )
+    su(
+        cluster,
+        "INSERT INTO app_private.agents (id, name, role_name, scopes, owner_id) VALUES "
+        f"('{agent}', 'unbounded-{agent[:8]}', 'r', ARRAY['notes:read']::text[], '{owner}');",
+    )
+
+    # **The control must verify it built its own condition** (D605). Without
+    # this the test passed with no agent row at all: `begin` finds no row, reads
+    # no bound, and takes the unbounded path -- so "an agent without a quota is
+    # unbounded" was being demonstrated by an agent that did not exist.
+    existing = su(cluster, f"SELECT count(*) FROM app_private.agents WHERE id = '{agent}';")
+    assert existing.stdout.strip() == "1", "the fixture did not create the agent it tests"
+
+    for _ in range(5):
+        opened = as_agent(
+            cluster,
+            "agent_reader",
+            agent,
+            owner,
+            "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+        )
+        assert opened.returncode == 0, opened.stderr
+        assert _returned(opened), "an unbounded agent was refused"
+
+    counted = su(
+        cluster, f"SELECT count(*) FROM app_private.agent_quota WHERE agent_id = '{agent}';"
+    )
+    assert counted.stdout.strip() == "0", "an unbounded agent has a counter row"
+
+
+def test_a_quota_refuses_the_call_after_the_bound_and_records_it(
+    cluster: dict[str, Any],
+) -> None:
+    """The whole of `AGT-QUOTA-001`'s offline half, through the function.
+
+    The refusal is a NULL return rather than a raise, because a RAISE would roll
+    back the audit row written in the same transaction (D489) and leave the
+    denial unrecorded -- which is the one thing ADR 0141 put `begin` before the
+    scope check to prevent.
+    """
+    agent, owner = _quota_agent(cluster, calls=2, window=3600)
+
+    for attempt in (1, 2):
+        opened = as_agent(
+            cluster,
+            "agent_reader",
+            agent,
+            owner,
+            "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+        )
+        assert _returned(opened), f"call {attempt} was refused inside the bound"
+
+    third = as_agent(
+        cluster,
+        "agent_reader",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+    )
+    assert third.returncode == 0, f"the refusal raised instead of returning NULL: {third.stderr}"
+    assert _returned(third) == "", f"the third call returned {_returned(third)!r}, not NULL"
+
+    rows = su(
+        cluster,
+        "SELECT outcome || '/' || coalesce(denial_reason::text, '-') "
+        f"FROM app_private.agent_audit WHERE agent_id = '{agent}' ORDER BY started_at;",
+    )
+    assert rows.stdout.split() == ["started/-", "started/-", "refused/budget_exceeded"], (
+        f"the records read {rows.stdout.split()}"
+    )
+
+    closed = su(
+        cluster,
+        "SELECT count(*) FROM app_private.agent_audit "
+        f"WHERE agent_id = '{agent}' AND outcome = 'refused' AND completed_at IS NOT NULL;",
+    )
+    assert closed.stdout.strip() == "1", (
+        "the refused record is not complete, so it reads as a call still in flight"
+    )
+
+
+def test_a_refused_call_consumes_its_quota(cluster: dict[str, Any]) -> None:
+    """Deliberate, and the opposite is the tempting answer (ADR 0180).
+
+    `begin` runs before the scope check, so the count is taken before anything
+    knows whether the call will succeed -- and a caller hammering a capability it
+    may not use is exactly what a rate limit is for. A quota counting only
+    successes would be no bound at all on the traffic that matters most.
+    """
+    agent, owner = _quota_agent(cluster, calls=1, window=3600)
+
+    for _ in range(3):
+        as_agent(
+            cluster,
+            "agent_reader",
+            agent,
+            owner,
+            "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+        )
+
+    counted = su(cluster, f"SELECT calls FROM app_private.agent_quota WHERE agent_id = '{agent}';")
+    assert counted.stdout.strip() == "3", (
+        f"the counter reads {counted.stdout.strip()}; the two refused calls did not consume it"
+    )
+
+
+def test_the_window_is_fixed_and_a_new_one_starts_clean(cluster: dict[str, Any]) -> None:
+    """A one-second window, so the boundary is reachable without waiting long.
+
+    Windows are epoch-aligned and fixed rather than sliding: a sliding window
+    needs the timestamps of individual calls, which is a second copy of what
+    `agent_audit` already records.
+    """
+    import time as _time
+
+    agent, owner = _quota_agent(cluster, calls=1, window=1)
+
+    as_agent(
+        cluster,
+        "agent_reader",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+    )
+    refused = as_agent(
+        cluster,
+        "agent_reader",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+    )
+    assert _returned(refused) == "", "the second call in one window was not refused"
+
+    _time.sleep(1.2)
+    after = as_agent(
+        cluster,
+        "agent_reader",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+    )
+    assert _returned(after), "a new window did not start clean"
+
+    windows = su(
+        cluster,
+        f"SELECT count(*) FROM app_private.agent_quota WHERE agent_id = '{agent}';",
+    )
+    assert int(windows.stdout.strip()) == 2, (
+        f"{windows.stdout.strip()} window row(s); a fixed window makes exactly one per period"
+    )
+
+
+def test_a_bound_without_a_window_is_refused_by_the_catalog(cluster: dict[str, Any]) -> None:
+    """Neither or both. Either alone reads as a quota that is configured."""
+    owner = str(uuid.uuid4())
+    agent = str(uuid.uuid4())
+    su(
+        cluster,
+        f"INSERT INTO app_private.users "
+        f"(id, username, display_name, role_name, scopes, status) VALUES "
+        f"('{owner}', 'u{agent[:8]}', 'Quota Owner', 'apg_authenticated', "
+        f"ARRAY['notes:read']::text[], 'active');",
+    )
+
+    for calls, window in (("5", "NULL"), ("NULL", "60")):
+        result = su(
+            cluster,
+            "INSERT INTO app_private.agents "
+            "(id, name, role_name, scopes, owner_id, quota_calls, quota_window_seconds) "
+            f"VALUES (gen_random_uuid(), 'half-{agent[:8]}', 'r', "
+            f"ARRAY['notes:read']::text[], '{owner}', {calls}, {window});",
+        )
+        assert result.returncode != 0, f"calls={calls} window={window} was accepted"
+
+    # The control: both together insert, so the two refusals are about the pair
+    # and not about the row being unacceptable for some other reason.
+    both = su(
+        cluster,
+        "INSERT INTO app_private.agents "
+        "(id, name, role_name, scopes, owner_id, quota_calls, quota_window_seconds) "
+        f"VALUES ('{agent}', 'whole-{agent[:8]}', 'r', ARRAY['notes:read']::text[], "
+        f"'{owner}', 5, 60);",
+    )
+    assert both.returncode == 0, both.stderr
+
+
+def test_no_role_holds_any_privilege_on_the_quota_table(cluster: dict[str, Any]) -> None:
+    """0019's rule for `agent_audit`, applied to the counter.
+
+    A counter an agent could read is a counter an agent could reason about
+    evading, and the only path in is the definer function.
+    """
+    for role_key in ("agent_reader", "agent_writer", "authenticated", "anon"):
+        for privilege in ("SELECT", "INSERT", "UPDATE", "DELETE"):
+            granted = su(
+                cluster,
+                f"SELECT has_table_privilege('{cluster['roles'][role_key]}', "
+                f"'app_private.agent_quota', '{privilege}');",
+            )
+            assert granted.stdout.strip() == "f", f"{role_key} holds {privilege} on the quota table"

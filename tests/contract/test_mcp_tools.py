@@ -2289,3 +2289,93 @@ def test_the_per_tool_bound_is_clamped_to_the_process_wide_one() -> None:
         f"register() built semaphores at {sorted(built.values())}; a tool declaring 4 "
         "under a process of 2 must be clamped to 2, or the capability widens its share"
     )
+
+
+def test_a_quota_refusal_is_visible_and_closes_no_record(monkeypatch: Any) -> None:
+    """`begin` returning None is the fifth budget refusing (ADR 0180).
+
+    Three things at once, and the third is the one a passing tool call would
+    hide: the caller is TOLD (this is the one budget it can act on, by waiting),
+    the reason recorded is `budget_exceeded`, and **`complete` is never called**
+    -- the refusal was already written, complete, by the transaction that
+    counted it, and closing it here would be closing a record this process did
+    not open.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    from app.mcp_budgets import ReadSlots
+
+    lock = _lock(NOTES)
+    _with_scopes(monkeypatch, "notes:read")
+    monkeypatch.setattr(mcp_authorization, "current_token", lambda: "t")
+    monkeypatch.setattr(mcp_authorization, "current_request_id", lambda: REQUEST_ID)
+
+    closed: list[Any] = []
+    monkeypatch.setattr(mcp_tools, "audit_begin", lambda *_, **__: None)
+    monkeypatch.setattr(mcp_tools, "audit_complete", lambda *a, **k: closed.append(k) or True)
+
+    reached = {"upstream": False}
+
+    def upstream(*_: Any, **__: Any) -> dict[str, Any]:
+        reached["upstream"] = True
+        return {"resource": "notes", "row_count": 0, "rows": []}
+
+    monkeypatch.setattr(mcp_tools, "query_resource", upstream)
+
+    registry = _Registry()
+    mcp_tools.register(registry, lock, base_url=BASE, slots=ReadSlots(2))
+
+    with pytest.raises(ToolError) as raised:
+        asyncio.run(registry.tools["query_resource"](resource="notes"))
+
+    assert "budget_exceeded" in str(raised.value), (
+        f"the caller was told {str(raised.value)!r}; a quota is the one budget it can "
+        "act on by waiting, so it is caller-visible rather than structural"
+    )
+    assert not closed, (
+        "the runtime closed a record it never opened; the refusal was already written "
+        "complete by the transaction that counted it"
+    )
+    assert not reached["upstream"], "the refused call still reached upstream"
+
+
+def test_an_audit_outage_is_not_read_as_a_quota_refusal(monkeypatch: Any) -> None:
+    """**The control, and the defect it guards was in the first draft.**
+
+    A read whose `begin` RAISES carries on by design (ADR 0141) and leaves
+    `audit_id` at `None` -- the same value a quota refusal leaves. Testing the id
+    rather than a separate flag would turn every audit-plane outage into a quota
+    refusal for every read, which is D495's shape: one value carrying two ideas
+    that agree until they do not.
+    """
+    import asyncio
+
+    from app.mcp_audit import AuditRefusal
+    from app.mcp_budgets import ReadSlots
+
+    lock = _lock(NOTES)
+    _with_scopes(monkeypatch, "notes:read")
+    monkeypatch.setattr(mcp_authorization, "current_token", lambda: "t")
+    monkeypatch.setattr(mcp_authorization, "current_request_id", lambda: REQUEST_ID)
+
+    def unavailable(*_: Any, **__: Any) -> None:
+        raise AuditRefusal("the audit call refused")
+
+    monkeypatch.setattr(mcp_tools, "audit_begin", unavailable)
+    monkeypatch.setattr(mcp_tools, "audit_complete", lambda *_, **__: True)
+    monkeypatch.setattr(
+        mcp_tools,
+        "query_resource",
+        lambda *_, **__: {"resource": "notes", "row_count": 0, "rows": []},
+    )
+
+    registry = _Registry()
+    mcp_tools.register(registry, lock, base_url=BASE, slots=ReadSlots(2))
+
+    served = asyncio.run(registry.tools["query_resource"](resource="notes"))
+    assert served["resource"] == "notes", (
+        "a read was refused because its audit record could not be opened; that is a "
+        "write's rule (ADR 0141), and reading it as a quota refusal is worse still"
+    )

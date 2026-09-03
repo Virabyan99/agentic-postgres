@@ -348,6 +348,17 @@
         "agent_writer"
       ],
       "description": "What refused, which capability version was live, and which contract said so (ADR 0178). Adds app_private.agent_denial_reason as an ENUM -- a type rather than a string, because a free-text reason would be written by the runtime today and by whatever raised the error tomorrow, and an operator reading agent_audit could not tell them apart. Eight members, derived from the refusal sites in mcp_tools, mcp_query and mcp_upstream rather than designed beside them. The session plan proposed five and `credential` is not one of them: the MCP runtime holds no credential of any kind, and classifying an upstream 401 as a credential failure is the guess D433 forbids -- four states sit behind two statuses. `upstream_refused` is the honest form. Three columns on agent_audit, all nullable and each for its own reason: capability_version and contract_hash are NULL at lock schema version 1 where capabilities declare neither (ADR 0177), and denial_reason is NULL for every outcome that is not a refusal -- stated as an equivalence CHECK, so a served row carrying a reason is as refused as a refused row without one. Both audit functions are replaced with wider signatures and NEITHER new parameter carries a DEFAULT (D857): ADR 0175 checks every call against the arity the migrations declare, so a required parameter is now the safe choice and a defaulted one would let a caller omit the version forever. Targeted REVOKEs, not the blanket form, for 0019's reason -- schema api is not app_private. See ADR 0178, ADR 0175, ADR 0139, ADR 0135, D433, D489."
+    },
+    {
+      "version": "20260904120028",
+      "name": "agent_windowed_quota",
+      "template": "templates/0028-agent-windowed-quota.sql",
+      "placeholders": [
+        "object_owner",
+        "agent_reader",
+        "agent_writer"
+      ],
+      "description": "The fifth budget: a bound on an agent that outlives the request (ADR 0180). Counted inside api.agent_audit_begin rather than in a call of its own, because the agent plane holds no database credential (D407) and a write is already four upstream requests, a read three, none of it ever timed -- a fifth would be a 25-33% increase in round trips on a path whose latency nobody knows. ADR 0141 had already put begin BEFORE the scope check so a denial is audited, and a quota refusal is a denial, so the place that costs nothing is the only place the refusal can be recorded. The bound lives on app_private.agents because the requirement bounds an AGENT, not a capability; both columns are nullable and NULL means unbounded, because inventing a number for the agents that exist today would be a policy nobody chose. Measured at read committed with a control proving the race: two overlapping upserts give a final count of 2 and the loser BLOCKS (0.94s against a 0.75s hold), while the same two as a plain INSERT give the loser 23505. repeatable read is rejected -- its loser gets 40001 and retrying a quota increment is how a caller exceeds its quota. The signature does NOT change: a refusal is signalled by returning NULL, because a RAISE would roll back the audit row it just wrote (D489) and leave the denial unrecorded. Growth costs disk, not latency: the upsert is flat from 100 to 200,000 rows (0.0093 to 0.0084 ms) while the table goes 64 kB to 22 MB, so pruning stays off the request path (D903). See ADR 0180, ADR 0129, ADR 0141, ADR 0171, D407, D489."
     }
   ]
 }
