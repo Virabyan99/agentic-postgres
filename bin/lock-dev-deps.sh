@@ -6,11 +6,24 @@
 # pins uv by exact version and refuses to run against any other version, so a
 # lock produced on one workstation is reproducible on another and in CI.
 #
+# **The resolution is pinned in TIME as well as in tool** (ADR 0176). Pinning
+# only the tool leaves `--check` asking whether the committed lock is the newest
+# resolution *at the moment it runs*, which is a fact about PyPI rather than
+# about this repository: any upstream release reddens it, on a schedule nobody
+# here controls. `bin/lock-versions.sh --check` had already made the opposite
+# choice for images -- "makes no network call at all; everything it verifies is
+# derivable" -- and this is the caller of that decision that never got it.
+#
+# So the lock carries the cutoff that produced it, on its first line, and
+# `--check` resolves against that cutoff rather than against now. Moving the
+# world forward is `--update`, which stamps a new cutoff -- an act, with a diff
+# to read, rather than a clock.
+#
 # Exit codes (runbook §2 convention):
 #   0  success
 #   2  invalid operator input
 #   3  missing local prerequisite
-#   5  lock is out of date (--check only)
+#   5  lock is out of date, or carries no cutoff (--check only)
 
 set -euo pipefail
 
@@ -23,14 +36,21 @@ readonly PYTHON_MINOR="3.12"
 readonly INPUT_FILE="${ROOT_DIR}/requirements-dev.in"
 readonly LOCK_FILE="${ROOT_DIR}/requirements-dev.txt"
 
+# The lock's first line, and the only thing in it uv did not write. `--check`
+# reads the cutoff from here, so the marker is part of the artifact rather than
+# a second file that could drift away from the lock it describes.
+readonly CUTOFF_PREFIX="# exclude-newer: "
+
 usage() {
   cat <<'USAGE'
 Usage: bin/lock-dev-deps.sh (--update | --check | --help)
 
-  --update   Resolve requirements-dev.in and write the hash-locked
-             requirements-dev.txt. May access the network.
-  --check    Verify requirements-dev.txt is exactly what --update would
-             produce. Does not modify any file.
+  --update   Resolve requirements-dev.in as of NOW, stamp that instant into the
+             lock's first line, and write the hash-locked requirements-dev.txt.
+             Accesses the network, and is the only way the resolution moves.
+  --check    Verify requirements-dev.txt is exactly what --update would have
+             produced AT THE CUTOFF THE LOCK ITSELF CARRIES. Modifies nothing,
+             and its answer does not change while the tree does not.
   --help     Show this message.
 
 Install the locked set with:
@@ -68,14 +88,43 @@ compile_to() {
   # --check kept failing, and the documented "--check verifies the lock is
   # exactly what --update would produce" was false. Both now run this function
   # against a clean destination, so they are the same resolution.
-  local destination="$1"
+  #
+  # `--exclude-newer` is what makes the answer a property of the tree. Measured
+  # against the pinned uv 0.12.1 before anything was built on it: two compiles
+  # at the same cutoff are byte-identical, and the control -- the same compile
+  # with no cutoff -- resolved two packages differently on the same afternoon
+  # (cyclopts 4.23.3 -> 4.24.0, sse-starlette 3.4.8 -> 3.4.10). A flag that
+  # changed nothing would have proved nothing.
+  local destination="$1" cutoff="$2"
   uv pip compile \
     --quiet \
     --no-header \
     --generate-hashes \
+    --exclude-newer "${cutoff}" \
     --python-version "${PYTHON_MINOR}" \
     "${INPUT_FILE}" \
     --output-file "${destination}"
+}
+
+# The cutoff the committed lock was produced at, or empty if it carries none.
+committed_cutoff() {
+  local first
+  first="$(head -n 1 "${LOCK_FILE}")"
+  case "${first}" in
+    "${CUTOFF_PREFIX}"*) printf '%s' "${first#"${CUTOFF_PREFIX}"}" ;;
+    *) printf '' ;;
+  esac
+}
+
+# Prepend the marker, so what --check compares and what --update writes are the
+# same whole file. Comparing a body against a body would leave the one line that
+# decides the resolution unverified.
+stamp() {
+  local body="$1" cutoff="$2" destination="$3"
+  {
+    printf '%s%s\n' "${CUTOFF_PREFIX}" "${cutoff}"
+    cat "${body}"
+  } > "${destination}"
 }
 
 main() {
@@ -93,16 +142,20 @@ main() {
       require_uv
       [ -f "${INPUT_FILE}" ] || die 2 "missing ${INPUT_FILE}"
 
-      local staged
+      local staged cutoff
       staged="$(mktemp)"
       # shellcheck disable=SC2064  # expand staged now, not at trap time
       trap "rm -f '${staged}'" EXIT
 
-      compile_to "${staged}"
+      # Now, to the second, in UTC. `date -u` rather than anything derived from
+      # the lock: --update is where the world is allowed to move forward.
+      cutoff="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+      compile_to "${staged}" "${cutoff}"
       # Replace rather than compile in place, so the resolution never sees the
       # lock it is about to overwrite.
-      cat "${staged}" > "${LOCK_FILE}"
-      printf 'lock-dev-deps: wrote %s\n' "${LOCK_FILE}"
+      stamp "${staged}" "${cutoff}" "${LOCK_FILE}"
+      printf 'lock-dev-deps: wrote %s at cutoff %s\n' "${LOCK_FILE}" "${cutoff}"
       return 0
       ;;
     --check)
@@ -110,12 +163,18 @@ main() {
       [ -f "${INPUT_FILE}" ] || die 2 "missing ${INPUT_FILE}"
       [ -f "${LOCK_FILE}" ] || die 5 "missing ${LOCK_FILE}; run --update"
 
-      local tmp
-      tmp="$(mktemp)"
-      # shellcheck disable=SC2064  # expand tmp now, not at trap time
-      trap "rm -f '${tmp}'" EXIT
+      local tmp body cutoff
+      cutoff="$(committed_cutoff)"
+      [ -n "${cutoff}" ] || die 5 \
+        "${LOCK_FILE} carries no '${CUTOFF_PREFIX}' line, so there is nothing to resolve against but the clock; run --update"
 
-      compile_to "${tmp}"
+      tmp="$(mktemp)"
+      body="$(mktemp)"
+      # shellcheck disable=SC2064  # expand both now, not at trap time
+      trap "rm -f '${tmp}' '${body}'" EXIT
+
+      compile_to "${body}" "${cutoff}"
+      stamp "${body}" "${cutoff}" "${tmp}"
 
       if ! diff -u "${LOCK_FILE}" "${tmp}" >/dev/null; then
         printf 'lock-dev-deps: %s is out of date. Diff (committed vs resolved):\n' \
@@ -124,7 +183,7 @@ main() {
         die 5 "run bin/lock-dev-deps.sh --update"
       fi
 
-      printf 'lock-dev-deps: %s is current.\n' "${LOCK_FILE}"
+      printf 'lock-dev-deps: %s is current at cutoff %s.\n' "${LOCK_FILE}" "${cutoff}"
       return 0
       ;;
     *)

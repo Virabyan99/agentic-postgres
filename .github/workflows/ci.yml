@@ -126,12 +126,26 @@ jobs:
 
       # The session is derived, not passed: setting it here would let CI test a
       # different policy than the gate does, which is the whole failure ADR 0014
-      # removed. This asserts the derived value is what the suite ran under.
-      - name: Confirm the acceptance session is derived from the package
+      # removed.
+      #
+      # **This step asserted the constant was equal to the literal two**, under
+      # a comment saying the value must not be a literal, and has failed on every
+      # push since the constant first moved. Question 5's shape in the one file
+      # the guard against it does not read: `_operator_commands()` globs
+      # `bin/*.py`, and a workflow is not a `.py`.
+      #
+      # What replaces it has content that cannot go stale -- the workflow must
+      # not OVERRIDE the derivation. Whether the derivation is right is the
+      # gate's job, and `test_the_derivation_actually_produces_the_current_session`
+      # already runs the expression rather than grepping for it.
+      - name: Confirm the acceptance session is derived, not passed
         run: |
           . .venv/bin/activate
-          PYTHONPATH=src python -c \
-            'from agentic_postgres import CURRENT_SESSION; assert CURRENT_SESSION == 2, CURRENT_SESSION'
+          if [ -n "${APG_ACCEPTANCE_SESSION:-}" ]; then
+            echo "CI exports APG_ACCEPTANCE_SESSION=${APG_ACCEPTANCE_SESSION}; the suite would test a policy the gate does not" >&2
+            exit 1
+          fi
+          PYTHONPATH=src python -c 'from agentic_postgres import CURRENT_SESSION as s; assert isinstance(s, int) and s >= 1, s; print(f"acceptance session {s}, derived from the package")'
 
       - name: Offline Session 2 contract suite
         run: |
@@ -204,7 +218,21 @@ jobs:
           . .venv/bin/activate
           python -m pytest --collect-only -q -m p0
 
+      # D695: pytest returns 5 when a marker selects nothing, and there are no
+      # `future` placeholders left -- an empty list is the finished state of this
+      # repository, not a failure. D695's repair moved the test that assumed
+      # otherwise and left this step, which makes the same assumption, running
+      # the same command. Any OTHER non-zero code is still a failure: a step that
+      # swallowed every code would report a broken suite as no outstanding work.
       - name: Show outstanding future work
         run: |
           . .venv/bin/activate
+          set +e
           python -m pytest -q -m future
+          status=$?
+          set -e
+          case "${status}" in
+            0) ;;
+            5) echo "no future-marked work remains" ;;
+            *) exit "${status}" ;;
+          esac

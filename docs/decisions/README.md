@@ -239,3 +239,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0173](0173-a-reset-issues-a-token-the-administrator-conveys-and-a-credential-change-ends-the-sessions.md) | A reset issues a token the administrator conveys, and a credential change ends the sessions | 15 | Accepted |
 | [0174](0174-a-rotation-surface-refuses-to-describe-a-rotation-it-cannot-perform.md) | A rotation surface refuses to describe a rotation it cannot perform | 15 | Accepted |
 | [0175](0175-a-call-to-a-released-function-is-checked-against-its-released-signature.md) | A call to a released function is checked against its released signature | 15 | Accepted |
+| [0176](0176-a-lock-check-verifies-the-tree-not-the-world.md) | A lock check verifies the tree, not the world | 16 | Accepted |

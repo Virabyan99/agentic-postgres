@@ -47,10 +47,46 @@ def test_update_does_not_compile_onto_the_live_lock(source: str) -> None:
 
 
 def test_both_modes_compile_into_a_temporary_destination(source: str) -> None:
+    """Every destination is a variable this script assigned from ``mktemp``.
+
+    **Replaced by a stricter form, authorised by ADR 0176.** This asserted
+    ``destinations <= {"staged", "tmp"}`` -- a list of the two names that
+    happened to exist when it was written -- and went red the moment ``--check``
+    needed a second temporary, to hold the body before the cutoff line is
+    stamped onto it. The claim it makes is about a *construct*: the destination
+    is a temp file. It was standing a *name* in for that, which is D464's family,
+    and the failure mode is the one that matters -- **the safe change is what
+    broke it, while an unsafe destination named `tmp` would have walked straight
+    through.**
+
+    Widening the list to the measured set is permitted by §6 and would have left
+    the proxy in place to break at the next temporary.
+
+    **EVERY assignment is checked, not merely that one of them is a `mktemp`**,
+    and the mutation battery is why. The first draft asked whether the
+    destination's name appeared in some `mktemp` assignment somewhere in the
+    file, and a mutation that reassigned `tmp` to `"${LOCK_FILE}.partial"`
+    immediately before the call **survived it**: the earlier `tmp="$(mktemp)"`
+    was still there to satisfy the membership test. That is the defect this
+    module exists for, reintroduced under a guard written against it.
+    """
     destinations = set(re.findall(r'compile_to "\$\{(\w+)\}"', source))
     assert destinations, "no compile_to call sites found; the search pattern is stale"
-    assert destinations <= {"staged", "tmp"}, (
-        f"compile_to is called with a non-temporary destination: {sorted(destinations)}"
+
+    assignments: dict[str, list[str]] = {}
+    for name, value in re.findall(r"^\s*(\w+)=(.+)$", source, re.MULTILINE):
+        assignments.setdefault(name, []).append(value.strip())
+    assert assignments, "no assignment found at all; the search pattern is stale"
+
+    offenders = [
+        f"{name}={value}"
+        for name in sorted(destinations)
+        for value in assignments.get(name, ["<never assigned>"])
+        if value != '"$(mktemp)"'
+    ]
+    assert not offenders, (
+        "compile_to's destination is assigned something other than a fresh "
+        f"temporary file: {offenders}"
     )
 
 

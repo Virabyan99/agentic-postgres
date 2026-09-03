@@ -166,6 +166,137 @@ def test_ci_invokes_the_gate_rather_than_restating_it() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# The workflow is an operator command too (D871)
+# ---------------------------------------------------------------------------
+
+#: A session compared against ANY integer literal, rather than only against the
+#: one `CURRENT_SESSION` happens to be today.
+#:
+#: `TYPES_THE_CURRENT_SESSION` above is deliberately narrower, and says so: it
+#: "cannot catch a stale bound *after* the bump", because `<= 12` stops matching
+#: once the constant is 13. In `bin/` that is acceptable, because the
+#: load-bearing guard there is a command actually executed against the number.
+#:
+#: **A workflow is not executed by anything this suite runs**, so nothing here
+#: can catch its bound by running it. The only affordable guard is textual, and
+#: the narrow version would have caught `== 2` for exactly one session and then
+#: gone quiet for thirteen -- which is what happened.
+#:
+#: A floor is not exempted here as it is in `bin/`. Nothing in a workflow needs
+#: to say "session >= 3": the workflow runs one tree at one commit, and every
+#: number it could compare against is derivable from that tree.
+#: The shell operators are here because the control demanded them. The first
+#: draft carried only the Python and arithmetic spellings, and its own offender
+#: list -- ``if [ "${SESSION}" -gt 15 ]`` -- walked straight through it. A guard
+#: over a workflow that reads only Python comparisons would be reading the one
+#: language the file is least likely to be written in.
+_OPERATOR = r"(?:<=|>=|==|!=|<|>|-eq\b|-ne\b|-lt\b|-le\b|-gt\b|-ge\b)"
+
+COMPARES_A_SESSION_TO_A_LITERAL = re.compile(
+    rf"""
+    (?:
+        \w*session\w* [}}\)"'\s]* {_OPERATOR} \s* \d
+      | \d \s* {_OPERATOR} [\s"'$\{{]* \w*session\w*
+      | --session \s+ \d
+    )
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+
+def _workflows() -> list[Path]:
+    return sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml"))
+
+
+def test_no_workflow_compares_a_session_against_a_literal() -> None:
+    """D871. CI asserted ``CURRENT_SESSION == 2`` for thirteen sessions.
+
+    It sat under a comment explaining that the session must be derived rather
+    than passed, in the job whose failure made the whole workflow red -- and the
+    guard that exists for exactly this, ``TYPES_THE_CURRENT_SESSION``, reads
+    ``bin/*.py`` and nothing else. Question 5, in the file that decides whether
+    anybody finds out.
+
+    Comment lines are scanned too, unlike in the ``bin/`` guard. A comment in
+    ``bin/`` explains a command a reader can run; a comment in a workflow that
+    names a session number is describing a step beside it, and the two going out
+    of step is the defect rather than a documentation slip.
+    """
+    offenders: list[str] = []
+    for path in _workflows():
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            if COMPARES_A_SESSION_TO_A_LITERAL.search(line):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{number}  {line.strip()[:90]}")
+
+    assert not offenders, (
+        "a workflow compares a session against a literal; it will be wrong at the "
+        "next bump and nothing outside GitHub will notice:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_the_workflow_scan_reads_the_files_and_catches_what_it_is_for() -> None:
+    """The control, and the reason it is three parts (D694, D509).
+
+    A scan over an empty list passes for ever. A scan that matched the step as
+    it is written today would make the repair unlandable. Both halves have to be
+    exercised or this is a green test nobody has seen fail.
+    """
+    workflows = _workflows()
+    assert workflows, "the scan reads no workflow; .github/workflows/*.yml is empty"
+    assert any(path.name == "ci.yml" for path in workflows), (
+        "the scan excludes the very workflow D871 was about"
+    )
+
+    # The defect, in the spelling it actually had and in three others.
+    for offender in (
+        "'from agentic_postgres import CURRENT_SESSION;"
+        " assert CURRENT_SESSION == 2, CURRENT_SESSION'",
+        'if [ "${SESSION}" -gt 15 ]; then',
+        "  # valid while session <= 12",
+        "assert 2 == CURRENT_SESSION",
+        "run: bin/write-session-evidence.py --session 15",
+    ):
+        assert COMPARES_A_SESSION_TO_A_LITERAL.search(offender), f"the scan misses: {offender!r}"
+
+    # And the shapes a repaired workflow legitimately carries.
+    for allowed in (
+        "PYTHONPATH=src python -c 'from agentic_postgres import CURRENT_SESSION as s; print(s)'",
+        "run: bin/session-01-check.sh",
+        "name: Session 2 offline contract",
+        'python -m pytest -q -m "p0 and not future"',
+    ):
+        assert not COMPARES_A_SESSION_TO_A_LITERAL.search(allowed), f"the scan flags: {allowed!r}"
+
+
+def test_the_future_marker_step_tolerates_an_empty_selection() -> None:
+    """D871/D695. ``pytest -m future`` exits 5 when it selects nothing.
+
+    There are no ``future`` placeholders left, so the informational step that
+    lists them has returned 5 -- and failed its job -- since the last one was
+    activated. D695 repaired the *test* that assumed a non-empty selection and
+    left this step, which makes the same assumption, running the same command.
+
+    The assertion is deliberately about the step tolerating **5 and nothing
+    else**: a step written to swallow every code would report a suite that could
+    not even collect as "no outstanding work", which is the failure that is
+    worse than the red one.
+    """
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "-m future" in workflow, "CI no longer lists outstanding future work"
+
+    step = workflow.split("Show outstanding future work", 1)[1]
+    assert "-m future" in step, "the future-work step no longer runs the marker"
+    assert re.search(r"^\s*5\)", step, re.MULTILINE), (
+        "the future-work step does not tolerate pytest's exit 5, which D695 "
+        "measured is what an empty marker selection returns"
+    )
+    assert re.search(r"exit \"?\$\{?status", step), (
+        "the future-work step swallows every exit code, not only 5; a broken "
+        "suite would report as no outstanding work"
+    )
+
+
 def test_the_gate_is_executable_in_the_git_index() -> None:
     """The \\\\wsl$ trap: a mode lost in transit breaks CI, not the local run."""
     result = subprocess.run(
