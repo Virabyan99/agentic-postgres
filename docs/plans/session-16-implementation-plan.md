@@ -351,6 +351,52 @@ not tune it, and says so — but a per-capability limit read against an unmeasur
 global is a bound on a guess, so the run **measures what a real response costs**
 for each of the seven capabilities and records it, which is the cheap half of
 retiring that §9 entry.
+
+**Done.** ADR **0179**. CI green on `7a67fb5`, run `33800126152`.
+
+**The run is the second half of ADR 0129's table, not a fifth budget** (D898).
+Rows and elapsed time were already per capability; bytes and concurrency were
+not. Framed as "two new limits" it reads as growth in a plane whose bounds are
+load-bearing; framed as *the two that were never per capability* it is symmetry,
+and it decides the review question — not *is a fifth budget safe* but *may a
+capability narrow one of the four*.
+
+**Two findings, and both came from measuring rather than reasoning.**
+
+**D899.** `run_report` returned its row with **no byte check at all**.
+`_within_byte_budget` was split out in Session 9 so the write path would get the
+ceiling the read path had, and its docstring cites question 5 by name — this is
+the third caller, missed by the same split. Measured at **32,927 bytes for one
+row** of 4 KiB columns, and `run_report` returns exactly one row by construction,
+so the row budget can never bind on it. The one path a byte ceiling exists for,
+and the one without one.
+
+**D901.** The concurrency proof measured the concept and not the product: it
+built its own semaphores and its own driver, so `register()`'s
+`async with tool_slots(tool), read_slots:` was never executed by it, and three
+mutations survived. **The test immediately above it in that file records the same
+lesson from Session 9** — same file, same route, one session later. Rewritten
+through `register()`, and the arm that matters is two concurrent calls against a
+tool bound of 1 under a global of 4 peaking at **1**, which only the per-tool
+slot can produce.
+
+**D900** is the measurement §9 asked for, and it makes ADR 0129's independence
+numeric for the first time: the row and byte budgets cross over at roughly 860
+bytes per column. The value is **not** tuned and that §9 entry is **not** closed.
+
+### What this leaves for Run 10, and it is not in §5 yet
+
+**The host's `capabilities.yaml` is still schema version 1.** Every version still
+loads, deliberately — but that means the deployment runs the oldest shape:
+no `version`, no `lifecycle`, no `risk`, no per-capability bounds, and
+`capability_version` NULL in every audit row. **Everything Runs 2, 3 and 4 built
+is inert on the host until somebody edits that file**, and it is a gitignored
+operator input that exists in exactly one place with no copy in git.
+
+Run 5 adds a sixth thing to the same file. So the trip has an operator step
+nobody has costed: migrating seven capabilities across four to seven new fields,
+by hand, against a schema. **Whether a `--migrate-manifest` helper ships in Run 8
+or 9 is a decision, and it is cheaper taken now than discovered at the trip.**
 ### Run 5 — windowed quotas, the fifth budget
 
 **Read ADR 0129 first**, per the stage plan's *Must not* and D865.
