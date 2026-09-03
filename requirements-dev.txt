@@ -475,9 +475,9 @@ cryptography==50.0.0 \
     #   joserfc
     #   pyjwt
     #   secretstorage
-cyclopts==4.23.3 \
-    --hash=sha256:4299ec47f5be853f9a114fcc534c84d42bbf19fefa303994597ecb7e5fd3082b \
-    --hash=sha256:b3a65872942afb08f3ab5ca3d65b0b3ecfc872c9ccbea9d6a74ec11aa8a0215e
+cyclopts==4.24.0 \
+    --hash=sha256:9bf9da3f09a0ff74aa6621e1644abfdde3b22158b0c09b5aaa6f82bd0c31c526 \
+    --hash=sha256:b3e44fd301ea498f0b30578d6192a9d9565fd0098e736bd9c8ca0a33f6989659
     # via fastmcp-slim
 dnspython==2.8.0 \
     --hash=sha256:01d9bbc4a2d76bf0db7c1f729812ded6d912bd318d3b1cf81d30c0f845dbf3af \
