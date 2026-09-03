@@ -10,9 +10,9 @@ annotated-types==0.8.0 \
     --hash=sha256:13b2beaad985e05e2d6407ee4c4f35590b11f8d693a258a561055cac8f64cab7 \
     --hash=sha256:f072f4d804ea359e4eaf198b1af7a8b0943881a87f31bb764f8bf219bb9419e0
     # via pydantic
-anyio==4.14.2 \
-    --hash=sha256:9f505dda5ac9f0c8309b5e8bd445a8c2bf7246f3ce950121e45ea15bc41d1494 \
-    --hash=sha256:cfa139f3ed1a23ee8f88a145ddb5ac7605b8bbfd8592baacd7ce3d8bb4313c7f
+anyio==4.15.0 \
+    --hash=sha256:7ecd9937369ffce8bba0b5ccb9b3a9507b101b0ed50256aecfbab27e6c2acb99 \
+    --hash=sha256:b5c620ed540725e2579c31b17bb995b3bf02c9281c9cace04c7d186380bab85e
     # via
     #   httpx
     #   mcp
@@ -1200,9 +1200,9 @@ six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
     # via python-dateutil
-sse-starlette==3.4.8 \
-    --hash=sha256:6e82314c786709a3cd9520f2285cf9fff90e181e598e8a357b0cf80f66afba0d \
-    --hash=sha256:ed89ffbb75cbf78a5fe2f2109cd584792ee7f9dfac96f791db546df8f15f3f9c
+sse-starlette==3.4.9 \
+    --hash=sha256:0b78e877e30c25ed86d71acbc48f200d56653ed7f778a7d53ed3d46e413f3ceb \
+    --hash=sha256:8fa074cff1a175386c20eff5ab55244bdf01678ece9da06e38cfeec9c4ac8bfd
     # via mcp
 starlette==0.49.3 \
     --hash=sha256:1c14546f299b5901a1ea0e34410575bc33bbd741377a10484a54445588d00284 \
