@@ -50,7 +50,7 @@ decision (ADR 0129). What the brief got wrong is §1.
 Six columns, the house shape. **Every row is a fact measured against the tree or
 against the deployment at planning time**, not a prediction.
 
-**Next free number after this table is D891.**
+**Next free number after this table is D898.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -84,6 +84,12 @@ against the deployment at planning time**, not a prediction.
 | **D888** | Widening the guard's schema is a one-line change to a regular expression. | **It took three corrections, and the guard forced each one by contradicting itself.** (a) It does not model `DEFAULT` — safe while it read `app_private`, where no released function carries one, and immediately wrong for `api`: `api.create_note(p_title text, p_content text DEFAULT '')` is called with one argument in five correct places and the guard called all five defects. (b) A `DROP` names a signature **by its types**, so it retires that declaration's whole callable range; subtracting only the count it spells left `agent_audit_begin` declaring `[1, 2, 5]` — an old signature's defaulted forms outliving the signature. (c) Seven of the nineteen findings were not calls at all: a type signature passed to `has_function_privilege`, docstring prose naming parameters, and prefix strings whose closing paren is somewhere unrelated. | Callable arities are a **range**; a drop retires a declaration; and a call is distinguished from a signature by two rules **measured against all 157 real calls before being written** — none has an all-bare argument list, none has its own string delimiter as the first character after the paren, and the 25 zero-argument calls are unaffected. | **A guard that cries wolf about correct code gets widened back**, and that is how this one would have died a session after it was built. Every correction here came from the guard reporting something the tree proved was fine — which is the good failure mode, and the reason the measurement preceded each rule instead of following it. | 0178 |
 | **D889** | The audit row records the capability version, per `AGT-CAPVER-001`. | **A tool backed by several capabilities has no single version to record.** `query_resource` is `query_notes` and `query_tasks` (ADR 0120); they version independently, and the record is OPENED before the arguments have selected between them. | **`_sole_capability_version` records the version when a tool has exactly one backing capability and NULL otherwise**, with the reason at the function. `contract_hash` is recorded beside it and always: the lock's `canonical_sha256` names the compiled contract, so an old record stays legible after the contract moves. | **Two different facts arrive as the same NULL** — "this tool has several capabilities" and "this lock is schema version 1, where none declares a version" — and the column cannot tell them apart. Stated here rather than discovered by whoever queries the table: the contract hash is what separates them, because the contract says which case the deployment was in. | 0178 |
 | **D890** | Neither new parameter carries a `DEFAULT`, which is stricter than D857's instinct. | **Correct, and it is safe only because D887 was fixed first.** A defaulted parameter would let a caller omit the capability version for ever and leave the column quietly NULL, with nothing to say so — D816's unverified field wearing a different hat. A required one is caught offline by the arity guard, which is what makes strictness affordable here and would not have been an hour earlier. | Required, and the VALUES may still be NULL: the caller decides, and ADR 0175 checks that it did. | **The pain D857 caused is what makes the opposite choice correct now.** Session 15 Run 4 added a parameter, the product followed, four proofs did not, and a host gate found it thirteen minutes in — so the guard was built. With the guard reading both schemas, the failure mode inverts: forgetting is loud and offline, while defaulting would be silent and durable. | 0178 |
+| **D892** | D866 splits the seven new capability fields across Runs 2, 4 and 7, and `schema_version` 1 → 2 *"lands once, in Run 2"*. | **Run 2's own ADR makes that impossible as written.** ADR 0177 fixed the rule that a field is REQUIRED at the version introducing it — *"requiring them at v2 keeps v2 from being a version in which they are optional and therefore absent"* — and v2 requires exactly `version`, `lifecycle`, `risk`. So Run 4's byte and concurrency limits and Run 7's dry-run and approval cannot land at v2 without breaking that rule, and landing each at its own version means **three manifest formats in one session** — which the same ADR argues against: *"a manifest format that moves twice in one session is a worse thing to hand an operator than a field whose behaviour arrives a run later."* | **Runs 4 and 7's capability fields land together, at v3, in Run 4.** Run 7 keeps dry-run's BEHAVIOUR and the approval refusal; it declares no new manifest field, because Run 4 will already have declared them. Two formats for the session, which is the minimum the run split allows. | **A decision taken in Run 2 constrained Runs 4 and 7, and the plan could not have known it** — D866 was written before ADR 0177 existed and is not wrong, it is superseded by a rule its own run produced. This is the shape §7's question 5 describes from the other end: not a decision whose callers were missed, but a decision whose *future* callers had already been scheduled. Catching it now costs a paragraph; catching it in Run 7 costs a released schema version nobody wanted. | 0177 |
+| **D893** | A per-capability byte limit narrows `MAX_SERIALIZED_BYTES`, and a concurrency limit narrows the pool-derived semaphore. | **The byte budget is applied to reads and writes and NOT to metadata**: `_within_byte_budget` is called at `mcp_tools` 380 and 499, on the read result and the write result, and the two metadata tools return from the lock without passing through it. A byte limit declared on a metadata capability would therefore bound nothing. | **Run 4 forbids both new fields on a metadata capability**, extending `allOf[2]`'s `not/anyOf` — which currently lists `resource`, `columns`, `filters`, `order_by`, `max_rows`, `max_affected_rows` and would otherwise PERMIT them. | ADR 0120's rule, reached for the third time: a metadata capability is forbidden the fields describing a backing rather than merely not required to declare them, because a value invented to satisfy a schema reads exactly like a real one (D267). **The forbidden list does not extend itself**, which is what makes this a decision each new field needs rather than a default. | 0177 |
+| **D894** | Run 8's profiles are *"project-local"*, so they are a capability-manifest concern. | **They move the PROJECT manifest**, whose schema is a different document with its own version: `project.schema.json` is at `enum: [1]`, and it already carries an `mcp` block. | Stated so Run 8 budgets for a **project** schema bump rather than a capability one. | **D881's split one run early is what makes this cheap.** `SUPPORTED_SCHEMA_VERSIONS` was one frozenset governing both documents until Run 2; had it still been, Run 8 would have had to move the capability manifest's accepted set to bump the project manifest's — two authorities disagreeing about two documents at once. The split was made for a reason that had not yet arrived. | — |
+| **D895** | Run 10: *"ADR 0175 compares a call to a released `app_private` function against the arity its migrations declare, and Run 3 changes a table rather than a function — so the guard does not cover it."* | **Half stale, half still true.** Run 3 widened the guard to `api` as well (D887), so the first clause no longer describes it. The second stands exactly: **the equivalent question for a COLUMN is unguarded.** Nothing checks that a reader of `agent_audit` names columns the migrations declare, and 0027 added three. | **Run 10's decision is unchanged and better posed**: whether a column-level guard is worth building, taken with the trip's evidence. The row is corrected now so Run 10 does not re-derive a guard that already covers what it says is missing. | A stale sentence in a plan is worse than an absent one, because it reads as a measurement. This one would have sent Run 10 to widen a guard that had already been widened, and away from the gap that is actually open. | — |
+| **D896** | Run 9 derives `bin/session-16-check.sh` by diff from `session-15-check.sh`. | **46,777 bytes and one `usage()` block.** The derivation is feasible and the warning is exact: D853 and D858 are two instances in one session of a header updated and a `usage()` left naming the previous session. | Unchanged, and the size is recorded so Run 9 budgets for a read rather than a glance. | D505, D507, D678 and D693 are the same loss in four earlier sessions; D693's guard now catches the `--session N` half automatically, and the `usage()` half is still a human reading 46 KB. | — |
+| **D897** | `AGT-CAPVER-001`: *"the version reaches the audit row."* | **A tool backed by SEVERAL capabilities has no version to reach it.** `query_resource` is `query_notes` and `query_tasks` (ADR 0120); they version independently, and the record is **opened before the arguments have selected between them**, so writing either would name a capability this call may not have used. | **The requirement is satisfied and the limit is recorded here rather than inside the claim.** `_sole_capability_version` records the version when a tool has exactly one backing capability and `NULL` otherwise. `contract_hash` is recorded always. | **Two different facts arrive as the same NULL** — "this tool has several capabilities" and "this lock is schema version 1, where none declares a version" — and the column cannot separate them. The contract hash is what can: it names the compiled contract, and the contract says which case the deployment was in. Resolving it properly means recording the version once the arguments have chosen, which is Run 7's path and not this run's. | 0178 |
 
 ---
 
@@ -273,6 +279,52 @@ asserts every refusal path in the runtime maps to exactly one member. That guard
 is the run's real output: it is what stops a sixth refusal being added later
 with no reason attached.
 
+**Done.** ADR **0178**, migration **0027**. CI green on `98371cc`.
+
+**Eight members, not five, and the derivation contradicts this paragraph in both
+directions** (D886). Four of the named five are real. **`credential` is not a
+refusal this plane can issue**: the MCP runtime holds no credential of any kind,
+so the member could not describe its own — and if it meant the *caller's*,
+`mcp_upstream`'s own header measures **four states behind two statuses**. Naming
+one of them `credential` is D433's forbidden guess, and it is worse in a durable
+record than in a response, because whoever reads it later cannot re-derive what
+was true. `upstream_refused` is the honest form. Four members the brief did not
+name do exist: `input_malformed`, `upstream_refused`, `audit_unavailable`,
+`write_rejected`.
+
+**`AGT-DENIAL-001`, `AGT-CAPVER-001` and `AGT-RISK-001` are satisfied by this
+run**, with one limit recorded rather than buried (D897). Every denial carries a
+taxonomy reason, no reason is free text — it is a Postgres enum, so the catalog
+refuses one rather than a convention discouraging it — and the version and the
+contract hash reach the audit row.
+
+**The finding that outlives the run is D887, and it is about a guard.** ADR
+0175's arity check read `app_private` alone, and `api.agent_audit_begin` and
+`api.agent_audit_complete` are the two functions the agent plane calls on **every
+request**. This migration widened both signatures and the guard stayed green:
+simultaneously the most-called released functions in the tree and the least
+covered. Question 5 for the **fourth** time this session, after D719, D871 and
+D874.
+
+**Widening it took three corrections and the guard forced every one** (D888), by
+reporting something the tree proved was fine — which is the good failure mode. It
+did not model `DEFAULT`; a `DROP` retires a declaration's whole callable range
+rather than the count it spells; and seven of its nineteen findings were not
+calls at all. Both new rules were measured against **all 157 real calls** before
+being written. **A guard that cries wolf about correct code gets widened back**,
+which is how this one would have died a session after it was built.
+
+**Verified against a real cluster** through the suite's own fixture, twenty-seven
+migrations applied as `migration_user` over TCP: the enum and its order, the
+equivalence CHECK in both directions with the control between them, both
+functions at their new arity with no overload surviving, the grants surviving
+the `DROP` with a role that must NOT hold them as the control, and a refusal
+recorded end to end through the functions rather than the table.
+
+Eight mutations, each with a control it cannot reach, all killed. One was
+uninformative on its first attempt and is recorded as such: adding an unused
+`credential` constant does not make it a member, and the guard was right to pass.
+
 ### Run 4 — per-capability byte and concurrency limits
 
 Bounded **by** ADR 0129's existing four, not beside them: a per-capability byte
@@ -281,12 +333,20 @@ narrows the pool-derived semaphore. **Neither may widen**, which is the same
 monotonicity D867 fixes for profiles and the reason those two runs share an
 invariant.
 
+**`schema_version` 2 → 3, and it carries Run 7's two fields as well** (D892).
+ADR 0177 requires a field at the version that introduces it, so dry-run and
+approval are declared here rather than in a second bump — two manifest formats
+this session instead of three. Run 7 still owns their behaviour.
+
+**All four are forbidden on a metadata capability** (D893), extending
+`allOf[2]`'s `not/anyOf`: `_within_byte_budget` is never applied to a metadata
+result, so a byte limit there would bound nothing.
+
 `MAX_SERIALIZED_BYTES` is *"1 MiB, chosen and not measured"* (§9). This run does
 not tune it, and says so — but a per-capability limit read against an unmeasured
 global is a bound on a guess, so the run **measures what a real response costs**
 for each of the seven capabilities and records it, which is the cheap half of
 retiring that §9 entry.
-
 ### Run 5 — windowed quotas, the fifth budget
 
 **Read ADR 0129 first**, per the stage plan's *Must not* and D865.
@@ -317,13 +377,14 @@ created a second one**.
 
 ### Run 7 — dry-run, and approval as a refusal
 
+**The manifest fields arrive in Run 4** (D892); this run is their behaviour.
+
 Dry-run ships fully: authorization, scope and validation run; nothing changes;
 the audit row records a dry-run rather than a write. **The audit distinction is
 the point** — a dry-run recorded as a write would make every write count in the
 audit table a lie.
 
 Approval ships as a declaration and a named refusal (D870). Not a workflow.
-
 ### Run 8 — project-local profiles
 
 **A profile may only narrow** (D867), and the refusal is at **compile time**: a
