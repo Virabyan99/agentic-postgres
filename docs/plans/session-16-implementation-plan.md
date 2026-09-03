@@ -212,6 +212,49 @@ not an oversight to route around.
 **ADR 0176** records the version bump's compatibility rule — whether a v1
 manifest still renders — decided before the schema moves.
 
+**Done.** ADR **0177**, not 0176 (D879). CI green on `4795412`, run
+`33787745473`, all three jobs.
+
+**Each field has a reader, and one of the three readers is deliberately not a
+behaviour.** `version` reaches the canonical contract, the lock and the catalog.
+`lifecycle` is behavioural: a `retired` capability may not be `enabled` and the
+compiler refuses it — the existing rule reached by a declaration, since
+`compile_canonical` already drops disabled capabilities entirely, so retirement
+is enforced by the lock's **absence**. `risk` is validated only — a metadata
+capability must be `low`, a write may not be.
+
+**`AGT-CAPVER-001` and `AGT-RISK-001` do not close here** (D880). Their readers
+are migration 0027's columns and Run 3's denial taxonomy. Risk could have
+selected a behaviour today by narrowing `max_affected_rows` or `timeout_ms`, and
+that would make it a **second authority** over two of ADR 0129's four budgets,
+which are independent by decision. **A requirement reported closed on a
+validation rule would be claiming a behaviour nobody built.**
+
+**The deploy-breaking half was D882**, and it was found by reading the generated
+catalog rather than the code: *"an unknown `schema_version` fails the start
+rather than being ignored"*. `mcp_lock` held `SUPPORTED_SCHEMA_VERSION = 1` and
+compared with `!=`. A release compiling a v2 lock against that runtime deploys a
+project whose MCP service never comes up, at **step 6b**, mid-convergence. The
+runtime learns 2 in the same run, and the compiled contract's version becomes
+**the manifest's** rather than a constant — because `capabilities.yaml` lives
+only on the host and no commit can edit it, so a v1 manifest still has to render.
+Both directions of the gate are enforced: a v1 lock *carrying* the fields is
+refused, or the version number would be decorative, and at v1 the fields are
+**absent rather than defaulted** (D600).
+
+**Two rows are about proofs rather than product.** D884: replacing `max(risk)`
+with `declared[0]` **survived**, because every capability in the example manifest
+shares its tool's risk — the run's only derivation had never been reached with
+inputs that disagree. D885: two mutations reported `NOT RUN`, which sits in the
+same column as a survivor, because parametrized victims report as `name[param]`
+and the rig keyed on the exact node id. **The apparatus was the defect twice in
+one battery**, and `NOT RUN` is the reading a battery is least likely to
+question. All eight killed after both repairs.
+
+**What Run 3 inherits**: migration 0027, the denial taxonomy, and the two
+requirements this run declined to close. `Tool.risk` and `Tool.capabilities` are
+already parsed and reach the runtime, so the audit row's inputs exist.
+
 ### Run 3 — migration 0027 and the denial taxonomy
 
 `capability_version`, `contract_hash` and `denial_reason` on
