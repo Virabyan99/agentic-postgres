@@ -269,6 +269,43 @@ def test_the_workflow_scan_reads_the_files_and_catches_what_it_is_for() -> None:
         assert not COMPARES_A_SESSION_TO_A_LITERAL.search(allowed), f"the scan flags: {allowed!r}"
 
 
+def test_ci_installs_the_shellcheck_the_gate_pins() -> None:
+    """D875. The linter was the third cause, and it was never pinned.
+
+    CI ran ``apt-get install -y shellcheck`` and got whatever the runner image
+    carried; this repository is developed against 0.11.0. Measured with 0.11.0
+    as the control: **0.9.0 and 0.10.0 raise SC2015 on two lines and exit 1,
+    0.11.0 exits 0.** ``shellcheck`` is the first command in the gate's step 2,
+    so the gate died there on every CI run for a month while passing locally --
+    and the clean-clone reproduction on this machine ran straight past it, into
+    the lock check, because it had 0.11.0 too.
+
+    ``bin/lock-dev-deps.sh`` had pinned uv by exact version since Session 1 and
+    refuses any other. **This is that decision applied to a second subject**, not
+    a new one (ADR 0021), and the number now lives in two files -- so this is the
+    guard that keeps them one number, which is what question 5 asks for.
+    """
+    gate = GATE.read_text(encoding="utf-8")
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+    pinned = re.search(r'SHELLCHECK_PINNED_VERSION="([\d.]+)"', gate)
+    assert pinned, "the gate no longer pins a shellcheck version"
+
+    installed = re.search(r"^\s*version=([\d.]+)\s*$", workflow, re.MULTILINE)
+    assert installed, "CI no longer installs a pinned shellcheck version"
+
+    assert installed.group(1) == pinned.group(1), (
+        f"CI installs shellcheck {installed.group(1)} and the gate refuses "
+        f"anything but {pinned.group(1)}"
+    )
+    assert "sha256sum -c -" in workflow, (
+        "CI downloads shellcheck without verifying it against a checksum"
+    )
+    assert "apt-get install -y --no-install-recommends shellcheck" not in workflow, (
+        "CI is back to taking shellcheck from apt, unpinned"
+    )
+
+
 def test_the_future_marker_step_tolerates_an_empty_selection() -> None:
     """D871/D695. ``pytest -m future`` exits 5 when it selects nothing.
 

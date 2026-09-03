@@ -54,10 +54,26 @@ jobs:
           # Must match the version bin/lock-dev-deps.sh pins, or --check fails.
           version: "0.12.1"
 
-      - name: Install shellcheck and jq
+      # **shellcheck is pinned by version and checksum, not taken from apt.**
+      # `apt-get install shellcheck` gave the runner 0.9.0 while this repository
+      # is developed against 0.11.0, and the two disagree: 0.9.0 and 0.10.0 raise
+      # SC2015 on two lines and exit 1, 0.11.0 exits 0. It is the first command
+      # in the gate's step 2, so the gate died here on every run for a month.
+      # The gate refuses any other version, so this and the constant it checks
+      # against must move together -- `test_ci_installs_the_shellcheck_the_gate_
+      # pins` asserts they do.
+      - name: Install the pinned shellcheck and jq
         run: |
+          version=0.11.0
+          sha256=8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198
+          curl -sSL -o /tmp/shellcheck.tar.xz \
+            "https://github.com/koalaman/shellcheck/releases/download/v${version}/shellcheck-v${version}.linux.x86_64.tar.xz"
+          echo "${sha256}  /tmp/shellcheck.tar.xz" | sha256sum -c -
+          tar -xJf /tmp/shellcheck.tar.xz -C /tmp
+          sudo install -m 0755 "/tmp/shellcheck-v${version}/shellcheck" /usr/local/bin/shellcheck
+          shellcheck --version
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends shellcheck jq
+          sudo apt-get install -y --no-install-recommends jq
 
       - name: Create the environment and install hash-locked dependencies
         run: |

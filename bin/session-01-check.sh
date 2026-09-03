@@ -96,6 +96,22 @@ step "2. Static quality and lock checks"
 # ---------------------------------------------------------------------------
 # libexec/* is named explicitly: those launchers are extensionless, so the
 # bin/*.sh glob misses them, and they are the scripts systemd runs as root.
+#
+# **The linter is pinned, for the same reason `lock-dev-deps.sh` pins uv**
+# (ADR 0021: applying a decision to a new subject is not a new decision). CI
+# apt-installed shellcheck unpinned and got 0.9.0; this machine has 0.11.0.
+# Measured, with 0.11.0 as the control: 0.9.0 and 0.10.0 raise SC2015 on two
+# lines and **exit 1**, 0.11.0 exits 0. shellcheck runs FIRST in this step, so
+# the gate died here on every CI run for a month while passing locally, and a
+# clean-clone reproduction on this machine ran straight past it into the lock
+# check. An unpinned linter is a second definition of passing.
+readonly SHELLCHECK_PINNED_VERSION="0.11.0"
+shellcheck_version="$(shellcheck --version | awk '/^version:/ {print $2}')"
+if [ "${shellcheck_version}" != "${SHELLCHECK_PINNED_VERSION}" ]; then
+  printf 'session-01-check: shellcheck %s found, this repository pins %s.\n' \
+    "${shellcheck_version:-<none>}" "${SHELLCHECK_PINNED_VERSION}" >&2
+  exit 3
+fi
 shellcheck deploy.sh bin/*.sh libexec/*
 "$(python_bin)" -m ruff check src bin tests
 "$(python_bin)" -m ruff format --check src bin tests
