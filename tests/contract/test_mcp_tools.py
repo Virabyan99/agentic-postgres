@@ -39,6 +39,7 @@ from app.mcp_lock import (
     EXPECTED_TOOL_NAMES,
     METADATA_TOOLS,
     READ_TOOLS,
+    SUPPORTED_SCHEMA_VERSIONS,
     WRITE_TOOLS,
     CapabilityLock,
     LockError,
@@ -735,9 +736,21 @@ def test_a_lock_missing_one_of_the_six_is_refused(tmp_path: Path) -> None:
 
 def test_a_lock_from_an_unknown_schema_version_is_refused(tmp_path: Path) -> None:
     """A surface from a schema this code has not seen is a surface nobody
-    reviewed against this code."""
+    reviewed against this code.
+
+    **The example of "unknown" is DERIVED, and it used to be the literal 2**
+    (D883). Session 16 Run 2 made 2 known, so this stopped testing an unknown
+    version and started testing a known one -- and it then failed on the tool
+    roster instead, which reads like the parser having lost its version check
+    entirely. Exactly the shape of the CI step that asserted
+    `CURRENT_SESSION == 2`: a literal correct when written, wrong once the
+    constant moved, and misleading in between.
+    """
+    unknown = max(SUPPORTED_SCHEMA_VERSIONS) + 1
+    assert unknown not in SUPPORTED_SCHEMA_VERSIONS
+
     path = tmp_path / "lock.json"
-    path.write_text(json.dumps({"schema_version": 2, "tools": []}), encoding="utf-8")
+    path.write_text(json.dumps({"schema_version": unknown, "tools": []}), encoding="utf-8")
 
     with pytest.raises(LockError, match="schema_version"):
         load_lock(path)
@@ -1966,3 +1979,117 @@ def test_redaction_does_not_invent_a_parameter_the_caller_never_sent() -> None:
         "p_content": REDACTED,
     }
     assert redact({}, ("p_content",)) == {}
+
+
+# ---------------------------------------------------------------------------
+# Lock schema version 2: risk and the backing capabilities (ADR 0177)
+# ---------------------------------------------------------------------------
+
+
+def _v2_document(*names: str) -> dict[str, Any]:
+    """The same lock at schema version 2, every tool classified.
+
+    Built from `_lock_document` rather than beside it, so the two cannot drift:
+    a v2 fixture that was independently valid would stop being the v1 fixture
+    plus the classification, which is the only difference under test.
+    """
+    document = _lock_document(*names)
+    document["schema_version"] = 2
+    for tool in document["tools"]:
+        risk = "moderate" if tool["name"] in WRITE_TOOLS else "low"
+        tool["risk"] = risk
+        tool["capabilities"] = [
+            {
+                "name": tool["name"],
+                "version": "1.0.0",
+                "lifecycle": "active",
+                "risk": risk,
+            }
+        ]
+    return document
+
+
+def _load(tmp_path: Path, document: dict[str, Any]) -> CapabilityLock:
+    path = tmp_path / "lock.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    return load_lock(path)
+
+
+def test_a_version_two_lock_loads_and_carries_the_classification(tmp_path: Path) -> None:
+    """**The control** for the refusals below, and the ordering D882 is about.
+
+    The compiler emits schema_version 2 now. If this runtime did not accept it,
+    a deploy would recreate the MCP service against a lock it refuses and the
+    container would not come up -- at step 6b, in the middle of a convergence.
+    """
+    lock = _load(tmp_path, _v2_document(*EXPECTED_TOOL_NAMES))
+
+    for tool in lock.tools:
+        assert tool.risk in ("low", "moderate", "high"), tool.name
+        assert tool.capabilities, f"{tool.name} names no backing capability"
+        assert all(reference.version == "1.0.0" for reference in tool.capabilities)
+
+    assert {tool.risk for tool in lock.tools} == {"low", "moderate"}, (
+        "the fixture classifies every tool the same way, so this proves nothing"
+    )
+
+
+def test_a_version_one_lock_still_loads_with_the_fields_absent(tmp_path: Path) -> None:
+    """`capabilities.yaml` lives only on the host, so v1 has to keep working.
+
+    **Absent, not defaulted.** A deployment that does not classify its
+    capabilities must be distinguishable from one that classified them all as
+    harmless (D600) -- and in Run 3 that difference becomes an audit row rather
+    than a variable.
+    """
+    lock = _load(tmp_path, _lock_document(*EXPECTED_TOOL_NAMES))
+
+    assert {tool.risk for tool in lock.tools} == {None}
+    assert {tool.capabilities for tool in lock.tools} == {()}
+
+
+@pytest.mark.parametrize("field", ["risk", "capabilities"])
+def test_a_version_one_lock_carrying_the_new_fields_is_refused(tmp_path: Path, field: str) -> None:
+    """The direction that keeps the version number from being decorative.
+
+    A v1 lock carrying `risk` came from a compiler that disagrees with its own
+    declared version. Reading it anyway would mean the number describes nothing,
+    which is how a format version stops being a contract and becomes a comment.
+    """
+    document = _lock_document(*EXPECTED_TOOL_NAMES)
+    document["tools"][0][field] = "low" if field == "risk" else []
+
+    with pytest.raises(LockError, match="schema_version 1"):
+        _load(tmp_path, document)
+
+
+def test_a_lock_backed_by_a_retired_capability_is_refused(tmp_path: Path) -> None:
+    """The compiler refuses to emit one; the lock is validated as if it had not.
+
+    A lock is an input, not a teammate -- the same rule `_write` states for the
+    write shape. The compiler's refusal is the enforcement, and this is the
+    check that the enforcement was not simply believed.
+    """
+    document = _v2_document(*EXPECTED_TOOL_NAMES)
+    document["tools"][0]["capabilities"][0]["lifecycle"] = "retired"
+
+    with pytest.raises(LockError, match="retired"):
+        _load(tmp_path, document)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ({"risk": "critical"}, "not a classification"),
+        ({"capabilities": []}, "names no backing capability"),
+    ],
+)
+def test_a_version_two_lock_is_parsed_as_strictly_as_the_rest_of_it(
+    tmp_path: Path, mutation: dict[str, Any], expected: str
+) -> None:
+    """A lock parsed leniently is a surface nobody bounded."""
+    document = _v2_document(*EXPECTED_TOOL_NAMES)
+    document["tools"][0].update(mutation)
+
+    with pytest.raises(LockError, match=expected):
+        _load(tmp_path, document)

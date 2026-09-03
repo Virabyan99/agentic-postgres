@@ -85,14 +85,45 @@ def render(contract: dict[str, Any]) -> str:
         f"**{contract['capability_count']} capabilities**."
     )
     lines.append("")
-    lines.append("| Tool | Kind | Reads | Scopes | Timeout |")
-    lines.append("|---|---|---|---|---|")
+    # **The risk column exists only at contract schema version 2** (ADR 0177),
+    # and its absence at v1 is deliberate rather than a rendering convenience. A
+    # column reading "—" on every row would say this deployment classifies its
+    # capabilities and declined to, which is the reverse of the truth: a v1
+    # contract does not carry the field at all (D600).
+    versioned = contract["schema_version"] >= 2
+    lines.append(
+        "| Tool | Kind | Reads | Scopes | Timeout | Risk |"
+        if versioned
+        else "| Tool | Kind | Reads | Scopes | Timeout |"
+    )
+    lines.append("|---|---|---|---|---|---|" if versioned else "|---|---|---|---|---|")
     for tool in tools:
-        lines.append(
+        row = (
             f"| `{tool['name']}` | {tool['kind']} | {tool['source']} "
             f"| {scope_expression(tool['discovery_scope_sets'])} "
             f"| {tool['timeout_ms']} ms |"
         )
+        lines.append(row + f" {tool['risk']} |" if versioned else row)
+
+    if versioned:
+        lines.append("")
+        lines.append(
+            "Each tool's backing capabilities, with the version and lifecycle each "
+            "declares. **A tool has no single version of its own**: `query_resource` "
+            "is two authorizations behind one name (ADR 0120) and they move "
+            "independently, so the list is the authority and the tool-level risk "
+            "above is the only aggregate."
+        )
+        lines.append("")
+        lines.append("| Tool | Capability | Version | Lifecycle | Risk |")
+        lines.append("|---|---|---|---|---|")
+        for tool in tools:
+            for capability in tool["capabilities"]:
+                lines.append(
+                    f"| `{tool['name']}` | `{capability['name']}` "
+                    f"| {capability['version']} | {capability['lifecycle']} "
+                    f"| {capability['risk']} |"
+                )
 
     for tool in tools:
         # A write tool has no resources -- it is one-to-one with its operation

@@ -723,3 +723,224 @@ def test_the_compiler_refuses_a_deployed_shaped_document_by_name(tmp_path: Path)
     ok = compile_from(document("https://x.test/api/rest"))
     assert ok.returncode == 0, f"the rendered shape no longer compiles: {ok.stderr}"
     assert '"upstream"' in ok.stdout
+
+
+# ---------------------------------------------------------------------------
+# Schema version 2: a version, a lifecycle and a risk (ADR 0177)
+# ---------------------------------------------------------------------------
+
+
+def v1_manifest(capabilities: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest as schema version 1: the three fields removed.
+
+    A v1 manifest still has to compile, because `capabilities.yaml` is a
+    gitignored operator input that exists only on the host and no commit can
+    edit it. This is what that claim is checked against.
+    """
+    document = copy.deepcopy(capabilities)
+    document["schema_version"] = 1
+    for entry in document["capabilities"]:
+        for field in capability_compiler.VERSIONED_FIELDS:
+            entry.pop(field, None)
+    return document
+
+
+def test_the_compiled_version_is_the_manifests_not_a_constant(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """D882. `SCHEMA_VERSION = 1` was right while there was one manifest shape.
+
+    There are two now, and the compiled tool's shape is a function of which one
+    it came from -- a v2 manifest produces tools carrying `capabilities` and
+    `risk`, a v1 manifest produces the tools it always did. A fixed number on a
+    document whose shape varies is a version that describes nothing.
+    """
+    at_two = compile_with(capabilities, surface, published)
+    assert at_two["schema_version"] == 2
+
+    at_one = compile_with(v1_manifest(capabilities), surface, published)
+    assert at_one["schema_version"] == 1
+
+    # The control: the two really are different documents, so the version is
+    # tracking something. Equal shapes would make the assertion above vacuous.
+    assert at_one["tools"] != at_two["tools"]
+
+
+def test_a_v1_manifest_compiles_without_the_fields_rather_than_with_nulls(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """D600's rule at the contract's edge.
+
+    A `risk: null` on every tool would say this deployment classifies its
+    capabilities and declined to, which is the reverse of the truth. The keys
+    are absent, and a runtime can therefore tell the two states apart -- which
+    is exactly what `mcp_lock` refuses a v1 lock carrying them for.
+    """
+    compiled = compile_with(v1_manifest(capabilities), surface, published)
+
+    assert compiled["tools"], "the control: a v1 manifest compiled to nothing"
+    for tool in compiled["tools"]:
+        assert "risk" not in tool, f"{tool['name']} carries risk at schema version 1"
+        assert "capabilities" not in tool, f"{tool['name']} carries capabilities at v1"
+
+
+def test_every_tool_carries_its_backing_capabilities_and_the_riskiest_of_them(
+    canonical: dict[str, Any],
+) -> None:
+    """A tool has no single version, and `query_resource` is why (ADR 0120).
+
+    Two authorizations behind one name, able to move independently, so the list
+    is the authority. `risk` is the one aggregate, because it is the only one of
+    the three with an ordering and a defensible worst case: a tool is as
+    dangerous as the most dangerous thing behind it.
+    """
+    by_name = {tool["name"]: tool for tool in canonical["tools"]}
+
+    grouped = by_name["query_resource"]
+    assert [entry["name"] for entry in grouped["capabilities"]] == [
+        "query_notes",
+        "query_tasks",
+    ], "the grouped tool no longer names both authorizations"
+
+    for tool in canonical["tools"]:
+        declared = tool["capabilities"]
+        assert declared, f"{tool['name']} names no backing capability"
+        for entry in declared:
+            assert set(entry) == {"name", *capability_compiler.VERSIONED_FIELDS}
+        expected = max(
+            (entry["risk"] for entry in declared), key=capability_compiler.RISK_ORDER.index
+        )
+        assert tool["risk"] == expected, (
+            f"{tool['name']} declares risk {tool['risk']!r} over backing risks "
+            f"{[entry['risk'] for entry in declared]}"
+        )
+
+
+def test_the_tool_takes_the_riskiest_of_its_capabilities_not_the_first(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """D884. The shipped manifest cannot tell `max` from `[0]`, so this builds a case that can.
+
+    Every capability in `capabilities.example.yaml` shares its tool's risk --
+    `query_notes` and `query_tasks` are both `low` -- so a compiler taking the
+    FIRST backing risk produces an identical contract, and a mutation replacing
+    `max(...)` with `declared[0]` **survived** the test above. An uninformative
+    mutation pointing at a real gap (D493): the aggregate is the only derivation
+    this run adds, and nothing reached it with inputs that disagree.
+
+    A read may be any risk, so raising one half of the grouped tool is a legal
+    manifest rather than a contrivance. Both orderings are compiled, because
+    taking the first would be right by accident in one of them.
+    """
+    for raised in ("query_notes", "query_tasks"):
+        document = copy.deepcopy(capabilities)
+        for entry in document["capabilities"]:
+            if entry["name"] == raised:
+                entry["risk"] = "high"
+
+        compiled = compile_with(document, surface, published)
+        grouped = next(tool for tool in compiled["tools"] if tool["name"] == "query_resource")
+        backing = {entry["name"]: entry["risk"] for entry in grouped["capabilities"]}
+
+        assert backing[raised] == "high"
+        assert set(backing.values()) == {"low", "high"}, (
+            f"the two capabilities agree ({backing}), so this case cannot tell the "
+            "riskiest from the first"
+        )
+        assert grouped["risk"] == "high", (
+            f"{raised} is high and the tool reports {grouped['risk']!r}; a tool is as "
+            "dangerous as the most dangerous thing behind it"
+        )
+
+
+def test_a_retired_capability_may_not_be_enabled(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """ADR 0177, and it is an existing decision reached by a declaration.
+
+    `compile_canonical` already drops disabled capabilities entirely -- "a
+    runtime that received them would have to be trusted to ignore them, and the
+    lock is meant to be the thing that cannot be argued with". Retirement is
+    that rule, so the enforcement is the lock's ABSENCE rather than a runtime
+    check somebody could forget to apply.
+    """
+    retired = copy.deepcopy(capabilities)
+    retired["capabilities"][0]["lifecycle"] = "retired"
+    name = retired["capabilities"][0]["name"]
+
+    with pytest.raises(CompilerError, match="retired"):
+        compile_with(retired, surface, published)
+
+    # Retired AND disabled is the state the refusal exists to allow. Checked
+    # before the `enabled` filter for exactly this reason: afterwards the two
+    # are indistinguishable, and a compiler that refused both would make
+    # retirement unreachable.
+    retired["capabilities"][0]["enabled"] = False
+    compiled = compile_with(retired, surface, published)
+    assert all(
+        name not in [entry["name"] for entry in tool["capabilities"]] for tool in compiled["tools"]
+    ), f"{name} is retired and disabled and still reached the contract"
+
+
+def test_a_deprecated_capability_still_compiles_and_says_so(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """The second state has to be reachable or the first one is the only one.
+
+    A lifecycle that refused a deprecated call would make the word mean
+    `retired`, and then one of the two would name nothing. Deprecation is
+    visible -- it travels into the lock and the catalog -- and callable.
+    """
+    document = copy.deepcopy(capabilities)
+    document["capabilities"][0]["lifecycle"] = "deprecated"
+    name = document["capabilities"][0]["name"]
+
+    compiled = compile_with(document, surface, published)
+    states = {
+        entry["name"]: entry["lifecycle"]
+        for tool in compiled["tools"]
+        for entry in tool["capabilities"]
+    }
+    assert states[name] == "deprecated", "a deprecated capability lost its state on the way in"
+    assert set(states.values()) == {"active", "deprecated"}, (
+        f"the control: every capability reads {set(states.values())}, so this proves nothing"
+    )
+
+
+def test_the_compiler_refuses_a_manifest_version_it_does_not_produce_a_contract_for(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """The version is read, not merely copied through into the output."""
+    beyond = copy.deepcopy(capabilities)
+    beyond["schema_version"] = max(capability_compiler.COMPILED_SCHEMA_VERSIONS) + 1
+
+    with pytest.raises(CompilerError, match="schema_version"):
+        compile_with(beyond, surface, published)
+
+
+def test_each_schema_version_constant_matches_its_schemas_enum() -> None:
+    """D881. One frozenset governed two documents, and they had to diverge.
+
+    `validate_project_semantics` and `load_capabilities_manifest` both read
+    `SUPPORTED_SCHEMA_VERSIONS`, so adding 2 for the capability manifest would
+    have made the project check accept a project manifest declaring 2 -- which
+    `project.schema.json` then refuses. Two authorities disagreeing about one
+    document, and invisibly, because the schema runs first and wins.
+    """
+    pairs = (
+        ("project.schema.json", config.SUPPORTED_PROJECT_SCHEMA_VERSIONS),
+        ("capabilities.schema.json", config.SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS),
+    )
+    for filename, constant in pairs:
+        schema = json.loads((REPO_ROOT / "schemas" / filename).read_text("utf-8"))
+        enum = schema["properties"]["schema_version"]["enum"]
+        assert set(enum) == set(constant), (
+            f"{filename} accepts {sorted(enum)} and the constant says {sorted(constant)}"
+        )
+
+    # The control: the two are not the same set, so a test comparing each
+    # against the other's schema would fail. Without this, one constant serving
+    # both would still pass.
+    assert (
+        config.SUPPORTED_PROJECT_SCHEMA_VERSIONS != config.SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS
+    ), "the two constants are equal again, which is the state D881 was about"

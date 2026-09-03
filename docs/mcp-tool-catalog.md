@@ -77,16 +77,28 @@ would not have returned.
 
 <!-- BEGIN GENERATED: mcp-catalog -->
 
-Contract `notes-tasks-agent-v1`, schema version 1: **6 tools** behind **7 capabilities**.
+Contract `notes-tasks-agent-v1`, schema version 2: **6 tools** behind **7 capabilities**.
 
-| Tool | Kind | Reads | Scopes | Timeout |
+| Tool | Kind | Reads | Scopes | Timeout | Risk |
+|---|---|---|---|---|---|
+| `create_note` | write | postgrest | `notes:write` | 5000 ms | moderate |
+| `describe_resource` | metadata | lock | `meta:read` | 1000 ms | low |
+| `list_resources` | metadata | lock | `meta:read` | 1000 ms | low |
+| `query_resource` | read | postgrest | `notes:read` OR `tasks:read` | 5000 ms | low |
+| `run_report` | read | postgrest | `notes:read` AND `tasks:read` | 5000 ms | low |
+| `update_task_status` | write | postgrest | `tasks:write` | 5000 ms | moderate |
+
+Each tool's backing capabilities, with the version and lifecycle each declares. **A tool has no single version of its own**: `query_resource` is two authorizations behind one name (ADR 0120) and they move independently, so the list is the authority and the tool-level risk above is the only aggregate.
+
+| Tool | Capability | Version | Lifecycle | Risk |
 |---|---|---|---|---|
-| `create_note` | write | postgrest | `notes:write` | 5000 ms |
-| `describe_resource` | metadata | lock | `meta:read` | 1000 ms |
-| `list_resources` | metadata | lock | `meta:read` | 1000 ms |
-| `query_resource` | read | postgrest | `notes:read` OR `tasks:read` | 5000 ms |
-| `run_report` | read | postgrest | `notes:read` AND `tasks:read` | 5000 ms |
-| `update_task_status` | write | postgrest | `tasks:write` | 5000 ms |
+| `create_note` | `create_note` | 1.0.0 | active | moderate |
+| `describe_resource` | `describe_resource` | 1.0.0 | active | low |
+| `list_resources` | `list_resources` | 1.0.0 | active | low |
+| `query_resource` | `query_notes` | 1.0.0 | active | low |
+| `query_resource` | `query_tasks` | 1.0.0 | active | low |
+| `run_report` | `run_report` | 1.0.0 | active | low |
+| `update_task_status` | `update_task_status` | 1.0.0 | active | moderate |
 
 ### `create_note`
 

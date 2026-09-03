@@ -40,8 +40,21 @@ from agentic_postgres import REPO_ROOT, auth_profile
 #: oversized input never reaches the parser. The fixtures are ~1 KiB.
 MAX_MANIFEST_BYTES = 65_536
 
-#: Manifest schema versions this build understands.
-SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
+#: Manifest schema versions this build understands, **one constant per document
+#: kind** (ADR 0177).
+#:
+#: There was one frozenset, checked by both `validate_project_semantics` and
+#: `load_capabilities_manifest`. Adding 2 for the capability manifest would have
+#: made the project check accept a project manifest declaring 2 -- which
+#: `project.schema.json`'s `enum: [1]` then refuses, so two authorities would
+#: have disagreed about the same document. ADR 0002, and the disagreement would
+#: have been invisible because the schema runs first and wins.
+#:
+#: `test_each_schema_version_constant_matches_its_schemas_enum` checks each of
+#: these against the enum in the schema it governs, so they cannot drift apart
+#: the way one shared constant could not even express.
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1})
+SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2})
 
 #: Plan decision B. `/docs` is derived unconditionally by runbook §3.8, so it
 #: is structurally reserved; `/.well-known` is ACME, needed from Session 2;
@@ -836,10 +849,10 @@ def _validate_prefix(value: str, *, field: str) -> None:
 def validate_project_semantics(document: dict[str, Any]) -> None:
     """Apply every rule of runbook §3.4 that JSON Schema cannot express."""
     version = document.get("schema_version")
-    if version not in SUPPORTED_SCHEMA_VERSIONS:
+    if version not in SUPPORTED_PROJECT_SCHEMA_VERSIONS:
         raise ManifestError(
             f"unsupported schema_version {version!r}; "
-            f"supported: {sorted(SUPPORTED_SCHEMA_VERSIONS)}"
+            f"supported: {sorted(SUPPORTED_PROJECT_SCHEMA_VERSIONS)}"
         )
 
     project = document["project"]
@@ -1342,8 +1355,11 @@ def load_capabilities_manifest(path: Path) -> dict[str, Any]:
     validate_against_schema(document, "capabilities.schema.json")
 
     version = document.get("schema_version")
-    if version not in SUPPORTED_SCHEMA_VERSIONS:
-        raise ManifestError(f"unsupported schema_version {version!r}")
+    if version not in SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS:
+        raise ManifestError(
+            f"unsupported schema_version {version!r}; "
+            f"supported: {sorted(SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS)}"
+        )
 
     capabilities = document.get("capabilities") or []
     names = [entry["name"] for entry in capabilities]

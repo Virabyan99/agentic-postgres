@@ -59,14 +59,32 @@ BACKED_SOURCES = frozenset({"postgrest"})
 UNBACKED_SOURCES = frozenset({"lock"})
 
 CONTRACT_ID = "notes-tasks-agent-v1"
-SCHEMA_VERSION = 1
+
+#: **The compiled contract's version is the manifest's, not a constant** (ADR
+#: 0177). It was `SCHEMA_VERSION = 1`, and a constant was right while there was
+#: one manifest shape. There are two now, and the compiled tool's shape is a
+#: function of which one it came from: a v2 manifest produces tools carrying
+#: `capabilities`, `risk` and their versions, a v1 manifest produces the tools it
+#: always did. A fixed number on a document whose shape varies is a version that
+#: describes nothing -- and a v1 manifest still has to render, because
+#: `capabilities.yaml` lives only on the host.
+COMPILED_SCHEMA_VERSIONS = frozenset({1, 2})
+
+#: Ordered, so a tool backed by several capabilities can take the riskiest.
+#: Ascending; `_riskiest` compares by index and nothing else compares risks.
+RISK_ORDER = ("low", "moderate", "high")
+
+#: The three fields schema version 2 adds, carried verbatim into every tool.
+VERSIONED_FIELDS = ("version", "lifecycle", "risk")
 
 __all__ = [
     "BACKED_SOURCES",
+    "COMPILED_SCHEMA_VERSIONS",
     "CONTRACT_ID",
     "PLANNED_TOOLS",
-    "SCHEMA_VERSION",
+    "RISK_ORDER",
     "UNBACKED_SOURCES",
+    "VERSIONED_FIELDS",
     "CompilerError",
     "canonical_bytes",
     "compile_canonical",
@@ -292,6 +310,30 @@ def compile_canonical(
     flag. A runtime that received them would have to be trusted to ignore them,
     and the lock is meant to be the thing that cannot be argued with.
     """
+    manifest_version = capabilities.get("schema_version")
+    if manifest_version not in COMPILED_SCHEMA_VERSIONS:
+        raise CompilerError(
+            f"manifest schema_version {manifest_version!r} is not one this compiler "
+            f"produces a contract for; supported: {sorted(COMPILED_SCHEMA_VERSIONS)}"
+        )
+
+    # **A retired capability may not be enabled** (ADR 0177). Raised here rather
+    # than checked in the runtime, because the paragraph above is the reason: a
+    # disabled capability is compiled out entirely, so retirement enforced this
+    # way is the lock's ABSENCE rather than a runtime rule somebody could forget
+    # to apply. Checked before the `enabled` filter, or a retired-and-disabled
+    # entry and a retired-and-enabled one would be indistinguishable by then.
+    retired = sorted(
+        entry["name"]
+        for entry in capabilities["capabilities"]
+        if entry.get("lifecycle") == "retired" and entry.get("enabled")
+    )
+    if retired:
+        raise CompilerError(
+            f"retired capabilities are enabled: {retired}. A retired capability leaves the "
+            "lock; disable it, or move it back to deprecated if it is still callable"
+        )
+
     operations = surface_operations(surface)
     entries = [entry for entry in capabilities["capabilities"] if entry.get("enabled")]
 
@@ -308,7 +350,7 @@ def compile_canonical(
     tools = [_compile_tool(name, backing) for name, backing in sorted(grouped.items())]
 
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": manifest_version,
         "contract_id": CONTRACT_ID,
         "tool_count": len(tools),
         "capability_count": len(entries),
@@ -376,6 +418,31 @@ def _compile_tool(name: str, backing: list[dict[str, Any]]) -> dict[str, Any]:
             }
         ),
     }
+    # **Per capability, and a derived worst case beside it** (ADR 0177).
+    #
+    # A tool may be backed by several capabilities, so there is no single
+    # version or lifecycle for it -- `query_resource` is two authorizations, and
+    # they can be at different versions and on different tracks. The list is
+    # therefore the authority and the tool-level `risk` is the only aggregate,
+    # because risk is the one of the three that has an ordering and a defensible
+    # worst case: a tool is as dangerous as the most dangerous thing behind it.
+    #
+    # Absent entirely at manifest version 1, rather than present and null. A null
+    # that looks measured is worse than an absent field (D600), and a runtime
+    # reading a v1 lock must be able to tell "this deployment does not declare
+    # risk" from "this deployment declares it and the value is nothing".
+    declared = [
+        entry["capability"] for entry in sorted(backing, key=lambda e: e["capability"]["name"])
+    ]
+    if all(field in capability for capability in declared for field in VERSIONED_FIELDS):
+        compiled["capabilities"] = [
+            {"name": capability["name"], **{f: capability[f] for f in VERSIONED_FIELDS}}
+            for capability in declared
+        ]
+        compiled["risk"] = max(
+            (capability["risk"] for capability in declared), key=RISK_ORDER.index
+        )
+
     if kind == "metadata":
         compiled["reads"] = "lock"
         compiled["operation_ids"] = sorted(entry["resolved"]["operation_id"] for entry in backing)
@@ -477,7 +544,7 @@ def compile_lock(
             raise CompilerError(f"the lock needs {required} and was not given one")
 
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": canonical["schema_version"],
         "contract_id": canonical["contract_id"],
         "project_key": project_key,
         "upstream": upstream,

@@ -7,7 +7,11 @@
   "additionalProperties": false,
   "required": ["schema_version", "capabilities"],
   "properties": {
-    "schema_version": { "type": "integer", "enum": [1] },
+    "schema_version": {
+      "type": "integer",
+      "enum": [1, 2],
+      "description": "1 or 2 (ADR 0177). At v1 `version`, `lifecycle` and `risk` are FORBIDDEN; at v2 all three are REQUIRED, for every kind. Both halves are deliberate: forbidding them at v1 keeps a manifest from carrying fields nothing reads at that version, and requiring them at v2 keeps v2 from being a version in which they are optional and therefore absent. v1 still loads because `capabilities.yaml` is a gitignored operator input that exists only on the host -- a schema refusing it outright would fail the next deploy on a file no commit can fix, in a session that has not been to the host yet."
+    },
     "capabilities": {
       "type": "array",
       "default": [],
@@ -15,6 +19,37 @@
       "description": "Enabled agent tools. An entry may exist while disabled; enabling one requires a live backing API contract."
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schema_version": { "const": 2 } },
+        "required": ["schema_version"]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "items": { "required": ["version", "lifecycle", "risk"] }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "not": {
+                "anyOf": [
+                  { "required": ["version"] },
+                  { "required": ["lifecycle"] },
+                  { "required": ["risk"] }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "description": "The version gate, at the document level rather than per capability, because a manifest declaring one version and mixing both shapes is the state this exists to refuse (ADR 0177)."
+    }
+  ],
   "$defs": {
     "scope": {
       "type": "string",
@@ -80,6 +115,21 @@
           "description": "The MCP tool this capability is exposed through. Absent means the tool is this capability's own `name`, which is every case but one. Present, it groups capabilities: `query_notes` and `query_tasks` both declare `query_resource`, so one tool carries two frozen resources with a SEPARATE scope requirement each (ADR 0120). That is what the capability plan's \"notes:read or tasks:read\" means, and it is unrepresentable in a single entry -- required_scopes is a conjunction, so one entry naming both would refuse an agent holding either. Capabilities sharing a tool must agree on `kind` and `operation.source`; the compiler refuses them otherwise, because one name with two authorization models is two tools wearing one label."
         },
         "description": { "type": "string", "maxLength": 500 },
+        "version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "description": "The capability's own semantic version, required at schema_version 2 (ADR 0177). Read by the compiler, which carries it into the canonical contract and the deployed lock, and published in docs/mcp-tool-catalog.md. It reaches app_private.agent_audit in Session 16 Run 3, which is where AGT-CAPVER-001 is proved -- this run gives the field a reader, not the whole requirement. No leading zeroes and no pre-release suffix: the pattern is deliberately narrower than semver.org's, because a range nobody compares over is a string, and the comparison this repository needs is equality against what a lock recorded."
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["active", "deprecated", "retired"],
+          "description": "Where the capability is in its life, required at schema_version 2 (ADR 0177). **`retired` may not be `enabled: true`, and the compiler refuses it** -- which is not a new rule but the existing one reached by a declaration: `compile_canonical` already drops disabled capabilities entirely, because \"a runtime that received them would have to be trusted to ignore them, and the lock is meant to be the thing that cannot be argued with\". So retirement is enforced by the lock's ABSENCE rather than by a runtime check somebody could forget. `deprecated` compiles in and stays callable, and travels into the lock and the catalog so an operator can see what is on its way out; a lifecycle that refused a deprecated call would make the word mean `retired` and leave one of the two states unreachable. No default, because a default is a value nobody chose."
+        },
+        "risk": {
+          "type": "string",
+          "enum": ["low", "moderate", "high"],
+          "description": "What is at stake when this capability runs, required at schema_version 2 (ADR 0177). **Validated in this run, not yet behavioural**: a metadata capability must be `low` -- it reaches no backend, holds no credential and answers from the lock, so any other value would describe a hazard that does not exist -- and a write may not be `low`, because it changes rows. AGT-RISK-001 requires risk to SELECT a behaviour, and that lands in Run 3 with the denial taxonomy and the audit columns. It deliberately does not narrow a budget: rows, bytes, elapsed time and concurrency are independent by decision (ADR 0129), and a risk class tightening one of them would be a second authority over it."
+        },
         "kind": {
           "type": "string",
           "enum": ["read", "write", "metadata"],
@@ -237,6 +287,26 @@
             }
           },
           "description": "A metadata capability answers from the deployed lock and reaches no backend, so every field describing one is FORBIDDEN rather than merely unrequired (ADR 0120). Stated as a refusal because the alternative is a manifest carrying a resource and a column list for a query nobody makes, which reads exactly like a real backing and is the shape D267 refuses in a comment."
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "metadata" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": { "risk": { "const": "low" } }
+          },
+          "description": "A metadata capability reaches no backend, holds no credential and answers from the deployed lock, so `moderate` or `high` would name a hazard that does not exist (ADR 0177). Written as a constraint on the value rather than as a required field, so it says nothing at schema_version 1, where `risk` is absent."
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "write" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": { "risk": { "not": { "const": "low" } } }
+          },
+          "description": "A write changes rows, so `low` is a claim the kind contradicts (ADR 0177). The pair with the branch above is the whole of what `risk` reads in Session 16 Run 2; the behaviour AGT-RISK-001 asks for arrives in Run 3."
         }
       ]
     }

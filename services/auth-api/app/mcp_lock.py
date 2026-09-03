@@ -27,11 +27,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-#: The lock format this runtime understands. A lock declaring anything else is
+#: The lock formats this runtime understands. A lock declaring anything else is
 #: refused at startup rather than read optimistically -- a capability surface
 #: from a schema this code does not know is a surface nobody reviewed against
 #: this code.
-SUPPORTED_SCHEMA_VERSION = 1
+#:
+#: **2 was added before any v2 lock could reach a host** (ADR 0177), and that
+#: ordering is the most breakable thing in Session 16 Run 2. The check is `!=`,
+#: it runs at startup, and it fails the start. A release compiling a v2 lock
+#: while this still said 1 would deploy a project whose MCP service refuses to
+#: come up -- and `DEFERRED_SERVICES` starts it at step 6b, so the failure lands
+#: in the middle of a convergence rather than at its edge.
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
+
+#: The lock version at which a tool carries `risk` and its backing
+#: `capabilities`. Below it those keys must be ABSENT and above it required --
+#: parsed as strictly as everything else here, because a lock parsed leniently
+#: is a surface nobody bounded, and because a tool that is silently missing its
+#: risk is indistinguishable from one classified as harmless.
+VERSIONED_CAPABILITIES_FROM = 2
 
 #: The two tools that answer from the lock, the two that read PostgREST, and
 #: the two that write it (Session 9 Run 4, D486). Named rather than inferred
@@ -75,6 +89,23 @@ class Operation:
     method: str
     path: str
     operation_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class CapabilityRef:
+    """One authorization behind a tool, with what it declares about itself.
+
+    A tool may be backed by several (ADR 0120), and they move independently, so
+    there is no single version or lifecycle for a tool -- `query_resource` is
+    `query_notes` and `query_tasks`, and either can be deprecated while the
+    other is not. This is why the lock carries a list rather than three fields
+    on the tool.
+    """
+
+    name: str
+    version: str
+    lifecycle: str
+    risk: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +163,13 @@ class Tool:
     resources: tuple[Resource, ...]
     write: WriteSpec | None = None
     audit_redact: tuple[str, ...] = ()
+    #: `None` at lock schema version 1, where the fields do not exist. Not a
+    #: default of "low" and not an empty tuple: a deployment that does not
+    #: classify its capabilities must be distinguishable from one that
+    #: classified them as harmless (D600), and Run 3 writes this into the audit
+    #: row where the difference becomes a record rather than a variable.
+    risk: str | None = None
+    capabilities: tuple[CapabilityRef, ...] = ()
 
     def discoverable_by(self, scopes: frozenset[str]) -> bool:
         """Whether a caller holding `scopes` may see this tool at all.
@@ -210,13 +248,13 @@ def load_lock(path: Path | str) -> CapabilityLock:
         raise LockError(f"the capability lock is not JSON: {error}") from error
 
     version = _require(document, "schema_version", int, "the lock")
-    if version != SUPPORTED_SCHEMA_VERSION:
+    if version not in SUPPORTED_SCHEMA_VERSIONS:
         raise LockError(
             f"the lock declares schema_version {version}; this runtime serves "
-            f"{SUPPORTED_SCHEMA_VERSION} and will not guess at the difference"
+            f"{sorted(SUPPORTED_SCHEMA_VERSIONS)} and will not guess at the difference"
         )
 
-    tools = tuple(_tool(entry) for entry in _require(document, "tools", list, "the lock"))
+    tools = tuple(_tool(entry, version) for entry in _require(document, "tools", list, "the lock"))
     names = tuple(sorted(tool.name for tool in tools))
     if names != EXPECTED_TOOL_NAMES:
         raise LockError(f"the lock serves {list(names)}, not {list(EXPECTED_TOOL_NAMES)}")
@@ -236,7 +274,7 @@ def load_lock(path: Path | str) -> CapabilityLock:
     )
 
 
-def _tool(entry: Any) -> Tool:
+def _tool(entry: Any, version: int) -> Tool:
     name = _require(entry, "name", str, "a tool")
     kind = _require(entry, "kind", str, f"tool {name}")
     source = _require(entry, "source", str, f"tool {name}")
@@ -263,6 +301,7 @@ def _tool(entry: Any) -> Tool:
     if name in WRITE_TOOLS and resources:
         raise LockError(f"tool {name} writes one operation and must name no resource")
     write = _write(entry, name) if name in WRITE_TOOLS else None
+    risk, capabilities = _classification(entry, name, version)
 
     return Tool(
         name=name,
@@ -274,7 +313,61 @@ def _tool(entry: Any) -> Tool:
         resources=resources,
         write=write,
         audit_redact=_strings(entry.get("audit_redact", []), f"tool {name} audit_redact"),
+        risk=risk,
+        capabilities=capabilities,
     )
+
+
+def _classification(
+    entry: Any, tool_name: str, version: int
+) -> tuple[str | None, tuple[CapabilityRef, ...]]:
+    """`risk` and the backing capabilities, required from lock version 2 (ADR 0177).
+
+    **Both directions are refused**, and the second is the one worth having: a
+    v1 lock carrying these keys came from a compiler that disagrees with its own
+    declared version, and reading them anyway would make the version number
+    decorative. The first is the ordinary strictness of this module -- a tool
+    silently missing its risk is indistinguishable from one classified as
+    harmless.
+    """
+    where = f"tool {tool_name}"
+    present = "risk" in entry or "capabilities" in entry
+
+    if version < VERSIONED_CAPABILITIES_FROM:
+        if present:
+            raise LockError(
+                f"{where} carries risk or capabilities at lock schema_version {version}, "
+                f"which does not define them; they arrive at "
+                f"{VERSIONED_CAPABILITIES_FROM}"
+            )
+        return None, ()
+
+    risk = _require(entry, "risk", str, where)
+    if risk not in ("low", "moderate", "high"):
+        raise LockError(f"{where}.risk is {risk!r}, which is not a classification")
+
+    declared = _require(entry, "capabilities", list, where)
+    if not declared:
+        raise LockError(f"{where} names no backing capability")
+
+    refs = []
+    for item in declared:
+        capability = _require(item, "name", str, f"{where}.capabilities")
+        lifecycle = _require(item, "lifecycle", str, f"{where}.capabilities.{capability}")
+        if lifecycle == "retired":
+            raise LockError(
+                f"{where} is backed by retired capability {capability!r}. A retired "
+                "capability leaves the lock; one that reached it was compiled wrong"
+            )
+        refs.append(
+            CapabilityRef(
+                name=capability,
+                version=_require(item, "version", str, f"{where}.capabilities.{capability}"),
+                lifecycle=lifecycle,
+                risk=_require(item, "risk", str, f"{where}.capabilities.{capability}"),
+            )
+        )
+    return risk, tuple(refs)
 
 
 def _write(entry: Any, tool_name: str) -> WriteSpec:

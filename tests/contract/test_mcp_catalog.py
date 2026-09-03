@@ -121,16 +121,38 @@ def test_the_generated_block_names_exactly_the_contracts_tools(
     carrying one the contract does not describes a capability **nobody
     approved**, which is the failure `capabilities.yaml` exists to prevent.
     """
-    rows = re.findall(r"^\| `([a-z_]+)` \|", generated, re.MULTILINE)
-    named = set(rows)
     in_contract = {tool["name"] for tool in contract["tools"]}
 
-    assert named == in_contract, (
-        f"the catalog names {sorted(named)} and the contract carries {sorted(in_contract)}"
+    # **Two tables now, with different row semantics** (ADR 0177). The summary
+    # names each tool once; the capability table names it once per backing
+    # authorization, so `query_resource` appears twice there and must. Counting
+    # both together made "a tool is listed twice" fire on a catalog that was
+    # right, so the count is asserted per table rather than dropped.
+    summary = re.findall(r"^\| `([a-z_]+)` \| (?:read|write|metadata) \|", generated, re.MULTILINE)
+    detail = re.findall(r"^\| `([a-z_]+)` \| `([a-z_]+)` \|", generated, re.MULTILINE)
+
+    assert set(summary) == in_contract, (
+        f"the summary names {sorted(set(summary))} and the contract carries {sorted(in_contract)}"
     )
-    assert len(rows) == len(named) == contract["tool_count"], (
-        "a tool is listed twice, or the contract's own tool_count disagrees"
+    assert len(summary) == len(set(summary)) == contract["tool_count"], (
+        "a tool is listed twice in the summary, or the contract's own tool_count disagrees"
     )
+
+    if contract["schema_version"] >= 2:
+        assert {tool for tool, _ in detail} == in_contract, (
+            f"the capability table names {sorted({tool for tool, _ in detail})}"
+        )
+        assert len(detail) == contract["capability_count"], (
+            f"the capability table carries {len(detail)} rows and the contract declares "
+            f"{contract['capability_count']} capabilities"
+        )
+        # The grouped tool is the whole reason the two tables differ (ADR 0120).
+        assert sum(1 for tool, _ in detail if tool == "query_resource") == 2, (
+            "the grouped tool no longer shows both of its authorizations, which is "
+            "the case that makes a per-capability table necessary at all"
+        )
+    else:
+        assert not detail, "a v1 contract rendered a capability table it cannot fill"
 
 
 def test_every_resource_ceiling_reaches_the_catalog(generated: str, contract: dict) -> None:

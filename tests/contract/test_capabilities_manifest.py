@@ -72,7 +72,11 @@ def test_the_example_manifest_is_the_reviewed_agent_surface() -> None:
     Session 9 Run 3's, exactly the rows docs/capability-plan.md reserved for it.
     """
     document = config.load_capabilities_manifest(EXAMPLE)
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == max(config.SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS), (
+        "the example manifest is where the tree exercises the NEWEST schema version. "
+        "At an older one the fields that version adds are forbidden, so nothing here "
+        "would ever have compiled them (ADR 0177)"
+    )
     assert {entry["name"] for entry in document["capabilities"]} == {
         "list_resources",
         "describe_resource",
@@ -287,3 +291,115 @@ def test_scope_vocabulary_lives_only_in_the_schema() -> None:
         "the split has been undone and an administrative scope is requestable again"
     )
     assert not hasattr(config, "APPROVED_SCOPES")
+
+
+# ---------------------------------------------------------------------------
+# Schema version 2: the gate, and what risk means per kind (ADR 0177)
+# ---------------------------------------------------------------------------
+
+V2_FIELDS = {"version": "1.0.0", "lifecycle": "active", "risk": "low"}
+
+
+def refused(tmp_path: Path, document: dict[str, Any]) -> str:
+    """Load and expect a refusal, returning the message for inspection."""
+    with pytest.raises(config.ManifestError) as raised:
+        check(tmp_path, document)
+    return str(raised.value)
+
+
+@pytest.mark.parametrize("field", sorted(V2_FIELDS))
+def test_the_new_fields_are_forbidden_at_schema_version_one(tmp_path: Path, field: str) -> None:
+    """Forbidden rather than merely unrequired, and that is the decision.
+
+    A v1 manifest carrying `risk` would be declaring something nothing at v1
+    reads -- D816's unverified field, arriving by way of a version number that
+    stopped meaning anything. The host's `capabilities.yaml` is still v1, and it
+    must not be able to half-adopt the new shape.
+    """
+    capability = read_capability() | {field: V2_FIELDS[field]}
+    refused(tmp_path, {"schema_version": 1, "capabilities": [capability]})
+
+    # The control: the same capability without that field loads at v1, so the
+    # refusal is about the field and not about the rest of the entry.
+    assert check(tmp_path, {"schema_version": 1, "capabilities": [read_capability()]})
+
+
+@pytest.mark.parametrize("missing", sorted(V2_FIELDS))
+def test_all_three_fields_are_required_at_schema_version_two(tmp_path: Path, missing: str) -> None:
+    """Required, or v2 is a version in which they are optional and absent."""
+    fields = {key: value for key, value in V2_FIELDS.items() if key != missing}
+    refused(tmp_path, {"schema_version": 2, "capabilities": [read_capability() | fields]})
+
+    assert check(tmp_path, {"schema_version": 2, "capabilities": [read_capability() | V2_FIELDS]})
+
+
+@pytest.mark.parametrize(
+    "version",
+    ["1.0", "1.0.0.0", "01.0.0", "1.0.0-rc1", "v1.0.0", "latest"],
+)
+def test_a_capability_version_is_a_plain_semver(tmp_path: Path, version: str) -> None:
+    """Deliberately narrower than semver.org's grammar.
+
+    No pre-release suffix and no leading zeroes: a range nobody compares over is
+    a string, and the comparison this repository needs is equality against what
+    a lock recorded.
+    """
+    capability = read_capability() | V2_FIELDS | {"version": version}
+    refused(tmp_path, {"schema_version": 2, "capabilities": [capability]})
+
+
+def test_a_metadata_capability_is_low_risk_and_may_not_claim_otherwise(
+    tmp_path: Path,
+) -> None:
+    """It reaches no backend, holds no credential and answers from the lock."""
+    metadata = {
+        "name": "list_resources",
+        "kind": "metadata",
+        "enabled": False,
+        "required_scopes": ["meta:read"],
+        "operation": {"source": "lock", "operation_id": "lock.resources.list"},
+    }
+    assert check(tmp_path, {"schema_version": 2, "capabilities": [metadata | V2_FIELDS]})
+
+    for claimed in ("moderate", "high"):
+        refused(
+            tmp_path,
+            {"schema_version": 2, "capabilities": [metadata | V2_FIELDS | {"risk": claimed}]},
+        )
+
+
+def test_a_write_may_not_be_low_risk(tmp_path: Path) -> None:
+    """A write changes rows, so `low` is a claim its own kind contradicts."""
+    write = write_capability()
+    refused(tmp_path, {"schema_version": 2, "capabilities": [write | V2_FIELDS]})
+
+    for claimed in ("moderate", "high"):
+        assert check(
+            tmp_path,
+            {"schema_version": 2, "capabilities": [write | V2_FIELDS | {"risk": claimed}]},
+        )
+
+
+def test_a_read_may_be_any_risk(tmp_path: Path) -> None:
+    """The control for the two rules above.
+
+    Without it, a schema that refused every risk value on every kind would
+    satisfy both of them -- and this is the kind those rules deliberately do not
+    constrain, because a bounded read of a frozen resource is not classifiable
+    from its kind alone.
+    """
+    for claimed in ("low", "moderate", "high"):
+        assert check(
+            tmp_path,
+            {
+                "schema_version": 2,
+                "capabilities": [read_capability() | V2_FIELDS | {"risk": claimed}],
+            },
+        )
+
+
+def test_an_unknown_lifecycle_or_risk_is_refused(tmp_path: Path) -> None:
+    """Both are closed vocabularies; `sunset` and `critical` are not states."""
+    for field, value in (("lifecycle", "sunset"), ("risk", "critical")):
+        capability = read_capability() | V2_FIELDS | {field: value}
+        refused(tmp_path, {"schema_version": 2, "capabilities": [capability]})

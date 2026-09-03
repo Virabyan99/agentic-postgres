@@ -1,7 +1,7 @@
 {
   "capability_count": 7,
   "contract_id": "notes-tasks-agent-v1",
-  "schema_version": 1,
+  "schema_version": 2,
   "tool_count": 6,
   "tools": [
     {
@@ -11,6 +11,14 @@
       ],
       "audit_redact": [
         "p_content"
+      ],
+      "capabilities": [
+        {
+          "lifecycle": "active",
+          "name": "create_note",
+          "risk": "moderate",
+          "version": "1.0.0"
+        }
       ],
       "descriptions": [
         "Create one note owned by the caller's owner. Returns the created row."
@@ -32,11 +40,20 @@
       "required_scopes": [
         "notes:write"
       ],
+      "risk": "moderate",
       "source": "postgrest",
       "timeout_ms": 5000
     },
     {
       "audit_redact": [],
+      "capabilities": [
+        {
+          "lifecycle": "active",
+          "name": "describe_resource",
+          "risk": "low",
+          "version": "1.0.0"
+        }
+      ],
       "descriptions": [
         "One resource's frozen columns, permitted filters and permitted ordering, exactly as the lock froze them. Read from the deployed lock."
       ],
@@ -51,11 +68,20 @@
         "lock.resources.describe"
       ],
       "reads": "lock",
+      "risk": "low",
       "source": "lock",
       "timeout_ms": 1000
     },
     {
       "audit_redact": [],
+      "capabilities": [
+        {
+          "lifecycle": "active",
+          "name": "list_resources",
+          "risk": "low",
+          "version": "1.0.0"
+        }
+      ],
       "descriptions": [
         "The resources this deployment's agent surface can query, and the scope each one needs. Read from the deployed lock; reaches no database."
       ],
@@ -70,11 +96,26 @@
         "lock.resources.list"
       ],
       "reads": "lock",
+      "risk": "low",
       "source": "lock",
       "timeout_ms": 1000
     },
     {
       "audit_redact": [],
+      "capabilities": [
+        {
+          "lifecycle": "active",
+          "name": "query_notes",
+          "risk": "low",
+          "version": "1.0.0"
+        },
+        {
+          "lifecycle": "active",
+          "name": "query_tasks",
+          "risk": "low",
+          "version": "1.0.0"
+        }
+      ],
       "descriptions": [
         "The caller's own notes, filtered and ordered within frozen bounds.",
         "The caller's own tasks, filtered and ordered within frozen bounds."
@@ -249,11 +290,20 @@
           ]
         }
       ],
+      "risk": "low",
       "source": "postgrest",
       "timeout_ms": 5000
     },
     {
       "audit_redact": [],
+      "capabilities": [
+        {
+          "lifecycle": "active",
+          "name": "run_report",
+          "risk": "low",
+          "version": "1.0.0"
+        }
+      ],
       "descriptions": [
         "The caller's own activity, counted under the caller's own RLS: notes and tasks totals, tasks by status, and the two most recent update times."
       ],
@@ -294,6 +344,7 @@
           ]
         }
       ],
+      "risk": "low",
       "source": "postgrest",
       "timeout_ms": 5000
     },
@@ -304,6 +355,14 @@
         "p_new_status"
       ],
       "audit_redact": [],
+      "capabilities": [
+        {
+          "lifecycle": "active",
+          "name": "update_task_status",
+          "risk": "moderate",
+          "version": "1.0.0"
+        }
+      ],
       "descriptions": [
         "Move one of the caller's owner's tasks from an expected status to a new one; refused when the expected status no longer holds."
       ],
@@ -324,6 +383,7 @@
       "required_scopes": [
         "tasks:write"
       ],
+      "risk": "moderate",
       "source": "postgrest",
       "timeout_ms": 5000
     }

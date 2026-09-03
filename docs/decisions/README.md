@@ -240,3 +240,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0174](0174-a-rotation-surface-refuses-to-describe-a-rotation-it-cannot-perform.md) | A rotation surface refuses to describe a rotation it cannot perform | 15 | Accepted |
 | [0175](0175-a-call-to-a-released-function-is-checked-against-its-released-signature.md) | A call to a released function is checked against its released signature | 15 | Accepted |
 | [0176](0176-a-lock-check-verifies-the-tree-not-the-world.md) | A lock check verifies the tree, not the world | 16 | Accepted |
+| [0177](0177-a-capability-declares-a-version-a-lifecycle-and-a-risk-and-each-has-a-reader.md) | A capability declares a version, a lifecycle and a risk, and each has a reader | 16 | Accepted |

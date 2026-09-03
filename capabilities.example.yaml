@@ -36,7 +36,7 @@
 # refuses a write that groups (ADR 0120) or one that carries a read's shape
 # (D470).
 
-schema_version: 1
+schema_version: 2
 
 capabilities:
   # --- The two metadata tools ------------------------------------------------
@@ -51,6 +51,9 @@ capabilities:
       The resources this deployment's agent surface can query, and the scope
       each one needs. Read from the deployed lock; reaches no database.
     kind: metadata
+    version: 1.0.0
+    lifecycle: active
+    risk: low
     enabled: true
     required_scopes: [meta:read]
     operation:
@@ -65,6 +68,9 @@ capabilities:
       One resource's frozen columns, permitted filters and permitted ordering,
       exactly as the lock froze them. Read from the deployed lock.
     kind: metadata
+    version: 1.0.0
+    lifecycle: active
+    risk: low
     enabled: true
     required_scopes: [meta:read]
     operation:
@@ -87,6 +93,9 @@ capabilities:
     tool: query_resource
     description: The caller's own notes, filtered and ordered within frozen bounds.
     kind: read
+    version: 1.0.0
+    lifecycle: active
+    risk: low
     enabled: true
     required_scopes: [notes:read]
     operation:
@@ -121,6 +130,9 @@ capabilities:
     tool: query_resource
     description: The caller's own tasks, filtered and ordered within frozen bounds.
     kind: read
+    version: 1.0.0
+    lifecycle: active
+    risk: low
     enabled: true
     required_scopes: [tasks:read]
     operation:
@@ -170,6 +182,9 @@ capabilities:
       The caller's own activity, counted under the caller's own RLS: notes and
       tasks totals, tasks by status, and the two most recent update times.
     kind: read
+    version: 1.0.0
+    lifecycle: active
+    risk: low
     enabled: true
     required_scopes: [notes:read, tasks:read]
     operation:
@@ -209,6 +224,9 @@ capabilities:
     description: >-
       Create one note owned by the caller's owner. Returns the created row.
     kind: write
+    version: 1.0.0
+    lifecycle: active
+    risk: moderate
     enabled: true
     required_scopes: [notes:write]
     operation:
@@ -231,6 +249,9 @@ capabilities:
       Move one of the caller's owner's tasks from an expected status to a new
       one; refused when the expected status no longer holds.
     kind: write
+    version: 1.0.0
+    lifecycle: active
+    risk: moderate
     enabled: true
     required_scopes: [tasks:write]
     operation:
