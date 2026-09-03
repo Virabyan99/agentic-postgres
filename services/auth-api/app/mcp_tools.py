@@ -54,13 +54,21 @@ from app.mcp_audit import redact as audit_redact
 from app.mcp_authorization import current_agent_context
 from app.mcp_budgets import DEFAULT_MAX_CONCURRENT_READS, ReadSlots
 from app.mcp_errors import (
+    AUDIT_UNAVAILABLE,
     BUDGET_EXCEEDED,
+    BUDGET_EXCEEDED_REASON,
+    CONTRACT_DRIFT,
+    INPUT_MALFORMED,
     INPUT_NOT_PERMITTED,
+    NOT_IN_ALLOWLIST,
     RESOURCE_UNKNOWN,
     SCOPE_NOT_HELD,
+    SCOPE_NOT_HELD_REASON,
     STRUCTURAL_REFUSAL,
+    UPSTREAM_REFUSED,
     AgentVisible,
     as_tool_error,
+    denial_reason,
 )
 from app.mcp_lock import CapabilityLock, LockError, Resource, WriteSpec
 from app.mcp_query import Filter, QueryRefusal, build_request, build_write_request
@@ -139,8 +147,35 @@ TOOL_NAMES = (
 MAX_SERIALIZED_BYTES = 1048576
 
 
+def _sole_capability_version(lock: CapabilityLock, tool: str) -> str | None:
+    """The version of this tool's capability, when it has exactly one.
+
+    **`None` when the tool is backed by several**, and that is the honest
+    answer rather than a shortcut: `query_resource` is `query_notes` and
+    `query_tasks` (ADR 0120), they version independently, and the record is
+    opened before the arguments have selected between them. Writing either
+    version would name a capability this call may not have used.
+
+    `None` also when the deployed lock is schema version 1, where a capability
+    declares no version at all (ADR 0177). The two Nones are different facts and
+    the column cannot tell them apart -- which is a limit of this run, stated
+    here rather than discovered later, and it is the reason `contract_hash` is
+    recorded beside it: the hash names the compiled contract, and the contract
+    says which case this deployment is in.
+    """
+    declared = lock.tool(tool).capabilities
+    return declared[0].version if len(declared) == 1 else None
+
+
 class ToolRefusal(Exception):
     """A STRUCTURAL refusal: the caller is told nothing (ADR 0097, ADR 0130).
+
+    **It carries a denial reason even though the caller gets none** (ADR
+    0178). The two are not in tension: the caller is told nothing because
+    a status this plane could not classify must not become a diagnosis,
+    and the audit row says which boundary refused because an operator
+    reading it later cannot re-derive that. Silence outward, a record
+    inward.
 
     Raised as a plain exception on purpose. `mask_error_details=True` replaces
     its message with the framework's opaque string, which is the right amount
@@ -153,6 +188,19 @@ class ToolRefusal(Exception):
     this type, so its carefully-worded input messages were replaced before they
     left the process -- written, reviewed, tested, and invisible (D448).
     """
+
+    def __init__(self, message: str, reason: str) -> None:
+        """`reason` is required, and it is not the message.
+
+        The message is `STRUCTURAL_REFUSAL` at every site -- one string, on
+        purpose, because it is what a caller would read and D433 refuses to make
+        it more. The reason is the BOUNDARY, and it differs site by site: a lock
+        the served surface no longer matches, an upstream that refused, an audit
+        record that could not be written. Collapsing those three in the audit
+        row is exactly what this parameter exists to stop.
+        """
+        super().__init__(message)
+        self.reason = denial_reason(reason)
 
 
 def _scopes() -> frozenset[str]:
@@ -167,7 +215,7 @@ def _resource_for(lock: CapabilityLock, tool: str, name: str) -> Resource:
         # The lock's own message names tools and resources, which are public
         # facts about this surface -- the caller could have got them from
         # `list_resources`. Safe to relay, and useful to.
-        raise AgentVisible(RESOURCE_UNKNOWN, str(error)) from error
+        raise AgentVisible(RESOURCE_UNKNOWN, str(error), NOT_IN_ALLOWLIST) from error
 
     held = _scopes()
     missing = [scope for scope in resource.required_scopes if scope not in held]
@@ -177,7 +225,9 @@ def _resource_for(lock: CapabilityLock, tool: str, name: str) -> Resource:
         # would be this process telling a caller about its own token, which it
         # already has and which a log should not repeat back.
         raise AgentVisible(
-            SCOPE_NOT_HELD, f"this resource requires {sorted(resource.required_scopes)}"
+            SCOPE_NOT_HELD,
+            f"this resource requires {sorted(resource.required_scopes)}",
+            SCOPE_NOT_HELD_REASON,
         )
     return resource
 
@@ -198,18 +248,22 @@ def _write_for(lock: CapabilityLock, tool: str) -> WriteSpec:
     try:
         declared = lock.tool(tool)
     except LockError as error:  # pragma: no cover -- load_lock refuses this first
-        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
+        raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT) from error
 
     spec = declared.write
     if spec is None:  # pragma: no cover -- load_lock requires the write shape
         # Structural rather than caller-visible: a registered write tool whose
         # lock entry carries no write shape is a deployment fault, and nothing
         # the caller did produced it.
-        raise ToolRefusal(STRUCTURAL_REFUSAL)
+        raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
 
     held = _scopes()
     if [scope for scope in spec.required_scopes if scope not in held]:
-        raise AgentVisible(SCOPE_NOT_HELD, f"this tool requires {sorted(spec.required_scopes)}")
+        raise AgentVisible(
+            SCOPE_NOT_HELD,
+            f"this tool requires {sorted(spec.required_scopes)}",
+            SCOPE_NOT_HELD_REASON,
+        )
     return spec
 
 
@@ -297,12 +351,12 @@ def query_resource(
         # An input the lock does not permit. The caller can fix this, and
         # `mcp_query` already writes the message to name the INPUT and never the
         # schema -- so it is exactly what may be relayed.
-        raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
+        raise AgentVisible(INPUT_NOT_PERMITTED, str(error), NOT_IN_ALLOWLIST) from error
 
     try:
         rows = execute(base_url, token, request, request_id=request_id)
     except UpstreamRefusal as error:
-        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
+        raise ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED) from error
 
     result = {"resource": found.name, "row_count": len(rows), "rows": rows}
     return _within_budget(result, found.max_rows)
@@ -322,7 +376,7 @@ def _within_budget(result: dict[str, Any], max_rows: int) -> dict[str, Any]:
         # Structural: the upstream returned more than the lock permits, which is
         # a fault in the deployment rather than in the request. Nothing the
         # caller did produced it and nothing it can do fixes it.
-        raise ToolRefusal(STRUCTURAL_REFUSAL)
+        raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
     return _within_byte_budget(result)
 
 
@@ -345,6 +399,7 @@ def _within_byte_budget(result: dict[str, Any]) -> dict[str, Any]:
             BUDGET_EXCEEDED,
             f"the result is {serialized} bytes, above the {MAX_SERIALIZED_BYTES} ceiling; "
             "ask for fewer columns or fewer rows",
+            BUDGET_EXCEEDED_REASON,
         )
     return result
 
@@ -364,24 +419,24 @@ def run_report(
     """
     tool = lock.tool("run_report")
     if len(tool.resources) != 1:
-        raise ToolRefusal(STRUCTURAL_REFUSAL)
+        raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
     found = _resource_for(lock, "run_report", tool.resources[0].name)
 
     try:
         request = build_request(found, timeout_ms=tool.timeout_ms)
     except QueryRefusal as error:
-        raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
+        raise AgentVisible(INPUT_NOT_PERMITTED, str(error), NOT_IN_ALLOWLIST) from error
 
     try:
         rows = execute(base_url, token, request, request_id=request_id)
     except UpstreamRefusal as error:
-        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
+        raise ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED) from error
 
     if len(rows) != 1:
         # The report is one row by construction. Anything else is a surface that
         # has changed underneath the lock, and reporting the first row would be
         # reporting a number nobody bounded. Structural: not the caller's doing.
-        raise ToolRefusal(STRUCTURAL_REFUSAL)
+        raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
     return rows[0]
 
 
@@ -423,7 +478,7 @@ def invoke_write(
             spec, timeout_ms=lock.tool(tool).timeout_ms, arguments=arguments
         )
     except QueryRefusal as error:
-        raise AgentVisible(INPUT_NOT_PERMITTED, str(error)) from error
+        raise AgentVisible(INPUT_NOT_PERMITTED, str(error), NOT_IN_ALLOWLIST) from error
 
     try:
         rows = execute_write(
@@ -434,13 +489,13 @@ def invoke_write(
             request_id=request_id,
         )
     except UpstreamRefusal as error:
-        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
+        raise ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED) from error
 
     if len(rows) != 1:
         # Both reviewed writes are `RETURNS <composite>` -- exactly one row
         # (D487). Zero is a shape that changed underneath the lock, and the
         # write has already committed, so this is loud rather than quiet.
-        raise ToolRefusal(STRUCTURAL_REFUSAL)
+        raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
     return _within_byte_budget({"tool": tool, "row_count": len(rows), "row": rows[0]})
 
 
@@ -453,14 +508,20 @@ def _filter(entry: Any) -> Filter:
     """
     if not isinstance(entry, dict):
         raise AgentVisible(
-            INPUT_NOT_PERMITTED, "a filter is an object with column, operator and value"
+            INPUT_NOT_PERMITTED,
+            "a filter is an object with column, operator and value",
+            INPUT_MALFORMED,
         )
     for required in ("column", "operator"):
         if not isinstance(entry.get(required), str) or not entry[required]:
-            raise AgentVisible(INPUT_NOT_PERMITTED, f"a filter needs a non-empty {required}")
+            raise AgentVisible(
+                INPUT_NOT_PERMITTED, f"a filter needs a non-empty {required}", INPUT_MALFORMED
+            )
     unknown = set(entry) - {"column", "operator", "value"}
     if unknown:
-        raise AgentVisible(INPUT_NOT_PERMITTED, f"a filter has no {sorted(unknown)} member")
+        raise AgentVisible(
+            INPUT_NOT_PERMITTED, f"a filter has no {sorted(unknown)} member", INPUT_MALFORMED
+        )
     return Filter(column=entry["column"], operator=entry["operator"], value=entry.get("value"))
 
 
@@ -556,6 +617,8 @@ def register(
                         tool=tool,
                         request_id=timed.request_id,
                         parameters=audit_redact(arguments, lock.tool(tool).audit_redact),
+                        capability_version=_sole_capability_version(lock, tool),
+                        contract_hash=lock.canonical_sha256,
                     )
                 except (AuditRefusal, UpstreamRefusal) as error:
                     if kind in FAIL_CLOSED_KINDS:
@@ -564,7 +627,7 @@ def register(
                         # prevent. Structural, so the caller is told nothing --
                         # an unauditable write is this deployment's fault.
                         timed.refused()
-                        raise ToolRefusal(STRUCTURAL_REFUSAL) from error
+                        raise ToolRefusal(STRUCTURAL_REFUSAL, AUDIT_UNAVAILABLE) from error
                     # A read carries on. Its availability does not depend on the
                     # audit table, and the failure is not silent -- it lands in
                     # telemetry as the record below.
@@ -590,23 +653,25 @@ def register(
                         result = await asyncio.to_thread(work)
             except AgentVisible as visible:
                 timed.refused()
-                await _close(timed, audit_id, token, OUTCOME_REFUSED, None)
+                await _close(timed, audit_id, token, OUTCOME_REFUSED, None, visible.reason)
                 raise as_tool_error(visible) from visible
-            except ToolRefusal:
+            except ToolRefusal as refusal:
                 timed.refused()
-                await _close(timed, audit_id, token, OUTCOME_REFUSED, None)
+                await _close(timed, audit_id, token, OUTCOME_REFUSED, None, refusal.reason)
                 raise
             except Exception:
                 # Unclassified: the record says `failed` rather than being left
                 # open forever. `Timed` logs the exception TYPE and never its
                 # message, which is where a caller's value would be if one ever
                 # reached one.
-                await _close(timed, audit_id, token, OUTCOME_FAILED, None)
+                # `failed`, not `refused`, so it carries no reason -- and the
+                # equivalence CHECK in 0027 is what makes that a property.
+                await _close(timed, audit_id, token, OUTCOME_FAILED, None, None)
                 raise
 
             row_count = result.get("row_count") if isinstance(result, dict) else None
             timed.served(row_count)
-            await _close(timed, audit_id, token, OUTCOME_SERVED, row_count)
+            await _close(timed, audit_id, token, OUTCOME_SERVED, row_count, None)
             return result
 
     async def _close(
@@ -615,6 +680,7 @@ def register(
         token: str | None,
         outcome: str,
         row_count: int | None,
+        reason: str | None,
     ) -> None:
         """Close the record, and never let closing it change the outcome.
 
@@ -635,6 +701,7 @@ def register(
                 request_id=timed.request_id or "",
                 elapsed_ms=timed.elapsed_ms(),
                 row_count=row_count,
+                denial_reason=reason,
             )
         except (AuditRefusal, UpstreamRefusal) as error:
             LOGGER.warning(

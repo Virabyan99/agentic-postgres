@@ -136,6 +136,8 @@ def begin(
     tool: str,
     request_id: str,
     parameters: dict[str, Any],
+    capability_version: str | None,
+    contract_hash: str | None,
 ) -> str:
     """Open one record and return its id, or refuse.
 
@@ -148,7 +150,18 @@ def begin(
         base_url,
         token,
         AUDIT_BEGIN_PATH,
-        {"p_tool": tool, "p_request_id": request_id, "p_parameters": parameters},
+        {
+            "p_tool": tool,
+            "p_request_id": request_id,
+            "p_parameters": parameters,
+            # **Sent explicitly, and `None` is a value rather than an omission**
+            # (ADR 0178). Migration 0027 gives neither parameter a DEFAULT, so
+            # omitting one is a signature mismatch rather than a quiet NULL --
+            # which is the point after D857, and is safe now that ADR 0175's
+            # guard reads `api` as well as `app_private`.
+            "p_capability_version": capability_version,
+            "p_contract_hash": contract_hash,
+        },
         request_id,
     )
     if not isinstance(opened, str) or not opened.strip():
@@ -165,6 +178,7 @@ def complete(
     request_id: str,
     elapsed_ms: int,
     row_count: int | None,
+    denial_reason: str | None,
 ) -> bool:
     """Close one record, and say whether it was actually closed.
 
@@ -188,6 +202,11 @@ def complete(
             "p_outcome": outcome,
             "p_elapsed_ms": elapsed_ms,
             "p_row_count": row_count,
+            # Present exactly when the outcome is `refused`, which 0027 states
+            # as an equivalence CHECK and the function refuses before the UPDATE
+            # -- so a mismatch here is this repository's own errcode rather than
+            # a constraint name arriving inside an audit call.
+            "p_denial_reason": denial_reason,
         },
         request_id,
     )

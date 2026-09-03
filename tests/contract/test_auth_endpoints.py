@@ -1329,7 +1329,7 @@ def _seed_audit_row(cluster: dict[str, Any], agent_id: str, owner_id: str, tool:
         f'SET ROLE "{cluster["roles"]["agent_reader"]}"; '
         f"SELECT set_config('app.agent_id', '{agent_id}', true); "
         f"SELECT set_config('app.user_id', '{owner_id}', true); "
-        f"SELECT api.agent_audit_begin('{tool}')"
+        f"SELECT api.agent_audit_begin('{tool}', NULL, NULL, NULL, NULL)"
     )
 
 

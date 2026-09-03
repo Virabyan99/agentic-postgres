@@ -305,6 +305,18 @@
       "template": "templates/0026-password-reset-plane.sql",
       "template_sha256": "b801da9fbc821c84a1f5e14006e065bf16bd10168610e60fdaf2c8c7aeac2943",
       "version": "20260903120026"
+    },
+    {
+      "canonical_render_sha256": "53ee2535c4c89fc768d998e02048aa3f1f96b8086c250bea338375dd2e5d6235",
+      "name": "agent_audit_denial_taxonomy",
+      "placeholders": [
+        "agent_reader",
+        "agent_writer",
+        "object_owner"
+      ],
+      "template": "templates/0027-agent-audit-denial-taxonomy.sql",
+      "template_sha256": "ef6dc06627ebf918cf7e53d50165488bac11a8c7aa66f16c0d649fd458d6f357",
+      "version": "20260903120027"
     }
   ],
   "schema_version": 1

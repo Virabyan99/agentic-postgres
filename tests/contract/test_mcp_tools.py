@@ -34,7 +34,7 @@ import pytest
 
 from app import mcp_authorization, mcp_tools
 from app.mcp_audit import AuditRefusal
-from app.mcp_errors import ROW_NOT_FOUND, WRITE_CONFLICT, AgentVisible
+from app.mcp_errors import ROW_NOT_FOUND, WRITE_CONFLICT, WRITE_REJECTED, AgentVisible
 from app.mcp_lock import (
     EXPECTED_TOOL_NAMES,
     METADATA_TOOLS,
@@ -1307,7 +1307,7 @@ def test_a_translated_write_refusal_reaches_the_caller_through_the_tool(
     _, registry, _recorded = _registered(monkeypatch, "tasks:write")
 
     def conflicted(*_: Any, **__: Any) -> Any:
-        raise AgentVisible(WRITE_CONFLICT, "the row is not in the expected state")
+        raise AgentVisible(WRITE_CONFLICT, "the row is not in the expected state", WRITE_REJECTED)
 
     monkeypatch.setattr(mcp_tools, "execute_write", conflicted)
     with pytest.raises(ToolError, match="write_conflict"):
@@ -1874,7 +1874,15 @@ def test_the_audit_calls_go_to_the_two_named_rpcs_and_nowhere_else(monkeypatch: 
 
     monkeypatch.setattr(mcp_audit, "_dial", dial)
 
-    mcp_audit.begin(BASE, "tok", tool="create_note", request_id=REQUEST_ID, parameters={})
+    mcp_audit.begin(
+        BASE,
+        "tok",
+        tool="create_note",
+        request_id=REQUEST_ID,
+        parameters={},
+        capability_version=None,
+        contract_hash=None,
+    )
     mcp_audit.complete(
         BASE,
         "tok",
@@ -1883,6 +1891,7 @@ def test_the_audit_calls_go_to_the_two_named_rpcs_and_nowhere_else(monkeypatch: 
         request_id=REQUEST_ID,
         elapsed_ms=3,
         row_count=1,
+        denial_reason=None,
     )
 
     assert seen == ["/rpc/agent_audit_begin", "/rpc/agent_audit_complete"]
@@ -1912,7 +1921,15 @@ def test_the_audit_responses_are_parsed_as_the_measured_shapes(monkeypatch: Any)
         mcp_audit, "_dial", answering(200, b'"c8c13a67-cee5-43e2-b1e7-07b17460215f"')
     )
     assert (
-        mcp_audit.begin(BASE, "t", tool="create_note", request_id=REQUEST_ID, parameters={})
+        mcp_audit.begin(
+            BASE,
+            "t",
+            tool="create_note",
+            request_id=REQUEST_ID,
+            parameters={},
+            capability_version=None,
+            contract_hash=None,
+        )
         == "c8c13a67-cee5-43e2-b1e7-07b17460215f"
     )
 
@@ -1922,7 +1939,15 @@ def test_the_audit_responses_are_parsed_as_the_measured_shapes(monkeypatch: Any)
     for wrong in (b'{"id": "x"}', b'["c8c13a67-cee5-43e2-b1e7-07b17460215f"]'):
         monkeypatch.setattr(mcp_audit, "_dial", answering(200, wrong))
         with pytest.raises(mcp_audit.AuditRefusal, match="not a record id"):
-            mcp_audit.begin(BASE, "t", tool="create_note", request_id=REQUEST_ID, parameters={})
+            mcp_audit.begin(
+                BASE,
+                "t",
+                tool="create_note",
+                request_id=REQUEST_ID,
+                parameters={},
+                capability_version=None,
+                contract_hash=None,
+            )
 
     for body, expected in ((b"true", True), (b"false", False)):
         monkeypatch.setattr(mcp_audit, "_dial", answering(200, body))
@@ -1935,6 +1960,7 @@ def test_the_audit_responses_are_parsed_as_the_measured_shapes(monkeypatch: Any)
                 request_id=REQUEST_ID,
                 elapsed_ms=1,
                 row_count=1,
+                denial_reason=None,
             )
             is expected
         )
@@ -1964,6 +1990,7 @@ def test_an_audit_refusal_names_no_upstream_code(monkeypatch: Any) -> None:
             request_id=REQUEST_ID,
             elapsed_ms=1,
             row_count=1,
+            denial_reason=None,
         )
     assert "PT422" not in str(caught.value)
     assert "AP422" not in str(caught.value)

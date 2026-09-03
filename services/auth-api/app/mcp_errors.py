@@ -96,7 +96,11 @@ def write_refusal(code: str) -> AgentVisible | None:
     if translated is None:
         return None
     token, sentence = translated
-    return AgentVisible(token, sentence)
+    # `write_rejected`: the product's OWN PT4xx vocabulary, translated
+    # (ADR 0139). Distinct from `upstream_refused`, which is a status this
+    # plane could not classify -- these three it can, because the product
+    # raised them deliberately and this repository reviewed the sentences.
+    return AgentVisible(token, sentence, WRITE_REJECTED)
 
 
 #: The one thing every structural refusal says, and it says nothing.
@@ -109,6 +113,81 @@ def write_refusal(code: str) -> AgentVisible | None:
 STRUCTURAL_REFUSAL: Final = "refused"
 
 
+# ---------------------------------------------------------------------------
+# What the AUDIT RECORD says, which is a third thing (ADR 0178)
+# ---------------------------------------------------------------------------
+#
+# Not `CALLER_FACING_TOKENS` and not `STRUCTURAL_REFUSAL`. Those answer *what may
+# an agent be told*, and the answer is deliberately little: six tokens, and one
+# string for everything else.
+#
+# A denial reason answers a different question -- *which boundary refused* -- and
+# it is read by an operator, in a console, later. It has to separate the cases a
+# caller is told nothing about, or a deployment fault, an unreachable upstream
+# and an unwritable audit table all arrive as `refused`.
+#
+# **Derived from the refusal sites, not designed beside them.** The session plan
+# proposed five members and named `credential`; there is no such refusal here.
+# This runtime holds no credential of any kind, and classifying an upstream 401
+# as one is D433's forbidden guess -- `mcp_upstream`'s own header measures four
+# states behind two statuses. `UPSTREAM_REFUSED` is the honest form: this plane
+# asked and was told no.
+SCOPE_NOT_HELD_REASON: Final = "scope_not_held"
+NOT_IN_ALLOWLIST: Final = "not_in_allowlist"
+INPUT_MALFORMED: Final = "input_malformed"
+BUDGET_EXCEEDED_REASON: Final = "budget_exceeded"
+CONTRACT_DRIFT: Final = "contract_drift"
+UPSTREAM_REFUSED: Final = "upstream_refused"
+AUDIT_UNAVAILABLE: Final = "audit_unavailable"
+WRITE_REJECTED: Final = "write_rejected"
+
+#: Every member, in the enum's own order. A contract test compares this tuple
+#: against migration 0027's template, so the catalog and this file cannot drift
+#: apart and neither is a second authority (ADR 0002). The comparison is the
+#: same one `UPSTREAM_WRITE_REFUSALS`'s keys already get against 0019.
+DENIAL_REASONS: Final = (
+    SCOPE_NOT_HELD_REASON,
+    NOT_IN_ALLOWLIST,
+    INPUT_MALFORMED,
+    BUDGET_EXCEEDED_REASON,
+    CONTRACT_DRIFT,
+    UPSTREAM_REFUSED,
+    AUDIT_UNAVAILABLE,
+    WRITE_REJECTED,
+)
+
+#: The caller-facing token each denial reason accompanies, where there is one.
+#:
+#: `None` means the caller is told nothing -- the three structural classes plus
+#: the audit one. The mapping is here rather than at each raise site so that
+#: "which reason goes with which token" is one table somebody can read, and so
+#: the guard below can assert it is total over `DENIAL_REASONS`.
+TOKEN_FOR_REASON: Final[dict[str, str | None]] = {
+    SCOPE_NOT_HELD_REASON: SCOPE_NOT_HELD,
+    NOT_IN_ALLOWLIST: INPUT_NOT_PERMITTED,
+    INPUT_MALFORMED: INPUT_NOT_PERMITTED,
+    BUDGET_EXCEEDED_REASON: BUDGET_EXCEEDED,
+    CONTRACT_DRIFT: None,
+    UPSTREAM_REFUSED: None,
+    AUDIT_UNAVAILABLE: None,
+    WRITE_REJECTED: WRITE_CONFLICT,
+}
+
+
+def denial_reason(reason: str) -> str:
+    """Validate a denial reason at the point it is chosen, not at the database.
+
+    The column's type would refuse an unknown value anyway, and that refusal
+    arrives as a constraint violation inside an audit call -- which the write
+    path treats as `audit_unavailable` and fails closed on. So a typo here would
+    surface as "the audit table is broken", which is the wrong diagnosis for a
+    misspelled constant and the expensive kind of wrong.
+    """
+    if reason not in DENIAL_REASONS:
+        raise ValueError(f"{reason!r} is not a denial reason")
+    return reason
+
+
 class AgentVisible(Exception):
     """A refusal an authenticated agent may read, and act on.
 
@@ -118,12 +197,21 @@ class AgentVisible(Exception):
     without one.
     """
 
-    def __init__(self, token: str, detail: str) -> None:
+    def __init__(self, token: str, detail: str, reason: str) -> None:
+        """`reason` is REQUIRED, and that is the decision (ADR 0178).
+
+        A default would be one member standing for several boundaries, which is
+        exactly the collapse `STRUCTURAL_REFUSAL` makes deliberately for a
+        CALLER and which an operator's console must not inherit. The caller-side
+        token and the audit-side reason are validated separately because they
+        are different vocabularies answering different questions.
+        """
         if token not in CALLER_FACING_TOKENS:
             raise ValueError(f"{token!r} is not a caller-facing token")
         super().__init__(detail)
         self.token = token
         self.detail = detail
+        self.reason = denial_reason(reason)
 
     def __str__(self) -> str:
         return f"{self.token}: {self.detail}"

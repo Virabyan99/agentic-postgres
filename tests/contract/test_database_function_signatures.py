@@ -36,15 +36,29 @@ import re
 
 from agentic_postgres import REPO_ROOT
 
-#: `CREATE FUNCTION app_private.name(` — the declaration.
+#: **Both released schemas, and `api` was missing until Session 16 Run 3**
+#: (D889). The guard read `app_private.` alone, and the two functions the
+#: agent plane calls on every single request -- `api.agent_audit_begin` and
+#: `api.agent_audit_complete` -- are `api.`. Migration 0027 widened both
+#: signatures and this guard, built for precisely that, stayed green while
+#: four call sites in the suite still passed the old arity. Question 5, in
+#: the schema the rule was not applied to.
+#:
+#: `api` is the only schema exposed over HTTP, so its functions are the ones
+#: whose arity a caller can be refused by -- which makes it the schema this
+#: mattered most in and the one it did not cover.
+SCHEMAS = ("app_private", "api")
+_QUALIFIED = f"(?:{'|'.join(SCHEMAS)})"
+
+#: `CREATE FUNCTION <schema>.name(` — the declaration.
 CREATE = re.compile(
-    r"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+app_private\.(\w+)\s*\(", re.IGNORECASE
+    rf"CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+{_QUALIFIED}\.(\w+)\s*\(", re.IGNORECASE
 )
-#: `DROP FUNCTION app_private.name(` — a signature leaving the released set.
-DROP = re.compile(r"DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?app_private\.(\w+)\s*\(", re.IGNORECASE)
+#: `DROP FUNCTION <schema>.name(` — a signature leaving the released set.
+DROP = re.compile(rf"DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?{_QUALIFIED}\.(\w+)\s*\(", re.IGNORECASE)
 #: A call. **No whitespace before the paren**, which is what separates
 #: `auth_create_agent(` from a prose reference like `app_private.users (id)`.
-CALL = re.compile(r"app_private\.(\w+)\(")
+CALL = re.compile(rf"{_QUALIFIED}\.(\w+)\(")
 
 #: Directories whose Python is held to the released signatures. The product is
 #: here as well as the proofs: the defect this guards against was in four
@@ -132,15 +146,44 @@ def _arguments(text: str, open_paren: int) -> list[str] | None:
     return None
 
 
+def _callable_arities(parameters: list[str]) -> set[int]:
+    """Every argument count this declaration can be called with.
+
+    **A parameter with a `DEFAULT` may be omitted**, and PostgreSQL requires the
+    defaulted ones to come last — so a declaration of *n* parameters of which *d*
+    carry a default is callable with anything from ``n - d`` through ``n``.
+
+    This was outside the guard while it read `app_private` alone, and the module
+    docstring said so. Widening to `api` made it load-bearing at once:
+    ``api.create_note(p_title text, p_content text DEFAULT '')`` is called with
+    one argument in five places, every one of them correct, and a guard counting
+    only the full arity called all five defects (D889). **A guard that cries wolf
+    about correct code gets widened back**, which is how this one would have
+    died a session after it was built.
+    """
+    total = len(parameters)
+    defaulted = sum(1 for parameter in parameters if re.search(r"\bDEFAULT\b", parameter, re.I))
+    return set(range(total - defaulted, total + 1))
+
+
 def released_signatures() -> dict[str, set[int]]:
-    """Every `app_private` function the migrations leave live, by arity.
+    """Every released function the migrations leave live, by callable arity.
 
     Migrations are read in filename order and `DROP` is applied before `CREATE`
     **at the position each appears**, because 0025 drops and recreates four
     functions in one file — reading all the creates first would leave the old
     arities live alongside the new ones and the guard would accept both.
+
+    A `DROP` names a signature **by its types**, so it retires that
+    declaration's whole callable range and not merely the count it spells: a
+    `DROP FUNCTION f(text, uuid, jsonb)` retires the `f(a)` and `f(a, b)` forms
+    that the same declaration's `DEFAULT`s made legal. Declarations are
+    therefore held per full arity and dropped by that key, which is why this
+    does not simply subtract sets — subtracting left `agent_audit_begin`
+    declaring `[1, 2, 5]`, an old signature's defaulted forms outliving the
+    signature itself.
     """
-    live: dict[str, set[int]] = {}
+    live: dict[str, dict[int, set[int]]] = {}
     for path in sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql")):
         text = path.read_text(encoding="utf-8")
         events = [(match.start(), "drop", match) for match in DROP.finditer(text)]
@@ -149,12 +192,53 @@ def released_signatures() -> dict[str, set[int]]:
             arguments = _arguments(text, match.end() - 1)
             if arguments is None:
                 continue
-            bucket = live.setdefault(match.group(1), set())
+            declarations = live.setdefault(match.group(1), {})
             if kind == "drop":
-                bucket.discard(len(arguments))
+                declarations.pop(len(arguments), None)
             else:
-                bucket.add(len(arguments))
-    return {name: arities for name, arities in live.items() if arities}
+                declarations[len(arguments)] = _callable_arities(arguments)
+
+    return {
+        name: {arity for arities in declarations.values() for arity in arities}
+        for name, declarations in live.items()
+        if declarations
+    }
+
+
+#: An argument that is a bare identifier or SQL type name and nothing else.
+_BARE = re.compile(r"^[A-Za-z_][A-Za-z0-9_ \[\]]*$")
+
+
+def _is_a_call(text: str, match: re.Match[str], arguments: list[str]) -> bool:
+    """Whether this occurrence is a CALL rather than a signature or prose.
+
+    Widening the scan to `api` brought in three things that are not calls and
+    that `app_private` never contained (D890):
+
+    * a **type signature** — ``"api.agent_audit_begin(text, uuid, jsonb)"``,
+      passed to `has_function_privilege`;
+    * **prose** in a docstring naming parameters —
+      ``api.agent_audit_begin(p_tool, p_request_id, p_parameters)``;
+    * a **prefix string** used for scanning — ``"CREATE FUNCTION
+      api.agent_audit_begin("`` — whose closing paren is somewhere unrelated.
+
+    The first two are exactly the arguments that are **all bare identifiers**,
+    and the third is the one whose ``(`` is immediately followed by the quote
+    that opened the Python literal it sits in.
+
+    **Both rules were measured before being written, against all 157 real calls
+    in the tree**: none of them has an all-bare argument list, and none has its
+    string's own delimiter as the first character after the paren. The
+    zero-argument calls — 25 of them, `postgrest_pre_request()` among them — are
+    unaffected, which is why the bare rule requires a non-empty list.
+    """
+    if arguments and all(_BARE.match(argument.strip()) for argument in arguments):
+        return False
+
+    line_start = text.rfind("\n", 0, match.start()) + 1
+    quotes = [char for char in text[line_start : match.start()] if char in "\"'"]
+    after = text[match.end() : match.end() + 1]
+    return not (quotes and after == quotes[-1])
 
 
 def test_every_call_to_a_released_function_uses_a_released_arity() -> None:
@@ -166,10 +250,22 @@ def test_every_call_to_a_released_function_uses_a_released_arity() -> None:
     """
     live = released_signatures()
     assert len(live) > 30, (
-        f"only {len(live)} released app_private function(s) were parsed out of the "
-        "migrations. The declaration scan has broken, and every assertion below "
-        "would pass by selecting almost nothing"
+        f"only {len(live)} released function(s) were parsed out of the migrations. "
+        "The declaration scan has broken, and every assertion below would pass by "
+        "selecting almost nothing"
     )
+
+    # **Both schemas, named**, because narrowing `SCHEMAS` back to `app_private`
+    # would leave this test green (every call is correct today) while silently
+    # dropping the two functions the agent plane calls on every request. That is
+    # how the hole D887 found was invisible for a whole session, and a guard
+    # whose coverage can shrink without a failure is a guard that will.
+    for schema, witness in (("app_private", "auth_create_agent"), ("api", "agent_audit_begin")):
+        assert witness in live, (
+            f"{witness} is not in the released set, so schema {schema!r} is no longer "
+            "being read. This test would still pass, and would be checking half the "
+            "surface it claims to (D887)"
+        )
 
     wrong: list[str] = []
     checked = 0
@@ -185,6 +281,8 @@ def test_every_call_to_a_released_function_uses_a_released_arity() -> None:
                 arguments = _arguments(text, match.end() - 1)
                 if arguments is None:
                     continue
+                if not _is_a_call(text, match, arguments):
+                    continue  # a signature, prose, or a prefix string (D890)
                 checked += 1
                 arity = len(arguments)
                 if arity in live[name]:
@@ -192,8 +290,12 @@ def test_every_call_to_a_released_function_uses_a_released_arity() -> None:
                 if (relative, name, arity) in DELIBERATE_RETIRED_CALLS:
                     continue
                 line = text[: match.start()].count("\n") + 1
+                # The schema comes from the match, not from a literal: the guard
+                # reads two schemas now, and naming every finding `app_private`
+                # would send a reader to the wrong file (D889).
+                schema = match.group(0).split(".", 1)[0]
                 wrong.append(
-                    f"{relative}:{line} calls app_private.{name} with {arity} "
+                    f"{relative}:{line} calls {schema}.{name} with {arity} "
                     f"argument(s); the migrations declare {sorted(live[name])}"
                 )
 

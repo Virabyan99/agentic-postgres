@@ -504,7 +504,7 @@ def test_the_audit_identity_comes_from_the_guc_and_not_from_a_parameter(
         "agent_writer",
         agent,
         owner,
-        "SELECT api.agent_audit_begin('query_resource', NULL, '{\"a\": 1}'::jsonb);",
+        "SELECT api.agent_audit_begin('query_resource', NULL, '{\"a\": 1}'::jsonb, NULL, NULL);",
     )
     assert written.returncode == 0, written.stderr
 
@@ -525,7 +525,11 @@ def test_a_caller_without_an_agent_identity_is_refused(cluster: dict[str, Any]) 
     accident, the function still refuses rather than writing a row whose principal
     is NULL and finding out from a NOT NULL violation.
     """
-    result = as_role(cluster, "agent_writer", "SELECT api.agent_audit_begin('no_identity');")
+    result = as_role(
+        cluster,
+        "agent_writer",
+        "SELECT api.agent_audit_begin('no_identity', NULL, NULL, NULL, NULL);",
+    )
     assert result.returncode != 0, "a caller with no agent identity opened an audit record"
     assert "AP403" in (result.stderr or ""), result.stderr
 
@@ -545,7 +549,7 @@ def test_an_agent_cannot_close_another_agents_record(cluster: dict[str, Any]) ->
         "agent_writer",
         first,
         owner,
-        "SELECT api.agent_audit_begin('mine');",
+        "SELECT api.agent_audit_begin('mine', NULL, NULL, NULL, NULL);",
     )
     assert opened.returncode == 0, opened.stderr
     record = su(
@@ -558,7 +562,7 @@ def test_an_agent_cannot_close_another_agents_record(cluster: dict[str, Any]) ->
         "agent_writer",
         second,
         owner,
-        f"SELECT api.agent_audit_complete('{record}', 'served', 1, 1);",
+        f"SELECT api.agent_audit_complete('{record}', 'served', 1, 1, NULL);",
     )
     assert stolen.returncode == 0, stolen.stderr
     assert "f" in stolen.stdout.split(), (
@@ -579,7 +583,13 @@ def test_complete_refuses_the_committed_outcome(cluster: dict[str, Any]) -> None
     claims.
     """
     agent, owner = str(uuid.uuid4()), str(uuid.uuid4())
-    opened = as_agent(cluster, "agent_writer", agent, owner, "SELECT api.agent_audit_begin('c');")
+    opened = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('c', NULL, NULL, NULL, NULL);",
+    )
     assert opened.returncode == 0, opened.stderr
     record = su(
         cluster, "SELECT id::text FROM app_private.agent_audit WHERE tool = 'c';"
@@ -590,7 +600,7 @@ def test_complete_refuses_the_committed_outcome(cluster: dict[str, Any]) -> None
         "agent_writer",
         agent,
         owner,
-        f"SELECT api.agent_audit_complete('{record}', 'committed');",
+        f"SELECT api.agent_audit_complete('{record}', 'committed', NULL, NULL, NULL);",
     )
     assert result.returncode != 0, "the agent plane closed a record as 'committed'"
     assert "AP422" in (result.stderr or ""), result.stderr
@@ -876,9 +886,9 @@ def test_the_reader_returns_the_most_recent_first_and_breaks_ties_by_id(
         agent,
         owner,
         """
-        SELECT api.agent_audit_begin('query_resource');
-        SELECT api.agent_audit_begin('run_report');
-        SELECT api.agent_audit_begin('list_resources');
+        SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);
+        SELECT api.agent_audit_begin('run_report', NULL, NULL, NULL, NULL);
+        SELECT api.agent_audit_begin('list_resources', NULL, NULL, NULL, NULL);
         """,
     )
     assert written.returncode == 0, written.stderr
@@ -947,7 +957,11 @@ def test_the_reader_filters_narrow_and_do_not_authorize(cluster: dict[str, Any])
     owner = str(uuid.uuid4())
     for agent in (mine, other):
         result = as_agent(
-            cluster, "agent_reader", agent, owner, "SELECT api.agent_audit_begin('query_resource');"
+            cluster,
+            "agent_reader",
+            agent,
+            owner,
+            "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
         )
         assert result.returncode == 0, result.stderr
 
@@ -991,7 +1005,12 @@ def test_the_reader_applies_the_limit_it_is_given_without_clamping(
     a clamp at, say, 100 would be invisible until somebody asked for 101.
     """
     agent, owner = str(uuid.uuid4()), str(uuid.uuid4())
-    calls = "\n".join(["SELECT api.agent_audit_begin('query_resource');" for _ in range(4)])
+    calls = "\n".join(
+        [
+            "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);"
+            for _ in range(4)
+        ]
+    )
     result = as_agent(cluster, "agent_reader", agent, owner, calls)
     assert result.returncode == 0, result.stderr
 
@@ -1007,3 +1026,208 @@ def test_the_reader_applies_the_limit_it_is_given_without_clamping(
     assert count(4) == 4
     assert count(2) == 2, "the limit is not applied"
     assert count(1) == 1
+
+
+# ---------------------------------------------------------------------------
+# Migration 0027: what refused, and which contract said so (ADR 0178)
+# ---------------------------------------------------------------------------
+
+
+def test_the_denial_taxonomy_is_in_the_catalog(cluster: dict[str, Any]) -> None:
+    """The eight members, in the enum's own order, read from the applied cluster.
+
+    `test_denial_taxonomy.py` compares the runtime tuple against the migration
+    TEMPLATE, which is a text comparison. This is the other half: the template
+    was applied and the type exists with those members. A template that parsed
+    and did not apply would satisfy the first and fail here.
+    """
+    result = su(
+        cluster,
+        "SELECT string_agg(enumlabel, ',' ORDER BY enumsortorder) FROM pg_enum "
+        "JOIN pg_type ON pg_type.oid = pg_enum.enumtypid "
+        "WHERE typname = 'agent_denial_reason';",
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == (
+        "scope_not_held,not_in_allowlist,input_malformed,budget_exceeded,"
+        "contract_drift,upstream_refused,audit_unavailable,write_rejected"
+    ), result.stdout
+
+
+def test_a_refused_record_carries_a_reason_and_no_other_record_may(
+    cluster: dict[str, Any],
+) -> None:
+    """The equivalence CHECK, in both directions, with the control between them.
+
+    **Written as an equivalence rather than two one-way checks** because a
+    `served` row carrying a reason is as wrong as a `refused` row without one,
+    and stating it once means neither direction can be relaxed while the other
+    still looks guarded.
+
+    The control is the first case: a refused row WITH a reason must insert. A
+    constraint that refused every insert would satisfy both refusals and mean
+    nothing.
+    """
+    columns = "source, agent_id, owner_id, tool, outcome"
+    values = "'agent_plane', gen_random_uuid(), gen_random_uuid(), 't', "
+
+    cases = [
+        ("refused with a reason [the CONTROL]", "refused", "scope_not_held", True),
+        ("refused with no reason", "refused", None, False),
+        ("served with a reason", "served", "scope_not_held", False),
+        ("served with no reason", "served", None, True),
+    ]
+    for label, outcome, reason, expected in cases:
+        if reason is None:
+            statement = (
+                f"INSERT INTO app_private.agent_audit ({columns}) VALUES ({values}'{outcome}');"
+            )
+        else:
+            statement = (
+                f"INSERT INTO app_private.agent_audit ({columns}, denial_reason) "
+                f"VALUES ({values}'{outcome}', '{reason}');"
+            )
+        inserted = su(cluster, statement).returncode == 0
+        assert inserted is expected, f"{label}: inserted={inserted}, expected={expected}"
+
+
+def test_both_audit_functions_moved_to_their_new_arity_and_left_no_overload(
+    cluster: dict[str, Any],
+) -> None:
+    """0027 DROPs before it CREATEs, so exactly one signature may remain.
+
+    A `CREATE` without the `DROP` is the quiet failure: PostgreSQL would keep
+    both, a three-argument call would still resolve to the old one, and the new
+    columns would be NULL on every row while every proof passed.
+    """
+    expected = {
+        "agent_audit_begin": (
+            "p_tool text, p_request_id uuid, p_parameters jsonb, "
+            "p_capability_version text, p_contract_hash text"
+        ),
+        "agent_audit_complete": (
+            "p_audit_id uuid, p_outcome text, p_elapsed_ms integer, "
+            "p_row_count integer, p_denial_reason text"
+        ),
+    }
+    for name, signature in expected.items():
+        result = su(
+            cluster,
+            "SELECT string_agg(pg_get_function_identity_arguments(p.oid), ' | ') "
+            "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+            f"WHERE n.nspname = 'api' AND p.proname = '{name}';",
+        )
+        assert result.returncode == 0, result.stderr
+        got = result.stdout.strip()
+        assert "|" not in got, f"{name} has more than one signature live: {got}"
+        assert got == signature, f"{name} is {got!r}"
+
+
+def test_the_grants_survived_the_functions_being_replaced(cluster: dict[str, Any]) -> None:
+    """A DROP takes its grants with it, and a plane that cannot audit fails closed.
+
+    So this is not bookkeeping: without the re-GRANT, every agent write refuses
+    on its own audit record and every agent read logs a warning, on a deployment
+    whose migrations all applied cleanly.
+    """
+    signature = "text,uuid,jsonb,text,text"
+    for role_key in ("agent_reader", "agent_writer"):
+        result = su(
+            cluster,
+            f"SELECT has_function_privilege('{cluster['roles'][role_key]}', "
+            f"'api.agent_audit_begin({signature})', 'EXECUTE');",
+        )
+        assert result.stdout.strip() == "t", f"{role_key} may not execute begin"
+
+    # The control, and it is the one ADR 0134 insists on: `has_function_privilege`
+    # reports privileges held by way of MEMBERSHIP, so it can answer `true` for a
+    # role that appears in no ACL entry. A role that should NOT hold this must
+    # come back false, or the four assertions above are measuring the instrument.
+    denied = su(
+        cluster,
+        f"SELECT has_function_privilege('{cluster['roles']['anon']}', "
+        f"'api.agent_audit_begin({signature})', 'EXECUTE');",
+    )
+    assert denied.stdout.strip() == "f", "anon may execute an audit function"
+
+
+def test_a_write_records_the_reason_it_refused(cluster: dict[str, Any]) -> None:
+    """The whole point, end to end through the functions rather than the table.
+
+    `begin` then `complete('refused', ...)` with a reason, read back. This is the
+    path the runtime takes, so it exercises the argument order, the enum cast and
+    the branch that refuses a mismatched pair -- none of which a direct INSERT
+    would touch.
+    """
+    agent, owner = str(uuid.uuid4()), str(uuid.uuid4())
+    opened = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('create_note', NULL, NULL, '1.2.3', repeat('a', 64));",
+    )
+    assert opened.returncode == 0, opened.stderr
+    record = opened.stdout.strip().splitlines()[-1].strip()
+
+    closed = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        f"SELECT api.agent_audit_complete('{record}', 'refused', 5, NULL, 'scope_not_held');",
+    )
+    assert closed.returncode == 0, closed.stderr
+    assert closed.stdout.strip().splitlines()[-1].strip() == "t"
+
+    row = su(
+        cluster,
+        "SELECT outcome || '|' || denial_reason || '|' || capability_version "
+        f"|| '|' || contract_hash FROM app_private.agent_audit WHERE id = '{record}';",
+    )
+    assert row.stdout.strip() == f"refused|scope_not_held|1.2.3|{'a' * 64}", row.stdout
+
+
+def test_complete_refuses_a_reason_that_does_not_match_the_outcome(
+    cluster: dict[str, Any],
+) -> None:
+    """Refused BEFORE the UPDATE, with this repository's own errcode.
+
+    ADR 0139's rule about translating a refusal rather than relaying one: the
+    table's CHECK would refuse it too, and that arrives as a constraint name
+    inside an audit call -- which the write path treats as `audit_unavailable`
+    and fails closed on. A misspelled pair would then read as "the audit table
+    is broken", which is the wrong diagnosis.
+    """
+    agent, owner = str(uuid.uuid4()), str(uuid.uuid4())
+    opened = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('create_note', NULL, NULL, NULL, NULL);",
+    )
+    record = opened.stdout.strip().splitlines()[-1].strip()
+
+    for outcome, reason in (("served", "'scope_not_held'"), ("refused", "NULL")):
+        result = as_agent(
+            cluster,
+            "agent_writer",
+            agent,
+            owner,
+            f"SELECT api.agent_audit_complete('{record}', '{outcome}', 1, 1, {reason});",
+        )
+        assert result.returncode != 0, f"{outcome} with {reason} was accepted"
+        assert "AP422" in result.stderr, result.stderr
+
+    # The control: the matching pair closes it, so the two refusals above are
+    # about the pairing and not about the record being unreachable.
+    ok = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        f"SELECT api.agent_audit_complete('{record}', 'served', 1, 1, NULL);",
+    )
+    assert ok.returncode == 0, ok.stderr
+    assert ok.stdout.strip().splitlines()[-1].strip() == "t"
