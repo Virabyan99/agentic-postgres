@@ -187,19 +187,23 @@ USAGE
             --project-a-outputs FILE --ssh-destination op@HOST \
             [--public-ipv6 ADDR] [--project-b-outputs FILE] [-k EXPRESSION]
 
-  --mode offline   Contracts, schemas, models, the rendered pgbackrest
-                   configuration, the secret contract's third format, the
-                   drill's disposability guard driven against a stubbed docker,
-                   and the backup schedule. No host.
-  --mode host      A point-in-time restore into a disposable instance: the live
-                   cluster read before and after it, the restored instance
-                   queried, and a broken archiver made visible and repaired.
-                   Needs root -- it reaches the Docker daemon and reads
-                   root-only state -- and it materialises a SECOND copy of the
-                   cluster on disk for the duration of the drill.
-  --mode external  What the public internet reaches. Session 11 adds no external
-                   claim -- there is nothing about a backup repository a
-                   stranger can measure -- but the inherited ones still need it.
+  --mode offline   Contracts, schemas and models, plus Session 15's own offline
+                   halves: the refresh state machine and its precedence, the SQL
+                   guard's correspondence with it, the agent expiry's placement
+                   after the hash comparison, the reset's ordering, and the
+                   rotation surface's two refusals. No host, no root.
+  --mode host      The identity plane through its published route: a session
+                   renewed without the password, a replayed refresh token ending
+                   its family, a revoked agent refusing to be reinstated by a
+                   flag, and a password reset that ends the sessions the old
+                   password produced. Needs root -- it reaches the Docker daemon
+                   and reads root-only state -- and every one of these needs
+                   --admin-password-file. Without it they skip, the document
+                   comes back not_run, and this gate exits 5.
+  --mode external  What the public internet reaches. Session 15 adds no external
+                   claim -- an identity plane is measured through its own front
+                   door or on the host -- but the inherited ones still need it,
+                   because claims_through_session(15) is cumulative.
                    MUST run from a network that is not the deployment host.
 
   --project-b-outputs   Required in host mode. `project_isolation` is a claim
