@@ -1200,9 +1200,9 @@ six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
     # via python-dateutil
-sse-starlette==3.4.9 \
-    --hash=sha256:0b78e877e30c25ed86d71acbc48f200d56653ed7f778a7d53ed3d46e413f3ceb \
-    --hash=sha256:8fa074cff1a175386c20eff5ab55244bdf01678ece9da06e38cfeec9c4ac8bfd
+sse-starlette==3.4.10 \
+    --hash=sha256:710f5f5b0527409903a22a91699db02f76f4c2eb9204e882e4ee7cada76bdf75 \
+    --hash=sha256:c6c87280d8feb4e55a8d79633782766b9cac6a26da5c79a145d00aa404117a86
     # via mcp
 starlette==0.49.3 \
     --hash=sha256:1c14546f299b5901a1ea0e34410575bc33bbd741377a10484a54445588d00284 \
