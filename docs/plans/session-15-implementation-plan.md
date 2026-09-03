@@ -17,15 +17,16 @@ not repeat them.
 ## Status — read this first
 
 ```
-SESSION 15 IS IN PROGRESS. **RUNS 1-5 ARE DONE. RUN 6 IS NEXT.**
+SESSION 15 IS IN PROGRESS. **RUNS 1-6 ARE DONE. RUN 7 IS NEXT.**
 HEAD 7304cdf, main, clean and pushed.
 CURRENT_SESSION **14**, template_version **0.3.0**, outputs schema **v14**.
                  It moves to 15 in Run 7, ALL-OR-NOTHING (D690).
-divergences     **Next free: D849.** D812-D820 planning-time, D821-D825 Run 1,
+divergences     **Next free: D853.** D812-D820 planning-time, D821-D825 Run 1,
                 D826-D831 Run 2, D832-D837 Run 3, D838-D843 Run 4,
-                D844-D848 Run 5.
-ADRs            173. **Next free: 0174.** Run 1 wrote 0170, Run 2 wrote 0171,
-                Run 4 wrote 0172 (which closes D503), Run 5 wrote 0173.
+                D844-D848 Run 5, D849-D852 Run 6.
+ADRs            174. **Next free: 0175.** Run 1 wrote 0170, Run 2 wrote 0171,
+                Run 4 wrote 0172 (which closes D503), Run 5 wrote 0173,
+                Run 6 wrote 0174.
 migrations      **26 released.** Runs 2-5 added 0023, 0024, 0025, 0026.
                 D837's function landed in 0026 with its caller, ungranted.
                 Fix-forward only; every down block raises AP900.
@@ -82,7 +83,7 @@ thing to diagnose.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 planning time**, not a prediction.
 
-**Next free number after this table is D849.**
+**Next free number after this table is D853.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -124,6 +125,10 @@ planning time**, not a prediction.
 | **D846** | `auth_revoke_user_sessions` was removed in Run 3 for having no caller, so Run 5 restores it. | **It is not restored — it is written where its caller is**, in 0026, and it is **not granted to the auth service** at all. Its only caller is inside `auth_consume_password_reset`, so it needs no grant. | **Kept ungranted.** A grant the service does not need is a capability it does not hold, and the class guard added in Run 3 only checks that *granted* functions have callers. | **D837 closes here, and the shape it closes into is better than the one it was removed from.** Run 3 would have granted it to the service beside four others; Run 5 gives it exactly one caller and no grant. **The rule that forced the removal produced a smaller privilege surface than the version that broke it**, which is the argument for enforcing it as a class rather than treating it as bookkeeping. | 0173 |
 | **D847** | The reset needs a single-use token, and Run 2 already built one for sessions. | **Reusing it meant deciding where the primitive lives.** `mint`, `hash_token` and `is_wellformed` were in `refresh_sessions`, named for the plane that happened to need them first, and a reset importing `refresh_sessions.mint` reads as the wrong module doing the wrong job. | **Extracted to `app.one_time_tokens`**, with `refresh_sessions` re-exporting them so every existing caller and Run 2's 27 tests keep working unchanged. | **The alternative was a second minting routine**, and two implementations of one value is precisely what ADR 0002 exists to prevent: the second is always slightly weaker and nothing compares them. **The split is also the honest one** — what a token IS belongs to the primitive, and what a presented token MEANS stays with the plane that can answer it. | 0173, 0002 |
 | **D848** | A reset's failure modes are: unknown, spent, expired. | **There is a fourth, and it is the one that strands somebody.** If the token is spent *before* the chosen password is screened, a subject who picks a weak password holds a consumed reset and an unchanged credential — **unable to log in and unable to reset**, which is strictly worse than the refusal that produced it. | **The password is screened before the token is spent**, and `test_a_weak_password_does_not_spend_the_reset` asserts the token still works afterwards. | **The ordering is invisible in every response.** Both versions answer 422 to the weak password; they differ only in what the subject can do next, which no status code carries. It is the same class as Run 4's expiry-before-hash mutation — **a property that lives entirely in the order of two statements and shows up in no observable output** — and both were found by mutating rather than by reading. | 0173 |
+| **D849** | Sixteen rotation flags are unverified assumptions (D816), so Run 6 verifies them and then drives the surface from all three. | **One of the three cannot be verified, because the behaviour it selects between was never built.** `must_refresh_on_start` chooses between failing closed and starting on a cached last-known-good value. `bin/materialize-secrets.py` has **no cache, no fallback and no last-known-good path** — every provider failure except a 404 on an optional secret fails the whole run. The phrase "bounded last-known-good start" appears in this repository **only inside `secrets.required.yaml`'s own comments**. | **The surface does not report it, and says why.** Six `false` declarations describe leniency that does not exist; the `true` behaviour is the only behaviour. A contract test asserts the materializer still has no fallback, so the day one is built the test goes red and the flag becomes real. | **D816 said the flags were unread. This is worse and more useful: one of them is unREADABLE.** A surface driven by it would have printed a difference between six secrets and thirteen that the deployment cannot act on — a distinction with no consequence, which is the most durable kind of wrong documentation. **Two of three are now verified and driven; the third is a specification awaiting its mechanism**, and this run does not claim to have closed D816 for it. | 0174 |
+| **D850** | `one_time_initialization` is one property: the value is read once at initialization. | **It covers two different phenomena.** `postgres_init_superuser_password` is read once and **nothing is bound to it** — the cluster keeps whatever initdb set, and the file is never read again. `pgbackrest_repo_cipher_pass` is the opposite: the value **is** bound, to the repository, at `stanza-create`. Replacing it does not leave the system using the old value; it leaves the reader holding the wrong one for every backup ever taken. | **The consequence is shared and the mechanism is spelled per secret.** The flag stays — it is right that replacement achieves no rotation — and the surface refuses with the sentence that actually describes each. | **One sentence covering both is plausible and wrong for one of them**, which is D278: a repair that works is not evidence its explanation is right. The first draft of the surface printed the `initdb` sentence for the cipher pass, and it read perfectly — an operator would have learned a wrong mechanism from a correct refusal. | 0174 |
+| **D851** | The two observable flags are assumed correct because the contract is careful and five sessions old. | **Both measured against the pinned image, and both hold.** Replacing `postgres_init_superuser_password` over the same data directory: the replacement is **refused** and the original **still works** — new=False, old=True. A database role password rotates end to end, with the rollback rehearsed *before* the rotation and working after it. | **Recorded as measured rather than assumed**, and the surface is driven by flags that were checked. | **The control is what makes the first one evidence.** "The new password does not work" is equally consistent with a container that failed to start; "and the old one still does" is what makes it a live cluster keeping its original credential. **The rig also had two of my own bugs first** — a bare `-e POSTGRES_PASSWORD` shadowing the value, and the data volume mounted at the wrong path, which would have compared two unrelated clusters and produced a clean-looking refutation of a true flag. | 0174 |
+| **D852** | A mutation that disables the `one_time_initialization` branch should make the surface claim a rotation. | **It survived.** Every secret declaring `one_time_initialization: true` **also** declares `rotate_by_replacement: false`, so the second branch still refuses and the property holds. The mutation is uninformative (D493) — the refusal is over-determined by the data. | **Recorded as uninformative, and the gap it exposed is closed.** Nothing required the two flags to agree: the contract permitted `one_time_initialization: true` beside `rotate_by_replacement: true`. That guard now exists and was **verified firing** by injecting the contradiction. | **The survivor was worth more than a kill.** It did not find a weak test; it found that two independent conditions have always agreed, that nothing required them to, and that a contradictory declaration would produce a plan reporting a rotation the secret's own entry denies. **Asserted as an implication rather than an equality**, deliberately — `rotate_by_replacement: false` without `one_time_initialization` is a legitimate "replacement does not rotate this, for some other reason", and forcing the converse would make a future entry lie to satisfy a test. | 0174 |
 ---
 
 ## 2. What Session 15 adds to the acceptance registry
@@ -493,6 +498,54 @@ rotates **one** class end to end with its rollback rehearsed first (D815). ADR
 **0171**.
 
 **Expect surviving flags to be wrong.** A survivor is evidence — read it.
+
+**Done.** — D849–D852, ADR **0174**. **The plan said to verify the flags before
+reading them, and that ordering is what the run found.**
+
+**What shipped:** `agentic_postgres.rotation`, `bin/rotate-secret.{sh,py}`, and
+eleven contract assertions. The surface answers one question per secret — *if you
+replaced this value, what would happen* — and **the two refusals are the reason
+it exists**: both look exactly like the seventeen that rotate, so a plan printing
+their files and services would describe, in detail, a rotation that does not
+happen. That is D56, written down five sessions ago and until now enforced by
+nothing.
+
+**D849 is the finding, and it is sharper than D816's.** D816 said the flags were
+unread. One of them is **unreadable**: `must_refresh_on_start` selects between
+failing closed and starting on a cached last-known-good value, and the
+materializer has **no cache** — the phrase appears in this repository only inside
+`secrets.required.yaml`'s own comments. Six `false` declarations describe
+leniency that does not exist. The surface does not report it and says why, and a
+test asserts the materializer still has no fallback so the day one is built the
+flag becomes real.
+
+**Two of three flags were measured, not assumed** (D851). Replacing
+`postgres_init_superuser_password` over the same data directory: replacement
+refused, original still works — and the control is what makes that evidence
+rather than a broken container. A role password rotated end to end with the
+rollback **rehearsed first**. The rig carried two of my own bugs before it
+carried a result, and the second — the data volume at the wrong path — would have
+compared two unrelated clusters and produced a clean-looking refutation of a true
+flag.
+
+**D850: one flag, two phenomena.** The first draft printed the `initdb` sentence
+for the cipher pass and it read perfectly — an operator would have learned a
+wrong mechanism from a correct refusal.
+
+**Seven mutations, six killed, and the survivor was worth more than a kill**
+(D852). `M1` disabled the `one_time_initialization` branch and the surface still
+refused, because every secret declaring it also declares
+`rotate_by_replacement: false`. Uninformative as a mutation, and it exposed that
+**nothing required the two to agree** — a contradictory declaration would have
+produced a plan reporting a rotation the secret's own entry denies. That guard
+now exists and was verified firing.
+
+**Not done, and named rather than implied:** **one class is proved end to end and
+sixteen are not** (D815). A database role password was rotated in a rig; the
+others rotate by the same mechanism and have not each been performed. Nothing
+here touched the provider, and no verb in this command can. `IDN-ROT-001` is not
+a registered requirement yet — Run 7's bump (D690) — and **D816 is not closed**:
+two of three flags are verified and driven, the third awaits its mechanism.
 
 ### Run 7 — the bump
 
