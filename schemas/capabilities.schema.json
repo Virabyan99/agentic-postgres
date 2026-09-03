@@ -9,8 +9,8 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [1, 2],
-      "description": "1 or 2 (ADR 0177). At v1 `version`, `lifecycle` and `risk` are FORBIDDEN; at v2 all three are REQUIRED, for every kind. Both halves are deliberate: forbidding them at v1 keeps a manifest from carrying fields nothing reads at that version, and requiring them at v2 keeps v2 from being a version in which they are optional and therefore absent. v1 still loads because `capabilities.yaml` is a gitignored operator input that exists only on the host -- a schema refusing it outright would fail the next deploy on a file no commit can fix, in a session that has not been to the host yet."
+      "enum": [1, 2, 3],
+      "description": "1, 2 or 3. **A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it** (ADR 0177), and both halves are deliberate: forbidding it earlier keeps a manifest from carrying a field nothing reads at that version, and requiring it keeps the introducing version from being one in which it is optional and therefore absent. v2 adds `version`, `lifecycle` and `risk` for every kind. v3 adds `max_response_bytes` and `max_concurrent_calls` to reads and writes, and `supports_dry_run` and `requires_approval` to writes -- all four FORBIDDEN on a metadata capability, which bounds none of them (ADR 0179). Every older version still loads, because `capabilities.yaml` is a gitignored operator input that exists only on the host: a schema refusing one outright would fail the next deploy on a file no commit can fix."
     },
     "capabilities": {
       "type": "array",
@@ -22,7 +22,7 @@
   "allOf": [
     {
       "if": {
-        "properties": { "schema_version": { "const": 2 } },
+        "properties": { "schema_version": { "minimum": 2 } },
         "required": ["schema_version"]
       },
       "then": {
@@ -47,7 +47,54 @@
           }
         }
       },
-      "description": "The version gate, at the document level rather than per capability, because a manifest declaring one version and mixing both shapes is the state this exists to refuse (ADR 0177)."
+      "description": "The v2 gate, at the document level rather than per capability, because a manifest declaring one version and mixing two shapes is the state this exists to refuse (ADR 0177). `minimum: 2` rather than `const: 2` since v3 arrived: a field introduced at v2 stays required at every version above it, and `const` would have made v3 a version in which the three were forbidden again."
+    },
+    {
+      "if": {
+        "properties": { "schema_version": { "minimum": 3 } },
+        "required": ["schema_version"]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "allOf": [
+                {
+                  "if": {
+                    "properties": { "kind": { "enum": ["read", "write"] } },
+                    "required": ["kind"]
+                  },
+                  "then": { "required": ["max_response_bytes", "max_concurrent_calls"] }
+                },
+                {
+                  "if": {
+                    "properties": { "kind": { "const": "write" } },
+                    "required": ["kind"]
+                  },
+                  "then": { "required": ["supports_dry_run", "requires_approval"] }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "not": {
+                "anyOf": [
+                  { "required": ["max_response_bytes"] },
+                  { "required": ["max_concurrent_calls"] },
+                  { "required": ["supports_dry_run"] },
+                  { "required": ["requires_approval"] }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "description": "The v3 gate (ADR 0179). Required by KIND rather than uniformly: a read and a write both produce a response and both take a concurrency slot, and only a write has anything to not-do, so only a write declares a dry run and an approval. A metadata capability is forbidden all four by `$defs/capability`'s own branch -- stated there rather than here, because it is a fact about the kind and not about the version."
     }
   ],
   "$defs": {
@@ -232,6 +279,26 @@
           "description": "Write side-effect bound."
         },
         "idempotent": { "type": "boolean" },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576,
+          "description": "This capability's own ceiling on one serialized response, narrowing `MAX_SERIALIZED_BYTES` (ADR 0179). **The maximum IS that constant**, so a manifest cannot widen the global bound -- and the number lives in two files, which a contract test keeps equal, because JSON Schema cannot import a Python constant and the choice is between two authorities that are checked and one that is trusted (ADR 0002). Measured, so the value is read against something: a metadata response is 288-683 bytes, a write's is 8-12 KB at 4 KiB of content, and `query_resource` over `notes` reaches the 1 MiB ceiling at 42 rows when each column holds 4 KiB -- against a `max_rows` of 200. The row budget and the byte budget genuinely cross over, at roughly 860 bytes per column, which is ADR 0129's independence claim in numbers. The floor of 1024 is a floor on USEFULNESS: a smaller ceiling could not carry one row of anything."
+        },
+        "max_concurrent_calls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "description": "This capability's own ceiling on simultaneous in-flight calls, narrowing the process-wide semaphore (ADR 0179). **The effective bound is `min(this, process-wide)`, taken at the acquisition** -- and this `maximum` is a sanity cap rather than the real ceiling, because the process-wide bound is rendered from `api.rest.pool_size` at half (ADR 0129) and a capability manifest never sees it. The asymmetry with `max_response_bytes`, whose maximum IS its global, is stated because a reader seeing two maxima would reasonably assume both are the enforcement. Narrowing only: a capability that could raise its own share would be deciding how much of a human-facing pool an agent may take, which is ADR 0070's rule inverted."
+        },
+        "supports_dry_run": {
+          "type": "boolean",
+          "description": "Whether this write can be asked to run its authorization, scope and validation and then stop (ADR 0179). **Declared at v3 and BEHAVING in Session 16 Run 7** (D892): ADR 0177 requires a field at the version that introduces it, and declaring this in a second bump would move the manifest format three times in one session. Writes only -- a read and a metadata call change nothing, so there is nothing for them to not-do."
+        },
+        "requires_approval": {
+          "type": "boolean",
+          "description": "Whether this write is refused pending an approval this product does not implement (D870, ADR 0179). **A declaration and a named refusal, never a workflow**: approval implies a pending request, durable state holding it, a second principal, and a path by which the caller learns the outcome -- the last of which is a notification plane this product does not have. Declared at v3 and refusing in Run 7."
+        },
         "timeout_ms": {
           "type": "integer",
           "minimum": 100,
@@ -282,7 +349,11 @@
                 { "required": ["filters"] },
                 { "required": ["order_by"] },
                 { "required": ["max_rows"] },
-                { "required": ["max_affected_rows"] }
+                { "required": ["max_affected_rows"] },
+                { "required": ["max_response_bytes"] },
+                { "required": ["max_concurrent_calls"] },
+                { "required": ["supports_dry_run"] },
+                { "required": ["requires_approval"] }
               ]
             }
           },

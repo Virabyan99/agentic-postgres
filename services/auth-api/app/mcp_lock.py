@@ -38,7 +38,7 @@ from typing import Any
 #: while this still said 1 would deploy a project whose MCP service refuses to
 #: come up -- and `DEFERRED_SERVICES` starts it at step 6b, so the failure lands
 #: in the middle of a convergence rather than at its edge.
-SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 #: The lock version at which a tool carries `risk` and its backing
 #: `capabilities`. Below it those keys must be ABSENT and above it required --
@@ -46,6 +46,13 @@ SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
 #: is a surface nobody bounded, and because a tool that is silently missing its
 #: risk is indistinguishable from one classified as harmless.
 VERSIONED_CAPABILITIES_FROM = 2
+
+#: The lock version at which a tool carries its own budget bounds (ADR
+#: 0179). Below it those keys must be ABSENT and at or above it a read or a
+#: write carries both -- a metadata tool carries neither at any version,
+#: because it bounds neither: `_within_byte_budget` never sees its result
+#: and it takes no concurrency slot.
+BUDGETS_FROM = 3
 
 #: The two tools that answer from the lock, the two that read PostgREST, and
 #: the two that write it (Session 9 Run 4, D486). Named rather than inferred
@@ -170,6 +177,17 @@ class Tool:
     #: row where the difference becomes a record rather than a variable.
     risk: str | None = None
     capabilities: tuple[CapabilityRef, ...] = ()
+    #: `None` below lock schema version 3, and on a metadata tool at every
+    #: version -- it bounds neither (ADR 0179). The runtime takes
+    #: `min(this, the global)`, so a lock that widened would be narrowed back
+    #: here: the schema refuses a wider MANIFEST and this refuses a wider LOCK,
+    #: which is a different input and one this module is required to distrust.
+    max_response_bytes: int | None = None
+    max_concurrent_calls: int | None = None
+    #: Declared at v3 and behaving in Run 7 (D892). Parsed now so the field has
+    #: a reader the moment it exists, rather than sitting in the lock unread.
+    supports_dry_run: bool | None = None
+    requires_approval: bool | None = None
 
     def discoverable_by(self, scopes: frozenset[str]) -> bool:
         """Whether a caller holding `scopes` may see this tool at all.
@@ -302,6 +320,7 @@ def _tool(entry: Any, version: int) -> Tool:
         raise LockError(f"tool {name} writes one operation and must name no resource")
     write = _write(entry, name) if name in WRITE_TOOLS else None
     risk, capabilities = _classification(entry, name, version)
+    budgets = _budgets(entry, name, kind, version)
 
     return Tool(
         name=name,
@@ -315,6 +334,7 @@ def _tool(entry: Any, version: int) -> Tool:
         audit_redact=_strings(entry.get("audit_redact", []), f"tool {name} audit_redact"),
         risk=risk,
         capabilities=capabilities,
+        **budgets,
     )
 
 
@@ -368,6 +388,56 @@ def _classification(
             )
         )
     return risk, tuple(refs)
+
+
+def _budgets(entry: Any, tool_name: str, kind: str, version: int) -> dict[str, Any]:
+    """The per-capability bounds a read or a write carries from lock version 3.
+
+    **Both directions, as everywhere else in this module.** A tool carrying them
+    below v3 came from a compiler that disagrees with its own declared version;
+    a metadata tool carrying them at any version is describing a bound it has --
+    `_within_byte_budget` never sees its result and it takes no concurrency slot
+    (ADR 0179).
+
+    The values are checked rather than trusted. A lock is an input, not a
+    teammate: the schema refuses a manifest that widens, and this refuses a lock
+    that does, because they are two different documents and only one of them was
+    produced by this repository's compiler.
+    """
+    where = f"tool {tool_name}"
+    keys = ("max_response_bytes", "max_concurrent_calls", "supports_dry_run", "requires_approval")
+    present = [key for key in keys if key in entry]
+
+    if version < BUDGETS_FROM or kind == "metadata":
+        if present:
+            raise LockError(
+                f"{where} carries {present} at lock schema_version {version} with kind "
+                f"{kind!r}, which bounds none of them; they arrive at {BUDGETS_FROM} for "
+                "a read or a write"
+            )
+        return {}
+
+    budgets: dict[str, Any] = {
+        "max_response_bytes": _require(entry, "max_response_bytes", int, where),
+        "max_concurrent_calls": _require(entry, "max_concurrent_calls", int, where),
+    }
+    if budgets["max_response_bytes"] < 1:
+        raise LockError(f"{where}.max_response_bytes is not a positive number of bytes")
+    if budgets["max_concurrent_calls"] < 1:
+        raise LockError(
+            f"{where}.max_concurrent_calls is {budgets['max_concurrent_calls']}; "
+            "a tool bounded to nothing"
+        )
+
+    if kind == "write":
+        budgets["supports_dry_run"] = _require(entry, "supports_dry_run", bool, where)
+        budgets["requires_approval"] = _require(entry, "requires_approval", bool, where)
+    elif "supports_dry_run" in entry or "requires_approval" in entry:
+        raise LockError(
+            f"{where} is a {kind} and declares a dry run or an approval; a call that "
+            "changes nothing has neither"
+        )
+    return budgets
 
 
 def _write(entry: Any, tool_name: str) -> WriteSpec:

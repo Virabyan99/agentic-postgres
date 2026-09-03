@@ -43,6 +43,7 @@ disclosure control on top of that, never instead of it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 
@@ -359,10 +360,16 @@ def query_resource(
         raise ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED) from error
 
     result = {"resource": found.name, "row_count": len(rows), "rows": rows}
-    return _within_budget(result, found.max_rows)
+    return _within_budget(
+        result,
+        found.max_rows,
+        _byte_ceiling(lock.tool("query_resource").max_response_bytes),
+    )
 
 
-def _within_budget(result: dict[str, Any], max_rows: int) -> dict[str, Any]:
+def _within_budget(
+    result: dict[str, Any], max_rows: int, ceiling: int = MAX_SERIALIZED_BYTES
+) -> dict[str, Any]:
     """Both budgets, checked on the way out (AGT-BUDGET-001).
 
     **Server-side regardless of client input**: the row ceiling is the lock's and
@@ -377,10 +384,29 @@ def _within_budget(result: dict[str, Any], max_rows: int) -> dict[str, Any]:
         # a fault in the deployment rather than in the request. Nothing the
         # caller did produced it and nothing it can do fixes it.
         raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
-    return _within_byte_budget(result)
+    return _within_byte_budget(result, ceiling)
 
 
-def _within_byte_budget(result: dict[str, Any]) -> dict[str, Any]:
+def _byte_ceiling(declared: int | None) -> int:
+    """This capability's ceiling, which may only NARROW the global (ADR 0179).
+
+    `min` rather than the declared value, and the schema's `maximum` says the
+    same thing — deliberately twice. The schema refuses a wider manifest before
+    a deployment exists; this refuses a wider LOCK, which is a different input
+    and one the runtime is required to distrust ("a lock is an input, not a
+    teammate"). A lock compiled by something other than this repository's
+    compiler is exactly the case where one of the two is the only one left.
+
+    `None` at lock schema version below 3, where a capability declares none.
+    """
+    if declared is None:
+        return MAX_SERIALIZED_BYTES
+    return min(declared, MAX_SERIALIZED_BYTES)
+
+
+def _within_byte_budget(
+    result: dict[str, Any], ceiling: int = MAX_SERIALIZED_BYTES
+) -> dict[str, Any]:
     """The byte ceiling alone, on every result this process returns.
 
     **Split out because the write path is a caller of it** (§6 question 5: when
@@ -390,14 +416,22 @@ def _within_byte_budget(result: dict[str, Any]) -> dict[str, Any]:
     been the one path returning an unbounded response. `content` is an unbounded
     `text` column and `create_note` echoes the created row back, so the ceiling
     is not theoretical there.
+
+    `ceiling` defaults to the global so that a caller which has no capability
+    bound to hand still gets the bound that always applied. **Measured** before
+    the per-capability bound was added: a metadata response is 288-683 bytes, a
+    write's is 8-12 KB at 4 KiB of content, and a read over `notes` reaches 1 MiB
+    at 42 rows when every column holds 4 KiB -- against a `max_rows` of 200. The
+    row budget and the byte budget cross over at roughly 860 bytes per column,
+    which is what makes them independent in fact and not only by decision.
     """
     serialized = len(json.dumps(result, separators=(",", ":")).encode("utf-8"))
-    if serialized > MAX_SERIALIZED_BYTES:
+    if serialized > ceiling:
         # Caller-visible, and the advice is the point: this is the one budget a
         # caller can stay inside by asking differently.
         raise AgentVisible(
             BUDGET_EXCEEDED,
-            f"the result is {serialized} bytes, above the {MAX_SERIALIZED_BYTES} ceiling; "
+            f"the result is {serialized} bytes, above the {ceiling} ceiling; "
             "ask for fewer columns or fewer rows",
             BUDGET_EXCEEDED_REASON,
         )
@@ -437,7 +471,18 @@ def run_report(
         # has changed underneath the lock, and reporting the first row would be
         # reporting a number nobody bounded. Structural: not the caller's doing.
         raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
-    return rows[0]
+    # **`run_report` returned its row with no byte check at all until D899.**
+    #
+    # `_within_byte_budget` was split out in Session 9 precisely so the write
+    # path would get the ceiling the read path had -- its docstring says so, and
+    # cites question 5 by name. This is the THIRD caller, and it was missed by
+    # the same split: `query_resource` reaches the check through `_within_budget`
+    # and a write reaches it directly, and this one returned `rows[0]`.
+    #
+    # Not theoretical. Measured at 32,927 bytes for one row when each column
+    # holds 4 KiB -- one row, so the row budget can never bind, which is exactly
+    # the case a byte ceiling exists for.
+    return _within_byte_budget(rows[0], _byte_ceiling(tool.max_response_bytes))
 
 
 def invoke_write(
@@ -496,7 +541,10 @@ def invoke_write(
         # (D487). Zero is a shape that changed underneath the lock, and the
         # write has already committed, so this is loud rather than quiet.
         raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
-    return _within_byte_budget({"tool": tool, "row_count": len(rows), "row": rows[0]})
+    return _within_byte_budget(
+        {"tool": tool, "row_count": len(rows), "row": rows[0]},
+        _byte_ceiling(lock.tool(tool).max_response_bytes),
+    )
 
 
 def _filter(entry: Any) -> Filter:
@@ -541,6 +589,28 @@ def register(
     from app.mcp_authorization import current_request_id, current_token
 
     read_slots = slots if slots is not None else ReadSlots(DEFAULT_MAX_CONCURRENT_READS)
+
+    # **One semaphore per tool that declares a bound** (ADR 0179), built once at
+    # registration rather than per call: a slot created per request bounds
+    # nothing, because each caller would get its own.
+    #
+    # `min(declared, the process-wide limit)` -- a capability may narrow the
+    # share and may never widen it. A tool declaring more than the process has
+    # is not an error, it is simply not the binding constraint, and clamping
+    # here means the two numbers cannot disagree later.
+    #
+    # A tool with no declared bound (schema version below 3, or a metadata tool)
+    # gets a null slot that admits everything, so the global remains its only
+    # bound -- which is exactly what it had before this run.
+    _per_tool = {
+        entry.name: ReadSlots(min(entry.max_concurrent_calls, read_slots.limit))
+        for entry in lock.tools
+        if entry.max_concurrent_calls is not None
+    }
+
+    def tool_slots(name: str) -> Any:
+        """This tool's own slot, or a context manager that admits everything."""
+        return _per_tool.get(name) or contextlib.nullcontext()
 
     async def bounded(
         tool: str, resource: str | None, work: Any, *, kind: str, arguments: dict[str, Any]
@@ -649,7 +719,19 @@ def register(
                     # the call on the loop, six overlapping reads peaked at ONE
                     # concurrent, so the semaphore never saw contention and the
                     # bound it appears to apply was unreachable.
-                    async with read_slots:
+                    # **The tool's own slot, then the process-wide one** (ADR
+                    # 0179), and the order is deliberate. The process-wide bound
+                    # is a share of PostgREST's pool and is the one that protects
+                    # a resource shared with human callers, so it is acquired
+                    # LAST and released FIRST -- a task waiting for the global
+                    # holds only its own tool's slot, never a share of the pool
+                    # it has not been granted.
+                    #
+                    # Both are counting semaphores over disjoint sets, so there
+                    # is no cycle and no deadlock: a task holds at most one of
+                    # each and never waits on a tool slot while holding a global
+                    # one.
+                    async with tool_slots(tool), read_slots:
                         result = await asyncio.to_thread(work)
             except AgentVisible as visible:
                 timed.refused()

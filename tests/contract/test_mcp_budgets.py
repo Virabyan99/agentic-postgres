@@ -744,3 +744,67 @@ def test_the_fingerprint_never_reaches_a_sink_either() -> None:
                         offenders.append(f"{path.name}:{node.lineno}")
 
     assert not offenders, f"a token fingerprint reaches a sink: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# Per-capability narrowing (ADR 0179)
+# ---------------------------------------------------------------------------
+
+
+def test_a_capability_may_narrow_the_byte_ceiling_and_may_not_widen_it() -> None:
+    """`min`, not the declared value, and the schema says the same thing twice.
+
+    Deliberately twice: the schema refuses a wider MANIFEST before a deployment
+    exists, and this refuses a wider LOCK, which is a different document and one
+    the runtime is required to distrust. A lock compiled by something other than
+    this repository's compiler is the case where only one of the two is left.
+    """
+    from app.mcp_tools import MAX_SERIALIZED_BYTES, _byte_ceiling
+
+    assert _byte_ceiling(None) == MAX_SERIALIZED_BYTES, "an undeclared bound is the global"
+    assert _byte_ceiling(65536) == 65536, "a narrower bound is taken"
+    assert _byte_ceiling(MAX_SERIALIZED_BYTES) == MAX_SERIALIZED_BYTES
+    assert _byte_ceiling(MAX_SERIALIZED_BYTES * 2) == MAX_SERIALIZED_BYTES, (
+        "a lock declaring more than the global widened it"
+    )
+
+
+def test_the_schema_maximum_is_the_runtime_constant() -> None:
+    """Two files, one number, checked rather than trusted (ADR 0002).
+
+    JSON Schema cannot import a Python constant, so the choice is between two
+    authorities that are compared and one that is hoped about. This is the same
+    arrangement `DENIAL_REASONS` has against migration 0027.
+    """
+    import json
+
+    from app.mcp_tools import MAX_SERIALIZED_BYTES
+
+    schema = json.loads(
+        (REPO_ROOT / "schemas" / "capabilities.schema.json").read_text(encoding="utf-8")
+    )
+    declared = schema["$defs"]["capability"]["properties"]["max_response_bytes"]["maximum"]
+    assert declared == MAX_SERIALIZED_BYTES, (
+        f"the schema caps a capability at {declared} and the runtime ceiling is "
+        f"{MAX_SERIALIZED_BYTES}; a manifest could declare a bound the runtime "
+        "would then narrow, which makes the schema's refusal a lie"
+    )
+
+
+def test_a_result_above_a_narrowed_ceiling_is_refused_and_says_which_ceiling() -> None:
+    """The message names the ceiling that applied, not the global.
+
+    A refusal quoting 1048576 to a caller bounded at 65536 would send them
+    looking for a limit that is not the one they hit.
+    """
+    from app.mcp_errors import AgentVisible
+    from app.mcp_tools import _within_byte_budget
+
+    payload = {"rows": ["x" * 200_000]}
+
+    assert _within_byte_budget(payload) is payload, "the control: it fits the global"
+
+    with pytest.raises(AgentVisible) as raised:
+        _within_byte_budget(payload, 65536)
+    assert "65536" in str(raised.value)
+    assert "1048576" not in str(raised.value)

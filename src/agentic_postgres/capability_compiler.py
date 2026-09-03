@@ -68,7 +68,7 @@ CONTRACT_ID = "notes-tasks-agent-v1"
 #: always did. A fixed number on a document whose shape varies is a version that
 #: describes nothing -- and a v1 manifest still has to render, because
 #: `capabilities.yaml` lives only on the host.
-COMPILED_SCHEMA_VERSIONS = frozenset({1, 2})
+COMPILED_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 #: Ordered, so a tool backed by several capabilities can take the riskiest.
 #: Ascending; `_riskiest` compares by index and nothing else compares risks.
@@ -76,6 +76,14 @@ RISK_ORDER = ("low", "moderate", "high")
 
 #: The three fields schema version 2 adds, carried verbatim into every tool.
 VERSIONED_FIELDS = ("version", "lifecycle", "risk")
+
+#: The two bounds schema version 3 adds to a read and a write, and the two
+#: declarations it adds to a write (ADR 0179). Kept apart from
+#: `VERSIONED_FIELDS` because they arrive per KIND rather than for every
+#: capability -- a metadata capability declares none of them, and a read
+#: declares two of the four.
+BUDGET_FIELDS = ("max_response_bytes", "max_concurrent_calls")
+WRITE_DECLARATIONS = ("supports_dry_run", "requires_approval")
 
 __all__ = [
     "BACKED_SOURCES",
@@ -436,12 +444,41 @@ def _compile_tool(name: str, backing: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     if all(field in capability for capability in declared for field in VERSIONED_FIELDS):
         compiled["capabilities"] = [
-            {"name": capability["name"], **{f: capability[f] for f in VERSIONED_FIELDS}}
+            {
+                "name": capability["name"],
+                **{f: capability[f] for f in VERSIONED_FIELDS},
+                **{
+                    f: capability[f]
+                    for f in (*BUDGET_FIELDS, *WRITE_DECLARATIONS)
+                    if f in capability
+                },
+            }
             for capability in declared
         ]
         compiled["risk"] = max(
             (capability["risk"] for capability in declared), key=RISK_ORDER.index
         )
+
+    # **The NARROWEST wins** (ADR 0179). A tool may be backed by several
+    # capabilities and each declares its own bound, so the tool's effective bound
+    # is the smallest -- the opposite aggregation from `risk`, and for the same
+    # reason: risk takes the worst case because a tool is as dangerous as the
+    # most dangerous thing behind it, and a bound takes the tightest because a
+    # tool may do no more than the most restricted thing behind it permits.
+    #
+    # Emitted only when EVERY backing capability declares them, so a v2 manifest
+    # produces the tools it always did and the keys are absent rather than
+    # defaulted (D600).
+    if all(field in capability for capability in declared for field in BUDGET_FIELDS):
+        for field in BUDGET_FIELDS:
+            compiled[field] = min(capability[field] for capability in declared)
+    if all(field in capability for capability in declared for field in WRITE_DECLARATIONS):
+        for field in WRITE_DECLARATIONS:
+            # A write is one-to-one with its operation (D486), so there is one
+            # capability here and `any` is an identity. Written as a fold rather
+            # than as `declared[0][field]` so that grouping a write later -- which
+            # the compiler refuses today -- would not silently take the first.
+            compiled[field] = any(capability[field] for capability in declared)
 
     if kind == "metadata":
         compiled["reads"] = "lock"

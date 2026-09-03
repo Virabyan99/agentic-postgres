@@ -77,7 +77,7 @@ would not have returned.
 
 <!-- BEGIN GENERATED: mcp-catalog -->
 
-Contract `notes-tasks-agent-v1`, schema version 2: **6 tools** behind **7 capabilities**.
+Contract `notes-tasks-agent-v1`, schema version 3: **6 tools** behind **7 capabilities**.
 
 | Tool | Kind | Reads | Scopes | Timeout | Risk |
 |---|---|---|---|---|---|

@@ -1,7 +1,7 @@
 {
   "capability_count": 7,
   "contract_id": "notes-tasks-agent-v1",
-  "schema_version": 2,
+  "schema_version": 3,
   "tool_count": 6,
   "tools": [
     {
@@ -15,8 +15,12 @@
       "capabilities": [
         {
           "lifecycle": "active",
+          "max_concurrent_calls": 1,
+          "max_response_bytes": 65536,
           "name": "create_note",
+          "requires_approval": false,
           "risk": "moderate",
+          "supports_dry_run": false,
           "version": "1.0.0"
         }
       ],
@@ -31,6 +35,8 @@
       "idempotent": false,
       "kind": "write",
       "max_affected_rows": 1,
+      "max_concurrent_calls": 1,
+      "max_response_bytes": 65536,
       "name": "create_note",
       "operation": {
         "method": "post",
@@ -40,8 +46,10 @@
       "required_scopes": [
         "notes:write"
       ],
+      "requires_approval": false,
       "risk": "moderate",
       "source": "postgrest",
+      "supports_dry_run": false,
       "timeout_ms": 5000
     },
     {
@@ -105,12 +113,16 @@
       "capabilities": [
         {
           "lifecycle": "active",
+          "max_concurrent_calls": 2,
+          "max_response_bytes": 1048576,
           "name": "query_notes",
           "risk": "low",
           "version": "1.0.0"
         },
         {
           "lifecycle": "active",
+          "max_concurrent_calls": 2,
+          "max_response_bytes": 1048576,
           "name": "query_tasks",
           "risk": "low",
           "version": "1.0.0"
@@ -129,6 +141,8 @@
         ]
       ],
       "kind": "read",
+      "max_concurrent_calls": 2,
+      "max_response_bytes": 1048576,
       "max_rows": 200,
       "name": "query_resource",
       "resources": [
@@ -299,6 +313,8 @@
       "capabilities": [
         {
           "lifecycle": "active",
+          "max_concurrent_calls": 1,
+          "max_response_bytes": 65536,
           "name": "run_report",
           "risk": "low",
           "version": "1.0.0"
@@ -314,6 +330,8 @@
         ]
       ],
       "kind": "read",
+      "max_concurrent_calls": 1,
+      "max_response_bytes": 65536,
       "max_rows": 1,
       "name": "run_report",
       "resources": [
@@ -358,8 +376,12 @@
       "capabilities": [
         {
           "lifecycle": "active",
+          "max_concurrent_calls": 1,
+          "max_response_bytes": 65536,
           "name": "update_task_status",
+          "requires_approval": false,
           "risk": "moderate",
+          "supports_dry_run": false,
           "version": "1.0.0"
         }
       ],
@@ -374,6 +396,8 @@
       "idempotent": true,
       "kind": "write",
       "max_affected_rows": 1,
+      "max_concurrent_calls": 1,
+      "max_response_bytes": 65536,
       "name": "update_task_status",
       "operation": {
         "method": "post",
@@ -383,8 +407,10 @@
       "required_scopes": [
         "tasks:write"
       ],
+      "requires_approval": false,
       "risk": "moderate",
       "source": "postgrest",
+      "supports_dry_run": false,
       "timeout_ms": 5000
     }
   ]

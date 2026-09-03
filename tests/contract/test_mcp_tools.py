@@ -27,6 +27,7 @@ rather than an error. That is why these are tests and not comments.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -2120,3 +2121,171 @@ def test_a_version_two_lock_is_parsed_as_strictly_as_the_rest_of_it(
 
     with pytest.raises(LockError, match=expected):
         _load(tmp_path, document)
+
+
+def test_a_version_three_lock_is_parsed_as_strictly_as_the_rest(tmp_path: Path) -> None:
+    """A lock parsed leniently is a surface nobody bounded (ADR 0179).
+
+    Both directions: a read or a write at v3 must carry both bounds, and a
+    metadata tool must carry neither at any version -- it bounds neither, so a
+    value there would describe a limit that does not exist.
+    """
+    document = _v2_document(*EXPECTED_TOOL_NAMES)
+    document["schema_version"] = 3
+    for tool in document["tools"]:
+        if tool["name"] in METADATA_TOOLS:
+            continue
+        tool["max_response_bytes"] = 65536
+        tool["max_concurrent_calls"] = 2
+        if tool["name"] in WRITE_TOOLS:
+            tool["supports_dry_run"] = False
+            tool["requires_approval"] = False
+
+    lock = _load(tmp_path, document)
+    for tool in lock.tools:
+        if tool.name in METADATA_TOOLS:
+            assert tool.max_response_bytes is None, f"{tool.name} bounds nothing and declares one"
+            assert tool.max_concurrent_calls is None
+        else:
+            assert tool.max_response_bytes == 65536
+            assert tool.max_concurrent_calls == 2
+
+    missing = json.loads(json.dumps(document))
+    del missing["tools"][[t["name"] for t in missing["tools"]].index("query_resource")][
+        "max_response_bytes"
+    ]
+    with pytest.raises(LockError, match="max_response_bytes"):
+        _load(tmp_path, missing)
+
+    leaked = json.loads(json.dumps(document))
+    leaked["tools"][[t["name"] for t in leaked["tools"]].index("list_resources")][
+        "max_response_bytes"
+    ] = 1024
+    with pytest.raises(LockError, match="bounds none of them"):
+        _load(tmp_path, leaked)
+
+
+def _with_tool_bound(lock: CapabilityLock, name: str, *, declared: int) -> CapabilityLock:
+    """The same lock with one tool carrying a concurrency bound (ADR 0179)."""
+    import dataclasses
+
+    tools = tuple(
+        dataclasses.replace(tool, max_concurrent_calls=declared) if tool.name == name else tool
+        for tool in lock.tools
+    )
+    return dataclasses.replace(lock, tools=tools)
+
+
+def test_a_per_tool_bound_narrows_the_process_wide_one_through_register(
+    monkeypatch: Any,
+) -> None:
+    """ADR 0179, asserted **through `register()`** and not around it.
+
+    Run 4's first version of this built its own semaphores and its own driver,
+    so three mutations survived: dropping the per-tool slot, replacing the global
+    with it, and letting a tool declare more than the process has. None of them
+    was reachable from a test that never called `register()` -- the same seam the
+    test above this one records from Session 9, and the same lesson a session
+    later.
+
+    `available` on the process-wide semaphore is what the neighbouring test
+    reads, and it is read here for both: a call inside a bounded tool must be
+    holding one of each, so both counters drop.
+    """
+    import asyncio
+
+    from app.mcp_budgets import ReadSlots
+
+    lock = _lock(NOTES)
+    #: The tool declares 4 and the process has 2, so the process must win -- the
+    #: arm that fails if the `min` is dropped.
+    lock = _with_tool_bound(lock, "query_resource", declared=4)
+    slots = ReadSlots(2)
+    seen: dict[str, int] = {}
+
+    _with_scopes(monkeypatch, "meta:read", "notes:read")
+    monkeypatch.setattr(mcp_authorization, "current_token", lambda: "t")
+    monkeypatch.setattr(mcp_authorization, "current_request_id", lambda: REQUEST_ID)
+    monkeypatch.setattr(mcp_tools, "audit_begin", lambda *_, **__: "audit-1")
+    monkeypatch.setattr(mcp_tools, "audit_complete", lambda *_, **__: True)
+
+    def watching(*_: Any, **__: Any) -> dict[str, Any]:
+        seen["global"] = slots.available
+        return {"resource": "notes", "row_count": 0, "rows": []}
+
+    monkeypatch.setattr(mcp_tools, "query_resource", watching)
+
+    registry = _Registry()
+    mcp_tools.register(registry, lock, base_url=BASE, slots=slots)
+    asyncio.run(registry.tools["query_resource"](resource="notes"))
+
+    assert seen["global"] == slots.limit - 1, (
+        "the call did not hold the process-wide slot; the per-tool one replaced it "
+        "rather than narrowing it, so a capability takes more of the pool than its share"
+    )
+
+    # **The arm the previous version could not reach.** Asserting that the global
+    # slot is held stays true when the per-tool slot is dropped, so that mutation
+    # survived. A peak BELOW the global is something only the per-tool bound can
+    # produce: two concurrent calls, a tool bound of 1, a global of 4.
+    narrow = _with_tool_bound(_lock(NOTES), "query_resource", declared=1)
+    roomy = ReadSlots(4)
+    peak = {"now": 0, "peak": 0}
+
+    def counting(*_: Any, **__: Any) -> dict[str, Any]:
+        peak["now"] += 1
+        peak["peak"] = max(peak["peak"], peak["now"])
+        time.sleep(0.05)
+        peak["now"] -= 1
+        return {"resource": "notes", "row_count": 0, "rows": []}
+
+    monkeypatch.setattr(mcp_tools, "query_resource", counting)
+
+    second = _Registry()
+    mcp_tools.register(second, narrow, base_url=BASE, slots=roomy)
+
+    async def two_at_once() -> None:
+        await asyncio.gather(
+            second.tools["query_resource"](resource="notes"),
+            second.tools["query_resource"](resource="notes"),
+        )
+
+    asyncio.run(two_at_once())
+    assert peak["peak"] == 1, (
+        f"two concurrent calls peaked at {peak['peak']} against a tool bound of 1 and a "
+        "global of 4. The per-tool slot is not being acquired, so a capability's own "
+        "bound narrows nothing"
+    )
+
+
+def test_the_per_tool_bound_is_clamped_to_the_process_wide_one() -> None:
+    """A tool declaring more than the process has is narrowed, not obeyed.
+
+    Read off `register()`'s own construction rather than by racing calls: what is
+    under test is the arithmetic, and a race would measure the scheduler as well.
+    The behaviour that the two semaphores are BOTH acquired is the test above.
+    """
+    from app.mcp_budgets import ReadSlots
+
+    lock = _with_tool_bound(_lock(NOTES), "query_resource", declared=4)
+    slots = ReadSlots(2)
+
+    registry = _Registry()
+    built: dict[str, int] = {}
+    original = mcp_tools.ReadSlots
+
+    def recording(limit: int) -> Any:
+        built[str(len(built))] = limit
+        return original(limit)
+
+    try:
+        mcp_tools.ReadSlots = recording  # type: ignore[assignment]
+        mcp_tools.register(registry, lock, base_url=BASE, slots=slots)
+    finally:
+        mcp_tools.ReadSlots = original  # type: ignore[assignment]
+
+    assert built, "register() built no per-tool semaphore at all"
+    assert set(built.values()) == {2}, (
+        f"register() built semaphores at {sorted(built.values())}; a tool declaring 4 "
+        "under a process of 2 must be clamped to 2, or the capability widens its share"
+    )

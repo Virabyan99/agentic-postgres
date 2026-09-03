@@ -403,3 +403,68 @@ def test_an_unknown_lifecycle_or_risk_is_refused(tmp_path: Path) -> None:
     for field, value in (("lifecycle", "sunset"), ("risk", "critical")):
         capability = read_capability() | V2_FIELDS | {field: value}
         refused(tmp_path, {"schema_version": 2, "capabilities": [capability]})
+
+
+# ---------------------------------------------------------------------------
+# Schema version 3: the two narrowings (ADR 0179)
+# ---------------------------------------------------------------------------
+
+V3_RW = {"max_response_bytes": 65536, "max_concurrent_calls": 2}
+V3_W = {"supports_dry_run": False, "requires_approval": False}
+
+
+def test_a_metadata_capability_is_forbidden_every_v3_field(tmp_path: Path) -> None:
+    """It bounds none of them, so declaring one would bound nothing (D893).
+
+    `_within_byte_budget` is never applied to a metadata result -- measured at
+    288-683 bytes, passing through no check -- and a metadata call takes no
+    concurrency slot, because `read_slots` wraps `UPSTREAM_KINDS` only. A call
+    that changes nothing has neither a dry run nor an approval.
+
+    The `not/anyOf` list does not extend itself, which is why each new field
+    needs this decision rather than inheriting one.
+    """
+    metadata = {
+        "name": "list_resources",
+        "kind": "metadata",
+        "enabled": False,
+        "required_scopes": ["meta:read"],
+        "operation": {"source": "lock", "operation_id": "lock.resources.list"},
+        **V2_FIELDS,
+    }
+    assert check(tmp_path, {"schema_version": 3, "capabilities": [metadata]}), (
+        "the control: a metadata capability declaring none of the four still loads"
+    )
+
+    for field, value in (*V3_RW.items(), *V3_W.items()):
+        refused(tmp_path, {"schema_version": 3, "capabilities": [metadata | {field: value}]})
+
+
+def test_neither_v3_limit_may_widen_its_global(tmp_path: Path) -> None:
+    """The schema is one of the two places this is refused (ADR 0179).
+
+    The other is the runtime, which takes `min(declared, the global)`. Two
+    refusals for one rule, because they guard different documents: a manifest
+    somebody wrote, and a lock something compiled.
+    """
+    read = read_capability() | V2_FIELDS | V3_RW
+
+    assert check(
+        tmp_path,
+        {"schema_version": 3, "capabilities": [read | {"max_response_bytes": 1048576}]},
+    ), "the control: exactly the global is permitted"
+
+    refused(
+        tmp_path, {"schema_version": 3, "capabilities": [read | {"max_response_bytes": 1048577}]}
+    )
+    refused(tmp_path, {"schema_version": 3, "capabilities": [read | {"max_concurrent_calls": 0}]})
+
+
+def test_the_v2_fields_stay_required_at_v3(tmp_path: Path) -> None:
+    """`minimum: 2`, not `const: 2` -- the correction the v3 gate needed.
+
+    A `const` would have made v3 a version in which `version`, `lifecycle` and
+    `risk` were forbidden again, which is the opposite of what introducing a
+    field at a version means.
+    """
+    refused(tmp_path, {"schema_version": 3, "capabilities": [read_capability() | V3_RW]})

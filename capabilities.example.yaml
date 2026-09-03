@@ -36,7 +36,7 @@
 # refuses a write that groups (ADR 0120) or one that carries a read's shape
 # (D470).
 
-schema_version: 2
+schema_version: 3
 
 capabilities:
   # --- The two metadata tools ------------------------------------------------
@@ -96,6 +96,8 @@ capabilities:
     version: 1.0.0
     lifecycle: active
     risk: low
+    max_response_bytes: 1048576
+    max_concurrent_calls: 2
     enabled: true
     required_scopes: [notes:read]
     operation:
@@ -133,6 +135,8 @@ capabilities:
     version: 1.0.0
     lifecycle: active
     risk: low
+    max_response_bytes: 1048576
+    max_concurrent_calls: 2
     enabled: true
     required_scopes: [tasks:read]
     operation:
@@ -185,6 +189,8 @@ capabilities:
     version: 1.0.0
     lifecycle: active
     risk: low
+    max_response_bytes: 65536
+    max_concurrent_calls: 1
     enabled: true
     required_scopes: [notes:read, tasks:read]
     operation:
@@ -227,6 +233,10 @@ capabilities:
     version: 1.0.0
     lifecycle: active
     risk: moderate
+    max_response_bytes: 65536
+    max_concurrent_calls: 1
+    supports_dry_run: false
+    requires_approval: false
     enabled: true
     required_scopes: [notes:write]
     operation:
@@ -252,6 +262,10 @@ capabilities:
     version: 1.0.0
     lifecycle: active
     risk: moderate
+    max_response_bytes: 65536
+    max_concurrent_calls: 1
+    supports_dry_run: false
+    requires_approval: false
     enabled: true
     required_scopes: [tasks:write]
     operation:

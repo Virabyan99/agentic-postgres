@@ -54,7 +54,7 @@ MAX_MANIFEST_BYTES = 65_536
 #: these against the enum in the schema it governs, so they cannot drift apart
 #: the way one shared constant could not even express.
 SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1})
-SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2})
+SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 #: Plan decision B. `/docs` is derived unconditionally by runbook §3.8, so it
 #: is structurally reserved; `/.well-known` is ACME, needed from Session 2;

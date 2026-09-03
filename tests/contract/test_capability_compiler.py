@@ -740,7 +740,11 @@ def v1_manifest(capabilities: dict[str, Any]) -> dict[str, Any]:
     document = copy.deepcopy(capabilities)
     document["schema_version"] = 1
     for entry in document["capabilities"]:
-        for field in capability_compiler.VERSIONED_FIELDS:
+        for field in (
+            *capability_compiler.VERSIONED_FIELDS,
+            *capability_compiler.BUDGET_FIELDS,
+            *capability_compiler.WRITE_DECLARATIONS,
+        ):
             entry.pop(field, None)
     return document
 
@@ -755,8 +759,14 @@ def test_the_compiled_version_is_the_manifests_not_a_constant(
     `risk`, a v1 manifest produces the tools it always did. A fixed number on a
     document whose shape varies is a version that describes nothing.
     """
-    at_two = compile_with(capabilities, surface, published)
-    assert at_two["schema_version"] == 2
+    newest = max(config.SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS)
+    at_newest = compile_with(capabilities, surface, published)
+    assert at_newest["schema_version"] == newest, (
+        "the example manifest is the tree's exercise of the NEWEST version, and the "
+        "compiled contract's version is the manifest's -- a literal here would be "
+        "wrong at the next bump and would read as a measurement (D883)"
+    )
+    at_two = at_newest
 
     at_one = compile_with(v1_manifest(capabilities), surface, published)
     assert at_one["schema_version"] == 1
@@ -806,7 +816,19 @@ def test_every_tool_carries_its_backing_capabilities_and_the_riskiest_of_them(
         declared = tool["capabilities"]
         assert declared, f"{tool['name']} names no backing capability"
         for entry in declared:
-            assert set(entry) == {"name", *capability_compiler.VERSIONED_FIELDS}
+            # A superset at v3, where a read and a write also carry their
+            # bounds and a write its two declarations (ADR 0179). Asserted as
+            # containment plus an explicit check that nothing UNKNOWN crept in,
+            # rather than loosened to a subset check -- widening an allowlist to
+            # a measured set is not weakening; loosening it to a subset is.
+            known = {
+                "name",
+                *capability_compiler.VERSIONED_FIELDS,
+                *capability_compiler.BUDGET_FIELDS,
+                *capability_compiler.WRITE_DECLARATIONS,
+            }
+            assert {"name", *capability_compiler.VERSIONED_FIELDS} <= set(entry)
+            assert set(entry) <= known, f"unknown key(s): {sorted(set(entry) - known)}"
         expected = max(
             (entry["risk"] for entry in declared), key=capability_compiler.RISK_ORDER.index
         )
@@ -944,3 +966,37 @@ def test_each_schema_version_constant_matches_its_schemas_enum() -> None:
     assert (
         config.SUPPORTED_PROJECT_SCHEMA_VERSIONS != config.SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS
     ), "the two constants are equal again, which is the state D881 was about"
+
+
+def test_a_tool_takes_the_narrowest_bound_of_its_capabilities(
+    capabilities: dict[str, Any], surface: dict[str, Any], published: set[str]
+) -> None:
+    """The opposite aggregation from `risk`, and for a reason (ADR 0179).
+
+    Risk takes the worst case because a tool is as dangerous as the most
+    dangerous thing behind it. A bound takes the tightest because a tool may do
+    no more than the most restricted thing behind it permits.
+
+    Built as a case where the two capabilities DISAGREE, because the shipped
+    manifest gives `query_notes` and `query_tasks` the same numbers -- and D884
+    is what happens when an aggregate is only ever reached with inputs that
+    agree.
+    """
+    document = copy.deepcopy(capabilities)
+    for entry in document["capabilities"]:
+        if entry["name"] == "query_tasks":
+            entry["max_response_bytes"] = 4096
+            entry["max_concurrent_calls"] = 1
+
+    compiled = compile_with(document, surface, published)
+    grouped = next(tool for tool in compiled["tools"] if tool["name"] == "query_resource")
+    backing = {entry["name"]: entry for entry in grouped["capabilities"]}
+
+    assert backing["query_notes"]["max_response_bytes"] != 4096, (
+        "the two capabilities agree, so this case cannot tell narrowest from widest"
+    )
+    assert grouped["max_response_bytes"] == 4096, (
+        f"the tool declares {grouped['max_response_bytes']} bytes over backing bounds "
+        f"{[e['max_response_bytes'] for e in backing.values()]}"
+    )
+    assert grouped["max_concurrent_calls"] == 1

@@ -242,3 +242,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0176](0176-a-lock-check-verifies-the-tree-not-the-world.md) | A lock check verifies the tree, not the world | 16 | Accepted |
 | [0177](0177-a-capability-declares-a-version-a-lifecycle-and-a-risk-and-each-has-a-reader.md) | A capability declares a version, a lifecycle and a risk, and each has a reader | 16 | Accepted |
 | [0178](0178-a-denial-names-the-boundary-that-refused-it.md) | A denial names the boundary that refused it, and `credential` is not one of them | 16 | Accepted |
+| [0179](0179-a-capability-narrows-a-budget-and-may-never-widen-one.md) | A capability narrows a budget and may never widen one | 16 | Accepted |
