@@ -263,11 +263,45 @@ def test_no_future_placeholder_names_an_environment_variable() -> None:
     assert not offenders, f"future placeholders gated on an environment variable: {offenders}"
 
 
+def named_in_a_test_body() -> set[str]:
+    """Every registered variable a test module names as a string constant.
+
+    **From the AST, not the text.** A regex over the source counts a variable
+    mentioned in a comment or a docstring, which is a text scan standing in for
+    a construct -- the shape this repository has caught three times. An
+    `ast.Constant` is the thing a test could actually pass to `os.environ.get`.
+    """
+    registered = set(ENVIRONMENT_VARIABLES)
+    named: set[str] = set()
+    for path in all_test_modules():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value in registered:
+                named.add(node.value)
+    return named
+
+
 def test_every_registered_variable_is_used() -> None:
-    """An unused entry is either a deleted test or a gate that never fired."""
-    used = {variable for _, _, variables in gated_functions() for variable in variables}
+    """An unused entry is either a deleted test or a gate that never fired.
+
+    **"Used" is marker-declared OR named in a body** (D857), because a variable
+    can be OPTIONAL. `APG_INDUCED_ALERT_FILE` is read inside
+    `test_nothing_fires_that_nobody_induced`, deliberately: declaring it on
+    `requires_environment` would make that proof skip whenever nobody induced an
+    alert, which is most runs, and its assertion is written to reduce to the
+    literal quiet half when the variable is absent.
+
+    The roster had no way to say that, so the guard called a used variable
+    unused. **It was red at Session 14's close commit** and stayed red into this
+    session: D809 removed the marker declaration in Run 8 round 6, the full
+    suite had already been run before the trip, and the working agreement --
+    correctly -- does not re-run it per round. The gate that would have caught
+    this ran before the change that caused it.
+    """
+    declared = {variable for _, _, variables in gated_functions() for variable in variables}
+    used = declared | named_in_a_test_body()
     unused = sorted(set(ENVIRONMENT_VARIABLES) - used)
-    assert not unused, f"ENVIRONMENT_VARIABLES lists variables no test gates on: {unused}"
+    assert not unused, f"ENVIRONMENT_VARIABLES lists variables no test gates on or reads: {unused}"
 
 
 def test_the_session_two_environments_are_all_represented() -> None:
