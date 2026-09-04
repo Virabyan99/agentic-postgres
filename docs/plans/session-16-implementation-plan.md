@@ -673,9 +673,9 @@ deployment exists, rather than at request time where it would be one more
 runtime denial.
 
 **Done.** ADR **0183**, project manifest schema **version 2**, D929–D933.
-Fourteen mutation arms, fourteen killed, no survivor to classify. **CI verdict
-recorded in the commit that follows this one**, read by full SHA and HTTP
-status (D913, D914).
+Fourteen mutation arms, fourteen killed, no survivor to classify. **CI green on
+`93212b1`, run `33854271887`**, read by full SHA and judged on the HTTP status
+(D913, D914).
 
 **What shipped.** `mcp.profile` in the project manifest at schema version 2: a
 map from tool name to the seven bounds the runtime reads from the lock —
