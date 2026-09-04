@@ -748,8 +748,8 @@ header, which is the half Session 15 missed twice (D853, D858).
 
 **Done.** ADR **0184**, `CURRENT_SESSION` **16**, `template_version` **0.5.0**,
 nine requirements, seven claims, `bin/session-16-check.sh`, D934–D939. **CI
-verdict recorded in the commit that follows this one**, read by full SHA and
-HTTP status (D913, D914). Ten mutation arms, ten killed — **after one
+green on `1331940`, run `33857804101`**, read by full SHA and judged on the HTTP
+status (D913, D914). Ten mutation arms, ten killed — **after one
 survivor of D928's second kind**: the arm that disabled the `bounded` checker
 survived, because a checker defect has no witness in a suite whose runtime is
 correct. The repair was a control of the control (D509),
