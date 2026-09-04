@@ -473,12 +473,29 @@ def _compile_tool(name: str, backing: list[dict[str, Any]]) -> dict[str, Any]:
         for field in BUDGET_FIELDS:
             compiled[field] = min(capability[field] for capability in declared)
     if all(field in capability for capability in declared for field in WRITE_DECLARATIONS):
-        for field in WRITE_DECLARATIONS:
-            # A write is one-to-one with its operation (D486), so there is one
-            # capability here and `any` is an identity. Written as a fold rather
-            # than as `declared[0][field]` so that grouping a write later -- which
-            # the compiler refuses today -- would not silently take the first.
-            compiled[field] = any(capability[field] for capability in declared)
+        # **The two declarations have OPPOSITE polarity, and Run 4 folded both
+        # with `any`** (ADR 0182). A write is one-to-one with its operation
+        # (D486), so both folds are identities today and nothing was wrong --
+        # but this run is the first to READ the fields, and a permission folded
+        # with `any` is the direction that grants what nothing granted.
+        #
+        # `requires_approval` is a RESTRICTION, so it takes `any`: a tool is as
+        # restricted as the most restricted thing behind it. That is `risk`'s
+        # aggregation, for `risk`'s reason.
+        #
+        # `supports_dry_run` is a PERMISSION, so it takes `all`: a tool may be
+        # rehearsed only if every capability behind it may be. That is the
+        # budgets' aggregation, for the budgets' reason.
+        #
+        # Written as folds rather than as `declared[0][field]` so that grouping a
+        # write later -- which the compiler refuses today -- would not silently
+        # take the first.
+        compiled["requires_approval"] = any(
+            capability["requires_approval"] for capability in declared
+        )
+        compiled["supports_dry_run"] = all(
+            capability["supports_dry_run"] for capability in declared
+        )
 
     if kind == "metadata":
         compiled["reads"] = "lock"

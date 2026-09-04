@@ -33,7 +33,7 @@ from typing import Any
 
 import pytest
 
-from app import mcp_authorization, mcp_tools
+from app import mcp_authorization, mcp_errors, mcp_tools
 from app.mcp_audit import AuditRefusal
 from app.mcp_errors import (
     INPUT_NOT_PERMITTED,
@@ -446,7 +446,9 @@ def test_a_metadata_tool_takes_no_slot_and_a_read_and_a_write_both_do(
     assert seen["meta"] == slots.limit, "a metadata tool must not queue behind a read"
 
     asyncio.run(
-        registry.tools["create_note"](p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY)
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=False
+        )
     )
     assert seen["write"] == slots.limit - 1, (
         "a write reaches upstream and must hold a slot; it names no resource, so "
@@ -1024,6 +1026,7 @@ def test_a_committed_write_returns_its_one_row(monkeypatch: Any) -> None:
         max_affected_rows=1,
         request_id=REQUEST_ID,
         idempotency_key=IDEMPOTENCY_KEY,
+        dry_run=False,
     )
     assert rows == [{"id": "x", "title": "t"}]
 
@@ -1041,6 +1044,7 @@ def test_the_bound_is_checked_against_the_response_never_trusted(monkeypatch: An
             max_affected_rows=1,
             request_id=REQUEST_ID,
             idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
 
 
@@ -1063,6 +1067,7 @@ def test_the_cas_conflict_reaches_the_caller_as_a_token(monkeypatch: Any) -> Non
             max_affected_rows=1,
             request_id=REQUEST_ID,
             idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
     assert caught.value.token == WRITE_CONFLICT
     assert "AP409" not in str(caught.value)
@@ -1083,6 +1088,7 @@ def test_a_missing_row_and_a_missing_function_are_not_the_same_404(monkeypatch: 
             max_affected_rows=1,
             request_id=REQUEST_ID,
             idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
     assert caught.value.token == ROW_NOT_FOUND
 
@@ -1095,6 +1101,7 @@ def test_a_missing_row_and_a_missing_function_are_not_the_same_404(monkeypatch: 
             max_affected_rows=1,
             request_id=REQUEST_ID,
             idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
 
 
@@ -1121,6 +1128,7 @@ def test_every_unmapped_refusal_stays_masked(monkeypatch: Any, status: int, body
             max_affected_rows=1,
             request_id=REQUEST_ID,
             idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
     assert "enum" not in str(caught.value)
     assert "task_status" not in str(caught.value)
@@ -1147,6 +1155,7 @@ def test_the_write_body_is_what_the_transport_sends(monkeypatch: Any) -> None:
         max_affected_rows=1,
         request_id=REQUEST_ID,
         idempotency_key=IDEMPOTENCY_KEY,
+        dry_run=False,
     )
 
     assert seen["data"] == request.body
@@ -1265,6 +1274,7 @@ def test_a_write_reaches_the_operation_the_lock_names_with_the_callers_token(
         max_affected_rows: int,
         request_id: str,
         idempotency_key: str,
+        dry_run: bool,
     ) -> Any:
         seen.update(
             base_url=base_url,
@@ -1275,12 +1285,15 @@ def test_a_write_reaches_the_operation_the_lock_names_with_the_callers_token(
             bound=max_affected_rows,
             request_id=request_id,
             idempotency_key=idempotency_key,
+            dry_run=dry_run,
         )
         return [{"id": "note-1", "title": "t"}]
 
     monkeypatch.setattr(mcp_tools, "execute_write", capture)
     result = asyncio.run(
-        registry.tools["create_note"](p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY)
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=False
+        )
     )
 
     assert seen["target"] == "/rpc/create_note", "the path comes from the lock, not the caller"
@@ -1295,7 +1308,12 @@ def test_a_write_reaches_the_operation_the_lock_names_with_the_callers_token(
     assert seen["bound"] == 1, "the lock's max_affected_rows, handed to the executor (D487)"
     assert seen["token"] == "the.callers.token"  # noqa: S105 -- the forwarded value, asserted
     assert seen["base_url"] == BASE
-    assert result == {"tool": "create_note", "row_count": 1, "row": {"id": "note-1", "title": "t"}}
+    assert result == {
+        "tool": "create_note",
+        "row_count": 1,
+        "row": {"id": "note-1", "title": "t"},
+        "dry_run": False,
+    }
 
 
 def test_a_write_the_caller_holds_no_scope_for_is_refused_before_any_dial(
@@ -1322,7 +1340,10 @@ def test_a_write_the_caller_holds_no_scope_for_is_refused_before_any_dial(
     with pytest.raises(ToolError, match="notes:write") as created:
         asyncio.run(
             registry.tools["create_note"](
-                p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY
+                p_title="t",
+                p_content="c",
+                idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
     with pytest.raises(ToolError, match="tasks:write"):
@@ -1332,6 +1353,7 @@ def test_a_write_the_caller_holds_no_scope_for_is_refused_before_any_dial(
                 p_expected_status="todo",
                 p_new_status="done",
                 idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
 
@@ -1356,7 +1378,9 @@ def test_holding_one_write_scope_does_not_carry_the_other(monkeypatch: Any) -> N
     monkeypatch.setattr(mcp_tools, "execute_write", lambda *_, **__: [{"id": "x"}])
 
     served = asyncio.run(
-        registry.tools["create_note"](p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY)
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=False
+        )
     )
     assert served["row_count"] == 1
 
@@ -1367,6 +1391,7 @@ def test_holding_one_write_scope_does_not_carry_the_other(monkeypatch: Any) -> N
                 p_expected_status="todo",
                 p_new_status="done",
                 idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
 
@@ -1392,7 +1417,10 @@ def test_a_write_result_is_byte_bounded_like_a_read(monkeypatch: Any) -> None:
     with pytest.raises(ToolError, match="ceiling"):
         asyncio.run(
             registry.tools["create_note"](
-                p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY
+                p_title="t",
+                p_content="c",
+                idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
 
@@ -1425,6 +1453,7 @@ def test_a_translated_write_refusal_reaches_the_caller_through_the_tool(
                 p_expected_status="todo",
                 p_new_status="done",
                 idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
 
@@ -1439,6 +1468,7 @@ def test_a_translated_write_refusal_reaches_the_caller_through_the_tool(
                 p_expected_status="todo",
                 p_new_status="done",
                 idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
 
@@ -1461,6 +1491,7 @@ def test_a_write_argument_the_lock_does_not_declare_is_refused(monkeypatch: Any)
             tool="create_note",
             arguments={"p_title": "t", "p_content": "c", "p_owner_id": "someone-else"},
             idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
 
 
@@ -1502,18 +1533,206 @@ def test_a_malformed_idempotency_key_is_refused_before_any_dial(monkeypatch: Any
     for bad in ("short", "has a space", "", "k" * 256):
         with pytest.raises(ToolError) as refused:
             asyncio.run(
-                registry.tools["create_note"](p_title="t", p_content="c", idempotency_key=bad)
+                registry.tools["create_note"](
+                    p_title="t", p_content="c", idempotency_key=bad, dry_run=False
+                )
             )
         assert INPUT_NOT_PERMITTED in str(refused.value), refused.value
         assert not dialled, f"the key {bad!r} was refused AFTER an upstream request"
 
     asyncio.run(
-        registry.tools["create_note"](p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY)
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=False
+        )
     )
     assert dialled == [IDEMPOTENCY_KEY], (
         "THE CONTROL: a well-formed key must reach the transport, or the assertions "
         "above are satisfied by a write that refuses everything"
     )
+
+
+def _relocked(lock: Any, name: str, **fields: Any) -> Any:
+    """The same lock with one tool's declarations replaced.
+
+    A `Tool` is frozen, so this rebuilds it rather than mutating -- which is the
+    point: a fixture that could mutate the lock in place would let one proof
+    leak into the next through a shared object.
+    """
+    import dataclasses
+
+    return dataclasses.replace(
+        lock,
+        tools=tuple(
+            dataclasses.replace(tool, **fields) if tool.name == name else tool
+            for tool in lock.tools
+        ),
+    )
+
+
+def test_a_capability_requiring_approval_is_refused_before_any_dial(monkeypatch: Any) -> None:
+    """`AGT-APPROVE-001`. **The refusal is the whole claim** (D870, ADR 0182).
+
+    Approval implies a pending request, durable state holding it, a second
+    principal, and a path by which the caller learns the outcome -- the last of
+    which is a notification plane this product does not have. So the plane
+    refuses, names the boundary in the audit record, and tells the caller a
+    token that does not imply anything is pending.
+
+    Three things are asserted and the third is the one a workflow would break:
+    the caller is told `approval_required`, **no upstream request is made**, and
+    the refusal reaches the caller at all rather than being masked.
+
+    The CONTROL is the same lock with the flag off, which must proceed to the
+    transport -- without it, a `register()` that refused everything would pass.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    from app.mcp_budgets import ReadSlots
+
+    dialled: list[str] = []
+
+    def capture(*_: Any, **kwargs: Any) -> Any:
+        dialled.append(kwargs["idempotency_key"])
+        return [{"id": "note-1", "title": "t"}]
+
+    base, _registry, _recorded = _registered(monkeypatch, "notes:write")
+    monkeypatch.setattr(mcp_tools, "execute_write", capture)
+
+    lock = _relocked(base, "create_note", requires_approval=True)
+    registry = _Registry()
+    mcp_tools.register(registry, lock, base_url=BASE, slots=ReadSlots(2))
+
+    with pytest.raises(ToolError) as refused:
+        asyncio.run(
+            registry.tools["create_note"](
+                p_title="t",
+                p_content="c",
+                idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
+            )
+        )
+    assert mcp_errors.APPROVAL_REQUIRED in str(refused.value), refused.value
+    assert not dialled, "a call requiring approval reached the transport"
+
+    # THE CONTROL: the same lock without the flag proceeds.
+    registry = _Registry()
+    mcp_tools.register(registry, base, base_url=BASE, slots=ReadSlots(2))
+    asyncio.run(
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=False
+        )
+    )
+    assert dialled == [IDEMPOTENCY_KEY], "the control did not reach the transport"
+
+
+def test_the_approval_token_promises_nothing_pending() -> None:
+    """The token is in the enumerated caller vocabulary and means one thing.
+
+    A caller reading `approval_required` must not infer that something is queued
+    for a human: nothing is. The refusal is terminal, and the sentence beside it
+    says the deployment cannot grant it rather than that somebody has not yet.
+    """
+    assert mcp_errors.APPROVAL_REQUIRED in mcp_errors.CALLER_FACING_TOKENS
+    assert mcp_errors.TOKEN_FOR_REASON[mcp_errors.APPROVAL_REQUIRED_REASON] == (
+        mcp_errors.APPROVAL_REQUIRED
+    )
+    assert mcp_errors.APPROVAL_REQUIRED_REASON in mcp_errors.DENIAL_REASONS
+
+
+def test_a_dry_run_of_a_write_that_does_not_support_one_is_refused(monkeypatch: Any) -> None:
+    """Existing vocabulary, because there is no new concept here.
+
+    The lock does not permit that input, which is what `not_in_allowlist` and
+    `input_not_permitted` already say. A new token would imply the caller had
+    found a new KIND of boundary, and they have not.
+
+    **`None` is refused too, and that is D600 rather than pedantry.** At lock
+    schema version 1 a capability declares neither field, and a deployment that
+    never said it supports a dry run is not a deployment that supports one --
+    defaulting the absent value to `False` would be right by luck here and wrong
+    the next time the pattern is copied.
+
+    The CONTROL is the same call with the flag on, which must reach the
+    transport and carry the header.
+    """
+    import asyncio
+
+    from fastmcp.exceptions import ToolError
+
+    from app.mcp_budgets import ReadSlots
+
+    dialled: list[bool] = []
+
+    def capture(*_: Any, **kwargs: Any) -> Any:
+        dialled.append(kwargs["dry_run"])
+        return [{"id": "note-1", "title": "t"}]
+
+    base, _registry, _recorded = _registered(monkeypatch, "notes:write")
+    monkeypatch.setattr(mcp_tools, "execute_write", capture)
+
+    for declared in (False, None):
+        registry = _Registry()
+        lock = _relocked(base, "create_note", supports_dry_run=declared)
+        mcp_tools.register(registry, lock, base_url=BASE, slots=ReadSlots(2))
+        with pytest.raises(ToolError) as refused:
+            asyncio.run(
+                registry.tools["create_note"](
+                    p_title="t",
+                    p_content="c",
+                    idempotency_key=IDEMPOTENCY_KEY,
+                    dry_run=True,
+                )
+            )
+        assert mcp_errors.INPUT_NOT_PERMITTED in str(refused.value), refused.value
+        assert not dialled, f"a dry run reached the transport with supports_dry_run={declared!r}"
+
+    registry = _Registry()
+    lock = _relocked(base, "create_note", supports_dry_run=True)
+    mcp_tools.register(registry, lock, base_url=BASE, slots=ReadSlots(2))
+    asyncio.run(
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=True
+        )
+    )
+    assert dialled == [True], "THE CONTROL: a permitted dry run did not reach the transport"
+
+
+def test_a_dry_run_result_says_so_and_counts_no_rows(monkeypatch: Any) -> None:
+    """A caller should not have to infer a rehearsal from a null field.
+
+    The database returns one composite either way, so `row_count` is the only
+    thing that can distinguish them -- and `dry_run` says it in a word. Both are
+    asserted against the real call in the same test, because "0" means nothing
+    without "1" beside it.
+    """
+    import asyncio
+
+    from app.mcp_budgets import ReadSlots
+
+    base, _registry, _recorded = _registered(monkeypatch, "notes:write")
+    monkeypatch.setattr(mcp_tools, "execute_write", lambda *_, **__: [{"id": None, "title": "t"}])
+
+    registry = _Registry()
+    lock = _relocked(base, "create_note", supports_dry_run=True)
+    mcp_tools.register(registry, lock, base_url=BASE, slots=ReadSlots(2))
+
+    rehearsed = asyncio.run(
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=True
+        )
+    )
+    assert rehearsed["dry_run"] is True
+    assert rehearsed["row_count"] == 0, rehearsed
+
+    real = asyncio.run(
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=False
+        )
+    )
+    assert real["dry_run"] is False
+    assert real["row_count"] == 1, real
 
 
 def test_a_write_whose_response_is_not_one_row_is_a_loud_structural_fault(
@@ -1533,6 +1752,7 @@ def test_a_write_whose_response_is_not_one_row_is_a_loud_structural_fault(
             tool="create_note",
             arguments={"p_title": "t", "p_content": "c"},
             idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
 
 
@@ -1628,7 +1848,10 @@ def test_hiding_a_name_does_not_refuse_the_call_and_that_is_why_both_exist(
     with pytest.raises(ToolError, match="notes:write"):
         asyncio.run(
             registry.tools["create_note"](
-                p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY
+                p_title="t",
+                p_content="c",
+                idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
 
@@ -1732,7 +1955,9 @@ def test_the_request_id_reaches_every_upstream_request_of_one_call(monkeypatch: 
 
     monkeypatch.setattr(mcp_tools, "execute_write", capture)
     asyncio.run(
-        registry.tools["create_note"](p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY)
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=False
+        )
     )
 
     assert dialled["request_id"] == REQUEST_ID, "the write did not carry the request id"
@@ -1762,6 +1987,7 @@ def test_the_forwarded_header_set_and_its_guard_moved_together() -> None:
     to be the read set plus precisely one name.
     """
     from app.mcp_query import (
+        DRY_RUN_HEADER,
         FORWARDED_HEADERS,
         IDEMPOTENCY_KEY_HEADER,
         REQUEST_ID_HEADER,
@@ -1770,7 +1996,10 @@ def test_the_forwarded_header_set_and_its_guard_moved_together() -> None:
 
     assert REQUEST_ID_HEADER in FORWARDED_HEADERS
     assert set(FORWARDED_HEADERS) == {"Authorization", "Accept", "X-Request-Id"}
-    assert set(WRITE_FORWARDED_HEADERS) - set(FORWARDED_HEADERS) == {IDEMPOTENCY_KEY_HEADER}
+    assert set(WRITE_FORWARDED_HEADERS) - set(FORWARDED_HEADERS) == {
+        IDEMPOTENCY_KEY_HEADER,
+        DRY_RUN_HEADER,
+    }
     assert set(FORWARDED_HEADERS) - set(WRITE_FORWARDED_HEADERS) == set(), (
         "the write roster must CONTAIN the read one; a write that dropped the request id "
         "would break the one guarantee ADR 0141 pays for on every call"
@@ -1803,6 +2032,7 @@ def test_the_dialled_request_actually_carries_the_header(monkeypatch: Any) -> No
     def record(request: Any, timeout: float = 0) -> Any:
         seen["headers"] = {name.lower() for name in request.headers}
         seen["value"] = request.get_header("X-request-id")
+        seen["dry_run"] = request.get_header("Dry-run")
         # An ARRAY, which both branches accept: `execute_write` takes a single
         # object or a one-element array (rig4), and `execute` takes only an
         # array. One body, so the two arms below differ in the branch they
@@ -1817,6 +2047,7 @@ def test_the_dialled_request_actually_carries_the_header(monkeypatch: Any) -> No
         max_affected_rows=1,
         request_id=REQUEST_ID,
         idempotency_key=IDEMPOTENCY_KEY,
+        dry_run=False,
     )
 
     assert seen["value"] == REQUEST_ID
@@ -1826,11 +2057,30 @@ def test_the_dialled_request_actually_carries_the_header(monkeypatch: Any) -> No
         "x-request-id",
         "content-type",
         "idempotency-key",
+        "dry-run",
     }
     assert "prefer" not in seen["headers"], (
         "THE CONTROL: a header the allowlist does not name must be absent, or the "
         "assertion above is satisfied by a transport that forwards everything"
     )
+
+    # **The dry-run header's VALUE, and a name-only assertion missed it** (ADR
+    # 0182). A mutation sending the literal `"true"` unconditionally survived
+    # every proof in this module: the header set was right, the live SQL proofs
+    # never reach the runtime, and a transport that made EVERY write a rehearsal
+    # would have shipped. Both values are asserted, because `"false"` alone is
+    # satisfied by a constant.
+    assert seen["dry_run"] == "false", seen["dry_run"]
+    execute_write(
+        BASE,
+        "tok",
+        _write_request(),
+        max_affected_rows=1,
+        request_id=REQUEST_ID,
+        idempotency_key=IDEMPOTENCY_KEY,
+        dry_run=True,
+    )
+    assert seen["dry_run"] == "true", seen["dry_run"]
 
     # **The read branch must NOT carry it** (ADR 0181). This is the arm that
     # makes the two rosters a real split rather than a widening dressed as one:
@@ -1901,7 +2151,9 @@ def test_the_record_is_opened_before_the_work_and_closed_after(monkeypatch: Any)
     monkeypatch.setattr(mcp_tools, "audit_complete", completed)
 
     asyncio.run(
-        registry.tools["create_note"](p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY)
+        registry.tools["create_note"](
+            p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY, dry_run=False
+        )
     )
 
     assert order == ["begin", "work", "complete"]
@@ -1934,7 +2186,10 @@ def test_the_records_parameters_are_redacted_per_the_lock(monkeypatch: Any) -> N
 
     asyncio.run(
         registry.tools["create_note"](
-            p_title="the title", p_content="SECRET BODY", idempotency_key=IDEMPOTENCY_KEY
+            p_title="the title",
+            p_content="SECRET BODY",
+            idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
     )
     written = next(entry for entry in recorded if entry["phase"] == "begin")["parameters"]
@@ -1950,6 +2205,7 @@ def test_the_records_parameters_are_redacted_per_the_lock(monkeypatch: Any) -> N
             p_expected_status="todo",
             p_new_status="done",
             idempotency_key=IDEMPOTENCY_KEY,
+            dry_run=False,
         )
     )
     written = next(entry for entry in recorded if entry["phase"] == "begin")["parameters"]
@@ -1979,7 +2235,10 @@ def test_a_denied_call_is_recorded_as_refused(monkeypatch: Any) -> None:
     with pytest.raises(ToolError, match="notes:write"):
         asyncio.run(
             registry.tools["create_note"](
-                p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY
+                p_title="t",
+                p_content="c",
+                idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
 
@@ -2013,7 +2272,10 @@ def test_a_write_whose_record_cannot_be_opened_does_not_happen(monkeypatch: Any)
     with pytest.raises(ToolRefusal):
         asyncio.run(
             registry.tools["create_note"](
-                p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY
+                p_title="t",
+                p_content="c",
+                idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )
 
@@ -2066,7 +2328,10 @@ def test_a_failing_complete_never_changes_the_outcome(monkeypatch: Any) -> None:
     assert (
         asyncio.run(
             registry.tools["create_note"](
-                p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY
+                p_title="t",
+                p_content="c",
+                idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )["row_count"]
         == 1
@@ -2076,7 +2341,10 @@ def test_a_failing_complete_never_changes_the_outcome(monkeypatch: Any) -> None:
     assert (
         asyncio.run(
             registry.tools["create_note"](
-                p_title="t", p_content="c", idempotency_key=IDEMPOTENCY_KEY
+                p_title="t",
+                p_content="c",
+                idempotency_key=IDEMPOTENCY_KEY,
+                dry_run=False,
             )
         )["row_count"]
         == 1

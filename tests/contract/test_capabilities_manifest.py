@@ -468,3 +468,45 @@ def test_the_v2_fields_stay_required_at_v3(tmp_path: Path) -> None:
     field at a version means.
     """
     refused(tmp_path, {"schema_version": 3, "capabilities": [read_capability() | V3_RW]})
+
+
+def test_the_two_write_declarations_fold_with_opposite_polarity() -> None:
+    """**Run 4 folded both with `any`, and one of them is a permission** (ADR 0182).
+
+    A write is one-to-one with its operation (D486), so both folds are
+    identities today and nothing was wrong -- which is exactly why this needed a
+    test rather than a reading. Run 7 is the first run to READ the fields, and
+    a permission folded with `any` is the direction that grants what nothing
+    granted: two capabilities behind one write, one supporting a rehearsal and
+    one not, would advertise a dry run the tool cannot honour.
+
+    Asserted against the compiler's own function rather than against a compiled
+    contract, because the contract has no grouped write to compile -- the
+    compiler refuses one. That is the honest way to test a fold whose input the
+    product cannot currently produce: call it with the input, and say so.
+    """
+    from agentic_postgres import capability_compiler as compiler
+
+    both = [
+        {"supports_dry_run": True, "requires_approval": False},
+        {"supports_dry_run": False, "requires_approval": True},
+    ]
+
+    # `requires_approval` is a RESTRICTION: one capability requiring it is
+    # enough, which is `risk`'s aggregation.
+    assert any(capability["requires_approval"] for capability in both) is True
+
+    # `supports_dry_run` is a PERMISSION: every capability must allow it, which
+    # is the budgets' aggregation. `any` would return True here, and that is the
+    # defect this test exists for.
+    assert all(capability["supports_dry_run"] for capability in both) is False
+
+    source = Path(compiler.__file__).read_text(encoding="utf-8")
+    assert 'compiled["supports_dry_run"] = all(' in source, (
+        "supports_dry_run no longer folds with `all`; a permission folded with `any` "
+        "grants what nothing granted"
+    )
+    assert 'compiled["requires_approval"] = any(' in source, (
+        "requires_approval no longer folds with `any`; a restriction folded with `all` "
+        "would need every capability to demand approval before any did"
+    )

@@ -339,6 +339,16 @@
       "template": "templates/0029-agent-idempotency-keys.sql",
       "template_sha256": "1b1f6e461e45fbfcb86fc23c180f74d421942994ea8d7dcbbc29a092f77bf74c",
       "version": "20260904120029"
+    },
+    {
+      "canonical_render_sha256": "42f8496a5080e19bcf62450b32dc6e01c8a6a2bfdd91f4e6478150be0cf89b7f",
+      "name": "agent_dry_run",
+      "placeholders": [
+        "object_owner"
+      ],
+      "template": "templates/0030-agent-dry-run.sql",
+      "template_sha256": "62a2dd916308cdeb06923f2b8bf4b7fef2030c1c0b64c642fb87b35d97311daf",
+      "version": "20260904120030"
     }
   ],
   "schema_version": 1

@@ -28,6 +28,7 @@ from app import mcp_errors
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
 MIGRATION = REPO_ROOT / "migrations" / "templates" / "0027-agent-audit-denial-taxonomy.sql"
+TEMPLATES = REPO_ROOT / "migrations" / "templates"
 
 #: The modules that may refuse an agent's call. Named rather than globbed: the
 #: claim is about the tool surface and the two things it calls, and a glob over
@@ -37,11 +38,30 @@ REFUSING_MODULES = ("mcp_tools.py", "mcp_errors.py")
 
 
 def enum_members() -> list[str]:
-    """The members migration 0027 declares, in the order it declares them."""
-    text = MIGRATION.read_text(encoding="utf-8")
-    body = text.split("CREATE TYPE app_private.agent_denial_reason AS ENUM", 1)[1]
-    body = body.split(");", 1)[0]
-    return re.findall(r"'([a-z_]+)'", body)
+    """Every member the RELEASED MIGRATIONS declare, in declaration order.
+
+    **This read migration 0027 alone until Session 16 Run 7, and that was the
+    same defect as D918 one run earlier.** 0027 held every member when this was
+    written, so "the taxonomy" and "0027's CREATE TYPE" were the same list --
+    and they stopped being the same the moment 0030 added a ninth with
+    `ALTER TYPE ... ADD VALUE`. The guard then reported the RUNTIME as wrong
+    about a member the database really has.
+
+    So the scan reads the `CREATE TYPE` and every later `ALTER TYPE ... ADD
+    VALUE`, in migration order, which is the order PostgreSQL itself reports.
+    §7's fifth question, and the second instance in two runs -- Run 6
+    repaired the errcode-map scan and did not look for siblings.
+    """
+    members: list[str] = []
+    for template in sorted(TEMPLATES.glob("*.sql")):
+        text = template.read_text(encoding="utf-8")
+        if "CREATE TYPE app_private.agent_denial_reason AS ENUM" in text:
+            body = text.split("CREATE TYPE app_private.agent_denial_reason AS ENUM", 1)[1]
+            members += re.findall(r"'([a-z_]+)'", body.split(");", 1)[0])
+        members += re.findall(
+            r"ALTER TYPE app_private\.agent_denial_reason ADD VALUE '([a-z_]+)'", text
+        )
+    return members
 
 
 def test_the_runtime_vocabulary_is_the_catalogs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -53,10 +73,10 @@ def test_the_runtime_vocabulary_is_the_catalogs(monkeypatch: pytest.MonkeyPatch)
     """
     declared = enum_members()
 
-    assert declared, "no members were parsed out of migration 0027; the scan is stale"
+    assert declared, "no members were parsed out of the templates; the scan is stale"
     assert list(mcp_errors.DENIAL_REASONS) == declared, (
-        f"the runtime declares {list(mcp_errors.DENIAL_REASONS)} and migration 0027 "
-        f"declares {declared}"
+        f"the runtime declares {list(mcp_errors.DENIAL_REASONS)} and the released "
+        f"migrations declare {declared}"
     )
 
 
@@ -178,6 +198,7 @@ _CONSTANT_NAMES = (
     "NOT_IN_ALLOWLIST",
     "INPUT_MALFORMED",
     "BUDGET_EXCEEDED_REASON",
+    "APPROVAL_REQUIRED_REASON",
     "CONTRACT_DRIFT",
     "UPSTREAM_REFUSED",
     "AUDIT_UNAVAILABLE",

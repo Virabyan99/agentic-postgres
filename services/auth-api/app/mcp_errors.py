@@ -44,6 +44,16 @@ BUDGET_EXCEEDED: Final = "budget_exceeded"
 RESOURCE_UNKNOWN: Final = "resource_unknown"
 WRITE_CONFLICT: Final = "write_conflict"
 ROW_NOT_FOUND: Final = "row_not_found"
+#: Session 16 Run 7 (ADR 0182, D870). A seventh token, because none of the six
+#: is honest here: the caller HOLDS the scope, the input is permitted, and the
+#: budget is untouched. `scope_not_held` is the closest and would be a lie.
+#:
+#: **The refusal is the guarantee**, and it is terminal. Nothing about this token
+#: implies a pending request a caller should wait on -- approval in this product
+#: is a declaration and a named refusal, never a workflow, because a workflow
+#: needs durable pending state, a second principal, and a notification plane none
+#: of which exists.
+APPROVAL_REQUIRED: Final = "approval_required"
 
 #: Every token a caller can see. Enumerated so a test can assert the set, and so
 #: adding one is an edit somebody reviews rather than a string somebody types.
@@ -51,6 +61,7 @@ ROW_NOT_FOUND: Final = "row_not_found"
 #: compare-and-swap a caller cannot distinguish from a generic failure is not
 #: one.
 CALLER_FACING_TOKENS: Final = (
+    APPROVAL_REQUIRED,
     BUDGET_EXCEEDED,
     INPUT_NOT_PERMITTED,
     RESOURCE_UNKNOWN,
@@ -152,6 +163,10 @@ CONTRACT_DRIFT: Final = "contract_drift"
 UPSTREAM_REFUSED: Final = "upstream_refused"
 AUDIT_UNAVAILABLE: Final = "audit_unavailable"
 WRITE_REJECTED: Final = "write_rejected"
+#: Session 16 Run 7's ninth member, derived from a real refusal site exactly as
+#: the eight above were: `invoke_write` refuses a tool whose compiled contract
+#: declares `requires_approval` (ADR 0182, D870).
+APPROVAL_REQUIRED_REASON: Final = "approval_required"
 
 #: Every member, in the enum's own order. A contract test compares this tuple
 #: against migration 0027's template, so the catalog and this file cannot drift
@@ -166,6 +181,7 @@ DENIAL_REASONS: Final = (
     UPSTREAM_REFUSED,
     AUDIT_UNAVAILABLE,
     WRITE_REJECTED,
+    APPROVAL_REQUIRED_REASON,
 )
 
 #: The caller-facing token each denial reason accompanies, where there is one.
@@ -183,6 +199,7 @@ TOKEN_FOR_REASON: Final[dict[str, str | None]] = {
     UPSTREAM_REFUSED: None,
     AUDIT_UNAVAILABLE: None,
     WRITE_REJECTED: WRITE_CONFLICT,
+    APPROVAL_REQUIRED_REASON: APPROVAL_REQUIRED,
 }
 
 

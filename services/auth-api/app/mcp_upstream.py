@@ -257,6 +257,7 @@ def execute_write(
     max_affected_rows: int,
     request_id: str,
     idempotency_key: str,
+    dry_run: bool,
 ) -> list[dict[str, Any]]:
     """Run one built WRITE request; return its rows or translate its refusal.
 
@@ -290,7 +291,12 @@ def execute_write(
     # database would refuse it, so the failure would arrive as a `PT412` nobody
     # could explain rather than as the type error it is.
     status, body = _dial(
-        base_url, token, request, request_id=request_id, idempotency_key=idempotency_key
+        base_url,
+        token,
+        request,
+        request_id=request_id,
+        idempotency_key=idempotency_key,
+        dry_run=dry_run,
     )
     if status != 200:
         visible = write_refusal(_refusal_code(body))
@@ -339,6 +345,7 @@ def _dial(
     *,
     request_id: str,
     idempotency_key: str | None = None,
+    dry_run: bool = False,
 ) -> tuple[int, bytes]:
     """One HTTP exchange with the upstream, status and body, refusals included.
 
@@ -361,6 +368,7 @@ def _dial(
     failures (D468) were right to fail.
     """
     from app.mcp_query import (
+        DRY_RUN_HEADER,
         FORWARDED_HEADERS,
         IDEMPOTENCY_KEY_HEADER,
         REQUEST_ID_HEADER,
@@ -374,7 +382,12 @@ def _dial(
     }
     allowed = FORWARDED_HEADERS
     if idempotency_key is not None:
+        # **Both write headers, always, and `dry_run` is not conditional on its
+        # own value** (ADR 0182). Sending `Dry-Run` only when true would make the
+        # write roster a subset check again, which is exactly what two exact
+        # rosters exist to avoid. The literal is what the database parses.
         headers[IDEMPOTENCY_KEY_HEADER] = idempotency_key
+        headers[DRY_RUN_HEADER] = "true" if dry_run else "false"
         allowed = WRITE_FORWARDED_HEADERS
     # **This guard moved in the same commit as the allowlist it reads** (D477).
     if set(headers) != set(allowed):  # pragma: no cover -- a guard on the pair

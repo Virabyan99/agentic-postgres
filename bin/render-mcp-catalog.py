@@ -63,7 +63,7 @@ END = "<!-- END GENERATED: mcp-catalog -->"
 #: repository root and imports no service package; importing one to avoid a
 #: duplicate would trade a compared pair for a fragile path, and a test that
 #: compares a value with itself is the shape §6 warns about.
-RESERVED_WRITE_PARAMETERS = ("idempotency_key",)
+RESERVED_WRITE_PARAMETERS = ("idempotency_key", "dry_run")
 
 
 def load_contract() -> dict[str, Any]:

@@ -56,6 +56,8 @@ from app.mcp_audit import redact as audit_redact
 from app.mcp_authorization import current_agent_context
 from app.mcp_budgets import DEFAULT_MAX_CONCURRENT_READS, ReadSlots
 from app.mcp_errors import (
+    APPROVAL_REQUIRED,
+    APPROVAL_REQUIRED_REASON,
     AUDIT_UNAVAILABLE,
     BUDGET_EXCEEDED,
     BUDGET_EXCEEDED_REASON,
@@ -510,7 +512,7 @@ IDEMPOTENCY_KEY_PATTERN: Final = re.compile(r"^[\x21-\x7e]{8,255}$")
 #: is the fragile half of the alternative, and a test between two lists is what
 #: this repository uses in its place. Aliasing would make that test compare a
 #: value with itself.
-RESERVED_WRITE_PARAMETERS: Final = ("idempotency_key",)
+RESERVED_WRITE_PARAMETERS: Final = ("idempotency_key", "dry_run")
 
 
 def _idempotency_key(candidate: Any) -> str:
@@ -533,6 +535,7 @@ def invoke_write(
     tool: str,
     arguments: dict[str, Any],
     idempotency_key: str,
+    dry_run: bool,
 ) -> dict[str, Any]:
     """One reviewed write, as the caller, and the row it committed.
 
@@ -557,14 +560,41 @@ def invoke_write(
     telemetry record, and it is the count of rows this write actually affected.
     """
     spec = _write_for(lock, tool)
+    entry = lock.tool(tool)
+
+    # **Approval, beside the scope check and before anything is dialled** (ADR
+    # 0182, D870). The record is already open, so the refusal is audited (ADR
+    # 0141), and no upstream request is made for a call that cannot proceed.
+    #
+    # **Terminal, not pending.** Nothing here implies a request a caller should
+    # wait on: approval in this product is a declaration and a named refusal,
+    # because a workflow needs durable pending state, a second principal and a
+    # notification plane, none of which exists.
+    if entry.requires_approval:
+        raise AgentVisible(
+            APPROVAL_REQUIRED,
+            "this capability requires an approval this deployment cannot grant",
+            APPROVAL_REQUIRED_REASON,
+        )
+
+    # A rehearsal of a write that cannot be rehearsed is an input the lock does
+    # not permit -- existing vocabulary, no new concept. `None` is lock schema
+    # version 1, where a capability declares neither field: asking for a dry-run
+    # against a deployment that never said it supports one is refused for the
+    # same reason, and D600 is why the two Nones are not defaulted to false.
+    if dry_run and not entry.supports_dry_run:
+        raise AgentVisible(
+            INPUT_NOT_PERMITTED,
+            "this capability does not support a dry run",
+            NOT_IN_ALLOWLIST,
+        )
+
     # First, with the other input checks and before anything is built, for this
     # function's stated reason: a refusable call costs no upstream request.
     key = _idempotency_key(idempotency_key)
 
     try:
-        request = build_write_request(
-            spec, timeout_ms=lock.tool(tool).timeout_ms, arguments=arguments
-        )
+        request = build_write_request(spec, timeout_ms=entry.timeout_ms, arguments=arguments)
     except QueryRefusal as error:
         raise AgentVisible(INPUT_NOT_PERMITTED, str(error), NOT_IN_ALLOWLIST) from error
 
@@ -576,6 +606,7 @@ def invoke_write(
             max_affected_rows=spec.max_affected_rows,
             request_id=request_id,
             idempotency_key=key,
+            dry_run=dry_run,
         )
     except UpstreamRefusal as error:
         raise ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED) from error
@@ -585,9 +616,21 @@ def invoke_write(
         # (D487). Zero is a shape that changed underneath the lock, and the
         # write has already committed, so this is loud rather than quiet.
         raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
+
+    # **`row_count` is 0 for a rehearsal, and `dry_run` says so explicitly.**
+    # The database returns one composite either way -- a dry-run's is the row it
+    # would have written, with a created row's id nulled (ADR 0182) -- so the
+    # count is the only thing that can distinguish them, and a caller should not
+    # have to infer it from a null field. `bounded()` reads `row_count` for the
+    # telemetry record, so a rehearsal is measured as affecting nothing too.
     return _within_byte_budget(
-        {"tool": tool, "row_count": len(rows), "row": rows[0]},
-        _byte_ceiling(lock.tool(tool).max_response_bytes),
+        {
+            "tool": tool,
+            "row_count": 0 if dry_run else len(rows),
+            "row": rows[0],
+            "dry_run": dry_run,
+        },
+        _byte_ceiling(entry.max_response_bytes),
     )
 
 
@@ -998,7 +1041,9 @@ def register(
     # header rosters stay two exact sets rather than one loose one.
 
     @server.tool(name="create_note", timeout=seconds("create_note"))
-    async def _create_note(p_title: str, p_content: str, idempotency_key: str) -> dict[str, Any]:
+    async def _create_note(
+        p_title: str, p_content: str, idempotency_key: str, dry_run: bool
+    ) -> dict[str, Any]:
         """Create one note owned by the caller's owner, and return the created
         row. Bounded to one row; the owner is the caller's, never an argument.
 
@@ -1017,6 +1062,7 @@ def register(
                 tool="create_note",
                 arguments={"p_title": p_title, "p_content": p_content},
                 idempotency_key=idempotency_key,
+                dry_run=dry_run,
             ),
             kind=KIND_WRITE,
             # `p_content` is redacted from the record by the lock's
@@ -1031,7 +1077,11 @@ def register(
 
     @server.tool(name="update_task_status", timeout=seconds("update_task_status"))
     async def _update_task_status(
-        p_task_id: str, p_expected_status: str, p_new_status: str, idempotency_key: str
+        p_task_id: str,
+        p_expected_status: str,
+        p_new_status: str,
+        idempotency_key: str,
+        dry_run: bool,
     ) -> dict[str, Any]:
         """Move one of the caller's owner's tasks from an expected status to a
         new one.
@@ -1061,6 +1111,7 @@ def register(
                     "p_new_status": p_new_status,
                 },
                 idempotency_key=idempotency_key,
+                dry_run=dry_run,
             ),
             kind=KIND_WRITE,
             # Nothing redacted: a task id and two status literals are the

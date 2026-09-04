@@ -235,7 +235,7 @@ capabilities:
     risk: moderate
     max_response_bytes: 65536
     max_concurrent_calls: 1
-    supports_dry_run: false
+    supports_dry_run: true
     requires_approval: false
     enabled: true
     required_scopes: [notes:write]
@@ -264,7 +264,7 @@ capabilities:
     risk: moderate
     max_response_bytes: 65536
     max_concurrent_calls: 1
-    supports_dry_run: false
+    supports_dry_run: true
     requires_approval: false
     enabled: true
     required_scopes: [tasks:write]

@@ -103,6 +103,15 @@ FORWARDED_HEADERS = ("Authorization", "Accept", REQUEST_ID_HEADER)
 #: one agent, so one caller's key can never reach another's.
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 
+#: Whether this write is a rehearsal (ADR 0182). Sent on every write, `"true"` or
+#: `"false"`, because an OPTIONAL header would put the write roster back to a
+#: subset check -- the thing having two exact rosters exists to avoid.
+#:
+#: The value is a literal the database parses narrowly: anything that is not
+#: `true` or `false` raises there rather than being read as false, because a
+#: caller who asked for a rehearsal and got a live write has no way to find out.
+DRY_RUN_HEADER = "Dry-Run"
+
 #: The write branch's allowlist, and the reason there are two rosters.
 #:
 #: `_dial`'s guard is an EQUALITY (D477), and an *optional* header would turn it
@@ -115,7 +124,7 @@ IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
 #: Were it optional the two rosters could not both be exact -- a second reason
 #: for requiring it, the first being that an unconditional guarantee is worth
 #: more than one an agent has to remember to ask for.
-WRITE_FORWARDED_HEADERS = (*FORWARDED_HEADERS, IDEMPOTENCY_KEY_HEADER)
+WRITE_FORWARDED_HEADERS = (*FORWARDED_HEADERS, IDEMPOTENCY_KEY_HEADER, DRY_RUN_HEADER)
 
 
 class QueryRefusal(Exception):

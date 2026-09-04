@@ -50,7 +50,7 @@ decision (ADR 0129). What the brief got wrong is §1.
 Six columns, the house shape. **Every row is a fact measured against the tree or
 against the deployment at planning time**, not a prediction.
 
-**Next free number after this table is D923.**
+**Next free number after this table is D929.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -115,6 +115,12 @@ against the deployment at planning time**, not a prediction.
 | **D920** | `docs/mcp-tool-catalog.md` publishes what an agent can do against this deployment, and it is rendered from the compiled contract. | **The contract does not carry `idempotency_key`**, because it is not a database function parameter — so a REQUIRED tool parameter was absent from the document a caller reads, and every catalog test stayed green. `render-mcp-catalog.py --check` reported the catalog current. | The renderer publishes the reserved parameter with the sentence a caller needs. It keeps its **own copy** of the list and a contract test compares it against `mcp_tools.RESERVED_WRITE_PARAMETERS` — D486's pattern, because a repository-root script importing a service package trades a compared pair for a fragile path, and aliasing would make the test compare a value with itself. | **D274's family**: when a document names what a caller may do, check that a caller following it can. A generated document is not automatically a true one — it is true about its source, and this one's source deliberately excludes the runtime's own parameters. **Every test asserted the catalog matched the contract, and the contract was not the whole contract.** | 0181 |
 | **D921** | The idempotency key is one more entry in `FORWARDED_HEADERS`, which grew from two to three once already (D477). | **It cannot be, because it is sent on writes only.** `_dial`'s guard is an EQUALITY against the allowlist, and an optional header turns that into a subset check — D300's shape, which both of Session 8's allowlist failures were right to refuse. | **Two exact rosters rather than one loose one**: `FORWARDED_HEADERS` for a read, `WRITE_FORWARDED_HEADERS` for a write, and `_dial` checks whichever branch it is on for equality. A test asserts the write set is the read set plus **precisely one** name, and a mutation applying the write roster unconditionally is killed by a proof reading what a READ actually sent. | **This is also the second reason a key is required rather than optional.** Were it optional the two rosters could not both be exact, and the guard would have to soften. A constraint that looked like a nuisance turned out to be what keeps an existing invariant intact — the opposite of the usual direction, and worth noticing before somebody relaxes the requirement for convenience. | 0181 |
 | **D922** | The proofs written for this run cover the refusals they name. | **Two of them did not, and the battery found both.** `test_a_key_reused_for_a_different_tool_is_refused` passed with the tool comparison REMOVED, because its two calls also differ in argument fingerprint and the other half of the same condition refused them. And the runtime's own key shape check had no proof at all: deleting it left every test green, because the database refuses a malformed key too and the plane fails closed either way. | The tool arm calls `agent_idempotency_claim` **directly**, with the fingerprint held equal across two tool names, plus a control where the tool also matches. The runtime arm asserts the refusal **and that no upstream request was made**, plus a control where a well-formed key reaches the transport. | **Two different failures wearing one appearance.** The first was a weak test — it measured a clause its inputs could never isolate. The second was a real coverage gap of D911's exact shape, one run later: a second boundary enforcing the same rule makes the first one's absence invisible, and only a mutation asks whether it is doing anything. **The tool comparison is also, today, unreachable end to end** — the two writes share no parameter names, so no two tools can collide on a fingerprint. It is kept as the explicit authority and proved where it can be reached, which is the honest version of a defensive check. | 0181 |
+| **D923** | Run 7's text: a dry-run runs *"authorization, scope and validation"*. | **Whose validation is the question, and the plan does not answer it.** The runtime's validation is the lock's — argument names in both directions, filters against the allowlist. **The product's is somewhere else entirely**: `length(title) BETWEEN 1 AND 200` is a `CHECK` on `app.notes`, the row policies are RLS, and the compare-and-swap is inside `api.update_task_status`. None of it fires unless the write is attempted, so a branch that skips the write reports success for a title the table refuses. | **The dry-run ATTEMPTS the write and rolls it back** (ADR 0182), inside a plpgsql `BEGIN … EXCEPTION` block whose sentinel unwinds to the implicit savepoint. Measured with a control: the INSERT is rolled back, the surrounding transaction still commits its audit row, the `RETURNING` variable survives complete, and a real `CHECK` violation **propagates** rather than being swallowed. | **This is the first time D489 could be worked WITH rather than around.** The quota refusal (ADR 0180) and the idempotency conflict (ADR 0181) each had to avoid `RAISE` because it would take their audit row; here the rollback is scoped to a SUBTRANSACTION, so the row survives. Three runs met the same rule and the third found the exception to it. **And the promise this buys is the strongest one a dry-run can make**: the refusal a rehearsal reports is the refusal the real call would have produced, as a property rather than an intention — the same statement runs, so the same errcode comes back and the same translation applies. | 0182 |
+| **D924** | The rehearsal returns the row it would have written. | **It also returns an id for a row that will never exist.** The `RETURNING` variable survives the rollback complete, id included — plpgsql variables are not transactional — so the obvious implementation hands back a plausible uuid nothing holds, in the field a client is most likely to store. | **The id is nulled** on a `create_note` rehearsal. A task's id is the caller's own argument rather than a minted one, so it is left alone: the row it names exists, and what did not happen is the transition. At the MCP boundary the result carries `"dry_run": true` and `row_count` **0**. | **D600 with a fresh coat.** That row was about a `release` read from a block no document kind has, wrapped in `or {}`, writing `null` into every drill evidence document — and passing a whole host gate. This one would have been worse in one respect: the value is not `null` but a *well-formed uuid*, so nothing downstream could tell it from a real one. **Nothing was created, so nothing has an identity**, and that sentence is the whole repair. | 0182 |
+| **D925** | Run 4 compiled `supports_dry_run` and `requires_approval` in one loop, folding both with `any` — written as a fold rather than `declared[0]` so that grouping a write later would not silently take the first. | **The fold is right and one of the two polarities is wrong.** `requires_approval` is a RESTRICTION, so `any` is correct and is `risk`'s aggregation. `supports_dry_run` is a PERMISSION: a tool may be rehearsed only if EVERY capability behind it may be, which is the budgets' aggregation. Folded with `any`, two capabilities behind one write — one supporting a rehearsal and one not — would advertise a dry run the tool cannot honour. | `all` for the permission, `any` for the restriction, each with its reason at the fold. A test asserts both polarities **and** reads the source for the two calls, because a write is one-to-one with its operation today (D486) so the compiled contract cannot exhibit the difference. | **Nothing was wrong and it still had to be fixed**, which is the interesting part. Both folds are identities while a write has one backing capability, so no output differed and no test could have failed. What changed is that **Run 7 is the first run to READ these fields** — §9's rotation-flag entry is the same shape, sixteen declared flags nobody had read — and a permission folded with `any` is the direction that grants what nothing granted. | 0182 |
+| **D926** | Run 6 repaired the errcode-map scan that read migration 0019 alone (D918), and the class is closed. | **FOUR more readers had the same defect, in the next run.** `test_the_runtime_vocabulary_is_the_catalogs`, `test_every_refusal_site_maps_to_exactly_one_denial_reason` and `test_the_constant_names_are_the_ones_the_runtime_exports` all read migration 0027's `CREATE TYPE` and nothing else, so 0030's ninth denial reason made all three report the RUNTIME as wrong about a member the database really has. **And a fourth, `test_the_denial_taxonomy_is_in_the_catalog`, held the eight members as a HARDCODED STRING** — which the contract suite found after the other three were repaired, so even the repair pass missed it. | The taxonomy reader aggregates the `CREATE TYPE` and every later `ALTER TYPE … ADD VALUE`, across every template, in migration order — which is the order PostgreSQL itself reports. The live check compares the CLUSTER against the runtime tuple, so the chain runs cluster → runtime → templates and no comparison has both of its sides from one place. | **D918 was repaired as an instance and not as a class**, and the bill arrived one run later — four times over, and the fourth only after three deliberate repairs in the same file family. The generalisable form is worth writing down: *a reader that encodes WHICH FILE holds a value is correct only while that file holds all of them*, and this repository adds migrations by design. The question to ask of any scan is not "does it read the right file" but "what makes this the only file". | 0182 |
+| **D927** | The reviewed manifest is where a capability's declarations are exercised. | **`capabilities.example.yaml` declared `supports_dry_run: false` on both writes**, which is what Run 4 landed when the field had no behaviour. Shipping Run 7 against it unchanged would have made the feature inert in the reviewed manifest — the same shape as the host's `capabilities.yaml` still being schema version 1, one level in. | Both writes declare `supports_dry_run: true`. The compiled contract was re-approved after **reading the diff line by line**: exactly four changes, two per write tool — the capability entry and the tool-level aggregate — and nothing else. `requires_approval` stays `false` on both, because nothing in this product needs approval and D870 says the claim is proved by a refusal, which a fixture manifest provides. | **A field declared before its behaviour defaults to off, and off is the value that makes the next run look finished while doing nothing.** ADR 0177's rule — a field is required at the version that introduces it — is what puts a run in this position, and it is worth pairing with the habit of asking, at the start of the behaviour run, what the manifest currently says. | 0182 |
+| **D928** | The mutation battery's arms measure what their labels say. | **Two of twelve did not, and they failed differently.** Widening the handler from `WHEN sqlstate 'P0001'` to `WHEN OTHERS` survived and was **uninformative**: the `sqlerrm` re-raise inside the handler already sends every non-sentinel error onward, so the two forms are genuinely equivalent and the defect exists only when both go. And the arm making the transport send `"true"` unconditionally survived because its **victim was a live SQL proof**, which drives psql and never reaches the runtime — while the proof that does read the built request asserted header NAMES and no values. | The handler arm replaces the whole `EXCEPTION` block. The transport arm points at `test_the_dialled_request_actually_carries_the_header`, which now asserts the header's **value** in both directions. Twelve of twelve killed. | **D493's two categories in one run**, and telling them apart is the work. The first survivor meant the product had defence in depth; the second meant a transport that made **every write a rehearsal** would have shipped, because nothing offline reads that header's value and nothing online reaches the runtime. It is D911's shape for the third session in a row: *a proof that asserts a set is not asserting its members*. | 0182 |
 
 ---
 
@@ -592,6 +598,67 @@ the point** — a dry-run recorded as a write would make every write count in th
 audit table a lie.
 
 Approval ships as a declaration and a named refusal (D870). Not a workflow.
+**Done.** ADR **0182**, migration **0030**, D923–D928. Twelve mutation arms,
+twelve killed, after two survivors that failed in **different** ways.
+
+**What shipped.** A dry-run that **attempts the write and rolls it back**, so
+every `CHECK`, every policy and the compare-and-swap fire — inside a plpgsql
+`BEGIN … EXCEPTION` block whose sentinel unwinds to the implicit savepoint,
+leaving the surrounding transaction free to commit its audit row.
+`agent_audit_outcome` gains `dry_run`; `agent_denial_reason` gains
+`approval_required`; both write tools gain a required `dry_run` parameter that
+travels as a header beside the idempotency key.
+
+**The plan's phrase was "authorization, scope and validation", and the run is
+about the word *validation*** (D923). The runtime's is the lock's; the product's
+lives in the database and fires only if the write is attempted. A rehearsal that
+skipped it would report success for a title the table refuses, which is the one
+thing a caller uses a dry-run to find out. **The promise this buys is that a
+rehearsal's refusal IS the refusal the real call would have produced** — the
+same statement runs, so the same errcode comes back and the same translation
+applies.
+
+**This is the first run in the session that could work WITH D489 rather than
+around it.** ADR 0180's quota refusal and ADR 0181's idempotency conflict each
+had to avoid `RAISE` because it would take their audit row. A subtransaction
+rollback does not, and three runs meeting the same rule is what made the
+exception visible.
+
+**The id is nulled, and D600 is why** (D924). The `RETURNING` variable survives
+the rollback complete — plpgsql variables are not transactional — so the obvious
+implementation returns a well-formed uuid for a row that will never exist, in the
+field a client is most likely to keep. Worse than D600's `null` in one respect:
+nothing downstream could tell it from a real id.
+
+**Approval is a refusal, exactly as D870 scoped it.** Raised beside the scope
+check so the record is already open and the denial is audited, before anything is
+dialled. A ninth denial reason and a seventh caller-facing token, because none of
+the six existing ones is honest — `scope_not_held` is the closest and is false.
+
+**Three findings are about this repository's own guards.** `supports_dry_run` was
+folded with `any` where a permission needs `all`, latent because a write has one
+backing capability and visible only because this run was the first to read the
+field (D925). The denial-taxonomy guards read migration 0027 alone — **D918's
+defect again, one run later, in three more readers**, because Run 6 repaired an
+instance rather than a class (D926). And the reviewed manifest declared
+`supports_dry_run: false` on both writes, so the feature would have shipped inert
+in the very file that reviews it (D927).
+
+**The battery's two survivors are worth separating** (D928). One was
+uninformative — the handler's `sqlerrm` re-raise already covers `WHEN OTHERS`, so
+the two forms are equivalent and the product has defence in depth. The other was
+real: a transport sending `"true"` unconditionally, making **every write a
+rehearsal**, survived because the proof that reads the built request asserted
+header *names* and no values. D911's shape for the third session running.
+
+**Not closed, deliberately.** No capability in the reviewed manifest declares
+`requires_approval: true`, so `AGT-APPROVE-001`'s live half is proved against a
+fixture lock rather than the deployment's own file — which is what D870's
+"declaration and a refusal" means in practice. And a rehearsal costs what the
+real write costs less the commit: the same four upstream requests, the same
+statement, the same `FOR UPDATE` briefly held. **A dry-run is a rehearsal, not a
+preview**, and an agent hammering them is doing real work.
+
 ### Run 8 — project-local profiles
 
 **A profile may only narrow** (D867), and the refusal is at **compile time**: a

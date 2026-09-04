@@ -204,6 +204,7 @@ def as_agent(
     sql: str,
     *,
     idempotency_key: str | None = None,
+    dry_run: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """A request with the GUCs the pre-request hook would have set.
 
@@ -221,9 +222,18 @@ def as_agent(
     module a replay of the one before it, and a `None` default would leave every
     existing write proof refused. A proof that is ABOUT replay passes its own key
     and gets the deduplication it is measuring.
+
+    **`dry_run` is a STRING and defaults to absent, not to `"false"`** (ADR
+    0182). The database distinguishes an absent header from a present one, and
+    the malformed-value proof needs to send `"1"` and `"TRUE"` -- values a bool
+    parameter could not express. Absent is the honest default for every proof
+    that is not about rehearsal.
     """
     key = idempotency_key if idempotency_key is not None else f"k-{secrets.token_hex(8)}"
-    headers = json.dumps({"idempotency-key": key})
+    sent = {"idempotency-key": key}
+    if dry_run is not None:
+        sent["dry-run"] = dry_run
+    headers = json.dumps(sent)
     return su(
         cluster,
         f"""
@@ -1050,13 +1060,23 @@ def test_the_reader_applies_the_limit_it_is_given_without_clamping(
 
 
 def test_the_denial_taxonomy_is_in_the_catalog(cluster: dict[str, Any]) -> None:
-    """The eight members, in the enum's own order, read from the applied cluster.
+    """Every member, in the enum's own order, read from the APPLIED cluster.
 
     `test_denial_taxonomy.py` compares the runtime tuple against the migration
-    TEMPLATE, which is a text comparison. This is the other half: the template
-    was applied and the type exists with those members. A template that parsed
+    TEMPLATES, which is a text comparison. This is the other half: the templates
+    were applied and the type exists with those members. A template that parsed
     and did not apply would satisfy the first and fail here.
+
+    **The expected list is the runtime's tuple and was a hardcoded string until
+    Session 16 Run 7.** That was the FOURTH reader of this taxonomy encoding
+    where its members lived — D918 in Run 6, three more in `test_denial_taxonomy`
+    at the start of this run, and this one, which the contract suite found after
+    those three were repaired. A literal here is a third copy of a list ADR 0002
+    says has one authority; chaining cluster → runtime → templates keeps each
+    comparison between two different things.
     """
+    from app import mcp_errors
+
     result = su(
         cluster,
         "SELECT string_agg(enumlabel, ',' ORDER BY enumsortorder) FROM pg_enum "
@@ -1064,10 +1084,7 @@ def test_the_denial_taxonomy_is_in_the_catalog(cluster: dict[str, Any]) -> None:
         "WHERE typname = 'agent_denial_reason';",
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == (
-        "scope_not_held,not_in_allowlist,input_malformed,budget_exceeded,"
-        "contract_drift,upstream_refused,audit_unavailable,write_rejected"
-    ), result.stdout
+    assert result.stdout.strip() == ",".join(mcp_errors.DENIAL_REASONS), result.stdout
 
 
 def test_a_refused_record_carries_a_reason_and_no_other_record_may(
@@ -1993,3 +2010,287 @@ def test_a_failed_write_does_not_burn_its_key(cluster: dict[str, Any]) -> None:
     # refused had the failed call left one.
     retried = _note(cluster, agent, owner, key)
     assert retried.returncode == 0, f"the key was burned by a failure: {retried.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# Dry-run (Session 16 Run 7 -- ADR 0182, migration 0030)
+# ---------------------------------------------------------------------------
+#
+# Every arm needs a cluster, because the whole claim is that a dry-run runs the
+# PRODUCT's validation -- the CHECK constraints, the policies, the
+# compare-and-swap -- and none of that exists offline.
+
+
+def test_a_dry_run_changes_nothing_and_records_a_dry_run(cluster: dict[str, Any]) -> None:
+    """`AGT-DRYRUN-001`, and the id is the half worth reading twice.
+
+    The `RETURNING` variable survives the rollback complete, id included -- and
+    that id belongs to a row that does not exist and never will. Publishing it
+    would be D600 with a fresh coat: a plausible uuid nothing holds, in the field
+    a client is most likely to keep. Nothing was created, so nothing has one.
+
+    The CONTROL is the same call without the header. Without it, a `create_note`
+    that had simply stopped working would satisfy every assertion here.
+    """
+    agent, owner = _writing_agent(cluster)
+
+    rehearsed = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        "SELECT coalesce((api.create_note('rehearsed', 'body')).id::text, 'NULL');",
+        dry_run="true",
+    )
+    assert rehearsed.returncode == 0, rehearsed.stderr
+    assert _returned(rehearsed) == "NULL", _returned(rehearsed)
+
+    assert (
+        su(cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';").stdout.strip()
+        == "0"
+    ), "a dry run wrote a row"
+
+    outcomes = su(
+        cluster,
+        "SELECT outcome || ':' || coalesce(row_count::text, 'null') "
+        "FROM app_private.agent_audit "
+        f"WHERE agent_id = '{agent}' AND source = 'database';",
+    ).stdout.split()
+    assert outcomes == ["dry_run:0"], outcomes
+
+    # THE CONTROL: the same call, no header, writes for real.
+    real = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        "SELECT (api.create_note('for real', 'body')).id;",
+    )
+    assert real.returncode == 0, real.stderr
+    assert _returned(real) != "NULL"
+    assert (
+        su(cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';").stdout.strip()
+        == "1"
+    )
+
+
+def test_a_dry_run_reports_the_refusal_the_real_call_would_have_produced(
+    cluster: dict[str, Any],
+) -> None:
+    """**Whose validation**, which is the question the run's plan does not answer.
+
+    `length(title) BETWEEN 1 AND 200` is a CHECK on `app.notes`. A dry-run that
+    skipped the write would skip it and report success for a title the table
+    refuses -- the single thing a caller most wants a dry-run to tell them. So
+    the write is ATTEMPTED and rolled back, and the constraint fires.
+
+    The two arms together are the claim: the rehearsal and the real call are
+    refused by the SAME constraint, so a dry-run's refusal is the refusal the
+    real call would have produced rather than an imitation of it.
+    """
+    agent, owner = _writing_agent(cluster)
+    long_title = "x" * 201
+
+    rehearsed = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        f"SELECT (api.create_note('{long_title}', 'body')).id;",
+        dry_run="true",
+    )
+    assert rehearsed.returncode != 0, "a dry run accepted a title the table refuses"
+    assert "notes_title_check" in (rehearsed.stderr or ""), rehearsed.stderr
+
+    real = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        f"SELECT (api.create_note('{long_title}', 'body')).id;",
+    )
+    assert real.returncode != 0
+    assert "notes_title_check" in (real.stderr or ""), real.stderr
+
+    # And neither left anything behind -- the audit row included, because an
+    # aborting transaction takes it (D489).
+    assert (
+        su(
+            cluster,
+            f"SELECT count(*) FROM app_private.agent_audit WHERE agent_id = '{agent}';",
+        ).stdout.strip()
+        == "0"
+    )
+
+
+def test_a_dry_run_spends_no_idempotency_key(cluster: dict[str, Any]) -> None:
+    """A rehearsal changes nothing, and dedupe state is something (ADR 0182).
+
+    Burning a key on a dry-run would make the real call that follows a replay of
+    a write that never happened -- the caller would get a row back and no row
+    would exist. The claim is therefore taken AFTER the dry-run branch.
+
+    It is still required, which the second arm asserts: the rule stays "every
+    agent write carries a key" with no exception a caller has to remember.
+    """
+    agent, owner = _writing_agent(cluster)
+    key = "rehearse-then-write"
+
+    rehearsed = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        "SELECT (api.create_note('rehearsed', 'body')).id;",
+        idempotency_key=key,
+        dry_run="true",
+    )
+    assert rehearsed.returncode == 0, rehearsed.stderr
+    assert (
+        su(
+            cluster,
+            f"SELECT count(*) FROM app_private.agent_idempotency WHERE agent_id = '{agent}';",
+        ).stdout.strip()
+        == "0"
+    ), "a dry run claimed the key"
+
+    real = _note(cluster, agent, owner, key)
+    assert real.returncode == 0, f"the key was spent by a rehearsal: {real.stderr}"
+    assert _returned(real) != "NULL"
+    assert (
+        su(cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';").stdout.strip()
+        == "1"
+    )
+
+    # A rehearsal still requires a key, like every other agent write.
+    keyless = su(
+        cluster,
+        f"""
+        BEGIN;
+        SET LOCAL ROLE "{cluster["roles"]["agent_writer"]}";
+        SELECT set_config('app.agent_id', '{agent}', true);
+        SELECT set_config('app.user_id', '{owner}', true);
+        SELECT set_config('request.headers', '{{"dry-run": "true"}}', true);
+        SELECT (api.create_note('no key', 'body')).id;
+        COMMIT;
+        """,
+    )
+    assert keyless.returncode != 0, "a rehearsal was accepted with no idempotency key"
+    assert "AP412" in (keyless.stderr or ""), keyless.stderr
+
+
+def test_a_malformed_dry_run_header_raises_rather_than_reading_as_false(
+    cluster: dict[str, Any],
+) -> None:
+    """**The one misreading that costs a row**, so the parse is narrow.
+
+    A caller who asked for a rehearsal and got a live write has no way to find
+    out: the call succeeds, the row is created, and the response looks exactly
+    like the rehearsal they expected. So anything that is not the literal `true`
+    or `false` raises rather than being read as false -- the opposite of the
+    forgiving parse a header usually gets.
+
+    The controls are both literals, which must be accepted and must MEAN what
+    they say: `false` writes, `true` does not.
+    """
+    agent, owner = _writing_agent(cluster)
+
+    for bad in ("1", "TRUE", "yes", ""):
+        refused = as_agent(
+            cluster,
+            "agent_writer",
+            agent,
+            owner,
+            "SELECT (api.create_note('ambiguous', 'body')).id;",
+            dry_run=bad,
+        )
+        assert refused.returncode != 0, f"the dry-run header {bad!r} was accepted"
+        assert "AP412" in (refused.stderr or ""), refused.stderr
+
+    assert (
+        su(cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';").stdout.strip()
+        == "0"
+    ), "an ambiguous dry-run header wrote a row"
+
+    explicit_false = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        "SELECT (api.create_note('explicitly live', 'body')).id;",
+        dry_run="false",
+    )
+    assert explicit_false.returncode == 0, explicit_false.stderr
+    assert _returned(explicit_false) != "NULL"
+    assert (
+        su(cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';").stdout.strip()
+        == "1"
+    ), "the literal false did not write"
+
+
+def test_a_dry_run_of_a_transition_leaves_the_status_alone(cluster: dict[str, Any]) -> None:
+    """The rehearsal shows the status it WOULD set, and sets nothing.
+
+    A task's id is the caller's own argument rather than a minted one, so it is
+    not nulled: the row it names exists, and what did not happen is the
+    transition. `row_count` 0 with outcome `dry_run` is what says so.
+
+    The CONTROL is the real transition afterwards, which must actually move the
+    status -- otherwise "the status is unchanged" is satisfied by a function
+    that no longer works.
+    """
+    agent, owner = _writing_agent(cluster)
+    note = _returned(_note(cluster, agent, owner, "task-key-dryrun-1"))
+    task = str(uuid.uuid4())
+    su(
+        cluster,
+        f"INSERT INTO app.tasks (id, owner_id, note_id, title) "
+        f"VALUES ('{task}', '{owner}', '{note}', 'a task');",
+    )
+
+    move = f"SELECT (api.update_task_status('{task}', 'pending', 'completed')).status;"
+    rehearsed = as_agent(cluster, "agent_writer", agent, owner, move, dry_run="true")
+    assert rehearsed.returncode == 0, rehearsed.stderr
+    assert _returned(rehearsed) == "completed", "the rehearsal did not show the new status"
+
+    assert (
+        su(cluster, f"SELECT status FROM app.tasks WHERE id = '{task}';").stdout.strip()
+        == "pending"
+    ), "a dry run moved the task"
+
+    real = as_agent(cluster, "agent_writer", agent, owner, move)
+    assert real.returncode == 0, real.stderr
+    assert (
+        su(cluster, f"SELECT status FROM app.tasks WHERE id = '{task}';").stdout.strip()
+        == "completed"
+    ), "THE CONTROL: the real transition did not move the task either"
+
+
+def test_a_dry_run_of_a_transition_reports_the_conflict_the_real_call_would(
+    cluster: dict[str, Any],
+) -> None:
+    """The compare-and-swap runs in a rehearsal, which is the point of one.
+
+    A caller asking "would this transition succeed" is asking exactly the
+    question the CAS answers, and a dry-run that skipped it would answer yes for
+    a task somebody else had already moved.
+    """
+    agent, owner = _writing_agent(cluster)
+    note = _returned(_note(cluster, agent, owner, "task-key-dryrun-2"))
+    task = str(uuid.uuid4())
+    su(
+        cluster,
+        f"INSERT INTO app.tasks (id, owner_id, note_id, title, status) "
+        f"VALUES ('{task}', '{owner}', '{note}', 'a task', 'completed');",
+    )
+
+    rehearsed = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        f"SELECT (api.update_task_status('{task}', 'pending', 'completed')).status;",
+        dry_run="true",
+    )
+    assert rehearsed.returncode != 0, "a rehearsal skipped the compare-and-swap"
+    assert "AP409" in (rehearsed.stderr or ""), rehearsed.stderr
