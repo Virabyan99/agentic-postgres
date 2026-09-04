@@ -2,7 +2,7 @@
 
 - **Status:** accepted
 - **Date:** 2026-09-04
-- **Session:** 16, Run 5 (`AGT-QUOTA-001`, D865, D902–D913)
+- **Session:** 16, Run 5 (`AGT-QUOTA-001`, D865, D902–D914)
 - **Related:** **ADR 0129** (four budgets, independent by decision — read first,
   per the stage plan's *Must not*), **ADR 0179** (a capability narrows a budget
   and may never widen one), **ADR 0141** (`begin` runs before the scope check,
