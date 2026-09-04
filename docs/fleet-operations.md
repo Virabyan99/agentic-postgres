@@ -109,7 +109,9 @@ either unit file is absent — installing units is `provision-host.sh --apply`'s
 job and the refusal says so — and while the repository holds no full backup,
 because the first one is yours to take by hand. It re-reads systemd afterwards
 rather than trusting the enable's exit code. Both timers carry
-`Persistent=true`, so a run the calendar already owed fires at enable.
+`Persistent=true`, which catches up a slot missed while the host was down; a
+timer enabled for the first time owes nothing, and its first run is the next
+calendar slot (D973, measured at the first enable).
 
 **On the reference deployment no timer unit was installed until Session 17's
 trip** (D944): the units were added in Session 10 after the host was
@@ -125,3 +127,44 @@ from happening quietly again.
 - Installing the unit files: `provision-host.sh --check`, then `--apply`.
 - Taking the first full backup of every project.
 - Deciding, at a terminal, that a project is retired. Nothing here decides it.
+
+## 6. Creating a project — the sequence as measured
+
+The order below is the one that produced the third project on 2026-09-04,
+with the four things that went wrong on the way and what each cost. Every
+`sudo` line is a human at a terminal; nothing here is a script.
+
+1. **The manifest lives outside the checkout.** `.gitignore` names the two
+   host manifests individually, on purpose (a glob would hide a future example
+   file that should be committed), so a third manifest inside the checkout is
+   an untracked file, the release is dirty, and every deploy refuses with
+   *"the checkout has uncommitted changes"* (D971). Keep it at
+   `/home/op/<project>.yaml` and pass that path.
+2. **Buckets, tokens, DNS**, by hand: `apg-<key>` and `apg-<key>-backup` in
+   the same location as the others; two Account API tokens, Object Read &
+   Write, each scoped to one bucket; one grey-cloud A record.
+3. **The control-plane credential** on the host, two lines, then
+   `bootstrap-providers.sh --plan`, then `--apply --operator-credential-file`.
+   `--apply` creates the Infisical project, the runtime identity and every
+   generated value, and shreds the credential file afterwards. Create nothing
+   at Infisical by hand before it.
+4. **Paste the four R2 values** into the new project: `/storage` (create the
+   folder yourself) and `/backup` (exists after `--apply`).
+5. `materialize-secrets.sh --project <path> --requirements secrets.required.yaml
+   --session N` — the first reader of all four values; a 404 here names the
+   one that is missing.
+6. **Deploy, unredirected.** `sudo ./deploy.sh --host host.yaml --project <path>
+   --capabilities capabilities.yaml --through-session N`, at the terminal, with
+   nothing after it: a redirect or a pipe puts the command in the background
+   of sudo's pty and its first `docker exec -i` stops on `SIGTTIN` and waits
+   forever (D972; `deploy.sh` now refuses that shape). The first pass records
+   the loopback endpoints `unavailable` and the app route `unavailable` for a
+   project with no administrator; both are the documented first-deploy state,
+   not failures.
+7. **Ports**: `deploy.sh … --render-runtime-only` reserves two and prints the
+   `database-ports.sh verify` command with this project's instance UUID; run
+   it as printed; deploy once more. Now `pooled` and `direct` read
+   `available`.
+8. `fleet.sh` shows the new row. An ephemeral project shows its expiry and
+   `unscheduled`; nothing more is owed to it. A permanent project continues
+   with the first full backup and `schedule enable`.

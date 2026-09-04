@@ -339,9 +339,15 @@ check_baseline() {
     violations=$((violations + 1))
   fi
 
-  local unit
-  for unit in agentic-postgres-docker-firewall.service agentic-postgres-edge.service \
-              agentic-postgres-project@.service; do
+  # The SAME glob install_units writes from, never a list typed here. The list
+  # this replaced named three units, so on 2026-09-04 --check reported "the host
+  # meets the baseline" on a host missing all four backup units (D970): D522
+  # widened the installer's glob and the checker kept its own definition of
+  # what a unit is. One source, two readers (D600).
+  local origin unit
+  for origin in "${ROOT_DIR}"/systemd/*.service "${ROOT_DIR}"/systemd/*.timer; do
+    [ -f "${origin}" ] || continue
+    unit="$(basename "${origin}")"
     if [ -f "${SYSTEMD_DIR}/${unit}" ]; then
       ok "unit ${unit}"
     else

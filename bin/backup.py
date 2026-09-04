@@ -551,9 +551,16 @@ def verb_schedule(arguments: argparse.Namespace) -> int:
         raise OperatorError(
             EXIT_STATE, "the timers were enabled and systemd does not report both enabled"
         )
+    # Measured on the host at the first enable (D973): Persistent=true catches
+    # up a slot missed while the timer was already installed and the host was
+    # down, judged against the stamp file the timer writes on its first
+    # trigger. A freshly enabled timer has no stamp, so nothing is owed and the
+    # first runs are the next calendar slots. The earlier text here promised an
+    # immediate run; it was stated, not measured, and it was wrong.
     print(
-        "backup: Persistent=true on both timers, so a run the calendar already owed "
-        "fires now rather than at the next slot; a full backup is minutes at process-max 1."
+        "backup: Persistent=true catches up a slot missed while the host was down; "
+        "a timer enabled for the first time owes nothing, so the first runs are the "
+        "next calendar slots (systemctl list-timers 'agentic-postgres-backup-*')."
     )
     return 0
 

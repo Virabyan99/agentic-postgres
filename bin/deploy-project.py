@@ -1733,7 +1733,14 @@ def render_runtime_only(arguments: argparse.Namespace) -> int:
 
     print("\n\033[1mNothing was started, and no allocation was marked active.\033[0m")
     print("The allocation becomes active once both transports have answered:")
-    print(f"  sudo bin/database-ports.sh verify --host <host.yaml> --instance-uuid {instance_uuid}")
+    # The path this run was given, never a `<host.yaml>` placeholder: pasted
+    # verbatim, the angle brackets are shell redirections, and `> --instance-uuid`
+    # wrote a file of that name into the checkout, which the next deploy refused
+    # as a dirty release (D975). A printed command is run as printed.
+    print(
+        f"  sudo bin/database-ports.sh verify --host {arguments.host} "
+        f"--instance-uuid {instance_uuid}"
+    )
     return 0
 
 
@@ -2298,11 +2305,20 @@ def main(argv: list[str] | None = None) -> int:
         # D230's gate, and the order matters: the administrator is read first,
         # so a project that has none records `unavailable` without spending the
         # observation window polling a route it is not going to publish.
+        #
+        # And the window is skipped, not merely short-circuited inside it: the
+        # comment above promised that since D230 while the loop below polled a
+        # route it already knew it would not publish, ten times per deploy on
+        # the first ephemeral project (D974). One observation, once, is the
+        # honest record for a project with no administrator.
         administrator = observe_active_administrator(rendered["database"])
-        app_status = observation.await_observation(
-            lambda: observe_app(rendered["routes"]["app"], administrator=administrator),
-            lambda observed: observed == "ready",
-        )
+        if administrator:
+            app_status = observation.await_observation(
+                lambda: observe_app(rendered["routes"]["app"], administrator=True),
+                lambda observed: observed == "ready",
+            )
+        else:
+            app_status = observe_app(rendered["routes"]["app"], administrator=False)
         if not administrator:
             print(
                 "\n  This project has no active administrator, so its application route "

@@ -124,8 +124,11 @@ shows a secret access key exactly once.
    repository holds no full backup, and it re-reads systemd afterwards rather
    than trusting the enable's exit code. `schedule status` exits 0 only when
    both timers are enabled; the fleet inventory reports the same reading as
-   `unscheduled`. Both timers carry `Persistent=true`, so a run the calendar
-   already owed fires at enable rather than at the next slot.
+   `unscheduled`. Both timers carry `Persistent=true`, which catches up a slot
+   missed while the host was down; **a timer enabled for the first time owes
+   nothing** and its first run is the next calendar slot (D973, measured at
+   the first enable on 2026-09-04: no trigger recorded, next elapse the next
+   slot). Read it with `systemctl list-timers 'agentic-postgres-backup-*'`.
 
    They are installed disabled on purpose. A unit that fails on every boot until
    an operator is ready trains an operator to ignore it.

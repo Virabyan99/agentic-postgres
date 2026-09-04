@@ -228,6 +228,19 @@ main() {
     [ -f "${project}" ] || die 2 "project manifest not found: ${project}"
     [ -f "${capabilities}" ] || die 2 "capability manifest not found: ${capabilities}"
 
+    # A terminal on stdin with stdout or stderr redirected is the one shape
+    # that hangs: sudo's use_pty runs the command in the background of its pty
+    # when the standard streams are not all terminals, and the first child that
+    # reads the terminal -- the bootstrap's `docker exec -i` -- is stopped with
+    # SIGTTIN and waits forever, its own 30-second timeout unable to fire in a
+    # stopped process (D972, measured on 2026-09-04: three processes in state
+    # T, nothing applied). Refused here, before root, so the operator learns it
+    # from a sentence rather than from a deploy that never returns. Fully
+    # non-interactive callers (no terminal anywhere) are not this shape.
+    if [ -t 0 ] && { [ ! -t 1 ] || [ ! -t 2 ]; }; then
+      die 2 "--through-session with stdin at a terminal and stdout or stderr redirected stops at the first docker exec -i under sudo (D972). Run it unredirected; the terminal is the log."
+    fi
+
     [ "$(id -u)" -eq 0 ] || die 3 "--through-session requires root: it writes host state."
 
     # Run through the resolver rather than the shebang. `#!/usr/bin/env python3`

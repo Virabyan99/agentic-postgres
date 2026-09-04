@@ -105,6 +105,48 @@ def test_no_unit_in_the_directory_is_left_uninstallable() -> None:
     )
 
 
+def _check_units_glob() -> str:
+    """The glob inside `--check`'s unit section, found by its own heading.
+
+    The check function is long and its unit loop sits after the launcher and
+    sudoers loops, so the search is anchored on the `== launchers and units ==`
+    heading and the first `for origin in` after it. The install function has
+    its own heading of the same text, so the FIRST heading is the check's only
+    because `check_baseline` precedes `install_units` in the file; the
+    assertion on ordering below keeps that from becoming a silent assumption.
+    """
+    first, _, rest = INSTALLER.partition("== launchers and units ==")
+    assert rest, "the check's unit heading could not be found; this reads nothing"
+    assert "install_units() {" not in first, "install_units precedes the check; the anchor moved"
+    match = re.search(r"for origin in ([^\n]*?); do", rest)
+    assert match, "the check has no glob loop over the units; this reads nothing"
+    return match.group(1)
+
+
+def test_the_check_reads_the_same_glob_the_installer_writes() -> None:
+    """D970. `--check` listed three units by name and reported the baseline met
+    on a host missing all four backup units: D522 widened the installer's glob
+    and the checker kept a definition of its own. One source for both readers.
+    The control is that the two globs come from two different functions --
+    the anchors are distinct -- so this cannot pass by reading the installer
+    twice."""
+    installer = _install_units_glob()
+    check = _check_units_glob()
+    assert installer == check, (
+        f"the installer globs {installer} and the check reads {check}; a unit the "
+        "installer would write is one the check cannot miss only if they agree (D970)"
+    )
+    assert "systemd/*.timer" in check, "the check would not notice a missing timer (D944)"
+    # Control: the two loops are different loops, not one text read twice.
+    install_body = INSTALLER.split("install_units() {", 1)[1]
+    assert 'bad "unit ' not in install_body, "the installer reports deviations; anchors crossed"
+    assert (
+        "install -m 0644" in install_body
+        and "install -m 0644"
+        not in (INSTALLER.partition("== launchers and units ==")[2].split("printf", 1)[0])
+    )
+
+
 def test_the_timers_are_installed_but_not_enabled() -> None:
     """The rule the edge and project units already follow, and its stated reason.
 

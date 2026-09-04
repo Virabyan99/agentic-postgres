@@ -248,6 +248,11 @@ def test_enable_enables_both_and_re_reads_systemd(
     assert len(reads) == 4, "systemd was not re-read after the enable"
     out = capsys.readouterr().out
     assert "is scheduled" in out and "Persistent=true" in out
+    # D973: the verb no longer promises an immediate run. Measured at the first
+    # enable on the host: LastTriggerUSec empty, next elapse the next calendar
+    # slot. A freshly enabled timer owes nothing.
+    assert "fires now" not in out, "the verb still promises a run that does not happen (D973)"
+    assert "next calendar slots" in out
 
 
 def test_enable_that_systemd_did_not_honour_is_reported_not_trusted(
