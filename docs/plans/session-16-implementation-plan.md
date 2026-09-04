@@ -826,6 +826,64 @@ guard does not cover it. **The equivalent question for a column is unguarded**,
 and whether that becomes a second guard is Run 10's decision, taken with the
 trip's evidence rather than before it.
 
+**Done.** Three host gates, two repairs, one migration re-frozen, D940–D943.
+**Both projects run Session 16 at release `8237c77`**, migrations 0027–0030
+applied on each, and `evidence/session-16.json` merged: **93 claims, 85 passed,
+8 `not_run`, 0 failed.** Host half 264 live proofs passed / 0 failed / 11
+environment skips, then 397 claim proofs passed; external half 25 passed. **All
+seven claims this session registered passed on the first execution of their
+live halves** — `capability_governance`, `denial_taxonomy`, `agent_quota`,
+`agent_idempotency`, `agent_dry_run`, `capability_profile`,
+`evaluation_harness`. The eight `not_run` are the eight Sessions 14 and 15
+carried, unchanged (D478, D860). **The re-freeze window on 0027–0030 is
+closed** (D912): the only remedy for any of the four is now a new migration.
+
+**The gate ran once before the trip, as the rule says**: `--setup-plan` with the
+environment set resolved every live proof's fixture graph with no error, then
+`session-16-check.sh --mode offline` passed — 4721 passed, 91 skipped, and 66
+of the skips this workstation's Docker port exhaustion, the class the memory
+already names, with CI's verdict on `1331940` covering those proofs.
+
+**The first deploy stopped at step 6, and the defect was in the migration, not
+in the deployment** (D940). 0027 added its equivalence CHECK validated, and
+alpha's `agent_audit` held 48 `refused` rows from Sessions 9 and 15 with the
+NULL reason §4 had called correct; PostgreSQL refused the constraint and rolled
+the migration back whole, so alpha kept serving its old release. No fixture
+cluster had ever carried such a row. 0027 was re-frozen with `NOT VALID` — the
+second re-freeze of the session, legitimate because the cluster carried none of
+its objects — and the audit-plane fixture now seeds a historical refused row
+before 0027 applies, which reproduced the deployment's failure offline in
+sixteen seconds. dbmate printed `Applied` for the migration that rolled back
+(D941); the deploy's exit 5 was the line to read.
+
+**The second deploy converged both projects first pass**, mcp and app `ready`,
+four migrations in order, the lock compiled from the installed manifest, the
+doctor 8 ok. **The first host gate then found ten failures and none was Session
+16's** (D942): Session 8 and 9's live write proofs still called `create_note`
+without the two reserved parameters and named the audit function at its old
+arity in an HTTP body and a `REVOKE` — the callers ADR 0175's guard cannot see.
+Repaired as proofs; the release did not move. **The second gate's live suite was
+100% green and step 6 failed one claim proof** (D943): a Session 9 proof that
+read every `query_resource` row in a shared cluster, order-dependent for seven
+sessions and exposed by the gate's sorted node-id order. Scoped; third gate
+green to exit 5.
+
+**The column-guard decision, taken with the trip's evidence: not built.** Nothing
+the trip found was a column arity. What it found was a CHECK over history (D940),
+two arity call shapes the existing guard does not read (D942), and an unscoped
+fixture read (D943) — three §9 entries, each named with the measurement that
+would close it, rather than a guard for a class that has not yet produced a
+defect.
+
+**Also measured, and recorded in §9 rather than repaired.** The deploy leaves
+`.generated/alpha-dev` root-owned after a root deploy while beta's stays `op`'s,
+so an operator's next `--render-only` of alpha fails on a permission error. The
+rendered summary prints *"Capabilities 0 enabled"* from the host's version 1
+`capabilities.yaml` while the lock serves six tools — D930's shape in the
+document an operator reads. And one Session 9 proof asserted `"error" not in
+result` while the tool had answered `isError: true`, so its own control had
+already passed on a refused write.
+
 ---
 
 ## 7. Evidence and claims
