@@ -82,7 +82,14 @@ from pathlib import Path
 #: held `1 <= session <= 12` as a literal -- correct at every check for twelve
 #: sessions, because the number it named and the number it meant were the same
 #: one. It derives from here now, and so does its `--help`.
-CURRENT_SESSION = 15
+#:
+#: **Session 16 moved it in Run 9, all-or-nothing again** (D690): nine
+#: requirements and seven claims landed in the same commit, with their proofs,
+#: because there were no `future` placeholders left to activate and a
+#: requirement targeted at 16 arrives whole or not at all. `VERSION` moved to
+#: `0.5.0` in that commit: four released migrations and a capability manifest
+#: bump, each of which ADR 0162 prices at a minor.
+CURRENT_SESSION = 16
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

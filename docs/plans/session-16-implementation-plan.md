@@ -126,6 +126,12 @@ against the deployment at planning time**, not a prediction.
 | **D931** | Run 8: a widening profile *"fails `bin/mcp-contract.sh check`"*. | **`check` had no project input.** It compiles the reviewed manifest, which is project-neutral by construction (`test_the_canonical_contract_names_no_project`), and a profile is per project; nothing `check` read could carry one. The only place a project reaches the contract tooling was `lock --outputs`, at deploy time. | **`check --project FILE`** applies that project's profile to the approved contract in a checkout and exits 5 on a widening — the plan's sentence, made true. **`lock --project FILE` is REQUIRED**, and the deploy passes the installed copy of the manifest. Compile time is therefore two places, and the deploy cannot skip the second. | The optional-flag version of this is D927 one step later: a lock compiled without the profile would ignore it and report success, and nothing offline would notice, because the example lock is never compiled by the deploy's path. Making the flag required is what makes "a profile is applied at compile time" a property of the command rather than of whoever calls it. | 0183 |
 | **D932** | `config.bounds_table` walks the whole schema, and the generated bounds table in `docs/product-contract.md` is complete. | **It walks `properties` and `$ref` and nothing else.** The profile is keyed by tool name, so its five numeric bounds live under `patternProperties`, and the first render after adding them produced a table **missing all five that still looked complete** — the docstring's own description of ADR 0007's failure mode, which it had already met once through `$ref` in Session 5. | The walker follows `patternProperties`, labelling the segment from the pattern schema's `title` (`mcp.profile.<tool>.max_rows`), and `test_the_bounds_table_reaches_the_profile` asserts the five are present. | **The generator caught by its own comment, for the second time.** The comment says a walk that stops early generates a table that looks complete; it was written about `$ref` and was true of `patternProperties` too, and nothing between the two instances asked what ELSE a schema can nest a bound under. | 0183 |
 | **D933** | A profile cannot remove a tool, and a project that must not expose one disables it in the capability manifest, where the compiler compiles it out. | **The compiler compiles it out and the runtime refuses the result.** Measured with a control: `create_note` disabled compiles a five-tool canonical contract, and `load_lock` refuses the lock compiled from it — *"the lock serves [five], not [six]"* — because `EXPECTED_TOOL_NAMES` is exactly six (ADR 0127). `compile_canonical`'s docstring says a disabled capability is compiled out *"rather than emitted with a flag"*; `mcp_lock` says the surface is *"enumerated, not discovered"*. Both are right and together they mean **the only manifests that deploy are the ones enabling all six.** | **Recorded, not repaired**, and named in the ADR under *what a profile cannot do* so that nobody builds tool removal into the profile as the workaround. A §9 entry: whether a disabled capability leaves the lock (and the runtime learns to serve fewer than six) or the runtime's roster becomes the manifest's is an ADR-shaped decision. | Two correct rules, each with a test, that have never been run against each other — `test_a_lock_missing_one_of_the_six_is_refused` and the disabled-capability path — because no shipped manifest disables anything. **Question 6 of §7 in a new shape**: the fixture agrees with the code because both enable everything. | 0183 |
+| **D934** | §2: `AGT-RISK-001` — *"A capability's risk classification selects a behaviour — it is not a label. A high-risk capability's denial and its audit record differ observably from a low-risk one's."* | **Nothing in the runtime reads `risk` outside the lock loader.** A grep over `services/auth-api/app/*.py` finds it in `mcp_lock.py` — parsed, refused when absent at version 2 or above, aggregated worst-case by the compiler — and nowhere else: no refusal site consults it, no audit column carries it, no telemetry record names it. The requirement as planned describes a plane that does not exist. | **Registered as what the tree does**: a closed, ordered classification, refused where it lies (a metadata capability above low, a write at low), aggregated as the riskiest of a tool's capabilities and never the first, refused at startup when a lock that must carry it does not, and present in the lock the deployment serves. The entry says in its own text that it selects no runtime behaviour. Building one — a stricter budget, a second audit column, a mandatory approval above a threshold — is a decision for a later session, not a line in a bump. | **A requirement is a guarantee, not an aspiration** (ADR 0089). Registering the plan's sentence would have created a claim that could only be proved by a fixture written to pass it — §7's sixth question, in the registry rather than in a test. The honest entry is smaller than the planned one and true. **It is also the first time this session found a planned requirement describing nothing**, and the planning lesson is that §2 was written from the stage plan's list of features rather than from a grep of the runtime. | 0184 |
+| **D935** | §2: `AGT-CAPVER-001` — *"a deprecated capability is refused or warned per its state."* | **Refused or carried, never warned.** A retired capability is refused by the compiler and again by the lock loader; a deprecated one compiles, and the lock carries `lifecycle: deprecated` for it — and nothing reads that value afterwards. No warning exists on any path, and the word `deprecated` appears in the runtime only in `mcp_lock.py`'s parser. | The entry asserts refused-or-carried, and adds the one consequence `version` gained in Run 9: a hand-written evaluation case is bound to the version it was written against, and a capability whose version moves without its cases fails the gate (ADR 0184). | **Before Run 9, `version` reached the lock and the audit row and constrained nothing** — D816's declared-without-a-reader, on the field ADR 0177 introduced first. The harness's version binding is the first reader with a consequence, and it arrived in the run that registered the requirement rather than the run that added the field. | 0184 |
+| **D936** | README: *"Session 15 implemented … at `template_version` 0.2.0."* | **The README quoted 0.2.0 through two bumps.** `VERSION` said 0.4.0. `test_the_readme_states_the_session_the_release_implements` has guarded the session number since Session 12; the version beside it, in the same sentence, was guarded by nothing. The paragraph also still described Session 13's code as this release's. | Rewritten for Session 16 at 0.5.0, and `test_the_readme_states_the_template_version_the_release_carries` compares the README's phrase against `VERSION`. | **D719's class in the guard that exists for it**: one sentence, two numbers, one checked. The unchecked one was wrong for two whole releases and nobody read it, because the checked one beside it was right. | — |
+| **D937** | The harness: an adversarial case is *"a request the lock does not permit"*, and the runtime must refuse it. | **A `limit` above `max_rows` is not refused — it is CLAMPED** (ADR 0127: *"asking for too many is a reasonable thing for a client to do and a bounded answer is the right reply"*), and a listing held on `meta:read` alone is FILTERED, not refused (D421). A harness with two verdicts would have derived `refused` for both and reported the runtime wrong for doing what two ADRs decided. Measured before the first case ran, by reading `build_request`. | **A third expectation, `bounded`**: the contract permits the request and bounds it, and the evaluation checks the bound was applied — the built request's `limit`, the listing's members — rather than a refusal that did not happen. | **The contract does two different things with a value it does not permit, and both are correct.** A harness that cannot say "permitted, and bounded" would be a harness nobody trusts the third time it is right about a clamp. This is also why `expects` is a closed three-member vocabulary and not a boolean. | 0184 |
+| **D938** | Each of Runs 2–8 built a plane and proved it; Run 9 registers the requirements over those proofs. | **Runs 2–8 wrote no live-host proof at all.** `git diff --stat 7aa9905^..HEAD -- tests/` lists sixteen files, every one under `tests/contract/`; `tests/deployment/` gained nothing this session. `claim_mode` refuses a claim whose every proof is offline, so **seven claims needed seven live halves and none existed.** | All seven written in Run 9, in `tests/deployment/test_session16_agent_governance.py`, modelled on Session 9's writer module and using the deployment suite's own fixtures. Each collects, each resolves its fixture graph under `--setup-plan`, and **none has executed** — Run 10's trip runs them, and D211–D214 say what to expect of a proof on its first execution. | **The evidence model caught this before the trip, not after.** Had the claims been registered against offline proofs alone, `claim_mode` would have refused them at the bump; had the live halves been skipped, the merge would have reported seven `not_run` claims — which is the honest state today and will be until the trip. The cost of writing them last is that seven proofs meet a host for the first time in one round, which is the shape D211 warned about. | 0184 |
+| **D939** | `AGT-APPROVE-001`'s live half: a capability declaring `requires_approval` is refused on the deployment. | **No reviewed capability declares it, and the host's project manifest is version 1** (D930), so no profile can turn it on there either. A live proof that asserted the refusal would skip on every deployment this repository has, and a skip is not a pass — the claim `agent_dry_run` would report `not_run` for as long as nobody deploys a capability nothing needs. | The live half asserts the three facts the deployment CAN show: the declaration reaches both writes in the mounted lock, the cluster's own enum carries `approval_required`, and the runtime the container serves from names it as a caller-facing token and a denial reason — all read off the deployment. The refusal itself is proved offline against a lock that declares it, which is what §5's Run 7 paragraph already said D870 means. | **A live half is a measurement of the deployment, not a re-run of the offline proof on a host.** The temptation was to deploy a manifest with `requires_approval: true` for the trip and revert it after — a fixture written to pass the proof, deployed. What the deployment honestly shows is that the plane it runs would refuse if asked; that is the guarantee, and it is enough. | 0184 |
 
 ---
 
@@ -739,6 +745,70 @@ Then the bump: `CURRENT_SESSION` 16, `template_version` 0.5.0, nine requirements
 seven claims, `bin/session-16-check.sh` **derived by diff from
 `bin/session-15-check.sh`** — and its `usage()` block rewritten, not only its
 header, which is the half Session 15 missed twice (D853, D858).
+
+**Done.** ADR **0184**, `CURRENT_SESSION` **16**, `template_version` **0.5.0**,
+nine requirements, seven claims, `bin/session-16-check.sh`, D934–D939. **CI
+verdict recorded in the commit that follows this one**, read by full SHA and
+HTTP status (D913, D914). Ten mutation arms, ten killed — **after one
+survivor of D928's second kind**: the arm that disabled the `bounded` checker
+survived, because a checker defect has no witness in a suite whose runtime is
+correct. The repair was a control of the control (D509),
+`test_the_bound_check_can_tell_a_clamped_request_from_an_honoured_one`, which
+feeds the checker a fabricated honoured limit and an unfiltered listing and
+requires both to be reported.
+
+**The harness.** `evaluation_harness.derive_cases` is pure over the approved
+contract and produces **47 cases**: one positive per capability and, per frozen
+field, one adversarial — a column the allowlist does not name, a column the
+caller may read and not filter on, an operator the closed enum has and the
+column does not permit, an ordering index past the frozen list, an argument the
+function does not take and one it requires, a malformed reserved parameter, a
+rehearsal against a capability that declares none, and on the response side more
+rows than the ceiling and more bytes than the budget. **A case carries an
+expectation and never a reason** (D868), and there are three expectations, not
+two: `bounded` is for the request the contract permits and bounds — a `limit`
+above `max_rows` is clamped, not refused, and a listing held on fewer scopes is
+filtered (D937). Fifteen **written** cases live in `tests/evaluation-cases.yaml`,
+each bound to the capability version it was written against; a capability whose
+version moves without its cases fails `render-evaluation-report --check`, the
+harness test, the offline gate and CI. The evaluation runs every case against
+the runtime's own request builders with a fake upstream — 76 nodes — and asserts
+the plan's stop condition structurally: a scope case is refused by the scope
+check and nothing else is, and the non-scope refusals come from at least three
+boundaries. **They come from four.** `docs/evaluation-report.md` is generated and
+carries the contract's digest, which is the lock's `canonical_sha256` and the
+deployed document's `capability_contract_sha256`.
+
+**The bump.** All-or-nothing (D690): the constant, the version, the nine
+registry entries, the seven claims, the claims-session map, the `EVAL` prefix
+and the README moved in one commit. Two entries say less than §2 planned, on
+purpose. **`AGT-RISK-001` was planned as a behaviour and nothing in the runtime
+reads `risk`** (D934); it is registered as the classification the tree
+actually carries, aggregates and refuses. **`AGT-CAPVER-001` was planned as
+"refused or warned" and no warning exists** (D935); it is registered as
+refused-or-carried, plus the one consequence `version` gained this run. The
+README had quoted `template_version` 0.2.0 through two bumps with nothing
+checking it (D936); it is checked now.
+
+**The gate** is derived by diff from Session 15's with `readonly SESSION=16` the
+only literal; its header AND its usage block were rewritten, which is the half
+D858 records Session 15 missing. Offline mode adds the two example profiles
+applied to the approved contract and the report's `--check`.
+
+**Seven live halves, none executed.** Runs 2–8 wrote every proof under
+`tests/contract/` and nothing under `tests/deployment/` (D938), so all seven
+were written here, in `test_session16_agent_governance.py`, on Session 9's
+writer-agent pattern. They collect and resolve under `--setup-plan`; Run 10's
+trip is what runs them, and the honest state until then is seven `not_run`
+claims. `AGT-APPROVE-001`'s live half measures the declaration, the enum member
+and the token on the deployment rather than a refusal no reviewed capability can
+trigger (D939).
+
+**Not closed, deliberately.** Risk selects no behaviour and the requirement
+says so; a deprecated capability warns nobody; the `--migrate-manifest`
+decision still covers both host manifests; and `bootstrap_identity`, with the
+other seven inherited `not_run` claims, stays exactly where Session 15 left it
+(D478, D860).
 
 ### Run 10 — the host trip
 

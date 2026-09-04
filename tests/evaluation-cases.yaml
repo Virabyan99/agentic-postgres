@@ -1,0 +1,272 @@
+# Hand-written evaluation cases (ADR 0184, EVAL-HARNESS-001).
+#
+# The DERIVED cases are generated from the compiled contract, one adversarial
+# case per frozen field, and are never listed here -- see
+# docs/evaluation-report.md for the full roster. These are the cases a person
+# wrote because they know something the contract's SHAPE does not say: that a
+# hostile string is a value, that `in` takes a list and `is_null` takes none,
+# that a rehearsal is a positive call, that a key with a space is malformed.
+#
+# Every case is BOUND to the capability version it was written against. When a
+# capability's version moves in capabilities.example.yaml and its cases do not,
+# `load_written_cases` refuses the file, the harness test fails, and so does the
+# gate and CI: a capability that changed has to have its cases re-read.
+#
+# A case carries an EXPECTATION -- permitted, refused or bounded -- and never a
+# denial reason (D868). Which boundary refused is observed by the evaluation and
+# never asserted from here.
+#
+# Shape:
+#   id                  unique, prefixed `written:`
+#   capability          a capability the contract compiles
+#   capability_version  the version it declares today
+#   kind                positive | adversarial
+#   field               the contract member the case exercises
+#   expects             permitted | refused | bounded
+#   scopes              what the caller holds
+#   call                the tool invocation, keyed by the runtime's parameter names
+#   upstream            the fake upstream response: rows, and optionally bytes
+#   probe               request (default) | response
+#   note                why a person wrote this one
+
+# --- list_resources -----------------------------------------------------------
+
+- id: written:list_resources:contract-id
+  capability: list_resources
+  capability_version: 1.0.0
+  kind: positive
+  field: operation
+  expects: permitted
+  scopes: [meta:read, notes:read, tasks:read]
+  call: {tool: list_resources}
+  note: >-
+    The listing names the contract it came from, so a caller can tell which
+    reviewed surface it is looking at.
+
+- id: written:list_resources:reader-sees-only-what-it-may-use
+  capability: list_resources
+  capability_version: 1.0.0
+  kind: adversarial
+  field: required_scopes
+  expects: bounded
+  scopes: [meta:read, notes:read]
+  call: {tool: list_resources}
+  note: >-
+    Held on notes:read alone the listing carries notes and not tasks -- filtered
+    to what this caller could use, never advertising what it would refuse (D421).
+
+# --- describe_resource ---------------------------------------------------------
+
+- id: written:describe_resource:orderings-carry-indices
+  capability: describe_resource
+  capability_version: 1.0.0
+  kind: positive
+  field: order_by
+  expects: permitted
+  scopes: [meta:read, notes:read]
+  call: {tool: describe_resource, read_tool: query_resource, resource: notes}
+  note: >-
+    A caller selects an ordering by INDEX, so describe has to hand the indices
+    out; this is why describe is a tool and not documentation.
+
+- id: written:describe_resource:a-write-has-no-resource-to-describe
+  capability: describe_resource
+  capability_version: 1.0.0
+  kind: adversarial
+  field: resources
+  expects: refused
+  scopes: [meta:read, notes:read, notes:write]
+  call: {tool: describe_resource, read_tool: create_note, resource: notes}
+  note: >-
+    A write is one-to-one with its operation and names no resource (D486), so
+    asking a write tool to describe one is asking about a thing that does not exist.
+
+# --- query_notes ---------------------------------------------------------------
+
+- id: written:query_notes:in-takes-a-list
+  capability: query_notes
+  capability_version: 1.0.0
+  kind: positive
+  field: filters
+  expects: permitted
+  scopes: [notes:read]
+  call:
+    tool: query_resource
+    resource: notes
+    filters:
+      - {column: id, operator: in, value: ["00000000-0000-4000-8000-000000000001", "weird,id"]}
+    order_by: 1
+    limit: 5
+  upstream: {rows: 2}
+  note: >-
+    The list form, with a member carrying the list separator, is the case the
+    quoting exists for (mcp_query.quote_list_member).
+
+- id: written:query_notes:a-hostile-value-stays-a-value
+  capability: query_notes
+  capability_version: 1.0.0
+  kind: positive
+  field: filters
+  expects: permitted
+  scopes: [notes:read]
+  call:
+    tool: query_resource
+    resource: notes
+    filters:
+      - {column: title, operator: eq, value: "x' OR 1=1; DROP TABLE notes; --"}
+  upstream: {rows: 0}
+  note: >-
+    AGT-SQL-001's shape as a harness case: the string is permitted BECAUSE it is
+    a value, and the evaluation records the built target so a reader can see it
+    percent-encoded rather than interpolated.
+
+- id: written:query_notes:a-filter-value-may-not-be-a-document
+  capability: query_notes
+  capability_version: 1.0.0
+  kind: adversarial
+  field: filters
+  expects: refused
+  scopes: [notes:read]
+  call:
+    tool: query_resource
+    resource: notes
+    filters:
+      - {column: title, operator: eq, value: {nested: "object"}}
+  note: >-
+    An object where a scalar belongs is a document, not a value, and nothing in
+    the reviewed surface takes one.
+
+# --- query_tasks ---------------------------------------------------------------
+
+- id: written:query_tasks:is-null-takes-no-value
+  capability: query_tasks
+  capability_version: 1.0.0
+  kind: positive
+  field: filters
+  expects: permitted
+  scopes: [tasks:read]
+  call:
+    tool: query_resource
+    resource: tasks
+    filters:
+      - {column: note_id, operator: is_null}
+    order_by: 3
+  upstream: {rows: 1}
+  note: The one operator whose operand this runtime supplies rather than the caller.
+
+- id: written:query_tasks:is-null-with-a-value-is-refused
+  capability: query_tasks
+  capability_version: 1.0.0
+  kind: adversarial
+  field: filters
+  expects: refused
+  scopes: [tasks:read]
+  call:
+    tool: query_resource
+    resource: tasks
+    filters:
+      - {column: note_id, operator: is_null, value: "anything"}
+  note: >-
+    A value on an operator that takes none would either be dropped silently or
+    reach the query; both are wrong, so the call is refused.
+
+# --- run_report ----------------------------------------------------------------
+
+- id: written:run_report:one-row
+  capability: run_report
+  capability_version: 1.0.0
+  kind: positive
+  field: max_rows
+  expects: permitted
+  scopes: [notes:read, tasks:read]
+  call: {tool: run_report}
+  upstream: {rows: 1}
+  note: The report is exactly one row by construction; that is the whole positive case.
+
+- id: written:run_report:half-the-scopes-is-none-of-them
+  capability: run_report
+  capability_version: 1.0.0
+  kind: adversarial
+  field: required_scopes
+  expects: refused
+  scopes: [notes:read]
+  call: {tool: run_report}
+  upstream: {rows: 1}
+  note: >-
+    The report counts notes AND tasks in one row, so a caller holding one scope
+    would be handed a number it is not authorized to see (ADR 0120's conjunction).
+
+# --- create_note ---------------------------------------------------------------
+
+- id: written:create_note:a-rehearsal-is-a-positive-call
+  capability: create_note
+  capability_version: 1.0.0
+  kind: positive
+  field: supports_dry_run
+  expects: permitted
+  scopes: [notes:write]
+  call:
+    tool: create_note
+    arguments: {p_title: "harness title", p_content: "harness body"}
+    idempotency_key: written-create-note-dry-run-0001
+    dry_run: true
+  upstream: {rows: 1}
+  note: >-
+    A dry run attempts the write and rolls it back (ADR 0182); at this boundary
+    it is a permitted call that reaches the transport with the header set.
+
+- id: written:create_note:an-argument-may-not-be-a-document
+  capability: create_note
+  capability_version: 1.0.0
+  kind: adversarial
+  field: arguments
+  expects: refused
+  scopes: [notes:write]
+  call:
+    tool: create_note
+    arguments: {p_title: "harness title", p_content: {body: "nested"}}
+    idempotency_key: written-create-note-object-0001
+    dry_run: false
+  note: >-
+    PostgREST coerces a number where the function takes text, so a number is
+    honest input; an object in an argument position is not.
+
+# --- update_task_status ---------------------------------------------------------
+
+- id: written:update_task_status:transition
+  capability: update_task_status
+  capability_version: 1.0.0
+  kind: positive
+  field: arguments
+  expects: permitted
+  scopes: [tasks:write]
+  call:
+    tool: update_task_status
+    arguments:
+      p_task_id: "00000000-0000-4000-8000-000000000002"
+      p_expected_status: pending
+      p_new_status: in_progress
+    idempotency_key: written-update-task-0001
+    dry_run: false
+  upstream: {rows: 1}
+  note: The compare-and-swap's three arguments, every one a scalar the function takes.
+
+- id: written:update_task_status:a-key-with-a-space-is-malformed
+  capability: update_task_status
+  capability_version: 1.0.0
+  kind: adversarial
+  field: idempotency_key
+  expects: refused
+  scopes: [tasks:write]
+  call:
+    tool: update_task_status
+    arguments:
+      p_task_id: "00000000-0000-4000-8000-000000000002"
+      p_expected_status: pending
+      p_new_status: in_progress
+    idempotency_key: "has a space in it"
+    dry_run: false
+  note: >-
+    Printable ASCII with no whitespace, 8 to 255 characters -- the shape
+    migration 0029 enforces, checked at the boundary that received it so the
+    refusal names the input rather than arriving as a translated PT412.

@@ -66,6 +66,7 @@ all flags or steps lost to retyping the previous session's page.
 | Page | Answers |
 |---|---|
 | [Acceptance matrix](acceptance-matrix.md) | Every requirement, its node ids, and whether they collect **(generated)** |
+| [Evaluation report](evaluation-report.md) | Every case the evaluation harness asks of the agent surface, derived and written counted apart **(generated)** |
 | [Security acceptance](security-acceptance.md) | The security requirements and how each is proved |
 | [Threat model](threat-model.md) | What is defended against, and what is not |
 | [Source specification](source-specification.md) | The original brief. **Digest-pinned** — quoted, never edited |

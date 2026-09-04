@@ -247,3 +247,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0181](0181-an-idempotency-key-is-claimed-in-the-writes-own-transaction.md) | An idempotency key is claimed in the write's own transaction, and the outcome is re-read rather than stored | 16 | Accepted |
 | [0182](0182-a-dry-run-attempts-the-write-and-rolls-it-back.md) | A dry-run attempts the write and rolls it back, and approval is a refusal | 16 | Accepted |
 | [0183](0183-a-profile-narrows-the-compiled-contract-and-never-widens-it.md) | A profile narrows the compiled contract and never widens it | 16 | Accepted |
+| [0184](0184-an-adversarial-case-is-derived-from-the-contract-and-carries-no-reason.md) | An adversarial case is derived from the contract and carries no reason | 16 | Accepted |

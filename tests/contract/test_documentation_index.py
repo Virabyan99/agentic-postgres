@@ -25,7 +25,7 @@ import subprocess
 
 import pytest
 
-from agentic_postgres import CURRENT_SESSION, REPO_ROOT
+from agentic_postgres import CURRENT_SESSION, REPO_ROOT, template_version
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -179,6 +179,22 @@ def test_the_readme_states_the_session_the_release_implements(readme: str) -> No
     assert stated == CURRENT_SESSION, (
         f"the README says Session {stated} is complete and CURRENT_SESSION is "
         f"{CURRENT_SESSION}. One of them is describing a release that does not exist"
+    )
+
+
+def test_the_readme_states_the_template_version_the_release_carries(readme: str) -> None:
+    """**D936.** The README quoted `template_version` 0.2.0 through two bumps.
+
+    The session line above has been checked since Session 12; the version
+    beside it was checked by nobody, so it said 0.2.0 while `VERSION` said
+    0.4.0 for two whole releases. Same file, same sentence, one number guarded
+    and one not -- D719's class in the guard that exists for it.
+    """
+    match = re.search(r"`template_version` \*\*([0-9A-Za-z.+-]+)\*\*", readme)
+    assert match, "the README has no `template_version` **N** status phrase"
+    assert match.group(1) == template_version(), (
+        f"the README says template_version {match.group(1)} and VERSION says "
+        f"{template_version()}. One of them is describing a release that does not exist"
     )
 
 

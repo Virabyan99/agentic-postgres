@@ -483,6 +483,30 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     # repository ships. Two claims one word apart is how D696 starts, so they
     # are named apart deliberately.
     "credential_rotation_surface": ("IDN-ROT-001",),
+    # Session 16 adds seven, all `host`, in Run 9's commit with the constant
+    # (D690). **Every one's live half was written in Run 9 and none had executed
+    # when this was written** (D938): Runs 2-8 proved their planes in a checkout
+    # and wrote nothing that reaches the deployment, so all seven report
+    # `not_run` until Run 10's trip, and that is the evidence model working.
+    #
+    # `capability_governance` holds BOTH the version and the risk requirement,
+    # because they are one declaration: three fields arriving at one manifest
+    # version (ADR 0177), read by one loader, refused together. Splitting them
+    # would make two claims that cannot disagree.
+    #
+    # `agent_dry_run` holds the rehearsal AND the approval refusal, for the
+    # reason ADR 0182 shipped them together: both are what a write does before
+    # it is dialled, declared side by side at the same manifest version, with
+    # opposite polarity (D925). `evaluation_harness` is one requirement covering
+    # the harness and its CI enforcement (plan §2): a claim purely about CI
+    # would have no live half in either mode that exists.
+    "capability_governance": ("AGT-CAPVER-001", "AGT-RISK-001"),
+    "denial_taxonomy": ("AGT-DENIAL-001",),
+    "agent_quota": ("AGT-QUOTA-001",),
+    "agent_idempotency": ("AGT-IDEM-001",),
+    "agent_dry_run": ("AGT-DRYRUN-001", "AGT-APPROVE-001"),
+    "capability_profile": ("AGT-PROFILE-001",),
+    "evaluation_harness": ("EVAL-HARNESS-001",),
     #
     # **Three of the sixteen candidates are deliberately NOT here**, and each has
     # a different reason. They stay in `UNCLAIMED_BY_HISTORY`, which now records
