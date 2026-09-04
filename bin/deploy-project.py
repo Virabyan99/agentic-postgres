@@ -2010,6 +2010,13 @@ def main(argv: list[str] | None = None) -> int:
     # The upstream it records is the public `routes.rest`, which names the API
     # surface the capabilities were compiled against and is NOT what the runtime
     # dials (ADR 0126).
+    #
+    # `--project` is the INSTALLED copy of the manifest, the one step 6 hands to
+    # the bootstrap and the migrator, so the profile the lock was compiled under
+    # and the digest it records are of the document this deploy actually
+    # installed (ADR 0183). The flag is required by the command, not optional:
+    # a lock compiled without it would ignore the project's profile and report
+    # success.
     if arguments.through_session >= AGENT_PLANE_SESSION:
         lock_path = deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME
         compiled = run(
@@ -2017,6 +2024,8 @@ def main(argv: list[str] | None = None) -> int:
             "lock",
             "--outputs",
             str(deployed_output.rendered_path(key) / "outputs.json"),
+            "--project",
+            str(state_directory / "manifest.yaml"),
         )
         if compiled.returncode != 0:
             fail(

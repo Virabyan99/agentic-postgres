@@ -37,8 +37,11 @@ def check(tmp_path: Path, document: dict[str, Any]) -> dict[str, Any]:
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.name)
 def test_example_manifest_is_valid(path: Path) -> None:
+    """Both fixtures are at the NEWEST version (ADR 0183), so the shipped
+    manifests exercise the shape the compiler reads rather than the one the
+    host still runs -- D927's lesson, applied to this document."""
     document = config.load_project_manifest(path)
-    assert document["schema_version"] == 1
+    assert document["schema_version"] == max(config.SUPPORTED_PROJECT_SCHEMA_VERSIONS)
 
 
 @pytest.mark.parametrize("path", FIXTURES, ids=lambda p: p.name)
@@ -76,6 +79,25 @@ def test_required_section_is_required(tmp_path: Path, base: dict[str, Any], sect
         check(tmp_path, base)
 
 
+def downgrade(document: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest at schema version 1 (ADR 0183): the profile out, the
+    two fields it replaced back in with the values the fixture carried for
+    fifteen sessions. What the host's manifests still look like."""
+    document = copy.deepcopy(document)
+    document["schema_version"] = 1
+    document["mcp"].pop("profile", None)
+    document["mcp"]["max_result_rows"] = 100
+    document["mcp"]["max_response_bytes"] = 262144
+    return document
+
+
+def set_at(document: dict[str, Any], pointer: tuple[str, ...], value: Any) -> None:
+    node = document
+    for key in pointer[:-1]:
+        node = node.setdefault(key, {})
+    node[pointer[-1]] = value
+
+
 @pytest.mark.parametrize(
     ("pointer", "value"),
     [
@@ -83,9 +105,12 @@ def test_required_section_is_required(tmp_path: Path, base: dict[str, Any], sect
         (("database", "max_client_connections"), 10001),
         (("database", "pool_size"), 0),
         (("api", "max_rows"), 10001),
-        (("mcp", "max_result_rows"), 1001),
-        (("mcp", "max_response_bytes"), 1023),
-        (("mcp", "max_response_bytes"), 10485761),
+        (("mcp", "profile", "query_resource", "max_rows"), 1001),
+        (("mcp", "profile", "query_resource", "max_response_bytes"), 1023),
+        (("mcp", "profile", "query_resource", "max_response_bytes"), 1048577),
+        (("mcp", "profile", "query_resource", "max_concurrent_calls"), 33),
+        (("mcp", "profile", "query_resource", "timeout_ms"), 99),
+        (("mcp", "profile", "create_note", "max_affected_rows"), 101),
         (("storage", "upload_url_ttl_seconds"), 59),
         (("storage", "download_url_ttl_seconds"), 3601),
         (("storage", "max_upload_bytes"), 5368709121),
@@ -93,11 +118,33 @@ def test_required_section_is_required(tmp_path: Path, base: dict[str, Any], sect
     ],
 )
 def test_numeric_bounds_are_enforced(
-    tmp_path: Path, base: dict[str, Any], pointer: tuple[str, str], value: int
+    tmp_path: Path, base: dict[str, Any], pointer: tuple[str, ...], value: int
 ) -> None:
-    base[pointer[0]][pointer[1]] = value
+    set_at(base, pointer, value)
     with pytest.raises(config.ManifestError):
         check(tmp_path, base)
+
+
+@pytest.mark.parametrize(
+    ("pointer", "value"),
+    [
+        (("mcp", "max_result_rows"), 1001),
+        (("mcp", "max_response_bytes"), 1023),
+        (("mcp", "max_response_bytes"), 10485761),
+    ],
+)
+def test_the_version_one_bounds_are_still_enforced_at_version_one(
+    tmp_path: Path, base: dict[str, Any], pointer: tuple[str, ...], value: int
+) -> None:
+    """The two fields version 2 replaced (ADR 0183) are still bounded on the
+    version 1 manifest the host runs. Asserted on a DOWNGRADED fixture: on the
+    version 2 base these keys are refused as forbidden, which is a refusal for
+    the wrong reason (D374)."""
+    document = downgrade(base)
+    assert check(tmp_path, copy.deepcopy(document)), "the control: the downgrade itself loads"
+    set_at(document, pointer, value)
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, document)
 
 
 def test_bounds_are_declared_only_in_the_schema() -> None:
@@ -530,10 +577,78 @@ def test_pool_size_may_not_exceed_max_client_connections(
 
 
 def test_mcp_rows_may_not_exceed_api_rows(tmp_path: Path, base: dict[str, Any]) -> None:
-    base["mcp"]["max_result_rows"] = 600
-    base["api"]["max_rows"] = 500
+    """Both versions (ADR 0183): the one field at version 1, and every profiled
+    `max_rows` at version 2. The relation survived the bump because at version
+    2 the lock compiler READS the value, which makes it worth bounding."""
+    document = downgrade(base)
+    document["mcp"]["max_result_rows"] = 600
+    document["api"]["max_rows"] = 500
     with pytest.raises(config.ManifestError, match="max_result_rows"):
+        check(tmp_path, document)
+
+    base["mcp"]["profile"]["query_resource"]["max_rows"] = 600
+    base["api"]["max_rows"] = 500
+    with pytest.raises(config.ManifestError, match=r"mcp\.profile\.query_resource\.max_rows"):
         check(tmp_path, base)
+
+
+# ---------------------------------------------------------------------------
+# Schema version 2: the profile replaces two fields nothing read (ADR 0183)
+# ---------------------------------------------------------------------------
+
+
+def test_version_two_requires_a_profile_and_forbids_the_two_inert_fields(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """A field is forbidden below the version that introduces it and required
+    at or above it (ADR 0177's rule, applied to this document), and the two
+    replaced fields are the mirror image. Both fixtures are version 2, so the
+    version 1 arms run on a downgraded copy -- with the downgrade itself
+    checked first, or every refusal below could be the downgrade's."""
+    assert base["schema_version"] == 2
+
+    without = copy.deepcopy(base)
+    del without["mcp"]["profile"]
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, without)
+
+    for field, value in (("max_result_rows", 100), ("max_response_bytes", 262144)):
+        carrying = copy.deepcopy(base)
+        carrying["mcp"][field] = value
+        with pytest.raises(config.ManifestError):
+            check(tmp_path, carrying)
+
+    empty = copy.deepcopy(base)
+    empty["mcp"]["profile"] = {}
+    assert check(tmp_path, empty)["mcp"]["profile"] == {}, "narrowing nothing is a valid state"
+
+    v1 = downgrade(base)
+    assert check(tmp_path, copy.deepcopy(v1))["schema_version"] == 1
+    v1["mcp"]["profile"] = {"query_resource": {"max_rows": 10}}
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, v1)
+
+
+def test_a_profile_entry_is_typed_and_non_empty(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The schema's half of the refusals: an unknown field, a wrong type, a
+    tool name outside the identifier grammar, an empty entry. The compiler's
+    half -- widening, wrong kind, unknown tool -- needs the compiled contract
+    and lives in test_capability_profile.py."""
+    for entry in (
+        {"columns": ["id"]},
+        {"max_rows": "100"},
+        {"supports_dry_run": "false"},
+        {},
+    ):
+        document = copy.deepcopy(base)
+        document["mcp"]["profile"] = {"query_resource": entry}
+        with pytest.raises(config.ManifestError):
+            check(tmp_path, document)
+
+    document = copy.deepcopy(base)
+    document["mcp"]["profile"] = {"Delete-Everything": {"timeout_ms": 100}}
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, document)
 
 
 # ---------------------------------------------------------------------------

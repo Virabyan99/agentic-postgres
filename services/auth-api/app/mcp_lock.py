@@ -213,6 +213,14 @@ class CapabilityLock:
     tool_count: int
     capability_count: int
     tools: tuple[Tool, ...]
+    #: The project's narrowing the lock was compiled under (ADR 0183), as the
+    #: compiler recorded it: tool name to the fields and values it narrowed.
+    #: `None` when the project manifest predates profiles (version 1), which is
+    #: distinguishable from an empty profile on a version 2 manifest (D600).
+    #: Verified against the tools at load and never consulted afterwards -- the
+    #: tools are what the runtime obeys, and this is the record of why they
+    #: differ from the reviewed contract.
+    profile: dict[str, dict[str, Any]] | None = None
 
     def tool(self, name: str) -> Tool:
         for candidate in self.tools:
@@ -281,6 +289,7 @@ def load_lock(path: Path | str) -> CapabilityLock:
     if declared != len(tools):
         raise LockError(f"the lock says {declared} tools and carries {len(tools)}")
 
+    ordered = tuple(sorted(tools, key=lambda tool: tool.name))
     return CapabilityLock(
         contract_id=_require(document, "contract_id", str, "the lock"),
         project_key=_require(document, "project_key", str, "the lock"),
@@ -288,8 +297,82 @@ def load_lock(path: Path | str) -> CapabilityLock:
         canonical_sha256=_require(document, "canonical_sha256", str, "the lock"),
         tool_count=declared,
         capability_count=_require(document, "capability_count", int, "the lock"),
-        tools=tuple(sorted(tools, key=lambda tool: tool.name)),
+        tools=ordered,
+        profile=_profile(document, ordered),
     )
+
+
+#: The seven fields a profile may narrow, and where each lives on a parsed tool
+#: (ADR 0183). `max_rows` is on every resource of a read rather than on the
+#: tool, so it is read from each. A second copy of the compiler's
+#: `PROFILE_FIELDS` roster, deliberately: the runtime imports nothing from
+#: `agentic_postgres`, and a contract test keeps the two rosters equal (D486's
+#: arrangement, the one `RESERVED_WRITE_PARAMETERS` already uses).
+PROFILE_FIELDS = (
+    "timeout_ms",
+    "max_response_bytes",
+    "max_concurrent_calls",
+    "max_rows",
+    "max_affected_rows",
+    "supports_dry_run",
+    "requires_approval",
+)
+
+
+def _profile(document: Any, tools: tuple[Tool, ...]) -> dict[str, dict[str, Any]] | None:
+    """The lock's own account of how it was narrowed, checked against its tools.
+
+    **This is the reader** (D816): a field declared with no reader is an
+    unverified field, and a lock that says it was narrowed and was not came
+    from something other than this repository's compiler. The compiler sets
+    every profiled field EQUAL to the profile's value -- a profile may only
+    narrow, and the narrowed value is the profile's -- so the check is equality,
+    per tool and per field, with `max_rows` read from every resource.
+
+    Absent is a version 1 project manifest and is accepted. Present is parsed
+    as strictly as everything else here, in both directions: an entry naming a
+    tool the lock does not serve, a field the roster does not know, or a value
+    the tool does not carry is a lock disagreeing with itself.
+    """
+    if "profile" not in document:
+        return None
+    declared = document["profile"]
+    if not isinstance(declared, dict):
+        raise LockError("the lock.profile is not an object")
+    by_name = {tool.name: tool for tool in tools}
+
+    profile: dict[str, dict[str, Any]] = {}
+    for tool_name, entries in declared.items():
+        tool = by_name.get(tool_name)
+        if tool is None:
+            raise LockError(
+                f"the lock.profile narrows {tool_name!r}, which the lock does not serve"
+            )
+        if not isinstance(entries, dict) or not entries:
+            raise LockError(f"the lock.profile entry for {tool_name} narrows nothing")
+        for field, value in entries.items():
+            if field not in PROFILE_FIELDS:
+                raise LockError(
+                    f"the lock.profile narrows {tool_name}.{field}, which is not a bound this "
+                    f"runtime reads; it knows {list(PROFILE_FIELDS)}"
+                )
+            carried = (
+                sorted({resource.max_rows for resource in tool.resources})
+                if field == "max_rows"
+                else [getattr(tool, field) if field != "max_affected_rows" else _affected(tool)]
+            )
+            if carried != [value]:
+                raise LockError(
+                    f"the lock.profile says {tool_name}.{field} was narrowed to {value!r} and "
+                    f"the tool carries {carried}. A lock disagreeing with its own profile was "
+                    "not compiled by this repository's compiler"
+                )
+        profile[tool_name] = dict(entries)
+    return profile
+
+
+def _affected(tool: Tool) -> int | None:
+    return tool.write.max_affected_rows if tool.write is not None else None
 
 
 def _tool(entry: Any, version: int) -> Tool:

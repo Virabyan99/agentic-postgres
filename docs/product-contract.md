@@ -277,8 +277,13 @@ and live in `src/agentic_postgres/config.py`; they are listed separately.
 | `database.shared_buffers_mb` | 16 | 1,024 | PostgreSQL shared_buffers. Counts in full against the memory guardrail: it is shared memory, which no swap can relieve and no cache reclaim can shrink. |
 | `database.shm_size_mb` | 64 | 1,024 | The container /dev/shm size. PostgreSQL's dynamic shared memory for parallel query lands here, and Docker's 64 MiB default is below the default shared_buffers. Must be at least shared_buffers_mb. |
 | `database.work_mem_mb` | 1 | 64 | Per-sort-node working memory. Allocated on demand, so it does not multiply by max_connections in practice; the guardrail charges a flat per-backend anonymous allowance instead. See the Session 3 plan 3.3. |
-| `mcp.max_response_bytes` | 1,024 | 10,485,760 | Agent response size ceiling. |
-| `mcp.max_result_rows` | 1 | 1,000 | Agent read row ceiling. Must not exceed api.max_rows. |
+| `mcp.max_response_bytes` | 1,024 | 10,485,760 | Schema version 1 only, and READ BY NOTHING (D929). Its maximum is ten times the runtime's `MAX_SERIALIZED_BYTES`, so even a reader could not have honoured it. Version 2 replaces it with `mcp.profile.<tool>.max_response_bytes`, bounded at the runtime's ceiling (ADR 0183). |
+| `mcp.max_result_rows` | 1 | 1,000 | Schema version 1 only, and READ BY NOTHING (D929): declared as the agent read row ceiling since Session 1, it reaches neither Compose, the lock nor the runtime. Version 2 replaces it with `mcp.profile.<tool>.max_rows`, which the lock compiler reads (ADR 0183). Must not exceed api.max_rows. |
+| `mcp.profile.<tool>.max_affected_rows` | 1 | 100 | At most the write's compiled `max_affected_rows`. Writes only. |
+| `mcp.profile.<tool>.max_concurrent_calls` | 1 | 32 | At most the tool's compiled `max_concurrent_calls`. Reads and writes only. |
+| `mcp.profile.<tool>.max_response_bytes` | 1,024 | 1,048,576 | At most the tool's compiled `max_response_bytes`. Reads and writes only; the maximum is the runtime's `MAX_SERIALIZED_BYTES`, as in the capability schema (ADR 0179). |
+| `mcp.profile.<tool>.max_rows` | 1 | 1,000 | At most EVERY resource's compiled `max_rows` behind a read tool -- `query_resource` has two and they may disagree, so a per-tool value is checked against each. Reads only. Must not exceed api.max_rows. |
+| `mcp.profile.<tool>.timeout_ms` | 100 | 30,000 | At most the tool's compiled `timeout_ms`. Applies to every kind. |
 | `storage.download_url_ttl_seconds` | 60 | 3,600 | Presigned download URL lifetime. Shorter than the upload default because an upload is one deliberate act by the holder and a download URL is the one that ends up pasted somewhere. |
 | `storage.max_upload_bytes` | 1 | 5,368,709,120 | Largest accepted upload. P0 default is 25 MiB. |
 | `storage.memory_limit_mb` | 128 | 2,048 | The storage container's memory limit. 384 is the application API's figure, INHERITED RATHER THAN MEASURED. A second application container's memory floor is listed as 'must be measured' in this session's feasibility table and cannot be until there is an adapter to measure; it is a manifest field precisely so the number stays visible and overridable while it is provisional, rather than being a literal nobody knows is unmeasured. ADR 0082 is the shape that measurement has to take -- one profile per process with a no-work control, because ru_maxrss is a high-water mark already set by earlier work and reports the same plausible number for every row. |
@@ -289,7 +294,8 @@ Relations between these fields cannot be expressed in JSON Schema and are
 enforced in `src/agentic_postgres/config.py`:
 
 - `database.pool_size` must not exceed `database.max_client_connections`
-- `mcp.max_result_rows` must not exceed `api.max_rows`
+- `mcp.max_result_rows` must not exceed `api.max_rows` (schema version 1)
+- Every `mcp.profile.<tool>.max_rows` must not exceed `api.max_rows` (schema version 2)
 - `api.public_base_path` and `mcp.public_base_path` must not overlap segment-wise
 - Neither base path may overlap a reserved route
 - `database.pooled_public` must be false and `database.pooled_public_cidrs` empty; a public pooler is not a supported profile (ADR 0040)

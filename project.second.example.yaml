@@ -9,7 +9,7 @@
 # one rendered from project.example.yaml. See runbook §8 and
 # tests/contract/test_render_isolation.py.
 
-schema_version: 1
+schema_version: 2
 
 project:
   slug: fixture-alpine
@@ -52,8 +52,23 @@ api:
 
 mcp:
   public_base_path: /mcp
-  max_result_rows: 100
-  max_response_bytes: 262144
+  # A DIFFERENT narrowing from project.example.yaml's, for the reason
+  # `database.pool_size` above differs: a pair of fixtures that agree on a value
+  # cannot prove the value is read (D884). This one narrows a write as well as a
+  # read, and in both boolean directions -- a permission withdrawn and a
+  # restriction added -- so that the polarity split ADR 0183 fixes is exercised
+  # by a shipped manifest rather than only by a test.
+  profile:
+    query_resource:
+      max_rows: 50
+      max_response_bytes: 131072
+      timeout_ms: 3000
+    run_report:
+      timeout_ms: 2000
+    create_note:
+      supports_dry_run: false
+    update_task_status:
+      requires_approval: true
 
 storage:
   enabled: true

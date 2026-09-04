@@ -9,8 +9,8 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [1],
-      "description": "Manifest format version."
+      "enum": [1, 2],
+      "description": "Manifest format version. 1 or 2. Version 2 (ADR 0183) replaces `mcp.max_result_rows` and `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with `mcp.profile`, which the lock compiler reads. A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it (ADR 0177's rule, applied to this document), and the two replaced fields are the mirror image: required at 1, forbidden at 2. Version 1 still loads and compiles the lock it always did, because `project.alpha.yaml` and `project.beta.yaml` live only on the host and no commit can edit them."
     },
     "project": {
       "type": "object",
@@ -169,7 +169,7 @@
     "mcp": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["public_base_path", "max_result_rows", "max_response_bytes"],
+      "required": ["public_base_path"],
       "properties": {
         "public_base_path": {
           "type": "string",
@@ -181,13 +181,22 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 1000,
-          "description": "Agent read row ceiling. Must not exceed api.max_rows."
+          "description": "Schema version 1 only, and READ BY NOTHING (D929): declared as the agent read row ceiling since Session 1, it reaches neither Compose, the lock nor the runtime. Version 2 replaces it with `mcp.profile.<tool>.max_rows`, which the lock compiler reads (ADR 0183). Must not exceed api.max_rows."
         },
         "max_response_bytes": {
           "type": "integer",
           "minimum": 1024,
           "maximum": 10485760,
-          "description": "Agent response size ceiling."
+          "description": "Schema version 1 only, and READ BY NOTHING (D929). Its maximum is ten times the runtime's `MAX_SERIALIZED_BYTES`, so even a reader could not have honoured it. Version 2 replaces it with `mcp.profile.<tool>.max_response_bytes`, bounded at the runtime's ceiling (ADR 0183)."
+        },
+        "profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "propertyNames": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+          "patternProperties": {
+            "^[a-z][a-z0-9_]{0,63}$": { "$ref": "#/$defs/profileEntry" }
+          },
+          "description": "Schema version 2 (ADR 0183). This project's narrowing of the approved capability contract, keyed by tool name. **A profile may only NARROW** (D867): every value is compared against what the approved contract compiles for that tool when the lock is compiled, and a value that would widen any bound -- or that names a tool the contract does not compile, or a field the tool's kind does not carry -- fails `bin/mcp-contract.sh check --project` and the deploy's lock step, before a deployment exists. Nothing is clamped. An empty object is a project that narrows nothing, stated rather than absent. The vocabulary is the seven bounds the runtime reads from the lock and nothing else; a profile cannot remove a tool, narrow a column list, or touch a per-capability declaration."
         }
       }
     },
@@ -446,6 +455,83 @@
           "allowed_cors_origins": { "maxItems": 0 }
         }
       }
+    },
+    "profileEntry": {
+      "type": "object",
+      "title": "tool",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "One tool's narrowing (ADR 0183). The seven fields are exactly the bounds the runtime reads from the lock; each applies to the kinds named in `capability_compiler.PROFILE_FIELDS`, and the compiler refuses a field on a kind that does not carry it. The ranges here mirror the capability schema's so that a profile cannot even ask for more than a capability may declare; the real refusal is the comparison against the compiled contract, which no schema can express. `minProperties: 1` because an empty entry reads as a restriction and applies none.",
+      "properties": {
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 30000,
+          "description": "At most the tool's compiled `timeout_ms`. Applies to every kind."
+        },
+        "max_response_bytes": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 1048576,
+          "description": "At most the tool's compiled `max_response_bytes`. Reads and writes only; the maximum is the runtime's `MAX_SERIALIZED_BYTES`, as in the capability schema (ADR 0179)."
+        },
+        "max_concurrent_calls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "description": "At most the tool's compiled `max_concurrent_calls`. Reads and writes only."
+        },
+        "max_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000,
+          "description": "At most EVERY resource's compiled `max_rows` behind a read tool -- `query_resource` has two and they may disagree, so a per-tool value is checked against each. Reads only. Must not exceed api.max_rows."
+        },
+        "max_affected_rows": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "description": "At most the write's compiled `max_affected_rows`. Writes only."
+        },
+        "supports_dry_run": {
+          "type": "boolean",
+          "description": "A PERMISSION, so `false` is the narrow end: a profile may withdraw a dry run the contract supports and may not grant one it does not. Writes only."
+        },
+        "requires_approval": {
+          "type": "boolean",
+          "description": "A RESTRICTION, so `true` is the narrow end: a profile may require approval where the contract does not and may not lift a requirement the contract declares. Writes only."
+        }
+      }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "schema_version": { "minimum": 2 } },
+        "required": ["schema_version"]
+      },
+      "then": {
+        "properties": {
+          "mcp": {
+            "required": ["profile"],
+            "not": {
+              "anyOf": [
+                { "required": ["max_result_rows"] },
+                { "required": ["max_response_bytes"] }
+              ]
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "mcp": {
+            "required": ["max_result_rows", "max_response_bytes"],
+            "not": { "required": ["profile"] }
+          }
+        }
+      },
+      "description": "The version 2 gate (ADR 0183), at the document level for ADR 0177's reason: a manifest declaring one version and carrying the other's shape is the state this exists to refuse. `profile` is required at 2 rather than optional, so a version 2 manifest that narrows nothing says so with an empty object instead of by omission; the two fields it replaces are forbidden at 2 so that a reader never sees an inert bound beside a live one."
+    }
+  ]
 }

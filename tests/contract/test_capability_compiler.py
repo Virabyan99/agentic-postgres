@@ -703,6 +703,11 @@ def test_the_compiler_refuses_a_deployed_shaped_document_by_name(tmp_path: Path)
                 "lock",
                 "--outputs",
                 str(path),
+                # Required since ADR 0183, and the same trap as above: without
+                # it argparse exits 2 naming `--project`, which "non-zero"
+                # would have read as the D465 refusal.
+                "--project",
+                str(REPO_ROOT / "project.example.yaml"),
             ],
             capture_output=True,
             text=True,

@@ -10,6 +10,18 @@ rather than a description of somebody's intention. Edit the contract, or edit
 editing the block below is overwritten on the next render and is caught by
 `--check` in the meantime.
 
+**A deployment may be narrower than this catalog, and never wider** (ADR
+0183). The project manifest's `mcp.profile` narrows the approved contract when
+the lock is compiled -- a smaller row or byte ceiling, a shorter timeout, fewer
+concurrent calls, a dry run withdrawn, an approval required -- in the seven
+bounds the runtime reads and nothing else. A profile that would widen any of
+them, name a tool this catalog does not list, or bound a field the tool's kind
+does not carry fails `bin/mcp-contract.sh check --project project.yaml` and the
+deploy's lock step, before a deployment exists. The deployed lock records the
+profile it was compiled under, and the runtime refuses a lock whose tools
+disagree with it. What this catalog describes is the ceiling; what one
+deployment serves is in its lock.
+
 ---
 
 ## What a tool is, and what it is not

@@ -9,7 +9,11 @@
 # project.second.example.yaml they also exercise the collision contract --
 # "fixture-alpha" and "fixture-alpine" share a 12-character prefix.
 
-schema_version: 1
+# Schema version 2 (ADR 0183): `mcp.profile` replaces `mcp.max_result_rows`
+# and `mcp.max_response_bytes`, two fields nothing ever read (D929). A version
+# 1 manifest still loads -- both host manifests are version 1 -- and compiles
+# the lock it always did.
+schema_version: 2
 
 project:
   slug: fixture-alpha
@@ -54,8 +58,20 @@ api:
 
 mcp:
   public_base_path: /mcp
-  max_result_rows: 100
-  max_response_bytes: 262144
+  # This project's narrowing of the approved capability contract, keyed by tool
+  # (ADR 0183). **A profile may only narrow** (D867): every value here is
+  # compared against what the approved contract compiles for that tool when the
+  # lock is compiled, and one that would widen any bound fails
+  # `bin/mcp-contract.sh check --project project.yaml` -- at compile time, with
+  # no host and no root. Nothing is clamped. The two values below are the ones
+  # the version 1 fields `max_result_rows` and `max_response_bytes` carried for
+  # fifteen sessions without a reader; here the lock compiler reads them, and
+  # they are placed on the one tool they can honestly bound -- `run_report`
+  # returns exactly one row, so a row ceiling of 100 on it would be a widening.
+  profile:
+    query_resource:
+      max_rows: 100
+      max_response_bytes: 262144
 
 storage:
   enabled: true

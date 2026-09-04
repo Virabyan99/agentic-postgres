@@ -85,15 +85,43 @@ VERSIONED_FIELDS = ("version", "lifecycle", "risk")
 BUDGET_FIELDS = ("max_response_bytes", "max_concurrent_calls")
 WRITE_DECLARATIONS = ("supports_dry_run", "requires_approval")
 
+#: **What a project profile may narrow, and what "narrower" means for each**
+#: (ADR 0183). The vocabulary is the seven things the runtime reads from the
+#: lock and nowhere else -- a profile naming anything else would be narrowing
+#: a value nothing consults, which is D274's claim that lives only in a
+#: document. `kinds` is where the field exists on a compiled tool; a profile
+#: naming it on another kind is a bound on nothing (ADR 0179's rule for
+#: metadata capabilities, applied to the profile).
+#:
+#: `narrower(candidate, compiled)` answers whether the profile's value is at
+#: least as restrictive as the compiled one. A number narrows when it is less
+#: than or equal. The two booleans have OPPOSITE polarity, exactly as their
+#: folds do (D925): `supports_dry_run` is a permission, so `False` is the
+#: narrow end and a profile may withdraw it and never grant it;
+#: `requires_approval` is a restriction, so `True` is the narrow end and a
+#: profile may add it and never lift it. Equal is accepted for every field --
+#: a profile restating the compiled bound narrows nothing and widens nothing.
+PROFILE_FIELDS: dict[str, dict[str, Any]] = {
+    "timeout_ms": {"kinds": ("metadata", "read", "write"), "narrower": lambda c, v: c <= v},
+    "max_response_bytes": {"kinds": ("read", "write"), "narrower": lambda c, v: c <= v},
+    "max_concurrent_calls": {"kinds": ("read", "write"), "narrower": lambda c, v: c <= v},
+    "max_rows": {"kinds": ("read",), "narrower": lambda c, v: c <= v},
+    "max_affected_rows": {"kinds": ("write",), "narrower": lambda c, v: c <= v},
+    "supports_dry_run": {"kinds": ("write",), "narrower": lambda c, v: (not c) or v},
+    "requires_approval": {"kinds": ("write",), "narrower": lambda c, v: c or (not v)},
+}
+
 __all__ = [
     "BACKED_SOURCES",
     "COMPILED_SCHEMA_VERSIONS",
     "CONTRACT_ID",
     "PLANNED_TOOLS",
+    "PROFILE_FIELDS",
     "RISK_ORDER",
     "UNBACKED_SOURCES",
     "VERSIONED_FIELDS",
     "CompilerError",
+    "apply_profile",
     "canonical_bytes",
     "compile_canonical",
     "compile_lock",
@@ -575,12 +603,107 @@ def _compile_write(name: str, entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def apply_profile(canonical: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
+    """The canonical contract, narrowed by one project's profile (ADR 0183).
+
+    **A profile may only narrow** (D867), and this is the whole of where that is
+    decided. Every entry is compared against what the approved contract compiled
+    for that tool, and the first of these refuses the profile with a
+    `CompilerError` -- a `CapabilityContractError`, so the CLI exits 5 and no
+    lock is written:
+
+    - a tool the contract does not compile: a narrowing of nothing (D274);
+    - a field the tool's kind does not carry: a bound on nothing (ADR 0179);
+    - a field the contract's version does not declare: a profile cannot
+      INTRODUCE a bound early, only narrow one that exists (ADR 0177);
+    - a value that widens, by `PROFILE_FIELDS`' order for that field;
+    - `max_rows` above ANY resource of a read: `query_resource` has two and they
+      may disagree, and a clamp against the smaller would silently accept a
+      value that widened it.
+
+    **Nothing is clamped.** The runtime takes `min(lock, global)` for a lock it
+    did not compile, because a lock is an input; a profile is an operator's
+    declaration, and a declaration silently corrected is one the operator does
+    not know was wrong.
+
+    Pure: the input is not mutated, and a tool the profile does not name comes
+    back byte-identical. `max_rows` is applied to each resource and the tool's
+    own `max_rows` is re-derived from them, exactly as `_compile_tool` derives it.
+    """
+    narrowed = json.loads(json.dumps(canonical))
+    by_name = {tool["name"]: tool for tool in narrowed["tools"]}
+
+    for tool_name in sorted(profile):
+        tool = by_name.get(tool_name)
+        if tool is None:
+            raise CompilerError(
+                f"profile names tool {tool_name!r}, which the approved contract does not "
+                f"compile. A profile narrows a tool that exists; it cannot describe one that "
+                f"does not. Compiled: {sorted(by_name)}"
+            )
+        entries = profile[tool_name]
+        if not isinstance(entries, dict) or not entries:
+            raise CompilerError(
+                f"profile entry for {tool_name!r} narrows nothing. An empty entry reads as a "
+                "restriction and applies none; leave the tool out instead"
+            )
+        for field in sorted(entries):
+            rule = PROFILE_FIELDS.get(field)
+            if rule is None:
+                raise CompilerError(
+                    f"profile narrows {tool_name}.{field}, which is not a bound the runtime "
+                    f"reads from the lock. Narrowable: {sorted(PROFILE_FIELDS)}"
+                )
+            if tool["kind"] not in rule["kinds"]:
+                raise CompilerError(
+                    f"profile narrows {tool_name}.{field}, and {tool_name} is a "
+                    f"{tool['kind']} tool, which carries no {field}. A bound on nothing "
+                    f"reads exactly like a real one; {field} applies to {list(rule['kinds'])}"
+                )
+            candidate = entries[field]
+            if field == "max_rows":
+                _narrow_max_rows(tool, candidate)
+                continue
+            if field not in tool:
+                raise CompilerError(
+                    f"profile narrows {tool_name}.{field}, which the approved contract at "
+                    f"schema_version {narrowed['schema_version']} does not declare. A profile "
+                    "narrows a bound the contract carries; it cannot introduce one early"
+                )
+            compiled = tool[field]
+            if not rule["narrower"](candidate, compiled):
+                raise CompilerError(
+                    f"profile would WIDEN {tool_name}.{field}: the approved contract compiles "
+                    f"{compiled!r} and the profile asks for {candidate!r}. A profile may only "
+                    "narrow (ADR 0183); a wider bound is a change to the reviewed manifest"
+                )
+            tool[field] = candidate
+
+    return narrowed
+
+
+def _narrow_max_rows(tool: dict[str, Any], candidate: int) -> None:
+    """Apply a per-tool row bound to every resource behind a read tool."""
+    for resource in tool["resources"]:
+        if candidate > resource["max_rows"]:
+            raise CompilerError(
+                f"profile would WIDEN {tool['name']}.max_rows for resource "
+                f"{resource['name']!r}: the approved contract compiles {resource['max_rows']} "
+                f"and the profile asks for {candidate}. A per-tool bound is checked against "
+                "EVERY resource behind the tool, because they may disagree"
+            )
+    for resource in tool["resources"]:
+        resource["max_rows"] = candidate
+    tool["max_rows"] = max(resource["max_rows"] for resource in tool["resources"])
+
+
 def compile_lock(
     *,
     canonical: dict[str, Any],
     project_key: str,
     upstream: str,
     sources: dict[str, str],
+    profile: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """The deployed lock: the canonical contract plus where to send a request.
 
@@ -592,12 +715,31 @@ def compile_lock(
     `sources` are the digests of everything this lock was compiled from. A lock
     whose inputs cannot be identified is a capability surface nobody can prove
     was reviewed, which is the failure `capabilities.yaml` exists to prevent.
+
+    `profile` is the project's narrowing (ADR 0183), applied here so that the
+    lock is the only artefact that carries the narrowed tools. `canonical_sha256`
+    stays the digest of the APPROVED contract the profile was applied to --
+    `mcp_tools` records it as `contract_hash` on every audit row and the
+    deployed document publishes it, and both name the reviewed contract. The
+    `profile` block is the whole difference, and it is absent rather than empty
+    when the project declares none (D600), so a version 1 project manifest
+    compiles the lock it always did.
     """
     for required in ("capabilities_sha256", "api_surface_sha256", "canonical_openapi_sha256"):
         if required not in sources:
             raise CompilerError(f"the lock needs {required} and was not given one")
+    if profile is not None and "project_manifest_sha256" not in sources:
+        raise CompilerError(
+            "the lock needs project_manifest_sha256 when a profile is applied: the profile is "
+            "an input, and a lock whose inputs cannot be identified is a surface nobody can "
+            "prove was reviewed"
+        )
 
-    return {
+    tools = canonical["tools"]
+    if profile is not None:
+        tools = apply_profile(canonical, profile)["tools"]
+
+    lock = {
         "schema_version": canonical["schema_version"],
         "contract_id": canonical["contract_id"],
         "project_key": project_key,
@@ -606,8 +748,14 @@ def compile_lock(
         "compiled_from": dict(sorted(sources.items())),
         "tool_count": canonical["tool_count"],
         "capability_count": canonical["capability_count"],
-        "tools": canonical["tools"],
+        "tools": tools,
     }
+    if profile is not None:
+        lock["profile"] = {
+            name: {field: entries[field] for field in sorted(entries)}
+            for name, entries in sorted(profile.items())
+        }
+    return lock
 
 
 def canonical_bytes(document: dict[str, Any]) -> bytes:

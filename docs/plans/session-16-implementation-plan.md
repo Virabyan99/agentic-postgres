@@ -121,6 +121,11 @@ against the deployment at planning time**, not a prediction.
 | **D926** | Run 6 repaired the errcode-map scan that read migration 0019 alone (D918), and the class is closed. | **FOUR more readers had the same defect, in the next run.** `test_the_runtime_vocabulary_is_the_catalogs`, `test_every_refusal_site_maps_to_exactly_one_denial_reason` and `test_the_constant_names_are_the_ones_the_runtime_exports` all read migration 0027's `CREATE TYPE` and nothing else, so 0030's ninth denial reason made all three report the RUNTIME as wrong about a member the database really has. **And a fourth, `test_the_denial_taxonomy_is_in_the_catalog`, held the eight members as a HARDCODED STRING** — which the contract suite found after the other three were repaired, so even the repair pass missed it. | The taxonomy reader aggregates the `CREATE TYPE` and every later `ALTER TYPE … ADD VALUE`, across every template, in migration order — which is the order PostgreSQL itself reports. The live check compares the CLUSTER against the runtime tuple, so the chain runs cluster → runtime → templates and no comparison has both of its sides from one place. | **D918 was repaired as an instance and not as a class**, and the bill arrived one run later — four times over, and the fourth only after three deliberate repairs in the same file family. The generalisable form is worth writing down: *a reader that encodes WHICH FILE holds a value is correct only while that file holds all of them*, and this repository adds migrations by design. The question to ask of any scan is not "does it read the right file" but "what makes this the only file". | 0182 |
 | **D927** | The reviewed manifest is where a capability's declarations are exercised. | **`capabilities.example.yaml` declared `supports_dry_run: false` on both writes**, which is what Run 4 landed when the field had no behaviour. Shipping Run 7 against it unchanged would have made the feature inert in the reviewed manifest — the same shape as the host's `capabilities.yaml` still being schema version 1, one level in. | Both writes declare `supports_dry_run: true`. The compiled contract was re-approved after **reading the diff line by line**: exactly four changes, two per write tool — the capability entry and the tool-level aggregate — and nothing else. `requires_approval` stays `false` on both, because nothing in this product needs approval and D870 says the claim is proved by a refusal, which a fixture manifest provides. | **A field declared before its behaviour defaults to off, and off is the value that makes the next run look finished while doing nothing.** ADR 0177's rule — a field is required at the version that introduces it — is what puts a run in this position, and it is worth pairing with the habit of asking, at the start of the behaviour run, what the manifest currently says. | 0182 |
 | **D928** | The mutation battery's arms measure what their labels say. | **Two of twelve did not, and they failed differently.** Widening the handler from `WHEN sqlstate 'P0001'` to `WHEN OTHERS` survived and was **uninformative**: the `sqlerrm` re-raise inside the handler already sends every non-sentinel error onward, so the two forms are genuinely equivalent and the defect exists only when both go. And the arm making the transport send `"true"` unconditionally survived because its **victim was a live SQL proof**, which drives psql and never reaches the runtime — while the proof that does read the built request asserted header NAMES and no values. | The handler arm replaces the whole `EXCEPTION` block. The transport arm points at `test_the_dialled_request_actually_carries_the_header`, which now asserts the header's **value** in both directions. Twelve of twelve killed. | **D493's two categories in one run**, and telling them apart is the work. The first survivor meant the product had defence in depth; the second meant a transport that made **every write a rehearsal** would have shipped, because nothing offline reads that header's value and nothing online reaches the runtime. It is D911's shape for the third session in a row: *a proof that asserts a set is not asserting its members*. | 0182 |
+| **D929** | D867: the only project-local narrowing is `enabled`, per capability. | **`enabled` is host-local, not project-local** — `capabilities.yaml` is one file per host and two projects compile the same canonical contract from it. The document that IS per project already carried two fields reading as exactly Run 8's feature: `mcp.max_result_rows` ("agent read row ceiling") and `mcp.max_response_bytes` ("agent response size ceiling"). **Both are read by nothing.** A grep over `bin/`, `src/` and `services/` finds one consumer, the check that rows do not exceed `api.max_rows`; neither reaches Compose, the rendered environment, the lock or the runtime. `max_response_bytes` is permitted up to 10 MiB, **ten times `MAX_SERIALIZED_BYTES`**, so even a reader could not have honoured it. | **Project manifest schema version 2 replaces the two with `mcp.profile`**, which the lock compiler reads; at version 2 the two are forbidden, at version 1 they stay as they were, because both host manifests are version 1. Their VALUES migrate into the example profiles, where they get a reader for the first time. | Declared since Session 1, fifteen sessions without a reader — D816's rule (a declared field with no reader is an unverified field) at a scale the rotation flags never reached, and D927's (off looks finished) one document over. **The trap for Run 8 was to build the profile BESIDE them**: three project-local bounds in one block, two inert, and a reader assuming all three apply. | 0183 |
+| **D930** | §2 and the handoff: the host's `capabilities.yaml` is still schema version 1, so *"the deployment runs the OLDEST shape and everything Runs 2, 3, 4 and 7 built is inert there until an operator edits that file"*; a dry-run *"is refused as an input the lock does not permit"*. | **The host's `capabilities.yaml` is not an input to the lock.** `bin/mcp-contract.py lock` compiles the deployed lock from `CANONICAL_PATH` — the COMMITTED canonical contract, compiled from `capabilities.example.yaml` at `check` time — and the deploy passes it no `--capabilities`, so `compiled_from.capabilities_sha256` digests the release's example file. The host's file reaches `render-config.py --render` only: schema validation, the `capabilities.enabled` name list in `outputs.json`, and `input_digests.capabilities_sha256` — **a second field of the same name digesting a different file.** | **Recorded, not repaired.** Run 10's brief has to be re-read against it: when the trip deploys this release, the lock is version 3 with `supports_dry_run: true` on both writes **whatever the host's file says**, and the `--migrate-manifest` question is about the PROJECT manifest (D929, profiles) at least as much as the capability one. The two same-named digests are a §9 entry. | **A session-long premise was wrong in the reassuring direction.** The plan and the handoff both said Runs 2–7 could not reach the deployment without an operator's edit; they reach it at the trip, unconditionally. Question 3 of §7 — *whose identity, through which tool* — asked of a FILE: which file does this artefact actually derive from, and the answer was not the one whose name suggested it. | 0183 |
+| **D931** | Run 8: a widening profile *"fails `bin/mcp-contract.sh check`"*. | **`check` had no project input.** It compiles the reviewed manifest, which is project-neutral by construction (`test_the_canonical_contract_names_no_project`), and a profile is per project; nothing `check` read could carry one. The only place a project reaches the contract tooling was `lock --outputs`, at deploy time. | **`check --project FILE`** applies that project's profile to the approved contract in a checkout and exits 5 on a widening — the plan's sentence, made true. **`lock --project FILE` is REQUIRED**, and the deploy passes the installed copy of the manifest. Compile time is therefore two places, and the deploy cannot skip the second. | The optional-flag version of this is D927 one step later: a lock compiled without the profile would ignore it and report success, and nothing offline would notice, because the example lock is never compiled by the deploy's path. Making the flag required is what makes "a profile is applied at compile time" a property of the command rather than of whoever calls it. | 0183 |
+| **D932** | `config.bounds_table` walks the whole schema, and the generated bounds table in `docs/product-contract.md` is complete. | **It walks `properties` and `$ref` and nothing else.** The profile is keyed by tool name, so its five numeric bounds live under `patternProperties`, and the first render after adding them produced a table **missing all five that still looked complete** — the docstring's own description of ADR 0007's failure mode, which it had already met once through `$ref` in Session 5. | The walker follows `patternProperties`, labelling the segment from the pattern schema's `title` (`mcp.profile.<tool>.max_rows`), and `test_the_bounds_table_reaches_the_profile` asserts the five are present. | **The generator caught by its own comment, for the second time.** The comment says a walk that stops early generates a table that looks complete; it was written about `$ref` and was true of `patternProperties` too, and nothing between the two instances asked what ELSE a schema can nest a bound under. | 0183 |
+| **D933** | A profile cannot remove a tool, and a project that must not expose one disables it in the capability manifest, where the compiler compiles it out. | **The compiler compiles it out and the runtime refuses the result.** Measured with a control: `create_note` disabled compiles a five-tool canonical contract, and `load_lock` refuses the lock compiled from it — *"the lock serves [five], not [six]"* — because `EXPECTED_TOOL_NAMES` is exactly six (ADR 0127). `compile_canonical`'s docstring says a disabled capability is compiled out *"rather than emitted with a flag"*; `mcp_lock` says the surface is *"enumerated, not discovered"*. Both are right and together they mean **the only manifests that deploy are the ones enabling all six.** | **Recorded, not repaired**, and named in the ADR under *what a profile cannot do* so that nobody builds tool removal into the profile as the workaround. A §9 entry: whether a disabled capability leaves the lock (and the runtime learns to serve fewer than six) or the runtime's roster becomes the manifest's is an ADR-shaped decision. | Two correct rules, each with a test, that have never been run against each other — `test_a_lock_missing_one_of_the_six_is_refused` and the disabled-capability path — because no shipped manifest disables anything. **Question 6 of §7 in a new shape**: the fixture agrees with the code because both enable everything. | 0183 |
 
 ---
 
@@ -666,6 +671,63 @@ preview**, and an agent hammering them is doing real work.
 profile that would widen any bound fails `mcp-contract.sh check`, before a
 deployment exists, rather than at request time where it would be one more
 runtime denial.
+
+**Done.** ADR **0183**, project manifest schema **version 2**, D929–D933.
+Fourteen mutation arms, fourteen killed, no survivor to classify. **CI verdict
+recorded in the commit that follows this one**, read by full SHA and HTTP
+status (D913, D914).
+
+**What shipped.** `mcp.profile` in the project manifest at schema version 2: a
+map from tool name to the seven bounds the runtime reads from the lock —
+`timeout_ms`, `max_response_bytes`, `max_concurrent_calls`, `max_rows`,
+`max_affected_rows`, `supports_dry_run`, `requires_approval` — and nothing
+else. `capability_compiler.apply_profile` is pure over the approved contract,
+and it refuses, with `CompilerError` and therefore exit 5: a value that widens
+by that field's order, a tool the contract does not compile, a field the tool's
+kind does not carry, a field the contract's version does not declare, and a
+`max_rows` above ANY resource behind a read. **Nothing is clamped.** The two
+booleans have opposite polarity, exactly as their folds do (D925): a permission
+may be withdrawn and a restriction added, never the reverse. Equal is accepted.
+The lock records the profile it was compiled under and keeps `canonical_sha256`
+as the APPROVED contract's digest — the audit row's `contract_hash` and the
+deployed document's `capability_contract_sha256` both name the reviewed
+contract — and `mcp_lock.load_lock` refuses a lock whose tools disagree with
+its own profile, which is the reader the field needs (D816). `check --project`
+refuses in a checkout; `lock --project` is **required** and the deploy passes
+the installed manifest (D931).
+
+**The interesting measurement was not about profiles.** The project manifest
+already carried two fields that read as this feature and were read by nothing
+for fifteen sessions (D929), and the host's `capabilities.yaml` — the file §2
+said made Runs 2–7 inert on the deployment — is not an input to the lock at all
+(D930). The lock is compiled from the committed canonical contract, so the trip
+deploys version 3 with dry-run supported whatever the host's file says. **The
+premise was wrong in the reassuring direction**, and Run 10's brief has to be
+re-read against it.
+
+**What a profile cannot do, stated so it is not built as the workaround.**
+Remove a tool — and neither can `enabled: false` on a write in the capability
+manifest, because the compiler compiles it out and the runtime refuses a
+five-tool lock (D933, measured with a control). Narrow `columns`, `filters` or
+`order_by`: the reviewed manifest's own comment says a second column list is a
+second authority over one surface, and a third list in the project manifest is
+the same objection. Touch a per-capability declaration: the lock's
+`capabilities[]` entries record what the reviewed manifest declared, and the
+tool-level fields are what the runtime obeys.
+
+**Two smaller findings about this repository's own apparatus.** The bounds
+generator walked `properties` and `$ref` and would have produced a table missing
+the profile's five numeric bounds that still looked complete — ADR 0007's
+failure mode, through the generator, for the second time (D932). And the
+shipped example manifests were moved to version 2 with two DIFFERENT profiles,
+one narrowing a read and one narrowing a write in both boolean directions,
+because a pair of fixtures that agree cannot prove a value is read (D884, D927).
+
+**Not closed, deliberately.** Whether a `--migrate-manifest` helper ships now
+covers two documents — the capability manifest (Run 4's open decision) and the
+project manifest (this run's) — and both host manifests are version 1. The two
+same-named `capabilities_sha256` fields digesting different files (D930) and
+the six-or-nothing roster (D933) are §9 entries, not repairs.
 
 ### Run 9 — the evaluation harness, and the bump
 

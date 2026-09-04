@@ -38,17 +38,22 @@ readonly ROOT_DIR
 
 usage() {
   cat <<'USAGE'
-Usage: bin/mcp-contract.sh check [--capabilities FILE]
+Usage: bin/mcp-contract.sh check [--capabilities FILE] [--project FILE]
        bin/mcp-contract.sh compile [--capabilities FILE] > candidate.json
-       bin/mcp-contract.sh lock --outputs FILE [--capabilities FILE] > lock.json
+       bin/mcp-contract.sh lock --outputs FILE --project FILE [--capabilities FILE] > lock.json
 
   check              Compare. Never writes. Compiles the manifest against the
                      reviewed API surface and the approved OpenAPI snapshot, and
-                     compares the result against the committed contract.
+                     compares the result against the committed contract. With
+                     --project, also applies that project's mcp.profile to the
+                     approved contract and exits 5 if it would widen any bound
+                     (ADR 0183): a profile is refused here, at compile time.
   compile            Compile a candidate and stream it to standard output.
                      Writes no file; redirect it yourself, as yourself.
   lock               Resolve the approved contract for one project and stream
-                     the deployed lock to standard output.
+                     the deployed lock to standard output. The project's
+                     mcp.profile narrows it; a version 1 manifest declares none
+                     and compiles the lock it always did.
   --capabilities FILE
                      The capability manifest. Defaults to
                      capabilities.example.yaml, which is the reviewed set; a
@@ -56,6 +61,9 @@ Usage: bin/mcp-contract.sh check [--capabilities FILE]
   --outputs FILE     A rendered outputs.json, for `lock`. The upstream address
                      is read from routes.rest rather than rebuilt, so this never
                      becomes a second derivation of an address naming owns.
+  --project FILE     The project manifest. Optional for `check`; REQUIRED for
+                     `lock`, so a deploy cannot compile a lock that ignores a
+                     profile and report success.
   --help             Show this message.
 
 The contract is a generated artifact. It cannot be written by hand and `check`
@@ -94,6 +102,7 @@ main() {
   local command=""
   local capabilities=""
   local outputs=""
+  local project=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --help|-h)
@@ -115,6 +124,11 @@ main() {
         outputs="$2"
         shift 2
         ;;
+      --project)
+        [ "$#" -ge 2 ] || die 2 "--project requires a file."
+        project="$2"
+        shift 2
+        ;;
       *)
         usage >&2
         die 2 "unknown argument: $1"
@@ -126,6 +140,14 @@ main() {
   if [ "${command}" = "lock" ] && [ -z "${outputs}" ]; then
     die 2 "lock requires --outputs."
   fi
+  # Required rather than defaulted (ADR 0183): a lock compiled without the
+  # project's profile is a lock that ignores it, and it would report success.
+  if [ "${command}" = "lock" ] && [ -z "${project}" ]; then
+    die 2 "lock requires --project: the project's mcp.profile narrows the lock."
+  fi
+  if [ "${command}" = "compile" ] && [ -n "${project}" ]; then
+    die 2 "compile takes no --project: the canonical contract is project-neutral."
+  fi
 
   local -a arguments=()
   if [ -n "${capabilities}" ]; then
@@ -136,6 +158,10 @@ main() {
   if [ -n "${outputs}" ]; then
     [ -f "${outputs}" ] || die 2 "rendered outputs not found: ${outputs}"
     arguments+=(--outputs "${outputs}")
+  fi
+  if [ -n "${project}" ]; then
+    [ -f "${project}" ] || die 2 "project manifest not found: ${project}"
+    arguments+=(--project "${project}")
   fi
 
   exec "$(python_bin)" "${ROOT_DIR}/bin/mcp-contract.py" "${arguments[@]}"

@@ -53,8 +53,17 @@ MAX_MANIFEST_BYTES = 65_536
 #: `test_each_schema_version_constant_matches_its_schemas_enum` checks each of
 #: these against the enum in the schema it governs, so they cannot drift apart
 #: the way one shared constant could not even express.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1})
+#:
+#: Project manifest version 2 (ADR 0183) replaces `mcp.max_result_rows` and
+#: `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with
+#: `mcp.profile`, which the lock compiler reads. Version 1 still loads and
+#: compiles the lock it always did, because both host manifests are version 1
+#: and no commit can edit them.
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3})
+
+#: The project manifest version at which `mcp.profile` exists (ADR 0183).
+PROJECT_PROFILE_FROM = 2
 
 #: Plan decision B. `/docs` is derived unconditionally by runbook §3.8, so it
 #: is structurally reserved; `/.well-known` is ACME, needed from Session 2;
@@ -125,7 +134,8 @@ SAFE_KEY_ALLOWLIST: frozenset[str] = frozenset(
 #: generated documentation reads them rather than restating them (decision E).
 CROSS_FIELD_RELATIONS: tuple[str, ...] = (
     "`database.pool_size` must not exceed `database.max_client_connections`",
-    "`mcp.max_result_rows` must not exceed `api.max_rows`",
+    "`mcp.max_result_rows` must not exceed `api.max_rows` (schema version 1)",
+    "Every `mcp.profile.<tool>.max_rows` must not exceed `api.max_rows` (schema version 2)",
     "`api.public_base_path` and `mcp.public_base_path` must not overlap segment-wise",
     "Neither base path may overlap a reserved route",
     "`database.pooled_public` must be false and `database.pooled_public_cidrs` empty; "
@@ -731,11 +741,24 @@ def bounds_table(schema_name: str = "project.schema.json") -> list[dict[str, Any
         return schema.get("$defs", {}).get(name, {}), seen | {name}
 
     def walk(node: dict[str, Any], pointer: str, seen: frozenset[str]) -> None:
-        for key, value in node.get("properties", {}).items():
-            child = f"{pointer}.{key}" if pointer else key
+        # `patternProperties` is walked beside `properties`, and the segment it
+        # contributes is the pattern schema's `title` in angle brackets rather
+        # than the pattern itself (ADR 0183, D932). `mcp.profile` is keyed by
+        # tool name, so its seven bounds live under a pattern; a walk that
+        # stopped at `properties` would have generated a table missing all
+        # seven that still looked complete -- ADR 0007's failure mode, arriving
+        # through the generator for the second time (the first was `$ref`).
+        members = [
+            *node.get("properties", {}).items(),
+            *((None, value) for value in node.get("patternProperties", {}).values()),
+        ]
+        for key, value in members:
             if not isinstance(value, dict):
                 continue
             resolved, child_seen = resolve(value, seen)
+            if key is None:
+                key = f"<{resolved.get('title', 'key')}>"
+            child = f"{pointer}.{key}" if pointer else key
             if "minimum" in resolved or "maximum" in resolved:
                 rows.append(
                     {
@@ -880,11 +903,26 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
             f"database.pool_size ({database['pool_size']}) must not exceed "
             f"database.max_client_connections ({database['max_client_connections']})"
         )
-    if mcp["max_result_rows"] > api["max_rows"]:
-        raise ManifestError(
-            f"mcp.max_result_rows ({mcp['max_result_rows']}) must not exceed "
-            f"api.max_rows ({api['max_rows']})"
-        )
+    # **The row ceiling's relation to `api.max_rows` survives the version bump**
+    # (ADR 0183). At version 1 it binds the one field nothing read; at version 2
+    # it binds every profiled `max_rows`, which the lock compiler DOES read. The
+    # schema decides which of the two fields a version carries, so the check
+    # follows the version rather than probing for keys -- a manifest with both
+    # or neither is refused before this runs.
+    if version < PROJECT_PROFILE_FROM:
+        if mcp["max_result_rows"] > api["max_rows"]:
+            raise ManifestError(
+                f"mcp.max_result_rows ({mcp['max_result_rows']}) must not exceed "
+                f"api.max_rows ({api['max_rows']})"
+            )
+    else:
+        for tool_name, entries in sorted(mcp["profile"].items()):
+            bound = entries.get("max_rows")
+            if bound is not None and bound > api["max_rows"]:
+                raise ManifestError(
+                    f"mcp.profile.{tool_name}.max_rows ({bound}) must not exceed "
+                    f"api.max_rows ({api['max_rows']})"
+                )
 
     name = database.get("name")
     if name is not None:
