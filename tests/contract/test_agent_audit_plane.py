@@ -44,6 +44,12 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
 FIXTURE = REPO_ROOT / ".generated" / "fixture-alpha-dev"
 
+#: The migration BEFORE which the fixture seeds a historical refused row, and
+#: the agent that row belongs to (D940). Named by the migration's manifest name
+#: rather than its number, so a renumbering cannot silently seed nothing.
+HISTORICAL_ROW_BEFORE = "agent_audit_denial_taxonomy"
+HISTORICAL_AGENT = "d940d940-0000-4000-8000-000000000940"
+
 #: The two functions 0019 adds to `api`, with the argument lists their ACLs are
 #: keyed by. Written out rather than scraped: this is the list the assertions
 #: below compare against, so deriving it from the same file they are checking
@@ -154,6 +160,22 @@ def cluster() -> Any:
         manifest = migrations.load_manifest()
         applied_names = []
         for entry in manifest["migrations"]:
+            # **A historical refused row, written BEFORE the taxonomy exists**
+            # (D940). Every cluster this fixture ever built was empty when 0027
+            # applied, so no proof met the state the deployment was in -- a
+            # `refused` row with no reason column to carry one -- and 0027's
+            # validated CHECK was refused by PostgreSQL on the first deploy, at
+            # step 6, on both projects' worth of history. Seeded as the
+            # superuser, because the row is history and not a request.
+            if entry["name"] == HISTORICAL_ROW_BEFORE:
+                seeded = su(
+                    "INSERT INTO app_private.agent_audit "
+                    "(source, agent_id, owner_id, tool, outcome) VALUES "
+                    f"('agent_plane', '{HISTORICAL_AGENT}', gen_random_uuid(), "
+                    "'historical_refusal', 'refused');",
+                    database,
+                )
+                assert seeded.returncode == 0, seeded.stderr
             payload = migrations.render_migration(entry, manifest, document)
             body = payload.split("-- migrate:down", 1)[0].replace("-- migrate:up", "", 1)
             applied = _docker(
@@ -1122,6 +1144,57 @@ def test_a_refused_record_carries_a_reason_and_no_other_record_may(
             )
         inserted = su(cluster, statement).returncode == 0
         assert inserted is expected, f"{label}: inserted={inserted}, expected={expected}"
+
+
+def test_a_refused_row_written_before_the_taxonomy_survives_it_and_new_rows_are_still_checked(
+    cluster: dict[str, Any],
+) -> None:
+    """**D940.** The proof that would have stopped Session 16's first deploy.
+
+    The fixture seeded a `refused` row with no reason BEFORE 0027 applied, which
+    is the state every deployment with a history is in and no fixture cluster
+    ever was. Three things follow, and the third is the control: the row is
+    still there with a NULL reason; the constraint exists and is NOT VALID,
+    which is why 0027 applied over it; and it is still enforced -- a new
+    refused row without a reason is refused, and VALIDATE CONSTRAINT itself
+    is refused by the historical row, which proves the exemption is a real
+    row and not an absent one.
+    """
+    historical = su(
+        cluster,
+        "SELECT outcome::text, denial_reason IS NULL FROM app_private.agent_audit "
+        f"WHERE agent_id = '{HISTORICAL_AGENT}';",
+    )
+    assert historical.returncode == 0, historical.stderr
+    assert historical.stdout.strip() == "refused|t", (
+        f"the seeded historical row is {historical.stdout!r}; the fixture did not seed it "
+        "before the taxonomy applied, so this proof measures an empty cluster (D940)"
+    )
+
+    validated = su(
+        cluster,
+        "SELECT convalidated FROM pg_constraint WHERE conname = 'agent_audit_reason_iff_refused';",
+    )
+    assert validated.stdout.strip() == "f", (
+        f"convalidated is {validated.stdout.strip()!r}. A validated CHECK cannot be added over "
+        "a refused row that predates the reason column, which is what the deployment holds"
+    )
+
+    refused = su(
+        cluster,
+        "INSERT INTO app_private.agent_audit (source, agent_id, owner_id, tool, outcome) "
+        "VALUES ('agent_plane', gen_random_uuid(), gen_random_uuid(), 't', 'refused');",
+    )
+    assert refused.returncode != 0, "a NOT VALID constraint stopped checking new rows"
+    assert "agent_audit_reason_iff_refused" in refused.stderr
+
+    # The control: the exemption is a real row. Validating would scan it and fail.
+    validate = su(
+        cluster,
+        "ALTER TABLE app_private.agent_audit VALIDATE CONSTRAINT agent_audit_reason_iff_refused;",
+    )
+    assert validate.returncode != 0, "VALIDATE succeeded, so no historical row was exempt"
+    assert "violated by some row" in validate.stderr, validate.stderr
 
 
 def test_both_audit_functions_moved_to_their_new_arity_and_left_no_overload(

@@ -307,7 +307,7 @@
       "version": "20260903120026"
     },
     {
-      "canonical_render_sha256": "53ee2535c4c89fc768d998e02048aa3f1f96b8086c250bea338375dd2e5d6235",
+      "canonical_render_sha256": "1456ce625d64d2275dc104f2239e4be1b05846e27c51c3fc36b69b74512fecff",
       "name": "agent_audit_denial_taxonomy",
       "placeholders": [
         "agent_reader",
@@ -315,7 +315,7 @@
         "object_owner"
       ],
       "template": "templates/0027-agent-audit-denial-taxonomy.sql",
-      "template_sha256": "ef6dc06627ebf918cf7e53d50165488bac11a8c7aa66f16c0d649fd458d6f357",
+      "template_sha256": "ce0101bc2b9df901d1c65eb520353e0ab0de67faa4842e8ed08b28e1e23e0b83",
       "version": "20260903120027"
     },
     {

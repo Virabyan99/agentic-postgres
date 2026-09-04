@@ -87,9 +87,23 @@ ALTER TABLE app_private.agent_audit
 -- equivalence rather than two one-way checks: a `served` row with a reason is
 -- as wrong as a `refused` row without one, and stating it once means neither
 -- direction can be relaxed without the other being noticed.
+--
+-- **NOT VALID, and that is the whole difference between a checkout and a
+-- deployment** (D940). Every fixture cluster this migration was proved against
+-- was built empty and migrated in one pass, so no proof ever met a `refused`
+-- row written BEFORE this column existed. The deployment had 48 of them --
+-- every denied call Session 9's and Session 15's live proofs made -- and a
+-- validated CHECK is refused by PostgreSQL for exactly those rows ("violated by
+-- some row"), which stopped Session 16's first deploy at step 6 with the whole
+-- migration rolled back. A historical refusal has no recorded boundary, so a
+-- NULL reason on it is CORRECT rather than missing (the session plan's §4 said
+-- so before the deploy did); NOT VALID checks every row written from now on and
+-- never re-examines the ones written before there was anything to write. Nothing
+-- runs VALIDATE CONSTRAINT on it, ever, and the audit-plane proof seeds one such
+-- row before applying this file so the case stays met.
 ALTER TABLE app_private.agent_audit
   ADD CONSTRAINT agent_audit_reason_iff_refused
-  CHECK ((outcome = 'refused') = (denial_reason IS NOT NULL));
+  CHECK ((outcome = 'refused') = (denial_reason IS NOT NULL)) NOT VALID;
 
 COMMENT ON COLUMN app_private.agent_audit.capability_version IS
   'The semver the capability declared in the deployed lock, or NULL at lock '
