@@ -24,6 +24,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,14 +57,26 @@ MAX_MANIFEST_BYTES = 65_536
 #:
 #: Project manifest version 2 (ADR 0183) replaces `mcp.max_result_rows` and
 #: `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with
-#: `mcp.profile`, which the lock compiler reads. Version 1 still loads and
-#: compiles the lock it always did, because both host manifests are version 1
-#: and no commit can edit them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2})
+#: `mcp.profile`, which the lock compiler reads. Version 3 (ADR 0186) adds
+#: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
+#: projects, because both host manifests are version 1 and no commit can edit
+#: them.
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 #: The project manifest version at which `mcp.profile` exists (ADR 0183).
 PROJECT_PROFILE_FROM = 2
+
+#: The project manifest version at which `project.lifecycle` exists (ADR 0186),
+#: and what every version below it means by omitting it.
+PROJECT_LIFECYCLE_FROM = 3
+LIFECYCLE_PERMANENT = "permanent"
+LIFECYCLE_EPHEMERAL = "ephemeral"
+
+#: `expires_at`'s shape: RFC 3339, UTC, second precision, `Z`. The schema
+#: states the same pattern; this copy exists so `project_lifecycle` can parse
+#: what the schema admitted without importing a validator.
+_EXPIRES_AT = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
 
 #: Plan decision B. `/docs` is derived unconditionally by runbook §3.8, so it
 #: is structurally reserved; `/.well-known` is ACME, needed from Session 2;
@@ -136,6 +149,8 @@ CROSS_FIELD_RELATIONS: tuple[str, ...] = (
     "`database.pool_size` must not exceed `database.max_client_connections`",
     "`mcp.max_result_rows` must not exceed `api.max_rows` (schema version 1)",
     "Every `mcp.profile.<tool>.max_rows` must not exceed `api.max_rows` (schema version 2)",
+    "An ephemeral `project.lifecycle` carries an `expires_at` later than the render's own "
+    "clock, and a permanent one carries none (schema version 3)",
     "`api.public_base_path` and `mcp.public_base_path` must not overlap segment-wise",
     "Neither base path may overlap a reserved route",
     "`database.pooled_public` must be false and `database.pooled_public_cidrs` empty; "
@@ -869,8 +884,41 @@ def _validate_prefix(value: str, *, field: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def validate_project_semantics(document: dict[str, Any]) -> None:
-    """Apply every rule of runbook §3.4 that JSON Schema cannot express."""
+def project_lifecycle(document: dict[str, Any]) -> dict[str, str]:
+    """The project's lifecycle, as the rendered document will carry it (ADR 0186).
+
+    ``{"kind": "permanent"}`` for a manifest below version 3, which is what
+    every earlier version meant by saying nothing -- so the two host manifests,
+    both version 1, render as permanent projects without an edit. At version 3
+    the block is the manifest's own, and the schema has already refused an
+    ephemeral one without ``expires_at`` and a permanent one with it.
+    """
+    declared = document.get("project", {}).get("lifecycle")
+    if declared is None:
+        return {"kind": LIFECYCLE_PERMANENT}
+    lifecycle = {"kind": str(declared["kind"])}
+    if "expires_at" in declared:
+        lifecycle["expires_at"] = str(declared["expires_at"])
+    return lifecycle
+
+
+def expires_at_of(lifecycle: dict[str, str]) -> datetime | None:
+    """``expires_at`` as a moment, or None for a permanent project."""
+    value = lifecycle.get("expires_at")
+    if value is None:
+        return None
+    if not _EXPIRES_AT.match(value):
+        raise ManifestError(f"project.lifecycle.expires_at is not RFC 3339 UTC: {value!r}")
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+
+
+def validate_project_semantics(document: dict[str, Any], *, now: datetime | None = None) -> None:
+    """Apply every rule of runbook §3.4 that JSON Schema cannot express.
+
+    ``now`` is the render's clock, injectable so the expiry rule is testable at
+    a fixed moment; it defaults to the wall clock, which is the one a render
+    actually runs under.
+    """
     version = document.get("schema_version")
     if version not in SUPPORTED_PROJECT_SCHEMA_VERSIONS:
         raise ManifestError(
@@ -884,6 +932,18 @@ def validate_project_semantics(document: dict[str, Any]) -> None:
     if not _ENVIRONMENT.match(project["environment"]):
         raise ManifestError(f"invalid project.environment: {project['environment']!r}")
     _validate_domain(project["domain"])
+
+    # A project born expired is a typo, and the render is the last moment a
+    # human is looking (ADR 0186). Nothing else in this module reads a clock,
+    # and this reads it only to refuse: the value itself is carried verbatim.
+    expires_at = expires_at_of(project_lifecycle(document))
+    if expires_at is not None:
+        moment = now if now is not None else datetime.now(UTC)
+        if expires_at <= moment:
+            raise ManifestError(
+                f"project.lifecycle.expires_at ({expires_at.strftime('%Y-%m-%dT%H:%M:%SZ')}) "
+                "is not in the future; an ephemeral project cannot be born expired"
+            )
 
     api = document["api"]
     mcp = document["mcp"]

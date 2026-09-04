@@ -365,6 +365,10 @@ def build_outputs(
             "key": identity.key,
             "domain": identity.domain,
             "generated_directory": identity.generated_directory,
+            # Version 15 (ADR 0186): the manifest's own block at version 3, and
+            # `permanent` below it -- which is what every earlier manifest
+            # meant. `config` owns that rule; this carries its answer.
+            "lifecycle": config.project_lifecycle(project),
         },
         "compose": {
             "project_name": identity.compose_project_name,

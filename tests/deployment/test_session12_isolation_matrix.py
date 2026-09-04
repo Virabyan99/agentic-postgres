@@ -175,6 +175,10 @@ RELEASE_STATE = (
 #: Carries no authority. Prefix rules rather than an enumeration: these grow
 #: with every session and none of them is a claim in either direction.
 NOT_AUTHORITY_PREFIXES = (
+    # Version 15 (ADR 0186). A declaration about the project's life, not a
+    # value it serves with: two permanent projects share it, an ephemeral one
+    # differs, and neither says anything about isolation.
+    "project.lifecycle.",
     "database.budget.",
     "database.observed.",
     "database.access_profiles.",

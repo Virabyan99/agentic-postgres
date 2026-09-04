@@ -305,6 +305,7 @@ enforced in `src/agentic_postgres/config.py`:
 - `database.pool_size` must not exceed `database.max_client_connections`
 - `mcp.max_result_rows` must not exceed `api.max_rows` (schema version 1)
 - Every `mcp.profile.<tool>.max_rows` must not exceed `api.max_rows` (schema version 2)
+- An ephemeral `project.lifecycle` carries an `expires_at` later than the render's own clock, and a permanent one carries none (schema version 3)
 - `api.public_base_path` and `mcp.public_base_path` must not overlap segment-wise
 - Neither base path may overlap a reserved route
 - `database.pooled_public` must be false and `database.pooled_public_cidrs` empty; a public pooler is not a supported profile (ADR 0040)

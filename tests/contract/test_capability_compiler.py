@@ -965,12 +965,19 @@ def test_each_schema_version_constant_matches_its_schemas_enum() -> None:
             f"{filename} accepts {sorted(enum)} and the constant says {sorted(constant)}"
         )
 
-    # The control: the two are not the same set, so a test comparing each
-    # against the other's schema would fail. Without this, one constant serving
-    # both would still pass.
+    # The control. Its first form asserted the two SETS differ, and that was a
+    # description of the observations (D695's shape): the day project schema
+    # version 3 arrived beside capability schema version 3 (ADR 0186), both
+    # sets became {1, 2, 3} and the control went red for a state D881 never
+    # forbade -- D881 was about one CONSTANT serving two documents, not about
+    # two documents happening to be at the same version (D964). So the control
+    # now asserts the thing it was for: the two are distinct objects read from
+    # distinct files, and each was compared against its own file's enum.
     assert (
-        config.SUPPORTED_PROJECT_SCHEMA_VERSIONS != config.SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS
-    ), "the two constants are equal again, which is the state D881 was about"
+        config.SUPPORTED_PROJECT_SCHEMA_VERSIONS
+        is not config.SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS
+    ), "one constant is serving both documents again, which is the state D881 was about"
+    assert len({filename for filename, _ in pairs}) == len(pairs), "a schema file is paired twice"
 
 
 def test_a_tool_takes_the_narrowest_bound_of_its_capabilities(

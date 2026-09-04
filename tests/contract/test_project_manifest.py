@@ -79,11 +79,21 @@ def test_required_section_is_required(tmp_path: Path, base: dict[str, Any], sect
         check(tmp_path, base)
 
 
-def downgrade(document: dict[str, Any]) -> dict[str, Any]:
-    """The same manifest at schema version 1 (ADR 0183): the profile out, the
-    two fields it replaced back in with the values the fixture carried for
-    fifteen sessions. What the host's manifests still look like."""
+def downgrade_to_two(document: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest at schema version 2 (ADR 0186): the lifecycle out,
+    which is what a version 2 manifest says and means permanent."""
     document = copy.deepcopy(document)
+    document["schema_version"] = 2
+    document["project"].pop("lifecycle", None)
+    return document
+
+
+def downgrade(document: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest at schema version 1 (ADR 0183): the lifecycle out,
+    the profile out, the two fields it replaced back in with the values the
+    fixture carried for fifteen sessions. What the host's manifests still look
+    like."""
+    document = downgrade_to_two(document)
     document["schema_version"] = 1
     document["mcp"].pop("profile", None)
     document["mcp"]["max_result_rows"] = 100
@@ -602,23 +612,25 @@ def test_version_two_requires_a_profile_and_forbids_the_two_inert_fields(
 ) -> None:
     """A field is forbidden below the version that introduces it and required
     at or above it (ADR 0177's rule, applied to this document), and the two
-    replaced fields are the mirror image. Both fixtures are version 2, so the
-    version 1 arms run on a downgraded copy -- with the downgrade itself
-    checked first, or every refusal below could be the downgrade's."""
-    assert base["schema_version"] == 2
+    replaced fields are the mirror image. Both fixtures are version 3 since
+    ADR 0186, so the version 2 arms run on a downgraded copy -- with the
+    downgrade itself checked first, or every refusal below could be the
+    downgrade's -- and the version 1 arms on a further one."""
+    two = downgrade_to_two(base)
+    assert check(tmp_path, copy.deepcopy(two))["schema_version"] == 2
 
-    without = copy.deepcopy(base)
+    without = copy.deepcopy(two)
     del without["mcp"]["profile"]
     with pytest.raises(config.ManifestError):
         check(tmp_path, without)
 
     for field, value in (("max_result_rows", 100), ("max_response_bytes", 262144)):
-        carrying = copy.deepcopy(base)
+        carrying = copy.deepcopy(two)
         carrying["mcp"][field] = value
         with pytest.raises(config.ManifestError):
             check(tmp_path, carrying)
 
-    empty = copy.deepcopy(base)
+    empty = copy.deepcopy(two)
     empty["mcp"]["profile"] = {}
     assert check(tmp_path, empty)["mcp"]["profile"] == {}, "narrowing nothing is a valid state"
 
@@ -627,6 +639,88 @@ def test_version_two_requires_a_profile_and_forbids_the_two_inert_fields(
     v1["mcp"]["profile"] = {"query_resource": {"max_rows": 10}}
     with pytest.raises(config.ManifestError):
         check(tmp_path, v1)
+
+
+# ---------------------------------------------------------------------------
+# Version 3: the lifecycle (ADR 0186)
+# ---------------------------------------------------------------------------
+
+
+def test_version_three_requires_a_lifecycle_and_lower_versions_forbid_it(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """ADR 0177's rule a third time. And the reading below the version: a
+    manifest that says nothing means permanent, which is what the two host
+    manifests -- both version 1 -- have always been."""
+    assert base["schema_version"] == 3
+    assert check(tmp_path, copy.deepcopy(base))["project"]["lifecycle"] == {"kind": "permanent"}
+
+    without = copy.deepcopy(base)
+    del without["project"]["lifecycle"]
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, without)
+
+    two = downgrade_to_two(base)
+    assert check(tmp_path, copy.deepcopy(two))["schema_version"] == 2
+    two["project"]["lifecycle"] = {"kind": "permanent"}
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, two)
+
+    assert config.project_lifecycle(downgrade_to_two(base)) == {"kind": config.LIFECYCLE_PERMANENT}
+    assert config.project_lifecycle(downgrade(base)) == {"kind": config.LIFECYCLE_PERMANENT}
+    assert config.project_lifecycle(base) == {"kind": config.LIFECYCLE_PERMANENT}
+
+
+def test_an_ephemeral_project_carries_an_expiry_and_a_permanent_one_may_not(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """`expires_at` is required exactly when the kind is ephemeral: an
+    ephemeral project with no end is a permanent one with a misleading label,
+    and a permanent project with an end is the reverse."""
+    ephemeral = copy.deepcopy(base)
+    ephemeral["project"]["lifecycle"] = {"kind": "ephemeral"}
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, ephemeral)
+
+    ephemeral["project"]["lifecycle"]["expires_at"] = "2999-01-01T00:00:00Z"
+    loaded = check(tmp_path, copy.deepcopy(ephemeral))
+    assert config.project_lifecycle(loaded) == {
+        "kind": "ephemeral",
+        "expires_at": "2999-01-01T00:00:00Z",
+    }
+
+    permanent = copy.deepcopy(base)
+    permanent["project"]["lifecycle"] = {"kind": "permanent", "expires_at": "2999-01-01T00:00:00Z"}
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, permanent)
+
+    # The shape is `observed_at`'s: UTC, second precision, `Z`. An offset form
+    # names the same instant and is refused, so one instant has one spelling.
+    offset = copy.deepcopy(ephemeral)
+    offset["project"]["lifecycle"]["expires_at"] = "2999-01-01T00:00:00+00:00"
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, offset)
+
+
+def test_a_project_born_expired_is_refused(tmp_path: Path, base: dict[str, Any]) -> None:
+    """The render is the last moment a human is looking, and a typo in a date
+    is invisible after it. Equal is expired: an `expires_at` of now expires now."""
+    from datetime import UTC, datetime
+
+    born_expired = copy.deepcopy(base)
+    born_expired["project"]["lifecycle"] = {
+        "kind": "ephemeral",
+        "expires_at": "2000-01-01T00:00:00Z",
+    }
+    with pytest.raises(config.ManifestError, match="born expired"):
+        check(tmp_path, born_expired)
+
+    at_noon = copy.deepcopy(base)
+    at_noon["project"]["lifecycle"] = {"kind": "ephemeral", "expires_at": "2026-09-04T12:00:00Z"}
+    noon = datetime(2026, 9, 4, 12, 0, 0, tzinfo=UTC)
+    with pytest.raises(config.ManifestError, match="born expired"):
+        config.validate_project_semantics(at_noon, now=noon)
+    config.validate_project_semantics(at_noon, now=noon.replace(minute=0, second=0, hour=11))
 
 
 def test_a_profile_entry_is_typed_and_non_empty(tmp_path: Path, base: dict[str, Any]) -> None:

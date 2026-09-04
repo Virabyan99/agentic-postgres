@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -361,6 +361,9 @@ def build_deployed_document(
             "environment": rendered["project"]["environment"],
             "key": rendered["project"]["key"],
             "domain": rendered["project"]["domain"],
+            # Version 15: repeated from the render so the fleet inventory can
+            # read it off the host without the manifest (ADR 0186).
+            "lifecycle": dict(rendered["project"]["lifecycle"]),
         },
         "host": dict(host),
         # `edge` as measured, plus the project's own two network names carried

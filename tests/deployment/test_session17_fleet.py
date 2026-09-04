@@ -115,6 +115,30 @@ def test_the_inventory_prints_no_credential(
         assert value not in out + err, f"fleet.sh {' '.join(arguments)} printed a credential"
 
 
+def test_a_permanent_project_publishes_its_lifecycle_at_v15(
+    project_a: dict[str, Any], project_b: dict[str, Any], as_root, sh_status
+) -> None:
+    """`FLEET-LIFE-001`'s live half (Run 3). Both host manifests are version 1
+    and declare no lifecycle; the deployed document at version 15 says
+    `permanent` for each, which is what they always were (ADR 0186), and the
+    inventory reads it off the host and reports neither as expired."""
+    del as_root
+    for document in (project_a, project_b):
+        key = document["project"]["key"]
+        assert document["schema_version"] == deployed_output.SCHEMA_VERSION, (
+            f"{key} is at outputs v{document['schema_version']}; this release deploys "
+            f"v{deployed_output.SCHEMA_VERSION}"
+        )
+        assert document["project"]["lifecycle"] == {"kind": fleet.PERMANENT}, key
+
+    code, out, err = _inventory(sh_status, "--json")
+    assert code == 0, err
+    by_key = {p["key"]: p for p in json.loads(out)["projects"]}
+    for document in (project_a, project_b):
+        row = by_key[document["project"]["key"]]
+        assert row["lifecycle"] == {"kind": fleet.PERMANENT, "expires_at": None, "expired": False}
+
+
 def test_the_text_rendering_names_every_project_on_every_line(as_root, sh_status) -> None:
     """Every non-blank line after the header starts with a project key: a
     value on one screen is always under the project it belongs to."""

@@ -214,6 +214,25 @@ def test_it_builds_from_the_real_rendered_fixture(rendered: dict) -> None:
     assert document["project"]["key"] == KEY
 
 
+def test_the_deployed_document_carries_the_renders_lifecycle(rendered: dict) -> None:
+    """Version 15 (ADR 0186). The deployed document repeats what the render
+    said, verbatim -- a permanent fixture publishes `permanent`, and a render
+    that said `ephemeral` with an expiry is published with both, so the fleet
+    inventory reads the project's life off the host without the manifest. A
+    builder that hardcoded `permanent` would pass the fixture and lie about
+    every ephemeral project."""
+    assert build(rendered)["project"]["lifecycle"] == {"kind": "permanent"}
+
+    ephemeral = json.loads(json.dumps(rendered))
+    ephemeral["project"]["lifecycle"] = {
+        "kind": "ephemeral",
+        "expires_at": "2999-01-01T00:00:00Z",
+    }
+    document = build(ephemeral)
+    assert document["project"]["lifecycle"] == ephemeral["project"]["lifecycle"]
+    deployed_output.validate_deployed_document(document)
+
+
 def test_the_deployed_document_publishes_every_route_the_render_names(rendered: dict) -> None:
     """**The test that would have caught D395**, and would have caught D389.
 

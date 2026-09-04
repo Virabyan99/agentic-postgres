@@ -249,3 +249,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0183](0183-a-profile-narrows-the-compiled-contract-and-never-widens-it.md) | A profile narrows the compiled contract and never widens it | 16 | Accepted |
 | [0184](0184-an-adversarial-case-is-derived-from-the-contract-and-carries-no-reason.md) | An adversarial case is derived from the contract and carries no reason | 16 | Accepted |
 | [0185](0185-an-operators-read-over-the-hosts-own-documents-is-not-a-cross-project-catalog.md) | An operator's read over the host's own documents is not a cross-project catalog | 17 | Accepted |
+| [0186](0186-permanent-is-what-every-earlier-manifest-meant-and-expiry-is-a-fact-an-operator-reads.md) | Permanent is what every earlier manifest meant, and expiry is a fact an operator reads | 17 | Accepted |

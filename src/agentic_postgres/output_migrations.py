@@ -101,7 +101,12 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 14
+CURRENT_VERSION = 15
+
+#: What a document below version 15 means by carrying no lifecycle (ADR 0186).
+#: The one value in this module that is NOT an argument: it is not a fact the
+#: caller knows and the document predates, it is the meaning the version has.
+PERMANENT_LIFECYCLE = {"kind": "permanent"}
 
 #: The three access profiles a v4 document carries (ADR 0041), and the transport
 #: each one is fixed to. The schema states the same pairing with a `const`; this
@@ -242,8 +247,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}:
-        raise MigrationError(f"only versions 1 through 13 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}:
+        raise MigrationError(f"only versions 1 through 14 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -293,7 +298,10 @@ def migrate_rendered(
             backup_network=backup_network,
         )
 
-    return migrate_v13_to_v14(document, metrics_url=metrics_url)
+    if detect_version(document) == 13:
+        document = migrate_v13_to_v14(document, metrics_url=metrics_url)
+
+    return migrate_v14_to_v15(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1176,6 +1184,50 @@ def migrate_v13_to_v14(document: dict[str, Any], *, metrics_url: str) -> dict[st
     return migrated
 
 
+def migrate_v14_to_v15(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 15 ``rendered`` document derived from a version 14 one.
+
+    Version 15 adds ``project.lifecycle`` (ADR 0186): whether a project is
+    permanent or ephemeral, and when an ephemeral one expires.
+
+    **This step takes no argument, and that is the decision rather than an
+    omission.** Every other step in this module requires each value it adds,
+    because each is a fact the caller knows and the input predates -- a budget,
+    a container name, a route -- and defaulting one would put an invented value
+    in a document automation reads as authoritative. A lifecycle is different
+    in kind: a document below version 15 carries none because *every* project
+    before the field existed was permanent, so `permanent` is not a guess about
+    this document, it is what the version means. A caller asked to supply it
+    could only ever supply that one value, and an argument with one possible
+    value is a constant with a signature.
+
+    What this step therefore cannot do is migrate an ephemeral project: none
+    existed before the field did, and one that does exists only at version 15.
+    """
+    version = detect_version(document)
+    if version == 15:
+        raise MigrationError("document is already version 15; migration would be a no-op")
+    if version != 14:
+        raise MigrationError(f"only version 14 can be migrated to 15, got {version}")
+
+    require_kind(document, "rendered")
+
+    project = document.get("project")
+    if not isinstance(project, dict) or "key" not in project:
+        raise MigrationError(
+            "project carries no key; this document was not written by this renderer"
+        )
+    if "lifecycle" in project:
+        raise MigrationError(
+            "project already carries a lifecycle; this is not a version 14 document"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["project"]["lifecycle"] = dict(PERMANENT_LIFECYCLE)
+    migrated["schema_version"] = 15
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1190,6 +1242,7 @@ __all__ = [
     "BUDGET_MEMBERS",
     "CURRENT_VERSION",
     "HEALTH_ROUTE_PATH",
+    "PERMANENT_LIFECYCLE",
     "MigrationError",
     "detect_version",
     "document_kind",
@@ -1206,5 +1259,7 @@ __all__ = [
     "migrate_v10_to_v11",
     "migrate_v11_to_v12",
     "migrate_v12_to_v13",
+    "migrate_v13_to_v14",
+    "migrate_v14_to_v15",
     "require_kind",
 ]

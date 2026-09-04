@@ -60,8 +60,9 @@ claims wrongly, in the direction that makes work look undone.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 `7282cc5` or against the deployment on 2026-09-04**, not a prediction.
 
-**Next free number after this table is D964.** D944–D958 were written at
-planning; D959 and D960 are Run 1's; D961–D963 are Run 2's.
+**Next free number after this table is D966.** D944–D958 were written at
+planning; D959 and D960 are Run 1's; D961–D963 are Run 2's; D964 and D965 are
+Run 3's.
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -85,6 +86,8 @@ planning; D959 and D960 are Run 1's; D961–D963 are Run 2's.
 | **D961** | This plan's Run 2: *"runs doctor's probes in-process per project."* | **In-process would make the inventory a second caller of every probe's internals** -- `probe_containers(key)`, `probe_repository(key, root)`, the document loader -- and Run 1 built `doctor.py --json` precisely so a consumer could compose the doctor's *document* instead of its functions (D947: "composes rather than parses"). | **`bin/fleet.py` runs `bin/doctor.py --project KEY --json --root ROOT` as a subprocess with the same interpreter and reads the document.** What the inventory reports as health is byte-for-byte what the operator's own command prints, and the doctor's redaction (ADR 0159) is inherited whole rather than re-asserted. `doctor.py` gained `--root` so the fixture-root contract test drives the real pipeline. | A seam built in Run 1 and bypassed in Run 2 would have been a declared reader with no reader (D816's shape), and two callers of one probe set is question 5 waiting to happen. The cost is one process per project, which on a host of three is nothing. | — |
 | **D962** | `FLEET-BACKUP-001`: the inventory *"reports a project whose timers are not enabled as `unscheduled`"* -- one state for "not enabled". | **`systemctl is-enabled` distinguishes three states, measured on the host as `op`:** an instance of a template that is **not installed** answers `not-found` and exits **4**; an instance of an installed template that nobody enabled answers `disabled` and exits **1**; an enabled instance answers `enabled` and exits **0**. `systemctl show` on the absent instance reports `LoadState=not-found` with an empty `UnitFileState`. | **`fleet.unit_state` classifies four ways** -- `enabled`, `disabled`, `absent`, `unknown` -- and `schedule` folds the first three to `scheduled`/`unscheduled` while an `unknown` timer makes the schedule `unknown` (not measured is not measured absent, ADR 0158). `absent` is kept apart from `disabled` because the repairs differ: `provision-host.sh --apply` installs, `enable` enables. | The deployment is in the `absent` state today (D944), and an inventory that folded it into `disabled` would send an operator to `systemctl enable`, which fails on a unit that does not exist. The vocabulary is measured, not typed (D674). | — |
 | **D963** | Run 2's targeted modules were green and the commit was pushed as `3b1ac58`. | **CI was red on both jobs, one cause**: `test_no_module_is_imported_only_by_its_own_tests` reported `fleet` *"imported by nothing outside its own tests"*. The scan discounted any import whose name equalled the importing **file's** stem — a rule written so a package module importing itself is not its own caller — and applied it to every file under `bin/` too, so `bin/fleet.py`'s `from agentic_postgres import fleet` was discounted as a self-import. Every earlier `bin/` script happened to differ in stem from the module it drives (`doctor.py`/`diagnosis`, `upgrade.py`/`upgrade_plan`, `migrate.py`/`migrations`), so the rule had never been exercised on the case it gets wrong. | **The self-import exclusion is scoped to sources inside the package**, and a control asserts both directions: a `bin/` script sharing a module's stem is a caller, a package module importing itself is not. Repaired as the scan, not by renaming the command — a guard that decides a real caller is not one is wrong about the boundary it guards, and renaming would have left it wrong for the next same-stem pair. | The module the guard was written to catch (`edge_credentials`, D204) had no caller; this one had exactly one and the guard could not see it. A false positive in a guard over a real boundary is repaired in the guard when the guard's *rule* is wrong, and moved in the code when only the *name* collides (D464) — this is the first kind. **And the module was not in Run 2's targeted list**, which is what CI is for. | — |
+| **D964** | `test_each_schema_version_constant_matches_its_schemas_enum`'s control (D881): *"the two are not the same set, so a test comparing each against the other's schema would fail."* | **The control went red the day the two sets legitimately coincided.** Project schema version 3 (this run) beside capability schema version 3 (Session 16 Run 4) makes both constants `{1, 2, 3}`, and the control asserted `!=`. D881 was about one *constant* serving two documents — `SUPPORTED_SCHEMA_VERSIONS` read by both loaders — never about two documents happening to be at the same version. | **The control asserts what it was for**: the two constants are distinct objects (`is not`) read from distinct schema files, each compared against its own file's enum. The equality of the sets is a fact about today, not a defect. | D695's shape: an invariant that held for every observed state was a description of the observations. A control that fails for a reason the rule never forbade trains the next reader to weaken the rule. | — |
+| **D965** | This plan's Run 3: outputs v15 is *"`migrate_v14_to_v15` fills `permanent`; `SCHEMA_VERSION = 15`"* — one function and one constant, as the migrator module's own header promises. | **Nine tests chain the migrator by hand, step by step, and end at `migrate_v13_to_v14` before asserting `CURRENT_VERSION`.** Every one went red at the bump. The `chained` fixture exists for exactly this — *"named for what it is rather than for a version"* — and those nine do not use it; each is a per-version fixture test (`test_the_committed_v2_fixture_migrates_and_validates` through `test_the_v10_fixture_is_a_real_render_at_version_10`) that walks the chain itself. | **Each gains the v15 step**, by one replace-all edit, and the pattern is recorded rather than refactored: a test that walks the chain by hand is asserting each link is reachable from its fixture, which the `chained` fixture (v1 only) does not, so they are not redundant. **The next bump will meet them again** and the fix is the same one line, nine times. | Question 5 at the scale of a test module: the decision *the current version moved* has ten readers here, and only the fixture was written to move with it. A refactor that ended each hand-chain with `migrate_rendered` would lose the per-link assertion; a refactor that made the tail a helper is the one worth doing, and is not this run's. | — |
 
 ---
 
@@ -238,6 +241,26 @@ control green in every arm; the arms are in the commit message.
 - Live half: `test_a_permanent_project_publishes_its_lifecycle_at_v15`.
 - Battery: absence read as ephemeral, the past-expiry check inverted, the
   migrator leaving the field absent.
+
+**Done.** Project schema v3 adds `project.lifecycle` behind a version gate
+(required at 3, forbidden below); `config.project_lifecycle` answers
+`permanent` for a manifest that says nothing, the renderer carries that into
+outputs v15 on both branches, `deployed_output` repeats it, and
+`migrate_v14_to_v15` fills it **with no argument** — the one value in the
+module that is the meaning of the version rather than a fact the caller knows
+(ADR 0186). The render refuses an ephemeral project whose `expires_at` is at
+or before its own clock, injectable for the proof. The inventory gained
+`lifecycle` and `expired`; the matrix classifies `project.lifecycle.*` as
+carrying no authority; both example manifests moved to v3 and say
+`permanent`; the bounds doc gained the relation. Two things the bump met that
+the plan did not predict: the constant-versus-enum control asserted the two
+version sets differ, which became false today (D964), and nine tests chain the
+migrator by hand and each needed the v15 step (D965). The live half
+`test_a_permanent_project_publishes_its_lifecycle_at_v15` is written. Battery:
+nine arms across four modules, nine killed, control green in every arm — after
+one repair to the battery's own reader: the `v14` fixture asserted its premise
+inside the fixture, so two arms reported ERROR rather than FAILED (D386's
+false kill), and the premise moved into a test.
 
 ### Run 4 — `project-retire.sh`, ADR 0187
 

@@ -9,12 +9,14 @@
 # one rendered from project.example.yaml. See runbook §8 and
 # tests/contract/test_render_isolation.py.
 
-schema_version: 2
+schema_version: 3
 
 project:
   slug: fixture-alpine
   environment: dev
   domain: fixture-alpine-dev.test
+  lifecycle:
+    kind: permanent
 
 database:
   name: fixture_alpine_dev

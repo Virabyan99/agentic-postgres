@@ -184,6 +184,46 @@ def test_age_in_days_is_whole_and_never_negative() -> None:
     assert fleet.age_days("not a date", NOW) is None
 
 
+def test_lifecycle_is_read_off_the_document_and_expiry_is_a_reading() -> None:
+    """ADR 0186: a document without a lifecycle is permanent (a v14 document on
+    a host not yet redeployed), and `expired` is true when an ephemeral
+    project's `expires_at` is at or before now -- a reading, not a trigger."""
+    permanent = {"kind": fleet.PERMANENT, "expires_at": None, "expired": False}
+    assert fleet.lifecycle_of({}, NOW) == permanent
+    assert fleet.lifecycle_of({"lifecycle": {"kind": "permanent"}}, NOW) == permanent
+
+    live = {"lifecycle": {"kind": "ephemeral", "expires_at": "2026-09-04T13:00:00Z"}}
+    assert fleet.lifecycle_of(live, NOW) == {
+        "kind": fleet.EPHEMERAL,
+        "expires_at": "2026-09-04T13:00:00Z",
+        "expired": False,
+    }
+    at_noon = {"lifecycle": {"kind": "ephemeral", "expires_at": "2026-09-04T12:00:00Z"}}
+    assert fleet.lifecycle_of(at_noon, NOW)["expired"] is True, "equal is expired"
+    gone = {"lifecycle": {"kind": "ephemeral", "expires_at": "2026-09-01T00:00:00Z"}}
+    assert fleet.lifecycle_of(gone, NOW)["expired"] is True
+
+
+def test_the_text_rendering_marks_an_expired_project(deployed: dict[str, Any]) -> None:
+    ephemeral = json.loads(json.dumps(deployed))
+    ephemeral["project"]["lifecycle"] = {"kind": "ephemeral", "expires_at": "2026-09-01T00:00:00Z"}
+    r = fleet.row(
+        KEY,
+        ephemeral,
+        doctor=None,
+        doctor_problem="not run",
+        timers={},
+        denials=None,
+        window_hours=24,
+        now=NOW,
+    )
+    text = fleet.render_text((r,), observed_at="t", window_hours=24)
+    header = text.split("\n\n")[1].splitlines()[0]
+    assert "ephemeral until 2026-09-01T00:00:00Z EXPIRED" in header
+    parsed = json.loads(fleet.render_json((r,), observed_at="t", window_hours=24))
+    assert parsed["projects"][0]["lifecycle"]["expired"] is True
+
+
 def test_a_row_is_composed_from_the_document_and_the_live_readings(
     deployed: dict[str, Any],
 ) -> None:
@@ -203,6 +243,7 @@ def test_a_row_is_composed_from_the_document_and_the_live_readings(
     assert r.source_commit == COMMIT
     assert r.deployed_through_session == 3
     assert r.template_version == deployed["template_version"]
+    assert r.lifecycle == {"kind": fleet.PERMANENT, "expires_at": None, "expired": False}
     assert r.health["worst"] == diagnosis.OK
     assert r.health["counts"][diagnosis.OK] == 3
     assert r.health["checks"]["migrations"] == diagnosis.OK

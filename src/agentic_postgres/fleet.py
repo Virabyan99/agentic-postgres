@@ -43,6 +43,8 @@ __all__ = [
     "ABSENT",
     "DISABLED",
     "ENABLED",
+    "EPHEMERAL",
+    "PERMANENT",
     "SCHEDULED",
     "TIMER_KINDS",
     "UNKNOWN",
@@ -51,6 +53,7 @@ __all__ = [
     "age_days",
     "invalid_row",
     "last_full_backup_at",
+    "lifecycle_of",
     "render_json",
     "render_text",
     "row",
@@ -77,6 +80,11 @@ UNKNOWN = "unknown"
 #: A project's schedule, from its two timers. `scheduled` needs both.
 SCHEDULED = "scheduled"
 UNSCHEDULED = "unscheduled"
+
+#: The two lifecycle kinds (ADR 0186), spelled once here for the inventory's
+#: readers; `config` owns the manifest-side rule.
+PERMANENT = "permanent"
+EPHEMERAL = "ephemeral"
 
 #: The doctor check whose evidence carries the live last-full-backup time.
 _REPOSITORY_CHECK = "backup repository"
@@ -163,10 +171,42 @@ class Row:
     source_commit: str | None
     deployed_through_session: int | None
     template_version: str | None
+    lifecycle: dict[str, object]
     health: dict[str, object]
     backups: dict[str, object]
     denials: dict[str, object]
     problems: tuple[str, ...] = field(default_factory=tuple)
+
+
+def lifecycle_of(project: dict[str, object], now: datetime) -> dict[str, object]:
+    """The project's lifecycle and whether it has expired (ADR 0186).
+
+    A document below outputs version 15 carries no lifecycle and means
+    `permanent` -- the rule `config.project_lifecycle` states for manifests,
+    applied to the document that manifest rendered. `expired` is a reading,
+    not a trigger: it is true when an ephemeral project's `expires_at` is at
+    or before ``now``, and always false for a permanent one.
+    """
+    declared = project.get("lifecycle")
+    if not isinstance(declared, dict):
+        return {"kind": PERMANENT, "expires_at": None, "expired": False}
+    kind = str(declared.get("kind", PERMANENT))
+    expires_at = declared.get("expires_at")
+    expired = False
+    if kind == EPHEMERAL and isinstance(expires_at, str):
+        try:
+            moment = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            moment = None
+        if moment is not None:
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=UTC)
+            expired = moment <= now.astimezone(UTC)
+    return {
+        "kind": kind,
+        "expires_at": expires_at if isinstance(expires_at, str) else None,
+        "expired": expired,
+    }
 
 
 def _health(doctor: dict[str, object] | None, problem: str | None) -> dict[str, object]:
@@ -219,6 +259,7 @@ def row(
         source_commit=_text(document.get("source_commit")),
         deployed_through_session=_integer(document.get("deployed_through_session")),
         template_version=_text(document.get("template_version")),
+        lifecycle=lifecycle_of(project, now),
         health=_health(doctor, doctor_problem),
         backups={
             "state": schedule(states),
@@ -246,6 +287,7 @@ def invalid_row(key: str, reason: str) -> Row:
         source_commit=None,
         deployed_through_session=None,
         template_version=None,
+        lifecycle={"kind": UNKNOWN, "expires_at": None, "expired": False},
         health={"worst": diagnosis.UNKNOWN, "counts": {}, "checks": {}, "reason": reason},
         backups={
             "state": UNKNOWN,
@@ -282,8 +324,13 @@ def render_text(rows: tuple[Row, ...], *, observed_at: str, window_hours: int) -
             lines.append(f"{r.key}  ({r.problems[0]})")
             continue
         commit = (r.source_commit or "?")[:7]
+        life = str(r.lifecycle.get("kind"))
+        if r.lifecycle.get("expires_at"):
+            life += f" until {r.lifecycle.get('expires_at')}"
+        if r.lifecycle.get("expired"):
+            life += " EXPIRED"
         lines.append(
-            f"{r.key}  {r.domain}  {r.environment}  release {commit} "
+            f"{r.key}  {r.domain}  {r.environment}  {life}  release {commit} "
             f"s{r.deployed_through_session} v{r.template_version}"
         )
         counts = r.health.get("counts") or {}
