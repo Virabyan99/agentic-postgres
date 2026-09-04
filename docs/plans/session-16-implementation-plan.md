@@ -50,7 +50,7 @@ decision (ADR 0129). What the brief got wrong is §1.
 Six columns, the house shape. **Every row is a fact measured against the tree or
 against the deployment at planning time**, not a prediction.
 
-**Next free number after this table is D910.**
+**Next free number after this table is D914.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -102,6 +102,10 @@ against the deployment at planning time**, not a prediction.
 | **D907** | A quota refusal raises, like every other refusal in the plane. | **A `RAISE` rolls back the audit row written in the same transaction** (D489), so the denial would be unrecorded — the one thing ADR 0141 put `begin` before the scope check to prevent. There is no arrangement of exception blocks that keeps it: a handler discards its savepoint as surely as an aborting transaction does, and recording it durably would need an autonomous transaction, which is a second connection, which is the credential this plane does not hold. | **The refusal is a `NULL` return**, after the function writes the complete `refused` row itself. Unambiguous, because `begin` has never returned NULL — a caller with no agent identity is refused with `PT403`, so the only paths out were a record id or an error. **The signature does not change.** | D489 was measured in Session 9 about a *write*, and it reaches this because the same rule governs any row a refusing transaction wants to leave behind. The runtime's flag is `quota_spent` and **not `audit_id is None`**, because a read whose `begin` raised also leaves the id at None and carries on by design — one value, two meanings, which is D495's shape and was in the first draft of that block. | 0180 |
 | **D908** | Four live proofs report that `agent_audit_begin` returns a record id on a call that is over quota, so the refusal branch does not fire. | **The branch fired every time and the PRODUCT WAS RIGHT.** `RAISE NOTICE` inside the function read `bound=2 window=3600 used=3 over=t` on exactly the call the proofs described as served. The fault was the test helper: `_returned` did `result.stdout.strip().splitlines()[-1]`, and **psql prints an EMPTY LINE for a NULL scalar** — so `.strip()` deleted the answer, and `[-1]` returned the **owner id** left on stdout by the second `set_config(...)`, which `as_agent` runs inside the transaction and which returns the value it sets. A plausible uuid, produced by stripping away the emptiness that WAS the result. | `_returned` splits before it strips. The helper's docstring carries the reason, because the next person to write one will reach for `.strip()` first. | **Every inference after the first was sound and aimed at the wrong thing.** The bisect ran three container arms — plain, `SECURITY DEFINER` with the pinned `search_path`, and `bound` read by `SELECT INTO` — and all three refused correctly, which was itself the signal that the fault was in the OBSERVATION rather than the subject, and it was read as "not reproduced yet". What settled it was asking the function what it saw instead of inferring from what came back through two layers of shell and a helper written an hour earlier. §7's sixth question inverted: not a fixture that agrees with wrong code, but one that **contradicts right code convincingly**. | 0180 |
 | **D909** | The live proofs' fixtures were written from the tables they use. | **Three fixture faults in one run, none in the product**, and the cluster caught all three. `app_private.users` was inserted with `email` and `password_hash`, which it does not have — invented rather than read. The control, `test_an_agent_without_a_quota_is_unbounded`, **passed with no agent row at all**, because `begin` finds no row, reads no bound and takes the unbounded path — a nonexistent agent is indistinguishable from an unbounded one. And `_returned` above. | The insert names the real columns; the control asserts the agent exists before concluding anything from its behaviour (D605); the reader splits before stripping. | **The control was the dangerous one**, because it was the arm the other four were measured against. Had they all passed, the run would have shipped five green proofs over a table with no rows in it — and the four that failed are the only reason the third fault was ever visible. D605's rule earns its place again: *a rig that constructs a condition must measure that it constructed it.* | 0180 |
+| **D910** | Run 5's text: the quota table needs a **retention policy**, and ADR 0180's own first shape gave it one — `PRIMARY KEY (agent_id, window_start)`, a row per window, and a maintenance verb to delete windows older than a horizon. | **Nothing reads a closed window.** The bound is a count within the *current* window; no caller, no report, no proof and no operator command consults the previous one. Every retained row was waiting for a reader that does not exist — and the retention verb it needed came with a horizon somebody had to choose and somewhere to run it. | **The table is one row per agent** (`PRIMARY KEY (agent_id)`), and the boundary is a **reset in place**: `ON CONFLICT (agent_id) DO UPDATE SET calls = CASE WHEN window_start = EXCLUDED.window_start THEN calls + 1 ELSE 1 END`. **No `DELETE` exists anywhere in the design**, and the table is bounded by the deployment's agent count, with `ON DELETE CASCADE` removing a counter with its agent. | **The retention policy was designed away rather than written**, which is the cheaper answer whenever the data has no reader. D903 had already measured that the row-per-window shape would have been fast — 0.0084 ms at 200,000 rows — so this is not a lookup being rescued; the reset is chosen for the obligation it removes, not the millisecond. **The reset is the risky half and is guarded**: dropping the `window_start` comparison leaves a counter that never resets, which is a *stricter* wrong answer and therefore one no caller would report. It is a mutation arm, killed by `test_the_window_is_fixed_and_a_new_one_starts_clean`. | 0180 |
+| **D911** | The quota refusal path is covered, offline and live: a `NULL` from `begin` is read as a spent quota and not as a broken audit plane. | **The client's half had no test at all**, and only the battery said so. `test_a_quota_refusal_is_visible_and_closes_no_record` monkeypatches `mcp_tools.audit_begin` — the *boundary* — so it proves the runtime's reaction to `None` and never `mcp_audit.begin`'s production of it. A mutation making the client **raise `AuditRefusal` on a JSON `null`** left that test green: seven arms killed, one survivor, and the survivor was right. | `test_the_audit_client_reads_a_null_as_a_quota_refusal` calls the client directly against a stubbed `_dial`, with two control arms proving the parse widened by **exactly one value** — a record id still returns itself, and `{"id": "x"}` still raises `not a record id`. Eight of eight now killed. | **A stub at a boundary makes both sides of it look tested when only one is.** The distinction it was hiding is the load-bearing one: `AuditRefusal` means the audit plane failed, and a read carries on past it while a write fails closed — so raising there would have made a caller's own rate limit look like an outage and failed a write closed for a reason the caller could simply have waited out. **D493's rule paid again** — *a surviving mutation is evidence, read it* — and it was the only thing in the run that could have found this, because the product was correct and every test was green. | 0180 |
+| **D912** | *"Never amend a released migration. Fix forward; every down block raises AP900"* (§6, non-negotiable). Run 5 committed migration 0028 at `0f5937f`, froze it into `released.lock.json`, and then **reshaped it** — `PRIMARY KEY (agent_id, window_start)` to `PRIMARY KEY (agent_id)` — and re-froze. | **Two readings of *released*, and they diverge for exactly the window this run sat in.** The lock file is named `released.lock.json`, so the runbook's word points at *frozen and committed*; the code's own error text says **"An applied migration is immutable"** (`src/agentic_postgres/migrations.py`), and ADR 0028 opens *"migrations have to be immutable once applied — that is the whole basis on which a ledger of applied versions means anything."* **0028 has been applied to nothing but throwaway test clusters**: the host runs Session 15 at `dfc09b3`, which predates 0027 as well as 0028. | **Re-frozen, deliberately, and recorded here rather than reconciled quietly.** `freeze-lock` is the explicit act the lock exists to make visible — the diff is four hex digits in git, not an unnoticed edit, which is the failure `verify_lock` is written to catch. | **The boundary is Run 10's trip, and it is now the last cheap moment.** Once 0028 is applied to either project, the two readings converge and the only remedy is 0029. Recording it matters more than the edit did: a future reader finding a re-frozen hash in this session's history needs to know it was decided rather than overlooked, and needs the word *applied* rather than *released* to judge their own case. **The rule is not weakened — it is dated.** | 0180 |
+| **D913** | `0f5937f` was pushed as Run 5's implementation commit and reported as green. | **`main` was RED when Run 5 resumed, and nobody had read its verdict.** The CI watcher for that commit died on GitHub's **unauthenticated** rate limit — the PAT never reached `gh` — and the green being quoted was `7a67fb5`'s, two commits earlier. A worktree at `0f5937f` reproduces the failure in 0.07 s: `test_every_call_to_a_released_function_uses_a_released_arity`, ADR 0175's guard, on two sites in Run 3's own proofs. | The two sites write their type list out instead of interpolating it, and the guard is **not** touched. Re-measured at `0f5937f` in a detached worktree first, so the repair is aimed at a failure that was already there rather than at one this run introduced. | **Two failures, and the second is the one that matters.** The guard's false positive is narrow and benign: `has_function_privilege` is passed a *signature*, the scanner excludes a written-out type list because every argument is a bare identifier, and an interpolated placeholder reads as one argument instead. **Loosening it to ignore any braced argument was rejected** — a real call passing one interpolated variable is precisely the arity defect ADR 0175 exists to catch, and D300's rule holds: widening an allowlist to a measured set is not weakening, loosening it to a subset check is. The **process** failure is worse: a commit went out with its verdict unread and the last green commit's status quoted for it. §7 question 2 — *has it run at all, since the thing it measures last changed* — asked of CI rather than of a proof. The watcher must fail loudly on an auth error rather than time out looking like a slow run. | 0180 |
 
 ---
 
@@ -401,10 +405,14 @@ no `version`, no `lifecycle`, no `risk`, no per-capability bounds, and
 is inert on the host until somebody edits that file**, and it is a gitignored
 operator input that exists in exactly one place with no copy in git.
 
-Run 5 adds a sixth thing to the same file. So the trip has an operator step
-nobody has costed: migrating seven capabilities across four to seven new fields,
-by hand, against a schema. **Whether a `--migrate-manifest` helper ships in Run 8
-or 9 is a decision, and it is cheaper taken now than discovered at the trip.**
+This paragraph said *"Run 5 adds a sixth thing to the same file"* and **Run 5 did
+not** (D906): a quota bounds an agent, not a capability, so it landed as two
+columns on `app_private.agents` and the manifest is untouched. The operator step
+is therefore still the Run 2–4 one — migrating seven capabilities across the
+`schema_version` 3 fields, by hand, against a schema — and it has not grown.
+**Whether a `--migrate-manifest` helper ships in Run 8 or 9 is a decision, and it
+is cheaper taken now than discovered at the trip.**
+
 ### Run 5 — windowed quotas, the fifth budget
 
 **Read ADR 0129 first**, per the stage plan's *Must not* and D865.
@@ -420,6 +428,66 @@ Measure the concurrent case with a control that proves the rig has a real race,
 exactly as Session 15 Run 2 did for the refresh plane — the outcome of two
 requests crossing a window boundary is decided by the isolation level, and that
 is a measurement, not a design choice.
+
+**Done.** ADR **0180**, migration **0028**, D902–D913 — **twelve rows, four of
+which correct the run's own text**, the highest ratio of the session.
+
+**What shipped.** Two nullable columns on `app_private.agents` — `quota_calls`
+and `quota_window_seconds`, with a `CHECK` making them whole or absent together —
+and `app_private.agent_quota`, one row per agent. The count is taken **inside
+`api.agent_audit_begin`**, which already runs on every audited call, so the fifth
+budget costs **zero extra round trips** on a plane whose latency has never been
+measured (D904). Over the bound, the function writes its own complete `refused`
+row with `budget_exceeded` and returns **NULL**; the runtime reads that through a
+`quota_spent` flag and **not** `audit_id is None`, because a read whose `begin`
+raised also leaves the id at None and carries on by design (D907, D495's shape).
+
+**Four things the plan said that were wrong, and each was caught before it was
+built on.** The ADR number (D902); the growth being a latency problem, when the
+upsert is flat across a 2000× growth and the control shows the rig can see a slow
+lookup (D903); a quota being a capability-manifest field, when `AGT-QUOTA-001`
+bounds an *agent* — caught in the run's own ADR draft, one step before the schema
+bump it did not need, which would have broken D892's own argument (D906); and the
+retention policy, which was **designed away rather than written** (D910).
+
+**The retention answer is the one to reread.** Nothing consults a closed window,
+so the boundary is a reset in place and the table is bounded by agent count with
+no `DELETE` anywhere. D903's measurement is what makes that a choice rather than a
+rescue: the row-per-window shape would have been fast too, at 0.0084 ms and 22 MB
+per 200,000 rows. **The cheapest retention policy is a schema that does not
+accumulate**, and it removes a verb, a horizon and a place to run it.
+
+**D908 is the sharpest and it cost the most.** Four live proofs reported that the
+refusal branch never fired, and **the product was right every time**: `_returned`
+did `.stdout.strip().splitlines()[-1]`, psql prints an **empty line** for a NULL
+scalar, and `.strip()` deleted the answer — leaving `[-1]` to return the owner id
+that `set_config` had printed earlier in the transaction. A plausible uuid,
+manufactured by stripping away the emptiness that *was* the result. Three
+container bisect arms all refusing correctly was the signal that the fault was in
+the observation, and it was read as *"not reproduced yet"*.
+
+**The battery is eight arms, all killed** — six needing a live cluster, because
+the enforcement is inside a released function and nothing offline reaches it.
+Seven were killed on the first pass; the survivor was real (D911): the runtime
+test stubs `mcp_tools.audit_begin`, so the *client's* handling of a JSON `null`
+had no test, and a mutation making it raise `AuditRefusal` left everything green.
+
+**Two rows are about this run's own conduct rather than its subject, and they
+belong here.** D912: migration 0028 was committed and frozen, then reshaped and
+re-frozen — legitimate because ADR 0028's immutability attaches to *applied* and
+nothing has applied it, and **Run 10's trip is the last moment that stays true**.
+D913: `0f5937f` was pushed and reported green when it was **red**, because the CI
+watcher died on an unauthenticated rate limit and the previous commit's verdict
+was quoted for it. §7 question 2 asked of CI instead of a proof. The failure was
+ADR 0175's arity guard on two of Run 3's own sites, reproduced in a detached
+worktree at `0f5937f` before anything was repaired, so the fix is aimed at a
+failure that pre-existed this run rather than at one it caused.
+
+**Not closed, deliberately.** `AGT-QUOTA-001`'s live half runs against a cluster
+here and is proved — including a spent quota surviving a restart — but the
+deployment enforces nothing until an operator sets a bound on an agent. NULL
+means unbounded and every agent on the host is NULL today, which is the correct
+default: giving them a number nobody chose would be inventing a policy.
 
 ### Run 6 — idempotency keys
 

@@ -2379,3 +2379,71 @@ def test_an_audit_outage_is_not_read_as_a_quota_refusal(monkeypatch: Any) -> Non
         "a read was refused because its audit record could not be opened; that is a "
         "write's rule (ADR 0141), and reading it as a quota refusal is worse still"
     )
+
+
+def test_the_audit_client_reads_a_null_as_a_quota_refusal(monkeypatch: Any) -> None:
+    """A JSON `null` from `agent_audit_begin` is a verdict, not a malformed reply.
+
+    **Nothing reached this path until a surviving mutation said so.** The tool
+    test above monkeypatches `mcp_tools.audit_begin` directly, so it exercises
+    the runtime's reaction to `None` and never the client's production of it --
+    and a mutation making the client RAISE on `null` left that test green.
+
+    The distinction the client has to keep: `AuditRefusal` means the audit plane
+    failed, and everything upstream treats it that way -- a read carries on past
+    one and a write fails closed. A spent quota is neither. Raising here would
+    make a caller's own rate limit look like an outage, and would fail a write
+    closed for a reason the caller could have waited out.
+    """
+    from app import mcp_audit
+
+    def answering(status: int, body: bytes) -> Any:
+        def dial(*_: Any, **__: Any) -> tuple[int, bytes]:
+            return status, body
+
+        return dial
+
+    monkeypatch.setattr(mcp_audit, "_dial", answering(200, b"null"))
+    assert (
+        mcp_audit.begin(
+            BASE,
+            "t",
+            tool="query_resource",
+            request_id=REQUEST_ID,
+            parameters={},
+            capability_version=None,
+            contract_hash=None,
+        )
+        is None
+    )
+
+    # The control: the strictness either side of `null` is unchanged. A record id
+    # still comes back as itself, and a shape the function cannot return is still
+    # refused -- so accepting `null` widened the parse by exactly one value.
+    monkeypatch.setattr(
+        mcp_audit, "_dial", answering(200, b'"c8c13a67-cee5-43e2-b1e7-07b17460215f"')
+    )
+    assert (
+        mcp_audit.begin(
+            BASE,
+            "t",
+            tool="query_resource",
+            request_id=REQUEST_ID,
+            parameters={},
+            capability_version=None,
+            contract_hash=None,
+        )
+        == "c8c13a67-cee5-43e2-b1e7-07b17460215f"
+    )
+
+    monkeypatch.setattr(mcp_audit, "_dial", answering(200, b'{"id": "x"}'))
+    with pytest.raises(mcp_audit.AuditRefusal, match="not a record id"):
+        mcp_audit.begin(
+            BASE,
+            "t",
+            tool="query_resource",
+            request_id=REQUEST_ID,
+            parameters={},
+            capability_version=None,
+            contract_hash=None,
+        )

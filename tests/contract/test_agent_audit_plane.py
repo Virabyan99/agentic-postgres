@@ -1130,12 +1130,21 @@ def test_the_grants_survived_the_functions_being_replaced(cluster: dict[str, Any
     on its own audit record and every agent read logs a warning, on a deployment
     whose migrations all applied cleanly.
     """
-    signature = "text,uuid,jsonb,text,text"
+    # The type list is written out at both sites rather than held in a variable,
+    # and that is not a style choice. ADR 0175's scanner classifies an occurrence
+    # as a SIGNATURE when every argument is a bare identifier, so a written-out
+    # type list is excluded -- while the same name given a single interpolated
+    # placeholder reads as a CALL taking one argument, and fails the guard
+    # (D913). Interpolation is what a static scanner cannot see through, and
+    # teaching it to ignore any braced argument would blind it to a real call
+    # passing one interpolated variable, which is the arity defect ADR 0175
+    # exists to catch. The comment says none of this in code shape for the same
+    # reason: the scanner reads comments, and it is right to.
     for role_key in ("agent_reader", "agent_writer"):
         result = su(
             cluster,
             f"SELECT has_function_privilege('{cluster['roles'][role_key]}', "
-            f"'api.agent_audit_begin({signature})', 'EXECUTE');",
+            "'api.agent_audit_begin(text,uuid,jsonb,text,text)', 'EXECUTE');",
         )
         assert result.stdout.strip() == "t", f"{role_key} may not execute begin"
 
@@ -1146,7 +1155,7 @@ def test_the_grants_survived_the_functions_being_replaced(cluster: dict[str, Any
     denied = su(
         cluster,
         f"SELECT has_function_privilege('{cluster['roles']['anon']}', "
-        f"'api.agent_audit_begin({signature})', 'EXECUTE');",
+        "'api.agent_audit_begin(text,uuid,jsonb,text,text)', 'EXECUTE');",
     )
     assert denied.stdout.strip() == "f", "anon may execute an audit function"
 
@@ -1403,33 +1412,48 @@ def test_a_refused_call_consumes_its_quota(cluster: dict[str, Any]) -> None:
 
 
 def test_the_window_is_fixed_and_a_new_one_starts_clean(cluster: dict[str, Any]) -> None:
-    """A one-second window, so the boundary is reachable without waiting long.
+    """Windows are epoch-aligned and fixed rather than sliding.
 
-    Windows are epoch-aligned and fixed rather than sliding: a sliding window
-    needs the timestamps of individual calls, which is a second copy of what
-    `agent_audit` already records.
+    A sliding window needs the timestamps of individual calls, which is a second
+    copy of what `agent_audit` already records.
+
+    **The rig verifies it built its condition** (D605), because it cannot control
+    the clock: a call costs roughly 200 ms through `docker exec`, so two calls
+    against a short window straddle the boundary often enough to matter, and the
+    first version of this failed intermittently for exactly that reason. So the
+    two same-window calls are RETRIED until the counter proves they shared a
+    window, and the assertion runs only then.
     """
     import time as _time
 
-    agent, owner = _quota_agent(cluster, calls=1, window=1)
+    agent, owner = _quota_agent(cluster, calls=1, window=2)
 
-    as_agent(
-        cluster,
-        "agent_reader",
-        agent,
-        owner,
-        "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
-    )
-    refused = as_agent(
-        cluster,
-        "agent_reader",
-        agent,
-        owner,
-        "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
-    )
-    assert _returned(refused) == "", "the second call in one window was not refused"
+    def call() -> Any:
+        return as_agent(
+            cluster,
+            "agent_reader",
+            agent,
+            owner,
+            "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+        )
 
-    _time.sleep(1.2)
+    for _attempt in range(4):
+        call()
+        refused = call()
+        shared = su(
+            cluster, f"SELECT calls FROM app_private.agent_quota WHERE agent_id = '{agent}';"
+        ).stdout.strip()
+        if shared == "2":
+            break
+        _time.sleep(2.2)  # the pair straddled a boundary; start again in a fresh one
+    else:  # pragma: no cover -- four straddles in a row
+        pytest.fail("could not get two calls into one window; the rig cannot construct its case")
+
+    assert _returned(refused) == "", (
+        f"the second call in one window was not refused (counter read {shared})"
+    )
+
+    _time.sleep(2.2)
     after = as_agent(
         cluster,
         "agent_reader",
@@ -1439,12 +1463,21 @@ def test_the_window_is_fixed_and_a_new_one_starts_clean(cluster: dict[str, Any])
     )
     assert _returned(after), "a new window did not start clean"
 
-    windows = su(
+    # **One row, not two** (D910). The boundary RESETS the count rather than
+    # adding a row, so the table is bounded by the number of agents and there is
+    # nothing to prune -- which is why ADR 0180's retention section describes a
+    # question that no longer exists.
+    rows = su(
         cluster,
         f"SELECT count(*) FROM app_private.agent_quota WHERE agent_id = '{agent}';",
     )
-    assert int(windows.stdout.strip()) == 2, (
-        f"{windows.stdout.strip()} window row(s); a fixed window makes exactly one per period"
+    assert int(rows.stdout.strip()) == 1, (
+        f"{rows.stdout.strip()} row(s) for one agent; the window boundary added a row "
+        "instead of resetting, which is the shape that needs a pruner"
+    )
+    counted = su(cluster, f"SELECT calls FROM app_private.agent_quota WHERE agent_id = '{agent}';")
+    assert counted.stdout.strip() == "1", (
+        f"the new window carried {counted.stdout.strip()} calls forward; it must start clean"
     )
 
 
@@ -1496,3 +1529,60 @@ def test_no_role_holds_any_privilege_on_the_quota_table(cluster: dict[str, Any])
                 f"'app_private.agent_quota', '{privilege}');",
             )
             assert granted.stdout.strip() == "f", f"{role_key} holds {privilege} on the quota table"
+
+
+def test_a_spent_quota_survives_a_restart(cluster: dict[str, Any]) -> None:
+    """`AGT-QUOTA-001`'s own words: the bound **survives a process restart**.
+
+    This is what makes the fifth budget different from ADR 0129's four. Rows,
+    bytes and elapsed time are decided inside one call; concurrency is a
+    semaphore in one process and is *gone* when that process dies. A quota that
+    reset on restart would be a bound an agent could clear by waiting for a
+    deploy.
+
+    The database is restarted rather than the runtime, and that is the stronger
+    arm: the state lives in the catalog, so what has to survive is a real
+    shutdown and recovery, not a Python object going out of scope.
+    """
+    agent, owner = _quota_agent(cluster, calls=1, window=3600)
+
+    first = as_agent(
+        cluster,
+        "agent_reader",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+    )
+    assert _returned(first), "the first call inside the bound was refused"
+
+    # `name` is the container: the fixture yields the name it started, and there
+    # is no separate `container` key.
+    restarted = _docker("restart", cluster["name"], timeout=120)
+    assert restarted.returncode == 0, restarted.stderr
+    for _ in range(90):
+        if _docker("exec", cluster["name"], "pg_isready", "-U", "postgres").returncode == 0:
+            break
+        time.sleep(1)
+    else:  # pragma: no cover -- the cluster never came back
+        pytest.fail("the cluster did not come back after a restart")
+
+    after = as_agent(
+        cluster,
+        "agent_reader",
+        agent,
+        owner,
+        "SELECT api.agent_audit_begin('query_resource', NULL, NULL, NULL, NULL);",
+    )
+    assert _returned(after) == "", (
+        "the quota was clear after a restart, so an agent can reset its own bound "
+        "by waiting for one"
+    )
+
+    # The control: the counter is what survived, and it survived at the value the
+    # first call left. A test asserting only the refusal would pass against a
+    # cluster that had forgotten the agent entirely and refused for that reason.
+    counted = su(cluster, f"SELECT calls FROM app_private.agent_quota WHERE agent_id = '{agent}';")
+    assert counted.stdout.strip() == "2", (
+        f"the counter reads {counted.stdout.strip()!r} after the restart; the refusal "
+        "above may not have been about the quota at all"
+    )

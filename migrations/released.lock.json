@@ -319,7 +319,7 @@
       "version": "20260903120027"
     },
     {
-      "canonical_render_sha256": "2b2630b62b6064e9bfbb9aa320f9da711aacb1b899e4d465b72e62c9d1dd7341",
+      "canonical_render_sha256": "3db22cac78248cd0eb2408da5308e9b6d546cf8fb4b07384ece2ea371f56649b",
       "name": "agent_windowed_quota",
       "placeholders": [
         "agent_reader",
@@ -327,7 +327,7 @@
         "object_owner"
       ],
       "template": "templates/0028-agent-windowed-quota.sql",
-      "template_sha256": "c20327ad2b6badc1c37132074fffc35feb3753b8eb311bd4488e17aad9074501",
+      "template_sha256": "90cea40853be8ce88057d94b9fc42f1c70b651677388dc7e98f9126bf7b0e414",
       "version": "20260904120028"
     }
   ],

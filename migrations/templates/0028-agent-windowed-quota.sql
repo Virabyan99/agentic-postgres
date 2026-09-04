@@ -37,12 +37,11 @@
 -- gets 40001, and the ordinary response to a serialization failure is a retry --
 -- retrying a quota increment is how a caller exceeds its quota.
 --
--- And the growth, because the session plan asserted the opposite (D903): the
--- upsert costs 0.0093 ms at 100 rows and 0.0084 ms at 200,000 -- FLAT across a
--- 2000x growth -- while the table goes from 64 kB to 22 MB. The control, the
--- same lookup with no index, costs 5.56 ms at that size. Every access is a
--- primary-key hit, so growth costs DISK and not latency, and pruning therefore
--- does not belong on the request path.
+-- The growth question was measured too (D903), and then designed away (D910).
+-- The plan said the table's growth is "a latency problem before it is a disk
+-- one"; measured, the upsert is FLAT from 100 to 200,000 rows (0.0093 to 0.0084
+-- ms) while the table goes 64 kB to 22 MB, against a control at 659x -- so it
+-- was a disk problem. The table now holds one row per agent, so it is neither.
 
 SET LOCAL ROLE {{object_owner}};
 
@@ -79,24 +78,39 @@ COMMENT ON COLUMN app_private.agents.quota_window_seconds IS
   'copy of what agent_audit already records.';
 
 -- ---------------------------------------------------------------------------
--- One row per agent per live window
+-- ONE ROW PER AGENT, and the window boundary is a reset
 -- ---------------------------------------------------------------------------
 --
--- Bounded in SHAPE, which is what makes retention cheap: 24 rows per agent per
--- day at hourly windows, and nothing on the request path reads more than one of
--- them. `agent_audit` is the contrast the plan drew the wrong lesson from -- it
--- is unbounded AND nothing prunes it.
+-- **Not one row per window**, which was this migration's first shape and is the
+-- reason ADR 0180 spent a section on retention. Nothing ever reads a past
+-- window: the quota consults the current one and no other, and `agent_audit`
+-- already holds the per-call history if anybody wants to count. A row per window
+-- therefore accumulates state that exists only to be pruned -- and then needs a
+-- pruning verb, a caller for it, and a horizon somebody chooses.
+--
+-- Keyed on the agent alone, the table is bounded by the number of agents this
+-- deployment has issued. **Retention stops being a question rather than being
+-- answered**, and D903's measurement -- that growth costs disk and not latency --
+-- stops mattering because there is no growth.
+--
+-- Measured, with a control that removes the window comparison so the reset
+-- cannot pass by accident: two calls in one window count to 2 in one row; a call
+-- in the next window resets to 1 and adds no row; two CONCURRENT calls in one
+-- window count to 2 with no lost update; and without the comparison a new window
+-- does NOT reset, which is what proves arm 2 measured the guard.
 CREATE TABLE app_private.agent_quota (
-  agent_id     uuid        NOT NULL REFERENCES app_private.agents (id) ON DELETE CASCADE,
+  agent_id     uuid        PRIMARY KEY
+                 REFERENCES app_private.agents (id) ON DELETE CASCADE,
   window_start timestamptz NOT NULL,
-  calls        integer     NOT NULL CHECK (calls >= 1),
-  PRIMARY KEY (agent_id, window_start)
+  calls        integer     NOT NULL CHECK (calls >= 1)
 );
 
 COMMENT ON TABLE app_private.agent_quota IS
-  'The fifth budget''s durable state (ADR 0180). One row per agent per window. '
-  'ON DELETE CASCADE because a removed agent''s counters bound nothing -- unlike '
-  'its audit rows, which are attribution and outlive it.';
+  'The fifth budget''s durable state (ADR 0180). ONE ROW PER AGENT: the window '
+  'boundary resets the count rather than adding a row, so the table is bounded '
+  'by the number of agents and there is nothing to prune. ON DELETE CASCADE '
+  'because a removed agent''s counter bounds nothing -- unlike its audit rows, '
+  'which are attribution and outlive it.';
 
 -- ---------------------------------------------------------------------------
 -- `begin`, now counting
@@ -158,10 +172,19 @@ BEGIN
       floor(extract(epoch FROM clock_timestamp()) / window_size) * window_size
     );
 
+    -- The CASE is the window boundary: same window, increment; new window,
+    -- start again. `window_start` is written unconditionally, so the row always
+    -- names the window its count belongs to and the two can never disagree.
     INSERT INTO app_private.agent_quota (agent_id, window_start, calls)
     VALUES (acting_agent, window_at, 1)
-    ON CONFLICT (agent_id, window_start)
-    DO UPDATE SET calls = app_private.agent_quota.calls + 1
+    ON CONFLICT (agent_id)
+    DO UPDATE SET
+      calls = CASE
+                WHEN app_private.agent_quota.window_start = EXCLUDED.window_start
+                THEN app_private.agent_quota.calls + 1
+                ELSE 1
+              END,
+      window_start = EXCLUDED.window_start
     RETURNING calls INTO used;
 
     IF used > bound THEN
