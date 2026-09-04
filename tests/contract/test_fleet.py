@@ -512,8 +512,27 @@ def test_nothing_in_the_release_reads_the_inventory() -> None:
     The COMMAND, not the module: `backup.py` imports `fleet` for the timer
     vocabulary it shares with the inventory, which is one classifier rather
     than one reader, so the scan is for `bin/fleet`, `fleet.sh` and `fleet.py`.
+    And the CODE, not the prose (D968): a gate's header telling an operator to
+    run the inventory is not a reader of it.
     """
     mention = re.compile(r"bin/fleet\b|fleet\.(sh|py)\b")
+
+    def code_of(path: Path) -> str:
+        lines: list[str] = []
+        in_usage = False
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            if "<<'USAGE'" in line:
+                in_usage = True
+                continue
+            if in_usage:
+                if line.strip() == "USAGE":
+                    in_usage = False
+                continue
+            if line.lstrip().startswith("#"):
+                continue
+            lines.append(line)
+        return "\n".join(lines)
+
     offenders: list[str] = []
     for directory, patterns in (
         ("systemd", ("*",)),
@@ -526,7 +545,7 @@ def test_nothing_in_the_release_reads_the_inventory() -> None:
             for path in sorted((REPO_ROOT / directory).glob(pattern)):
                 if not path.is_file() or path.stem == "fleet":
                     continue
-                if mention.search(path.read_text(encoding="utf-8", errors="replace")):
+                if mention.search(code_of(path)):
                     offenders.append(str(path.relative_to(REPO_ROOT)))
     assert not offenders, f"these name the inventory, and only an operator may: {offenders}"
     assert list((REPO_ROOT / "systemd").iterdir()), "the scan saw no units"

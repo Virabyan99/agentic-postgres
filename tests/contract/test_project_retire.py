@@ -643,9 +643,51 @@ def test_a_record_is_never_overwritten(
 # ---------------------------------------------------------------------------
 
 
+def code_of(path: Path) -> str:
+    """A file's code: comment lines and the usage heredoc removed (D968).
+
+    The scan below is about what a file DOES. The first form read prose too,
+    and the Session 17 gate's header -- which tells the operator to run the
+    verb and pass its record -- was reported as a unit acting on expiry. The
+    same distinction `test_root_script_policy.code_of` draws, for the same
+    reason: a comment explaining why a script does not do something must not
+    fail the test asserting it does not.
+    """
+    lines: list[str] = []
+    in_usage = False
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if "<<'USAGE'" in line:
+            in_usage = True
+            continue
+        if in_usage:
+            if line.strip() == "USAGE":
+                in_usage = False
+            continue
+        if line.lstrip().startswith("#"):
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def test_the_code_stripper_keeps_code_and_drops_prose(tmp_path: Path) -> None:
+    """The control for `code_of`: a mention in a comment or the usage block is
+    dropped, a mention in a command line is kept."""
+    script = tmp_path / "x.sh"
+    script.write_text(
+        "#!/usr/bin/env bash\n# run bin/project-retire.sh first\nusage() {\n  cat <<'USAGE'\n"
+        "  bin/project-retire.sh --plan\nUSAGE\n}\nexec bin/other.sh\n",
+        encoding="utf-8",
+    )
+    assert "project-retire" not in code_of(script)
+    assert "exec bin/other.sh" in code_of(script)
+    script.write_text("exec bin/project-retire.sh --confirm x\n", encoding="utf-8")
+    assert "project-retire" in code_of(script)
+
+
 def test_no_unit_timer_or_command_names_the_retirement_verb() -> None:
     """Expiry is a fact an operator reads (ADR 0186). The only files that name
-    the verb are the verb itself and the documents that describe it."""
+    the verb IN CODE are the verb itself; prose that tells an operator to run
+    it is not a unit acting on expiry (D968)."""
     mention = re.compile(r"project-retire")
     offenders: list[str] = []
     for directory, patterns in (
@@ -658,7 +700,7 @@ def test_no_unit_timer_or_command_names_the_retirement_verb() -> None:
             for path in sorted((REPO_ROOT / directory).glob(pattern)):
                 if not path.is_file() or path.stem in {"project-retire"}:
                     continue
-                if mention.search(path.read_text(encoding="utf-8", errors="replace")):
+                if mention.search(code_of(path)):
                     offenders.append(str(path.relative_to(REPO_ROOT)))
     assert not offenders, f"these name the retirement verb, and only a human may: {offenders}"
     assert (REPO_ROOT / "systemd").is_dir() and list((REPO_ROOT / "systemd").iterdir()), (
