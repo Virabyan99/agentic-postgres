@@ -167,6 +167,7 @@ sudo bin/project-retire.sh --host host.yaml --project <key> --confirm <key> \
 
 sudo bin/migrate.sh --project project.yaml status    # applied and pending
 sudo bin/backup.sh  --outputs <outputs.json> info --json
+sudo bin/backup.sh  --outputs <outputs.json> schedule status  # both timers enabled? 0 if so
 sudo bin/restore-test.sh --target-time <iso8601> --project-dir <dir>
 
 # A verified SSH forward, then a session over it. `tunnel` needs the host;

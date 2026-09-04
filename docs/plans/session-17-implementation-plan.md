@@ -321,6 +321,27 @@ sentence and the arm is killed. D967 records the stanza-substring finding.
   that goes red on the deployment as it is today, which is the point.
 - `docs/backup-operations.md` step 5 becomes the verb.
 
+**Done.** `src/agentic_postgres/backup_schedule.py` decides what the verb may
+say and may do, in `fleet`'s measured vocabulary (D962): `enable` refuses
+while either unit file is `absent` — naming `provision-host.sh --apply`, the
+only thing that installs units — and, only after that, while the repository
+reports anything but `ready` with a full backup, naming `backup --type full`;
+an `unknown` timer state is refused rather than enabled blind. `bin/backup.py
+schedule status|enable|disable` performs it: `status` exits 0 only when both
+timers are enabled (the convention `check` and `info` follow), `enable`
+re-reads systemd after enabling rather than trusting the exit code, and
+`disable` skips what is not installed. **The actions are sub-verbs, not a
+positional**, because the parser guard in `test_backup_repository_report`
+reads every `add_argument` as a value this command is being told. Fourteen
+contract proofs with a recorded systemd, the live half
+`test_every_permanent_project_is_scheduled` — the proof that goes red on the
+deployment as it was on 2026-09-04 (D944) — and the backup document's step 5
+is the verb. **Unmeasured and stated as such**: both timers carry
+`Persistent=true`, so the trip should expect a run the calendar already owed
+to fire at `enable`; the verb prints that expectation, and the trip records
+whether it happened (D593's six minutes, at process-max 1). Battery: seven
+arms across the module and the verb, seven killed, control green in every arm.
+
 ### Run 6 — the bump
 
 `CURRENT_SESSION` 17, `template_version` 0.6.0, the seven requirements, the four

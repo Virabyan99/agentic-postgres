@@ -150,3 +150,31 @@ def test_the_text_rendering_names_every_project_on_every_line(as_root, sh_status
     key = re.compile(r"^\s*[a-z][a-z0-9-]*\s")
     stray = [line for line in lines[1:] if line.strip() and not key.match(line)]
     assert not stray, f"lines carrying no project key: {stray}"
+
+
+def test_every_permanent_project_is_scheduled(
+    project_a: dict[str, Any], project_b: dict[str, Any], as_root, sh_status
+) -> None:
+    """`FLEET-BACKUP-001`'s live half (Run 5), and the proof that goes red on
+    the deployment as it was on 2026-09-04: no backup timer was installed
+    (D944). Both permanent projects' timers are enabled according to systemd,
+    `schedule status` exits 0 for each, and the inventory agrees."""
+    del as_root
+    for document in (project_a, project_b):
+        key = document["project"]["key"]
+        if document["project"]["lifecycle"]["kind"] != fleet.PERMANENT:
+            continue
+        outputs = deployed_output.deployed_path(key)
+        code, out, err = sh_status(
+            "bin/backup.sh", "--outputs", str(outputs), "schedule", "status", "--json"
+        )
+        assert code == 0, f"{key}: schedule status exited {code} -- not scheduled\n{out}{err}"
+        status = json.loads(out)
+        assert status["schedule"] == fleet.SCHEDULED, status
+        assert set(status["timers"].values()) == {fleet.ENABLED}, status
+
+    code, out, err = _inventory(sh_status, "--json")
+    assert code == 0, err
+    for row in json.loads(out)["projects"]:
+        if row["lifecycle"]["kind"] == fleet.PERMANENT:
+            assert row["backups"]["state"] == fleet.SCHEDULED, row["backups"]

@@ -59,7 +59,13 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from agentic_postgres import backup_report, naming, runtime_override  # noqa: E402
+from agentic_postgres import (  # noqa: E402
+    backup_report,
+    backup_schedule,
+    fleet,
+    naming,
+    runtime_override,
+)
 
 EXIT_INPUT = 2
 EXIT_PREREQUISITE = 3
@@ -442,6 +448,117 @@ def verb_expire(arguments: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# The schedule (Session 17 Run 5, FLEET-BACKUP-001)
+# ---------------------------------------------------------------------------
+
+#: `systemctl` answers in well under this; the bound is for a hung manager.
+SYSTEMCTL_TIMEOUT_SECONDS = 60
+
+
+def systemctl(*arguments: str) -> subprocess.CompletedProcess:
+    """One `systemctl` call, bounded, stdin closed (D673)."""
+    return subprocess.run(
+        ["systemctl", *arguments],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=SYSTEMCTL_TIMEOUT_SECONDS,
+        stdin=subprocess.DEVNULL,
+    )
+
+
+def timer_states(key: str) -> dict[str, str]:
+    """Each timer's unit-file state, in `fleet`'s measured vocabulary (D962)."""
+    states: dict[str, str] = {}
+    for kind, unit in backup_schedule.units(key).items():
+        try:
+            result = systemctl("is-enabled", unit)
+        except (OSError, subprocess.TimeoutExpired):
+            states[kind] = fleet.UNKNOWN
+            continue
+        states[kind] = fleet.unit_state(result.returncode, result.stdout)
+    return states
+
+
+def verb_schedule(arguments: argparse.Namespace) -> int:
+    """`status`, `enable`, `disable` -- the two backup timers of one project.
+
+    `status` answers 0 when both timers are enabled and 6 otherwise: the verb
+    ran and its answer is "no", which is the convention `check` and `info`
+    follow. `enable` refuses while a unit file is absent (naming the
+    provisioning command) or while the repository holds no full backup (naming
+    the backup command), and re-reads the states afterwards rather than
+    trusting `systemctl`'s exit code. `disable` is unconditional.
+    """
+    document = load_document(arguments.outputs)
+    key = project_key(document)
+    states = timer_states(key)
+
+    if arguments.action == "status":
+        if arguments.json:
+            print(backup_schedule.render_json(key, states))
+        else:
+            print(backup_schedule.render_status(key, states))
+        return 0 if fleet.schedule(states) == fleet.SCHEDULED else EXIT_REFUSED
+
+    if arguments.action == "disable":
+        for kind, unit in backup_schedule.units(key).items():
+            if states[kind] == fleet.ABSENT:
+                print(f"backup: {unit} is not installed; nothing to disable")
+                continue
+            result = systemctl("disable", "--now", unit)
+            if result.returncode != 0:
+                raise OperatorError(
+                    EXIT_STATE, f"could not disable {unit} (exit {result.returncode})"
+                )
+            print(f"backup: {unit} disabled")
+        return 0
+
+    # enable: the two refusals first, and the repository is read only after
+    # the unit files are known to exist -- an absent unit is the cheaper answer
+    # and names the repair for the other state anyway.
+    absent = backup_schedule.enable_refusal(
+        states, repository_status=backup_report.STATUS_READY, last_full_backup_at="pending"
+    )
+    if absent is not None:
+        raise OperatorError(EXIT_PREREQUISITE, absent)
+    stanza = stanza_name(document)
+    container = database_container(document)
+    summary = read_repository(container, stanza)
+    state = backup_report.backup_state(summary, read_archiver(container, document))
+    why = backup_schedule.enable_refusal(
+        states,
+        repository_status=state["status"],
+        last_full_backup_at=state.get("last_full_backup_at"),
+    )
+    if why is not None:
+        raise OperatorError(EXIT_REFUSED, why)
+
+    for kind, unit in backup_schedule.units(key).items():
+        if states[kind] == fleet.ENABLED:
+            print(f"backup: {unit} already enabled")
+            continue
+        result = systemctl("enable", "--now", unit)
+        if result.returncode != 0:
+            raise OperatorError(EXIT_STATE, f"could not enable {unit} (exit {result.returncode})")
+        print(f"backup: {unit} enabled")
+
+    # Re-read rather than trust: a unit `systemctl enable` accepted and did not
+    # activate is the state this verb exists to make visible.
+    after = timer_states(key)
+    print(backup_schedule.render_status(key, after))
+    if fleet.schedule(after) != fleet.SCHEDULED:
+        raise OperatorError(
+            EXIT_STATE, "the timers were enabled and systemd does not report both enabled"
+        )
+    print(
+        "backup: Persistent=true on both timers, so a run the calendar already owed "
+        "fires now rather than at the next slot; a full backup is minutes at process-max 1."
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Entry
 # ---------------------------------------------------------------------------
 
@@ -488,6 +605,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     expire = verbs.add_parser("expire", help="apply the retention policy from the config")
     expire.set_defaults(handler=verb_expire)
+
+    # Sub-verbs rather than a positional: the parser guard in
+    # test_backup_repository_report reads every `add_argument` as a value this
+    # command is being TOLD, and an action is not one.
+    schedule = verbs.add_parser("schedule", help="the two backup timers: status, enable, disable")
+    actions = schedule.add_subparsers(dest="action", required=True)
+    status = actions.add_parser("status", help="both timers' unit-file state; 0 when both enabled")
+    status.add_argument("--json", action="store_true", help="status as a document")
+    status.set_defaults(handler=verb_schedule)
+    enable = actions.add_parser("enable", help="enable both timers, after two refusals")
+    enable.set_defaults(handler=verb_schedule, json=False)
+    disable = actions.add_parser("disable", help="disable both timers, unconditionally")
+    disable.set_defaults(handler=verb_schedule, json=False)
 
     return parser
 

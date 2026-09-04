@@ -115,9 +115,17 @@ shows a secret access key exactly once.
 5. **Enable the timers**, once the first backup exists:
 
    ```
-   sudo systemctl enable --now agentic-postgres-backup-full@<key>.timer
-   sudo systemctl enable --now agentic-postgres-backup-incr@<key>.timer
+   sudo bin/backup.sh --outputs /etc/agentic-postgres/projects/<key>/outputs.json \
+       schedule enable
    ```
+
+   The verb refuses while the unit files are not installed (that is
+   `provision-host.sh --apply`'s job, and the refusal names it) and while the
+   repository holds no full backup, and it re-reads systemd afterwards rather
+   than trusting the enable's exit code. `schedule status` exits 0 only when
+   both timers are enabled; the fleet inventory reports the same reading as
+   `unscheduled`. Both timers carry `Persistent=true`, so a run the calendar
+   already owed fires at enable rather than at the next slot.
 
    They are installed disabled on purpose. A unit that fails on every boot until
    an operator is ready trains an operator to ignore it.
