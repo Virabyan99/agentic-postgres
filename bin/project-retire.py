@@ -209,8 +209,8 @@ def main(argv: list[str] | None = None) -> int:
         if state_file.exists() and arguments.credential is None:
             return fail(
                 EXIT_PREREQUISITE,
-                "the project's bootstrap state exists, so --destroy needs --operator-credential-file. "
-                "Nothing was changed.",
+                "the project's bootstrap state exists, so --destroy needs "
+                "--operator-credential-file. Nothing was changed.",
             )
         if arguments.credential is not None and not arguments.credential.is_file():
             return fail(EXIT_PREREQUISITE, f"credential file not found: {arguments.credential}")
