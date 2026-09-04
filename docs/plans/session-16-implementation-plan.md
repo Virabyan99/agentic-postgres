@@ -512,7 +512,7 @@ already stores `parameters` pre-redacted by the lock's `audit.redact` and
 redacts nothing itself — **the same authority applies here or the run has
 created a second one**.
 
-**Done.** ADR **0181**, migration **0029**, D915–D922. **Every arm of the
+**Done.** ADR **0181**, migration **0029**, D915–D922. **CI green on , run .** **Every arm of the
 mutation battery is a live cluster**, because the guarantee is atomicity inside
 the write's own transaction and nothing offline reaches it. Nine of nine killed,
 after two survivors that were both real.
