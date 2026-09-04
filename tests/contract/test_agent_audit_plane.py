@@ -556,10 +556,17 @@ def test_the_audit_identity_comes_from_the_guc_and_not_from_a_parameter(
     )
     assert written.returncode == 0, written.stderr
 
+    # Scoped to THIS call's agent, not to every `query_resource` row (D943).
+    # The cluster is module-scoped and shared, and Session 16's quota proofs
+    # write `query_resource` rows for agents of their own; the gate runs claim
+    # proofs in sorted node-id order, so they run before this one and the
+    # unscoped SELECT returned their rows too. The identity the GUC set is what
+    # is asserted, so filtering on it narrows nothing the proof claims.
     stored = su(
         cluster,
         "SELECT agent_id::text || '|' || owner_id::text || '|' || source::text || '|' "
-        "|| outcome::text FROM app_private.agent_audit WHERE tool = 'query_resource';",
+        "|| outcome::text FROM app_private.agent_audit "
+        f"WHERE tool = 'query_resource' AND agent_id = '{agent}';",
     )
     assert stored.returncode == 0, stored.stderr
     assert stored.stdout.strip() == f"{agent}|{owner}|agent_plane|started"
