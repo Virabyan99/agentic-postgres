@@ -60,9 +60,9 @@ claims wrongly, in the direction that makes work look undone.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 `7282cc5` or against the deployment on 2026-09-04**, not a prediction.
 
-**Next free number after this table is D966.** D944–D958 were written at
+**Next free number after this table is D968.** D944–D958 were written at
 planning; D959 and D960 are Run 1's; D961–D963 are Run 2's; D964 and D965 are
-Run 3's.
+Run 3's; D966 and D967 are Run 4's.
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -88,6 +88,8 @@ Run 3's.
 | **D963** | Run 2's targeted modules were green and the commit was pushed as `3b1ac58`. | **CI was red on both jobs, one cause**: `test_no_module_is_imported_only_by_its_own_tests` reported `fleet` *"imported by nothing outside its own tests"*. The scan discounted any import whose name equalled the importing **file's** stem — a rule written so a package module importing itself is not its own caller — and applied it to every file under `bin/` too, so `bin/fleet.py`'s `from agentic_postgres import fleet` was discounted as a self-import. Every earlier `bin/` script happened to differ in stem from the module it drives (`doctor.py`/`diagnosis`, `upgrade.py`/`upgrade_plan`, `migrate.py`/`migrations`), so the rule had never been exercised on the case it gets wrong. | **The self-import exclusion is scoped to sources inside the package**, and a control asserts both directions: a `bin/` script sharing a module's stem is a caller, a package module importing itself is not. Repaired as the scan, not by renaming the command — a guard that decides a real caller is not one is wrong about the boundary it guards, and renaming would have left it wrong for the next same-stem pair. | The module the guard was written to catch (`edge_credentials`, D204) had no caller; this one had exactly one and the guard could not see it. A false positive in a guard over a real boundary is repaired in the guard when the guard's *rule* is wrong, and moved in the code when only the *name* collides (D464) — this is the first kind. **And the module was not in Run 2's targeted list**, which is what CI is for. | — |
 | **D964** | `test_each_schema_version_constant_matches_its_schemas_enum`'s control (D881): *"the two are not the same set, so a test comparing each against the other's schema would fail."* | **The control went red the day the two sets legitimately coincided.** Project schema version 3 (this run) beside capability schema version 3 (Session 16 Run 4) makes both constants `{1, 2, 3}`, and the control asserted `!=`. D881 was about one *constant* serving two documents — `SUPPORTED_SCHEMA_VERSIONS` read by both loaders — never about two documents happening to be at the same version. | **The control asserts what it was for**: the two constants are distinct objects (`is not`) read from distinct schema files, each compared against its own file's enum. The equality of the sets is a fact about today, not a defect. | D695's shape: an invariant that held for every observed state was a description of the observations. A control that fails for a reason the rule never forbade trains the next reader to weaken the rule. | — |
 | **D965** | This plan's Run 3: outputs v15 is *"`migrate_v14_to_v15` fills `permanent`; `SCHEMA_VERSION = 15`"* — one function and one constant, as the migrator module's own header promises. | **Nine tests chain the migrator by hand, step by step, and end at `migrate_v13_to_v14` before asserting `CURRENT_VERSION`.** Every one went red at the bump. The `chained` fixture exists for exactly this — *"named for what it is rather than for a version"* — and those nine do not use it; each is a per-version fixture test (`test_the_committed_v2_fixture_migrates_and_validates` through `test_the_v10_fixture_is_a_real_render_at_version_10`) that walks the chain itself. | **Each gains the v15 step**, by one replace-all edit, and the pattern is recorded rather than refactored: a test that walks the chain by hand is asserting each link is reachable from its fixture, which the `chained` fixture (v1 only) does not, so they are not redundant. **A tenth lives in `test_backup_plane.py`**, found by CI after the push because the grep that found the nine was scoped to one module; the grep that finds them all is `grep -rn 'migrate_v13_to_v14(' tests/`, and the next bump runs it over the whole tree. | Question 5 at the scale of a test module: the decision *the current version moved* has ten readers here, and only the fixture was written to move with it. A refactor that ended each hand-chain with `migrate_rendered` would lose the per-link assertion; a refactor that made the tail a helper is the one worth doing, and is not this run's. | — |
+| **D966** | This plan's Run 4 order: *"… → remove state, secrets and rendered directories → `--destroy-data`: the two volumes → `bootstrap-providers.sh --destroy`. Nothing off the host (D957)."* — the provider destroy last. | **The provider destroy reads the installed manifest and the bootstrap state out of the state directory** (`--project /etc/agentic-postgres/projects/<key>/manifest.yaml`, `bootstrap_state.state_path(key)` under the same directory), so a destroy that ran after the directories were removed would find no state and report *"Nothing is owned; nothing done"* — exit 0, identity never revoked, a success that removed nothing. | **`retirement.STEP_ORDER` puts `provider-destroy` before `remove-directories`**, and the order is asserted twice: on the tuple and on the recorded commands of a real run against a fixture host. | D145's family one more time: a step whose success is decided by what it could find, run after the thing it looks for is gone, exits 0. The plan wrote "last" because the destroy is the one step that leaves the host, and reading its inputs is what put it back in the middle. | 0187 |
+| **D967** | `FLEET-RETIRE-002`: a retirement never names the bucket or the stanza in a command — asserted by substring over every argv. | **`naming` derives the backup stanza AS the project key**, so the stanza is a substring of every `--project-key KEY` a retirement passes, and the first assertion failed against the fixture for a reason that had nothing to do with backups. | The stanza is not asserted by substring; the bucket is asserted by exact argument, and the commands are asserted not to name `pgbackrest`, `stanza-delete` or `backup.sh`. The docstring says why. | A scan that would fail on every correct input is not a guard, it is a description of one fixture; and the one that passes for the wrong reason is worse (D374). Both were caught by running the test against the real derivation rather than a guess about it. | — |
 
 ---
 
@@ -283,6 +285,30 @@ false kill), and the premise moved into a test.
   proved by `DEP-REMOVE-001`'s existing proof on the trip.
 - Battery: a name typed instead of derived, the release after the volume, the
   plan that writes, the confirm compared loosely.
+
+**Done.** `src/agentic_postgres/retirement.py` derives every name a
+retirement touches (through `naming`, or off the deployed document under that
+key, refusing a document that names another project), decides the refusals
+from the lifecycle and the flags, fixes `STEP_ORDER`, and composes the record;
+`bin/project-retire.py` and `bin/project-retire.sh` walk the order — the
+record first, `down`, units disabled, the port allocation released under the
+volume's identity, the edge files, the provider destroy, the three
+directories, and only with `--destroy-data` the two volumes — stopping at the
+first failure and naming it. **The provider destroy moved before the
+directory removal** (D966): it reads its inputs from the directory the plan
+had it run after. `EDGE_DYNAMIC_DIR` now has one spelling, in `edge_state`.
+ADR 0187 says what a destroy-the-data verb may destroy and what it never
+reaches. Fourteen contract proofs, including a real run against a fixture
+host with the subprocess layer recorded (the order, the record's mode and
+timing, the other project untouched), a failing step stopping the run, the
+plan mutating nothing, and two guards: nothing in the release names the verb
+(`FLEET-EXPIRE-001`), and volume removal lives in exactly two commands. Two
+live halves in `tests/deployment/test_session17_retirement.py`. Registered
+everywhere a root verb must be. Battery: eleven arms, ten killed on the
+first pass and one survivor that was a **weak test** — the wrong-confirmation
+arm asserted the *"Nothing was changed"* tail every refusal prints, so the
+next refusal satisfied it; the assertion now names the refusal's own
+sentence and the arm is killed. D967 records the stanza-substring finding.
 
 ### Run 5 — `backup.sh schedule`, the timers
 

@@ -166,8 +166,9 @@ SECRET_ROOT = Path("/var/lib/agentic-postgres/secrets")
 
 #: Traefik's file provider, host side. `bin/edge.sh` creates and mounts it
 #: read-only; a project writes exactly two files here and owns neither the
-#: directory nor the edge.
-EDGE_DYNAMIC_DIR = Path("/var/lib/agentic-postgres/edge/dynamic")
+#: directory nor the edge. One spelling, in `edge_state`, since a retirement
+#: (ADR 0187) removes what this writes.
+EDGE_DYNAMIC_DIR = edge_state.EDGE_DYNAMIC_DIR
 
 
 def fail(code: int, message: str) -> None:

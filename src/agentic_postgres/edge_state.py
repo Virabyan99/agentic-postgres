@@ -45,11 +45,16 @@ STATE_PATH = Path("/etc/agentic-postgres/edge-state.json")
 #: layout because it is what creates the directories.
 EDGE_STATE_DIR = Path("/var/lib/agentic-postgres/edge")
 ACME_DIR = EDGE_STATE_DIR / "acme"
+#: Traefik's file provider, host side: `bin/edge.sh` creates and mounts it
+#: read-only, a deploy writes a project's two files into it, and a retirement
+#: removes them (ADR 0187). One spelling, imported by both.
+EDGE_DYNAMIC_DIR = EDGE_STATE_DIR / "dynamic"
 
 SCHEMA_VERSION = 1
 
 __all__ = [
     "ACME_DIR",
+    "EDGE_DYNAMIC_DIR",
     "EDGE_STATE_DIR",
     "SCHEMA_VERSION",
     "STATE_PATH",

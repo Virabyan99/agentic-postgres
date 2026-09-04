@@ -32,6 +32,7 @@ ROOT_COMMANDS = (
     "bin/edge-network.sh",
     "bin/fleet.sh",
     "bin/materialize-secrets.sh",
+    "bin/project-retire.sh",
     "bin/project-runtime.sh",
     "bin/postgres-bootstrap.sh",
     "bin/provision-host.sh",
@@ -40,9 +41,24 @@ ROOT_COMMANDS = (
 
 #: Commands that refuse to act without root, and the flag that triggers it.
 PRIVILEGED_INVOCATIONS = (
-    # Session 17: the inventory reads 0600 root documents and runs the doctor.
+    # Session 17: the inventory reads 0600 root documents and runs the doctor;
+    # a retirement, even its plan, reads the same document and reaches systemd.
     ("bin/fleet.sh", ()),
     ("bin/fleet.sh", ("--json",)),
+    (
+        "bin/project-retire.sh",
+        (
+            "--host",
+            "host.example.yaml",
+            "--project",
+            "alpha-dev",
+            "--confirm",
+            "alpha-dev",
+            "--record",
+            "/dev/null",
+            "--plan",
+        ),
+    ),
     ("bin/provision-host.sh", ("--host", "host.example.yaml", "--apply")),
     ("bin/provision-host.sh", ("--host", "host.example.yaml", "--check")),
     ("bin/edge.sh", ("--host", "host.example.yaml", "up")),

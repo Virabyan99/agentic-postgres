@@ -244,7 +244,9 @@ DEPLOYED_DOCUMENT_READERS = (
     "bin/backup.py",
     "bin/doctor.py",
     "bin/fleet.py",
+    "bin/project-retire.py",
     "bin/restore-test.py",
+    "src/agentic_postgres/retirement.py",
     "src/agentic_postgres/restore_drill.py",
     "src/agentic_postgres/backup_report.py",
 )
