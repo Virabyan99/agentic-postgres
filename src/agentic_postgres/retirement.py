@@ -184,7 +184,10 @@ def refusal(
     if permanent:
         return "--permanent does not apply: the project is ephemeral"
     if not expired and not before_expiry:
-        return f"the project is ephemeral and expires at {expires_at}; pass --before-expiry to retire it now"
+        return (
+            f"the project is ephemeral and expires at {expires_at}; "
+            "pass --before-expiry to retire it now"
+        )
     if expired and before_expiry:
         return f"--before-expiry does not apply: the project expired at {expires_at}"
     return None

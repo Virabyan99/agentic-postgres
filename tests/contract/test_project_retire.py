@@ -272,7 +272,7 @@ def test_the_steps_come_in_the_only_order_they_may_run(deployed: dict[str, Any])
     assert "keep volumes" in kept[-1].what
 
 
-def test_nothing_off_the_host_is_a_step(deployed: dict[str, Any]) -> None:
+def test_nothing_off_the_host_is_a_step(deployed: dict[str, Any], tmp_path: Path) -> None:
     """`FLEET-RETIRE-002`: no command names the bucket, the stanza or a
     secret; the record names them as what still holds the backups."""
     r = retirement.resources_of(KEY, deployed, **ROOTS)
@@ -292,7 +292,7 @@ def test_nothing_off_the_host_is_a_step(deployed: dict[str, Any]) -> None:
             assert KEY in str(path)
 
     document = retirement.record(
-        r, captured_at=NOW, destroy_data=True, record_path=Path("/tmp/x.json")
+        r, captured_at=NOW, destroy_data=True, record_path=tmp_path / "record.json"
     )
     assert document["project_key"] == KEY
     assert document["captured_at"] == "2026-09-04T12:00:00Z"
@@ -549,7 +549,7 @@ def test_a_real_run_performs_the_steps_in_order_and_writes_the_record_first(
     assert written["project_key"] == KEY and written["destroy_data"] is True
 
     programs = [
-        Path(c[0]).name if not c[0] in ("systemctl", "docker") else " ".join(c[:2]) for c in calls
+        Path(c[0]).name if c[0] not in ("systemctl", "docker") else " ".join(c[:2]) for c in calls
     ]
     first = {name: programs.index(name) for name in set(programs)}
     assert first["project-runtime.sh"] < first["systemctl is-enabled"]
