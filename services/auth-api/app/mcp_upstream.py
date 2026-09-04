@@ -250,7 +250,13 @@ def execute(base_url: str, token: str, request: Any, *, request_id: str) -> list
 
 
 def execute_write(
-    base_url: str, token: str, request: Any, *, max_affected_rows: int, request_id: str
+    base_url: str,
+    token: str,
+    request: Any,
+    *,
+    max_affected_rows: int,
+    request_id: str,
+    idempotency_key: str,
 ) -> list[dict[str, Any]]:
     """Run one built WRITE request; return its rows or translate its refusal.
 
@@ -278,7 +284,14 @@ def execute_write(
     """
     from app.mcp_errors import write_refusal
 
-    status, body = _dial(base_url, token, request, request_id=request_id)
+    # **Required, with no default**, for `request_id`'s reason (ADR 0141's
+    # shape, applied to ADR 0181's guarantee). A default would let a write reach
+    # PostgREST with no key and be deduplicated by nothing, silently -- and the
+    # database would refuse it, so the failure would arrive as a `PT412` nobody
+    # could explain rather than as the type error it is.
+    status, body = _dial(
+        base_url, token, request, request_id=request_id, idempotency_key=idempotency_key
+    )
     if status != 200:
         visible = write_refusal(_refusal_code(body))
         if visible is not None:
@@ -319,7 +332,14 @@ def _refusal_code(body: bytes) -> str:
     return code if isinstance(code, str) else ""
 
 
-def _dial(base_url: str, token: str, request: Any, *, request_id: str) -> tuple[int, bytes]:
+def _dial(
+    base_url: str,
+    token: str,
+    request: Any,
+    *,
+    request_id: str,
+    idempotency_key: str | None = None,
+) -> tuple[int, bytes]:
     """One HTTP exchange with the upstream, status and body, refusals included.
 
     The transport half every caller shares, so there is still exactly one place
@@ -331,19 +351,33 @@ def _dial(base_url: str, token: str, request: Any, *, request_id: str) -> tuple[
     would let a caller omit it silently, and "every upstream request this plane
     makes carries an id" is precisely the guarantee -- one that a `None`
     slipping through would break in the quietest way available.
+
+    **`idempotency_key` selects a ROSTER, it does not add an optional header**
+    (ADR 0181). Supplying it means this is the write branch and the check below
+    is against `WRITE_FORWARDED_HEADERS`; omitting it means the read branch and
+    `FORWARDED_HEADERS`. Either way the comparison stays an EQUALITY, which is
+    the whole reason the two rosters are separate rather than one loose one --
+    a subset check here is D300's shape, and both of Session 8's allowlist
+    failures (D468) were right to fail.
     """
-    from app.mcp_query import FORWARDED_HEADERS, REQUEST_ID_HEADER
+    from app.mcp_query import (
+        FORWARDED_HEADERS,
+        IDEMPOTENCY_KEY_HEADER,
+        REQUEST_ID_HEADER,
+        WRITE_FORWARDED_HEADERS,
+    )
 
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": ARRAY_ACCEPT,
         REQUEST_ID_HEADER: request_id,
     }
+    allowed = FORWARDED_HEADERS
+    if idempotency_key is not None:
+        headers[IDEMPOTENCY_KEY_HEADER] = idempotency_key
+        allowed = WRITE_FORWARDED_HEADERS
     # **This guard moved in the same commit as the allowlist it reads** (D477).
-    # An EQUALITY on purpose: a widened allowlist whose checker did not move is
-    # D300's shape, and both of Session 8's allowlist failures (D468) were right
-    # to fail.
-    if set(headers) != set(FORWARDED_HEADERS):  # pragma: no cover -- a guard on the pair
+    if set(headers) != set(allowed):  # pragma: no cover -- a guard on the pair
         raise UpstreamRefusal("the forwarded header set and the allowlist disagree")
 
     built = urllib.request.Request(  # noqa: S310 -- a derived internal URL, path from the lock

@@ -202,13 +202,28 @@ def as_agent(
     agent_id: str,
     owner_id: str,
     sql: str,
+    *,
+    idempotency_key: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """A request with the GUCs the pre-request hook would have set.
 
     One transaction, because `set_config(..., true)` is transaction-local -- each
     `su` call is its own session, so a GUC set in one and read in another would
     be a different measurement entirely (D116/D117 are what that class costs).
+
+    **`request.headers` is set too, since ADR 0181.** An agent write now requires
+    an `Idempotency-Key`, refused in the database rather than only in the runtime
+    -- 0019 built these functions so that a caller skipping the agent plane still
+    leaves an audit row, and the same reasoning covers the guarantee.
+
+    **The default mints a FRESH key per call**, which is what an `as_agent` call
+    honestly is: one request. A shared default would make every proof in this
+    module a replay of the one before it, and a `None` default would leave every
+    existing write proof refused. A proof that is ABOUT replay passes its own key
+    and gets the deduplication it is measuring.
     """
+    key = idempotency_key if idempotency_key is not None else f"k-{secrets.token_hex(8)}"
+    headers = json.dumps({"idempotency-key": key})
     return su(
         cluster,
         f"""
@@ -216,6 +231,7 @@ def as_agent(
         SET LOCAL ROLE "{cluster["roles"][role_key]}";
         SELECT set_config('app.agent_id', '{agent_id}', true);
         SELECT set_config('app.user_id', '{owner_id}', true);
+        SELECT set_config('request.headers', '{headers}', true);
         {sql}
         COMMIT;
         """,
@@ -1586,3 +1602,394 @@ def test_a_spent_quota_survives_a_restart(cluster: dict[str, Any]) -> None:
         f"the counter reads {counted.stdout.strip()!r} after the restart; the refusal "
         "above may not have been about the quota at all"
     )
+
+
+# ---------------------------------------------------------------------------
+# Idempotency keys (Session 16 Run 6 -- ADR 0181, migration 0029)
+# ---------------------------------------------------------------------------
+#
+# Every arm needs a cluster, because the guarantee is atomicity inside the
+# write's own transaction and nothing offline can reach it.
+
+
+def _writing_agent(cluster: dict[str, Any]) -> tuple[str, str]:
+    """One agent that may write, and its owner. Returns (agent_id, owner_id)."""
+    owner = str(uuid.uuid4())
+    agent = str(uuid.uuid4())
+    su(
+        cluster,
+        f"INSERT INTO app_private.users "
+        f"(id, username, display_name, role_name, scopes, status) VALUES "
+        f"('{owner}', 'w{agent[:8]}', 'Write Owner', 'apg_authenticated', "
+        f"ARRAY['notes:write']::text[], 'active');",
+    )
+    su(
+        cluster,
+        "INSERT INTO app_private.agents (id, name, role_name, scopes, owner_id) VALUES "
+        f"('{agent}', 'write-{agent[:8]}', 'r', ARRAY['notes:write']::text[], '{owner}');",
+    )
+    return agent, owner
+
+
+def _note(cluster: dict[str, Any], agent: str, owner: str, key: str, title: str = "t"):
+    return as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        f"SELECT (api.create_note('{title}', 'body')).id;",
+        idempotency_key=key,
+    )
+
+
+def test_no_role_holds_any_privilege_on_the_idempotency_table(cluster: dict[str, Any]) -> None:
+    """0019's rule for `agent_audit` and 0028's for `agent_quota`, applied.
+
+    A grant question, so it reads the catalog rather than asking
+    `has_table_privilege`, which answers for privileges held by way of
+    MEMBERSHIP and would report roles appearing in no ACL entry at all (D467,
+    ADR 0134). `aclexplode` also names the OWNER as a grantee, so it is
+    subtracted.
+    """
+    result = su(
+        cluster,
+        "SELECT coalesce(string_agg(DISTINCT grantee::regrole::text, ','), '') "
+        "FROM pg_class c, aclexplode(c.relacl) a "
+        "WHERE c.oid = 'app_private.agent_idempotency'::regclass "
+        "  AND a.grantee <> c.relowner;",
+    )
+    assert result.stdout.strip() == "", (
+        f"a role holds a privilege on the claim table: {result.stdout.strip()}"
+    )
+
+
+def test_a_replayed_write_performs_the_work_once_and_returns_the_same_row(
+    cluster: dict[str, Any],
+) -> None:
+    """`AGT-IDEM-001`'s first half, end to end through the reviewed function.
+
+    The row's id is asserted equal across the two calls AND the table is counted,
+    because either alone is satisfied by a wrong implementation: returning the
+    same id proves nothing if a second row was written, and one row proves
+    nothing if the replay returned somebody else's.
+    """
+    agent, owner = _writing_agent(cluster)
+    key = "replay-same-key-01"
+
+    first = _returned(_note(cluster, agent, owner, key))
+    second = _returned(_note(cluster, agent, owner, key))
+
+    assert first, "the first write returned nothing"
+    assert second == first, f"the replay returned {second!r}, not {first!r}"
+
+    written = su(
+        cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';"
+    ).stdout.strip()
+    assert written == "1", f"the replay wrote a second row; the table holds {written}"
+
+    replays = su(
+        cluster,
+        "SELECT replay_count FROM app_private.agent_idempotency "
+        f"WHERE agent_id = '{agent}' AND idempotency_key = '{key}';",
+    ).stdout.strip()
+    assert replays == "1", f"the claim records {replays} replays, not 1"
+
+
+def test_a_different_key_with_the_same_body_writes_twice(cluster: dict[str, Any]) -> None:
+    """`AGT-IDEM-001`'s second half, and **the control for the arm above.**
+
+    Without it, a `create_note` that had simply stopped writing would satisfy
+    every replay assertion in this file. The bodies are identical, so the only
+    thing distinguishing these two calls is the key -- which is exactly the claim
+    being made.
+    """
+    agent, owner = _writing_agent(cluster)
+
+    first = _returned(_note(cluster, agent, owner, "distinct-key-aaa"))
+    second = _returned(_note(cluster, agent, owner, "distinct-key-bbb"))
+
+    assert first and second and first != second, "two keys produced one row"
+    written = su(
+        cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';"
+    ).stdout.strip()
+    assert written == "2", f"two distinct keys wrote {written} rows"
+
+
+def test_a_replay_is_audited_as_replayed_and_records_no_rows(cluster: dict[str, Any]) -> None:
+    """A replay is its own outcome, not `served` with a zero row count (D495).
+
+    The enum member is what makes this readable by an operator without inferring
+    anything from arithmetic -- and `ALTER TYPE ... ADD VALUE` committing in the
+    same transaction as the plpgsql bodies that name it is measured rather than
+    assumed, because a `LANGUAGE sql` body in that position does NOT.
+    """
+    agent, owner = _writing_agent(cluster)
+    key = "audited-replay-01"
+
+    _note(cluster, agent, owner, key)
+    _note(cluster, agent, owner, key)
+
+    outcomes = su(
+        cluster,
+        "SELECT outcome || ':' || coalesce(row_count::text, 'null') "
+        "FROM app_private.agent_audit "
+        f"WHERE agent_id = '{agent}' AND source = 'database' ORDER BY completed_at;",
+    ).stdout.split()
+    assert outcomes == ["committed:1", "replayed:0"], outcomes
+
+
+def test_a_key_reused_for_different_arguments_is_refused(cluster: dict[str, Any]) -> None:
+    """The argument fingerprint, and why it is not merely part of the key.
+
+    Making the hash part of the primary key would need no refusal at all -- the
+    second call would simply be a different claim and would write. That is wrong
+    QUIETLY: a caller retrying with a corrupted body gets a second write and no
+    signal, which is the outcome a key was supplied to prevent (ADR 0181).
+    """
+    agent, owner = _writing_agent(cluster)
+    key = "same-key-other-args"
+
+    _note(cluster, agent, owner, key, title="first title")
+    refused = _note(cluster, agent, owner, key, title="a different title")
+
+    assert refused.returncode != 0, "a key bound to different arguments wrote anyway"
+    assert "AP412" in (refused.stderr or ""), refused.stderr
+
+    written = su(
+        cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';"
+    ).stdout.strip()
+    assert written == "1", f"the refused call still wrote; the table holds {written}"
+
+
+def test_a_key_reused_for_a_different_tool_is_refused(cluster: dict[str, Any]) -> None:
+    """The claim records which tool spent the key, and refuses another one.
+
+    **This proof was measuring the wrong check and a surviving mutation said so.**
+    Its first version spent a key on `create_note` and then called
+    `update_task_status` through the plane, which is refused -- but removing the
+    tool comparison from `agent_idempotency_claim` left it green, because those
+    two calls also have different ARGUMENT FINGERPRINTS and the second half of
+    the same condition refused them.
+
+    The reason is worth stating rather than patching around: the fingerprint is
+    `jsonb_build_object` over each function's own parameter names, and the two
+    reviewed writes share none, so **two tools can never produce the same
+    fingerprint and the tool comparison cannot currently be the deciding
+    clause.** It is kept as the explicit authority -- the claim's `tool` column is
+    what an operator reads, and a third write tool sharing another's parameter
+    names would make the comparison load-bearing overnight -- but a check that
+    cannot fire must be proved at the boundary that can reach it, not through a
+    path that reaches it by accident.
+
+    So the plane arm below asserts what the plane actually guarantees, and the
+    function arm calls `agent_idempotency_claim` directly with a fingerprint held
+    EQUAL across two tool names, which is the only way to isolate the clause.
+    """
+    agent, owner = _writing_agent(cluster)
+    key = "same-key-other-tool"
+
+    _note(cluster, agent, owner, key)
+
+    # The claim names the tool that spent the key. An operator reads this column,
+    # so it is asserted rather than assumed.
+    spent_on = su(
+        cluster,
+        "SELECT tool FROM app_private.agent_idempotency "
+        f"WHERE agent_id = '{agent}' AND idempotency_key = '{key}';",
+    ).stdout.strip()
+    assert spent_on == "create_note", spent_on
+
+    # Through the plane: refused, though the fingerprint alone would refuse it.
+    refused = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        f"SELECT api.update_task_status('{uuid.uuid4()}', 'pending', 'completed');",
+        idempotency_key=key,
+    )
+    assert refused.returncode != 0, "a key spent on one tool was accepted by another"
+    assert "AP412" in (refused.stderr or ""), refused.stderr
+
+    # The clause in isolation: SAME fingerprint, different tool. Only the tool
+    # comparison can refuse this, so removing it makes this arm go green.
+    fingerprint = "a" * 64
+    other = str(uuid.uuid4())
+    su(
+        cluster,
+        "INSERT INTO app_private.agent_idempotency "
+        "(agent_id, idempotency_key, tool, arguments_sha256, row_id) VALUES "
+        f"('{other}', 'isolated-key-01', 'create_note', '{fingerprint}', '{uuid.uuid4()}');",
+    )
+    isolated = su(
+        cluster,
+        "SELECT app_private.agent_idempotency_claim("
+        f"'{other}', 'isolated-key-01', 'update_task_status', '{fingerprint}', "
+        f"'{uuid.uuid4()}');",
+    )
+    assert isolated.returncode != 0, (
+        "a claim with a matching fingerprint and a DIFFERENT tool was accepted; "
+        "the tool comparison is not doing anything"
+    )
+    assert "AP412" in (isolated.stderr or ""), isolated.stderr
+
+    # THE CONTROL: the same call with the tool ALSO matching is a plain replay.
+    # Without it the assertion above is satisfied by a claim function that
+    # refuses everything.
+    replayed = su(
+        cluster,
+        "SELECT app_private.agent_idempotency_claim("
+        f"'{other}', 'isolated-key-01', 'create_note', '{fingerprint}', "
+        f"'{uuid.uuid4()}');",
+    )
+    assert replayed.returncode == 0, f"a matching claim was refused: {replayed.stderr}"
+
+
+def test_an_agent_write_without_a_key_is_refused_and_a_human_write_is_not(
+    cluster: dict[str, Any],
+) -> None:
+    """Required in the DATABASE, not only in the runtime -- and the human half.
+
+    0019 built these functions so that a caller skipping the agent plane and
+    posting to `/rpc/create_note` directly still leaves an audit row; the same
+    reasoning covers the guarantee, because a check living only in the runtime is
+    a check an agent can route around.
+
+    **The human arm is the control and it is also the contract.** The claim is
+    taken only when `app.agent_id` is set, so a human caller is unaffected --
+    same rows, same errors, no key. Without this arm the assertion above would be
+    satisfied by a migration that had broken `create_note` for everybody.
+    """
+    agent, owner = _writing_agent(cluster)
+
+    refused = su(
+        cluster,
+        f"""
+        BEGIN;
+        SET LOCAL ROLE "{cluster["roles"]["agent_writer"]}";
+        SELECT set_config('app.agent_id', '{agent}', true);
+        SELECT set_config('app.user_id', '{owner}', true);
+        SELECT (api.create_note('no key', 'body')).id;
+        COMMIT;
+        """,
+    )
+    assert refused.returncode != 0, "an agent wrote with no idempotency key"
+    assert "AP412" in (refused.stderr or ""), refused.stderr
+
+    human = su(
+        cluster,
+        f"""
+        BEGIN;
+        SET LOCAL ROLE "{cluster["roles"]["authenticated"]}";
+        SELECT set_config('app.user_id', '{owner}', true);
+        SELECT (api.create_note('a human note', 'body')).id;
+        COMMIT;
+        """,
+    )
+    assert human.returncode == 0, f"a human write was refused for want of a key: {human.stderr}"
+
+
+def test_a_malformed_key_raises_rather_than_being_ignored(cluster: dict[str, Any]) -> None:
+    """D633, inverted deliberately, and the inversion is the point.
+
+    `agent_request_id()` returns NULL for anything malformed and lets the write
+    proceed, because a correlation field must never destroy the operation it
+    annotates. Ignoring a malformed idempotency key would instead perform the
+    write WITHOUT the guarantee the caller asked for -- a silent downgrade from
+    at-most-once to at-least-once. Same mechanism, opposite failure mode.
+
+    The control is a key one character longer than the floor: the refusal must be
+    about the shape and not about every key.
+    """
+    agent, owner = _writing_agent(cluster)
+
+    # **The SENTENCE, not just the errcode.** Both the malformed key and the
+    # absent one raise AP412, so asserting the code alone would be satisfied by
+    # a reader that quietly returned NULL for anything it could not parse --
+    # which is exactly the D633 behaviour this function inverts. A test that
+    # cannot tell the two refusals apart is not testing the inversion.
+    for bad in ("short", "has a space in it", ""):
+        refused = _note(cluster, agent, owner, bad)
+        assert refused.returncode != 0, f"the malformed key {bad!r} was accepted"
+        assert "must be 8 to 255" in (refused.stderr or ""), refused.stderr
+
+    accepted = _note(cluster, agent, owner, "12345678")
+    assert accepted.returncode == 0, f"an eight-character key was refused: {accepted.stderr}"
+
+    written = su(
+        cluster, f"SELECT count(*) FROM app.notes WHERE owner_id = '{owner}';"
+    ).stdout.strip()
+    assert written == "1", f"a malformed key still wrote; the table holds {written}"
+
+
+def test_a_replayed_transition_returns_the_row_rather_than_a_conflict(
+    cluster: dict[str, Any],
+) -> None:
+    """**Where a key earns its keep**, and why the claim precedes the swap.
+
+    Without it a retried transition fails its own compare-and-swap -- the status
+    it expects is the status it already set -- and the caller reads `PT409` for a
+    write that had in fact succeeded. That is the exact confusion an idempotency
+    key is supplied to remove, so the ordering inside migration 0029 is load
+    bearing rather than incidental.
+
+    The control is the same transition WITHOUT a replay: a second call under a
+    fresh key must still be refused with `AP409`, or this proof would pass
+    against a function that had simply stopped comparing.
+    """
+    agent, owner = _writing_agent(cluster)
+    note = _returned(_note(cluster, agent, owner, "task-owner-key-1"))
+    task = str(uuid.uuid4())
+    su(
+        cluster,
+        f"INSERT INTO app.tasks (id, owner_id, note_id, title) "
+        f"VALUES ('{task}', '{owner}', '{note}', 'a task');",
+    )
+
+    move = f"SELECT (api.update_task_status('{task}', 'pending', 'completed')).status;"
+    first = as_agent(cluster, "agent_writer", agent, owner, move, idempotency_key="move-key-0001")
+    assert first.returncode == 0, first.stderr
+    assert _returned(first) == "completed", _returned(first)
+
+    replay = as_agent(cluster, "agent_writer", agent, owner, move, idempotency_key="move-key-0001")
+    assert replay.returncode == 0, f"the replayed transition was refused: {replay.stderr}"
+    assert _returned(replay) == "completed", _returned(replay)
+
+    conflict = as_agent(
+        cluster, "agent_writer", agent, owner, move, idempotency_key="move-key-0002"
+    )
+    assert conflict.returncode != 0, "THE CONTROL: a fresh key must still meet the swap"
+    assert "AP409" in (conflict.stderr or ""), conflict.stderr
+
+
+def test_a_failed_write_does_not_burn_its_key(cluster: dict[str, Any]) -> None:
+    """D489 as a feature rather than a constraint, for once.
+
+    The claim is written in the transaction the write aborts, so a `RAISE` takes
+    it with them both -- and here that is what anyone would want: a key is
+    retryable after a failure. The same rule cost ADR 0180 its return type and
+    cost 0019 its ability to record a failed write.
+    """
+    agent, owner = _writing_agent(cluster)
+    key = "retried-after-failure"
+
+    failed = as_agent(
+        cluster,
+        "agent_writer",
+        agent,
+        owner,
+        f"SELECT api.update_task_status('{uuid.uuid4()}', 'pending', 'completed');",
+        idempotency_key=key,
+    )
+    assert failed.returncode != 0 and "AP404" in (failed.stderr or ""), failed.stderr
+
+    claims = su(
+        cluster,
+        f"SELECT count(*) FROM app_private.agent_idempotency WHERE agent_id = '{agent}';",
+    ).stdout.strip()
+    assert claims == "0", f"the aborted write left {claims} claims behind"
+
+    # And the key still works -- for a different tool, which the claim would have
+    # refused had the failed call left one.
+    retried = _note(cluster, agent, owner, key)
+    assert retried.returncode == 0, f"the key was burned by a failure: {retried.stderr}"

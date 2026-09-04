@@ -45,7 +45,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-from typing import Any
+import re
+from typing import Any, Final
 
 from app import mcp_tracing
 from app.mcp_audit import AuditRefusal
@@ -485,6 +486,44 @@ def run_report(
     return _within_byte_budget(rows[0], _byte_ceiling(tool.max_response_bytes))
 
 
+#: What a caller's idempotency key may look like, checked before it is sent.
+#:
+#: The same shape migration 0029 enforces, and deliberately BOTH (ADR 0181). The
+#: database's check is the one that cannot be routed around -- an agent posting
+#: to `/rpc/create_note` directly still meets it, which is 0019's own reason for
+#: putting the audit row inside the write. This one exists so a caller's mistake
+#: is answered by the boundary that received it, rather than arriving as a
+#: `PT412` translated from upstream and indistinguishable from the other thing
+#: `PT412` means -- a key already bound to a different call.
+IDEMPOTENCY_KEY_PATTERN: Final = re.compile(r"^[\x21-\x7e]{8,255}$")
+
+#: Write-tool parameters that are the RUNTIME's rather than the reviewed
+#: function's, in the order they follow the lock's arguments (ADR 0181).
+#:
+#: The lock's `arguments` are the database function's parameters and a caller may
+#: supply no other name (D470) -- so a name here is one that never enters the
+#: request body. `idempotency_key` travels as a header, which is why both RPC
+#: signatures stayed exactly where 0022 left them.
+#:
+#: **`bin/render-mcp-catalog.py` keeps its own copy and a test compares them**,
+#: D486's pattern: a renderer at the repository root importing a service package
+#: is the fragile half of the alternative, and a test between two lists is what
+#: this repository uses in its place. Aliasing would make that test compare a
+#: value with itself.
+RESERVED_WRITE_PARAMETERS: Final = ("idempotency_key",)
+
+
+def _idempotency_key(candidate: Any) -> str:
+    """One caller-supplied key, shape-checked at the boundary that received it."""
+    if not isinstance(candidate, str) or not IDEMPOTENCY_KEY_PATTERN.match(candidate):
+        raise AgentVisible(
+            INPUT_NOT_PERMITTED,
+            "an idempotency key is 8 to 255 printable ASCII characters",
+            INPUT_MALFORMED,
+        )
+    return candidate
+
+
 def invoke_write(
     lock: CapabilityLock,
     *,
@@ -493,6 +532,7 @@ def invoke_write(
     request_id: str,
     tool: str,
     arguments: dict[str, Any],
+    idempotency_key: str,
 ) -> dict[str, Any]:
     """One reviewed write, as the caller, and the row it committed.
 
@@ -517,6 +557,9 @@ def invoke_write(
     telemetry record, and it is the count of rows this write actually affected.
     """
     spec = _write_for(lock, tool)
+    # First, with the other input checks and before anything is built, for this
+    # function's stated reason: a refusable call costs no upstream request.
+    key = _idempotency_key(idempotency_key)
 
     try:
         request = build_write_request(
@@ -532,6 +575,7 @@ def invoke_write(
             request,
             max_affected_rows=spec.max_affected_rows,
             request_id=request_id,
+            idempotency_key=key,
         )
     except UpstreamRefusal as error:
         raise ToolRefusal(STRUCTURAL_REFUSAL, UPSTREAM_REFUSED) from error
@@ -942,10 +986,26 @@ def register(
     # one is a `404 PGRST202` -- the same status as the product's own "no such
     # row", with the opposite meaning (rig4, ADR 0139).
 
+    # **`idempotency_key` is a tool parameter and NOT one of the lock's
+    # `arguments`** (ADR 0181). The lock's list is the database function's
+    # parameters in PostgreSQL order, and a name that is not one of them may not
+    # be supplied (D470) -- the key never enters the request body. It travels as
+    # a header, so both RPC signatures stay exactly where 0022 left them and the
+    # human REST surface is untouched.
+    #
+    # Required, not optional. An unconditional guarantee is worth more than one
+    # an agent has to remember to ask for, and it is also what lets the forwarded
+    # header rosters stay two exact sets rather than one loose one.
+
     @server.tool(name="create_note", timeout=seconds("create_note"))
-    async def _create_note(p_title: str, p_content: str) -> dict[str, Any]:
+    async def _create_note(p_title: str, p_content: str, idempotency_key: str) -> dict[str, Any]:
         """Create one note owned by the caller's owner, and return the created
-        row. Bounded to one row; the owner is the caller's, never an argument."""
+        row. Bounded to one row; the owner is the caller's, never an argument.
+
+        `idempotency_key` is the caller's own token for this operation: send the
+        same one to retry safely, and a fresh one for a genuinely new note. The
+        same key with different arguments is refused rather than deduplicated.
+        """
         return await bounded(
             "create_note",
             None,
@@ -956,16 +1016,22 @@ def register(
                 request_id=current_request_id(),
                 tool="create_note",
                 arguments={"p_title": p_title, "p_content": p_content},
+                idempotency_key=idempotency_key,
             ),
             kind=KIND_WRITE,
             # `p_content` is redacted from the record by the lock's
             # `audit_redact` (D479) -- the key stays, the value does not.
+            #
+            # The idempotency key is absent here on purpose. It is a caller
+            # value, and an agent record carries none (ADR 0130); where it
+            # legitimately lives is `app_private.agent_idempotency`, which is
+            # the dedupe state rather than an annotation of it.
             arguments={"p_title": p_title, "p_content": p_content},
         )
 
     @server.tool(name="update_task_status", timeout=seconds("update_task_status"))
     async def _update_task_status(
-        p_task_id: str, p_expected_status: str, p_new_status: str
+        p_task_id: str, p_expected_status: str, p_new_status: str, idempotency_key: str
     ) -> dict[str, Any]:
         """Move one of the caller's owner's tasks from an expected status to a
         new one.
@@ -973,6 +1039,12 @@ def register(
         A compare-and-swap: the write is refused when the expected status no
         longer holds, and that refusal reaches the caller as `write_conflict`
         because its next move is to re-read and retry (ADR 0139).
+
+        **A replay of this one is where a key earns its keep.** Without it, a
+        retried transition fails its own compare-and-swap -- the status it
+        expects is the status it already set -- and the caller reads
+        `write_conflict` for a write that had in fact succeeded. Migration
+        0029's claim runs before the swap for exactly that reason.
         """
         return await bounded(
             "update_task_status",
@@ -988,6 +1060,7 @@ def register(
                     "p_expected_status": p_expected_status,
                     "p_new_status": p_new_status,
                 },
+                idempotency_key=idempotency_key,
             ),
             kind=KIND_WRITE,
             # Nothing redacted: a task id and two status literals are the

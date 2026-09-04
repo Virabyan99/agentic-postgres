@@ -56,6 +56,15 @@ CATALOG = REPO_ROOT / "docs" / "mcp-tool-catalog.md"
 BEGIN = "<!-- BEGIN GENERATED: mcp-catalog -->"
 END = "<!-- END GENERATED: mcp-catalog -->"
 
+#: Write-tool parameters the RUNTIME requires and the contract does not carry.
+#:
+#: **A second copy of `mcp_tools.RESERVED_WRITE_PARAMETERS`, with a contract test
+#: between them** (D486's pattern, ADR 0181). This script runs from the
+#: repository root and imports no service package; importing one to avoid a
+#: duplicate would trade a compared pair for a fragile path, and a test that
+#: compares a value with itself is the shape §6 warns about.
+RESERVED_WRITE_PARAMETERS = ("idempotency_key",)
+
 
 def load_contract() -> dict[str, Any]:
     return json.loads(CONTRACT.read_text(encoding="utf-8"))
@@ -145,6 +154,18 @@ def render(contract: dict[str, Any]) -> str:
             lines.append(
                 "- Arguments, by name and in order: "
                 + ", ".join(f"`{argument}`" for argument in tool["arguments"])
+            )
+            # The runtime's own parameters, which the CONTRACT does not carry
+            # because they are not the database function's (ADR 0181). Published
+            # anyway: this document says what an agent can do against this
+            # deployment, and a REQUIRED parameter it does not mention makes the
+            # document wrong in the direction a reader cannot detect.
+            lines.append(
+                "- Also required by the tool, and not part of the operation: "
+                + ", ".join(f"`{parameter}`" for parameter in RESERVED_WRITE_PARAMETERS)
+                + " — the caller's own token for this operation. Send the same one to "
+                "retry safely; the same key with different arguments is refused rather "
+                "than deduplicated."
             )
             redacted = tool.get("audit_redact") or []
             if redacted:

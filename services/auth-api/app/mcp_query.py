@@ -93,6 +93,30 @@ REQUEST_ID_HEADER = "X-Request-Id"
 #: subset check is D300's shape.
 FORWARDED_HEADERS = ("Authorization", "Accept", REQUEST_ID_HEADER)
 
+#: The caller's idempotency key, on its way to migration 0029's claim (ADR 0181).
+#:
+#: **Unlike the request id above, this value IS the caller's.** The runtime mints
+#: a request id precisely so that two agents cannot collide; a key is the
+#: caller's own idea of *this operation*, so minting one here would defeat the
+#: purpose -- every retry would look like a new call. It is shape-checked before
+#: it is sent and again in the database, and the claim's primary key scopes it to
+#: one agent, so one caller's key can never reach another's.
+IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
+
+#: The write branch's allowlist, and the reason there are two rosters.
+#:
+#: `_dial`'s guard is an EQUALITY (D477), and an *optional* header would turn it
+#: into a subset check -- D300's shape, and what both of Session 8's allowlist
+#: failures were right to refuse. So rather than loosening one roster there are
+#: two exact ones: a read sends `FORWARDED_HEADERS`, a write sends this, and each
+#: is checked for equality against what its own branch built.
+#:
+#: That is only possible because **every agent write carries a key** (ADR 0181).
+#: Were it optional the two rosters could not both be exact -- a second reason
+#: for requiring it, the first being that an unconditional guarantee is worth
+#: more than one an agent has to remember to ask for.
+WRITE_FORWARDED_HEADERS = (*FORWARDED_HEADERS, IDEMPOTENCY_KEY_HEADER)
+
 
 class QueryRefusal(Exception):
     """The tool input is not something the lock permits.

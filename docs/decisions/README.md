@@ -244,3 +244,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0178](0178-a-denial-names-the-boundary-that-refused-it.md) | A denial names the boundary that refused it, and `credential` is not one of them | 16 | Accepted |
 | [0179](0179-a-capability-narrows-a-budget-and-may-never-widen-one.md) | A capability narrows a budget and may never widen one | 16 | Accepted |
 | [0180](0180-a-windowed-quota-is-counted-where-the-record-is-already-opened.md) | A windowed quota is counted where the record is already opened | 16 | Accepted |
+| [0181](0181-an-idempotency-key-is-claimed-in-the-writes-own-transaction.md) | An idempotency key is claimed in the write's own transaction, and the outcome is re-read rather than stored | 16 | Accepted |

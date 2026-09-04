@@ -78,9 +78,21 @@ CALLER_FACING_TOKENS: Final = (
 #: `PT401` is deliberately absent: a caller that reached a tool has already
 #: been authenticated, so a missing request identity there is a fault, not an
 #: instruction. Everything unmapped stays masked (ADR 0130).
+#:
+#: **`PT412` is Session 16 Run 6's, and it is a FIFTH code rather than a second
+#: meaning for `PT409`** (ADR 0181). One errcode cannot carry two sentences, and
+#: the sentences are the whole value of a translated refusal: `PT409` says
+#: re-read and retry, while `PT412` says this key is already bound to a different
+#: call -- so retrying with it fails again and the move is a NEW key. Measured to
+#: cross HTTP as 412 with its code in the body, by an arm added to the proof that
+#: already measured the other four rather than by a throwaway rig.
 UPSTREAM_WRITE_REFUSALS: Final[dict[str, tuple[str, str]]] = {
     "PT404": (ROW_NOT_FOUND, "the row this write names does not exist"),
     "PT409": (WRITE_CONFLICT, "the row is not in the expected state; re-read and retry"),
+    "PT412": (
+        INPUT_NOT_PERMITTED,
+        "this idempotency key is already bound to a different call; use a new key",
+    ),
     "PT422": (INPUT_NOT_PERMITTED, "this transition would change nothing"),
 }
 

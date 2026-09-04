@@ -50,7 +50,7 @@ decision (ADR 0129). What the brief got wrong is §1.
 Six columns, the house shape. **Every row is a fact measured against the tree or
 against the deployment at planning time**, not a prediction.
 
-**Next free number after this table is D915.**
+**Next free number after this table is D923.**
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -107,6 +107,14 @@ against the deployment at planning time**, not a prediction.
 | **D912** | *"Never amend a released migration. Fix forward; every down block raises AP900"* (§6, non-negotiable). Run 5 committed migration 0028 at `0f5937f`, froze it into `released.lock.json`, and then **reshaped it** — `PRIMARY KEY (agent_id, window_start)` to `PRIMARY KEY (agent_id)` — and re-froze. | **Two readings of *released*, and they diverge for exactly the window this run sat in.** The lock file is named `released.lock.json`, so the runbook's word points at *frozen and committed*; the code's own error text says **"An applied migration is immutable"** (`src/agentic_postgres/migrations.py`), and ADR 0028 opens *"migrations have to be immutable once applied — that is the whole basis on which a ledger of applied versions means anything."* **0028 has been applied to nothing but throwaway test clusters**: the host runs Session 15 at `dfc09b3`, which predates 0027 as well as 0028. | **Re-frozen, deliberately, and recorded here rather than reconciled quietly.** `freeze-lock` is the explicit act the lock exists to make visible — the diff is four hex digits in git, not an unnoticed edit, which is the failure `verify_lock` is written to catch. | **The boundary is Run 10's trip, and it is now the last cheap moment.** Once 0028 is applied to either project, the two readings converge and the only remedy is 0029. Recording it matters more than the edit did: a future reader finding a re-frozen hash in this session's history needs to know it was decided rather than overlooked, and needs the word *applied* rather than *released* to judge their own case. **The rule is not weakened — it is dated.** | 0180 |
 | **D913** | `0f5937f` was pushed as Run 5's implementation commit and reported as green. | **`main` was RED when Run 5 resumed, and nobody had read its verdict.** The CI watcher for that commit died on GitHub's **unauthenticated** rate limit — the PAT never reached `gh` — and the green being quoted was `7a67fb5`'s, two commits earlier. A worktree at `0f5937f` reproduces the failure in 0.07 s: `test_every_call_to_a_released_function_uses_a_released_arity`, ADR 0175's guard, on two sites in Run 3's own proofs. | The two sites write their type list out instead of interpolating it, and the guard is **not** touched. Re-measured at `0f5937f` in a detached worktree first, so the repair is aimed at a failure that was already there rather than at one this run introduced. | **Two failures, and the second is the one that matters.** The guard's false positive is narrow and benign: `has_function_privilege` is passed a *signature*, the scanner excludes a written-out type list because every argument is a bare identifier, and an interpolated placeholder reads as one argument instead. **Loosening it to ignore any braced argument was rejected** — a real call passing one interpolated variable is precisely the arity defect ADR 0175 exists to catch, and D300's rule holds: widening an allowlist to a measured set is not weakening, loosening it to a subset check is. The **process** failure is worse: a commit went out with its verdict unread and the last green commit's status quoted for it. §7 question 2 — *has it run at all, since the thing it measures last changed* — asked of CI rather than of a proof. The watcher must fail loudly on an auth error rather than time out looking like a slow run. | 0180 |
 | **D914** | The repaired watcher fails loudly on a bad credential, so D913 cannot recur. | **The repair reproduced D913's own shape, immediately.** It decided the credential was good by scanning the response body for `Bad credentials` and `rate limit exceeded` — so a **404** matched neither, printed *"credential accepted"*, and polled a wrong URL for as long as it was allowed. The URL was wrong because the repository is `Virabyan99/agentic-postgres` and the watcher had been told `gmpar/agentic-postgres`; the account name was **assumed from the user's identity rather than read from `git remote -v`**. It also matched on a **short SHA**, which the runs API does not resolve, so even the right repository returned an empty list that printed as `PENDING`. | The watcher reads the **HTTP status code**, and anything other than 200 is fatal and named — 401 rejected, 403/429 rate-limited, 404 wrong repository with `git remote -v` in the message. A SHA that is not 40 characters is refused before any request. The repository comes from an override, defaulted to the measured remote. | **A string scan standing in for a status, which is D464's family and §7's canonical instance** — `postgrest --ready` returning 0 while every request 404s, five sessions apart in a different third party. Two `PENDING` lines were read as *"CI has not started yet"* and were really *"the question was never asked"*. **The absence of a signal and the absence of an answer are the same character**, which is D771's rule about `journalctl` returning 0 for no access and 0 for no kills — the third instance in this repository of a zero that means *nobody looked*. | 0180 |
+| **D915** | Run 6's text: *"the stored outcome is the hard part and the plan names it now"* — returning a recorded response means the plane holds a caller's prior result, which `audit.redact` must cover before it is stored. | **Right about the danger and wrong about the necessity.** The outcome does not have to be stored at all: nothing about a replay requires a snapshot, only that the caller gets the same row back. The claim keeps the row's **id**, and a replay re-selects it. | **No outcome is stored** (ADR 0181). `app_private.agent_idempotency` holds a uuid the caller already has and a **hash** of the arguments — neither is a caller value, so `audit.redact` stays the single authority (D479) and gains no second store with different needs. | **The hard part dissolved rather than being solved**, and the version that stores nothing is also the more truthful one: a stored response returned later claims to describe a row that may have moved on, where a re-read answers the question a caller is actually asking — *did my write happen, and what is the row* — with the row's current state. **A design constraint that looks expensive is sometimes a design that has not been questioned**, and this one had been carried since the plan was written. | 0181 |
+| **D916** | The claim is placed inside the write RPC for D904's reason — a separate request would cost a fifth upstream round trip on a path nobody has timed. | **The cost argument is true and it is not the argument.** A separate claiming RPC is a separate transaction, so two callers can both pass a check and both write. Atomicity is the entire guarantee. | Inside `api.create_note` and `api.update_task_status`, and the ADR says why in ADR 0180's own vocabulary so the two are not confused: **one is economy, this is correctness, and it would hold at any price.** | **Two runs reaching the same shape for different reasons is worth writing down, because a reader who assumes the reasons are the same will move the wrong one.** ADR 0180's placement could be revisited if the round-trip budget ever changed; this one could not be revisited at all. | 0181 |
+| **D917** | `app_private.agent_idempotency.agent_id` carries `REFERENCES app_private.agents (id) ON DELETE CASCADE`, by analogy with 0028's quota table. | **A live cluster refused the first agent write that reached it** — the audit-plane proofs set `app.agent_id` to ids no `agents` row holds, and the claim's foreign key failed. Two faults, and the second is the serious one: the constraint makes a write fail for a reason unrelated to the write, and **the CASCADE would delete a live agent's dedupe state with the agent, making a key still in flight re-executable.** | **No foreign key**, which is `agent_audit.agent_id`'s posture since 0019 and for the same reason. The asymmetry against 0028 is real rather than sloppy: a quota is a LIVE BOUND and is meaningless without its agent, so cascading is right there; a claim is a record that a call happened and must outlive the agent exactly as the audit row does. | **Cascading away the record that prevents a double write is a correctness hazard wearing the clothes of tidiness**, and the analogy that produced it was drawn one run earlier, by the same author, in the same file position. The cluster caught it in thirty seconds; nothing offline would have, because offline nothing inserts an agent. | 0181 |
+| **D918** | `test_the_map_speaks_only_errcodes_the_product_actually_raises` guards ADR 0139's vocabulary: a translated code the product never raises is dead vocabulary wearing a reviewed look. | **The scan read migration 0019 and nothing else**, which was every PT code in the tree when it was written and stopped being so the moment 0029 raised `PT412`. The guard reported a map entry for a code the product **does** raise. | **The repair is the scan, not the map.** It reads every released template, and asserts there are at least 29 of them so a directory that moved cannot make the scan vacuous. `PT401`'s arm — raised and deliberately unmapped — is unchanged. | §7's fifth question, asked by the guard **against itself**: a decision (which codes the product raises) implemented in one place, and the reader that encoded *where* they lived did not move when they spread. Widening a scan to the set the product actually raises is not weakening it — a map entry nothing anywhere raises still fails, which is the whole assertion. | 0181 |
+| **D919** | `agent_audit_outcome` can gain `replayed` in the same migration that uses it — dbmate wraps a migration in one transaction and an `ALTER TYPE` is DDL like any other. | **Measured, and it is a near miss.** `ALTER TYPE … ADD VALUE` then an `INSERT` using the member in one transaction is `ERROR: unsafe use of new value`, **and the whole transaction rolls back so the member is not added either**. But `ADD VALUE` plus a `CREATE FUNCTION … LANGUAGE plpgsql` whose body names it **commits**, because plpgsql does not resolve the literal at creation — while the identical `LANGUAGE sql` form is refused. Every function 0029 writes is plpgsql. | One migration, not two. The measurement is in the template above the `ALTER`, with the `LANGUAGE sql` control beside it. | **The second control is the one worth keeping**: a plpgsql body naming a member that does not exist **at all** is created without complaint, where the SQL-language form is refused at creation. So creation-time validation proves nothing about a plpgsql body's enum literals, and the only thing that does is a test that runs the path — which is `test_a_replay_is_audited_as_replayed_and_records_no_rows`, and it is a mutation arm. | 0181 |
+| **D920** | `docs/mcp-tool-catalog.md` publishes what an agent can do against this deployment, and it is rendered from the compiled contract. | **The contract does not carry `idempotency_key`**, because it is not a database function parameter — so a REQUIRED tool parameter was absent from the document a caller reads, and every catalog test stayed green. `render-mcp-catalog.py --check` reported the catalog current. | The renderer publishes the reserved parameter with the sentence a caller needs. It keeps its **own copy** of the list and a contract test compares it against `mcp_tools.RESERVED_WRITE_PARAMETERS` — D486's pattern, because a repository-root script importing a service package trades a compared pair for a fragile path, and aliasing would make the test compare a value with itself. | **D274's family**: when a document names what a caller may do, check that a caller following it can. A generated document is not automatically a true one — it is true about its source, and this one's source deliberately excludes the runtime's own parameters. **Every test asserted the catalog matched the contract, and the contract was not the whole contract.** | 0181 |
+| **D921** | The idempotency key is one more entry in `FORWARDED_HEADERS`, which grew from two to three once already (D477). | **It cannot be, because it is sent on writes only.** `_dial`'s guard is an EQUALITY against the allowlist, and an optional header turns that into a subset check — D300's shape, which both of Session 8's allowlist failures were right to refuse. | **Two exact rosters rather than one loose one**: `FORWARDED_HEADERS` for a read, `WRITE_FORWARDED_HEADERS` for a write, and `_dial` checks whichever branch it is on for equality. A test asserts the write set is the read set plus **precisely one** name, and a mutation applying the write roster unconditionally is killed by a proof reading what a READ actually sent. | **This is also the second reason a key is required rather than optional.** Were it optional the two rosters could not both be exact, and the guard would have to soften. A constraint that looked like a nuisance turned out to be what keeps an existing invariant intact — the opposite of the usual direction, and worth noticing before somebody relaxes the requirement for convenience. | 0181 |
+| **D922** | The proofs written for this run cover the refusals they name. | **Two of them did not, and the battery found both.** `test_a_key_reused_for_a_different_tool_is_refused` passed with the tool comparison REMOVED, because its two calls also differ in argument fingerprint and the other half of the same condition refused them. And the runtime's own key shape check had no proof at all: deleting it left every test green, because the database refuses a malformed key too and the plane fails closed either way. | The tool arm calls `agent_idempotency_claim` **directly**, with the fingerprint held equal across two tool names, plus a control where the tool also matches. The runtime arm asserts the refusal **and that no upstream request was made**, plus a control where a well-formed key reaches the transport. | **Two different failures wearing one appearance.** The first was a weak test — it measured a clause its inputs could never isolate. The second was a real coverage gap of D911's exact shape, one run later: a second boundary enforcing the same rule makes the first one's absence invisible, and only a mutation asks whether it is doing anything. **The tool comparison is also, today, unreachable end to end** — the two writes share no parameter names, so no two tools can collide on a fingerprint. It is kept as the explicit authority and proved where it can be reached, which is the honest version of a defensive check. | 0181 |
 
 ---
 
@@ -503,6 +511,75 @@ the redaction rules must cover before it is stored, not after. `agent_audit`
 already stores `parameters` pre-redacted by the lock's `audit.redact` and
 redacts nothing itself — **the same authority applies here or the run has
 created a second one**.
+
+**Done.** ADR **0181**, migration **0029**, D915–D922. **Every arm of the
+mutation battery is a live cluster**, because the guarantee is atomicity inside
+the write's own transaction and nothing offline reaches it. Nine of nine killed,
+after two survivors that were both real.
+
+**What shipped.** `app_private.agent_idempotency` — one claim per (agent, key),
+recording the tool, a **hash** of the arguments and the id of the row the call
+produced. The claim is taken inside `api.create_note` and
+`api.update_task_status`, and the key arrives as a **header** read exactly as
+0022 reads `x-request-id`, so both signatures stayed put, the human REST surface
+is untouched and ADR 0175's arity guard has nothing to catch. `agent_audit_outcome`
+gains `replayed`. Both write tools gain a required `idempotency_key` parameter,
+which travels as a header and never enters the request body.
+
+**The plan named the wrong hard part, and that is the row to read** (D915). It
+said the stored outcome was the difficulty. **Nothing has to be stored**: the
+claim keeps the row's id and a replay re-selects it, so the plane holds no
+caller value, `audit.redact` stays the single authority, and the answer is also
+*more truthful* than a snapshot — a recorded response returned later claims to
+describe a row that may have moved on. The constraint had been carried since the
+plan was written and dissolved the first time it was questioned.
+
+**Why the claim is in the write and not in a call of its own is NOT D904's
+argument** (D916). The quota went into `agent_audit_begin` because a fifth round
+trip would cost something on a path nobody has timed. The key goes into the write
+because a separate transaction cannot deduplicate at all. **One is economy and
+this is correctness**, and a reader who assumes they are the same reason will
+move the wrong one.
+
+**The foreign key was the sharpest product finding** (D917). Drawn by analogy
+with 0028 one run earlier, it made an agent write fail on a referential check
+over a row the write does not own — and its `ON DELETE CASCADE` would have
+deleted a live agent's dedupe state with the agent, making a key still in flight
+**re-executable**. A live cluster refused the first write that reached it;
+nothing offline inserts an agent, so nothing offline could have.
+
+**Three guards were wrong in the same direction and all three are §7 question
+five.** The errcode-map scan read migration 0019 alone and reported a code the
+product now genuinely raises (D918). The catalog rendered from the contract, and
+the contract does not carry a runtime parameter, so the document a caller reads
+omitted a **required** field with every test green (D920). And the header
+allowlist's equality could not survive an optional header, which is why there
+are now two exact rosters rather than one loose one — and why a key being
+*required* protects an existing invariant rather than merely being tidy (D921).
+
+**The battery's two survivors were different failures wearing one look** (D922).
+`test_a_key_reused_for_a_different_tool_is_refused` passed with the tool
+comparison deleted, because its inputs also differed in fingerprint — a weak test
+measuring a clause it could never isolate, and the underlying fact is that the
+tool comparison is **unreachable end to end today**, since the two writes share
+no parameter names. And the runtime's own key shape check had no proof at all:
+the database refuses a malformed key too, so deleting the boundary check left
+everything green. **A second boundary enforcing the same rule makes the first
+one's absence invisible** — D911's shape, one run later, in a different module.
+
+**Measured before it was built.** `ALTER TYPE … ADD VALUE` plus a `LANGUAGE
+plpgsql` body naming the new member commits in one transaction; the identical
+`LANGUAGE sql` form does not, and the arm that makes that trustworthy is the one
+showing plpgsql will create a body naming a member that **does not exist**
+(D919). `sha256` is a built-in; `digest()` is not. `PT412` crosses HTTP as 412
+with its code in the body — measured by an arm added to the proof that already
+measured the other four, rather than by a throwaway rig, so the extension stays
+exercised.
+
+**Not closed, deliberately.** Nothing prunes `app_private.agent_idempotency`, and
+unlike ADR 0180's quota table it is genuinely unbounded — one row per key a
+caller ever mints. It joins `agent_audit` and the secret generations in §9's
+list rather than escaping it, and retention is a decision this run does not take.
 
 ### Run 7 — dry-run, and approval as a refusal
 

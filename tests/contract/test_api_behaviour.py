@@ -112,6 +112,17 @@ CREATE FUNCTION api.e_pt422() RETURNS void LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp AS $$
 BEGIN RAISE EXCEPTION 'AP422: probe' USING ERRCODE = 'PT422'; END $$;
 
+-- Session 16 Run 6. `PT412` is the idempotency-key conflict, and it exists as a
+-- fifth code because ONE errcode cannot carry two sentences: `PT409` is already
+-- the compare-and-swap conflict, and "re-read and retry" is precisely the wrong
+-- advice for a key already bound to different arguments. The probe is here
+-- rather than in a throwaway rig because rig4 measured `PTxxx -> xxx` over four
+-- codes, and a fifth is an EXTENSION of that rule rather than an instance of it
+-- -- an extension nobody exercised is an assumption.
+CREATE FUNCTION api.e_pt412() RETURNS void LANGUAGE plpgsql
+  SET search_path = pg_catalog, pg_temp AS $$
+BEGIN RAISE EXCEPTION 'AP412: probe' USING ERRCODE = 'PT412'; END $$;
+
 CREATE FUNCTION api.e_28000() RETURNS void LANGUAGE plpgsql
   SET search_path = pg_catalog, pg_temp AS $$
 BEGIN RAISE EXCEPTION 'AP401: probe' USING ERRCODE = '28000'; END $$;
@@ -388,7 +399,13 @@ def test_a_hint_and_a_detail_reach_the_caller_verbatim(api_rig: ApiRig) -> None:
 @requires_docker
 @pytest.mark.parametrize(
     ("probe", "expected"),
-    [("e_pt401", 401), ("e_pt404", 404), ("e_pt409", 409), ("e_pt422", 422)],
+    [
+        ("e_pt401", 401),
+        ("e_pt404", 404),
+        ("e_pt409", 409),
+        ("e_pt412", 412),
+        ("e_pt422", 422),
+    ],
 )
 def test_a_pt_sqlstate_carries_its_status(api_rig: ApiRig, probe: str, expected: int) -> None:
     status, _, body = api_rig.call("POST", f"/rpc/{probe}", bearer=token(role="probe_web"), body={})

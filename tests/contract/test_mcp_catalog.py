@@ -411,3 +411,46 @@ def test_the_write_tools_details_reach_the_catalog(generated: str, contract: dic
     idempotence = {tool["name"]: tool["idempotent"] for tool in writes}
     assert idempotence["create_note"] is False and "not idempotent" in generated
     assert idempotence["update_task_status"] is True
+
+
+def test_the_renderers_reserved_parameters_match_the_runtimes(generated: str) -> None:
+    """Two lists that must agree, and a test between them (D486, ADR 0181).
+
+    A write tool requires one parameter the CONTRACT does not carry, because it
+    is not a database function argument -- `idempotency_key` travels as a header
+    and never enters the request body. The catalog publishes what an agent can do
+    against this deployment, so a required parameter it does not mention makes
+    the document wrong in the direction a reader cannot detect (D274's family).
+
+    `bin/render-mcp-catalog.py` keeps its own copy rather than importing the
+    service package from the repository root, so this compares the two. Aliasing
+    one to the other would make this test compare a value with itself, which is
+    the shape §6 names -- and the renderer is the half a reader of the catalog
+    actually depends on.
+    """
+    import importlib.util
+    import sys as _sys
+
+    service = REPO_ROOT / "services" / "auth-api"
+    _sys.path.insert(0, str(service))
+    try:
+        from app import mcp_tools
+    finally:
+        _sys.path.remove(str(service))
+
+    spec = importlib.util.spec_from_file_location("_render_catalog_reserved", RENDERER)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    assert module.RESERVED_WRITE_PARAMETERS == mcp_tools.RESERVED_WRITE_PARAMETERS, (
+        "the catalog renderer and the runtime disagree about which parameters a write "
+        "tool requires beyond the contract's arguments"
+    )
+    assert mcp_tools.RESERVED_WRITE_PARAMETERS, (
+        "the reserved list is empty, so the comparison above holds vacuously"
+    )
+    for parameter in module.RESERVED_WRITE_PARAMETERS:
+        assert f"`{parameter}`" in generated, (
+            f"{parameter!r} is required of every write and the catalog does not name it"
+        )

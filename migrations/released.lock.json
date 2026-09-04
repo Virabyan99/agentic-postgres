@@ -329,6 +329,16 @@
       "template": "templates/0028-agent-windowed-quota.sql",
       "template_sha256": "90cea40853be8ce88057d94b9fc42f1c70b651677388dc7e98f9126bf7b0e414",
       "version": "20260904120028"
+    },
+    {
+      "canonical_render_sha256": "3064f761f75ddabd8b22c3d92418949c25faf9a017e50cc05965946f9393662e",
+      "name": "agent_idempotency_keys",
+      "placeholders": [
+        "object_owner"
+      ],
+      "template": "templates/0029-agent-idempotency-keys.sql",
+      "template_sha256": "1b1f6e461e45fbfcb86fc23c180f74d421942994ea8d7dcbbc29a092f77bf74c",
+      "version": "20260904120029"
     }
   ],
   "schema_version": 1

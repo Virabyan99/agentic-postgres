@@ -447,20 +447,36 @@ def test_the_enumerated_write_refusals_translate_and_nothing_else_does() -> None
 
 
 def test_the_map_speaks_only_errcodes_the_product_actually_raises() -> None:
-    """ADR 0139's consequence, made a test: a key migration 0019 never raises
-    is dead vocabulary wearing a reviewed look.
+    """ADR 0139's consequence, made a test: a key the product never raises is
+    dead vocabulary wearing a reviewed look.
 
     `PT401` must be raised by the product AND absent from the map — its absence
     is a decision (the authentication plane's business), and this arm is what
-    keeps that from silently becoming an omission when the migration moves.
+    keeps that from silently becoming an omission when a migration moves.
+
+    **The scan reads EVERY released template, and it read only 0019 until Session
+    16 Run 6.** That was true when it was written and became false the moment a
+    later migration raised a code of its own: 0029 raises `PT412`, the map
+    translates it, and the guard reported the map as translating something the
+    product never raises. **The repair is the scan and not the map** — the
+    question is whether the *product* raises a code, and the product is all of
+    its released migrations, not the one that happened to hold every code when
+    the question was first asked. §7's fifth question, answered by the guard
+    against itself.
+
+    Widening a scan to the set the product actually raises is not weakening it: a
+    map entry nothing anywhere raises still fails, which is the whole assertion.
     """
     import re
 
-    template = (
-        REPO_ROOT / "migrations" / "templates" / "0019-agent-write-and-audit-plane.sql"
-    ).read_text(encoding="utf-8")
-    raised = set(re.findall(r"ERRCODE = '(PT\d{3})'", template))
-    assert raised, "the scan found no errcodes; the template moved or the scan is broken"
+    templates = sorted((REPO_ROOT / "migrations" / "templates").glob("*.sql"))
+    assert len(templates) >= 29, f"only {len(templates)} templates; the directory moved"
+    raised = {
+        code
+        for template in templates
+        for code in re.findall(r"ERRCODE = '(PT\d{3})'", template.read_text(encoding="utf-8"))
+    }
+    assert raised, "the scan found no errcodes; the templates moved or the scan is broken"
 
     mapped = set(mcp_errors.UPSTREAM_WRITE_REFUSALS)
     assert mapped <= raised, (

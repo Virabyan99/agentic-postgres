@@ -105,6 +105,7 @@ Each tool's backing capabilities, with the version and lifecycle each declares. 
 **Write** — operation `rpc.create_note.post`, at most **1** affected rows, not idempotent, requires `notes:write`.
 
 - Arguments, by name and in order: `p_title`, `p_content`
+- Also required by the tool, and not part of the operation: `idempotency_key` — the caller's own token for this operation. Send the same one to retry safely; the same key with different arguments is refused rather than deduplicated.
 - Redacted from the audit record: `p_content`
 
 ### `query_resource`
@@ -134,6 +135,7 @@ Each tool's backing capabilities, with the version and lifecycle each declares. 
 **Write** — operation `rpc.update_task_status.post`, at most **1** affected rows, idempotent, requires `tasks:write`.
 
 - Arguments, by name and in order: `p_task_id`, `p_expected_status`, `p_new_status`
+- Also required by the tool, and not part of the operation: `idempotency_key` — the caller's own token for this operation. Send the same one to retry safely; the same key with different arguments is refused rather than deduplicated.
 - Redacted from the audit record: nothing
 
 <!-- END GENERATED: mcp-catalog -->
