@@ -646,6 +646,37 @@ def test_version_two_requires_a_profile_and_forbids_the_two_inert_fields(
 # ---------------------------------------------------------------------------
 
 
+def test_an_unquoted_expiry_reaches_the_schema_as_the_string_it_was_written_as(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """D969. The first ephemeral manifest ever written failed on the host:
+    PyYAML's implicit timestamp resolver typed `expires_at: 2026-09-05T12:00:00Z`
+    as a datetime and the schema refused it as not a string. The strict loader
+    now drops that resolver. The premise is asserted first -- plain PyYAML
+    still does it -- so this cannot pass because PyYAML changed."""
+    import yaml as plain_yaml
+
+    text = "expires_at: 2026-09-05T12:00:00Z\n"
+    assert not isinstance(plain_yaml.safe_load(text)["expires_at"], str), (
+        "PyYAML no longer types a bare RFC 3339 value; the premise of this test moved"
+    )
+
+    path = tmp_path / "project.yaml"
+    manifest = copy.deepcopy(base)
+    manifest["project"]["lifecycle"] = {"kind": "ephemeral", "expires_at": "PLACEHOLDER"}
+    rendered = yaml.safe_dump(manifest, sort_keys=False).replace(
+        "expires_at: PLACEHOLDER", "expires_at: 2999-01-01T00:00:00Z"
+    )
+    assert "expires_at: 2999-01-01T00:00:00Z" in rendered, "the bare value was not written"
+    path.write_text(rendered, encoding="utf-8")
+    loaded = config.load_project_manifest(path)
+    assert loaded["project"]["lifecycle"]["expires_at"] == "2999-01-01T00:00:00Z"
+    assert isinstance(loaded["project"]["lifecycle"]["expires_at"], str)
+
+    # And the other implicit types are untouched: the schema wants integers.
+    assert isinstance(loaded["database"]["pool_size"], int)
+
+
 def test_version_three_requires_a_lifecycle_and_lower_versions_forbid_it(
     tmp_path: Path, base: dict[str, Any]
 ) -> None:

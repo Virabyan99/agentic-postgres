@@ -639,6 +639,20 @@ def _construct_strict_mapping(loader: StrictLoader, node: yaml.MappingNode) -> d
 
 StrictLoader.add_constructor("tag:yaml.org,2002:map", _construct_strict_mapping)
 
+#: A date is a STRING in every manifest this loader reads -- RFC 3339, second
+#: precision, `Z` -- and YAML's implicit timestamp resolver would type
+#: `2026-09-05T12:00:00Z` as a `datetime` before the schema ever sees it, which
+#: the schema then refuses as "not of type 'string'" (D969: the first ephemeral
+#: manifest ever written failed to render on the host for this). That is
+#: ambiguity resolved silently in the loader, the thing this loader exists to
+#: refuse, so the resolver is removed and the text reaches the schema as
+#: written. The other resolvers (int, float, bool, null) stay: the schema
+#: expects those types and a quoted number would be the surprise there.
+StrictLoader.yaml_implicit_resolvers = {
+    first: [(tag, pattern) for tag, pattern in resolvers if tag != "tag:yaml.org,2002:timestamp"]
+    for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
 
 def load_manifest(path: Path) -> dict[str, Any]:
     """Parse one YAML manifest strictly. Raises :class:`ManifestError`."""
