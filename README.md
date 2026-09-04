@@ -4,15 +4,14 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 16 implemented**, the fourth Stage 2 release, at
-`template_version` **0.5.0**. Session 16's code is in this release — capability
-governance: every capability versioned, classified and bounded (ADR 0177, ADR
-0179), a closed denial taxonomy on every agent refusal (ADR 0178), a windowed
-quota (ADR 0180), idempotency keys (ADR 0181), a dry-run that attempts the write
-and rolls it back (ADR 0182), project profiles that may only narrow (ADR 0183),
-and an evaluation harness whose adversarial cases are derived from the contract
-(ADR 0184) — and its host evidence is not yet published. Session 15's is: 78 of
-86 claims, measured against a live deployment. Two isolated
+**Status: Session 17 implemented**, the fifth Stage 2 release, at
+`template_version` **0.6.0**. Session 17's code is in this release — multi-project
+operation: a fleet inventory that is an operator's read and not a catalog (ADR
+0185), a project lifecycle at manifest schema 3 where permanent is what every
+earlier manifest meant and expiry is read, never acted on (ADR 0186), a
+retirement verb that removes what its key derives and never a backup (ADR 0187),
+and a backup schedule verb — and its host evidence is not yet published. Session
+16's is: 85 of 93 claims, measured against a live deployment. Two isolated
 projects run on one hardened host behind one shared Traefik edge on Let's Encrypt
 production certificates. Each has its own PostgreSQL 18 cluster under forced
 row-level security, two database transports, a REST and an application API behind
@@ -136,9 +135,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --session 16
+sudo bin/materialize-secrets.sh --project project.yaml --session 17
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 16
+     --capabilities capabilities.yaml --through-session 17
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a

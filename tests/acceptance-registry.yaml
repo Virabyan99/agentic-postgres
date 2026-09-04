@@ -2260,3 +2260,151 @@
     capability changed without its cases fails the gate and CI. The report the
     cases are derived for carries the contract's digest, and the deployment
     publishes the same digest for the contract it serves (ADR 0184, D868).
+
+# ---------------------------------------------------------------------------
+# Session 17 — Multi-project operation: the fleet inventory, project lifecycle,
+# retirement, and the backup schedule
+# ---------------------------------------------------------------------------
+#
+# Seven requirements, four claims, all landing with the constant (D690). Every
+# live half was written IN the run that built its plane (Runs 2-5), not at the
+# bump -- D938's lesson from Session 16, applied. `FLEET-BACKUP-001`'s live half
+# is the proof that goes red on the deployment as it was on 2026-09-04: no
+# backup timer unit was installed (D944).
+
+- id: FLEET-INV-001
+  priority: P0
+  target_session: 17
+  test_nodeids:
+    - tests/contract/test_fleet.py::test_a_row_is_composed_from_the_document_and_the_live_readings
+    - tests/contract/test_fleet.py::test_every_value_is_printed_under_its_own_key
+    - tests/contract/test_fleet.py::test_nothing_from_the_documents_sensitive_blocks_reaches_either_rendering
+    - tests/contract/test_fleet.py::test_the_command_reports_every_project_directory_and_nothing_else
+    - tests/contract/test_fleet.py::test_the_last_full_backup_comes_from_the_doctors_live_reading
+    - tests/deployment/test_session17_fleet.py::test_the_inventory_sees_every_deployed_project_and_nothing_else
+    - tests/deployment/test_session17_fleet.py::test_the_inventory_prints_no_credential
+    - tests/deployment/test_session17_fleet.py::test_the_text_rendering_names_every_project_on_every_line
+  description: >-
+    bin/fleet.sh reports every deployed project on the host -- identity and
+    release from the deployed document, health from the doctor's live verdicts
+    composed as a document, backups from the timers' unit-file state and the
+    doctor's live last-full reading (never backup_state.status), and refusals
+    by denial_reason over a window from the audit table -- holding no
+    credential, printing nothing the doctor's redaction forbids, and naming
+    each project's values under its own key only (ADR 0185).
+
+- id: FLEET-INV-002
+  priority: P0
+  target_session: 17
+  test_nodeids:
+    - tests/contract/test_fleet.py::test_the_command_writes_nothing
+    - tests/contract/test_fleet.py::test_the_write_scan_would_notice_a_write
+    - tests/contract/test_fleet.py::test_nothing_in_the_release_reads_the_inventory
+    - tests/deployment/test_session17_fleet.py::test_the_inventory_writes_nothing
+  description: >-
+    The inventory writes nothing -- no file under the state root, the runtime
+    state, the checkout or a home directory changes when it runs, by mtime and
+    size -- and nothing reads it: no service, unit, route or command in the
+    release names a fleet artefact. It is an operator's read, not a catalog
+    (ADR 0185).
+
+- id: FLEET-LIFE-001
+  priority: P0
+  target_session: 17
+  test_nodeids:
+    - tests/contract/test_project_manifest.py::test_version_three_requires_a_lifecycle_and_lower_versions_forbid_it
+    - tests/contract/test_project_manifest.py::test_an_ephemeral_project_carries_an_expiry_and_a_permanent_one_may_not
+    - tests/contract/test_project_manifest.py::test_a_project_born_expired_is_refused
+    - tests/contract/test_output_migrations.py::test_v15_adds_the_lifecycle_and_nothing_else
+    - tests/contract/test_output_migrations.py::test_v15_takes_no_argument_because_the_value_is_what_the_version_means
+    - tests/contract/test_output_migrations.py::test_the_renderer_and_the_migrator_agree_on_the_lifecycle
+    - tests/contract/test_deployed_output.py::test_the_deployed_document_carries_the_renders_lifecycle
+    - tests/deployment/test_session17_fleet.py::test_a_permanent_project_publishes_its_lifecycle_at_v15
+  description: >-
+    A project manifest declares its lifecycle at schema version 3, required
+    there and forbidden below; a version 1 or 2 manifest renders as permanent,
+    which is what every earlier manifest meant; an ephemeral manifest without
+    expires_at, a permanent one with it, and one born expired are each refused
+    at render; the deployed document publishes the lifecycle at outputs
+    version 15, the migrator fills permanent with no argument, and the
+    isolation matrix classifies it (ADR 0186).
+
+- id: FLEET-EXPIRE-001
+  priority: P0
+  target_session: 17
+  test_nodeids:
+    - tests/contract/test_fleet.py::test_lifecycle_is_read_off_the_document_and_expiry_is_a_reading
+    - tests/contract/test_fleet.py::test_the_text_rendering_marks_an_expired_project
+    - tests/contract/test_project_retire.py::test_a_permanent_project_needs_the_flag_and_an_ephemeral_one_its_expiry
+    - tests/contract/test_project_retire.py::test_an_unexpired_ephemeral_project_is_refused_without_the_flag
+    - tests/contract/test_project_retire.py::test_no_unit_timer_or_command_names_the_retirement_verb
+    - tests/deployment/test_session17_retirement.py::test_a_retirement_refuses_the_wrong_confirmation
+  description: >-
+    Expiry is read, never acted on: the inventory reports an ephemeral project
+    past its expires_at as expired; project-retire.sh refuses an unexpired
+    ephemeral project without --before-expiry and a permanent one without
+    --permanent, and refuses a flag that does not apply; and no unit, timer,
+    cron, deploy step or command in the release names the retirement verb
+    (ADR 0186, ADR 0187).
+
+- id: FLEET-RETIRE-001
+  priority: P0
+  target_session: 17
+  test_nodeids:
+    - tests/contract/test_project_retire.py::test_every_resource_is_derived_from_the_key_or_read_off_its_document
+    - tests/contract/test_project_retire.py::test_a_document_naming_another_project_is_refused
+    - tests/contract/test_project_retire.py::test_the_steps_come_in_the_only_order_they_may_run
+    - tests/contract/test_project_retire.py::test_the_plan_names_every_resource_and_mutates_nothing
+    - tests/contract/test_project_retire.py::test_the_command_refuses_before_reading_anything
+    - tests/contract/test_project_retire.py::test_a_real_run_performs_the_steps_in_order_and_writes_the_record_first
+    - tests/contract/test_project_retire.py::test_a_failed_step_stops_the_run_and_names_itself
+    - tests/contract/test_project_retire.py::test_a_record_is_never_overwritten
+    - tests/deployment/test_session17_retirement.py::test_a_retirement_plan_mutates_nothing
+  description: >-
+    project-retire.sh removes exactly the resources its key derives through
+    naming and its own state records, in one fixed order -- the record first,
+    the runtime down, the units disabled, the port allocation released under
+    the volume's identity before any volume is removed, the edge files, the
+    provider destroy before the state directory is removed, the directories,
+    and only with --destroy-data the two volumes -- refuses without the key
+    said back, stops at the first failing step and names it, and its plan
+    mutates nothing. The surviving project is untouched, which is
+    DEP-REMOVE-001's proof reused rather than duplicated (ADR 0187).
+
+- id: FLEET-RETIRE-002
+  priority: P0
+  target_session: 17
+  test_nodeids:
+    - tests/contract/test_project_retire.py::test_nothing_off_the_host_is_a_step
+    - tests/contract/test_project_retire.py::test_volume_removal_lives_in_exactly_two_commands
+  description: >-
+    A retirement never deletes a backup repository, a bucket, a token, a DNS
+    record or the cipher pass: no command in its plan names pgbackrest, a
+    bucket or a stanza operation; --destroy-data removes the two volumes and
+    nothing off the host; volume removal exists in exactly two commands, the
+    restore drill's and this one; and the retirement record names, in a
+    sentence, what still holds the project's backups (ADR 0187, D957).
+
+- id: FLEET-BACKUP-001
+  priority: P0
+  target_session: 17
+  test_nodeids:
+    - tests/contract/test_backup_schedule_verb.py::test_absent_units_are_refused_first_and_the_refusal_names_the_installer
+    - tests/contract/test_backup_schedule_verb.py::test_a_repository_without_a_full_backup_is_refused_and_the_refusal_names_the_command
+    - tests/contract/test_backup_schedule_verb.py::test_installed_units_and_a_full_backup_may_be_enabled
+    - tests/contract/test_backup_schedule_verb.py::test_status_exits_zero_only_when_both_timers_are_enabled
+    - tests/contract/test_backup_schedule_verb.py::test_enable_refuses_absent_units_before_reading_the_repository
+    - tests/contract/test_backup_schedule_verb.py::test_enable_enables_both_and_re_reads_systemd
+    - tests/contract/test_backup_schedule_verb.py::test_enable_that_systemd_did_not_honour_is_reported_not_trusted
+    - tests/contract/test_fleet.py::test_a_project_is_scheduled_only_when_both_timers_are_enabled
+    - tests/deployment/test_session17_fleet.py::test_every_permanent_project_is_scheduled
+  description: >-
+    Every permanent project's two backup timers are installed and enabled on
+    the host: backup.sh schedule status exits 0 only when both are, enable
+    refuses while a unit file is absent (naming the provisioning command) or
+    while the repository holds no full backup (naming the backup command) and
+    re-reads systemd rather than trusting the enable's exit code, and the
+    inventory reports a project whose timers are not enabled as unscheduled.
+    Registered because the schedule Session 10 built had no requirement and
+    was therefore reported by nothing, which is how it went uninstalled for
+    six sessions (D944, D958).

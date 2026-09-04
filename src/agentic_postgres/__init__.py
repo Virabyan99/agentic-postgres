@@ -89,7 +89,13 @@ from pathlib import Path
 #: requirement targeted at 16 arrives whole or not at all. `VERSION` moved to
 #: `0.5.0` in that commit: four released migrations and a capability manifest
 #: bump, each of which ADR 0162 prices at a minor.
-CURRENT_SESSION = 16
+#:
+#: **Session 17 moved it in Run 6, all-or-nothing again**: seven `FLEET-*`
+#: requirements and four claims, with every live half already written in the
+#: run that built its plane (D938 applied). `VERSION` moved to `0.6.0`: a
+#: project manifest bump (schema 3) and an outputs bump (v15), no migration --
+#: ADR 0162 prices the manifest bump at a minor and this took one.
+CURRENT_SESSION = 17
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

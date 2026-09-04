@@ -17,6 +17,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -501,6 +502,34 @@ def test_the_command_writes_nothing(fixture_root: Path, tmp_path: Path) -> None:
         p for p in before if p in after and before[p] != after[p]
     )
     assert not changed, f"the inventory changed these files: {changed}"
+
+
+def test_nothing_in_the_release_reads_the_inventory() -> None:
+    """`FLEET-INV-002`'s other half, and ADR 0185's fourth property: no service,
+    unit, route, deploy step or other command names the inventory. It is the
+    end of a chain, never a link in one.
+
+    The COMMAND, not the module: `backup.py` imports `fleet` for the timer
+    vocabulary it shares with the inventory, which is one classifier rather
+    than one reader, so the scan is for `bin/fleet`, `fleet.sh` and `fleet.py`.
+    """
+    mention = re.compile(r"bin/fleet\b|fleet\.(sh|py)\b")
+    offenders: list[str] = []
+    for directory, patterns in (
+        ("systemd", ("*",)),
+        ("libexec", ("*",)),
+        ("services", ("**/*.py", "**/*.yaml", "**/*.toml")),
+        ("bin", ("*.sh", "*.py")),
+        (".", ("compose.yaml", "deploy.sh")),
+    ):
+        for pattern in patterns:
+            for path in sorted((REPO_ROOT / directory).glob(pattern)):
+                if not path.is_file() or path.stem == "fleet":
+                    continue
+                if mention.search(path.read_text(encoding="utf-8", errors="replace")):
+                    offenders.append(str(path.relative_to(REPO_ROOT)))
+    assert not offenders, f"these name the inventory, and only an operator may: {offenders}"
+    assert list((REPO_ROOT / "systemd").iterdir()), "the scan saw no units"
 
 
 def test_the_write_scan_would_notice_a_write(tmp_path: Path) -> None:

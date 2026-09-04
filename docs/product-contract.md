@@ -76,6 +76,7 @@ and in the roadmap.
 | `REC` | Backup and recovery |
 | `OPS` | Health, diagnostics, logging, and operations |
 | `DX` | Developer experience and documentation |
+| `FLEET` | Multi-project operation: the inventory, the lifecycle, retirement, and the backup schedule |
 
 Priorities:
 
@@ -88,7 +89,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 143 requirements**
+**P0 — 150 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -235,6 +236,13 @@ Priorities:
 | `AGT-QUOTA-001` | 16 | A windowed quota bounds an agent across requests: counted inside agent_audit_begin so the fifth budget costs no extra round trip, held in one durable row per agent so the bound survives a process restart, refused by the database writing its own refused row with budget_exceeded rather than raising, and independent of ADR 0129's four per-request budgets. The runtime tells a quota refusal from an audit outage by the function's NULL return, never by the absence of a record id (ADR 0180, D907). |
 | `AGT-RISK-001` | 16 | Every capability carries a risk classification from a closed, ordered vocabulary; the manifest refuses a metadata capability that claims more than low and a write that claims low; a tool backed by several capabilities is classified as the riskiest of them, never the first; and a lock at a version that requires the classification is refused at startup without it. The classification is carried, aggregated and enforced as a declaration. It selects no runtime behaviour today (D934): the plan's "a high-risk capability's denial differs observably from a low-risk one's" describes a plane nothing in the runtime reads, and this entry asserts what the tree does rather than what the plan proposed. |
 | `EVAL-HARNESS-001` | 16 | Every enabled capability has positive and adversarial evaluation cases. The derived cases are generated from the compiled contract, one adversarial case per frozen field, and carry an expectation - permitted, refused or bounded - and never a denial reason; the reasons are observed when the cases run, and the derived adversarial cases are asserted not to be all refused by the same first check. Hand-written cases are counted separately and bound to the capability version they were written against, so a capability changed without its cases fails the gate and CI. The report the cases are derived for carries the contract's digest, and the deployment publishes the same digest for the contract it serves (ADR 0184, D868). |
+| `FLEET-BACKUP-001` | 17 | Every permanent project's two backup timers are installed and enabled on the host: backup.sh schedule status exits 0 only when both are, enable refuses while a unit file is absent (naming the provisioning command) or while the repository holds no full backup (naming the backup command) and re-reads systemd rather than trusting the enable's exit code, and the inventory reports a project whose timers are not enabled as unscheduled. Registered because the schedule Session 10 built had no requirement and was therefore reported by nothing, which is how it went uninstalled for six sessions (D944, D958). |
+| `FLEET-EXPIRE-001` | 17 | Expiry is read, never acted on: the inventory reports an ephemeral project past its expires_at as expired; project-retire.sh refuses an unexpired ephemeral project without --before-expiry and a permanent one without --permanent, and refuses a flag that does not apply; and no unit, timer, cron, deploy step or command in the release names the retirement verb (ADR 0186, ADR 0187). |
+| `FLEET-INV-001` | 17 | bin/fleet.sh reports every deployed project on the host -- identity and release from the deployed document, health from the doctor's live verdicts composed as a document, backups from the timers' unit-file state and the doctor's live last-full reading (never backup_state.status), and refusals by denial_reason over a window from the audit table -- holding no credential, printing nothing the doctor's redaction forbids, and naming each project's values under its own key only (ADR 0185). |
+| `FLEET-INV-002` | 17 | The inventory writes nothing -- no file under the state root, the runtime state, the checkout or a home directory changes when it runs, by mtime and size -- and nothing reads it: no service, unit, route or command in the release names a fleet artefact. It is an operator's read, not a catalog (ADR 0185). |
+| `FLEET-LIFE-001` | 17 | A project manifest declares its lifecycle at schema version 3, required there and forbidden below; a version 1 or 2 manifest renders as permanent, which is what every earlier manifest meant; an ephemeral manifest without expires_at, a permanent one with it, and one born expired are each refused at render; the deployed document publishes the lifecycle at outputs version 15, the migrator fills permanent with no argument, and the isolation matrix classifies it (ADR 0186). |
+| `FLEET-RETIRE-001` | 17 | project-retire.sh removes exactly the resources its key derives through naming and its own state records, in one fixed order -- the record first, the runtime down, the units disabled, the port allocation released under the volume's identity before any volume is removed, the edge files, the provider destroy before the state directory is removed, the directories, and only with --destroy-data the two volumes -- refuses without the key said back, stops at the first failing step and names it, and its plan mutates nothing. The surviving project is untouched, which is DEP-REMOVE-001's proof reused rather than duplicated (ADR 0187). |
+| `FLEET-RETIRE-002` | 17 | A retirement never deletes a backup repository, a bucket, a token, a DNS record or the cipher pass: no command in its plan names pgbackrest, a bucket or a stanza operation; --destroy-data removes the two volumes and nothing off the host; volume removal exists in exactly two commands, the restore drill's and this one; and the retirement record names, in a sentence, what still holds the project's backups (ADR 0187, D957). |
 
 **P1 — 6 requirements**
 

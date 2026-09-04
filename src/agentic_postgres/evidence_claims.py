@@ -507,6 +507,24 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "agent_dry_run": ("AGT-DRYRUN-001", "AGT-APPROVE-001"),
     "capability_profile": ("AGT-PROFILE-001",),
     "evaluation_harness": ("EVAL-HARNESS-001",),
+    # -----------------------------------------------------------------------
+    # Session 17 -- multi-project operation (ADR 0185, 0186, 0187)
+    # -----------------------------------------------------------------------
+    #
+    # Four claims, all `host`, landing with the constant (D690). Every live half
+    # was written in the run that built its plane (Runs 2-5), not here -- D938's
+    # lesson applied. `project_lifecycle` holds the field AND the reading of it,
+    # because a lifecycle nothing acts on is one declaration (ADR 0186);
+    # `project_retirement` holds what the verb removes AND what it never
+    # touches, because ADR 0187 is one decision with two halves.
+    #
+    # `backup_schedule` is the claim that goes red on the deployment as it was
+    # on 2026-09-04 (D944), and `project_removal` -- Session 12's -- closes on
+    # this session's trip through the record the retirement verb writes.
+    "fleet_inventory": ("FLEET-INV-001", "FLEET-INV-002"),
+    "project_lifecycle": ("FLEET-LIFE-001", "FLEET-EXPIRE-001"),
+    "project_retirement": ("FLEET-RETIRE-001", "FLEET-RETIRE-002"),
+    "backup_schedule": ("FLEET-BACKUP-001",),
     #
     # **Three of the sixteen candidates are deliberately NOT here**, and each has
     # a different reason. They stay in `UNCLAIMED_BY_HISTORY`, which now records

@@ -969,6 +969,11 @@ CLAIM_INTRODUCED_IN = {
     "agent_dry_run": 16,
     "capability_profile": 16,
     "evaluation_harness": 16,
+    # Session 17 Run 6: four claims, landing with the constant (D690).
+    "fleet_inventory": 17,
+    "project_lifecycle": 17,
+    "project_retirement": 17,
+    "backup_schedule": 17,
     "document_kinds": 2,
     "provider_convergence": 2,
     "release_immutability": 2,

@@ -59,6 +59,7 @@ all flags or steps lost to retyping the previous session's page.
 | [The database](database.md) | Four schemas, the roles, and what each may reach |
 | [Database security](database-security.md) | Forced RLS, the request identity, and the privilege model |
 | [Project isolation](project-isolation.md) | What two projects on one host do not share |
+| [Fleet operations](fleet-operations.md) | Several projects on one host over time: the inventory, the lifecycle, retiring one, and the backup schedule |
 | [Capability plan](capability-plan.md) | How a capability manifest becomes a compiled contract |
 
 ## Evidence and assurance

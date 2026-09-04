@@ -351,6 +351,24 @@ product-contract table and the acceptance matrix regenerated; `docs/fleet-
 operations.md` written and indexed; README's documented path names the two new
 verbs. No live half is written here — Runs 2–5 wrote theirs.
 
+**Done.** `CURRENT_SESSION` 17 and `template_version` 0.6.0 in one commit
+with the seven `FLEET-*` requirements (every node id a proof that already
+exists, every live half written in Runs 2–5), the four claims and their
+sessions, the `FLEET` prefix in the id pattern and the contract's family
+table, and `bin/session-17-check.sh` derived by diff from session-16's — the
+session literal substituted once, the header and the usage's mode
+descriptions rewritten line by line (D853, D858), the two inherited Session 16
+step-6 comments marked inherited, and one Session 17 step added: the bounds
+document checked current, since the lifecycle relation moved it. The README's
+status names the release and 0.6.0; its deploy examples and the two operations
+documents type `--session 17`; `docs/fleet-operations.md` is written and
+indexed. One guard was added for `FLEET-INV-002`'s second half — nothing in
+the release names the inventory command — and its first form scanned for the
+module name and caught `backup.py` importing `fleet` for the timer vocabulary,
+which is one classifier shared rather than a reader; the scan is for the
+command. No divergence row: the bump met nothing the plan did not predict.
+The next thing is Run 7, the trip.
+
 ### Run 7 — the host trip
 
 Gate once, every mode, before it; `pytest --setup-plan` with the environment
