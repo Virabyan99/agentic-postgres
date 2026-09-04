@@ -381,6 +381,9 @@ def test_the_v12_step_reaches_a_document_that_validates(v12: dict[str, Any]) -> 
     current = output_migrations.migrate_v13_to_v14(
         migrated, metrics_url="https://fixture-alpha-dev.test/metrics"
     )
+    # And the v15 step (ADR 0186): the tenth hand-chain, one module over from
+    # the nine D965 records, found by CI rather than by the grep (D965).
+    current = output_migrations.migrate_v14_to_v15(current)
     assert current["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(current, "outputs.schema.json")
 
