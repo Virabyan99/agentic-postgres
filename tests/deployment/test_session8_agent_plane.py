@@ -682,7 +682,19 @@ def test_a_read_only_agent_can_neither_discover_nor_invoke_a_write_on_the_deploy
         mcp_route,
         token=mcp_agent_session["token"],
         method="tools/call",
-        params={"name": "create_note", "arguments": {"p_title": "t", "p_content": "c"}},
+        params={
+            "name": "create_note",
+            # The two reserved parameters every agent write has required since
+            # Session 16 Runs 6 and 7 (ADR 0181, ADR 0182). Without them the
+            # framework refuses the call for its shape before the scope check
+            # runs, and the refusal this proof measures is the wrong one (D942).
+            "arguments": {
+                "p_title": "t",
+                "p_content": "c",
+                "idempotency_key": "run8-live-hidden-write-0001",
+                "dry_run": False,
+            },
+        },
     )
     result = sse_result(called.body)
     assert result is not None, f"the reply carried no SSE data line: {called.body[:200]!r}"

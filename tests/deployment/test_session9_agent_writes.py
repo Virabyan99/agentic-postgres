@@ -22,6 +22,7 @@ look like from a gate.
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import Callable
 from typing import Any
 
@@ -59,6 +60,32 @@ CANARY_TITLE = "apg-run6-audit-canary-4e19"
 #: distinctive string, so its presence anywhere in the record is a leak rather
 #: than a false positive (D479).
 CANARY_BODY = "apg-run6-REDACTION-CANARY-b72f"
+
+#: The five-argument shape of `api.agent_audit_begin` since migration 0027
+#: (ADR 0178), for the two proofs that reach the RPC directly rather than
+#: through the agent plane. This module carried the three-argument shape from
+#: Session 9 until Session 16's trip, because ADR 0175's arity guard reads SQL
+#: call sites and these two are an HTTP body and a GRANT signature (D942).
+AUDIT_BEGIN_SIGNATURE = "api.agent_audit_begin(text, uuid, jsonb, text, text)"
+AUDIT_BEGIN_QUERY = (
+    "p_request_id=00000000-0000-4000-8000-00000000c0de&p_parameters=%7B%7D"
+    "&p_capability_version=1.0.0&p_contract_hash=" + "0" * 64
+)
+
+
+def _write_arguments(title: str, content: str) -> dict[str, Any]:
+    """`create_note`'s arguments as every agent write has sent them since Runs
+    6 and 7 of Session 16: the reviewed function's two, plus the two reserved
+    parameters the runtime requires (ADR 0181, ADR 0182). A FRESH key per call,
+    because the proofs below create the same title several times and a reused
+    key would make the second call a replay of the first rather than a write --
+    which is a different guarantee, proved in Session 16's own module."""
+    return {
+        "p_title": title,
+        "p_content": content,
+        "idempotency_key": f"run9-live-{secrets.token_hex(8)}",
+        "dry_run": False,
+    }
 
 
 def sse_result(body: str) -> dict[str, Any] | None:
@@ -230,7 +257,7 @@ def test_a_write_agent_creates_one_note_through_the_agent_plane(
         method="tools/call",
         params={
             "name": "create_note",
-            "arguments": {"p_title": CANARY_TITLE, "p_content": CANARY_BODY},
+            "arguments": _write_arguments(CANARY_TITLE, CANARY_BODY),
         },
     )
     assert answer.status == 200, f"the write failed: {answer.body[:300]}"
@@ -286,7 +313,7 @@ def test_one_agent_write_leaves_both_records_and_they_agree(
         method="tools/call",
         params={
             "name": "create_note",
-            "arguments": {"p_title": CANARY_TITLE, "p_content": CANARY_BODY},
+            "arguments": _write_arguments(CANARY_TITLE, CANARY_BODY),
         },
     )
 
@@ -336,7 +363,7 @@ def test_the_recorded_parameters_are_redacted_per_the_lock(
         method="tools/call",
         params={
             "name": "create_note",
-            "arguments": {"p_title": CANARY_TITLE, "p_content": CANARY_BODY},
+            "arguments": _write_arguments(CANARY_TITLE, CANARY_BODY),
         },
     )
 
@@ -397,7 +424,7 @@ def test_the_request_id_is_recorded_and_is_this_planes_own_mint(
             method="tools/call",
             params={
                 "name": "create_note",
-                "arguments": {"p_title": CANARY_TITLE, "p_content": CANARY_BODY},
+                "arguments": _write_arguments(CANARY_TITLE, CANARY_BODY),
             },
         )
 
@@ -455,6 +482,13 @@ def test_a_denied_write_is_recorded_and_never_reaches_the_database(
             "name": "update_task_status",
             "arguments": {
                 "p_task_id": "00000000-0000-4000-8000-00000000dead",
+                # The two reserved parameters every agent write has required
+                # since Session 16 Runs 6 and 7 (ADR 0181, ADR 0182). Without
+                # them the framework refuses the call before this plane sees
+                # it, and the refusal measured is the framework's, not the
+                # product's (D942).
+                "idempotency_key": "run9-live-denied-write-0001",
+                "dry_run": False,
                 # `api.task_status` is ('pending', 'in_progress', 'completed',
                 # 'cancelled'), frozen by ADR 0003 and created in 0007. This
                 # sent "todo" and "done" until Run 9's host trip: neither is a
@@ -638,7 +672,13 @@ def test_a_get_against_the_deployed_audit_rpc_is_refused(
         f"{base}/rpc/agent_audit_begin",
         method="POST",
         token=token,
-        body={"p_tool": "query_resource"},
+        body={
+            "p_tool": "query_resource",
+            "p_request_id": None,
+            "p_parameters": {},
+            "p_capability_version": None,
+            "p_contract_hash": None,
+        },
     )
     assert control.status == 200, (
         f"the control failed: POST /rpc/agent_audit_begin answered {control.status} "
@@ -646,7 +686,7 @@ def test_a_get_against_the_deployed_audit_rpc_is_refused(
     )
 
     refused = api_call(
-        f"{base}/rpc/agent_audit_begin?p_tool=leaked",
+        f"{base}/rpc/agent_audit_begin?p_tool=leaked&{AUDIT_BEGIN_QUERY}",
         method="GET",
         token=token,
     )
@@ -678,7 +718,7 @@ def test_the_get_that_was_refused_wrote_nothing(
     tool = "apg-run7-get-canary"
 
     api_call(
-        f"{rest_base(project_a)}/rpc/agent_audit_begin?p_tool={tool}",
+        f"{rest_base(project_a)}/rpc/agent_audit_begin?p_tool={tool}&{AUDIT_BEGIN_QUERY}",
         method="GET",
         token=mcp_writer_session["token"],
     )
@@ -839,7 +879,7 @@ def test_a_write_whose_audit_record_cannot_be_opened_does_not_happen(
 
     owner_role = project_a["database"]["roles"]["object_owner"]
     writer_role = project_a["database"]["roles"]["agent_writer"]
-    signature = "api.agent_audit_begin(text, uuid, jsonb)"
+    signature = AUDIT_BEGIN_SIGNATURE
 
     def write(title: str) -> Any:
         return mcp_rpc(
@@ -848,7 +888,7 @@ def test_a_write_whose_audit_record_cannot_be_opened_does_not_happen(
             method="tools/call",
             params={
                 "name": "create_note",
-                "arguments": {"p_title": title, "p_content": CANARY_BODY},
+                "arguments": _write_arguments(title, CANARY_BODY),
             },
         )
 
@@ -949,7 +989,7 @@ def test_a_read_survives_the_same_audit_failure(
 
     owner_role = project_a["database"]["roles"]["object_owner"]
     writer_role = project_a["database"]["roles"]["agent_writer"]
-    signature = "api.agent_audit_begin(text, uuid, jsonb)"
+    signature = AUDIT_BEGIN_SIGNATURE
 
     def read() -> Any:
         return mcp_rpc(
@@ -1176,7 +1216,7 @@ def test_a_revoked_token_fails_its_next_read_write_and_direct_request(
             method="tools/call",
             params={
                 "name": "create_note",
-                "arguments": {"p_title": title, "p_content": CANARY_BODY},
+                "arguments": _write_arguments(title, CANARY_BODY),
             },
         )
 
