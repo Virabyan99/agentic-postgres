@@ -429,6 +429,58 @@ def test_dependency_lock_uses_hashes() -> None:
         assert "==" in line, f"unpinned dependency: {line}"
 
 
+def _package_modules_imported_by(sources: list[Path], package: Path) -> set[str]:
+    """Every `agentic_postgres` module the given Python sources import.
+
+    **A module importing itself is not a caller, and only a module can do
+    that** (D963). The first form of this scan discounted any import whose
+    name equalled the importing FILE's stem, wherever that file lived -- so
+    `bin/fleet.py` importing `agentic_postgres.fleet` was discounted as a
+    self-import, and CI reported the inventory's one caller as no caller. The
+    exclusion is scoped to sources inside the package; a `bin/` script that
+    shares a stem with the module it drives is exactly a caller.
+    """
+    import ast
+
+    imported: set[str] = set()
+    for source in sources:
+        own = source.stem if source.parent == package else None
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                # `from agentic_postgres import x, y`
+                if node.module == "agentic_postgres":
+                    imported.update(alias.name for alias in node.names if alias.name != own)
+                # `from agentic_postgres.x import y`
+                elif node.module.startswith("agentic_postgres."):
+                    name = node.module.split(".", 1)[1].split(".")[0]
+                    if name != own:
+                        imported.add(name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.startswith("agentic_postgres."):
+                        name = alias.name.split(".", 1)[1].split(".")[0]
+                        if name != own:
+                            imported.add(name)
+    return imported
+
+
+def test_a_script_sharing_a_modules_stem_counts_as_its_caller(tmp_path: Path) -> None:
+    """The control for D963, in both directions: a `bin/` script whose stem
+    matches the module it imports is a caller; a package module importing
+    itself is not."""
+    package = tmp_path / "src" / "agentic_postgres"
+    package.mkdir(parents=True)
+    (tmp_path / "bin").mkdir()
+    script = tmp_path / "bin" / "fleet.py"
+    script.write_text("from agentic_postgres import REPO_ROOT, fleet\n", encoding="utf-8")
+    selfish = package / "loop.py"
+    selfish.write_text("from agentic_postgres import loop\n", encoding="utf-8")
+
+    assert "fleet" in _package_modules_imported_by([script], package)
+    assert "loop" not in _package_modules_imported_by([selfish], package)
+
+
 def test_no_module_is_imported_only_by_its_own_tests() -> None:
     """A module nothing calls is a feature that does not exist (D204).
 
@@ -456,33 +508,15 @@ def test_no_module_is_imported_only_by_its_own_tests() -> None:
     Goes red if: a module is added with no caller, or the last caller of an
     existing one is removed.
     """
-    import ast
-
     package = REPO_ROOT / "src" / "agentic_postgres"
     modules = {
         path.stem for path in package.glob("*.py") if path.stem not in {"__init__", "__main__"}
     }
     assert modules, "no modules found; this compared nothing"
 
-    imported: set[str] = set()
-    for source in [*(REPO_ROOT / "bin").glob("*.py"), *package.glob("*.py")]:
-        tree = ast.parse(source.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                # `from agentic_postgres import x, y`
-                if node.module == "agentic_postgres":
-                    imported.update(alias.name for alias in node.names if alias.name != source.stem)
-                # `from agentic_postgres.x import y`
-                elif node.module.startswith("agentic_postgres."):
-                    name = node.module.split(".", 1)[1].split(".")[0]
-                    if name != source.stem:
-                        imported.add(name)
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name.startswith("agentic_postgres."):
-                        name = alias.name.split(".", 1)[1].split(".")[0]
-                        if name != source.stem:
-                            imported.add(name)
+    imported = _package_modules_imported_by(
+        [*(REPO_ROOT / "bin").glob("*.py"), *package.glob("*.py")], package
+    )
 
     # Python embedded in a shell script is still a caller.
     # `bin/provision-host.sh` imports `listeners` from a heredoc, and this
