@@ -63,10 +63,13 @@ It does **not** protect you from:
   the cipher pass, which is ADR 0147's stated residual: an attacker inside it
   owns the backup history as well as the live data.
 - **destruction of `pgbackrest_repo_cipher_pass`.** It is in
-  `bootstrap-state.schema.json`'s `managed_resources`, so `--destroy` may remove
-  it — correct for a project being torn down, and catastrophic for one that is
-  not. Losing it orphans **every backup ever taken**, and every check in this
-  repository still passes (D538).
+  `bootstrap-state.schema.json`'s `managed_resources`, which is the licence to
+  remove it — and **`--destroy` does not exercise that licence** (D957): it
+  revokes the runtime identity, unlinks the two credential files and the state
+  file, and leaves every secret in the Infisical project, this one included.
+  Deleting the project in the console is what destroys the pass. Losing it
+  orphans **every backup ever taken**, and every check in this repository
+  still passes (D538).
 
 Cross-account replication, a second provider and an offline copy are all absent
 by decision, not oversight. If the account boundary is a risk you need retired,
@@ -118,6 +121,14 @@ shows a secret access key exactly once.
 
    They are installed disabled on purpose. A unit that fails on every boot until
    an operator is ready trains an operator to ignore it.
+
+   **On the reference deployment neither this step nor the one that installs
+   the units had ever been taken by 2026-09-04** (D944). `install_units` runs
+   only from `provision-host.sh --apply`, which last ran before the timers
+   existed, so the four unit files were absent from the host and no scheduled
+   backup had ever run — while both deployed documents said `ready`, because
+   `backup_state` is a deploy-time snapshot. Session 17 replaces this step with
+   a verb that refuses when the units are absent.
 
 ---
 

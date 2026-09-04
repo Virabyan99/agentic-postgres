@@ -494,15 +494,24 @@ def diagnose(project_key: str) -> tuple[diagnosis.Check, ...]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--project", required=True)
-    parser.add_argument("--verbose", action="store_true")
+    # Two renderings, never both: `--json` carries every check's evidence by
+    # construction, so a `--verbose` beside it would be a flag that changes
+    # nothing, which is D374's shape at the command line.
+    rendering = parser.add_mutually_exclusive_group()
+    rendering.add_argument("--verbose", action="store_true")
+    rendering.add_argument("--json", action="store_true")
     arguments = parser.parse_args(argv)
 
     checks = diagnose(arguments.project)
-    # `verbose` reaches the RENDERER and nothing else. There is no verbose branch
-    # in any probe above, which is what keeps "a third party's bytes are never
-    # printed" a property of the shape rather than a rule each probe obeys
-    # (ADR 0159).
-    print(diagnosis.report(checks, project_key=arguments.project, verbose=arguments.verbose))
+    # The rendering flags reach the RENDERER and nothing else. There is no
+    # verbose or json branch in any probe above, which is what keeps "a third
+    # party's bytes are never printed" a property of the shape rather than a
+    # rule each probe obeys (ADR 0159).
+    if arguments.json:
+        observed_at = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        print(diagnosis.render_json(checks, project_key=arguments.project, observed_at=observed_at))
+    else:
+        print(diagnosis.report(checks, project_key=arguments.project, verbose=arguments.verbose))
     return diagnosis.exit_code(checks)
 
 

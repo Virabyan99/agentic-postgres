@@ -159,6 +159,7 @@ and the Let's Encrypt rate limits.
 sudo bin/doctor.sh --project <key>            # containers, TLS, database, pool,
                                               # migrations, backups, WAL, disk
 sudo bin/doctor.sh --project <key> --verbose  # the numbers behind each verdict
+sudo bin/doctor.sh --project <key> --json     # the same verdicts as a document
 
 sudo bin/migrate.sh --project project.yaml status    # applied and pending
 sudo bin/backup.sh  --outputs <outputs.json> info --json
@@ -259,11 +260,15 @@ substitute. See [ADR 0004](docs/decisions/0004-version-lock-format.md).
 
 ## What is intentionally unavailable
 
-**Session 12 owns the rest.** Removing a project is not built: provider resources
-can be released with `bin/bootstrap-providers.sh --destroy --confirm <key>`, but
-the scoped removal that provably leaves a co-tenant project untouched is
-`DEP-REMOVE-001`, and the two-project runtime isolation matrix is `DEP-ISO-001`.
-Neither is claimed.
+**Removing a project is not built, and it is the one Session 12 claim still
+open.** The runtime comes down with `bin/project-runtime.sh` (the volume is
+kept), and provider resources are released with `bin/bootstrap-providers.sh
+--destroy --confirm <key>` — which revokes the runtime identity and **leaves
+every secret in place**, the backup cipher pass included. The scoped removal
+that provably leaves a co-tenant project untouched is `DEP-REMOVE-001`; its
+proof is written and gated on a project actually removed, which has not
+happened. The two-project runtime isolation matrix, `DEP-ISO-001`, is claimed
+and has passed on every host gate since Session 12.
 
 Not deferred — **outside the product**:
 

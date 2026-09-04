@@ -60,7 +60,8 @@ claims wrongly, in the direction that makes work look undone.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 `7282cc5` or against the deployment on 2026-09-04**, not a prediction.
 
-**Next free number after this table is D959.**
+**Next free number after this table is D961.** D944–D958 were written at
+planning; D959 and D960 are Run 1's.
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -79,6 +80,8 @@ Six columns, the house shape. **Every row is a fact measured against the tree at
 | **D956** | A retirement is "down, then destroy." | **`database-ports.py release --instance-uuid --project-key` exists and has never run on a host**, and ADR 0042 keys an allocation by **the identity the volume carries** (`database.observed.instance_uuid` in the deployed document). After the volume is gone nothing can name the allocation. | **The retire verb reads the deployed document and the instance uuid FIRST and releases the ports BEFORE `--destroy-data` removes a volume**, and its `--plan` prints the uuid it will release under. The order is a contract test. | An ordering that is right by accident is D183's family. The verb that could strand every future allocation on this host is the one being written, and the trap is visible at planning time. | 0042 |
 | **D957** | `docs/backup-operations.md`: *"`pgbackrest_repo_cipher_pass` … is in `managed_resources`, so `--destroy` may remove it — correct for a project being torn down, and catastrophic for one that is not."* CLAUDE.md §9 carries the same warning. | **`--destroy` does not remove it.** `bootstrap-providers.py destroy()` revokes the runtime identity, unlinks the two credential files and the state file, and prints *"project … was left in place. Delete it in the Infisical console if you also want its secrets gone."* Every secret, the cipher pass included, survives a `--destroy`. The licence in `managed_resources` exists; nothing exercises it. | **ADR 0187 makes the current behaviour the decision**: a retirement never deletes a backup repository, a bucket, or the cipher pass; the retirement record names the bucket and the Infisical project that still hold them, and their removal is a console action the operator records afterwards. `--destroy-data` destroys volumes and nothing off the host. | The warning describes a capability the verb does not have, which is the reassuring direction (D930): everybody was careful around a step that could not happen, and nobody noticed that a destroyed project's backups stay readable to anyone holding the console. Both facts belong in the ADR. | 0187 |
 | **D958** | Session 10's brief: *"Scheduled full and incremental backups."* | **No requirement registers the schedule.** The `REC-*` family is `PITR`, `SAFE`, `SMOKE`, `EVID`, `WAL`; the four units and D522's glob are proved by `test_backup_schedule.py` under no requirement id and no claim — which is why nothing ever asked whether they were installed (D944). | `FLEET-BACKUP-001` registers the schedule with a live half that reads `systemctl is-enabled` on the host for every permanent project. | D697's rule, *every registered requirement belongs to a claim*, has a converse this row is: **a proof under no requirement is reported by nothing**, and a schedule reported by nothing was never enabled. | — |
+| **D959** | This plan's §0 and D953: *"1949 MB available with two projects on a swapless host. Run 1 measures whether a third fits."* | **A third project fits, measured by ADR 0165's method as `op` with no root** (D765's walk over `/sys/fs/cgroup/system.slice/docker-*.scope/memory.stat`, labelled from each scope's first pid). Anonymous memory on 2026-09-04: **alpha-dev 348 MB, beta-dev 351 MB, the shared edge 31 MB, total 730 MB** across 22 scopes; `free -m` reports 1832 MB used and **1982 MB available** of 3814. The largest single holders are the two `uvicorn` services per project (66–94 MB each) and the collector (53–66 MB); PostgreSQL holds 18–19 MB anon plus ~19 MB shmem against its 768 MB cap. A third project at the measured ~350 MB leaves ~1.6 GB available before page cache. | **The trip creates the third project.** §9's first stop condition does not apply. The number is recorded here rather than in a memory file because it is a fact about this deployment on this day. | D767's point holds one session later: the caps in aggregate exceed the machine and nothing holds them, so `anon` is the figure and the caps are not a budget. What bounds the third project is what it *holds*, and that is ~350 MB. | 0165 |
+| **D960** | CLAUDE.md §2 and D766: *"18 containers, not 16"*. | **The machine runs 22.** Session 14 added the collector and the store to every project — `apg-diag containers` lists 10 per project, and the cgroup walk finds 20 project scopes plus `traefik` and `haproxy`. The handoff carried the Session 14 planning-time count for three sessions. | The handoff's number is corrected; `apg-diag containers` was right all along and needs no change. | The same shape as D766 in the other direction: a count written down once and read as current. A count in a handoff is a measurement with a date, and this one had lost its date. | — |
 
 ---
 
@@ -155,6 +158,22 @@ trip and at the close, **nowhere else**.
   `docs/backup-operations.md` where the timers are described as running.
 - Mutation battery over the JSON renderer: a check dropped, a status
   mis-ranked, a detail leaking a value the redaction list forbids.
+
+**Done.** Measured first, as `op` with no root (D959): 22 scopes, 730 MB anon
+in total, ~350 MB per project, 1982 MB available — the third project fits, and
+D960 corrects the handoff's container count. `diagnosis.document` and
+`diagnosis.render_json` render the same checks as a document with the module's
+own `worst` and `exit_code`; `bin/doctor.py --json` and `bin/doctor.sh --json`
+carry it, refusing `--verbose` beside it (two renderings of one report, D374's
+shape at the command line) and `--json` without `--project`. The redaction
+scan now runs over three renderings, and the JSON arm has its own premise test
+(every probe present, every check with evidence, no UNKNOWN). ADR 0185 draws
+the inventory's line and the product contract's §5 gains the paragraph that
+says what its two non-goals protect. The ledger: README's *intentionally
+unavailable* paragraph, `scope-closure.md` §2's heading and the two Session 12
+claims (D954), `backup-operations.md`'s cipher-pass warning (D957) and its
+timer step (D944). The battery's arms and their outcomes are in the run's
+commit message.
 
 ### Run 2 — the fleet inventory
 

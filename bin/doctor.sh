@@ -49,6 +49,12 @@ Usage: bin/doctor.sh [--verbose] [--help]
                      workstation mode, the numbers each verdict was computed
                      from in deployed mode.
 
+  --json             Deployed mode only. The same checks as a JSON document --
+                     project_key, observed_at, worst, exit_code, and every
+                     check with its verdict, detail and evidence -- for the
+                     fleet inventory to compose. Not combined with --verbose:
+                     the document already carries the evidence.
+
 Deployed mode reads the deployed document for identities only. Every verdict
 comes from a live read: that document records what was true when it was
 written, and a project whose archiver died yesterday still publishes the
@@ -79,11 +85,19 @@ python_bin() {
 deployed_mode() {
   local project_key="$1"
   local verbose="${2-}"
+  local json="${3-}"
   [ -n "${project_key}" ] || { printf 'doctor: --project requires a project key.\n' >&2; exit 2; }
+  if [ -n "${verbose}" ] && [ -n "${json}" ]; then
+    printf 'doctor: --json and --verbose are two renderings of one report; choose one.\n' >&2
+    exit 2
+  fi
   [ "$(id -u)" -eq 0 ] || {
     printf 'doctor: --project needs root: the deployed document is 0600 root.\n' >&2
     exit 3
   }
+  if [ -n "${json}" ]; then
+    exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}" --json
+  fi
   if [ -n "${verbose}" ]; then
     exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}" --verbose
   fi
@@ -163,12 +177,13 @@ check_python_minor() {
 }
 
 main() {
-  local project="" verbose=""
+  local project="" verbose="" json=""
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --help) usage; return 0 ;;
       --verbose) verbose=1; VERBOSE=1; shift ;;
+      --json) json=1; shift ;;
       --project)
         [ "$#" -ge 2 ] || { printf 'doctor: --project requires a project key.\n' >&2; exit 2; }
         project="$2"; shift 2 ;;
@@ -181,7 +196,11 @@ main() {
   # contract: the two modes never execute together, which is what keeps
   # check_python_minor's deliberate bare `python` off the sudo path (ADR 0158).
   if [ -n "${project}" ]; then
-    deployed_mode "${project}" "${verbose}"
+    deployed_mode "${project}" "${verbose}" "${json}"
+  fi
+  if [ -n "${json}" ]; then
+    printf 'doctor: --json is a deployed-mode rendering; it needs --project.\n' >&2
+    exit 2
   fi
 
   printf 'Repository: %s\n\n' "${ROOT_DIR}"

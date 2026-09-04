@@ -220,8 +220,15 @@ def poisoned_run(monkeypatch: pytest.MonkeyPatch, doctor: Any) -> None:
     monkeypatch.setattr(doctor, "run", fake)
 
 
-def render(doctor: Any, *, verbose: bool) -> str:
-    """Run every real probe against the stubbed layer, then render."""
+#: The three renderings `bin/doctor.py` can produce. Every leak claim below runs
+#: over all of them: a rendering added later that the scan did not cover would
+#: be Question 5's shape, and `--json` (Session 17) carries every check's
+#: evidence unconditionally, so it is the widest of the three.
+MODES = ("quiet", "verbose", "json")
+
+
+def render(doctor: Any, *, mode: str) -> str:
+    """Run every real probe against the stubbed layer, then render in ``mode``."""
     doc = document()
     checks: list[diagnosis.Check] = [doctor.probe_containers("apg-canary-dev")]
     checks.extend(doctor.probe_routes(doc))
@@ -233,7 +240,13 @@ def render(doctor: Any, *, verbose: bool) -> str:
     checks.append(doctor.probe_repository("apg-canary-dev"))
     checks.append(doctor.probe_archiver(doc))
     checks.append(doctor.probe_disk(doc))
-    return diagnosis.report(tuple(checks), project_key="apg-canary-dev", verbose=verbose)
+    if mode == "json":
+        return diagnosis.render_json(
+            tuple(checks), project_key="apg-canary-dev", observed_at="2026-09-04T12:00:00Z"
+        )
+    return diagnosis.report(
+        tuple(checks), project_key="apg-canary-dev", verbose=(mode == "verbose")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -241,18 +254,18 @@ def render(doctor: Any, *, verbose: bool) -> str:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("verbose", [False, True])
+@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.usefixtures("poisoned_run")
-def test_no_subprocess_output_reaches_the_report(doctor: Any, verbose: bool) -> None:
+def test_no_subprocess_output_reaches_the_report(doctor: Any, mode: str) -> None:
     """The claim `OPS-001` makes, measured against the real probes.
 
-    Both verbosities: verbose is the new risk, but a test that only checked the
-    new flag would say nothing about whether the default had been leaking all
-    along.
+    Every rendering: verbose was the new risk in Session 11 and json is Session
+    17's, but a test that only checked the newest flag would say nothing about
+    whether the default had been leaking all along.
     """
-    assert SUBPROCESS not in render(doctor, verbose=verbose), (
+    assert SUBPROCESS not in render(doctor, mode=mode), (
         "output carries a value a subprocess emitted. ADR 0159: what --verbose "
-        "adds is resolution, never a third party's bytes."
+        "and --json add is resolution, never a third party's bytes."
     )
 
 
@@ -261,22 +274,45 @@ def test_no_subprocess_output_reaches_the_report(doctor: Any, verbose: bool) -> 
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("verbose", [False, True])
+@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.usefixtures("poisoned_run")
-def test_no_sensitive_document_block_reaches_the_report(doctor: Any, verbose: bool) -> None:
+def test_no_sensitive_document_block_reaches_the_report(doctor: Any, mode: str) -> None:
     """The deployed document is `0600 root` because it is a map of where the
-    secrets are. A diagnostic that reprinted that map at any verbosity would have
-    undone the file mode."""
-    assert SENSITIVE not in render(doctor, verbose=verbose)
+    secrets are. A diagnostic that reprinted that map at any verbosity, or in
+    any rendering, would have undone the file mode."""
+    assert SENSITIVE not in render(doctor, mode=mode)
 
 
 @pytest.mark.usefixtures("poisoned_run")
 def test_verbose_actually_prints_more(doctor: Any) -> None:
     """The premise. A verbose flag that changed nothing would satisfy every
     assertion above for the least interesting possible reason (D374)."""
-    quiet, loud = render(doctor, verbose=False), render(doctor, verbose=True)
+    quiet, loud = render(doctor, mode="quiet"), render(doctor, mode="verbose")
     assert len(loud) > len(quiet), "--verbose added nothing, so it proves nothing"
     assert " = " in loud, "verbose should print evidence pairs"
+
+
+@pytest.mark.usefixtures("poisoned_run")
+def test_the_json_rendering_carries_every_probe_and_its_evidence(doctor: Any) -> None:
+    """The premise for the JSON arm of the two claims above, and `FLEET-INV-001`'s
+    offline half: the document holds every probe's verdict and evidence, so the
+    leak scan over it exercised every formatting path there is. A scan over a
+    document that carried no evidence would prove nothing about the evidence."""
+    parsed = json.loads(render(doctor, mode="json"))
+    names = [check["name"] for check in parsed["checks"]]
+    assert len(names) >= 8, f"the document carries {names}; a probe is missing"
+    assert all(check["evidence"] for check in parsed["checks"]), "a check carries no evidence"
+    assert parsed["worst"] != diagnosis.UNKNOWN, "a probe did not reach its parsing path"
+    assert parsed["exit_code"] in (0, 6)
+
+
+def test_json_and_verbose_are_refused_together(doctor: Any) -> None:
+    """Two renderings of one report. A `--verbose` beside `--json` would change
+    nothing, and a flag that changes nothing is D374's shape at the command
+    line -- so it is refused before any probe runs, as an input error (2)."""
+    with pytest.raises(SystemExit) as refused:
+        doctor.main(["--project", "apg-canary-dev", "--json", "--verbose"])
+    assert refused.value.code == 2
 
 
 @pytest.mark.usefixtures("poisoned_run")
@@ -291,7 +327,7 @@ def test_every_probe_reached_its_parsing_path(doctor: Any) -> None:
     An `UNKNOWN` here means a probe never got to the code that formats a value,
     and a leak test that cannot reach the formatting proves nothing about it.
     """
-    rendered = render(doctor, verbose=True)
+    rendered = render(doctor, mode="verbose")
     assert "UNKNOWN" not in rendered, (
         f"a probe did not reach its parsing path, so the leak scan never exercised "
         f"its formatting:\n{rendered}"
@@ -409,7 +445,7 @@ def test_the_containers_check_still_names_an_unhealthy_container(doctor: Any) ->
     a `--format` line. Asserted so that tightening the rule to "no bytes at all"
     later is a deliberate act rather than a silent loss of the most useful line
     this check can print."""
-    assert "apg-canary-dev-postgres-1" in render(doctor, verbose=False)
+    assert "apg-canary-dev-postgres-1" in render(doctor, mode="quiet")
 
 
 def test_the_scan_catches_a_deliberately_leaky_renderer() -> None:

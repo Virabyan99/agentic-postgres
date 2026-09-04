@@ -33,11 +33,21 @@ account."* A filter over `pgbackrest`'s stderr would be a denylist against a
 third party's future output, and a test of it would be a test of the denylist
 (D622). Not printing it is a property; filtering it is a hope.
 
-Nothing here reads a file, runs a process or touches the network.
+**Two renderings of one set of checks, since Session 17** (`FLEET-INV-001`):
+`report` is the operator's table and `render_json` is the same verdicts as a
+document, for the fleet inventory to compose rather than to parse. The JSON
+carries every check's evidence unconditionally -- it is a machine's reading,
+and the values are the ones this program produced, so the redaction rule above
+holds for it exactly as it holds for `--verbose`. What it never carries is
+anything `report` would not: no subprocess bytes, no document block the doctor
+does not read.
+
+Nothing here reads a file, runs a process, reads a clock or touches the network.
 """
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 __all__ = [
@@ -53,8 +63,10 @@ __all__ = [
     "containers",
     "database",
     "disk_headroom",
+    "document",
     "exit_code",
     "migrations",
+    "render_json",
     "report",
     "repository",
     "route",
@@ -377,6 +389,48 @@ def report(checks: tuple[Check, ...], *, project_key: str, verbose: bool = False
         if verbose:
             lines.extend(f"  {'':<8}   {key} = {value}" for key, value in check.evidence)
     return "\n".join(lines)
+
+
+def document(checks: tuple[Check, ...], *, project_key: str, observed_at: str) -> dict[str, object]:
+    """The same verdicts as a document (Session 17, `FLEET-INV-001`).
+
+    Built from the checks and nothing else: the verdict vocabulary is this
+    module's, `worst` and `exit_code` are the functions the text report uses,
+    and the evidence is `Check.evidence` -- values this program produced. A
+    consumer that reads `exit_code` here reads the number the command exited
+    with, so a fleet inventory composing several of these cannot arrive at a
+    verdict the per-project command would not have given.
+
+    ``observed_at`` is passed in rather than read: this module reads no clock,
+    so the caller decides what moment the document describes and a test can
+    fix it.
+    """
+    return {
+        "project_key": project_key,
+        "observed_at": observed_at,
+        "worst": worst(checks),
+        "exit_code": exit_code(checks),
+        "checks": [
+            {
+                "name": check.name,
+                "verdict": check.verdict,
+                "detail": check.detail,
+                "evidence": dict(check.evidence),
+            }
+            for check in checks
+        ],
+    }
+
+
+def render_json(checks: tuple[Check, ...], *, project_key: str, observed_at: str) -> str:
+    """`document`, serialised deterministically -- sorted keys, so two runs over
+    the same checks produce identical bytes and a diff between runs is a diff
+    between deployments."""
+    return json.dumps(
+        document(checks, project_key=project_key, observed_at=observed_at),
+        indent=2,
+        sort_keys=True,
+    )
 
 
 def _tail(detail: str) -> str:

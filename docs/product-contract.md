@@ -336,6 +336,13 @@ These are not deferred. They are outside the product.
 - General-purpose ORM support beyond the endpoint contract in `DBX`.
 - Cross-project reporting or aggregation.
 
+What the first and last of those protect is **the surface a project serves**:
+nothing a project's users, agents or routes can reach may see another project,
+and no shared catalog sits in any request's path. An operator's read over the
+deployed documents already on a host's own disk — run as root at a terminal,
+holding no credential, served to nobody and read by nothing — is not that
+catalog, and ADR 0185 says where the line is.
+
 The agent constraint is the load-bearing one. An agent's reachable surface is
 exactly the set of capabilities enumerated in `capabilities.yaml`, each bound
 to one pre-existing operation with an approved shape. There is no path by

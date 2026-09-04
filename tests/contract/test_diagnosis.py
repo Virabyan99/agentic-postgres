@@ -244,6 +244,82 @@ def test_the_report_names_the_mount_it_measured() -> None:
 
 
 # ---------------------------------------------------------------------------
+# The document rendering (Session 17 Run 1, `FLEET-INV-001`)
+# ---------------------------------------------------------------------------
+
+#: A mixed set: one OK, one OK, one UNKNOWN -- so `worst` is not the first
+#: check's verdict and the exit code is the one an UNKNOWN forces.
+SAMPLE = (
+    diagnosis.tls(days_remaining=60, not_after="2026-12-31"),
+    diagnosis.migrations(applied=30, released=30),
+    diagnosis.archiver(failing=None, last_archived_time=None),
+)
+MOMENT = "2026-09-04T12:00:00Z"
+
+
+def test_the_document_carries_every_check_in_the_modules_own_vocabulary() -> None:
+    """A fleet inventory composes these, so a check dropped or a verdict
+    respelled would be invisible to it in exactly the way D600 describes."""
+    doc = diagnosis.document(SAMPLE, project_key="apg-k-dev", observed_at=MOMENT)
+    assert doc["project_key"] == "apg-k-dev"
+    assert doc["observed_at"] == MOMENT
+    assert [c["name"] for c in doc["checks"]] == [c.name for c in SAMPLE]
+    assert [c["verdict"] for c in doc["checks"]] == [c.verdict for c in SAMPLE]
+    assert [c["detail"] for c in doc["checks"]] == [c.detail for c in SAMPLE]
+    vocabulary = {diagnosis.OK, diagnosis.WARN, diagnosis.PROBLEM, diagnosis.UNKNOWN}
+    assert {c["verdict"] for c in doc["checks"]} <= vocabulary
+
+
+def test_the_documents_verdict_and_exit_code_are_the_text_reports() -> None:
+    """`worst` and `exit_code` in the document ARE the functions the command
+    exits through, so a consumer reading the document cannot reach a verdict
+    the per-project command would not have given -- and an UNKNOWN is not
+    quietly a pass there either."""
+    doc = diagnosis.document(SAMPLE, project_key="k", observed_at=MOMENT)
+    assert doc["worst"] == diagnosis.worst(SAMPLE) == diagnosis.UNKNOWN
+    assert doc["exit_code"] == diagnosis.exit_code(SAMPLE) == 6
+
+    healthy = SAMPLE[:2]
+    well = diagnosis.document(healthy, project_key="k", observed_at=MOMENT)
+    assert well["worst"] == diagnosis.OK
+    assert well["exit_code"] == 0
+
+
+def test_the_document_carries_the_evidence_the_verbose_report_prints() -> None:
+    """Same values, both renderings: the JSON is a machine's `--verbose`, and it
+    carries nothing the text would not show an operator."""
+    doc = diagnosis.document(SAMPLE, project_key="k", observed_at=MOMENT)
+    text = diagnosis.report(SAMPLE, project_key="k", verbose=True)
+    assert any(rendered["evidence"] for rendered in doc["checks"]), "no evidence at all"
+    for check, rendered in zip(SAMPLE, doc["checks"], strict=True):
+        assert rendered["evidence"] == dict(check.evidence)
+        for key, value in check.evidence:
+            assert f"{key} = {value}" in text
+
+
+def test_an_unmeasured_value_is_carried_as_null_and_the_verdict_stays_unknown() -> None:
+    """D600's rule in the document: a value nobody measured is the string the
+    module renders for None, beside a verdict that says it was not measured --
+    never a number that looks measured beside an ok."""
+    only = (diagnosis.archiver(failing=None, last_archived_time=None),)
+    doc = diagnosis.document(only, project_key="k", observed_at=MOMENT)
+    assert doc["checks"][0]["verdict"] == diagnosis.UNKNOWN
+    assert doc["checks"][0]["evidence"] == {"failing": "null", "last_archived_time": "null"}
+
+
+def test_render_json_round_trips_and_is_deterministic() -> None:
+    """Sorted keys, so two runs over the same checks are byte-identical and a
+    diff between two documents is a diff between two deployments."""
+    first = diagnosis.render_json(SAMPLE, project_key="k", observed_at=MOMENT)
+    second = diagnosis.render_json(SAMPLE, project_key="k", observed_at=MOMENT)
+    assert first == second
+    parsed = json.loads(first)
+    assert parsed == diagnosis.document(SAMPLE, project_key="k", observed_at=MOMENT)
+    assert list(parsed) == sorted(parsed), "top-level keys are not sorted"
+    assert first.count("\n") > 5, "not indented; a one-line document is not readable"
+
+
+# ---------------------------------------------------------------------------
 # Source-level, and labelled as such
 # ---------------------------------------------------------------------------
 

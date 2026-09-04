@@ -565,6 +565,10 @@ def test_commands_do_not_echo_a_planted_environment_variable() -> None:
     invocations = (
         ("bin/doctor.sh",),
         ("bin/doctor.sh", "--verbose"),
+        # Session 17's rendering. Unprivileged it stops at the root check, so
+        # this covers the shell half of the flag; the Python half is scanned
+        # in test_doctor_redaction over every rendering.
+        ("bin/doctor.sh", "--project", "apg-canary-dev", "--json"),
         ("bin/bootstrap-providers.sh",),
         ("bin/connect.sh",),
     )

@@ -24,7 +24,7 @@ decision.
 
 ---
 
-## 2. P0 — one unproved, two awaiting a witness
+## 2. P0 — one needs a rotation performed, three await a witness
 
 **`bootstrap_identity` is `not_run`, and what it needs is a ROTATION PERFORMED,
 not code** (D860). **The blocker was removed in Session 15 and the claim did not
@@ -67,8 +67,22 @@ proved. Neither may report `passed` on that alone — an offline half proves the
 documented path *resolves*, never that anybody walked it. Closing them needs a
 host that starts empty and a developer who did not build this.
 
-**`DEP-ISO-001` and `DEP-REMOVE-001` await one host trip.** Their proofs are
-written and dry-run clean against both deployed documents.
+**`DEP-ISO-001` is claimed (`isolation_matrix`) and has passed on every host
+gate since Session 12's trip.** This entry said for four sessions that it
+awaited a host trip, and the README said it was unclaimed (D954) — the D860
+shape in the other direction, finished work described as unfinished, which is
+the direction nobody chases.
+
+**`DEP-REMOVE-001` awaits a project actually removed.** Its proof reads
+`APG_REMOVED_PROJECT_FILE`, a record of the removed project's key and resource
+names captured *before* the removal, and asserts the survivor serves and holds
+its rows while nothing named for the removed key still runs. Only two projects
+exist and every two-project proof needs both, so closing it means a third
+project created for the purpose and retired; Session 17 plans exactly that
+(D953). What the removal surface does today is narrower than this ledger's
+warnings implied: `bootstrap-providers.sh --destroy` revokes the runtime
+identity and unlinks the credential files, and **every Infisical secret, the
+repository cipher pass included, stays in place** (D957).
 
 ---
 
