@@ -598,8 +598,9 @@ the point** — a dry-run recorded as a write would make every write count in th
 audit table a lie.
 
 Approval ships as a declaration and a named refusal (D870). Not a workflow.
-**Done.** ADR **0182**, migration **0030**, D923–D928. Twelve mutation arms,
-twelve killed, after two survivors that failed in **different** ways.
+**Done.** ADR **0182**, migration **0030**, D923–D928. **CI green on `7414840`,
+run `33850092626`.** Twelve mutation arms, twelve killed, after two survivors
+that failed in **different** ways.
 
 **What shipped.** A dry-run that **attempts the write and rolls it back**, so
 every `CHECK`, every policy and the compare-and-swap fire — inside a plpgsql
