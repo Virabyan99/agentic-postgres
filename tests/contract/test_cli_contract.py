@@ -52,6 +52,7 @@ SHELL_COMMANDS = (
     "bin/doctor.sh",
     "bin/edge.sh",
     "bin/edge-network.sh",
+    "bin/fleet.sh",
     "bin/lock-dev-deps.sh",
     "bin/lock-versions.sh",
     "bin/materialize-secrets.sh",
@@ -103,6 +104,7 @@ PYTHON_COMMANDS = (
     "bin/dev-token.py",
     "bin/docs.py",
     "bin/doctor.py",
+    "bin/fleet.py",
     "bin/materialize-secrets.py",
     "bin/mcp-contract.py",
     "bin/migrate.py",
@@ -569,6 +571,8 @@ def test_commands_do_not_echo_a_planted_environment_variable() -> None:
         # this covers the shell half of the flag; the Python half is scanned
         # in test_doctor_redaction over every rendering.
         ("bin/doctor.sh", "--project", "apg-canary-dev", "--json"),
+        ("bin/fleet.sh",),
+        ("bin/fleet.sh", "--json"),
         ("bin/bootstrap-providers.sh",),
         ("bin/connect.sh",),
     )

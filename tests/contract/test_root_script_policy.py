@@ -30,6 +30,7 @@ ROOT_COMMANDS = (
     "bin/docker-firewall.sh",
     "bin/edge.sh",
     "bin/edge-network.sh",
+    "bin/fleet.sh",
     "bin/materialize-secrets.sh",
     "bin/project-runtime.sh",
     "bin/postgres-bootstrap.sh",
@@ -39,6 +40,9 @@ ROOT_COMMANDS = (
 
 #: Commands that refuse to act without root, and the flag that triggers it.
 PRIVILEGED_INVOCATIONS = (
+    # Session 17: the inventory reads 0600 root documents and runs the doctor.
+    ("bin/fleet.sh", ()),
+    ("bin/fleet.sh", ("--json",)),
     ("bin/provision-host.sh", ("--host", "host.example.yaml", "--apply")),
     ("bin/provision-host.sh", ("--host", "host.example.yaml", "--check")),
     ("bin/edge.sh", ("--host", "host.example.yaml", "up")),

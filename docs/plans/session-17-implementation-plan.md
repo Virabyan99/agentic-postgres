@@ -60,8 +60,8 @@ claims wrongly, in the direction that makes work look undone.
 Six columns, the house shape. **Every row is a fact measured against the tree at
 `7282cc5` or against the deployment on 2026-09-04**, not a prediction.
 
-**Next free number after this table is D961.** D944–D958 were written at
-planning; D959 and D960 are Run 1's.
+**Next free number after this table is D963.** D944–D958 were written at
+planning; D959 and D960 are Run 1's; D961 and D962 are Run 2's.
 
 | # | The plan says | The repository does | Decision | Why | ADR |
 |---|---|---|---|---|---|
@@ -82,6 +82,8 @@ planning; D959 and D960 are Run 1's.
 | **D958** | Session 10's brief: *"Scheduled full and incremental backups."* | **No requirement registers the schedule.** The `REC-*` family is `PITR`, `SAFE`, `SMOKE`, `EVID`, `WAL`; the four units and D522's glob are proved by `test_backup_schedule.py` under no requirement id and no claim — which is why nothing ever asked whether they were installed (D944). | `FLEET-BACKUP-001` registers the schedule with a live half that reads `systemctl is-enabled` on the host for every permanent project. | D697's rule, *every registered requirement belongs to a claim*, has a converse this row is: **a proof under no requirement is reported by nothing**, and a schedule reported by nothing was never enabled. | — |
 | **D959** | This plan's §0 and D953: *"1949 MB available with two projects on a swapless host. Run 1 measures whether a third fits."* | **A third project fits, measured by ADR 0165's method as `op` with no root** (D765's walk over `/sys/fs/cgroup/system.slice/docker-*.scope/memory.stat`, labelled from each scope's first pid). Anonymous memory on 2026-09-04: **alpha-dev 348 MB, beta-dev 351 MB, the shared edge 31 MB, total 730 MB** across 22 scopes; `free -m` reports 1832 MB used and **1982 MB available** of 3814. The largest single holders are the two `uvicorn` services per project (66–94 MB each) and the collector (53–66 MB); PostgreSQL holds 18–19 MB anon plus ~19 MB shmem against its 768 MB cap. A third project at the measured ~350 MB leaves ~1.6 GB available before page cache. | **The trip creates the third project.** §9's first stop condition does not apply. The number is recorded here rather than in a memory file because it is a fact about this deployment on this day. | D767's point holds one session later: the caps in aggregate exceed the machine and nothing holds them, so `anon` is the figure and the caps are not a budget. What bounds the third project is what it *holds*, and that is ~350 MB. | 0165 |
 | **D960** | CLAUDE.md §2 and D766: *"18 containers, not 16"*. | **The machine runs 22.** Session 14 added the collector and the store to every project — `apg-diag containers` lists 10 per project, and the cgroup walk finds 20 project scopes plus `traefik` and `haproxy`. The handoff carried the Session 14 planning-time count for three sessions. | The handoff's number is corrected; `apg-diag containers` was right all along and needs no change. | The same shape as D766 in the other direction: a count written down once and read as current. A count in a handoff is a measurement with a date, and this one had lost its date. | — |
+| **D961** | This plan's Run 2: *"runs doctor's probes in-process per project."* | **In-process would make the inventory a second caller of every probe's internals** -- `probe_containers(key)`, `probe_repository(key, root)`, the document loader -- and Run 1 built `doctor.py --json` precisely so a consumer could compose the doctor's *document* instead of its functions (D947: "composes rather than parses"). | **`bin/fleet.py` runs `bin/doctor.py --project KEY --json --root ROOT` as a subprocess with the same interpreter and reads the document.** What the inventory reports as health is byte-for-byte what the operator's own command prints, and the doctor's redaction (ADR 0159) is inherited whole rather than re-asserted. `doctor.py` gained `--root` so the fixture-root contract test drives the real pipeline. | A seam built in Run 1 and bypassed in Run 2 would have been a declared reader with no reader (D816's shape), and two callers of one probe set is question 5 waiting to happen. The cost is one process per project, which on a host of three is nothing. | — |
+| **D962** | `FLEET-BACKUP-001`: the inventory *"reports a project whose timers are not enabled as `unscheduled`"* -- one state for "not enabled". | **`systemctl is-enabled` distinguishes three states, measured on the host as `op`:** an instance of a template that is **not installed** answers `not-found` and exits **4**; an instance of an installed template that nobody enabled answers `disabled` and exits **1**; an enabled instance answers `enabled` and exits **0**. `systemctl show` on the absent instance reports `LoadState=not-found` with an empty `UnitFileState`. | **`fleet.unit_state` classifies four ways** -- `enabled`, `disabled`, `absent`, `unknown` -- and `schedule` folds the first three to `scheduled`/`unscheduled` while an `unknown` timer makes the schedule `unknown` (not measured is not measured absent, ADR 0158). `absent` is kept apart from `disabled` because the repairs differ: `provision-host.sh --apply` installs, `enable` enables. | The deployment is in the `absent` state today (D944), and an inventory that folded it into `disabled` would send an operator to `systemctl enable`, which fails on a unit that does not exist. The vocabulary is measured, not typed (D674). | — |
 
 ---
 
@@ -195,6 +197,26 @@ commit message.
 - Battery: a project dropped from the loop, a value printed under the wrong key,
   a denial count read without the window, the timer state read from the
   document instead of systemd.
+
+**Done.** Measured first: `systemctl is-enabled` on the host answers
+`not-found`/4 for an instance of an uninstalled template, `disabled`/1 for an
+instance nobody enabled, `enabled`/0 otherwise (D962), so the inventory keeps
+`absent` apart from `disabled`. `src/agentic_postgres/fleet.py` composes a row
+from the document's identity and release, the doctor's JSON document (run as a
+subprocess, D961 — the plan said in-process), the two timers' states, and
+refusals by reason over a window read from the audit table over the socket;
+`bin/fleet.py` and `bin/fleet.sh` (root, `--json`, `--window`, `--root`)
+iterate the state root and print every value under its own key, writing
+nothing. `doctor.py` gained `--root` so the contract test drives the real
+pipeline against a fixture root of one valid, one invalid and one empty
+project. Twenty contract proofs in `test_fleet.py` including a poisoned-blocks
+redaction scan with its control and an mtime-diff *writes nothing* proof with
+its control; four live halves in `tests/deployment/test_session17_fleet.py`,
+written now (D938). Registered in `SHELL_COMMANDS`, `PYTHON_COMMANDS`,
+`ROOT_COMMANDS`, `PRIVILEGED_INVOCATIONS`, the environment-echo guard and
+`DEPLOYED_DOCUMENT_READERS` (which caught a read of the doctor's document under
+the name `document` — renamed, not exempted). Battery: ten arms, ten killed,
+control green in every arm; the arms are in the commit message.
 
 ### Run 3 — the lifecycle field, outputs v15, ADR 0186
 

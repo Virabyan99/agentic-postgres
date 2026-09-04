@@ -160,6 +160,8 @@ sudo bin/doctor.sh --project <key>            # containers, TLS, database, pool,
                                               # migrations, backups, WAL, disk
 sudo bin/doctor.sh --project <key> --verbose  # the numbers behind each verdict
 sudo bin/doctor.sh --project <key> --json     # the same verdicts as a document
+sudo bin/fleet.sh [--json] [--window HOURS]   # every project on this host: release,
+                                              # live health, backup timers, denials
 
 sudo bin/migrate.sh --project project.yaml status    # applied and pending
 sudo bin/backup.sh  --outputs <outputs.json> info --json

@@ -94,8 +94,10 @@ def run(
 # ---------------------------------------------------------------------------
 
 
-def load_document(project_key: str) -> dict[str, Any]:
-    path = deployed_output.deployed_path(project_key)
+def load_document(
+    project_key: str, root: Path = deployed_output.PROJECT_STATE_ROOT
+) -> dict[str, Any]:
+    path = deployed_output.deployed_path(project_key, root=root)
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -383,14 +385,16 @@ def probe_migrations(document: dict[str, Any]) -> diagnosis.Check:
     return diagnosis.migrations(applied=applied, released=released)
 
 
-def probe_repository(project_key: str) -> diagnosis.Check:
+def probe_repository(
+    project_key: str, root: Path = deployed_output.PROJECT_STATE_ROOT
+) -> diagnosis.Check:
     """`bin/backup.sh info --json`, and its STATE FIELD rather than its status.
 
     D548: `pgbackrest info` exits 0 for a stanza that does not exist. D145:
     `postgrest --ready` returns 0 while every request 404s. Two third parties,
     five sessions apart, one shape — the state was in a field both times.
     """
-    outputs = deployed_output.deployed_path(project_key)
+    outputs = deployed_output.deployed_path(project_key, root=root)
     info = run(str(REPO_ROOT / "bin" / "backup.sh"), "--outputs", str(outputs), "info", "--json")
     if info is None or not info.stdout.strip():
         return diagnosis.repository(status=None, last_full_backup_at=None)
@@ -478,14 +482,16 @@ def _first_int(text: str) -> int | None:
 # ---------------------------------------------------------------------------
 
 
-def diagnose(project_key: str) -> tuple[diagnosis.Check, ...]:
-    document = load_document(project_key)
+def diagnose(
+    project_key: str, root: Path = deployed_output.PROJECT_STATE_ROOT
+) -> tuple[diagnosis.Check, ...]:
+    document = load_document(project_key, root)
     checks: list[diagnosis.Check] = [probe_containers(project_key)]
     checks.extend(probe_routes(document))
     checks.append(probe_tls(document))
     checks.append(probe_database(document))
     checks.append(probe_migrations(document))
-    checks.append(probe_repository(project_key))
+    checks.append(probe_repository(project_key, root))
     checks.append(probe_archiver(document))
     checks.append(probe_disk(document))
     return tuple(checks)
@@ -494,6 +500,10 @@ def diagnose(project_key: str) -> tuple[diagnosis.Check, ...]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--project", required=True)
+    # Where the deployed documents live. The host's root by default; a fleet
+    # inventory or a proof may point it elsewhere. It changes where the
+    # DOCUMENT is read from and nothing about what is probed.
+    parser.add_argument("--root", type=Path, default=deployed_output.PROJECT_STATE_ROOT)
     # Two renderings, never both: `--json` carries every check's evidence by
     # construction, so a `--verbose` beside it would be a flag that changes
     # nothing, which is D374's shape at the command line.
@@ -502,7 +512,7 @@ def main(argv: list[str] | None = None) -> int:
     rendering.add_argument("--json", action="store_true")
     arguments = parser.parse_args(argv)
 
-    checks = diagnose(arguments.project)
+    checks = diagnose(arguments.project, arguments.root)
     # The rendering flags reach the RENDERER and nothing else. There is no
     # verbose or json branch in any probe above, which is what keeps "a third
     # party's bytes are never printed" a property of the shape rather than a

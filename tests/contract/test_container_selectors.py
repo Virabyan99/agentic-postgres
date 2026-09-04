@@ -243,6 +243,7 @@ def test_the_selector_reads_the_project_name_from_the_document() -> None:
 DEPLOYED_DOCUMENT_READERS = (
     "bin/backup.py",
     "bin/doctor.py",
+    "bin/fleet.py",
     "bin/restore-test.py",
     "src/agentic_postgres/restore_drill.py",
     "src/agentic_postgres/backup_report.py",
