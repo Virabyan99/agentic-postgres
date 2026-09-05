@@ -160,8 +160,12 @@ def test_removing_one_project_leaves_the_other_whole(
 
     # And nothing of the removed project is still running. Read from the host
     # rather than from its document, which is gone.
-    result = sh("docker", "ps", "--format", "{{.Names}}")
-    survivors = [line for line in result.stdout.splitlines() if removed_key in line]
+    # `sh` returns stdout as text and fails the test itself on a bad exit; this
+    # line read it as a process object and was the first line of the proof
+    # never to have run (D982) -- the survivor's rows and routes above passed
+    # on the first execution, 2026-09-05, and the proof died here.
+    names = sh("docker", "ps", "--format", "{{.Names}}")
+    survivors = [line for line in names.splitlines() if removed_key in line]
     assert not survivors, (
         f"these containers are still running for the removed project {removed_key!r}: "
         f"{survivors}. The removal did not complete, so 'the other project is unaffected' "

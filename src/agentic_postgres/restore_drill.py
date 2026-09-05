@@ -147,7 +147,16 @@ RESTORE_EXIT_NO_BACKUP_SET = 75
 #: `pgbackrest info --output=json`, from which the backup's *type* is read. Two
 #: independent reads that have to agree, rather than one read and a convention
 #: about a trailing letter.
-_BACKUP_SET_LINE = re.compile(r"restore backup set (?P<label>[0-9]{8}-[0-9]{6}[FDI])\b")
+#:
+#: A label is `<stamp>F` for a full set and `<stamp>F_<stamp>D` or `<stamp>F_<stamp>I`
+#: for a differential or incremental, which names the full set it depends on
+#: (`pgbackrest info` on 2026-09-05: `20260904-102252F_20260905-034338I`).
+#: The first shape this parser met was the full one and the first scheduled
+#: incremental, the night it ran, made the newest set the second shape (D983):
+#: `[FDI]\b` stopped at the underscore and the drill reported a silent restore.
+_BACKUP_SET_LINE = re.compile(
+    r"restore backup set (?P<label>[0-9]{8}-[0-9]{6}F(?:_[0-9]{8}-[0-9]{6}[DI])?)\b"
+)
 
 
 @dataclass(frozen=True)

@@ -480,6 +480,29 @@ def test_the_backup_set_is_read_from_pgbackrests_own_line() -> None:
     assert restore_drill.parse_backup_set(output) == "20260825-104447F"
 
 
+def test_an_incremental_or_differential_set_is_read_whole() -> None:
+    """D983. The first scheduled incremental made beta's newest set
+    `20260904-102252F_20260905-034338I` (from `pgbackrest info`), and the host
+    gate's drill reported *"the restore did not name a backup set"*: the pattern
+    accepted one stamp and a letter and stopped at the underscore. The label
+    names the full set it depends on, so it is read whole, and the full-only
+    line still parses as the control. The last-letter convention stays out of
+    it: the type comes from `info`."""
+    incremental = (
+        "2026-09-05 14:36:10.001 P00   INFO: repo1: restore backup set "
+        "20260904-102252F_20260905-034338I, recovery will start at 2026-09-05 03:43:38\n"
+    )
+    assert restore_drill.parse_backup_set(incremental) == "20260904-102252F_20260905-034338I"
+    differential = "P00   INFO: repo1: restore backup set 20260904-102252F_20260906-020000D, x\n"
+    assert restore_drill.parse_backup_set(differential) == "20260904-102252F_20260906-020000D"
+    full = "P00   INFO: repo1: restore backup set 20260904-102252F, recovery will start\n"
+    assert restore_drill.parse_backup_set(full) == "20260904-102252F"
+    # Two stamps joined the wrong way round, or a bare dependent stamp, is not
+    # a label pgBackRest prints and must not be read as one.
+    with pytest.raises(restore_drill.DrillError, match="did not name a backup set"):
+        restore_drill.parse_backup_set("restore backup set _20260905-034338I, x")
+
+
 def test_a_silent_restore_fails_the_drill_rather_than_publishing_nothing() -> None:
     """The empty capture is the case that matters.
 
@@ -493,11 +516,15 @@ def test_a_silent_restore_fails_the_drill_rather_than_publishing_nothing() -> No
 
 
 def test_the_backup_type_comes_from_info_and_not_from_the_labels_last_letter() -> None:
+    # The incremental label is the shape pgBackRest prints (D983): the fixture
+    # used to say `20260825-110000I`, a shape that does not exist, and the parser
+    # agreed with it.
     backups = [
         {"label": "20260825-104447F", "type": "full"},
-        {"label": "20260825-110000I", "type": "incr"},
+        {"label": "20260825-104447F_20260826-110000I", "type": "incr"},
     ]
     assert restore_drill.backup_set_type(backups, "20260825-104447F") == "full"
+    assert restore_drill.backup_set_type(backups, "20260825-104447F_20260826-110000I") == "incr"
     with pytest.raises(restore_drill.DrillError, match="does not list a backup set"):
         restore_drill.backup_set_type(backups, "20260825-999999F")
 
