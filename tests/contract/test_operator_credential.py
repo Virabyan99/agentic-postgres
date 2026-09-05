@@ -124,6 +124,64 @@ def test_the_control_plane_authenticates_rather_than_sending_the_credential(boot
     source = (REPO_ROOT / "bin" / "bootstrap-providers.py").read_text(encoding="utf-8")
     assert "universal-auth/login" in source
     assert "ControlPlane.login(" in source, "apply still constructs a client from the raw file"
+    # D981: one call in the whole file was enough to pass this, and apply
+    # supplied it while destroy kept reading the file as the token. Every
+    # function that takes the credential file must exchange it.
+    assert source.count("ControlPlane.login(") >= 2, "only one caller authenticates (D981)"
+    assert "ControlPlane(host" not in source, "a client is still built from the raw file"
+
+
+def test_destroy_exchanges_the_credential_exactly_as_apply_does(
+    bootstrap, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D981, behavioural. The first real retirement stopped at its provider
+    step with *"the access token contains characters that cannot appear in an
+    HTTP header (length 101)"*: 36 + 64 + a newline -- the two-line credential
+    file, passed in whole as a bearer token. `--destroy` had not worked since
+    the login change and nothing had run it against a real provider. The fake
+    records what was authenticated with and what was revoked; the control is
+    that the client is never constructed directly from the file."""
+    credential = write(tmp_path, "0" * 36 + "\n" + "f" * 64 + "\n")
+    client_id_path = tmp_path / "infisical-client-id"
+    client_secret_path = tmp_path / "infisical-client-secret"
+    client_id_path.write_text("id\n", encoding="utf-8")
+    client_secret_path.write_text("secret\n", encoding="utf-8")
+    state_file = tmp_path / "bootstrap-state.json"
+    state_file.write_text("{}", encoding="utf-8")
+
+    calls: list[tuple[str, ...]] = []
+
+    class FakeControlPlane:
+        def __init__(self, *args: str) -> None:
+            calls.append(("constructed", *args))
+
+        @classmethod
+        def login(cls, api_url: str, client_id: str, client_secret: str) -> FakeControlPlane:
+            calls.append(("login", api_url, client_id, client_secret))
+            return cls.__new__(cls)
+
+        def revoke_identity(self, identity_id: str) -> None:
+            calls.append(("revoke", identity_id))
+
+    monkeypatch.setattr(bootstrap, "ControlPlane", FakeControlPlane)
+    monkeypatch.setattr(bootstrap, "state_path", lambda key: state_file)
+    state = {
+        "runtime_identity_id": "identity-1",
+        "infisical_project_id": "project-1",
+        "credential_files": {
+            "client_id_path": str(client_id_path),
+            "client_secret_path": str(client_secret_path),
+        },
+    }
+    host = {"infisical": {"api_url": "https://app.infisical.com"}}
+
+    assert bootstrap.destroy("fixture-alpha-dev", state, host, credential) == 0
+    assert calls == [
+        ("login", "https://app.infisical.com", "0" * 36, "f" * 64),
+        ("revoke", "identity-1"),
+    ], calls
+    assert not client_id_path.exists() and not client_secret_path.exists()
+    assert not state_file.exists()
 
 
 def test_no_failure_path_prints_a_traceback_through_the_credential(bootstrap) -> None:

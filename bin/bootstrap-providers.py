@@ -898,8 +898,19 @@ def destroy(
     if credential_file is None:
         fail(EXIT_INVALID, "--destroy requires --operator-credential-file")
 
-    token = credential_file.read_text(encoding="utf-8").strip()
-    control = ControlPlane(host["infisical"]["api_url"], token)
+    # Exactly as apply authenticates (D981): the file is a two-line Universal
+    # Auth credential exchanged once for a short-lived token. Until the first
+    # real retirement this function read the file as if it WERE the token --
+    # the login change reached apply and not here, and the proof of the change
+    # scanned the source for one call, which apply supplied.
+    try:
+        operator_id, operator_secret = read_operator_credential(credential_file)
+    except BootstrapStateError as exc:
+        fail(EXIT_PREREQUISITE, str(exc))
+    try:
+        control = ControlPlane.login(host["infisical"]["api_url"], operator_id, operator_secret)
+    except BootstrapStateError as exc:
+        fail(EXIT_PROVIDER, f"control-plane login failed: {exc}")
 
     identity_id = state["runtime_identity_id"]
     try:
