@@ -27,15 +27,30 @@ from __future__ import annotations
 
 import json
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 #: Requests are small and the host is remote; a hung call must not hang a boot.
 DEFAULT_TIMEOUT = 30.0
+
+#: An idempotent call -- a login, a read -- is attempted this many times before
+#: the failure is reported, and only for a TRANSIENT failure: a read timeout, or
+#: a 502/503/504 from the provider's edge. Measured on 2026-09-05 (D976): the
+#: first authenticated read after a login took 8.9 s on one project and came
+#: back 504 after 60 s on another, while every read after it took 0.4 s; a
+#: deploy makes twenty-two reads and one in four converged. A DNS failure, a
+#: 401 or a 404 is not transient and is raised on the first attempt: a 404 is
+#: the one status the materializer reads as "absent" and it must stay exact.
+RETRY_ATTEMPTS = 3
+#: Seconds slept before the second and third attempts.
+RETRY_BACKOFF_SECONDS = (1.0, 3.0)
+TRANSIENT_HTTP_STATUSES = frozenset({502, 503, 504})
 
 #: Sent so that a server-side log can attribute a call without identifying a
 #: project. It carries no project key and no host identity on purpose.
@@ -104,7 +119,13 @@ class InfisicalClient:
     and Session 2 needs exactly two operations.
     """
 
-    def __init__(self, api_url: str, *, timeout: float = DEFAULT_TIMEOUT) -> None:
+    def __init__(
+        self,
+        api_url: str,
+        *,
+        timeout: float = DEFAULT_TIMEOUT,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
         parsed = urllib.parse.urlparse(api_url)
         if parsed.scheme != "https":
             raise InfisicalError(
@@ -116,6 +137,7 @@ class InfisicalClient:
 
         self._base = api_url.rstrip("/")
         self._timeout = timeout
+        self._sleep = sleep
         self._token: str | None = None
         # Default verification, always. A client that could be told not to
         # verify is one call away from sending a credential to whatever
@@ -132,7 +154,14 @@ class InfisicalClient:
         body: dict[str, Any] | None = None,
         query: dict[str, str] | None = None,
         authenticated: bool = True,
+        idempotent: bool = False,
     ) -> dict[str, Any]:
+        """One call, retried only when ``idempotent`` and the failure is transient.
+
+        Opt-in per call site rather than by method: a login is a POST and is
+        safe to repeat, a destroy is a DELETE and is not, and the transport
+        cannot tell those apart by looking at the verb.
+        """
         url = f"{self._base}{path}"
         if query:
             url = f"{url}?{urllib.parse.urlencode(query)}"
@@ -148,21 +177,46 @@ class InfisicalClient:
                 raise InfisicalError("not authenticated; call login() first")
             request.add_header("Authorization", f"Bearer {self._token}")
 
-        try:
-            # S310: the scheme was asserted https in __init__ and the host is
-            # fixed for the client's lifetime; only the path varies here.
-            with urllib.request.urlopen(  # noqa: S310
-                request, timeout=self._timeout, context=self._context
-            ) as response:
-                payload = response.read()
-        except urllib.error.HTTPError as exc:
-            # The body is deliberately not included. On a failed auth call it
-            # can echo request fields, and this message reaches logs.
-            raise InfisicalError(
-                f"{method} {path} failed with HTTP {exc.code}", status=exc.code
-            ) from None
-        except urllib.error.URLError as exc:
-            raise InfisicalError(f"{method} {path} could not reach the API: {exc.reason}") from None
+        attempts = RETRY_ATTEMPTS if idempotent else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                # S310: the scheme was asserted https in __init__ and the host is
+                # fixed for the client's lifetime; only the path varies here.
+                with urllib.request.urlopen(  # noqa: S310
+                    request, timeout=self._timeout, context=self._context
+                ) as response:
+                    payload = response.read()
+                break
+            except urllib.error.HTTPError as exc:
+                if attempt < attempts and exc.code in TRANSIENT_HTTP_STATUSES:
+                    self._sleep(RETRY_BACKOFF_SECONDS[attempt - 1])
+                    continue
+                # The body is deliberately not included. On a failed auth call it
+                # can echo request fields, and this message reaches logs.
+                raise InfisicalError(
+                    f"{method} {path} failed with HTTP {exc.code}"
+                    + (f" after {attempt} attempts" if attempt > 1 else ""),
+                    status=exc.code,
+                ) from None
+            except urllib.error.URLError as exc:
+                if attempt < attempts and isinstance(exc.reason, TimeoutError):
+                    self._sleep(RETRY_BACKOFF_SECONDS[attempt - 1])
+                    continue
+                raise InfisicalError(
+                    f"{method} {path} could not reach the API: {exc.reason}"
+                ) from None
+            except TimeoutError:
+                # A read that timed out AFTER the connection: urllib raises the
+                # bare socket timeout here, not a URLError, and until D976 it
+                # escaped this client as a traceback the materializer never
+                # caught. Converted so ``status`` is None -- never "absent".
+                if attempt < attempts:
+                    self._sleep(RETRY_BACKOFF_SECONDS[attempt - 1])
+                    continue
+                raise InfisicalError(
+                    f"{method} {path} timed out after {self._timeout:g}s"
+                    + (f" on each of {attempt} attempts" if attempt > 1 else "")
+                ) from None
 
         try:
             return json.loads(payload)
@@ -185,6 +239,8 @@ class InfisicalClient:
                 "clientSecret": credential.client_secret,
             },
             authenticated=False,
+            # A repeated login mints another short-lived token and nothing else.
+            idempotent=True,
         )
         token = response.get("accessToken")
         if not isinstance(token, str) or not token:
@@ -222,6 +278,7 @@ class InfisicalClient:
                 "expandSecretReferences": "false",
                 "includeImports": "false",
             },
+            idempotent=True,
         )
         secret = response.get("secret") or {}
         value = secret.get("secretValue")

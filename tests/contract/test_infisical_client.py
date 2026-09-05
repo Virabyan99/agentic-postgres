@@ -66,7 +66,9 @@ def test_an_https_url_is_accepted() -> None:
 def test_there_is_no_way_to_disable_certificate_verification() -> None:
     """A client that could be told not to verify is one call from a leak."""
     signature = inspect.signature(InfisicalClient.__init__)
-    assert set(signature.parameters) == {"self", "api_url", "timeout"}
+    # `sleep` since D976: the retry's clock, injected so the proofs record it.
+    # A clock cannot disable verification; the set is still exact.
+    assert set(signature.parameters) == {"self", "api_url", "timeout", "sleep"}
 
     source = inspect.getsource(infisical_client)
     for escape in ("CERT_NONE", "check_hostname = False", "_create_unverified"):
@@ -248,3 +250,142 @@ def test_logout_drops_the_token() -> None:
     assert client.authenticated
     client.logout()
     assert not client.authenticated
+
+
+# ---------------------------------------------------------------------------
+# Transient failures on idempotent calls (D976, Session 17 Run 7)
+# ---------------------------------------------------------------------------
+#
+# Measured on the host on 2026-09-05: the first authenticated read after a login
+# took 8.9 s on one project and came back 504 after 60 s on another, while every
+# read after it took 0.4 s. A deploy reads twenty-two secrets and one attempt in
+# four converged. The bare socket timeout escaped the client as a traceback the
+# materializer never caught. These proofs pin the repair: a read or a login is
+# retried a bounded number of times on a timeout or a gateway status, a DELETE
+# or a 404 is not, and a timeout that exhausts its attempts is an InfisicalError
+# whose status is None -- never something a `required: false` reader could
+# mistake for absent.
+
+
+class _Responder:
+    """A fake urlopen that fails a scripted number of times, then answers."""
+
+    def __init__(self, failures: list[BaseException], payload: dict[str, object]) -> None:
+        self.failures = list(failures)
+        self.payload = payload
+        self.calls = 0
+
+    def __call__(self, *args: object, **kwargs: object) -> _Responder:
+        self.calls += 1
+        if self.failures:
+            raise self.failures.pop(0)
+        return self
+
+    def __enter__(self) -> _Responder:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return json.dumps(self.payload).encode()
+
+
+def _gateway_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        url="https://infisical.example.invalid/api/v3/secrets/raw/X",
+        code=code,
+        msg="upstream",
+        hdrs=None,  # type: ignore[arg-type]
+        fp=None,
+    )
+
+
+def _authenticated_client(sleeps: list[float]) -> InfisicalClient:
+    client = InfisicalClient("https://infisical.example.invalid", sleep=sleeps.append)
+    client._token = "in-memory-only"  # noqa: S105
+    return client
+
+
+def _read(client: InfisicalClient) -> str:
+    return client.read_secret(name="X", project_id="p", environment="dev", secret_path="/runtime")  # noqa: S106 -- a folder, not a credential
+
+
+def test_a_read_that_times_out_twice_then_answers_is_returned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responder = _Responder(
+        [TimeoutError("The read operation timed out"), TimeoutError("timed out")],
+        {"secret": {"secretValue": "v"}},
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    assert _read(_authenticated_client(sleeps)) == "v"
+    assert responder.calls == 3
+    assert sleeps == list(infisical_client.RETRY_BACKOFF_SECONDS), "backoff was not applied"
+
+
+def test_a_gateway_status_is_retried_and_a_timeout_wrapped_in_a_url_error_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responder = _Responder(
+        [_gateway_error(504), urllib.error.URLError(TimeoutError("timed out"))],
+        {"secret": {"secretValue": "v"}},
+    )
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    assert _read(_authenticated_client(sleeps)) == "v"
+    assert responder.calls == 3 and len(sleeps) == 2
+
+
+def test_a_read_that_times_out_every_time_is_an_infisical_error_with_no_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Before D976 this escaped as a bare TimeoutError traceback. And `status`
+    must be None: the materializer reads only a 404 as absent."""
+    responder = _Responder([TimeoutError("t")] * infisical_client.RETRY_ATTEMPTS, {})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    with pytest.raises(InfisicalError) as caught:
+        _read(_authenticated_client(sleeps))
+    assert caught.value.status is None
+    assert "timed out" in str(caught.value) and str(infisical_client.RETRY_ATTEMPTS) in str(
+        caught.value
+    )
+    assert responder.calls == infisical_client.RETRY_ATTEMPTS
+    assert len(sleeps) == infisical_client.RETRY_ATTEMPTS - 1
+
+
+def test_a_404_is_never_retried_because_absent_must_stay_exact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control for the retry: a status the materializer branches on
+    arrives on the first attempt, with no sleep, exactly as before."""
+    responder = _Responder([_gateway_error(404)], {"secret": {"secretValue": "v"}})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    with pytest.raises(InfisicalError) as caught:
+        _read(_authenticated_client(sleeps))
+    assert caught.value.status == 404
+    assert responder.calls == 1 and sleeps == []
+
+
+def test_a_non_idempotent_call_is_attempted_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A DELETE that timed out may or may not have happened; repeating it is
+    the caller's decision, never the transport's."""
+    responder = _Responder([TimeoutError("t")], {})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    client = _authenticated_client(sleeps)
+    with pytest.raises(InfisicalError):
+        client._request("DELETE", "/api/v1/identities/x")
+    assert responder.calls == 1 and sleeps == []
+
+
+def test_login_is_retried_on_a_transient_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    responder = _Responder([_gateway_error(503)], {"accessToken": "tok"})
+    monkeypatch.setattr(urllib.request, "urlopen", responder)
+    sleeps: list[float] = []
+    client = InfisicalClient("https://infisical.example.invalid", sleep=sleeps.append)
+    client.login(Credential(client_id="an-identity", client_secret=SENTINEL))
+    assert client.authenticated and responder.calls == 2 and len(sleeps) == 1
