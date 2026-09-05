@@ -251,3 +251,6 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0185](0185-an-operators-read-over-the-hosts-own-documents-is-not-a-cross-project-catalog.md) | An operator's read over the host's own documents is not a cross-project catalog | 17 | Accepted |
 | [0186](0186-permanent-is-what-every-earlier-manifest-meant-and-expiry-is-a-fact-an-operator-reads.md) | Permanent is what every earlier manifest meant, and expiry is a fact an operator reads | 17 | Accepted |
 | [0187](0187-a-retirement-removes-what-its-key-derives-and-never-a-backup.md) | A retirement removes what its key derives and its state records, on this host, and never a backup | 17 | Accepted |
+| [0188](0188-the-secondary-repository-is-a-mirror-of-the-primary-at-a-second-provider.md) | The secondary repository is a mirror of the primary, at a second provider, under the primary's key | 18 | Accepted |
+| [0189](0189-a-replacement-host-is-built-from-a-kit-that-names-every-secret-and-holds-none.md) | A replacement host is built from a kit that names every secret and holds none, and the bootstrap adopts by recorded id | 18 | Accepted |
+| [0190](0190-a-rehearsal-is-bounded-reversible-and-reads-a-detection-that-exists.md) | A rehearsal is bounded, reversible, and reads a detection that exists; the disk is never filled | 18 | Accepted |

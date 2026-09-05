@@ -64,8 +64,9 @@ runs its live proofs' `--setup-plan` before the trip.
 
 Six columns: the number, what the brief or the tree said, what was measured or
 read, what this plan does, why it matters, the ADR if one decides it. **Next
-free number after this table is D994**; Run 1 writes its measurements as rows
-from there.
+free number after this table is D1001.** D984–D993 were written at planning;
+D994–D1000 are Run 1's measurements, and they reversed Run 2's design (ADR
+0188).
 
 | D | Said | Measured or read | This plan | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -79,6 +80,13 @@ from there.
 | **D991** | D704: *"`1.0.0` at Session 18."* | **The compatibility rules a major version promises are the ones `docs/product-contract.md` has carried since Session 13** for manifest, migration, contract, capability and secret-format changes; a major version adds nothing to them except that the next breaking change to any of the five needs the next major. Session 18 itself bumps the project manifest (v4, `backup.secondary`) and the outputs document (v16, per-repository backup state), both additive with migrators, which the rules allow inside a major. | **Run 5 bumps to `1.0.0` and writes the one sentence the rules need**: what `1.x` may change and what needs `2.0`. No second version axis (D704). | A number that promises more than the rules behind it is D600's null. | — |
 | **D992** | *"The Stage 3 decision report written from actual evidence."* | **The evidence is `evidence/session-18.json`, the ledger, and the Stage 3 consolidated specification's premises checked against the tree on 2026-09-05** (no coordinator; Stage 2 is 13–18, not 13–24; a PostgreSQL 19 baseline the tree does not run; `apg dev` replicating from a database with no public port). None of that is in a document. | **Run 5 writes `docs/stage-3-decision-report.md`** from those three sources, with its numbers filled at the trip's close: what 1.0.0 measured, what stayed `not_run` and why, which of the Stage 3 spec's premises hold, and a recommendation on the template-or-control-plane question (`scope-closure.md` §6) that the report answers rather than restates. | A decision report written before the evidence is a plan; written after it is the thing the stage plan asked for. | — |
 | **D993** | `docs/backup-operations.md` and ADR 0147: *"everything is in one Cloudflare account … cross-account replication, a second provider and an offline copy are absent by decision."* | True on 2026-09-05, and the sentence is a limitation the second repository removes. `backup_state` in the deployed document is a deploy-time snapshot of ONE repository (D700). | **Outputs v16 carries `backup_state.repositories`, one entry per repository, each with the fields the single one has today**; the fleet inventory's backups line reads the secondary too; the document states the boundary as ADR 0188 draws it. | Every reader of `backup_state` is a reader that must move (question 5): `deployed_output`, `fleet`, `doctor`, the migrator, the schema, the matrix's classification. Run 2 lists them before changing one. | 0188 |
+| **D994** | This plan's D984 and Run 2 as first written: *"a second repository is rendered, not built: `repo2-*` in the rendered config"*, with Run 1 to measure *"what `archive_command` does when one of two repositories is unreachable"*. | **Two repositories in one configuration couple the primary to the secondary.** Rig 18 (two MinIO endpoints, distinct credentials, the project's own image, pgBackRest 2.59.1, PostgreSQL 18.4): with the secondary stopped, every `archive-push` failed as a whole -- `[104] … repo2: HostConnectError` -- although the primary answered; three segments waited as `.ready`; `backup --repo=1`, `backup` with no `--repo`, and `check` failed (`[082]` on the 60-second timeout, `[049]`). With `archive-async=y` the queue stopped at the first segment the secondary refused and drained only when it returned. With both endpoints up, a full with no `--repo` went to repo1 only (*"repo option not specified, defaulting to repo1"*) and archiving reached both. | **Run 2 does not render `repo2-*`.** ADR 0188 makes the secondary a mirror of the primary's bucket at the second provider, copied by a host unit; the archiver keeps one repository. | The obvious design was one that would have stalled production archiving on the first outage of a provider nobody had measured, and it was one measurement away from being rendered. The Stage 2 failure mode's mirror image: not re-implementing a third party, but assuming its semantics. | 0188 |
+| **D995** | Rig 18's fallback, written into this plan's §9: *"the secondary is written by scheduled `backup --repo=2` only, WAL goes to the primary alone."* | **A second pgBackRest configuration for the same stanza -- the secondary as its own `repo1`, asynchronous, its own spool and lock paths, pushed best-effort after the primary with `\|\| true` -- did not decouple them either, in two variants.** With pgBackRest's default 60-second `archive-timeout` and with `archive-timeout=5` on the secondary, the archiver completed no push at all while the secondary was down (`pg_stat_archiver` at `archived=0 failed=0` after 27 seconds and three switches) and the primary's backup failed `[082]`; when the secondary returned, its spool drained and both archives reached the same segment. A configuration written inside the file (`config-include-path=`) was ignored -- the option is command-line only -- which cost one rerun before the variant was measured at all. | **Not the design.** Recorded so the next reader does not spend a day on it; left as a question for a later pgBackRest. | Twice the rig could not make the primary's availability independent of the secondary's with the archiver in the loop, and the third attempt would have been the one deployed. The mirror keeps the archiver out of the loop altogether. | 0188 |
+| **D996** | The §9 fallback assumed `archive-push --repo=1`. | **`archive-push` has no `--repo` option in 2.59.1**: `[031]: option 'repo' not valid for command 'archive-push'`, from the postmaster's log after the container was started with it. | Recorded; the mirror needs no such option. | An option assumed from the shape of its siblings (`backup --repo`, `restore --repo` exist). Grep the third party's own reference before the plan names a flag. | — |
+| **D997** | `REC-SAFE-001`: *"the command never passes delta"*; this plan's Run 3: *"`restore.sh` refuses when the volume holds a cluster"*, priced as a refusal the product builds. | **The refusal is pgBackRest's own**: a restore into a directory holding a cluster exits **40** -- *"unable to restore to path '…/pgdata' because it contains files. HINT: try using --delta if this is what you intended."* -- and `--delta` overwrites it (exit 0). One earlier arm read exit 0 for the same case and was wrong: its target volume had been recreated empty by the rig between runs (D702's shape, an observation's accident). | **`restore.sh` still refuses before calling pgBackRest**, so the message is the product's, but the guard the invariant rests on is *never passes `--delta`*, which `REC-SAFE-001` already asserts and `REC-NODE-001` inherits. | A product refusal in front of a third party's refusal is not redundant when the third party's has an override flag; the product's job is to never hold the flag. | 0189 |
+| **D998** | D715: *"restore-to-new-host … using only the independent backup account"*; this plan's Run 6 step 5 assumed a restore *"from the secondary repository"* as a pgBackRest repository of its own. | **A copy of the primary's bucket restores.** `mc mirror --overwrite --remove` copied 1,978 objects to a bucket at the second endpoint in 4 seconds with the second endpoint's credential; a pgBackRest configuration naming the copy as its only repository, with the second credential and the PRIMARY's cipher pass, restored (`--type=immediate`, promoted) a cluster that answered with 9,000 of 9,000 rows. Earlier, the same shape against a real second repository restored 11,000 of 11,000 and, with `--type=default`, replayed the archived segments beyond the set. | **The mirror is a repository to a restore**, and the replacement host's configuration names it as `repo1`. | The whole of what the secondary must provide is *a bucket a restore can read with a credential the primary account cannot revoke*, and a copy is that. | 0188, 0189 |
+| **D999** | ADR 0152 §3 and the drill: a restore *"fails the drill rather than publishing a null"* when its output does not match; the doctor's `repository` check reads `pgbackrest info`'s status. | **An undecryptable repository looks like an empty one.** A restore with the wrong cipher pass exits **75** -- *"no backup set found to restore"* -- not a decryption error; `info` with the wrong pass would report the same absence. Measured as the control of two arms. | **The doctor's mirror check and `restore.sh` name the possibility**: *no backup set found -- the repository is empty OR the cipher pass is not this repository's* -- and the kit's `secrets.txt` says which pass a repository was written under. | D145's family at the cryptographic layer: the exit code says "nothing there" for two states with opposite remedies. | 0188 |
+| **D1000** | `repo1-retention-full` is one value the manifest declares; a mirror inherits whatever its source kept. | **Retention is per configuration**: with `retention-full=2` on the primary and `1` on the second repository, three fulls left two sets on the primary and one on the second, expired by each backup on its own repository. A mirror made with `--remove` follows the primary's expiry within one copy interval. | The mirror has no retention of its own; the manifest's `retain_full` governs both, and the document says so. | One value, one statement of it (D495) survives the second repository only because the second is a copy. | 0188 |
 
 ---
 
@@ -91,9 +99,9 @@ a claim (D697); the four new claims are `independent_repository`,
 
 | Requirement | Priority | What it states |
 |---|---|---|
-| `REC-REPO-001` | P0 | A project with a secondary repository archives every WAL segment to both repositories and holds the same backup sets in both; `backup.sh check` reports both, and a deploy fails when either is unreachable |
-| `REC-REPO-002` | P0 | The secondary repository has its own credential and its own cipher pass; the primary's credential is not sufficient to read it and the secondary's is not sufficient to read the primary |
-| `REC-REPO-003` | P0 | A restore from the secondary repository alone, with the primary's credential absent, produces a cluster the drill queries and answers from |
+| `REC-REPO-001` | P0 | A project with a mirror holds, at the second provider, every backup set and archived segment the last copy saw; the copy is a scheduled unit whose failure is a failed unit and a doctor check, and the deployed document publishes the last successful copy time (ADR 0188) |
+| `REC-REPO-002` | P0 | The mirror has its own credential at its own provider; the primary's credential cannot read it and the mirror's cannot read the primary; the archiver's configuration never names the mirror |
+| `REC-REPO-003` | P0 | A restore from the mirror alone, with the mirror's credential and the primary's cipher pass and the primary's credential absent, produces a cluster the drill queries and answers from; the wrong cipher pass is reported as *empty or undecryptable*, never as empty |
 | `REC-KIT-001` | P0 | `dr-kit.sh export` writes every artifact the node-loss runbook names and no secret value; `verify` refuses a kit missing any of them |
 | `REC-KIT-002` | P0 | `bootstrap-providers.sh --adopt` binds a host to the Infisical project the kit records BY ID, mints a fresh runtime identity, and refuses to look anything up by name |
 | `REC-NODE-001` | P0 | `restore.sh` restores a stanza into the project's own volume only when that volume holds no cluster, refuses otherwise, and never names the live volume of any other project |
@@ -161,24 +169,57 @@ are bounded, reversible, and read a detection that exists; the disk is never
 filled. Ledger rows D994+ for whatever the rig disagrees with. Nothing else
 changes in this run.
 
-### Run 2 — the second repository
+**Done.** Rig 18 on this workstation: two MinIO endpoints
+(`RELEASE.2025-09-07T16-13-09Z`) behind one self-signed certificate, distinct
+credentials and buckets, one cluster on the project's own image (PostgreSQL
+18.4, pgBackRest 2.59.1), one stanza; six arms, every one with a control, and
+the rig rebuilt twice for mistakes of its own (container names not matching the
+certificate; an include path pgBackRest honours only on the command line) and
+once for a WSL restart that emptied `/tmp`. **The design arm reversed Run 2**
+(D994–D996): two repositories in one configuration couple the primary's
+archiving and backups to the secondary's availability, asynchronous archiving
+does not decouple them, a second configuration for the same stanza does not
+either in two variants, and `archive-push` has no `--repo`. **The mirror
+works** (D998): the primary's bucket copied to the second endpoint in four
+seconds, restored from the copy alone with the second credential and the
+primary's cipher pass to every row, the wrong pass refused as *no backup set
+found* (D999). The non-empty-directory refusal is pgBackRest's own, error 40,
+overridable only by `--delta` (D997); retention is per configuration (D1000).
+ADRs 0188–0190 written and indexed; §2's `REC-REPO-*` rows and Run 2 rewritten
+to the mirror. No code changed. The rig is torn down; its scripts live in
+`~/rig18` on the workstation, not in the tree.
 
-Project manifest schema 4: `backup.secondary` (`enabled`, `endpoint`, `bucket`,
-`region`, `retain_full`), absent meaning none, forbidden below v4, with the v3
-manifests loading unchanged. `naming` derives the secondary bucket's default
-name (`apg-<key>-backup-2`) once. `rendering` emits `repo2-*` from `outputs` as
-it emits `repo1-*`. `secrets.required.yaml` gains `backup2_s3_access_key_id`,
-`backup2_s3_secret_access_key` (operator-supplied, `/backup`) and
-`pgbackrest_repo2_cipher_pass` (generated), rendered as `21-repo2-s3-key-
-secret.conf` and `31-repo2-cipher-pass.conf` for the postgres service; the
-secret-contract proofs cover them in both directions. Outputs v16:
-`backup_state.repositories`, a list with the fields today's single block has,
-`migrate_v15_to_v16` wrapping the single block as repository 1; **every reader
-of `backup_state` moves** -- `deployed_output`, `fleet`, `diagnosis`, the
-schema, the matrix's classification, and the ten hand-chained migrator tests
-(D965's grep). `backup.sh info|check|backup` accept `--repo N` and `check`
-reports both; `restore-test.sh` accepts `--repo`. Offline proofs for every
-piece; the live proofs of `REC-REPO-001..003` written and gated on the trip.
+### Run 2 — the mirror (rewritten after Run 1; ADR 0188)
+
+**First, one more measurement**: the mirror client against the deployment's
+real second provider (§0.1) -- `mc mirror` from a pinned `quay.io/minio/mc`
+image, the version recorded in `versions.in.yaml` like every other image --
+with a control that a deleted source object is removed at the copy only with
+`--remove`, and that the copy's listing equals the source's. If the second
+provider's S3 dialect fails the client, §9 applies.
+
+Then: project manifest schema 4 with `backup.mirror` (`enabled`, `endpoint`,
+`bucket`, `region`), absent meaning none, forbidden below v4, v3 manifests
+loading unchanged; `naming` derives the mirror bucket's default name
+(`apg-<key>-backup-mirror`) once. `secrets.required.yaml` gains
+`mirror_s3_access_key_id` and `mirror_s3_secret_access_key` (operator-supplied,
+`/backup`), consumed by the mirror container only, and the primary's existing
+backup credential gains that container as a second consumer -- both directions
+proved by the secret-contract module. **The archiver's configuration does not
+change.** A unit pair `agentic-postgres-backup-mirror@.service|.timer` runs
+`bin/backup.sh mirror` nightly after the incremental, in a container on the
+project's backup egress network (ADR 0147); `provision-host.sh` installs and
+checks them by the glob (D970). Outputs v16: `backup_state.mirror` (`enabled`,
+`bucket`, `last_copied_at`, `objects`, `status`) beside the primary's block,
+`migrate_v15_to_v16` filling `enabled: false`; **every reader of `backup_state`
+moves** -- `deployed_output`, `fleet`, `diagnosis`, the schema, the matrix's
+classification, the hand-chained migrator tests (D965's grep). The doctor gains
+a `mirror` check reading the unit's last success and the copy's timestamp,
+naming *empty or undecryptable* where pgBackRest says only *no backup set*
+(D999). `restore-test.sh` and `backup.sh info|check` accept `--from CONFIG`, a
+pgBackRest configuration naming one repository, which is how a mirror is read.
+Offline proofs for every piece; the live proofs of `REC-REPO-001..003` written
+and gated on the trip.
 
 ### Run 3 — the kit, adoption, `restore.sh`, the runbook
 
@@ -238,10 +279,10 @@ Then, in order, the operator at a terminal:
 
 1. The second account, bucket and key pair (§0.1); the two values into Infisical
    under `/backup` for alpha and beta; both manifests to schema 4 with
-   `backup.secondary`; materialize; deploy both (unredirected, D972); `check`
-   reports both repositories; first full backup to the secondary by hand, one
-   project at a time (~7 minutes each); the scheduled incrementals the next
-   morning land in both -- read from the journal and `info` (D973's method).
+   `backup.mirror`; materialize; deploy both (unredirected, D972); the mirror
+   units installed and enabled; the first copy by hand (`backup.sh mirror`),
+   one project at a time; the scheduled copy the next morning read from the
+   journal and the document (D973's method).
 2. `dr-kit.sh export` for both projects; the kit copied off the host to the
    workstation; `verify`.
 3. Rehearsals on the production host, one at a time, never during a backup:
@@ -290,7 +331,7 @@ stay so (D478).
 |---|---|---|
 | A restore never overwrites the active volume | `restore-test.sh` unchanged; `restore.sh` refuses a volume holding a cluster and runs on a replacement only | `REC-SAFE-001`, `REC-NODE-001` |
 | A deploy over a broken archiver fails | 6c's `check` covers every repository | `REC-REPO-001` |
-| One credential reaches one repository | Two key pairs, two buckets, two cipher passes | `REC-REPO-002` |
+| One credential reaches one repository | Two key pairs, two buckets, one cipher pass held off the host by name (ADR 0188) | `REC-REPO-002` |
 | No secret value leaves the host in a kit | The kit names, never holds; the sentinel scan | `REC-KIT-001` |
 | The bootstrap never adopts by name | `--adopt` takes an id and refuses a search | `REC-KIT-002` |
 | A rehearsal leaves nothing behind | Every scenario reverses; `--plan` mutates nothing | `OPS-REHEARSE-001` |
