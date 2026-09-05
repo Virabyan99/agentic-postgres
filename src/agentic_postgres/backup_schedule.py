@@ -43,9 +43,23 @@ __all__ = [
 PROVISION_HINT = "sudo bin/provision-host.sh --host host.yaml --apply"
 
 
-def units(key: str) -> dict[str, str]:
-    """The two timer instances for one project, by kind, derived once."""
-    return {kind: fleet.timer_unit(kind, key) for kind in fleet.TIMER_KINDS}
+def units(key: str, kinds: tuple[str, ...] = fleet.TIMER_KINDS) -> dict[str, str]:
+    """The timer instances for one project, by kind, derived once. ``kinds`` is
+    `fleet.timer_kinds`' answer for the project: two, or three with a mirror
+    (ADR 0188). The default is the two every backed-up project has."""
+    return {kind: fleet.timer_unit(kind, key) for kind in kinds}
+
+
+def _kinds(states: dict[str, str]) -> tuple[str, ...]:
+    """The kinds a states dict speaks for, in the timers' fixed order: the two
+    mandatory ones always, and any other the caller read (the mirror's)."""
+    return (*fleet.TIMER_KINDS, *(kind for kind in states if kind not in fleet.TIMER_KINDS))
+
+
+def _join(names: list[str]) -> str:
+    if len(names) <= 2:
+        return " and ".join(names)
+    return f"{', '.join(names[:-1])} and {names[-1]}"
 
 
 def enable_refusal(
@@ -53,24 +67,23 @@ def enable_refusal(
 ) -> str | None:
     """Why the timers may not be enabled yet, or None.
 
-    ``states`` maps a kind to a `fleet` unit state; ``repository_status`` is
-    `backup_report`'s vocabulary and ``last_full_backup_at`` its timestamp, both
-    from `info`'s summary. Absent units are refused before the repository is
-    consulted: the first refusal names the repair for the second state anyway.
+    ``states`` maps a kind to a `fleet` unit state -- every timer the project
+    has, so a mirrored project's third timer is refused and enabled with the
+    other two; ``repository_status`` is `backup_report`'s vocabulary and
+    ``last_full_backup_at`` its timestamp, both from `info`'s summary. Absent
+    units are refused before the repository is consulted: the first refusal
+    names the repair for the second state anyway.
     """
-    absent = sorted(kind for kind in fleet.TIMER_KINDS if states.get(kind) == fleet.ABSENT)
+    kinds = _kinds(states)
+    absent = [kind for kind in kinds if states.get(kind) == fleet.ABSENT]
     if absent:
         return (
-            f"the {' and '.join(absent)} timer unit file(s) are not installed on this host; "
+            f"the {_join(absent)} timer unit file(s) are not installed on this host; "
             f"install the units first: {PROVISION_HINT}"
         )
-    unknown = sorted(
-        kind for kind in fleet.TIMER_KINDS if states.get(kind, fleet.UNKNOWN) == fleet.UNKNOWN
-    )
+    unknown = [kind for kind in kinds if states.get(kind, fleet.UNKNOWN) == fleet.UNKNOWN]
     if unknown:
-        return (
-            f"systemd did not answer for the {' and '.join(unknown)} timer(s); nothing was enabled"
-        )
+        return f"systemd did not answer for the {_join(unknown)} timer(s); nothing was enabled"
     if repository_status != backup_report.STATUS_READY or not last_full_backup_at:
         return (
             f"the repository reports {repository_status or 'nothing'} and holds no full backup; "
@@ -82,10 +95,11 @@ def enable_refusal(
 
 def status_document(key: str, states: dict[str, str]) -> dict[str, object]:
     """The status as a document: the key, each timer's state, and the fold."""
+    kinds = _kinds(states)
     return {
         "project_key": key,
-        "timers": {kind: states.get(kind, fleet.UNKNOWN) for kind in fleet.TIMER_KINDS},
-        "units": units(key),
+        "timers": {kind: states.get(kind, fleet.UNKNOWN) for kind in kinds},
+        "units": units(key, kinds),
         "schedule": fleet.schedule(states),
     }
 
@@ -93,8 +107,8 @@ def status_document(key: str, states: dict[str, str]) -> dict[str, object]:
 def render_status(key: str, states: dict[str, str]) -> str:
     document = status_document(key, states)
     lines = [f"backup: {key} is {document['schedule']}"]
-    for kind in fleet.TIMER_KINDS:
-        lines.append(f"  {kind:<5} {document['timers'][kind]:<9} {document['units'][kind]}")
+    for kind in _kinds(states):
+        lines.append(f"  {kind:<6} {document['timers'][kind]:<9} {document['units'][kind]}")
     if document["schedule"] == fleet.UNSCHEDULED:
         if fleet.ABSENT in document["timers"].values():
             lines.append(f"  the unit files are not installed: {PROVISION_HINT}")

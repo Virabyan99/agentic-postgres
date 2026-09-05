@@ -73,6 +73,15 @@ ORIGINS = ("generated", "operator_supplied")
 #: The origin that no generator may run for.
 OPERATOR_SUPPLIED = "operator_supplied"
 
+#: The facilities a secret may belong to (ADR 0188). A secret with a facility
+#: exists for a project exactly when the project enables that facility, and is
+#: required by construction whenever it exists: the third state beside
+#: required and optional, because an optional secret cannot reach a container
+#: (Compose refuses a missing mount source) and a required-everywhere one
+#: would fail every project without the facility.
+FACILITY_BACKUP_MIRROR = "backup_mirror"
+FACILITIES = (FACILITY_BACKUP_MIRROR,)
+
 #: The `pgpass` template. Wildcards in all four match fields, deliberately: the
 #: alternative names a host, a port, a database and a role that `naming.py`
 #: already derives, which is a second derivation path inside a secret file and a
@@ -117,8 +126,18 @@ def load_secret_contract(path: Path) -> dict[str, Any]:
     return document
 
 
-def active_secrets(contract: dict[str, Any], session: int) -> list[dict[str, Any]]:
+def active_secrets(
+    contract: dict[str, Any], session: int, *, facilities: frozenset[str] | None = None
+) -> list[dict[str, Any]]:
     """Secrets live at ``session``: introduced by it, and not yet retired.
+
+    ``facilities`` is which facilities the project has (ADR 0188), from
+    `enabled_facilities`. Given, a secret that belongs to a facility the
+    project lacks is not returned; omitted, every live secret is -- the
+    DECLARED view, for the readers that ask what the contract holds rather
+    than what one project materializes. The four that write, mount, require or
+    publish for a project pass it: the materializer, the secret override, the
+    render's required names, and the deploy's credential check.
 
     ``introduced_in_session <= session < retired_in_session``, where an absent
     ``retired_in_session`` means "still live" -- which is every secret but one.
@@ -139,11 +158,45 @@ def active_secrets(contract: dict[str, Any], session: int) -> list[dict[str, Any
     generation must lose, and a project is not upgraded by this repository
     deciding that it should be.
     """
-    return [
+    live = [
         s
         for s in contract["secrets"]
         if s["introduced_in_session"] <= session < s.get("retired_in_session", session + 1)
     ]
+    if facilities is None:
+        return live
+    # A project's view: a facility-gated secret only with its facility, and a
+    # facility-gated CONSUMER of any secret likewise -- the mirror container's
+    # read of the primary's credential pair (ADR 0188), which an unmirrored
+    # project neither writes nor mounts. Copies, so the declared view stays as
+    # loaded.
+    selected: list[dict[str, Any]] = []
+    for secret in live:
+        if secret.get("facility") is not None and secret["facility"] not in facilities:
+            continue
+        consumers = [
+            c
+            for c in secret["consumers"]
+            if c.get("facility") is None or c["facility"] in facilities
+        ]
+        selected.append({**secret, "consumers": consumers})
+    return selected
+
+
+def enabled_facilities(document: dict[str, Any]) -> frozenset[str]:
+    """Which facilities a project has, read from its manifest or its rendered
+    document -- both carry `backup.mirror.enabled` at the same place, and a
+    manifest that omits the block has none (ADR 0188).
+
+    One reader of the fact, for every caller that decides what a project
+    materializes, mounts or requires. A second expression of "does this
+    project have a mirror" beside a materializer would be the two-authority
+    shape ADR 0002 forbids.
+    """
+    enabled: set[str] = set()
+    if config.backup_mirror_enabled(document):
+        enabled.add(FACILITY_BACKUP_MIRROR)
+    return frozenset(enabled)
 
 
 def secret_is_active(contract: dict[str, Any], name: str, session: int) -> bool:
@@ -439,6 +492,44 @@ def _validate_semantics(document: dict[str, Any]) -> None:
     for secret in secrets:
         _validate_consumers(secret)
         _validate_formats(secret)
+        _validate_facility(secret)
+
+
+def _validate_facility(secret: dict[str, Any]) -> None:
+    """A facility-gated secret is required by construction (ADR 0188).
+
+    `required: false` beside a facility would make the secret optional for the
+    projects that have the facility, which is the state
+    `test_every_optional_secret_is_root_plane` refuses for a compose consumer:
+    Compose does not start a service whose mount source is missing.
+    """
+    facility = secret.get("facility")
+    for consumer in secret["consumers"]:
+        gated = consumer.get("facility")
+        if gated is None:
+            continue
+        if gated not in FACILITIES:
+            raise ManifestError(
+                f"secret {secret['name']!r} has a consumer naming facility {gated!r}; "
+                f"known: {list(FACILITIES)}"
+            )
+        if facility is not None:
+            raise ManifestError(
+                f"secret {secret['name']!r} names facility {facility!r} and so does one of "
+                "its consumers: one statement of the fact, on the secret"
+            )
+    if facility is None:
+        return
+    if facility not in FACILITIES:
+        raise ManifestError(
+            f"secret {secret['name']!r} names facility {facility!r}; known: {list(FACILITIES)}"
+        )
+    if not secret["required"]:
+        raise ManifestError(
+            f"secret {secret['name']!r} belongs to facility {facility!r} and is declared "
+            "optional. A facility-gated secret is required whenever it exists at all: "
+            "absent for a project without the facility, required for one with it"
+        )
 
 
 def _validate_formats(secret: dict[str, Any]) -> None:
@@ -533,6 +624,8 @@ def _reject_duplicates(values: list[Any], what: str, why: str) -> None:
 
 __all__ = [
     "CONTAINER_SECRET_DIR",
+    "FACILITIES",
+    "FACILITY_BACKUP_MIRROR",
     "FORMATS",
     "OPERATOR_SUPPLIED",
     "ORIGINS",
@@ -546,6 +639,7 @@ __all__ = [
     "consumer_named",
     "consumers_of",
     "container_secret_path",
+    "enabled_facilities",
     "generation_directory",
     "granted_services",
     "is_operator_supplied",

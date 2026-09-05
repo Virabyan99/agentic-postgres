@@ -143,7 +143,10 @@ def resources_of(
         postgres_volume=naming.postgres_volume_name(key),
         store_volume=naming.store_volume_name(key),
         unit=f"agentic-postgres-project@{key}.service",
-        timers=tuple(fleet.timer_unit(kind, key) for kind in fleet.TIMER_KINDS),
+        # The project's own timers (ADR 0188): a mirrored project's third timer
+        # is disabled with the other two, or it would fire against a project
+        # whose containers and secrets a retirement has removed.
+        timers=tuple(fleet.timer_unit(kind, key) for kind in fleet.timer_kinds(document)),
         state_directory=state_root / key,
         secrets_directory=secret_root / key,
         rendered_directory=rendered_root / key,

@@ -285,6 +285,46 @@ services:
   # drift, the cluster answers "password authentication failed", which is the
   # one error nobody debugs by re-reading a manifest.
   #
+  # Session 18 (ADR 0188). The mirror client: the primary backup repository's
+  # bucket copied to a bucket at a second provider, run by
+  # `agentic-postgres-backup-mirror@.timer` through `bin/backup.sh mirror`,
+  # never by the archiver and never as a long-running service -- the `mirror`
+  # profile is started by `compose run` alone. On the backup egress network
+  # only (ADR 0147): it reaches two object stores and nothing on this host.
+  #
+  # Four secret files reach it through the runtime override, as every consumer
+  # in secrets.required.yaml does: the primary's credential pair (a second
+  # consumer of the archiver's two secrets) and the mirror's own pair. The five
+  # identifiers below are rendered for every project; the four that a project
+  # without a mirror renders EMPTY take the lax spelling (ADR 0062: unset is
+  # refused, empty is a value), because this service is then never started and
+  # `BACKUP_MIRROR_ENABLED=false` -- never empty, so strict -- is what the
+  # script reads first if it is.
+  backup-mirror:
+    build:
+      context: ./services/backup-mirror
+      args:
+        BASE_IMAGE: ${MC_IMAGE:?required}
+    platform: ${TARGET_PLATFORM:?required}
+    profiles: [mirror]
+    restart: "no"
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    user: "65532:65532"
+    environment:
+      BACKUP_MIRROR_ENABLED: ${BACKUP_MIRROR_ENABLED:?required}
+      BACKUP_MIRROR_SOURCE_ENDPOINT: ${BACKUP_MIRROR_SOURCE_ENDPOINT?required}
+      BACKUP_MIRROR_SOURCE_BUCKET: ${BACKUP_MIRROR_SOURCE_BUCKET?required}
+      BACKUP_MIRROR_ENDPOINT: ${BACKUP_MIRROR_ENDPOINT?required}
+      BACKUP_MIRROR_BUCKET: ${BACKUP_MIRROR_BUCKET?required}
+    networks:
+      - backup
+    labels:
+      apg.project.key: ${PROJECT_KEY:?required}
+      apg.environment: ${PROJECT_ENVIRONMENT:?required}
+
   # `exec` matters: without it dbmate runs as a child of the shell and the
   # container's exit status is the shell's. `"$@"` carries the subcommand
   # bin/migrate.sh appends, so this list is the whole of what can be run here.

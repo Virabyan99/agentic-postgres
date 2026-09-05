@@ -58,7 +58,7 @@ main() {
   case "${action}" in
     materialize|up|down|attach|detach|status) ;;
     "") usage >&2; die 2 "an action is required." ;;
-    backup-full|backup-incr) ;;
+    backup-full|backup-incr|backup-mirror) ;;
     *) usage >&2; die 2 "unknown action: ${action}" ;;
   esac
 
@@ -120,6 +120,12 @@ main() {
       "${ROOT_DIR}/bin/backup.sh" --outputs "${deployment}" check || exit $?
       exec "${ROOT_DIR}/bin/backup.sh" --outputs "${deployment}" \
         backup --type "${action#backup-}"
+      ;;
+    # Session 18 (ADR 0188): the copy to the second provider. No `check` first,
+    # because the copy reads the repository and never the cluster, and a copy
+    # of a repository whose archiver is broken is still the right copy to have.
+    backup-mirror)
+      exec "${ROOT_DIR}/bin/backup.sh" --outputs "${deployment}" mirror
       ;;
   esac
 }

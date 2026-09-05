@@ -53,11 +53,18 @@ Usage:
   sudo bin/backup.sh --outputs <outputs.json> expire
   sudo bin/backup.sh --outputs <outputs.json> schedule status [--json]
   sudo bin/backup.sh --outputs <outputs.json> schedule enable|disable
+  sudo bin/backup.sh --outputs <outputs.json> mirror
 
-`schedule` is the two systemd timers (weekly full, nightly incremental).
-`status` exits 0 only when both are enabled. `enable` refuses while the unit
-files are not installed -- that is provision-host.sh --apply's job -- and while
-the repository holds no full backup, because the first one is yours to take.
+`schedule` is the project's systemd timers (weekly full, nightly incremental,
+and the nightly mirror copy for a project whose manifest enables one).
+`status` exits 0 only when every one of them is enabled. `enable` refuses while
+the unit files are not installed -- that is provision-host.sh --apply's job --
+and while the repository holds no full backup, because the first one is yours
+to take.
+
+`mirror` copies the repository to the second provider (ADR 0188) and records
+the copy beside the deployed document. What the mirror timer runs; by hand it
+is the same copy.
 
 The repository is created and checked by the deploy itself (step 6c), so the
 first two verbs are here for diagnosis rather than for setup. What the deploy
@@ -125,12 +132,12 @@ main() {
   local argument
   for argument in "$@"; do
     case "${argument}" in
-      stanza-create | check | backup | info | expire | schedule)
+      stanza-create | check | backup | info | expire | schedule | mirror)
         [ -n "${verb}" ] || verb="${argument}"
         ;;
     esac
   done
-  [ -n "${verb}" ] || die 2 "unknown verb. One of: stanza-create check backup info expire schedule"
+  [ -n "${verb}" ] || die 2 "unknown verb. One of: stanza-create check backup info expire schedule mirror"
 
   # `expire` is the only verb that DESTROYS anything, and what it destroys is a
   # backup chain that may be the only copy of a database. `backup` writes and

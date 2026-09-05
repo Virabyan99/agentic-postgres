@@ -101,7 +101,12 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 15
+CURRENT_VERSION = 16
+
+#: What a document below version 16 means by carrying no mirror (ADR 0188):
+#: none. Like `PERMANENT_LIFECYCLE`, a constant with one possible value
+#: rather than an argument.
+NO_MIRROR: dict[str, Any] = {"enabled": False, "endpoint": None, "bucket": None, "region": None}
 
 #: What a document below version 15 means by carrying no lifecycle (ADR 0186).
 #: The one value in this module that is NOT an argument: it is not a fact the
@@ -301,7 +306,10 @@ def migrate_rendered(
     if detect_version(document) == 13:
         document = migrate_v13_to_v14(document, metrics_url=metrics_url)
 
-    return migrate_v14_to_v15(document)
+    if detect_version(document) == 14:
+        document = migrate_v14_to_v15(document)
+
+    return migrate_v15_to_v16(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1228,6 +1236,37 @@ def migrate_v14_to_v15(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def migrate_v15_to_v16(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 16 ``rendered`` document derived from a version 15 one.
+
+    Version 16 adds ``backup.mirror`` (ADR 0188): the identifiers of a copy of
+    the repository at a second provider. No document below 16 has one, because
+    the field did not exist, so this step -- like :func:`migrate_v14_to_v15` --
+    takes no argument: the one value it could add is `NO_MIRROR`, and a
+    document with a mirror exists only at version 16.
+    """
+    version = detect_version(document)
+    if version == 16:
+        raise MigrationError("document is already version 16; migration would be a no-op")
+    if version != 15:
+        raise MigrationError(f"only version 15 can be migrated to 16, got {version}")
+
+    require_kind(document, "rendered")
+
+    backup = document.get("backup")
+    if not isinstance(backup, dict) or "retain_full" not in backup:
+        raise MigrationError(
+            "backup carries no retain_full; this document was not written by this renderer"
+        )
+    if "mirror" in backup:
+        raise MigrationError("backup already carries a mirror; this is not a version 15 document")
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["backup"]["mirror"] = dict(NO_MIRROR)
+    migrated["schema_version"] = 16
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1242,6 +1281,7 @@ __all__ = [
     "BUDGET_MEMBERS",
     "CURRENT_VERSION",
     "HEALTH_ROUTE_PATH",
+    "NO_MIRROR",
     "PERMANENT_LIFECYCLE",
     "MigrationError",
     "detect_version",
@@ -1261,5 +1301,6 @@ __all__ = [
     "migrate_v12_to_v13",
     "migrate_v13_to_v14",
     "migrate_v14_to_v15",
+    "migrate_v15_to_v16",
     "require_kind",
 ]

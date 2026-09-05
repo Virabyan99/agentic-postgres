@@ -34,10 +34,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import access_policy, config
+from agentic_postgres import access_policy, backup_report, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -147,6 +147,12 @@ ROUTE_NOT_PUBLISHED: dict[str, Any] = {"status": "unavailable", "url": None}
 #: segment name pinning to the oldest stuck WAL while `failed_count` climbed
 #: 11/15/26 (D535), so a reader watching the name would see a steady value for
 #: the whole failure. The count is what moves, so the count is what is published.
+#: Version 16 (ADR 0188): what the deploy publishes about the mirror when it
+#: could not read the copy record -- and the shape every other mirror status
+#: shares, so a reader never meets an absent key. One definition, in the
+#: report module that builds the block; re-exported here for its readers.
+MIRROR_NOT_OBSERVED: dict[str, Any] = dict(backup_report.MIRROR_NOT_OBSERVED)
+
 BACKUP_NOT_OBSERVED: dict[str, Any] = {
     "status": "not_observed",
     "stanza_created": None,
@@ -155,6 +161,7 @@ BACKUP_NOT_OBSERVED: dict[str, Any] = {
     "latest_recoverable_time": None,
     "wal_archived_count": None,
     "wal_failed_count": None,
+    "mirror": dict(MIRROR_NOT_OBSERVED),
 }
 
 __all__ = [
@@ -170,6 +177,7 @@ __all__ = [
     "activated_login_roles",
     "build_deployed_document",
     "deployed_path",
+    "mirror_record_path",
     "published_route",
     "rendered_path",
     "validate_deployed_document",
@@ -179,6 +187,13 @@ __all__ = [
 
 def deployed_path(project_key: str, *, root: Path = PROJECT_STATE_ROOT) -> Path:
     return root / project_key / "outputs.json"
+
+
+def mirror_record_path(project_key: str, *, root: Path = PROJECT_STATE_ROOT) -> Path:
+    """The mirror's copy record, beside the deployed document (ADR 0188).
+    Derived here once for its one writer (`bin/backup.py mirror`) and its two
+    readers (the doctor, the deploy), so none of the three spells the path."""
+    return root / project_key / backup_report.MIRROR_RECORD_FILENAME
 
 
 def rendered_path(project_key: str, *, root: Path = RENDERED_ROOT) -> Path:

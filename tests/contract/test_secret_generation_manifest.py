@@ -142,10 +142,14 @@ def test_the_session_ten_backup_secrets_are_in_the_manifest(contract: dict[str, 
     """
     from agentic_postgres import config
 
+    # The project's view (ADR 0191), as the materializer builds it: this
+    # fixture has no mirror, so the credential pair's mirror consumer -- a raw
+    # file for uid 65532 -- is not in its generation. A manifest built from the
+    # declared view would record a consumer nothing wrote.
     document = secret_generation.build_manifest(
         project_key="fixture-alpha-dev",
         generation_id="0123456789abcdef",
-        secrets=secrets_contract.active_secrets(contract, 10),
+        secrets=secrets_contract.active_secrets(contract, 10, facilities=frozenset()),
     )
     by_name = {entry["name"]: entry for entry in document["secrets"]}
 

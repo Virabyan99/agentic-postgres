@@ -37,13 +37,15 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 
-from agentic_postgres import diagnosis
+from agentic_postgres import config, diagnosis
 
 __all__ = [
     "ABSENT",
+    "ALL_TIMER_KINDS",
     "DISABLED",
     "ENABLED",
     "EPHEMERAL",
+    "MIRROR_KIND",
     "PERMANENT",
     "SCHEDULED",
     "TIMER_KINDS",
@@ -58,12 +60,21 @@ __all__ = [
     "render_text",
     "row",
     "schedule",
+    "timer_kinds",
     "timer_unit",
     "unit_state",
 ]
 
-#: The two backup timers a project has, by the kind of backup each takes.
+#: The two backup timers EVERY project with backups has, by the kind of backup
+#: each takes. A project's own list is `timer_kinds`, which adds the mirror.
 TIMER_KINDS = ("full", "incr")
+
+#: The third timer, for a project whose manifest enables a mirror (ADR 0188):
+#: the nightly copy of the repository to the second provider. Not in
+#: `TIMER_KINDS` because a project without a mirror must not be `unscheduled`
+#: for lacking a timer it was never meant to have.
+MIRROR_KIND = "mirror"
+ALL_TIMER_KINDS = (*TIMER_KINDS, MIRROR_KIND)
 
 #: A unit file's state as this module classifies `systemctl is-enabled`'s
 #: answer. Measured on the host on 2026-09-04 (D962): an instance of a template
@@ -95,9 +106,21 @@ def timer_unit(kind: str, key: str) -> str:
     """`agentic-postgres-backup-<kind>@<key>.timer` -- the instance name of the
     template unit `systemd/agentic-postgres-backup-<kind>@.timer`. Derived
     here once; `bin/backup.sh schedule` (Run 5) and the inventory both read it."""
-    if kind not in TIMER_KINDS:
-        raise ValueError(f"unknown timer kind {kind!r}; expected one of {TIMER_KINDS}")
+    if kind not in ALL_TIMER_KINDS:
+        raise ValueError(f"unknown timer kind {kind!r}; expected one of {ALL_TIMER_KINDS}")
     return f"agentic-postgres-backup-{kind}@{key}.timer"
+
+
+def timer_kinds(document: dict[str, object]) -> tuple[str, ...]:
+    """The timers THIS project has, read off its document (manifest or
+    rendered): the two every backed-up project has, and the mirror's when the
+    manifest enables one (ADR 0188). Every reader of a project's timers -- the
+    schedule verb, the inventory, the retirement plan -- asks this rather than
+    `TIMER_KINDS`, so a mirror timer left enabled by a retirement or unread by
+    the inventory cannot happen by one reader not moving (D600)."""
+    if config.backup_mirror_enabled(document):  # type: ignore[arg-type]
+        return ALL_TIMER_KINDS
+    return TIMER_KINDS
 
 
 def unit_state(returncode: int | None, stdout: str) -> str:
@@ -119,10 +142,17 @@ def unit_state(returncode: int | None, stdout: str) -> str:
 
 
 def schedule(states: dict[str, str]) -> str:
-    """A project is `scheduled` only when both timers are enabled. An unknown
-    timer makes the schedule unknown rather than unscheduled: not measured is
-    not the same as measured absent (ADR 0158)."""
-    values = [states.get(kind, UNKNOWN) for kind in TIMER_KINDS]
+    """A project is `scheduled` only when every timer it has is enabled. An
+    unknown timer makes the schedule unknown rather than unscheduled: not
+    measured is not the same as measured absent (ADR 0158).
+
+    ``states`` holds the project's timers -- `timer_kinds`' answer, read by the
+    caller -- so a mirror timer counts exactly when the project has a mirror.
+    The two mandatory kinds are consulted whether or not the caller supplied
+    them, because a states dict that omits `full` is a reading that did not
+    happen, never a project without a full backup timer."""
+    kinds = (*TIMER_KINDS, *(kind for kind in states if kind not in TIMER_KINDS))
+    values = [states.get(kind, UNKNOWN) for kind in kinds]
     if all(value == ENABLED for value in values):
         return SCHEDULED
     if any(value == UNKNOWN for value in values):
@@ -245,7 +275,10 @@ def row(
     project = document.get("project") or {}
     if not isinstance(project, dict):
         project = {}
-    states = {kind: timers.get(kind, UNKNOWN) for kind in TIMER_KINDS}
+    # The project's own timers (ADR 0188): three for a mirrored project, two
+    # otherwise. A reading the caller took for a timer the document does not
+    # declare is dropped rather than shown, and one it did not take is unknown.
+    states = {kind: timers.get(kind, UNKNOWN) for kind in timer_kinds(document)}
     last_full = last_full_backup_at(doctor)
     problems: list[str] = []
     if doctor is None:
@@ -346,7 +379,7 @@ def render_text(rows: tuple[Row, ...], *, observed_at: str, window_hours: int) -
         last = r.backups.get("last_full_backup_at") or "none"
         age = r.backups.get("age_days")
         age_text = f" ({age}d)" if age is not None else ""
-        timer_text = " ".join(f"{k}={timers.get(k)}" for k in TIMER_KINDS)  # type: ignore[union-attr]
+        timer_text = " ".join(f"{k}={v}" for k, v in timers.items())  # type: ignore[union-attr]
         lines.append(
             f"  {r.key}  backups  {r.backups.get('state'):<12} {timer_text}  "
             f"last full {last}{age_text}"

@@ -35,7 +35,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            15
+            16
           ]
         },
         "document_kind": {
@@ -318,7 +318,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            15
+            16
           ]
         },
         "document_kind": {
@@ -2005,7 +2005,8 @@
         "stanza",
         "repository_prefix",
         "bucket",
-        "retain_full"
+        "retain_full",
+        "mirror"
       ],
       "description": "The backup repository's identity and its one bound, version 13. ONE definition referenced from both branches, `storageSettings`' shape and for its measured reason (D389): a copy per branch is what let the two disagree, and STO-BOUND-001 read the deployed document for a bound that existed only on the rendered one. Every member here is derived or resolved by the deploy, so both branches carry the same values. `bucket` is a SEPARATE bucket from `storage.bucket` and that is ADR 0145 rather than a filing choice -- R2 scopes a token to buckets far more cleanly than to prefixes, so the isolation is a measured 403 rather than a policy sentence. `retain_full` is published whether or not backups are enabled, unlike the three identities beside it: it is a bound rather than a name, it was validated and read by NO code for nine sessions (D519), and nulling it would put 'the default is two chains' back where only source can answer it. What is NOT here is any observation -- see `backup_state`, which exists only on the deployed branch.",
       "properties": {
@@ -2038,6 +2039,98 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 12
+        },
+        "mirror": {
+          "$ref": "#/$defs/mirrorSettings"
+        }
+      }
+    },
+    "mirrorSettings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "endpoint",
+        "bucket",
+        "region"
+      ],
+      "description": "Version 16 (ADR 0188). The mirror's identifiers as rendered: the second provider's S3 hostname, the bucket there, and the region string. `enabled: false` with three nulls is what every manifest below version 4 says and what a version 15 document is migrated to. No credential and no cipher pass: the copy runs under the primary's pass, and the credential is two secret files.",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "endpoint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)+$"
+        },
+        "bucket": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 3,
+          "maxLength": 63
+        },
+        "region": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z0-9-]{2,32}$"
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "endpoint": {
+            "type": "null"
+          },
+          "bucket": {
+            "type": "null"
+          },
+          "region": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    "mirrorState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "last_copied_at",
+        "objects"
+      ],
+      "description": "Version 16 (ADR 0188). What the LAST SUCCESSFUL copy recorded, read at deploy time like the rest of `backup_state` (D700): `disabled` for a project with no mirror; `not_observed` when the deploy could not read the record; `never` when the mirror is enabled and no copy has succeeded; `copied` with the copy's time and object count otherwise. A failed copy is a failed unit and a doctor check, never a status here -- the record is written only on success (D1001).",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "not_observed",
+            "disabled",
+            "never",
+            "copied"
+          ]
+        },
+        "last_copied_at": {
+          "$ref": "#/$defs/nullableTimestamp"
+        },
+        "objects": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
         }
       }
     },
@@ -2051,7 +2144,8 @@
         "last_full_backup_at",
         "latest_recoverable_time",
         "wal_archived_count",
-        "wal_failed_count"
+        "wal_failed_count",
+        "mirror"
       ],
       "description": "What was READ from the repository and the archiver, version 13, deployed branch only. `not_observed` with every other member null is the honest state for a deployment nothing has asked yet, and it is the value this block carries until Run 6 writes an observer -- the discipline `database.observed` and `endpoint` already use, for the reason they use it: a zero would be indistinguishable from a real measurement that happened to be zero. `unconfigured` is backups disabled, or enabled with no repository credential in the active generation, which is D326's two-stage convergence and not a failed deploy. `wal_failed_count` is here and `last_failed_wal` is not, because measurement (rig1, D535) showed the count is the value that MOVES while the segment name pins to the oldest stuck one -- a reader watching the name would see a steady value throughout the failure. `latest_recoverable_time` is a PROVEN FLOOR and never the clock (D529, D550): `pgbackrest info` has no latest-recoverable-time field at all -- measured in rig 6, it carries per-backup epochs and WAL SEGMENT NAMES, and a segment name has no time in or beside it -- so what is published is the newest backup's stop time, the latest instant this deployment can PROVE is recoverable. WAL archived afterwards extends real recovery past it, so a drill landing later is the floor being a floor rather than a contradiction, which is why the evidence document records the ACHIEVED recovery point as a field of its own. `awaiting_first_backup` is the state of every project between its first Session 10 deploy and its first operator-run full backup: the stanza exists and nothing can be restored yet. It is not `ready`, it is not a failure, and it is emphatically not `unconfigured` -- that value means a MISSING CREDENTIAL and would send an operator hunting for a secret that is present and correct (ADR 0149).",
       "properties": {
@@ -2097,6 +2191,9 @@
             "null"
           ],
           "minimum": 0
+        },
+        "mirror": {
+          "$ref": "#/$defs/mirrorState"
         }
       },
       "if": {

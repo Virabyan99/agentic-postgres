@@ -61,8 +61,13 @@ MAX_MANIFEST_BYTES = 65_536
 #: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3})
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3})
+
+#: The project manifest version at which `backup.mirror` exists (ADR 0188):
+#: optional at 4, forbidden below. A manifest below 4 has no mirror, and the
+#: deployed document says `enabled: false` for it.
+PROJECT_MIRROR_FROM = 4
 
 #: The project manifest version at which `mcp.profile` exists (ADR 0183).
 PROJECT_PROFILE_FROM = 2
@@ -361,7 +366,58 @@ BACKUP_DEFAULTS: dict[str, Any] = {
     "account_id": None,
     "jurisdiction": "default",
     "retain_full": 2,
+    # Version 4 (ADR 0188). `None` is what every manifest below 4 says, and
+    # what a version 4 manifest says by omission: no mirror.
+    "mirror": None,
 }
+
+#: The mirror block resolved against its defaults (ADR 0188). `enabled: False`
+#: with three nulls is the shape of "no mirror" everywhere downstream, so a
+#: reader never has to ask whether the block is absent or disabled.
+MIRROR_DEFAULTS: dict[str, Any] = {
+    "enabled": False,
+    "endpoint": None,
+    "bucket": None,
+    "region": None,
+}
+
+#: A mirror endpoint is a hostname, never a URL: the scheme is always https
+#: and both the client and pgBackRest take a host. The schema states the same
+#: pattern; this copy exists so the semantic message can name the field.
+_MIRROR_ENDPOINT = re.compile(
+    r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?)+$"
+)
+_MIRROR_REGION = re.compile(r"^[a-z0-9-]{2,32}$")
+
+
+def backup_mirror(document: dict[str, Any]) -> dict[str, Any]:
+    """The project's mirror block, resolved: ``enabled`` and three fields.
+
+    A manifest below version 4 has no such block and this returns the
+    disabled shape; a version 4 manifest that omits it means the same. The
+    bucket is NOT derived here -- `naming.backup_mirror_bucket_name` does that,
+    once, and the rendered document carries the result (ADR 0002).
+    """
+    backup = {**BACKUP_DEFAULTS, **(document.get("backup") or {})}
+    declared = backup.get("mirror")
+    if not declared:
+        return dict(MIRROR_DEFAULTS)
+    return {**MIRROR_DEFAULTS, **declared}
+
+
+def backup_mirror_enabled(document: dict[str, Any]) -> bool:
+    """Does this project have a mirror? Backups on AND the mirror on (ADR 0188).
+
+    The one reader of the fact. A manifest and a rendered document carry the
+    block at the same place, so every caller that decides what a project
+    materializes, mounts, schedules or publishes asks this -- a second
+    expression beside a materializer would be the two-authority shape ADR
+    0002 forbids, and the reader that did not move is the defect this project
+    keeps producing (D600, D918).
+    """
+    backup = {**BACKUP_DEFAULTS, **(document.get("backup") or {})}
+    return bool(backup.get("enabled")) and bool(backup_mirror(document)["enabled"])
+
 
 #: The three secrets a repository needs before anything may touch it.
 #:
@@ -1453,6 +1509,39 @@ def _validate_backup(backup: dict[str, Any]) -> None:
             raise ManifestError(f"backup.bucket must be 3-63 characters: {bucket!r}")
         if not _R2_BUCKET.match(bucket):
             raise ManifestError(f"invalid R2 bucket name: {bucket!r}")
+
+    _validate_mirror({**MIRROR_DEFAULTS, **(backup.get("mirror") or {})})
+
+
+def _validate_mirror(mirror: dict[str, Any]) -> None:
+    """The mirror's own rules (ADR 0188), applied only when it is enabled.
+
+    The schema has already refused a mirror on a disabled backup and any
+    field on a disabled mirror; what is left is that an enabled mirror names
+    an endpoint and a region, because pgBackRest and the client both require
+    them and there is no `auto` outside Cloudflare.
+    """
+    if not mirror.get("enabled"):
+        return
+    endpoint = mirror.get("endpoint")
+    region = mirror.get("region")
+    bucket = mirror.get("bucket")
+    if not endpoint or not _MIRROR_ENDPOINT.match(endpoint):
+        raise ManifestError(
+            "backup.mirror is enabled, so backup.mirror.endpoint is required: the second "
+            "provider's S3 hostname, such as s3.eu-central-003.backblazeb2.com -- a host, "
+            f"never a URL. Got {endpoint!r}"
+        )
+    if not region or not _MIRROR_REGION.match(region):
+        raise ManifestError(
+            "backup.mirror is enabled, so backup.mirror.region is required: the region "
+            f"string the provider's S3 API expects, such as eu-central-003. Got {region!r}"
+        )
+    if bucket is not None:
+        if not 3 <= len(bucket) <= 63:
+            raise ManifestError(f"backup.mirror.bucket must be 3-63 characters: {bucket!r}")
+        if not _R2_BUCKET.match(bucket):
+            raise ManifestError(f"invalid backup.mirror.bucket: {bucket!r}")
 
 
 # ---------------------------------------------------------------------------

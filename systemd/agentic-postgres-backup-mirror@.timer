@@ -1,0 +1,19 @@
+[Unit]
+Description=Nightly backup mirror copy for Agentic Postgres project %i
+Documentation=file:/opt/agentic-postgres/releases/current/docs/backup-operations.md
+
+[Timer]
+# An hour after the nightly incremental's window (03:30 plus up to twenty
+# minutes of jitter, D973's reading of the first scheduled runs), so the copy
+# sees the night's backup set and its segments. A copy that runs before the
+# incremental lands is still a correct copy -- of yesterday -- and the next
+# one catches up; the offset is a preference, not a dependency.
+OnCalendar=*-*-* 04:30
+Persistent=true
+
+RandomizedDelaySec=20m
+
+Unit=agentic-postgres-backup-mirror@%i.service
+
+[Install]
+WantedBy=timers.target

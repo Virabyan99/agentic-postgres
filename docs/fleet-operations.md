@@ -32,7 +32,9 @@ under its project's key:
 A project whose document cannot be read is a row saying so; the other rows
 are still reported. A timer state is one of `enabled`, `disabled`, `absent`
 (the unit file was never installed) or `unknown`, and a project is
-`scheduled` only when both timers are enabled.
+`scheduled` only when every timer it has is enabled: the two backup timers,
+and the mirror's as well for a project whose manifest enables a mirror (ADR
+0188) — the row shows `mirror=` only for those.
 
 **It writes nothing.** No file under the state root, the runtime state, the
 checkout or your home directory changes when it runs, and that is proved on

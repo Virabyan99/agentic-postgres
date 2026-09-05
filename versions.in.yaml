@@ -31,6 +31,12 @@ compose:
 # mandatory when those images are built, before release.
 images:
   POSTGRES_IMAGE: docker.io/pgvector/pgvector:pg18
+  # Session 18 (ADR 0188). The mirror client, MinIO's `mc`, the base of
+  # services/backup-mirror. A release tag rather than a rolling one: measured
+  # against Backblaze B2 on 2026-09-05 at this exact release (D1001), and the
+  # digest below is that tag's manifest, verified with `docker buildx
+  # imagetools inspect` before it was written.
+  MC_IMAGE: quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z
   TRAEFIK_IMAGE: docker.io/library/traefik:v3.7
   # Session 2. Traefik never mounts the Docker socket; it reads the Docker
   # provider through this proxy over the host-scoped control network, with every

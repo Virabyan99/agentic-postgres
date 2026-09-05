@@ -25,7 +25,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from agentic_postgres import secret_override
-from agentic_postgres.secrets_contract import SECRET_ROOT, load_secret_contract
+from agentic_postgres.secrets_contract import (
+    SECRET_ROOT,
+    enabled_facilities,
+    load_secret_contract,
+)
 
 EXIT_INPUT = 2
 EXIT_PRECONDITION = 4
@@ -66,11 +70,19 @@ def main() -> int:
         fail(EXIT_PRECONDITION, f"no rendered directory at {arguments.rendered_dir}")
 
     contract = load_secret_contract(arguments.requirements)
+    # The project's facilities, from its rendered document in the same
+    # directory this override is written to (ADR 0188): a facility-gated
+    # secret is mounted only for a project that has the facility.
+    rendered = arguments.rendered_dir / "outputs.json"
+    if not rendered.is_file():
+        fail(EXIT_PRECONDITION, f"no rendered document at {rendered}")
+    facilities = enabled_facilities(json.loads(rendered.read_text(encoding="utf-8")))
     payload = secret_override.render_secret_override(
         project_key=arguments.project_key,
         generation_id=active_generation(arguments.project_key),
         contract=contract,
         session=arguments.session,
+        facilities=facilities,
     )
 
     destination = arguments.rendered_dir / secret_override.OVERRIDE_FILENAME

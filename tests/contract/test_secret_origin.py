@@ -288,7 +288,9 @@ def _run_fresh_bootstrap(tmp_path: Path, session: int) -> tuple[dict[str, str], 
     digest = "a" * 64
     manifest_digest = "b" * 64
     try:
-        module.apply("alpha-dev", None, digest, manifest_digest, host, credential, session)
+        module.apply(
+            "alpha-dev", None, digest, manifest_digest, host, credential, session, frozenset()
+        )
     except (SystemExit, PermissionError, OSError, ManifestError):
         pass
     return dict(_FakeControlPlane.written), documents
@@ -396,7 +398,7 @@ def test_plan_names_every_operator_supplied_secret_and_where_it_comes_from(
     module = bootstrap_module()
     module.state_path = lambda key: tmp_path / f"{key}.json"
 
-    module.describe_plan("alpha-dev", None, "digest", 7)
+    module.describe_plan("alpha-dev", None, "digest", 7, frozenset())
     printed = capsys.readouterr().out
 
     assert "create  secret value storage_service_password" in printed
@@ -424,7 +426,7 @@ def test_plan_at_session_six_says_nothing_about_storage(
     module = bootstrap_module()
     module.state_path = lambda key: tmp_path / f"{key}.json"
 
-    module.describe_plan("alpha-dev", None, "digest", 6)
+    module.describe_plan("alpha-dev", None, "digest", 6, frozenset())
     printed = capsys.readouterr().out
 
     assert "r2_access_key_id" not in printed

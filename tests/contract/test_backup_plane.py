@@ -22,6 +22,7 @@ from agentic_postgres import (
     REPO_ROOT,
     backup_report,
     config,
+    deployed_output,
     naming,
     output_migrations,
     secrets_contract,
@@ -384,6 +385,7 @@ def test_the_v12_step_reaches_a_document_that_validates(v12: dict[str, Any]) -> 
     # And the v15 step (ADR 0186): the tenth hand-chain, one module over from
     # the nine D965 records, found by CI rather than by the grep (D965).
     current = output_migrations.migrate_v14_to_v15(current)
+    current = output_migrations.migrate_v15_to_v16(current)
     assert current["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(current, "outputs.schema.json")
 
@@ -439,6 +441,10 @@ BACKUP_SECRETS = (
     "pgbackrest_repo_cipher_pass",
 )
 
+#: The two of the three the mirror container also reads (ADR 0188): the
+#: credential pair, never the cipher pass.
+MIRROR_READS = frozenset({"backup_r2_access_key_id", "backup_r2_secret_access_key"})
+
 
 @pytest.fixture(scope="module")
 def contract() -> dict[str, Any]:
@@ -458,8 +464,13 @@ def test_the_repository_credential_is_granted_to_postgres_and_to_nothing_else(
     by_name = {secret["name"]: secret for secret in contract["secrets"]}
     for name in BACKUP_SECRETS:
         consumers = secrets_contract.compose_consumers(by_name[name])
-        assert [c["service"] for c in consumers] == ["postgres"], (
-            f"{name} is granted to something other than postgres"
+        # ADR 0188 widened this allowlist to a measured set: the mirror
+        # container reads the primary repository with the archiver's credential
+        # PAIR, and never the cipher pass -- the objects it copies are already
+        # encrypted, and a copy of a repository needs no key to make.
+        expected = ["postgres", "backup-mirror"] if name in MIRROR_READS else ["postgres"]
+        assert [c["service"] for c in consumers] == expected, (
+            f"{name} is granted to {[c['service'] for c in consumers]}, expected {expected}"
         )
 
     postgres = {
@@ -489,6 +500,13 @@ def test_the_repository_files_are_owned_by_the_postgres_uid(contract: dict[str, 
     by_name = {secret["name"]: secret for secret in contract["secrets"]}
     for name in BACKUP_SECRETS:
         for consumer in secrets_contract.compose_consumers(by_name[name]):
+            if consumer["service"] == "backup-mirror":
+                # ADR 0188: the mirror container is a non-root client like
+                # every other service, and reads its two files as 65532.
+                assert (consumer["uid"], consumer["gid"]) == (65532, 65532), name
+                assert consumer["mode"] == "0400", name
+                assert consumer["format"] == "raw", name
+                continue
             assert (consumer["uid"], consumer["gid"]) == (999, 999), name
             assert consumer["mode"] == "0400", name
             # `pgbackrest` since Run 8b, and this replaces `format == "raw"`
@@ -657,7 +675,13 @@ def test_the_deploy_never_reports_ready_before_anything_reads_the_repository(
     assert state["status"] == expected
     assert state["status"] != "ready"
     for member, value in state.items():
-        if member != "status":
+        if member == "mirror":
+            # Version 16 (ADR 0188): the mirror is its own observation with its
+            # own `not_observed`, and nothing else in it may carry a value.
+            assert value == deployed_output.MIRROR_NOT_OBSERVED, (
+                f"mirror is {value!r} and nothing has been observed"
+            )
+        elif member != "status":
             assert value is None, f"{member} is {value!r} and nothing has been observed"
 
 

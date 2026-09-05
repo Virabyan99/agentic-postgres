@@ -239,6 +239,7 @@ def render(doctor: Any, *, mode: str) -> str:
     # `pgbackrest` failure names repository paths and S3 keys.
     checks.append(doctor.probe_repository("apg-canary-dev"))
     checks.append(doctor.probe_archiver(doc))
+    checks.append(doctor.probe_mirror("apg-canary-dev", doc))
     checks.append(doctor.probe_disk(doc))
     if mode == "json":
         return diagnosis.render_json(

@@ -160,7 +160,8 @@ def test_a_project_is_scheduled_only_when_both_timers_are_enabled() -> None:
 def test_the_timer_unit_is_the_templates_instance_name() -> None:
     """The template files are the authority for the name; this derives the
     instance from them once so Run 5's verb and the inventory agree."""
-    for kind in fleet.TIMER_KINDS:
+    assert fleet.ALL_TIMER_KINDS == (*fleet.TIMER_KINDS, fleet.MIRROR_KIND)
+    for kind in fleet.ALL_TIMER_KINDS:
         template = REPO_ROOT / "systemd" / f"agentic-postgres-backup-{kind}@.timer"
         assert template.is_file(), f"{template} is not the template this derives from"
         assert fleet.timer_unit(kind, "k-dev") == f"agentic-postgres-backup-{kind}@k-dev.timer"

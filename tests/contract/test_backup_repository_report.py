@@ -404,13 +404,17 @@ def test_the_command_runs_pgbackrest_as_the_postmasters_uid() -> None:
     # And it is the uid the secret contract materializes the backup files to,
     # rather than a literal that happens to match today.
     contract = yaml.safe_load((REPO_ROOT / "secrets.required.yaml").read_text("utf-8"))
+    # The postgres service's consumers: since ADR 0188 the credential pair has a
+    # second consumer, the mirror container, which runs as 65532 and is not
+    # pgBackRest; its ownership is `test_backup_plane`'s subject.
     consumers = [
         consumer
         for secret in contract["secrets"]
         for consumer in (secret.get("consumers") or [])
         if secret["name"].startswith(("backup_", "pgbackrest_"))
+        and consumer.get("service") == "postgres"
     ]
-    assert consumers, "no backup secrets declare a consumer"
+    assert consumers, "no backup secrets declare a postgres consumer"
     assert {str(consumer["uid"]) for consumer in consumers} == {module.POSTGRES_UID}, (
         "the uid pgBackRest runs as is not the uid its credential files are owned by; a "
         "0400 file owned 999 read by another uid is a repository authentication failure "

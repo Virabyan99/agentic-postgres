@@ -9,7 +9,7 @@
 # one rendered from project.example.yaml. See runbook §8 and
 # tests/contract/test_render_isolation.py.
 
-schema_version: 3
+schema_version: 4
 
 project:
   slug: fixture-alpine

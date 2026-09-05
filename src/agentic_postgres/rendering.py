@@ -288,6 +288,11 @@ def build_outputs(
     storage_enabled = bool(storage_settings["enabled"])
     backup_settings = {**config.BACKUP_DEFAULTS, **(project.get("backup") or {})}
     backup_enabled = bool(backup_settings["enabled"])
+    # Version 16 (ADR 0188). Resolved through `config.backup_mirror`, the one
+    # reader of the manifest's block, so a manifest below version 4 and a
+    # version 4 manifest that omits the block resolve to the same shape here.
+    mirror_settings = config.backup_mirror(project)
+    mirror_enabled = backup_enabled and bool(mirror_settings["enabled"])
 
     unavailable_endpoint = {
         "status": "unavailable",
@@ -330,10 +335,15 @@ def build_outputs(
         },
     }
 
+    # Filtered by the project's facilities (ADR 0188): a project without a
+    # mirror does not require the mirror's credential, and a rendered document
+    # that listed it would send an operator to paste a value nothing reads.
     required_secret_names = sorted(
         secret["name"]
         for secret in secrets_contract.active_secrets(
-            secrets_contract.load_secret_contract(SECRET_CONTRACT_PATH), RENDER_SESSION
+            secrets_contract.load_secret_contract(SECRET_CONTRACT_PATH),
+            RENDER_SESSION,
+            facilities=secrets_contract.enabled_facilities(project),
         )
     )
 
@@ -481,6 +491,17 @@ def build_outputs(
             # document must not name a repository for a facility that is off.
             "bucket": identity.backup_bucket,
             "retain_full": int(backup_settings["retain_full"]),
+            # Version 16 (ADR 0188). The mirror's identifiers, resolved here for
+            # the reason `retain_full` is: the copy unit, the doctor and the
+            # inventory all read this document and none of them re-derives a
+            # bucket name. `enabled: false` with three nulls is what a manifest
+            # below version 4 -- both host manifests -- says.
+            "mirror": {
+                "enabled": mirror_enabled,
+                "endpoint": mirror_settings["endpoint"] if mirror_enabled else None,
+                "bucket": identity.backup_mirror_bucket,
+                "region": mirror_settings["region"] if mirror_enabled else None,
+            },
         },
         "capabilities": {
             "enabled": sorted(
@@ -538,6 +559,16 @@ COMPOSE_ENV_KEYS: tuple[str, ...] = (
     "POSTGRES_ARCHIVE_MODE",
     "POSTGRES_ARCHIVE_COMMAND",
     "POSTGRES_ARCHIVE_TIMEOUT",
+    # Session 18 (ADR 0188). The mirror container's five identifiers, rendered
+    # for every project because `compose.yaml` interpolates them
+    # unconditionally in a service that only the `mirror` profile starts; a
+    # project without a mirror renders `false` and empty-but-present values the
+    # model does not mark strict. No credential: those are four secret files.
+    "BACKUP_MIRROR_ENABLED",
+    "BACKUP_MIRROR_SOURCE_ENDPOINT",
+    "BACKUP_MIRROR_SOURCE_BUCKET",
+    "BACKUP_MIRROR_ENDPOINT",
+    "BACKUP_MIRROR_BUCKET",
     "MIGRATIONS_TABLE",
     # The one role name that reaches a container. dbmate's connection URL is
     # assembled inside the migration container from this, the database name and
@@ -1383,6 +1414,42 @@ def build_alert_rules() -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
+def _mirror_settings(
+    identity: naming.ProjectIdentity, *, backup_settings: dict[str, Any]
+) -> dict[str, str]:
+    """The mirror container's five identifiers (ADR 0188), for every project.
+
+    The source endpoint is the primary repository's, derived by
+    `naming.storage_endpoint_url` from `backup.account_id` exactly as the
+    rendered `pgbackrest.conf` derives it -- one deriver, two readers -- and
+    reduced to a host because the client takes a host. A project without a
+    mirror renders `false` and empty values: the service that reads them is
+    started by the `mirror` profile alone, and `compose.yaml` marks none of
+    these strict, so an empty value is a value the model accepts (D178's rule
+    read the other way).
+    """
+    mirror = {**config.MIRROR_DEFAULTS, **(backup_settings.get("mirror") or {})}
+    enabled = bool(backup_settings.get("enabled")) and bool(mirror["enabled"])
+    if not enabled:
+        return {
+            "BACKUP_MIRROR_ENABLED": "false",
+            "BACKUP_MIRROR_SOURCE_ENDPOINT": "",
+            "BACKUP_MIRROR_SOURCE_BUCKET": "",
+            "BACKUP_MIRROR_ENDPOINT": "",
+            "BACKUP_MIRROR_BUCKET": "",
+        }
+    source = naming.storage_endpoint_url(
+        backup_settings["account_id"], backup_settings.get("jurisdiction", "default")
+    )
+    return {
+        "BACKUP_MIRROR_ENABLED": "true",
+        "BACKUP_MIRROR_SOURCE_ENDPOINT": source.removeprefix("https://"),
+        "BACKUP_MIRROR_SOURCE_BUCKET": identity.backup_bucket or "",
+        "BACKUP_MIRROR_ENDPOINT": str(mirror["endpoint"]),
+        "BACKUP_MIRROR_BUCKET": identity.backup_mirror_bucket or "",
+    }
+
+
 def _archive_settings(identity: naming.ProjectIdentity, *, backup_enabled: bool) -> dict[str, str]:
     """The three archiving variables, for an enabled project and a disabled one.
 
@@ -1499,6 +1566,7 @@ def build_compose_env(
         # the image never assembles one (ADR 0002, ADR 0106's rule applied to a
         # command line instead of a URL).
         **_archive_settings(identity, backup_enabled=backup_enabled),
+        **_mirror_settings(identity, backup_settings=backup_settings),
         "MIGRATIONS_TABLE": MIGRATIONS_TABLE,
         "MIGRATION_ROLE_NAME": identity.roles["migration_user"],
         "POSTGRES_SERVICE_HOST": POSTGRES_SERVICE_HOST,
@@ -2000,6 +2068,8 @@ def render_project(
         backup_stanza=project.get("backup", {}).get("stanza"),
         backup_repository_prefix=project.get("backup", {}).get("repository_prefix"),
         backup_bucket=project.get("backup", {}).get("bucket"),
+        backup_mirror_enabled=bool(config.backup_mirror(project)["enabled"]),
+        backup_mirror_bucket=config.backup_mirror(project)["bucket"],
     )
 
     digests = input_digests(project_path, capabilities_path)

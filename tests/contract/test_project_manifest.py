@@ -683,7 +683,7 @@ def test_version_three_requires_a_lifecycle_and_lower_versions_forbid_it(
     """ADR 0177's rule a third time. And the reading below the version: a
     manifest that says nothing means permanent, which is what the two host
     manifests -- both version 1 -- have always been."""
-    assert base["schema_version"] == 3
+    assert base["schema_version"] == max(config.SUPPORTED_PROJECT_SCHEMA_VERSIONS)
     assert check(tmp_path, copy.deepcopy(base))["project"]["lifecycle"] == {"kind": "permanent"}
 
     without = copy.deepcopy(base)
@@ -700,6 +700,122 @@ def test_version_three_requires_a_lifecycle_and_lower_versions_forbid_it(
     assert config.project_lifecycle(downgrade_to_two(base)) == {"kind": config.LIFECYCLE_PERMANENT}
     assert config.project_lifecycle(downgrade(base)) == {"kind": config.LIFECYCLE_PERMANENT}
     assert config.project_lifecycle(base) == {"kind": config.LIFECYCLE_PERMANENT}
+
+
+# ---------------------------------------------------------------------------
+# Version 4: the mirror (ADR 0188, Session 18 Run 2)
+# ---------------------------------------------------------------------------
+
+
+MIRROR = {
+    "enabled": True,
+    "endpoint": "s3.eu-central-003.backblazeb2.com",
+    "region": "eu-central-003",
+}
+
+
+def downgrade_to_three(document: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest at schema version 3: the mirror out."""
+    document = copy.deepcopy(document)
+    document["schema_version"] = 3
+    document["backup"].pop("mirror", None)
+    return document
+
+
+def test_version_four_admits_a_mirror_and_lower_versions_forbid_it(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """ADR 0177's rule a fourth time, with the one difference ADR 0188 states:
+    the field is OPTIONAL at 4, because a mirror is a facility a project may
+    not have, unlike a lifecycle every project has. Below 4 a manifest says
+    nothing and has none; at 4 it may say so."""
+    assert config.PROJECT_MIRROR_FROM == 4
+    assert config.backup_mirror(base) == config.MIRROR_DEFAULTS, "the example carries no mirror"
+
+    with_mirror = copy.deepcopy(base)
+    with_mirror["backup"]["mirror"] = dict(MIRROR)
+    loaded = check(tmp_path, with_mirror)
+    assert config.backup_mirror(loaded) == {**MIRROR, "bucket": None}
+
+    three = downgrade_to_three(with_mirror)
+    assert check(tmp_path, copy.deepcopy(three))["schema_version"] == 3
+    three["backup"]["mirror"] = dict(MIRROR)
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, three)
+
+    # And every reading below the version resolves to the disabled shape.
+    assert config.backup_mirror(downgrade_to_three(base)) == config.MIRROR_DEFAULTS
+    assert config.backup_mirror(downgrade(base)) == config.MIRROR_DEFAULTS
+
+
+def test_a_mirror_needs_backups_an_endpoint_and_a_region(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """A mirror of nothing is a typo, and an enabled mirror without the two
+    identifiers the client and pgBackRest both require fails at the first
+    copy instead of here -- which is where it should fail."""
+    disabled_backup = copy.deepcopy(base)
+    disabled_backup["backup"] = {"enabled": False, "mirror": dict(MIRROR)}
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, disabled_backup)
+
+    for missing in ("endpoint", "region"):
+        incomplete = copy.deepcopy(base)
+        incomplete["backup"]["mirror"] = {k: v for k, v in MIRROR.items() if k != missing}
+        with pytest.raises(config.ManifestError, match=f"backup.mirror.{missing}"):
+            check(tmp_path, incomplete)
+
+    url_not_host = copy.deepcopy(base)
+    url_not_host["backup"]["mirror"] = {**MIRROR, "endpoint": "https://s3.example.com"}
+    with pytest.raises(config.ManifestError, match="endpoint"):
+        check(tmp_path, url_not_host)
+
+    # A disabled mirror carries nothing, exactly like a disabled backup.
+    off_with_fields = copy.deepcopy(base)
+    off_with_fields["backup"]["mirror"] = {**MIRROR, "enabled": False}
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, off_with_fields)
+    off = copy.deepcopy(base)
+    off["backup"]["mirror"] = {"enabled": False}
+    assert config.backup_mirror(check(tmp_path, off)) == config.MIRROR_DEFAULTS
+
+
+def test_the_mirror_bucket_is_derived_once_and_an_override_is_verbatim(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """`naming.backup_mirror_bucket_name`, through the render's identity: the
+    derived name carries the namespace and the suffix; an override is used as
+    given, because a bucket at another provider is named by that provider's
+    rules (ADR 0188)."""
+    key = naming.project_key(base["project"]["slug"], base["project"]["environment"])
+    assert naming.backup_mirror_bucket_name(key) == f"apg-{key}-backup-mirror"
+    assert naming.backup_mirror_bucket_name(key, "alpha-dev") == "alpha-dev"
+
+    identity = naming.derive(
+        slug=base["project"]["slug"],
+        environment=base["project"]["environment"],
+        domain=base["project"]["domain"],
+        api_base_path=base["api"]["public_base_path"],
+        mcp_base_path=base["mcp"]["public_base_path"],
+        database_name=base["database"].get("name"),
+        backup_enabled=True,
+        backup_mirror_enabled=True,
+    )
+    assert identity.backup_mirror_bucket == f"apg-{key}-backup-mirror"
+    # And nothing without backups: a mirror of a disabled repository is None.
+    assert (
+        naming.derive(
+            slug=base["project"]["slug"],
+            environment=base["project"]["environment"],
+            domain=base["project"]["domain"],
+            api_base_path=base["api"]["public_base_path"],
+            mcp_base_path=base["mcp"]["public_base_path"],
+            database_name=base["database"].get("name"),
+            backup_enabled=False,
+            backup_mirror_enabled=True,
+        ).backup_mirror_bucket
+        is None
+    )
 
 
 def test_an_ephemeral_project_carries_an_expiry_and_a_permanent_one_may_not(

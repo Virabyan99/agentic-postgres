@@ -653,6 +653,21 @@ def storage_object_prefix(key: str, override: str | None = None) -> str:
     return override if override else f"objects/{key}/"
 
 
+def backup_mirror_bucket_name(key: str, override: str | None = None) -> str:
+    """The bucket at the second provider holding the repository's mirror (ADR 0188).
+
+    :func:`backup_bucket_name`'s rules, applied to a second bucket: the derived
+    name carries the ``apg-`` namespace and a ``-backup-mirror`` suffix; an
+    override is used verbatim and unprefixed, because a bucket at another
+    provider is named by that provider's rules, and Backblaze's names are
+    global rather than per account. Derived once, here, and read from the
+    rendered document by everything else (ADR 0002).
+    """
+    return r2_bucket(
+        override if override else f"apg-{key}-backup-mirror", context="r2_bucket_backup_mirror"
+    )
+
+
 def backup_bucket_name(key: str, override: str | None = None) -> str:
     """The R2 bucket holding a project's pgBackRest repository.
 
@@ -1061,6 +1076,9 @@ class ProjectIdentity:
     #: the stanza is: a rendered document must not name a repository for a
     #: facility that is off.
     backup_bucket: str | None = None
+    #: The mirror's bucket at the second provider (ADR 0188). `None` unless the
+    #: mirror is enabled, for the same reason.
+    backup_mirror_bucket: str | None = None
 
     generated_directory: str = ""
 
@@ -1080,6 +1098,8 @@ def derive(
     backup_stanza: str | None = None,
     backup_repository_prefix: str | None = None,
     backup_bucket: str | None = None,
+    backup_mirror_enabled: bool = False,
+    backup_mirror_bucket: str | None = None,
 ) -> ProjectIdentity:
     """Derive the complete identity set from validated manifest primitives.
 
@@ -1157,6 +1177,11 @@ def derive(
             else None
         ),
         backup_bucket=(backup_bucket_name(key, backup_bucket) if backup_enabled else None),
+        backup_mirror_bucket=(
+            backup_mirror_bucket_name(key, backup_mirror_bucket)
+            if backup_enabled and backup_mirror_enabled
+            else None
+        ),
         generated_directory=f".generated/{key}",
     )
 

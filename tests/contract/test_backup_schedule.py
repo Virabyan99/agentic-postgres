@@ -32,6 +32,9 @@ BACKUP_UNITS = (
     "agentic-postgres-backup-full@.timer",
     "agentic-postgres-backup-incr@.service",
     "agentic-postgres-backup-incr@.timer",
+    # Session 18 Run 2 (ADR 0188): the nightly copy to the second provider.
+    "agentic-postgres-backup-mirror@.service",
+    "agentic-postgres-backup-mirror@.timer",
 )
 
 
@@ -171,6 +174,7 @@ def test_the_timers_are_installed_but_not_enabled() -> None:
     [
         ("agentic-postgres-backup-full@.timer", "agentic-postgres-backup-full@%i.service"),
         ("agentic-postgres-backup-incr@.timer", "agentic-postgres-backup-incr@%i.service"),
+        ("agentic-postgres-backup-mirror@.timer", "agentic-postgres-backup-mirror@%i.service"),
     ],
 )
 def test_each_timer_names_its_own_service_and_a_schedule(timer: str, service: str) -> None:
@@ -204,6 +208,17 @@ def test_the_two_schedules_do_not_start_at_the_same_time() -> None:
         f"the two timers name the same time of day ({full!r} vs {incr!r}); the full "
         "runs weekly and the incremental daily, so they would collide every week"
     )
+    # The mirror (ADR 0188) copies what the backups wrote, so it must fire
+    # AFTER both and at neither's time of day: a copy taken during a backup
+    # copies a repository whose `backup.info` is being rewritten (D1001 is a
+    # pass that exits 1 with objects behind, and this is one way to cause it).
+    mirror = read_unit("agentic-postgres-backup-mirror@.timer")["Timer"]["OnCalendar"]
+    assert mirror.split()[-1] not in {full.split()[-1], incr.split()[-1]}, (
+        f"the mirror timer shares a time of day with a backup timer ({mirror!r})"
+    )
+    assert mirror.split()[-1] > incr.split()[-1] and mirror.split()[-1] > full.split()[-1], (
+        f"the mirror ({mirror!r}) fires before a backup it is meant to copy ({full!r}, {incr!r})"
+    )
 
 
 @pytest.mark.parametrize(
@@ -211,6 +226,7 @@ def test_the_two_schedules_do_not_start_at_the_same_time() -> None:
     [
         ("agentic-postgres-backup-full@.service", "backup-full"),
         ("agentic-postgres-backup-incr@.service", "backup-incr"),
+        ("agentic-postgres-backup-mirror@.service", "backup-mirror"),
     ],
 )
 def test_each_service_reaches_the_release_through_the_trampoline(service: str, action: str) -> None:
@@ -229,9 +245,9 @@ def test_each_service_reaches_the_release_through_the_trampoline(service: str, a
     # And the release's launcher actually knows the action, in both places it
     # has to: the validation case and the dispatch case.
     assert f"{action}" in LAUNCHER, f"the release launcher has no {action} action"
-    assert re.search(r"backup-full\|backup-incr\)", LAUNCHER), (
-        "the launcher's action validation does not admit the backup actions, so "
-        "every timer firing would exit 2 with 'unknown action'"
+    assert re.search(r"backup-full\|backup-incr\|backup-mirror\)", LAUNCHER), (
+        "the launcher's action validation does not admit the three backup actions, so "
+        "a timer firing would exit 2 with 'unknown action'"
     )
 
 

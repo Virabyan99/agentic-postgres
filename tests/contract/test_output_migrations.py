@@ -544,6 +544,7 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -703,7 +704,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 15"):
+    with pytest.raises(MigrationError, match="already version 16"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -960,6 +961,7 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1158,6 +1160,7 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1300,6 +1303,7 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1453,6 +1457,7 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1797,6 +1802,7 @@ def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1982,6 +1988,7 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2048,6 +2055,7 @@ def test_the_v9_fixture_is_a_real_render_at_version_9(v9_fixture: dict[str, Any]
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2186,6 +2194,7 @@ def test_the_v10_fixture_is_a_real_render_at_version_10(v10_fixture: dict[str, A
     assert migrated["schema_version"] == 13
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
+    migrated = output_migrations.migrate_v15_to_v16(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2352,23 +2361,32 @@ def v14(chained: dict[str, Any]) -> dict[str, Any]:
     downgrade, and checked first so a refusal below is the step's, not this."""
     document = json.loads(json.dumps(chained))
     document["project"].pop("lifecycle", None)
+    # Version 16 added `backup.mirror` after this fixture was written; a
+    # version 14 document carries neither.
+    document["backup"].pop("mirror", None)
     document["schema_version"] = 14
     return document
 
 
-def test_the_chain_ends_at_version_15_and_permanent(chained: dict[str, Any]) -> None:
-    """The premise of the `v14` fixture, as a test rather than inside the
-    fixture (D386): a mutation that made the chain end elsewhere must FAIL an
+def test_the_chain_ends_at_version_16_permanent_and_unmirrored(chained: dict[str, Any]) -> None:
+    """The premise of the `v14` and `v15` fixtures, as a test rather than inside
+    a fixture (D386): a mutation that made the chain end elsewhere must FAIL an
     assertion, not ERROR every test that shares the fixture."""
-    assert chained["schema_version"] == 15
+    assert chained["schema_version"] == 16
     assert chained["project"]["lifecycle"] == output_migrations.PERMANENT_LIFECYCLE
+    assert chained["backup"]["mirror"] == output_migrations.NO_MIRROR
 
 
 def test_v15_adds_the_lifecycle_and_nothing_else(v14: dict[str, Any]) -> None:
     migrated = output_migrations.migrate_v14_to_v15(v14)
     assert migrated["schema_version"] == 15
     assert migrated["project"]["lifecycle"] == {"kind": "permanent"}
-    config.validate_against_schema(migrated, "outputs.schema.json")
+    # The schema admits the current version only, so the document is carried
+    # one step further before it is validated; what version 15 added is
+    # asserted on the version 15 document itself, above.
+    config.validate_against_schema(
+        output_migrations.migrate_v15_to_v16(migrated), "outputs.schema.json"
+    )
 
     stripped = json.loads(json.dumps(migrated))
     del stripped["project"]["lifecycle"]
@@ -2395,9 +2413,90 @@ def test_v15_refuses_a_document_that_already_carries_it(v14: dict[str, Any]) -> 
         output_migrations.migrate_v14_to_v15(v14)
 
 
-def test_v15_refuses_a_current_document(chained: dict[str, Any]) -> None:
+def test_v15_refuses_a_document_already_at_15(v14: dict[str, Any]) -> None:
+    at_fifteen = output_migrations.migrate_v14_to_v15(v14)
     with pytest.raises(MigrationError, match="already version 15"):
-        output_migrations.migrate_v14_to_v15(chained)
+        output_migrations.migrate_v14_to_v15(at_fifteen)
+
+
+# ---------------------------------------------------------------------------
+# Version 16: the mirror (ADR 0188, Session 18 Run 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def v15(chained: dict[str, Any]) -> dict[str, Any]:
+    """A version 15 document, derived from the chain's current one by removing
+    what version 16 added. Its premise is asserted by
+    `test_the_chain_ends_at_version_16_permanent_and_unmirrored` (D386)."""
+    document = json.loads(json.dumps(chained))
+    document["backup"].pop("mirror", None)
+    document["schema_version"] = 15
+    return document
+
+
+def test_v16_adds_the_mirror_and_nothing_else(v15: dict[str, Any]) -> None:
+    migrated = output_migrations.migrate_v15_to_v16(v15)
+    assert migrated["schema_version"] == 16
+    assert migrated["backup"]["mirror"] == {
+        "enabled": False,
+        "endpoint": None,
+        "bucket": None,
+        "region": None,
+    }
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+    stripped = json.loads(json.dumps(migrated))
+    del stripped["backup"]["mirror"]
+    stripped["schema_version"] = 15
+    assert stripped == v15, "the step changed something other than what version 16 adds"
+
+
+def test_v16_takes_no_argument_because_no_earlier_document_has_a_mirror() -> None:
+    """The v15 step's reasoning, again: the one value this step could add is
+    `NO_MIRROR`, and a document WITH a mirror exists only at version 16."""
+    import inspect
+
+    parameters = inspect.signature(output_migrations.migrate_v15_to_v16).parameters
+    assert list(parameters) == ["document"]
+    assert output_migrations.NO_MIRROR == config.MIRROR_DEFAULTS
+
+
+def test_v16_refuses_a_document_that_already_carries_a_mirror(v15: dict[str, Any]) -> None:
+    v15["backup"]["mirror"] = {
+        "enabled": True,
+        "endpoint": "s3.eu-central-003.backblazeb2.com",
+        "bucket": "apg-x-backup-mirror",
+        "region": "eu-central-003",
+    }
+    with pytest.raises(MigrationError, match="already carries a mirror"):
+        output_migrations.migrate_v15_to_v16(v15)
+
+
+def test_v16_refuses_a_current_document(chained: dict[str, Any]) -> None:
+    with pytest.raises(MigrationError, match="already version 16"):
+        output_migrations.migrate_v15_to_v16(chained)
+
+
+def test_v16_refuses_a_deployed_document(v15: dict[str, Any]) -> None:
+    v15["document_kind"] = "deployed"
+    with pytest.raises(MigrationError):
+        output_migrations.migrate_v15_to_v16(v15)
+
+
+def test_v16_refuses_a_document_that_predates_version_15(v15: dict[str, Any]) -> None:
+    v15["schema_version"] = 14
+    with pytest.raises(MigrationError, match="only version 15"):
+        output_migrations.migrate_v15_to_v16(v15)
+
+
+def test_v16_refuses_a_document_with_no_backup_settings(v15: dict[str, Any]) -> None:
+    """A version 15 document always carries `backup.retain_full` (version 13);
+    one without it was not written by this renderer, and adding a mirror to it
+    would dress up an unknown document as a known one."""
+    v15["backup"] = {"enabled": False}
+    with pytest.raises(MigrationError, match="retain_full"):
+        output_migrations.migrate_v15_to_v16(v15)
 
 
 def test_v15_refuses_a_deployed_document(v14: dict[str, Any]) -> None:

@@ -37,6 +37,7 @@ from agentic_postgres.secrets_contract import (
     SECRET_ROOT,
     active_secrets,
     consumer_directory,
+    enabled_facilities,
     load_secret_contract,
     render_secret,
     secret_source_path,
@@ -130,7 +131,9 @@ def load_credential(key: str) -> Credential:
     )
 
 
-def plan(key: str, contract: dict[str, Any], session: int) -> int:
+def plan(
+    key: str, contract: dict[str, Any], session: int, facilities: frozenset[str] = frozenset()
+) -> int:
     """Report what would be written. Contacts nothing."""
     generation = "<new-generation>"
     print(f"project        {key}")
@@ -138,7 +141,7 @@ def plan(key: str, contract: dict[str, Any], session: int) -> int:
     print(f"generation     {generation}")
     print()
     files = 0
-    for secret in active_secrets(contract, session=session):
+    for secret in active_secrets(contract, session=session, facilities=facilities):
         for consumer in secret["consumers"]:
             destination = secret_source_path(key, generation, consumer)
             print(
@@ -150,12 +153,15 @@ def plan(key: str, contract: dict[str, Any], session: int) -> int:
     # The number a rotation has to reach, printed rather than counted in prose
     # (D108). The operator guide's rotation procedure is written against this
     # figure; a number in a document is a number that was right once.
-    print(f"{files} files would be written for {len(active_secrets(contract, session))} secrets.")
+    declared = len(active_secrets(contract, session, facilities=facilities))
+    print(f"{files} files would be written for {declared} secrets.")
     print("No provider was contacted and nothing was written.")
     return 0
 
 
-def materialize(key: str, contract: dict[str, Any], session: int) -> int:
+def materialize(
+    key: str, contract: dict[str, Any], session: int, facilities: frozenset[str] = frozenset()
+) -> int:
     project_root = Path(SECRET_ROOT) / key
     project_root.mkdir(parents=True, exist_ok=True)
     os.chmod(project_root, 0o700)
@@ -210,7 +216,10 @@ def materialize(key: str, contract: dict[str, Any], session: int) -> int:
         staging.mkdir(mode=0o700)
         os.chown(staging, 0, 0)
 
-        for secret in active_secrets(contract, session=session):
+        # Filtered by the project's facilities (ADR 0188): a secret that belongs
+        # to a facility this project lacks is neither fetched nor written, and
+        # one that belongs to a facility it has is required like any other.
+        for secret in active_secrets(contract, session=session, facilities=facilities):
             try:
                 value = client.read_secret(
                     name=secret["provider_key"],
@@ -315,8 +324,12 @@ def main(argv: list[str] | None = None) -> int:
     project = manifest["project"]
     key = derive_project_key(project["slug"], project["environment"])
 
+    # Which facilities this project has, read once from the manifest (ADR 0188);
+    # the same reader the render and the secret override use.
+    facilities = enabled_facilities(manifest)
+
     if arguments.plan:
-        return plan(key, contract, arguments.session)
+        return plan(key, contract, arguments.session, facilities)
 
     if os.geteuid() != 0:
         fail(EXIT_PREREQUISITE, "must run as root")
@@ -324,7 +337,7 @@ def main(argv: list[str] | None = None) -> int:
     # The project manifest's environment is deliberately not passed through: the
     # Infisical environment slug is a provider coordinate recorded by bootstrap,
     # and the two are not required to be the same string.
-    return materialize(key, contract, arguments.session)
+    return materialize(key, contract, arguments.session, facilities)
 
 
 if __name__ == "__main__":

@@ -155,6 +155,12 @@ REQUIRED_PATHS = (
     "systemd/agentic-postgres-backup-full@.timer",
     "systemd/agentic-postgres-backup-incr@.service",
     "systemd/agentic-postgres-backup-incr@.timer",
+    # Session 18 Run 2 (ADR 0188): the mirror's timer pair and the container
+    # that performs the copy.
+    "systemd/agentic-postgres-backup-mirror@.service",
+    "systemd/agentic-postgres-backup-mirror@.timer",
+    "services/backup-mirror/Dockerfile",
+    "services/backup-mirror/mirror.sh",
     "services/edge-probe/Dockerfile",
     "services/edge-probe/probe.py",
     "services/secret-check/Dockerfile",

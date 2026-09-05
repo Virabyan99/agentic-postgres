@@ -38,8 +38,10 @@ from agentic_postgres import (
     REPO_ROOT,
     access_broker,
     backup_report,
+    config,
     deployed_output,
     diagnosis,
+    fleet,
     migrations,
     naming,
     runtime_override,
@@ -443,6 +445,39 @@ def probe_archiver(document: dict[str, Any]) -> diagnosis.Check:
     )
 
 
+def probe_mirror(
+    project_key: str, document: dict[str, Any], root: Path = deployed_output.PROJECT_STATE_ROOT
+) -> diagnosis.Check:
+    """The mirror's copy record, read off disk rather than the document (ADR 0188).
+
+    The deployed document's `backup_state.mirror` is a deploy-time snapshot;
+    the record beside it is written by every completed copy, so it is the live
+    reading. An absent record on a mirrored project is `never`; a record that
+    does not parse is unknown, never zero objects.
+    """
+    enabled = config.backup_mirror_enabled(document)
+    if not enabled:
+        return diagnosis.mirror(enabled=False, status=None, last_copied_at=None, age_days=None)
+    path = deployed_output.mirror_record_path(project_key, root=root)
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        reading = backup_report.mirror_reading(enabled=True, record=None)
+    except OSError:
+        return diagnosis.mirror(enabled=True, status=None, last_copied_at=None, age_days=None)
+    else:
+        record = backup_report.parse_mirror_record(text)
+        if record is None:
+            return diagnosis.mirror(enabled=True, status=None, last_copied_at=None, age_days=None)
+        reading = backup_report.mirror_reading(enabled=True, record=record)
+    return diagnosis.mirror(
+        enabled=True,
+        status=reading["status"],
+        last_copied_at=reading["last_copied_at"],
+        age_days=fleet.age_days(reading["last_copied_at"], datetime.now(UTC)),
+    )
+
+
 def probe_disk(document: dict[str, Any]) -> diagnosis.Check:
     """PGDATA's size against the space free on the filesystem holding it.
 
@@ -493,6 +528,7 @@ def diagnose(
     checks.append(probe_migrations(document))
     checks.append(probe_repository(project_key, root))
     checks.append(probe_archiver(document))
+    checks.append(probe_mirror(project_key, document, root))
     checks.append(probe_disk(document))
     return tuple(checks)
 

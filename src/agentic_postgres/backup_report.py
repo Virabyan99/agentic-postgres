@@ -24,6 +24,7 @@ healthy repository for a stanza that does not exist, on every project, forever.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from typing import Any
 
@@ -315,4 +316,130 @@ def backup_state(summary: dict[str, Any], archiver: dict[str, Any] | None = None
         # resetting them would make the deploy a writer of the evidence it reads.
         "wal_archived_count": None if archiver is None else archiver["archived_count"],
         "wal_failed_count": None if archiver is None else archiver["failed_count"],
+        # Version 16 (ADR 0188). The mirror is a third source, folded in by
+        # `with_mirror` from the copy record the deploy reads; the repository's
+        # own report says nothing about it, so this block starts not observed.
+        "mirror": dict(MIRROR_NOT_OBSERVED),
     }
+
+
+#: What `backup_state.mirror` says when nothing read the copy record (ADR 0188).
+MIRROR_NOT_OBSERVED: dict[str, Any] = {
+    "status": "not_observed",
+    "last_copied_at": None,
+    "objects": None,
+}
+MIRROR_STATUS_DISABLED = "disabled"
+MIRROR_STATUS_NEVER = "never"
+MIRROR_STATUS_COPIED = "copied"
+
+#: The copy record, beside the deployed document in the project's state
+#: directory: written by `bin/backup.py mirror` on a completed copy and by
+#: nothing else, read by the doctor and the deploy. A copy that exits non-zero
+#: leaves the previous record in place, so the record always describes the
+#: newest COMPLETE copy (D1001: a pass may exit 1 with objects behind).
+MIRROR_RECORD_FILENAME = "mirror-state.json"
+
+
+def mirror_record(*, objects: int, copied_at: datetime) -> dict[str, Any]:
+    """What the verb writes: the status, when, and how many objects the mirror
+    bucket listed afterwards. Built here so the writer and the parser agree."""
+    if objects < 0:
+        raise ValueError("an object count cannot be negative")
+    return {
+        "status": MIRROR_STATUS_COPIED,
+        "last_copied_at": copied_at.astimezone(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "objects": objects,
+    }
+
+
+def parse_mirror_record(text: str) -> dict[str, Any] | None:
+    """The record read back, or None for anything that is not one.
+
+    None rather than a partial record: a file that says `copied` with no
+    timestamp is not a copy this module can vouch for, and a reader that
+    published the half it could parse would be D600's null that looks measured.
+    """
+    try:
+        loaded = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(loaded, dict) or loaded.get("status") != MIRROR_STATUS_COPIED:
+        return None
+    copied_at = loaded.get("last_copied_at")
+    objects = loaded.get("objects")
+    if not isinstance(copied_at, str) or not copied_at:
+        return None
+    if not isinstance(objects, int) or isinstance(objects, bool) or objects < 0:
+        return None
+    return {"status": MIRROR_STATUS_COPIED, "last_copied_at": copied_at, "objects": objects}
+
+
+def mirror_reading(*, enabled: bool, record: dict[str, Any] | None) -> dict[str, Any]:
+    """The mirror block for one project from the two facts a reader has: does
+    the manifest enable a mirror, and is there a copy record. `disabled` for a
+    project without one; `never` for one whose mirror has not yet completed a
+    copy; the record's `copied` otherwise."""
+    if not enabled:
+        return {"status": MIRROR_STATUS_DISABLED, "last_copied_at": None, "objects": None}
+    if record is None:
+        return {"status": MIRROR_STATUS_NEVER, "last_copied_at": None, "objects": None}
+    return {
+        "status": MIRROR_STATUS_COPIED,
+        "last_copied_at": record["last_copied_at"],
+        "objects": record["objects"],
+    }
+
+
+def count_listing(text: str) -> int | None:
+    """How many objects `mc ls --recursive --json` listed.
+
+    One JSON object per line -- measured on the pinned image (D1004): with
+    `--recursive` every line is `"type":"file"` and a prefix appears only as
+    part of a key; without it a prefix is its own `"type":"folder"` line. Only
+    files are counted, so the count is the same whichever form a caller
+    listed. The container image has no `wc`, so the host counts. None when a
+    line is not JSON: a listing this cannot read is not zero objects, and zero
+    is the count a restore would be planned against.
+    """
+    objects = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            return None
+        if not isinstance(entry, dict):
+            return None
+        if entry.get("type") == "file":
+            objects += 1
+    return objects
+
+
+def with_mirror(state: dict[str, Any], mirror: dict[str, Any] | None) -> dict[str, Any]:
+    """Fold the mirror's reading into a computed state block (ADR 0188).
+
+    ``mirror`` is the copy record `bin/backup.py mirror` writes on a successful
+    copy -- ``last_copied_at`` and ``objects`` -- or a status alone:
+    ``disabled`` for a project without a mirror, ``never`` for one whose mirror
+    has not yet completed a copy. None means nothing read it, and the block
+    stays `not_observed`: a failed copy is a failed unit and a doctor check,
+    never a status here, because the record is written only on success (D1001).
+    Like `with_archiver`, this never recomputes the repository's own status.
+    """
+    folded = dict(state)
+    if mirror is None:
+        folded["mirror"] = dict(MIRROR_NOT_OBSERVED)
+        return folded
+    status = str(mirror.get("status") or MIRROR_NOT_OBSERVED["status"])
+    copied = status == MIRROR_STATUS_COPIED
+    folded["mirror"] = {
+        "status": status,
+        "last_copied_at": mirror.get("last_copied_at") if copied else None,
+        "objects": mirror.get("objects") if copied else None,
+    }
+    return folded

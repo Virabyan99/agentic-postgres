@@ -267,6 +267,9 @@ BUILT_SERVICE_USERS = {
     "client-node-pg": "65532:65532",
     "client-psycopg": "65532:65532",
     "client-prisma": "65532:65532",
+    # Session 18 (ADR 0188): the mirror client, granted four secret files
+    # owned by this uid and nothing else.
+    "backup-mirror": "65532:65532",
 }
 
 #: Built services whose root filesystem is writable, and there is exactly one.
@@ -326,13 +329,18 @@ def test_postgres_joins_only_the_internal_network() -> None:
     )
 
 
-def test_the_backup_network_carries_the_database_and_nothing_else() -> None:
+def test_the_backup_network_carries_the_database_and_the_mirror_and_nothing_else() -> None:
     """ADR 0147's blast radius, stated as a membership rather than as prose.
 
-    The egress network exists for one command in one container. A second member
-    added later would widen what can reach the internet from inside a project,
-    and it would do so invisibly -- there is no other assertion anywhere that
-    counts who is on it.
+    The egress network exists for the repository's traffic. Until Session 18
+    that was one command in one container; ADR 0188 adds the second member,
+    the mirror client, which copies the repository's bucket to the second
+    provider and reaches nothing else -- it joins this network alone, and the
+    `mirror` profile starts it only when the timer fires. A third member would
+    widen what can reach the internet from inside a project, and it would do
+    so invisibly -- there is no other assertion anywhere that counts who is on
+    it. Replaced the two-line membership under ADR 0188, not weakened: the set
+    is still exact.
 
     `internal: true` is deliberately NOT set on it: that is the whole point of
     the network. The assertion is that it is absent, so that a future edit
@@ -346,7 +354,12 @@ def test_the_backup_network_carries_the_database_and_nothing_else() -> None:
         for name, service in document["services"].items()
         if "backup" in (service.get("networks") or [])
     )
-    assert members == ["postgres"], f"the egress network has other members: {members}"
+    assert members == ["backup-mirror", "postgres"], (
+        f"the egress network has other members: {members}"
+    )
+    assert document["services"]["backup-mirror"]["networks"] == ["backup"], (
+        "the mirror client joined a second network; it reaches the two buckets and nothing else"
+    )
     assert document["networks"]["backup"].get("internal") is not True, (
         "the backup network is marked internal, so it has no route off the host "
         "and archive-push cannot reach the repository. That is the state D516 "

@@ -156,6 +156,45 @@ is root-owned and every verb reaches a container over the local socket.
 | `backup --type full\|incr` | Take one. Retention is applied afterwards, from the config. |
 | `info [--json]` | What the repository reports. `--json` prints the block the deployed document is built from. |
 | `expire` | Apply retention now. Asks for confirmation; `--yes` for a scheduled sweep. |
+| `schedule status\|enable\|disable` | The project's timers (§4 of `docs/fleet-operations.md`). |
+| `mirror` | Copy the repository to the second provider and record the copy (ADR 0188). What the mirror timer runs; refused for a project whose manifest declares no mirror. |
+
+### The mirror (ADR 0188)
+
+A mirror is a copy of the repository's bucket at a second provider, made
+nightly by `agentic-postgres-backup-mirror@<key>.timer` (04:30, after both
+backup timers) in a container on the project's backup egress network. It is
+declared in the manifest at schema version 4:
+
+```yaml
+backup:
+  enabled: true
+  mirror:
+    enabled: true
+    endpoint: s3.eu-central-003.backblazeb2.com   # a host, never a URL
+    region: eu-central-003
+    # bucket: defaults to apg-<project-key>-backup-mirror
+```
+
+The copy is made with the primary's credential (read) and the mirror's own
+pair (`APG_MIRROR_S3_ACCESS_KEY_ID` / `APG_MIRROR_S3_SECRET_ACCESS_KEY` in the
+provider's `/backup` folder, operator-supplied like the primary's), under the
+primary's cipher pass: the objects are already encrypted, so a copy needs no
+key to make and the mirror's pair can decrypt nothing. **The archiver is never
+involved** — a mirror that is unreachable is a failed unit, never a cluster
+that stops archiving (D994).
+
+The copy record, `mirror-state.json` beside the deployed document, is written
+only after a pass that exits 0 and a listing that parses; a pass may exit
+non-zero with objects behind and the next pass completes it (D1001). The
+doctor's `backup mirror` check reads that record live: `never` while no copy
+has completed, a warning once the last copy is two days old. The deployed
+document's `backup_state.mirror` is the same reading at deploy time.
+
+**No mirror secret exists for a project without a mirror** (ADR 0191): the
+materializer, the secret override and the bootstrap all ask the manifest, so
+both host projects deploy unchanged and are not told to paste a pair nothing
+reads.
 
 **No verb names a bucket, a stanza, a repository prefix or a retention count.**
 All four are decided once and published (ADR 0002), so there is no flag here that
@@ -182,6 +221,12 @@ can sit behind an archiver that stopped an hour ago, and `pgbackrest info` repor
 | `ready` | A full backup exists and the archiver is not failing. |
 | `failing` | Either the repository is unhealthy, or **the most recent archive attempt failed**. |
 | `not_observed` | Nothing read the cluster. Not a verdict. |
+
+`backup_state.mirror` (version 16, ADR 0188) is a third source, read from the
+copy record on the host rather than from the repository: `disabled` for a
+project without a mirror, `never` while the mirror has not completed a copy,
+`copied` with `last_copied_at` and the object count the listing gave after it,
+`not_observed` when nothing read the record. It never changes `status`.
 
 **`wal_failed_count` being non-zero on a healthy cluster is normal**, and is the
 single most misread number here. It is cumulative and never resets, and every

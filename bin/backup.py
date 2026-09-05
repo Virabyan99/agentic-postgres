@@ -54,6 +54,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,8 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 from agentic_postgres import (  # noqa: E402
     backup_report,
     backup_schedule,
+    config,
+    deployed_output,
     fleet,
     naming,
     runtime_override,
@@ -97,6 +100,18 @@ POSTGRES_UID = "999"
 #: chose, and the message on timeout says which it is.
 BACKUP_TIMEOUT_SECONDS = 3600
 QUICK_TIMEOUT_SECONDS = 300
+
+#: How long a mirror copy may take. The one measured figure is Run 2's rig: a
+#: 31 MB repository copied from R2 to Backblaze in under a minute, and the
+#: nightly delta is smaller. An hour is the same bound the backup takes, and
+#: the unit says the same.
+MIRROR_TIMEOUT_SECONDS = 3600
+
+#: Where the mirror verb finds the installed rendered output and writes its
+#: copy record. `deployed_output` owns both roots; they are named here so a
+#: proof can point the verb at a directory it controls.
+RENDERED_ROOT = deployed_output.RENDERED_ROOT
+STATE_ROOT = deployed_output.PROJECT_STATE_ROOT
 
 
 class OperatorError(Exception):
@@ -467,10 +482,12 @@ def systemctl(*arguments: str) -> subprocess.CompletedProcess:
     )
 
 
-def timer_states(key: str) -> dict[str, str]:
-    """Each timer's unit-file state, in `fleet`'s measured vocabulary (D962)."""
+def timer_states(key: str, kinds: tuple[str, ...]) -> dict[str, str]:
+    """Each timer's unit-file state, in `fleet`'s measured vocabulary (D962).
+    ``kinds`` is `fleet.timer_kinds`' answer for the project: the mirror's
+    timer is read only for a project that has a mirror (ADR 0188)."""
     states: dict[str, str] = {}
-    for kind, unit in backup_schedule.units(key).items():
+    for kind, unit in backup_schedule.units(key, kinds).items():
         try:
             result = systemctl("is-enabled", unit)
         except (OSError, subprocess.TimeoutExpired):
@@ -492,7 +509,8 @@ def verb_schedule(arguments: argparse.Namespace) -> int:
     """
     document = load_document(arguments.outputs)
     key = project_key(document)
-    states = timer_states(key)
+    kinds = fleet.timer_kinds(document)
+    states = timer_states(key, kinds)
 
     if arguments.action == "status":
         if arguments.json:
@@ -502,7 +520,7 @@ def verb_schedule(arguments: argparse.Namespace) -> int:
         return 0 if fleet.schedule(states) == fleet.SCHEDULED else EXIT_REFUSED
 
     if arguments.action == "disable":
-        for kind, unit in backup_schedule.units(key).items():
+        for kind, unit in backup_schedule.units(key, kinds).items():
             if states[kind] == fleet.ABSENT:
                 print(f"backup: {unit} is not installed; nothing to disable")
                 continue
@@ -534,7 +552,7 @@ def verb_schedule(arguments: argparse.Namespace) -> int:
     if why is not None:
         raise OperatorError(EXIT_REFUSED, why)
 
-    for kind, unit in backup_schedule.units(key).items():
+    for kind, unit in backup_schedule.units(key, kinds).items():
         if states[kind] == fleet.ENABLED:
             print(f"backup: {unit} already enabled")
             continue
@@ -545,7 +563,7 @@ def verb_schedule(arguments: argparse.Namespace) -> int:
 
     # Re-read rather than trust: a unit `systemctl enable` accepted and did not
     # activate is the state this verb exists to make visible.
-    after = timer_states(key)
+    after = timer_states(key, kinds)
     print(backup_schedule.render_status(key, after))
     if fleet.schedule(after) != fleet.SCHEDULED:
         raise OperatorError(
@@ -562,6 +580,108 @@ def verb_schedule(arguments: argparse.Namespace) -> int:
         "a timer enabled for the first time owes nothing, so the first runs are the "
         "next calendar slots (systemctl list-timers 'agentic-postgres-backup-*')."
     )
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# The mirror (ADR 0188)
+# ---------------------------------------------------------------------------
+
+
+def compose_mirror(rendered: Path, action: str, *, timeout: int) -> subprocess.CompletedProcess:
+    """One run of the `backup-mirror` container through `bin/compose.sh`.
+
+    Through the wrapper and never `docker compose` directly, so the runtime
+    overrides -- the router labels, the secret grants, the mount digests --
+    are the ones the deploy installed, and the `run` refusals (no
+    `--entrypoint`, no `-e`) apply here as they do everywhere. The container is
+    the only thing that holds either credential; this process holds neither.
+    """
+    command = [
+        str(REPO_ROOT / "bin" / "compose.sh"),
+        str(rendered),
+        "--runtime",
+        "--profile",
+        "mirror",
+        "run",
+        "--rm",
+        "backup-mirror",
+        action,
+    ]
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+        stdin=subprocess.DEVNULL,
+    )
+
+
+def write_mirror_record(path: Path, record: dict) -> None:
+    """Root-owned, 0600, replaced atomically: a half-written record is a
+    record the doctor cannot parse, which it reports as unknown, not as a copy."""
+    staging = path.with_name(f".{path.name}.staging")
+    descriptor = os.open(staging, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(descriptor, (json.dumps(record, indent=2, sort_keys=True) + "\n").encode("utf-8"))
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    os.replace(staging, path)
+
+
+def verb_mirror(arguments: argparse.Namespace) -> int:
+    """Copy the repository to the second provider, and record the copy.
+
+    What the timer runs. The copy is `mc mirror --overwrite --remove` inside
+    the `backup-mirror` container (measured, D1001: complete on a pass that
+    exits 0; a pass that exits non-zero has left objects behind and the next
+    pass completes it). The record is written ONLY after a pass that exits 0
+    and a listing of the mirror bucket that parses, so a record always
+    describes a complete copy and the count that was read after it -- never a
+    count somebody assumed. A failed pass is this verb's non-zero exit, the
+    unit's failure, and the doctor's stale-copy warning; it is not a status
+    written anywhere.
+    """
+    document = load_document(arguments.outputs)
+    key = project_key(document)
+    stanza_name(document)  # refuses a project whose backups are disabled
+    if not config.backup_mirror_enabled(document):
+        raise OperatorError(
+            EXIT_INPUT,
+            f"{key} declares no backup mirror. Enable backup.mirror in the manifest and "
+            "redeploy; this command does not configure a project.",
+        )
+    rendered = deployed_output.rendered_path(key, root=RENDERED_ROOT)
+    if not (rendered / "compose.env").is_file():
+        raise OperatorError(
+            EXIT_STATE,
+            f"no rendered output for {key} at {rendered}; the project was never deployed "
+            "on this host.",
+        )
+
+    copy = compose_mirror(rendered, "copy", timeout=MIRROR_TIMEOUT_SECONDS)
+    _relay(copy)
+    if copy.returncode != 0:
+        raise OperatorError(
+            EXIT_STATE,
+            f"the mirror copy exited {copy.returncode}; the copy record was not written and "
+            "the next pass completes what this one left behind (D1001).",
+        )
+
+    listing = compose_mirror(rendered, "count", timeout=QUICK_TIMEOUT_SECONDS)
+    objects = backup_report.count_listing(listing.stdout) if listing.returncode == 0 else None
+    if objects is None:
+        raise OperatorError(
+            EXIT_STATE,
+            "the copy completed and the mirror bucket could not be listed afterwards "
+            f"(exit {listing.returncode}); the copy record was not written.",
+        )
+
+    record = backup_report.mirror_record(objects=objects, copied_at=datetime.now(UTC))
+    write_mirror_record(deployed_output.mirror_record_path(key, root=STATE_ROOT), record)
+    print(f"backup: mirror of {key} complete: {objects} object(s) at {record['last_copied_at']}")
     return 0
 
 
@@ -625,6 +745,11 @@ def build_parser() -> argparse.ArgumentParser:
     enable.set_defaults(handler=verb_schedule, json=False)
     disable = actions.add_parser("disable", help="disable both timers, unconditionally")
     disable.set_defaults(handler=verb_schedule, json=False)
+
+    mirror = verbs.add_parser(
+        "mirror", help="copy the repository to the second provider and record the copy"
+    )
+    mirror.set_defaults(handler=verb_mirror)
 
     return parser
 

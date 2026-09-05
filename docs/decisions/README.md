@@ -254,3 +254,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0188](0188-the-secondary-repository-is-a-mirror-of-the-primary-at-a-second-provider.md) | The secondary repository is a mirror of the primary, at a second provider, under the primary's key | 18 | Accepted |
 | [0189](0189-a-replacement-host-is-built-from-a-kit-that-names-every-secret-and-holds-none.md) | A replacement host is built from a kit that names every secret and holds none, and the bootstrap adopts by recorded id | 18 | Accepted |
 | [0190](0190-a-rehearsal-is-bounded-reversible-and-reads-a-detection-that-exists.md) | A rehearsal is bounded, reversible, and reads a detection that exists; the disk is never filled | 18 | Accepted |
+| [0191](0191-a-facility-gated-secret-exists-exactly-when-the-facility-is-enabled.md) | A facility-gated secret exists for a project exactly when the facility is enabled, and is required whenever it exists | 18 | Accepted |

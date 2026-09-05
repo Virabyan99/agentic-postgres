@@ -1,0 +1,31 @@
+[Unit]
+Description=Agentic Postgres backup mirror copy for project %i
+Documentation=file:/opt/agentic-postgres/releases/current/docs/backup-operations.md
+
+# The same shape as the two backup units: the project unit brings the stack
+# up, `After=` rather than `Requires=` so a timer firing on a deliberately
+# stopped project does nothing.
+After=network-online.target docker.service agentic-postgres-project@%i.service
+Wants=network-online.target
+BindsTo=agentic-postgres-project@%i.service
+
+[Service]
+Type=oneshot
+
+# %i is the project key and NOTHING ELSE, validated by the trampoline before it
+# becomes a path component. The action is `backup-mirror`, and the release's
+# own launcher decides what it means (ADR 0188): a copy of the primary
+# repository's bucket to the mirror bucket at the second provider, made by the
+# mirror container on the project's backup egress network. The archiver is
+# never involved; a lost mirror costs the primary nothing (D994, D995).
+ExecStart=/usr/local/libexec/agentic-postgres/project %i backup-mirror
+
+# A copy of a repository nobody has sized. Generous rather than tuned, and a
+# pass that exits non-zero with objects behind is completed by the next pass
+# (D1001), so a timeout here reads as one failed copy, not a lost mirror.
+TimeoutStartSec=3600
+
+# No Restart=. A failed copy is a failed unit an operator sees in
+# `systemctl list-units --failed`, in the doctor's mirror check, and in the
+# fleet inventory; the timer fires again tomorrow regardless.
+Restart=no

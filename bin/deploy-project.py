@@ -693,7 +693,9 @@ def require_edge_serves_this_release(session: int) -> None:
     )
 
 
-def _secrets_the_provider_is_missing(state: dict[str, Any], session: int) -> list[str]:
+def _secrets_the_provider_is_missing(
+    state: dict[str, Any], session: int, facilities: frozenset[str]
+) -> list[str]:
     """Declared, required and generatable through `session`, minus what we own.
 
     The same set difference `bootstrap-providers.sh --plan` reports, computed
@@ -708,16 +710,20 @@ def _secrets_the_provider_is_missing(state: dict[str, Any], session: int) -> lis
     """
     managed = set(state.get("managed_resources", []))
     declared = secrets_contract.load_secret_contract(REPO_ROOT / "secrets.required.yaml")
+    # This project's view (ADR 0188): a facility-gated secret is owed only by
+    # a project with the facility, and the bootstrap computes the same set.
     return sorted(
         secret["name"]
-        for secret in secrets_contract.active_secrets(declared, session)
+        for secret in secrets_contract.active_secrets(declared, session, facilities=facilities)
         if secret.get("required")
         and secret.get("origin") == "generated"
         and secret["name"] not in managed
     )
 
 
-def require_bootstrap(project_key: str, *, session: int) -> dict[str, Any]:
+def require_bootstrap(
+    project_key: str, *, session: int, facilities: frozenset[str]
+) -> dict[str, Any]:
     path = state_path(project_key)
     try:
         state = load_state(path)
@@ -737,7 +743,7 @@ def require_bootstrap(project_key: str, *, session: int) -> dict[str, Any]:
     #
     # The comparison is local and cheap, so it belongs in the step whose whole
     # promise is "read everything, change nothing".
-    missing = _secrets_the_provider_is_missing(state, session)
+    missing = _secrets_the_provider_is_missing(state, session, facilities)
     if missing:
         fail(
             EXIT_PRECONDITION,
@@ -1204,8 +1210,10 @@ def observe_backup(
     credentialed: bool,
     summary: dict[str, Any] | None = None,
     archiver: dict[str, Any] | None = None,
+    mirror: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """What this deploy can honestly say about the repository. Version 13.
+    """What this deploy can honestly say about the repository. Version 13;
+    version 16 adds the mirror's reading, folded last (ADR 0188).
 
     **Run 6 makes this ask the repository**, which Run 3's version of this
     docstring said it would -- a sentence that would otherwise have become
@@ -1230,17 +1238,21 @@ def observe_backup(
     asserting a failure nobody observed is the same substitution in the other
     direction.
     """
+    # The mirror's reading (ADR 0188) folds into every branch, the two
+    # `unconfigured` ones included: `disabled` is the honest value for a
+    # project without backups, and `mirror_reading` says so from the manifest.
+    # `with_mirror` never touches the repository's own status.
     if not enabled:
         state = dict(deployed_output.BACKUP_NOT_OBSERVED)
         state["status"] = "unconfigured"
-        return state
+        return backup_report.with_mirror(state, mirror)
     if not credentialed:
         print("  no repository credential in the active generation; backup stays unconfigured")
         state = dict(deployed_output.BACKUP_NOT_OBSERVED)
         state["status"] = "unconfigured"
-        return state
+        return backup_report.with_mirror(state, mirror)
     if summary is None:
-        return dict(deployed_output.BACKUP_NOT_OBSERVED)
+        return backup_report.with_mirror(dict(deployed_output.BACKUP_NOT_OBSERVED), mirror)
     # **`with_archiver`, not `backup_state`** (D701). `summary` here is what
     # `bin/backup.sh info --json` printed, and that command prints an
     # already-computed state block -- so calling `backup_state` on it applied
@@ -1250,7 +1262,29 @@ def observe_backup(
     # actually said, and a redeploy could not correct it.
     #
     # The archiver still folds in, and can still only make the status worse.
-    return backup_report.with_archiver(summary, archiver)
+    return backup_report.with_mirror(backup_report.with_archiver(summary, archiver), mirror)
+
+
+def read_mirror(
+    project_key: str,
+    rendered: dict[str, Any],
+    *,
+    root: Path = deployed_output.PROJECT_STATE_ROOT,
+) -> dict[str, Any]:
+    """The mirror's reading for the document: the manifest's decision and the
+    copy record on this host, through the same parser the doctor uses (ADR
+    0188). A record that does not parse is `never` here rather than unknown --
+    the deploy publishes what a copy has achieved, and an unreadable record
+    has achieved nothing a restore could be planned against."""
+    enabled = config.backup_mirror_enabled(rendered)
+    record = None
+    if enabled:
+        path = deployed_output.mirror_record_path(project_key, root=root)
+        try:
+            record = backup_report.parse_mirror_record(path.read_text(encoding="utf-8"))
+        except OSError:
+            record = None
+    return backup_report.mirror_reading(enabled=enabled, record=record)
 
 
 def read_backup_repository(release: Path, outputs_path: Path) -> dict[str, Any] | None:
@@ -1820,7 +1854,11 @@ def main(argv: list[str] | None = None) -> int:
     step("2. Preconditions this session does not create")
     edge = require_edge_is_up(host)
     require_edge_serves_this_release(arguments.through_session)
-    bootstrap = require_bootstrap(key, session=arguments.through_session)
+    bootstrap = require_bootstrap(
+        key,
+        session=arguments.through_session,
+        facilities=secrets_contract.enabled_facilities(rendered),
+    )
     secrets = require_secret_generation(key)
     print(f"  edge up, providers bootstrapped, generation {secrets['generation_id']}")
 
@@ -2372,6 +2410,9 @@ def main(argv: list[str] | None = None) -> int:
         # And what the archiver said at the same instant (ADR 0150). The two
         # fail independently, so the status needs both.
         archiver=backup_archiver,
+        # And the mirror's copy record on this host (ADR 0188): a deploy-time
+        # snapshot like the rest of the block; the doctor reads it live.
+        mirror=read_mirror(key, rendered, root=deployed_output.PROJECT_STATE_ROOT),
     )
     if (
         rendered["backup"]["enabled"]

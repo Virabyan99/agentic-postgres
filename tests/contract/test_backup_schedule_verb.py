@@ -147,7 +147,7 @@ class Systemd:
     def __call__(self, *arguments: str) -> subprocess.CompletedProcess[str]:
         self.calls.append(arguments)
         unit = arguments[-1]
-        kind = "full" if "backup-full@" in unit else "incr"
+        kind = next(k for k in fleet.ALL_TIMER_KINDS if f"backup-{k}@" in unit)
         if arguments[0] == "is-enabled":
             state = self.states[kind]
             answer = {
@@ -284,5 +284,5 @@ def test_disable_disables_what_is_installed_and_skips_what_is_not(
 
 def test_the_wrapper_knows_the_verb() -> None:
     source = (REPO_ROOT / "bin" / "backup.sh").read_text(encoding="utf-8")
-    assert "stanza-create | check | backup | info | expire | schedule)" in source
+    assert "stanza-create | check | backup | info | expire | schedule | mirror)" in source
     assert "schedule status [--json]" in source

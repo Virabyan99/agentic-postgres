@@ -64,9 +64,10 @@ runs its live proofs' `--setup-plan` before the trip.
 
 Six columns: the number, what the brief or the tree said, what was measured or
 read, what this plan does, why it matters, the ADR if one decides it. **Next
-free number after this table is D1004.** D984–D993 were written at planning;
+free number after this table is D1008.** D984–D993 were written at planning;
 D994–D1000 are Run 1's measurements, and they reversed Run 2's design (ADR
-0188); D1001–D1003 are Run 2's first step, the real second provider.
+0188); D1001–D1003 are Run 2's first step, the real second provider;
+D1004–D1007 are Run 2's build.
 
 | D | Said | Measured or read | This plan | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -90,6 +91,10 @@ D994–D1000 are Run 1's measurements, and they reversed Run 2's design (ADR
 | **D1001** | ADR 0188 and Run 2's first step: *"the mirror client against the deployment's real second provider … before a manifest names it."* | **Measured against Backblaze B2 (`s3.eu-central-003.backblazeb2.com`, a bucket-scoped application key) from this workstation, on the project's own image built from the pinned base.** `mc mirror --overwrite --remove` (`RELEASE.2025-08-13T08-35-41Z`) copied a local pgBackRest repository of 1,001 objects in 28 seconds; **the first pass exited 1 with two objects behind, and the next pass exited 0 with the copy complete**. A source object removed is removed at the copy on the next pass with `--remove` and stays without it (the control). A segment archived while a copy is listing lands in the following copy: the mirror is a snapshot of a listing, not a stream. | **`backup.sh mirror` treats a non-zero exit as a failed run, prints the client's last lines (D980), and leaves completion to the timer's next run**; the doctor's mirror check reads the last SUCCESSFUL copy, never the last attempt. The client image is pinned in `versions.in.yaml`; it carries no `grep` or `awk`, so every listing is parsed on the host side. | A copy that can be partial by one pass and complete by the next is exactly the kind of tool a timer suits and a one-shot verb misreports. | 0188 |
 | **D1002** | This plan's Run 6: a restore *"from the secondary"* on a replacement host, with D593's band for the restore time. | **A restore from Backblaze alone, on the project's image, with the mirror's credential and the primary's cipher pass: exit 0 in 151 seconds for ~1,000 objects (a ~30 MB repository), promoted, 9,000 of 9,000 rows; `info` against it reports `status: ok` with the full and two incrementals; the wrong cipher pass exits 75.** The Session 10 rig image (`apg-rig8-pg`) could not do any of it: it predates D590 and holds no CA store, so it verifies neither Backblaze's Let's Encrypt chain nor Cloudflare's -- a rig fact that cost one pass and that the project's image, which installs `ca-certificates` in the archiver's layer, does not share. | **Run 6's replacement-host restore is priced from this band**: a few minutes per gigabyte of repository at `process-max` 1 from `eu-central-003`, sampled once; the trip records its own figure. Every rig from here runs the project's image built from `versions.env`, never a session's leftover. | The restore's time is a sample from a band (D593), and a rig image is a third party of its own: the measurement that matters was almost taken on an image the deployment does not run. | 0188 |
 | **D1003** | Backblaze's bucket is the operator's (ADR 0110), created by hand. | **Unmeasured, and stated as such**: Backblaze keeps file versions by default, so a delete through the S3 API hides a version rather than freeing it, and a mirror with `--remove` may never reclaim space unless the bucket's lifecycle keeps only the last version. The measurement's own cleanup listed 0 objects afterwards, which is what a hidden version looks like from the S3 side. | **Run 6 reads the bucket's lifecycle setting before the first copy** and `docs/recovery-operations.md` names it as the one bucket setting the mirror needs; the doctor cannot see it. | A cost that grows silently is D700's shape at the provider: the listing says empty and the bill says otherwise. | — |
+| **D1004** | D1001: the client image carries no `grep` or `awk`, *"so every listing is parsed on the host side"* -- and the first step's rig counted `mc ls`'s TEXT lines. | **`mc ls --recursive --json` on the pinned image, measured against a two-file directory with a nested prefix, and its non-recursive form as the control**: one JSON object per line, `"type":"file"` for an object; with `--recursive` a prefix appears only inside a key, without it as its own `"type":"folder"` line. No summary line, no trailer. | `backup_report.count_listing` counts `file` entries only and returns None -- never zero -- for a line that is not JSON; the verb writes no record on None. The proof carries both samples verbatim. | A count of zero is the number a restore would be planned against; the format a counter reads must be the format that was measured, not the one a text listing suggested. | 0188 |
+| **D1005** | Run 2's build, as drafted: the mirror pair becomes *"required"* through the rendered document's `secrets.required_names`. | **The rendered document's `required_names` is `RENDER_SESSION`'s list -- Session 2's one sentinel -- by design**; the DEPLOYED document's `secrets.required_names` is built from the generation manifest, which is what the materializer wrote. The reader that decides what a project must hold is the materializer's view of the contract, and the deploy's preflight and the bootstrap compute the same set from the same reader. | The render's `required_secret_names` is filtered by facility for the future but is not the proof's subject; the proof reads the bootstrap's declared and operator-supplied lists and the deploy's preflight instead (`test_backup_mirror`). | A premise wrong in the reassuring direction (D930): a test on the rendered field would have passed for the wrong reason at Session 2's list and proved nothing about what a mirrored project holds. | 0191 |
+| **D1006** | Run 2 as drafted: *"`restore-test.sh` and `backup.sh info\|check` accept `--from CONFIG`, a pgBackRest configuration naming one repository, which is how a mirror is read."* | **Not built in Run 2.** The mirror is read by the copy record on the host and, for a restore, by ADR 0189's `restore.sh` on a replacement host with the mirror's credential and the primary's cipher pass -- which Run 3 builds. A `--from` on the drill would be a second reader of a repository configuration this run has no consumer for. | Deferred to Run 3, where `restore.sh` needs the mirror's configuration anyway; recorded here rather than silently dropped. | A declared flag with no reader is an unverified flag (D816, D929). | 0189 |
+| **D1007** | The contract had two states for a secret, `required: true` and `required: false`; ADR 0188 named the mirror's pair *"consumed by the mirror container only"* and gave the primary's pair *"that container as a second consumer"*. | **Neither state fits a secret two projects lack and one needs**: required everywhere fails both host projects' materialization (their manifests are schema 1); optional is refused for a compose consumer because Compose does not start a service whose mount source is missing. And the primary pair's second consumer, declared plainly, would be materialized and granted for every project -- two files nobody reads. | **ADR 0191**: a third state, `facility: backup_mirror`, on a secret or on a consumer; `active_secrets(..., facilities=)` is the project's view; every writer, mounter, requirer and creator asks it (the materializer, the override, the render, the deploy's preflight, the bootstrap's three lists). The declared view stays for the rotation planner and the contract tests. | The reader that did not move is this repository's defect class (D600, D918); nine readers of one contract were grepped before one was changed. | 0191 |
 
 ---
 
@@ -227,6 +232,40 @@ naming *empty or undecryptable* where pgBackRest says only *no backup set*
 pgBackRest configuration naming one repository, which is how a mirror is read.
 Offline proofs for every piece; the live proofs of `REC-REPO-001..003` written
 and gated on the trip.
+
+**Done.** (2026-09-05, D1004–D1007, ADR 0191.) Project manifest schema 4 with
+`backup.mirror` (`enabled`, `endpoint`, `region`, optional `bucket`; absent
+means none, forbidden below 4, both example manifests at 4);
+`naming.backup_mirror_bucket_name` derives `apg-<key>-backup-mirror` once;
+outputs schema 16 with `backup.mirror` and `backup_state.mirror`
+(`not_observed|disabled|never|copied`, `last_copied_at`, `objects`),
+`migrate_v15_to_v16` refusing anything but a rendered v15. **The contract
+needed a third state** (D1007, ADR 0191): `facility: backup_mirror` on the
+mirror's pair and on the primary pair's mirror consumer, `active_secrets(...,
+facilities=)` as the project's view, and every writer, mounter, requirer and
+creator moved to it -- the materializer, the secret override (reading the
+rendered document beside it), the render, the deploy's preflight and the
+bootstrap's three lists. The container: `services/backup-mirror` on the
+pinned `quay.io/minio/mc` (`versions.env` relocked with `--packages-only`),
+profile `mirror`, uid 65532, the backup egress network only, four secret files
+into `MC_HOST_` aliases in its own environment, `copy` and `count` actions.
+The unit pair `agentic-postgres-backup-mirror@.service|.timer` (04:30,
+`Persistent`, 20 minutes of jitter, after both backup timers), the launcher's
+`backup-mirror` action with no `check` before it, `backup.sh mirror` writing
+`mirror-state.json` beside the deployed document only after a pass that
+exits 0 AND a listing that parses (D1001, D1004). `fleet.timer_kinds` gives a
+mirrored project three timers, and `schedule`, the status verb, the inventory
+and the retirement plan all read it; `diagnosis.mirror` is the doctor's ninth
+check (OK/WARN never/WARN stale after two days/UNKNOWN unreadable), and the
+deploy folds `read_mirror` into every branch of `backup_state`. Measured on
+the pinned image: `mc ls --json`'s line format (D1004). Not built: `--from
+CONFIG` on the drill (D1006, Run 3). Proofs: `tests/contract/test_backup_mirror.py`
+(35), the guard modules widened (`test_backup_schedule`, `test_fleet`,
+`test_backup_schedule_verb`, `test_doctor_redaction`, `test_repository_contract`,
+`test_backup_plane`, `test_output_migrations`, `test_project_manifest`);
+battery 13/13 killed after one survivor widened the facility reader's proof
+(backups off with a mirror block saying on). The live half -- the first copy
+on the host, the timer enabled, `REC-REPO-001..003` -- is the trip's.
 
 ### Run 3 — the kit, adoption, `restore.sh`, the runbook
 

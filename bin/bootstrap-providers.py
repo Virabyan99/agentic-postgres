@@ -57,7 +57,11 @@ from agentic_postgres.bootstrap_state import (
 from agentic_postgres.config import load_project_manifest
 from agentic_postgres.host_config import load_host_manifest
 from agentic_postgres.naming import project_key as derive_project_key
-from agentic_postgres.secrets_contract import active_secrets, load_secret_contract
+from agentic_postgres.secrets_contract import (
+    active_secrets,
+    enabled_facilities,
+    load_secret_contract,
+)
 
 EXIT_INVALID = 2
 EXIT_PREREQUISITE = 3
@@ -160,7 +164,7 @@ def generate_rsa_private_pem() -> str:
     return pem
 
 
-def declared_provider_secrets(session: int) -> list[dict[str, Any]]:
+def declared_provider_secrets(session: int, facilities: frozenset[str]) -> list[dict[str, Any]]:
     """Every secret this project must have at the provider, from the contract.
 
     `secrets.required.yaml` is already the authority for what materialization
@@ -175,10 +179,17 @@ def declared_provider_secrets(session: int) -> list[dict[str, Any]]:
     in `/runtime`.
     """
     contract = load_secret_contract(REPO_ROOT / "secrets.required.yaml")
-    return [secret for secret in active_secrets(contract, session) if secret["required"]]
+    # Filtered by the project's facilities (ADR 0188): a mirror credential is
+    # declared, created and reported for a project that has a mirror, and
+    # for no other -- the same reader every materializer asks.
+    return [
+        secret
+        for secret in active_secrets(contract, session, facilities=facilities)
+        if secret["required"]
+    ]
 
 
-def generated_provider_secrets(session: int) -> list[dict[str, Any]]:
+def generated_provider_secrets(session: int, facilities: frozenset[str]) -> list[dict[str, Any]]:
     """The declared secrets this command may create a value for (ADR 0103).
 
     Everything `declared_provider_secrets` returns, less the ones whose value is
@@ -189,12 +200,14 @@ def generated_provider_secrets(session: int) -> list[dict[str, Any]]:
     """
     return [
         secret
-        for secret in declared_provider_secrets(session)
+        for secret in declared_provider_secrets(session, facilities)
         if not secrets_contract.is_operator_supplied(secret)
     ]
 
 
-def operator_supplied_provider_secrets(session: int) -> list[dict[str, Any]]:
+def operator_supplied_provider_secrets(
+    session: int, facilities: frozenset[str]
+) -> list[dict[str, Any]]:
     """The declared secrets an operator has to obtain and paste by hand.
 
     Reported by both `--plan` and `--apply`, always, rather than only when
@@ -206,14 +219,14 @@ def operator_supplied_provider_secrets(session: int) -> list[dict[str, Any]]:
     """
     return [
         secret
-        for secret in declared_provider_secrets(session)
+        for secret in declared_provider_secrets(session, facilities)
         if secrets_contract.is_operator_supplied(secret)
     ]
 
 
-def report_operator_supplied(session: int) -> None:
+def report_operator_supplied(session: int, facilities: frozenset[str]) -> None:
     """Name every secret this command will not create, and where it comes from."""
-    pending = operator_supplied_provider_secrets(session)
+    pending = operator_supplied_provider_secrets(session, facilities)
     if not pending:
         return
     print()
@@ -572,13 +585,19 @@ def write_private(path: Path, content: str, *, mode: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-def describe_plan(key: str, state: dict[str, Any] | None, digest: str, session: int) -> int:
+def describe_plan(
+    key: str,
+    state: dict[str, Any] | None,
+    digest: str,
+    session: int,
+    facilities: frozenset[str],
+) -> int:
     print(f"project  {key}")
     print(f"state    {state_path(key)}")
     print(f"session  {session}")
     print()
 
-    declared = generated_provider_secrets(session)
+    declared = generated_provider_secrets(session, facilities)
 
     if state is None:
         changes = [
@@ -592,14 +611,16 @@ def describe_plan(key: str, state: dict[str, Any] | None, digest: str, session: 
             print(f"  {change}")
         print()
         print(f"{len(changes)} change(s) proposed.")
-        report_operator_supplied(session)
+        report_operator_supplied(session, facilities)
         return 0
 
     changes: list[str] = []
     # Named one by one. "the sentinel is missing" was a sentence this command
     # could say about exactly one secret; what an operator needs to know is
     # which of the declared ones this project does not have.
-    changes.extend(f"create  secret value {name}" for name in missing_secret_names(state, session))
+    changes.extend(
+        f"create  secret value {name}" for name in missing_secret_names(state, session, facilities)
+    )
     if not is_converged(state, digest):
         recorded = state.get("provider_inputs_sha256", "none")
         changes.append(f"update  provider inputs changed ({recorded[:12]} -> {digest[:12]})")
@@ -610,18 +631,20 @@ def describe_plan(key: str, state: dict[str, Any] | None, digest: str, session: 
     if not changes:
         print("no changes.")
         print("The recorded state matches the manifest, and every credential file is present.")
-        report_operator_supplied(session)
+        report_operator_supplied(session, facilities)
         return 0
 
     for change in changes:
         print(f"  {change}")
     print()
     print(f"{len(changes)} change(s) proposed.")
-    report_operator_supplied(session)
+    report_operator_supplied(session, facilities)
     return 0
 
 
-def missing_secret_names(state: dict[str, Any], session: int) -> list[str]:
+def missing_secret_names(
+    state: dict[str, Any], session: int, facilities: frozenset[str]
+) -> list[str]:
     """Declared, required and *generatable* at this session, minus what we own.
 
     Operator-supplied secrets are excluded rather than reported missing forever.
@@ -633,13 +656,18 @@ def missing_secret_names(state: dict[str, Any], session: int) -> list[str]:
     managed = set(state.get("managed_resources", []))
     return [
         secret["name"]
-        for secret in generated_provider_secrets(session)
+        for secret in generated_provider_secrets(session, facilities)
         if secret["name"] not in managed
     ]
 
 
 def add_missing_secrets(
-    key: str, state: dict[str, Any], host: dict[str, Any], credential_file: Path, session: int
+    key: str,
+    state: dict[str, Any],
+    host: dict[str, Any],
+    credential_file: Path,
+    session: int,
+    facilities: frozenset[str],
 ) -> int:
     """Create the declared secrets this project does not have yet, and record them.
 
@@ -662,8 +690,8 @@ def add_missing_secrets(
 
     pending = [
         secret
-        for secret in generated_provider_secrets(session)
-        if secret["name"] in set(missing_secret_names(state, session))
+        for secret in generated_provider_secrets(session, facilities)
+        if secret["name"] in set(missing_secret_names(state, session, facilities))
     ]
 
     created: list[str] = []
@@ -704,7 +732,7 @@ def add_missing_secrets(
     for name in adopted:
         print(f"bootstrap-providers: {name} was already present at the provider; not overwritten")
     print(f"bootstrap-providers: recorded in {state_path(key)}")
-    report_operator_supplied(session)
+    report_operator_supplied(session, facilities)
     return 0
 
 
@@ -716,6 +744,7 @@ def apply(
     host: dict[str, Any],
     credential_file: Path,
     session: int,
+    facilities: frozenset[str],
 ) -> int:
     # Top-level sibling of `host`, not a child of it. The schema has
     # ["schema_version", "host", "ssh", "edge", "infisical"] at the root.
@@ -734,8 +763,8 @@ def apply(
             # Adding the missing resources is what converge means. The
             # alternative is --destroy and start again, which throws away a
             # working identity and its credential to add a secret.
-            if missing_secret_names(state, session):
-                return add_missing_secrets(key, state, host, credential_file, session)
+            if missing_secret_names(state, session, facilities):
+                return add_missing_secrets(key, state, host, credential_file, session, facilities)
             print("bootstrap-providers: no changes.")
             return 0
         if missing:
@@ -795,7 +824,7 @@ def apply(
         # The value is never written to this host, never printed, and not kept
         # after the call: the only copy is the provider's, and
         # materialize-secrets fetching it is the thing being proved.
-        for secret in generated_provider_secrets(session):
+        for secret in generated_provider_secrets(session, facilities):
             control.ensure_folder(
                 project_id, infisical["environment_slug"], secret["provider_path"]
             )
@@ -872,7 +901,7 @@ def apply(
                 # `generated_`, not `declared_`: an operator-supplied value was
                 # issued by a third party and pasted in by a human, so this
                 # project did not create it and §8.2 says it may not destroy it.
-                *(secret["name"] for secret in generated_provider_secrets(session)),
+                *(secret["name"] for secret in generated_provider_secrets(session, facilities)),
             }
         ),
         "created_at": timestamp,
@@ -885,7 +914,7 @@ def apply(
 
     print(f"bootstrap-providers: created 4 resource(s) for {key}")
     print(f"bootstrap-providers: recorded them in {state_path(key)}")
-    report_operator_supplied(session)
+    report_operator_supplied(session, facilities)
     return 0
 
 
@@ -974,9 +1003,12 @@ def main(argv: list[str] | None = None) -> int:
         fail(EXIT_INVALID, str(exc))
 
     state = read_state(key)
+    # Which facilities this project has (ADR 0188), read once from the
+    # manifest; the materializer and the render ask the same reader.
+    facilities = enabled_facilities(manifest)
 
     if arguments.mode == "plan":
-        return describe_plan(key, state, digest, arguments.session)
+        return describe_plan(key, state, digest, arguments.session, facilities)
     if arguments.mode == "destroy":
         return destroy(key, state, host, arguments.operator_credential_file)
 
@@ -994,6 +1026,7 @@ def main(argv: list[str] | None = None) -> int:
         host,
         arguments.operator_credential_file,
         arguments.session,
+        facilities,
     )
 
 

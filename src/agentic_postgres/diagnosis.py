@@ -318,6 +318,57 @@ def archiver(*, failing: bool | None, last_archived_time: str | None) -> Check:
     return _check("wal archiver", OK, f"last archived {last_archived_time}", facts)
 
 
+#: A mirror copy older than this is a copy the nightly timer has missed. Two
+#: days, not one: the timer fires at 04:30 with up to twenty minutes of jitter,
+#: and a doctor run at 04:00 the next day sees a copy just under a day old
+#: that is exactly on schedule (the same reasoning as the incremental's own
+#: cadence). Chosen, and named so it can be revised.
+MIRROR_STALE_AFTER_DAYS = 2
+
+
+def mirror(
+    *, enabled: bool, status: str | None, last_copied_at: str | None, age_days: int | None
+) -> Check:
+    """Has the repository's copy at the second provider kept up? (ADR 0188)
+
+    ``status`` is `backup_report`'s mirror vocabulary as the doctor read the
+    copy record: `disabled`, `never`, `copied`, or None when the record could
+    not be read. ``age_days`` is the caller's arithmetic over the clock this
+    module does not have, and a copy with no age is reported by its timestamp
+    alone rather than assumed fresh.
+
+    A project without a mirror is OK and says so: the check exists for every
+    project so that a fleet reading has the same rows for each, and "no mirror"
+    is a manifest decision, not a defect. A mirror that has never copied is a
+    warning rather than a problem for the reason the first full backup is: the
+    timer's first slot has not come, or the copy has been failing, and the unit's
+    own failure state says which.
+    """
+    from agentic_postgres import backup_report
+
+    facts = _pairs(
+        enabled=enabled, reported_status=status, last_copied_at=last_copied_at, age_days=age_days
+    )
+    if not enabled:
+        return _check("backup mirror", OK, "no mirror is configured for this project", facts)
+    if status is None or status == backup_report.MIRROR_NOT_OBSERVED["status"]:
+        return _check("backup mirror", UNKNOWN, "the copy record could not be read", facts)
+    if status == backup_report.MIRROR_STATUS_NEVER:
+        return _check(
+            "backup mirror", WARN, "the mirror is configured and has never completed a copy", facts
+        )
+    if status != backup_report.MIRROR_STATUS_COPIED:
+        return _check("backup mirror", PROBLEM, f"the copy record reports {status}", facts)
+    if age_days is not None and age_days >= MIRROR_STALE_AFTER_DAYS:
+        return _check(
+            "backup mirror",
+            WARN,
+            f"last copied {last_copied_at}, {age_days} days ago; the nightly copy has missed",
+            facts,
+        )
+    return _check("backup mirror", OK, f"last copied {last_copied_at}", facts)
+
+
 def disk_headroom(*, cluster_kb: int | None, available_kb: int | None, mount: str) -> Check:
     """Is there room for the restore this deployment promises?
 

@@ -130,9 +130,12 @@ def read_doctor(root: Path, key: str) -> tuple[dict[str, Any] | None, str | None
     return report, None
 
 
-def read_timers(key: str) -> dict[str, str]:
+def read_timers(key: str, document: dict[str, Any]) -> dict[str, str]:
+    """Every timer THIS project has (ADR 0188): the mirror's is read only for a
+    project whose document enables a mirror, so a project without one is not
+    reported `absent` for a unit it was never meant to have."""
     states: dict[str, str] = {}
-    for kind in fleet.TIMER_KINDS:
+    for kind in fleet.timer_kinds(document):
         result = run(
             "systemctl", "is-enabled", fleet.timer_unit(kind, key), timeout=PROBE_TIMEOUT_SECONDS
         )
@@ -196,7 +199,7 @@ def inventory(root: Path, *, window_hours: int, now: datetime) -> tuple[fleet.Ro
                 document,
                 doctor=doctor,
                 doctor_problem=doctor_problem,
-                timers=read_timers(key),
+                timers=read_timers(key, document),
                 denials=read_denials(document, window_hours),
                 window_hours=window_hours,
                 now=now,
