@@ -776,17 +776,20 @@ def test_the_provider_destroy_accepts_the_expired_manifest_a_retirement_hands_it
 
     destroy = bootstrap("destroy")
     assert "born expired" not in destroy.stderr + destroy.stdout, destroy.stderr
-    # Past the loader, the next refusal depends on the machine: with no
-    # /etc/agentic-postgres at all (CI) the state is absent and the missing
-    # credential file is refused (exit 2); on a workstation whose
+    # Past the loader, what happens next depends on the machine, and CI taught
+    # this proof its third shape: with no /etc/agentic-postgres at all the
+    # state is absent and a destroy of a project that owns nothing exits 0
+    # saying so, before it ever asks for a credential; on a workstation whose
     # /etc/agentic-postgres/projects is root-owned, D67's conservative read
-    # refuses first (exit 3). Both sit after the loader, which is the claim.
-    assert (destroy.returncode, "--operator-credential-file" in destroy.stderr) in {
-        (2, True),
-        (3, False),
-    }, (destroy.returncode, destroy.stderr)
-    if destroy.returncode == 3:
-        assert "cannot be read by this user" in destroy.stderr, destroy.stderr
+    # refuses first (exit 3); as root on a host with no state for the key it
+    # is the exit-0 shape again. Every one sits after the loader, which is the
+    # claim, and each is pinned to its own sentence so an unrelated failure
+    # cannot pass as one of them.
+    outcome = {
+        0: "Nothing is owned; nothing done" in destroy.stdout,
+        3: "cannot be read by this user" in destroy.stderr,
+    }.get(destroy.returncode, False)
+    assert outcome, (destroy.returncode, destroy.stdout, destroy.stderr)
 
     plan = bootstrap("plan")
     assert plan.returncode == 2 and "born expired" in plan.stderr, plan.stderr
