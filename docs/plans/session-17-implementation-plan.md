@@ -409,6 +409,49 @@ variables **set** (D671, D676). Then, in order, the operator at a TTY:
 
 Three gates and two repairs is the shape (Sessions 15 and 16); budget for it.
 
+**Done.** Two days, 2026-09-04 and 2026-09-05; three gates and **eleven
+repairs, D969–D983**, four times the budget the line above set and every one a
+defect that had waited for this trip. `evidence/session-17.json`: **97 claims,
+90 passed, 7 `not_run`, 0 failed**, against deployed release `8dc9842` and
+checkout `ac8ba0b`. Host half 283 live proofs passed / 0 failed / 10
+environment skips, then 436 claim proofs; external half 25 passed. **All four
+claims this session registered passed on the first execution of their live
+halves** -- `fleet_inventory`, `project_lifecycle`, `project_retirement`,
+`backup_schedule` -- **and `project_removal` passed for the first time since
+Session 12 closed**, through the proof that already existed, on the retirement
+record of `gamma-dev`. The seven `not_run` are Session 16's eight less that one.
+
+What the trip measured, in order. Day one: the four backup units installed by
+hand because `--check` was blind to them (D970); both permanent projects
+`scheduled`, and `Persistent=true` fired nothing at the first enable (D973);
+the third project created end to end -- two buckets and a DNS record through
+the Cloudflare API, tokens and Infisical values by hand, bootstrap,
+materialize, three deploys, ports reserved, verified and published -- with a
+manifest that had to live outside the checkout (D971), a deploy that stopped
+forever when redirected (D972), a gate that spent its observation window on a
+project it knew had no administrator (D974), and a hint whose placeholder made
+a file in the checkout (D975). Day two: **the first scheduled backups in the
+project's history**, beta's incremental at 03:43 and alpha's at 03:47 UTC, both
+complete; the reconverge that failed four times in five on a provider read
+(D976) and the two day-one stoppages Session 11 had already found and fixed in
+its guide (D977); a retirement that would have refused the expired project it
+exists for, in the bootstrap (D978) and again in the bootstrap's wrapper
+(D979), reported by a step that had swallowed its own words (D980), and a
+`--destroy` that had never worked since the control plane started
+authenticating (D981); then the retirement complete on the third record, eight
+steps, the volumes gone, the bucket, stanza, cipher pass, DNS record and
+certificate named as never touched; and a host gate whose first run found the
+removal proof dying on its last line the first time it ever ran (D982) and the
+restore drill unable to read the incremental set the night's schedule had made
+newest (D983).
+
+Left as recorded: gamma's off-host resources (two buckets, two tokens, one DNS
+record, one Infisical project) are the operator's console decision; the kernel
+restart was not taken; `.generated/alpha-dev` on the host is root-owned after
+every root run, as §9 says. The planning rule D977 adds -- grep the previous
+trips' "if something goes wrong" sections before a trip -- and D979's -- grep
+every reader of a function before repairing one -- go into CLAUDE.md §5.
+
 ---
 
 ## 7. Evidence and claims

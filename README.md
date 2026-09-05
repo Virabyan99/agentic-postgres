@@ -10,8 +10,10 @@ operation: a fleet inventory that is an operator's read and not a catalog (ADR
 0185), a project lifecycle at manifest schema 3 where permanent is what every
 earlier manifest meant and expiry is read, never acted on (ADR 0186), a
 retirement verb that removes what its key derives and never a backup (ADR 0187),
-and a backup schedule verb — and its host evidence is not yet published. Session
-16's is: 85 of 93 claims, measured against a live deployment. Two isolated
+and a backup schedule verb — and its evidence is **90 of 97 claims**, measured
+against the live deployment on 2026-09-05, the seven `not_run` unchanged from
+Session 16 less `project_removal`, which a third, ephemeral project's retirement
+closed. Two isolated
 projects run on one hardened host behind one shared Traefik edge on Let's Encrypt
 production certificates. Each has its own PostgreSQL 18 cluster under forced
 row-level security, two database transports, a REST and an application API behind
