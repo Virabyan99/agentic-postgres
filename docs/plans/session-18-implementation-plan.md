@@ -64,10 +64,10 @@ runs its live proofs' `--setup-plan` before the trip.
 
 Six columns: the number, what the brief or the tree said, what was measured or
 read, what this plan does, why it matters, the ADR if one decides it. **Next
-free number after this table is D1014.** D984–D993 were written at planning;
+free number after this table is D1015.** D984–D993 were written at planning;
 D994–D1000 are Run 1's measurements, and they reversed Run 2's design (ADR
 0188); D1001–D1003 are Run 2's first step, the real second provider;
-D1004–D1007 are Run 2's build; D1008–D1013 are Run 3's, and D1008 reversed
+D1004–D1007 are Run 2's build; D1008–D1014 are Run 3's, and D1008 reversed
 Run 3's order (ADR 0192).
 
 | D | Said | Measured or read | This plan | Why it matters | ADR |
@@ -102,6 +102,7 @@ Run 3's order (ADR 0192).
 | **D1011** | Run 3 as drafted: `--target-time T\|--latest`, with the drill's `--target-action=promote` on both. | **`--target-action` is refused without a `--type` in `(immediate, lsn, name, time, xid)`**: pgBackRest error `[031]`, measured (the rig's first pass failed on it). A plain `restore` replays every archived segment and promotes at the end of WAL. | `restore_arguments` emits a plain `restore` for `--latest` and `--type=time --target=T --target-action=promote` for a target time; the proof pins both vectors. | A flag copied from a working command is not a flag that works in every command; the rig found it before the trip did. | 0192 |
 | **D1012** | ADR 0189: *"only when that volume holds no cluster"* -- with no reading named. | **`PG_VERSION` under PGDATA is present in a restored volume and absent in a fresh one** (measured, arm D); `PGDATA` sits at `18/docker` inside the volume's mount (`runtime_override`'s two constants). A container mounting the volume is read from `docker ps -a --filter volume=`. | `restore.sh` probes `<mount>/18/docker/PG_VERSION` through the project's own image and refuses presence with exit 7, before building anything; `node_restore.pg_version_relative_path` derives the path. | "Holds no cluster" had to become a reading with a control, or the refusal would have been a sentence. | 0192 |
 | **D1013** | ADR 0189: `--adopt` *"refuses when the recorded project id does not exist and never searches by name"*, with no route named. | **Infisical's router declares `GET /api/v1/workspace/:projectId`** (operation `getProjectById`, response `{project: {id, orgId, …}}`, bearer auth), read from the API's source; the unauthenticated route probe against `app.infisical.com` answered 200 for every path, so nothing offline distinguishes the route from the site. The list route (`GET /api/v1/projects`) is the one adoption must never call. | `ControlPlane.get_project` calls the by-id route and nothing else; a proof drives adoption against a recorded control plane and asserts the exact call sequence; the live proof of the route is the trip's (the first `--adopt` on the replacement). | A by-name lookup is the runbook's stop condition; the guard is on the calls made, not on the words in the source. | 0189 |
+| **D1014** | CLAUDE.md §2: *"a run's targeted list must include every guard module whose subject the run touched."* Run 3 added four files to `bin/` and its targeted list held twenty-five modules. | **CI on `a8cf5d6` was red on one test**: `test_cli_contract`'s coverage guard, which holds every command in `bin/` to nine checks (the executable bit in the index, `--help`, the secret-argument scan among them) and found `dr-kit.sh`, `dr-kit.py`, `restore.sh` and `restore.py` in neither of its lists. Listed, the module's 388 passed at once: nothing was wrong, which is the shape the guard exists for (D175). | Listed in the repair commit; the run's targeted list now names `test_cli_contract` whenever a run adds or removes a command. | The rule was written after Session 17's trip and broken by the next run that added a command; a rule kept by memory is D175's shape. CI caught it, as CI is the full check for (D913). | — |
 
 ---
 
@@ -339,9 +340,11 @@ generation and asserted absent, adoption against a recorded control plane
 that asserts the exact call sequence, the runbook's commands exist in the
 measured order) and `tests/contract/test_node_restore.py` (18, the plan, the
 refusals, the measured argument vectors, the verdict, the command against a
-recorded docker); battery 13/13 killed. The live half -- a kit exported from
-production, `--adopt` on the replacement, the restore from the real mirror,
-`REC-NODE-002` -- is the trip's.
+recorded docker); battery 13/13 killed. CI on `a8cf5d6` was red on one
+guard the targeted list had omitted, `test_cli_contract`'s coverage of
+`bin/` (D1014); the four commands listed in the repair commit. The live
+half -- a kit exported from production, `--adopt` on the replacement, the
+restore from the real mirror, `REC-NODE-002` -- is the trip's.
 
 ### Run 4 — `rehearse.sh`
 
