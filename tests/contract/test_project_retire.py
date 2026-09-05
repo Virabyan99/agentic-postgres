@@ -615,6 +615,11 @@ def test_a_failed_step_stops_the_run_and_names_itself(
     assert "no allocation for instance deadbeef" in captured.err, (
         "the failed step's own message was swallowed (D980)"
     )
+    # And in the reason the summary line carries, not only in the repeated
+    # lines above it: the summary is what an operator reads last, and the
+    # battery showed the two carriers are independent (a mutation dropping
+    # the suffix survived while the repeated lines still passed the test).
+    assert "exited 4: ports: no allocation for instance deadbeef" in captured.err, captured.err
     assert record.exists(), "the record was written before the failing step"
     assert (host_layout["state"] / KEY).exists(), "a later step ran after the failure"
     assert (host_layout["edge"] / f"project-{KEY}.yaml").exists()
