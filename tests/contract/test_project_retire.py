@@ -722,3 +722,71 @@ def test_volume_removal_lives_in_exactly_two_commands() -> None:
     assert '"rm", "-f"' not in module, "a forced removal cannot tell removed from never there"
     command = (REPO_ROOT / "bin" / "project-retire.py").read_text(encoding="utf-8")
     assert '"--force"' not in command, "a --force is typed reflexively; a matching name is not"
+
+
+def test_the_provider_destroy_accepts_the_expired_manifest_a_retirement_hands_it(
+    tmp_path: Path,
+) -> None:
+    """D978. Step 6 runs `bootstrap-providers.sh --destroy` with the installed
+    manifest, and on 2026-09-05 that manifest had expired three hours earlier --
+    which is the case a retirement exists for. The bootstrap loaded it through
+    the born-expired rule and would have refused. Measured as the command, not
+    the function: `--mode destroy` on an expired manifest gets past the loader
+    to its next refusal (the missing credential file), while `--mode plan`, the
+    control, is a birth and is still refused at the loader."""
+    import yaml
+
+    manifest = yaml.safe_load((REPO_ROOT / "project.example.yaml").read_text(encoding="utf-8"))
+    manifest["schema_version"] = 3
+    # A slug no machine holds bootstrap state for: with the example's own slug
+    # the destroy got past the loader and met this workstation's root-owned
+    # state file for that key, which is a different refusal (D67) and would
+    # make this proof depend on what /etc holds where it runs.
+    manifest["project"]["slug"] = "fixture-expired"
+    manifest["project"]["lifecycle"] = {
+        "kind": "ephemeral",
+        "expires_at": "2000-01-01T00:00:00Z",
+    }
+    path = tmp_path / "project.expired.yaml"
+    path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+
+    def bootstrap(mode: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "bin" / "bootstrap-providers.py"),
+                "--host",
+                str(REPO_ROOT / "host.example.yaml"),
+                "--project",
+                str(path),
+                "--mode",
+                mode,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=REPO_ROOT,
+            env={
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONPATH": str(REPO_ROOT / "src"),
+            },
+            timeout=120,
+        )
+
+    destroy = bootstrap("destroy")
+    assert "born expired" not in destroy.stderr + destroy.stdout, destroy.stderr
+    # Past the loader, the next refusal depends on the machine: with no
+    # /etc/agentic-postgres at all (CI) the state is absent and the missing
+    # credential file is refused (exit 2); on a workstation whose
+    # /etc/agentic-postgres/projects is root-owned, D67's conservative read
+    # refuses first (exit 3). Both sit after the loader, which is the claim.
+    assert (destroy.returncode, "--operator-credential-file" in destroy.stderr) in {
+        (2, True),
+        (3, False),
+    }, (destroy.returncode, destroy.stderr)
+    if destroy.returncode == 3:
+        assert "cannot be read by this user" in destroy.stderr, destroy.stderr
+
+    plan = bootstrap("plan")
+    assert plan.returncode == 2 and "born expired" in plan.stderr, plan.stderr

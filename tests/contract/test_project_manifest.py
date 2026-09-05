@@ -754,6 +754,32 @@ def test_a_project_born_expired_is_refused(tmp_path: Path, base: dict[str, Any])
     config.validate_project_semantics(at_noon, now=noon.replace(minute=0, second=0, hour=11))
 
 
+def test_an_expired_manifest_loads_for_a_retirement_and_for_nothing_else(
+    tmp_path: Path, base: dict[str, Any]
+) -> None:
+    """D978. The first retirement of an expired project would have failed at
+    its provider-destroy step: the bootstrap loaded the installed manifest
+    through the born-expired rule. `expiry=False` is the retirement's reading;
+    the default -- the control -- still refuses, and every other rule still
+    applies to the retirement's reading too."""
+    expired = copy.deepcopy(base)
+    expired["project"]["lifecycle"] = {"kind": "ephemeral", "expires_at": "2000-01-01T00:00:00Z"}
+    path = tmp_path / "project.yaml"
+    path.write_text(yaml.safe_dump(expired, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(config.ManifestError, match="born expired"):
+        config.load_project_manifest(path)
+    loaded = config.load_project_manifest(path, expiry=False)
+    assert loaded["project"]["lifecycle"]["expires_at"] == "2000-01-01T00:00:00Z"
+
+    # Every other semantic rule still applies without the expiry rule.
+    bad_slug = copy.deepcopy(expired)
+    bad_slug["project"]["slug"] = "Not A Slug"
+    path.write_text(yaml.safe_dump(bad_slug, sort_keys=False), encoding="utf-8")
+    with pytest.raises(config.ManifestError, match="slug"):
+        config.load_project_manifest(path, expiry=False)
+
+
 def test_a_profile_entry_is_typed_and_non_empty(tmp_path: Path, base: dict[str, Any]) -> None:
     """The schema's half of the refusals: an unknown field, a wrong type, a
     tool name outside the identifier grammar, an empty entry. The compiler's

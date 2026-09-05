@@ -941,7 +941,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         host = load_host_manifest(arguments.host)
-        manifest = load_project_manifest(arguments.project)
+        # A destroy meets the installed manifest of a project that may have
+        # expired since it was born -- that is what an ephemeral project's
+        # retirement IS -- so the born-expired rule does not apply to it
+        # (D978). Plan and apply are births and keep the rule.
+        manifest = load_project_manifest(arguments.project, expiry=arguments.mode != "destroy")
     except (OSError, ValueError) as exc:
         fail(EXIT_INVALID, str(exc))
 

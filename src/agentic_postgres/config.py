@@ -926,12 +926,21 @@ def expires_at_of(lifecycle: dict[str, str]) -> datetime | None:
     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
-def validate_project_semantics(document: dict[str, Any], *, now: datetime | None = None) -> None:
+def validate_project_semantics(
+    document: dict[str, Any], *, now: datetime | None = None, expiry: bool = True
+) -> None:
     """Apply every rule of runbook §3.4 that JSON Schema cannot express.
 
     ``now`` is the render's clock, injectable so the expiry rule is testable at
     a fixed moment; it defaults to the wall clock, which is the one a render
     actually runs under.
+
+    ``expiry`` is whether the born-expired rule applies at all. It is a rule
+    about a BIRTH -- a render, a bootstrap, a deploy -- and a retirement reads
+    the same manifest after the date has passed, on purpose (D978): the first
+    retirement of an expired project would have failed at its provider-destroy
+    step because the bootstrap loaded the installed manifest through this
+    rule. Every other rule here still applies.
     """
     version = document.get("schema_version")
     if version not in SUPPORTED_PROJECT_SCHEMA_VERSIONS:
@@ -951,7 +960,7 @@ def validate_project_semantics(document: dict[str, Any], *, now: datetime | None
     # human is looking (ADR 0186). Nothing else in this module reads a clock,
     # and this reads it only to refuse: the value itself is carried verbatim.
     expires_at = expires_at_of(project_lifecycle(document))
-    if expires_at is not None:
+    if expires_at is not None and expiry:
         moment = now if now is not None else datetime.now(UTC)
         if expires_at <= moment:
             raise ManifestError(
@@ -1451,12 +1460,18 @@ def _validate_backup(backup: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def load_project_manifest(path: Path) -> dict[str, Any]:
-    """Parse, schema-check, secret-check, and semantically validate a project."""
+def load_project_manifest(path: Path, *, expiry: bool = True) -> dict[str, Any]:
+    """Parse, schema-check, secret-check, and semantically validate a project.
+
+    ``expiry=False`` is for the one reader that legitimately meets an expired
+    manifest: a retirement (D978). Everything else -- the render, the
+    bootstrap's plan and apply, a materialization -- is a birth and keeps the
+    default.
+    """
     document = load_manifest(path)
     assert_no_sensitive_keys(document)
     validate_against_schema(document, "project.schema.json")
-    validate_project_semantics(document)
+    validate_project_semantics(document, expiry=expiry)
     return document
 
 
