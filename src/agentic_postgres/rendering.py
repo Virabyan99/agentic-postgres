@@ -875,9 +875,18 @@ MIGRATIONS_TABLE = "app_private.schema_migrations"
 
 
 def build_pgbackrest_conf(
-    identity: naming.ProjectIdentity, outputs: dict[str, Any], endpoint: str
+    identity: naming.ProjectIdentity | None,
+    outputs: dict[str, Any],
+    endpoint: str,
+    *,
+    region: str = "auto",
 ) -> bytes:
     """The repository configuration, rendered from the document nothing else reads.
+
+    ``region`` is `auto` for the primary (R2 has no regions) and the mirror's
+    own for a restore from the mirror (ADR 0192; Backblaze names one and
+    pgBackRest sends it). One renderer for every pgBackRest configuration this
+    repository writes, so the two cannot drift in a field neither names.
 
     **Every value here comes out of `outputs`**, not out of the manifest and not
     re-derived from the key. That is ADR 0002 in the place it matters most: the
@@ -931,8 +940,9 @@ def build_pgbackrest_conf(
         f"repo1-s3-endpoint={endpoint.removeprefix('https://')}",
         # R2 is not AWS and has no regions, but the S3 protocol requires the
         # field and pgBackRest requires it too. `auto` is what R2's own
-        # documentation uses for S3-compatible clients.
-        "repo1-s3-region=auto",
+        # documentation uses for S3-compatible clients; a mirror restore
+        # passes the mirror's region (ADR 0192).
+        f"repo1-s3-region={region}",
         # ADR 0107 froze `path` for the storage service against a MEASURED
         # botocore fallback. That measurement does not transfer -- pgBackRest is
         # not botocore -- but the decision to freeze one style does, and path is

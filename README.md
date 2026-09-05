@@ -166,6 +166,10 @@ sudo bin/fleet.sh [--json] [--window HOURS]   # every project on this host: rele
 sudo bin/project-retire.sh --host host.yaml --project <key> --confirm <key> \
      --record <path> --plan                   # what retiring it would remove; nothing changes
 
+sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
+     --project project.yaml --output <dir>     # the disaster kit: identifiers, never a value
+bin/dr-kit.sh verify <dir>                    # is the kit whole? (docs/node-loss-runbook.md)
+
 sudo bin/migrate.sh --project project.yaml status    # applied and pending
 sudo bin/backup.sh  --outputs <outputs.json> info --json
 sudo bin/backup.sh  --outputs <outputs.json> schedule status  # both timers enabled? 0 if so

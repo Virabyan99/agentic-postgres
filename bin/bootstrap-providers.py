@@ -49,6 +49,7 @@ from agentic_postgres.bootstrap_state import (
     BootstrapStateError,
     credential_paths,
     is_converged,
+    load_state,
     needs_credential_repair,
     provider_inputs_digest,
     state_path,
@@ -499,6 +500,17 @@ class ControlPlane:
         if not secret or not secret_id:
             raise BootstrapStateError("client secret creation returned an incomplete response")
         return str(secret_id), str(secret)
+
+    def get_project(self, project_id: str) -> dict[str, Any]:
+        """One project BY ID (ADR 0189): `GET /api/v1/workspace/{id}`, the route
+        whose response wraps the project under `project` with its `orgId`.
+        A project that does not exist answers 404, which `_call` raises with
+        the status in the message; nothing here lists or searches by name."""
+        payload = self._call("GET", f"/api/v1/workspace/{urllib.parse.quote(project_id)}")
+        project = payload.get("project")
+        if not isinstance(project, dict) or not project.get("id"):
+            raise BootstrapStateError(f"the provider returned no project for id {project_id}")
+        return project
 
     def grant_project_access(self, project_id: str, identity_id: str, role: str) -> None:
         self._call(
@@ -962,12 +974,172 @@ def destroy(
     return 0
 
 
+def adopt(
+    key: str,
+    state: dict[str, Any] | None,
+    recorded: dict[str, Any],
+    digest: str,
+    manifest_digest: str,
+    host: dict[str, Any],
+    credential_file: Path,
+    session: int,
+    facilities: frozenset[str],
+) -> int:
+    """Bind THIS host to the Infisical project a kit's state records, BY ID (ADR 0189).
+
+    A replacement host has no state and the project's Infisical project already
+    exists; `--apply` would create a second one by name and `--plan` cannot see
+    the first. Adoption reads the recorded id, asks the provider for that
+    project and nothing else, mints a fresh runtime identity against it, and
+    writes this host's own state -- which records the identity and its
+    membership as what this host created, and the project as what it adopted.
+    The runtime credential the lost host held is neither reused nor revoked
+    here: it cannot be read back (ADR 0011) and revoking it is the operator's
+    console decision once the old host is known to be gone.
+
+    Refused: a state already recorded here for the key (this is not a
+    replacement host, or the previous bootstrap was not destroyed); a recorded
+    project this credential cannot read at that id; a project in another
+    organisation than the host manifest's; provider inputs that differ from the
+    recorded ones (the kit's host manifest was not the one deployed here).
+    """
+    infisical = host["infisical"]
+    if state is not None:
+        fail(
+            EXIT_PROVIDER,
+            f"this host already records a bootstrap for {key} ({state['infisical_project_id']}). "
+            "Adoption is for a host with no state; --destroy the recorded one first if this "
+            "really is a replacement.",
+        )
+    if recorded["project_key"] != key:
+        fail(EXIT_INVALID, f"the state file records {recorded['project_key']!r}, not {key!r}")
+    if recorded["api_url"].rstrip("/") != infisical["api_url"].rstrip("/"):
+        fail(
+            EXIT_INVALID,
+            f"the recorded state names provider {recorded['api_url']} and this host's manifest "
+            f"{infisical['api_url']}; a kit is used with the host manifest it was exported with",
+        )
+    if recorded["provider_inputs_sha256"] != digest:
+        fail(
+            EXIT_PROVIDER,
+            "the provider inputs on this host differ from the recorded ones: the host manifest's "
+            "infisical block or the project's slug/environment is not what the kit's state was "
+            "written under. Use the kit's host manifest and project manifest as they are.",
+        )
+
+    try:
+        operator_id, operator_secret = read_operator_credential(credential_file)
+    except BootstrapStateError as exc:
+        fail(EXIT_PREREQUISITE, str(exc))
+
+    project_id = recorded["infisical_project_id"]
+    try:
+        control = ControlPlane.login(infisical["api_url"], operator_id, operator_secret)
+        try:
+            project = control.get_project(project_id)
+        except BootstrapStateError as exc:
+            if "HTTP 404" in str(exc):
+                fail(
+                    EXIT_PROVIDER,
+                    f"the recorded Infisical project {project_id} does not exist at "
+                    f"{infisical['api_url']} (HTTP 404). Nothing here searches by name (ADR "
+                    "0189): if the project was renamed it still has this id, and if it was "
+                    "deleted its secrets are gone with it.",
+                )
+            raise
+        if str(project.get("orgId") or "") != str(infisical["organization_id"]):
+            fail(
+                EXIT_PROVIDER,
+                f"project {project_id} belongs to organisation {project.get('orgId')!r}, not the "
+                f"host manifest's {infisical['organization_id']!r}; refusing to adopt across "
+                "organisations",
+            )
+        organization = infisical["organization_id"]
+        identity_name = f"{key}-runtime-{now().replace(':', '').replace('-', '')}"
+        identity_id = control.create_identity(identity_name, organization)
+        client_id = control.attach_universal_auth(identity_id)
+        secret_id, client_secret = control.create_client_secret(
+            identity_id, f"{key} runtime (adopted)"
+        )
+    except (BootstrapStateError, KeyError, ValueError) as exc:
+        fail(EXIT_PROVIDER, str(exc))
+
+    paths = credential_paths(key)
+    try:
+        write_private(Path(paths["client_secret_path"]), f"{client_secret}\n", mode=0o400)
+        write_private(Path(paths["client_id_path"]), f"{client_id}\n", mode=0o400)
+        del client_secret
+    except OSError as exc:
+        try:
+            control.revoke_identity(identity_id)
+        except BootstrapStateError:
+            fail(
+                EXIT_PROVIDER,
+                f"could not write the credential ({exc}) and could not revoke identity "
+                f"{identity_id}. Revoke it by that ID by hand before retrying.",
+            )
+        fail(EXIT_PROVIDER, f"could not write the credential ({exc}); the identity was revoked.")
+
+    try:
+        control.grant_project_access(project_id, identity_id, "viewer")
+    except BootstrapStateError as exc:
+        fail(
+            EXIT_PROVIDER,
+            f"created identity {identity_id} but could not grant it access to {project_id}: "
+            f"{exc}. The identity exists and is recorded below; re-run --adopt after fixing "
+            "the role, or revoke it by id.",
+        )
+
+    timestamp = now()
+    document = {
+        "schema_version": 1,
+        "project_key": key,
+        "project_manifest_sha256": manifest_digest,
+        "provider_inputs_sha256": digest,
+        "provider": "infisical",
+        "api_url": infisical["api_url"],
+        "organization_slug": infisical["organization_slug"],
+        "infisical_project_id": project_id,
+        "environment_slug": recorded["environment_slug"],
+        "runtime_folder": recorded["runtime_folder"],
+        "runtime_identity_id": identity_id,
+        "runtime_client_id": client_id,
+        "active_client_secret_id": secret_id,
+        "credential_files": paths,
+        # What THIS host created and may therefore destroy: the identity, its
+        # membership, its client secret. Never the project and never a secret
+        # value -- the lost host created those, and §8.2 says we remove what we
+        # recorded creating and nothing else. A later --apply adopts the
+        # existing secret values into the record by the mechanism it has
+        # always had ("already present; not overwritten").
+        "managed_resources": ["runtime_client_secret", "runtime_identity", "runtime_membership"],
+        "created_at": timestamp,
+        "updated_at": timestamp,
+    }
+    validate_state(document)
+    write_private(
+        state_path(key), json.dumps(document, indent=2, sort_keys=True) + "\n", mode=0o600
+    )
+    print(f"bootstrap-providers: adopted project {project_id} for {key} by its recorded id")
+    print(
+        f"bootstrap-providers: created identity {identity_id} and recorded it in {state_path(key)}"
+    )
+    print(
+        "bootstrap-providers: the lost host's identity "
+        f"{recorded['runtime_identity_id']} was NOT revoked; revoke it in the console once that "
+        "host is known to be gone."
+    )
+    report_operator_supplied(session, facilities)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(add_help=True, description="Provider bootstrap.")
     parser.add_argument("--host", type=Path, required=True)
     parser.add_argument("--project", type=Path, required=True)
-    parser.add_argument("--mode", choices=["plan", "apply", "destroy"], required=True)
+    parser.add_argument("--mode", choices=["plan", "apply", "destroy", "adopt"], required=True)
     parser.add_argument("--operator-credential-file", type=Path)
+    parser.add_argument("--state", type=Path, help="the kit's bootstrap-state.json, for --adopt")
     # Which secrets the contract requires is a function of the session, the same
     # way it is for bin/materialize-secrets.sh. Optional and defaulted to what
     # this release implements, because there is exactly one honest answer for an
@@ -1011,6 +1183,26 @@ def main(argv: list[str] | None = None) -> int:
         return describe_plan(key, state, digest, arguments.session, facilities)
     if arguments.mode == "destroy":
         return destroy(key, state, host, arguments.operator_credential_file)
+    if arguments.mode == "adopt":
+        if arguments.state is None:
+            fail(EXIT_INVALID, "--adopt requires --state FILE (the kit's bootstrap-state.json)")
+        if arguments.operator_credential_file is None:
+            fail(EXIT_INVALID, "--adopt requires --operator-credential-file")
+        try:
+            recorded = load_state(arguments.state)
+        except BootstrapStateError as exc:
+            fail(EXIT_INVALID, f"the recorded state does not validate: {exc}")
+        return adopt(
+            key,
+            state,
+            recorded,
+            digest,
+            manifest_digest,
+            host,
+            arguments.operator_credential_file,
+            arguments.session,
+            facilities,
+        )
 
     if arguments.operator_credential_file is None:
         fail(EXIT_INVALID, "--apply requires --operator-credential-file")

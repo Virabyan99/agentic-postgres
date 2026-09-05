@@ -37,6 +37,7 @@ HOST_MANIFEST=""
 PROJECT_MANIFEST=""
 OPERATOR_CREDENTIAL=""
 CONFIRM=""
+STATE_FILE=""
 
 usage() {
   cat <<'USAGE'
@@ -45,6 +46,9 @@ Usage: bin/bootstrap-providers.sh --host FILE --project FILE --plan
             --operator-credential-file FILE
        sudo bin/bootstrap-providers.sh --host FILE --project FILE --destroy \
             --confirm PROJECT_KEY
+       sudo bin/bootstrap-providers.sh --host FILE --project FILE --adopt \
+            --state KIT/projects/<key>/bootstrap-state.json \
+            --operator-credential-file FILE
 
   --plan     Report what would be created or changed, and name every secret an
              operator has to supply by hand. Contacts nothing and writes
@@ -59,6 +63,12 @@ Usage: bin/bootstrap-providers.sh --host FILE --project FILE --plan
              one: those come from a third party's console and are pasted into
              the provider by hand (ADR 0103, D249).
   --destroy  Remove the resources this project's state file says we own, by ID.
+  --adopt    On a REPLACEMENT host with no state: bind this host to the
+             Infisical project the kit's bootstrap-state.json records, BY ID
+             (ADR 0189). Mints a fresh runtime identity against it, writes the
+             credential files and this host's state. Refuses a host that
+             already records the project, a recorded id that does not exist,
+             and any lookup by name.
 
   --host FILE                      The host manifest.
   --project FILE                   The project manifest.
@@ -85,10 +95,15 @@ parse_arguments() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --help|-h) usage; exit 0 ;;
-      --plan|--apply|--destroy)
-        [ -z "${MODE}" ] || die 2 "only one of --plan, --apply or --destroy may be given."
+      --plan|--apply|--destroy|--adopt)
+        [ -z "${MODE}" ] || die 2 "only one of --plan, --apply, --destroy or --adopt may be given."
         MODE="${1#--}"
         shift
+        ;;
+      --state)
+        [ "$#" -ge 2 ] || die 2 "--state requires a value."
+        STATE_FILE="$2"
+        shift 2
         ;;
       --host)
         [ "$#" -ge 2 ] || die 2 "--host requires a value."
@@ -178,6 +193,16 @@ main() {
         "operator credential file not found: ${OPERATOR_CREDENTIAL}"
       ;;
 
+    adopt)
+      [ "$(id -u)" -eq 0 ] || die 3 \
+        "--adopt requires root: it writes a credential under /etc/agentic-postgres/."
+      [ -n "${STATE_FILE}" ] || die 2 "--adopt requires --state FILE (the kit's bootstrap-state.json)."
+      [ -f "${STATE_FILE}" ] || die 2 "state file not found: ${STATE_FILE}"
+      [ -n "${OPERATOR_CREDENTIAL}" ] || die 2 "--adopt requires --operator-credential-file."
+      [ -f "${OPERATOR_CREDENTIAL}" ] || die 2 \
+        "operator credential file not found: ${OPERATOR_CREDENTIAL}"
+      ;;
+
     destroy)
       [ "$(id -u)" -eq 0 ] || die 3 "--destroy requires root."
       # The project key said back, in full. A --force flag would be typed
@@ -195,6 +220,7 @@ main() {
     --mode "${MODE}"
   )
   [ -n "${OPERATOR_CREDENTIAL}" ] && arguments+=(--operator-credential-file "${OPERATOR_CREDENTIAL}")
+  [ -n "${STATE_FILE}" ] && arguments+=(--state "${STATE_FILE}")
 
   PYTHONPATH="${ROOT_DIR}/src" exec "$(python_bin)" \
     "${ROOT_DIR}/bin/bootstrap-providers.py" "${arguments[@]}"

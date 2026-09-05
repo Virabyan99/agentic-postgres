@@ -47,7 +47,8 @@ all flags or steps lost to retyping the previous session's page.
 | [Client compatibility](client-compatibility.md) | Which clients work against which transport, measured |
 | [Migrations](migrations.md) | How a migration is written, rendered, released and applied |
 | [Secret handling](secret-handling.md) | Generations, per-consumer materialization, what may never be logged |
-| [Provider bootstrap](provider-bootstrap.md) | What is created at a provider, by identifier rather than by name |
+| [Provider bootstrap](provider-bootstrap.md) | What is created at a provider, by identifier rather than by name -- and adopted by id on a replacement host |
+| [Node-loss runbook](node-loss-runbook.md) | The host is gone: the kit, adoption, the restore from the mirror, the deploy, the cutover last |
 | [Host baseline](host-baseline.md) | What `provision-host.sh` does to a machine |
 
 ## The surface

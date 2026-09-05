@@ -36,10 +36,28 @@ sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
 # Removes, by ID, exactly what the state file says we own.
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.alpha.yaml \
      --destroy --confirm alpha-dev
+
+# On a REPLACEMENT host with no state: binds this host to the Infisical
+# project a kit's bootstrap-state.json records, BY ID (ADR 0189), mints a fresh
+# runtime identity against it, and writes this host's own state.
+sudo bin/bootstrap-providers.sh --host host.yaml --project kit/projects/alpha-dev/project.yaml \
+     --adopt --state kit/projects/alpha-dev/bootstrap-state.json \
+     --operator-credential-file /root/.config/agentic-postgres/bootstrap/infisical-control-plane-credential
 ```
 
 Running `--plan` twice after an `--apply` reports no changes. That is the
 property worth having: convergence, not idempotence by accident.
+
+**`--adopt` is the fourth mode, and the only one that starts from another
+host's record.** It refuses a host that already records the project, a
+recorded project id the provider does not have (HTTP 404 -- it never searches
+by name), a project in another organisation, and provider inputs that differ
+from the recorded ones. What it records as managed is what it created: the
+identity, its membership and its client secret -- never the project, never a
+secret value. A following `--apply` adopts the existing values into the record
+(*already present; not overwritten*) and creates none. The lost host's
+identity is named in the output and left for the console. The order it sits
+in is `docs/node-loss-runbook.md`.
 
 Nothing here accepts a credential as an argument, and no value is ever printed.
 

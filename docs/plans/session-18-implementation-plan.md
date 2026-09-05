@@ -64,10 +64,11 @@ runs its live proofs' `--setup-plan` before the trip.
 
 Six columns: the number, what the brief or the tree said, what was measured or
 read, what this plan does, why it matters, the ADR if one decides it. **Next
-free number after this table is D1008.** D984–D993 were written at planning;
+free number after this table is D1014.** D984–D993 were written at planning;
 D994–D1000 are Run 1's measurements, and they reversed Run 2's design (ADR
 0188); D1001–D1003 are Run 2's first step, the real second provider;
-D1004–D1007 are Run 2's build.
+D1004–D1007 are Run 2's build; D1008–D1013 are Run 3's, and D1008 reversed
+Run 3's order (ADR 0192).
 
 | D | Said | Measured or read | This plan | Why it matters | ADR |
 |---|---|---|---|---|---|
@@ -95,6 +96,12 @@ D1004–D1007 are Run 2's build.
 | **D1005** | Run 2's build, as drafted: the mirror pair becomes *"required"* through the rendered document's `secrets.required_names`. | **The rendered document's `required_names` is `RENDER_SESSION`'s list -- Session 2's one sentinel -- by design**; the DEPLOYED document's `secrets.required_names` is built from the generation manifest, which is what the materializer wrote. The reader that decides what a project must hold is the materializer's view of the contract, and the deploy's preflight and the bootstrap compute the same set from the same reader. | The render's `required_secret_names` is filtered by facility for the future but is not the proof's subject; the proof reads the bootstrap's declared and operator-supplied lists and the deploy's preflight instead (`test_backup_mirror`). | A premise wrong in the reassuring direction (D930): a test on the rendered field would have passed for the wrong reason at Session 2's list and proved nothing about what a mirrored project holds. | 0191 |
 | **D1006** | Run 2 as drafted: *"`restore-test.sh` and `backup.sh info\|check` accept `--from CONFIG`, a pgBackRest configuration naming one repository, which is how a mirror is read."* | **Not built in Run 2.** The mirror is read by the copy record on the host and, for a restore, by ADR 0189's `restore.sh` on a replacement host with the mirror's credential and the primary's cipher pass -- which Run 3 builds. A `--from` on the drill would be a second reader of a repository configuration this run has no consumer for. | Deferred to Run 3, where `restore.sh` needs the mirror's configuration anyway; recorded here rather than silently dropped. | A declared flag with no reader is an unverified flag (D816, D929). | 0189 |
 | **D1007** | The contract had two states for a secret, `required: true` and `required: false`; ADR 0188 named the mirror's pair *"consumed by the mirror container only"* and gave the primary's pair *"that container as a second consumer"*. | **Neither state fits a secret two projects lack and one needs**: required everywhere fails both host projects' materialization (their manifests are schema 1); optional is refused for a compose consumer because Compose does not start a service whose mount source is missing. And the primary pair's second consumer, declared plainly, would be materialized and granted for every project -- two files nobody reads. | **ADR 0191**: a third state, `facility: backup_mirror`, on a secret or on a consumer; `active_secrets(..., facilities=)` is the project's view; every writer, mounter, requirer and creator asks it (the materializer, the override, the render, the deploy's preflight, the bootstrap's three lists). The declared view stays for the rotation planner and the contract tests. | The reader that did not move is this repository's defect class (D600, D918); nine readers of one contract were grepped before one was changed. | 0191 |
+| **D1008** | ADR 0189 and this plan's Run 3 and Run 6: on the replacement, *adopt, materialize, deploy, then `restore.sh` into the project's own volume*, with the manifest's backup block *pointing at the mirror bucket as the primary*. | **A deploy fills the volume and cannot then meet the repository.** The first `up` on an empty volume runs `initdb`; step 6c's `stanza-create` then names a cluster whose system identifier is not the repository's, and the restore that followed would meet `PG_VERSION` and pgBackRest's `[040]` (measured on the project's image, arm C). And a mirror cannot be a manifest's primary: the primary endpoint is derived from `backup.account_id` in Cloudflare's shape and the region is `auto` by construction. | **The order is adopt, materialize, render, `restore.sh`, deploy** (ADR 0192): the restore fills the volume through the project's own image and starts the cluster once to promote it; the deploy then starts a cluster that exists and skips `initdb`; the manifest keeps `backup.mirror` and names a NEW primary bucket. The runbook is written in that order and a proof asserts it. | A runbook that deploys first would have failed at its fourth step on the trip, with the volume already holding a fresh cluster the operator would then have to remove by hand (D977's shape). | 0192 |
+| **D1009** | pgBackRest's documentation: *command line > environment > config file*. | **Measured on the project's image with a control**: a configuration naming `repo1-path=/repoA` (holding the stanza) and no environment answered `ok`; the environment set to `/repoB` (empty) answered `missing stanza path`; `--config` naming `/repoB` with the environment set to `/repoA` answered `ok`. The environment overrides the configuration file. | **A mirror restore carries the mirror's key pair in the restore container's own environment**, exported by a wrapper from two mounted raw files (the pattern `mirror.sh` uses); the primary's includes are not mounted at all, so the primary account's credential is absent rather than overridden. | Without the measurement the design would have rested on a documented precedence nobody here had seen hold; D267. | 0192 |
+| **D1010** | Run 1's rig: pgBackRest honours `config-include-path` on the command line only. | **A restore invoked with `--config=X --config-include-path=Y` writes `restore_command = 'pgbackrest --config=X --config-include-path=Y --stanza=S archive-get %f "%p"'` into `postgresql.auto.conf`** (measured, arm B). The recovering instance therefore needs the same configuration at the same paths and the same credential the restore had. | **The recovering instance runs in `restore.sh`'s own container**, with the restore's mounts and environment, until it promotes; the deploy's postmaster then starts a promoted cluster whose `restore_command` is inert. | A cluster started by the deploy while still in recovery would have run `archive-get` against a path the deploy's container does not mount. | 0192 |
+| **D1011** | Run 3 as drafted: `--target-time T\|--latest`, with the drill's `--target-action=promote` on both. | **`--target-action` is refused without a `--type` in `(immediate, lsn, name, time, xid)`**: pgBackRest error `[031]`, measured (the rig's first pass failed on it). A plain `restore` replays every archived segment and promotes at the end of WAL. | `restore_arguments` emits a plain `restore` for `--latest` and `--type=time --target=T --target-action=promote` for a target time; the proof pins both vectors. | A flag copied from a working command is not a flag that works in every command; the rig found it before the trip did. | 0192 |
+| **D1012** | ADR 0189: *"only when that volume holds no cluster"* -- with no reading named. | **`PG_VERSION` under PGDATA is present in a restored volume and absent in a fresh one** (measured, arm D); `PGDATA` sits at `18/docker` inside the volume's mount (`runtime_override`'s two constants). A container mounting the volume is read from `docker ps -a --filter volume=`. | `restore.sh` probes `<mount>/18/docker/PG_VERSION` through the project's own image and refuses presence with exit 7, before building anything; `node_restore.pg_version_relative_path` derives the path. | "Holds no cluster" had to become a reading with a control, or the refusal would have been a sentence. | 0192 |
+| **D1013** | ADR 0189: `--adopt` *"refuses when the recorded project id does not exist and never searches by name"*, with no route named. | **Infisical's router declares `GET /api/v1/workspace/:projectId`** (operation `getProjectById`, response `{project: {id, orgId, …}}`, bearer auth), read from the API's source; the unauthenticated route probe against `app.infisical.com` answered 200 for every path, so nothing offline distinguishes the route from the site. The list route (`GET /api/v1/projects`) is the one adoption must never call. | `ControlPlane.get_project` calls the by-id route and nothing else; a proof drives adoption against a recorded control plane and asserts the exact call sequence; the live proof of the route is the trip's (the first `--adopt` on the replacement). | A by-name lookup is the runbook's stop condition; the guard is on the calls made, not on the words in the source. | 0189 |
 
 ---
 
@@ -288,6 +295,53 @@ verification, and the DNS cutover as the last step -- **rehearsed as a plan
 and never performed on the trip** (production alpha keeps its domain; the
 restored copy runs under a drill domain). Offline proofs with recorded
 subprocesses in the retirement's style; batteries.
+
+**Done.** (2026-09-05, D1008–D1013, ADR 0192.) **Measured first, on the
+project's own image** (`~/rig18/r3-precedence.sh`, four arms with controls):
+the environment overrides a pgBackRest configuration file (D1009); a restore
+writes its `--config` and `--config-include-path` into `restore_command`
+(D1010); `--target-action` is refused without a `--type` (D1011); `PG_VERSION`
+is present in a restored volume and absent in a fresh one, and a populated
+directory is `[040]` (D1012, D997). **These reversed Run 3's order** (D1008,
+ADR 0192): on the replacement it is adopt, materialize, render, `restore.sh`,
+deploy -- a deploy first would `initdb` the volume and 6c would meet a
+foreign system identifier -- and the mirror cannot be a manifest's primary.
+Built: `dr_kit` + `bin/dr-kit.sh export|verify` (the two host manifests and,
+per project, the manifest, `bootstrap-state.json`, the deployed document and
+`secrets.txt` from the project's view of the contract; every file validated by
+its loader on the way in, the listing generated, `kit.json` with digests;
+export refuses an existing directory and writes 0700/0600; verify refuses a
+missing or altered artifact and a directory whose state, document or manifest
+names another key); `bootstrap-providers.sh --adopt --state FILE` (ADR 0189:
+`ControlPlane.get_project` by id at `GET /api/v1/workspace/{id}`, D1013; a
+fresh identity, membership and client secret recorded as this host's, the
+project never; refusals for a host that already records the project, a 404, a
+foreign organisation, differing provider inputs, a state naming another key);
+`node_restore` + `bin/restore.sh --outputs KIT-DOC --project MANIFEST
+--rendered-dir DIR --from mirror|primary --latest|--target-time T [--plan]`
+(the project's own volume derived from the key and every mount checked
+against it; the configuration from `build_pgbackrest_conf` with a `region`
+keyword, mounted at `/etc/pgbackrest/restore.conf`; a mirror restore mounts the
+cipher pass and the mirror pair's two raw files -- the pair's new postgres
+consumers, facility-gated -- and carries them into the container's
+environment through a wrapper, the primary's includes never mounted; refuses
+a mounted or populated volume with exit 7; builds the image through
+`compose.sh`; promotes in its own instance container; the verdict needs a
+replay LSN, timeline ≥ 2, the kit's `instance_uuid` and a migration ledger;
+`evidence/restore-<key>-<id>.json` in the drill's shape with `source` and
+`identity`; the wrapper's trap stops the two containers and never a volume);
+`docs/node-loss-runbook.md` in the measured order with §6's three rehearsal
+rules (drill domain, own bucket, `schedule enable` never run) and a
+symptom table; `docs/provider-bootstrap.md`'s fourth mode. Not built: the
+drill's `--from CONFIG` (D1006 stands; the mirror is `restore.sh`'s subject).
+Proofs: `tests/contract/test_disaster_kit.py` (16, the sentinel planted in a
+generation and asserted absent, adoption against a recorded control plane
+that asserts the exact call sequence, the runbook's commands exist in the
+measured order) and `tests/contract/test_node_restore.py` (18, the plan, the
+refusals, the measured argument vectors, the verdict, the command against a
+recorded docker); battery 13/13 killed. The live half -- a kit exported from
+production, `--adopt` on the replacement, the restore from the real mirror,
+`REC-NODE-002` -- is the trip's.
 
 ### Run 4 — `rehearse.sh`
 

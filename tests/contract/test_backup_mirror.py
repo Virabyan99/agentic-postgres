@@ -295,8 +295,11 @@ def test_the_mirror_pair_is_a_required_facility_secret_for_the_mirror_container(
         assert secret["required"] is True
         assert secret["origin"] == secrets_contract.OPERATOR_SUPPLIED
         assert secret["introduced_in_session"] == SESSION
-        assert [c["service"] for c in secret["consumers"]] == ["backup-mirror"]
-        assert all(c["uid"] == 65532 and c["format"] == "raw" for c in secret["consumers"])
+        # Two consumers since Run 3 (ADR 0192): the mirror container, and the
+        # postgres service as a raw file a replacement-host restore reads.
+        assert [c["service"] for c in secret["consumers"]] == ["backup-mirror", "postgres"]
+        assert all(c["format"] == "raw" for c in secret["consumers"])
+        assert [c["uid"] for c in secret["consumers"]] == [65532, 999]
     facility_bound = {s["name"] for s in contract["secrets"] if s.get("facility")}
     assert facility_bound == MIRROR_PAIR, "another secret gained a facility; extend this proof"
 

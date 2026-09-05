@@ -161,6 +161,13 @@ REQUIRED_PATHS = (
     "systemd/agentic-postgres-backup-mirror@.timer",
     "services/backup-mirror/Dockerfile",
     "services/backup-mirror/mirror.sh",
+    # Session 18 Run 3 (ADR 0189, ADR 0192): the kit, the replacement-host
+    # restore, and the runbook that orders them.
+    "bin/dr-kit.sh",
+    "bin/dr-kit.py",
+    "bin/restore.sh",
+    "bin/restore.py",
+    "docs/node-loss-runbook.md",
     "services/edge-probe/Dockerfile",
     "services/edge-probe/probe.py",
     "services/secret-check/Dockerfile",
