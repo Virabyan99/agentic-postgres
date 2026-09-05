@@ -131,7 +131,15 @@ def execute(step: retirement.Step) -> str | None:
     for command in step.commands:
         result = run(*command)
         if result.returncode != 0:
-            return f"{Path(command[0]).name} exited {result.returncode}"
+            # The step's own last words, or the operator is left with a number
+            # (D980): on the first real retirement step 6 reported "exited 2"
+            # and nothing else, and the cause -- a loader refusal two processes
+            # down -- had to be reconstructed from the source.
+            said = [line for line in (result.stderr or "").splitlines() if line.strip()]
+            for line in said[-8:]:
+                print(f"    {line}", file=sys.stderr)
+            reason = f": {said[-1].strip()}" if said else ""
+            return f"{Path(command[0]).name} exited {result.returncode}{reason}"
         print(f"  ran {Path(command[0]).name}")
     for path in step.paths:
         if not path.exists() and not path.is_symlink():

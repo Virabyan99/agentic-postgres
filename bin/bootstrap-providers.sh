@@ -144,14 +144,19 @@ python_bin() {
 }
 
 project_key() {
-  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "${PROJECT_MANIFEST}" <<'PYTHON'
+  # The mode travels with the path: a destroy meets the installed manifest of
+  # a project that may have expired since it was born, and the loader's
+  # born-expired rule is a rule about a birth (D978). This function was the
+  # second reader of that rule and the one the retirement met first (D979):
+  # the Python behind it had been repaired and this heredoc had not.
+  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "${PROJECT_MANIFEST}" "${MODE}" <<'PYTHON'
 import sys
 from pathlib import Path
 
 from agentic_postgres.config import load_project_manifest
 from agentic_postgres.naming import project_key
 
-manifest = load_project_manifest(Path(sys.argv[1]))["project"]
+manifest = load_project_manifest(Path(sys.argv[1]), expiry=sys.argv[2] != "destroy")["project"]
 print(project_key(manifest["slug"], manifest["environment"]))
 PYTHON
 }

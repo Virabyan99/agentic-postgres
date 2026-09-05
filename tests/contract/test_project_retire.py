@@ -584,8 +584,11 @@ def test_a_failed_step_stops_the_run_and_names_itself(
     def failing_release(*argv: str, timeout: int = 0) -> subprocess.CompletedProcess[str]:
         code = 4 if argv[0].endswith("database-ports.sh") else 0
         stdout = "enabled\n" if argv[:2] == ("systemctl", "is-enabled") else ""
+        # What the failing command said, which the retirement must repeat
+        # (D980): a number alone sent the operator back to the source.
+        stderr = "ports: no allocation for instance deadbeef\n" if code else ""
         return subprocess.CompletedProcess(
-            args=list(argv), returncode=code, stdout=stdout, stderr=""
+            args=list(argv), returncode=code, stdout=stdout, stderr=stderr
         )
 
     monkeypatch.setattr(command, "run", failing_release)
@@ -609,6 +612,9 @@ def test_a_failed_step_stops_the_run_and_names_itself(
     captured = capsys.readouterr()
     assert code == 6
     assert "release-ports" in captured.err and "did not run" in captured.err
+    assert "no allocation for instance deadbeef" in captured.err, (
+        "the failed step's own message was swallowed (D980)"
+    )
     assert record.exists(), "the record was written before the failing step"
     assert (host_layout["state"] / KEY).exists(), "a later step ran after the failure"
     assert (host_layout["edge"] / f"project-{KEY}.yaml").exists()
@@ -793,3 +799,38 @@ def test_the_provider_destroy_accepts_the_expired_manifest_a_retirement_hands_it
 
     plan = bootstrap("plan")
     assert plan.returncode == 2 and "born expired" in plan.stderr, plan.stderr
+
+    # D979: the WRAPPER derives the key by loading the manifest a second time,
+    # and that reader had not moved with the Python's -- the first real
+    # retirement died there with "could not derive the project key". Through
+    # the wrapper, as this user: a destroy gets past the key derivation to the
+    # root refusal; a plan is still refused at the derivation.
+    def wrapper(*mode: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                str(REPO_ROOT / "bin" / "bootstrap-providers.sh"),
+                "--host",
+                str(REPO_ROOT / "host.example.yaml"),
+                "--project",
+                str(path),
+                *mode,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=REPO_ROOT,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            timeout=120,
+        )
+
+    if os.geteuid() == 0:
+        pytest.skip("the wrapper's root refusal is the observation, and this user is root")
+    through_wrapper = wrapper("--destroy", "--confirm", "fixture-expired-dev")
+    assert "could not derive the project key" not in through_wrapper.stderr, through_wrapper.stderr
+    assert through_wrapper.returncode == 3 and "requires root" in through_wrapper.stderr, (
+        through_wrapper.returncode,
+        through_wrapper.stderr,
+    )
+    plan_through_wrapper = wrapper("--plan")
+    assert plan_through_wrapper.returncode == 2, plan_through_wrapper.stderr
+    assert "could not derive the project key" in plan_through_wrapper.stderr
