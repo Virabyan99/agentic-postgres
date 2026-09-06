@@ -108,9 +108,13 @@ and none for a real loss:
   production's; neither is this host's to write.
 
 ```bash
-sudo bin/materialize-secrets.sh --project <manifest> --session <N>
-sudo ./deploy.sh --host host.yaml --project <manifest> --through-session <N> --render-only
+sudo bin/materialize-secrets.sh --project <manifest> --requirements secrets.required.yaml --session <N>
+./deploy.sh --project <manifest> --capabilities capabilities.yaml --render-only
 ```
+
+The render needs no host and no root, and `deploy.sh` refuses `--render-only`
+beside `--through-session` (D1025); the kit's `capabilities.yaml` is the
+capability manifest to render with.
 
 Materialization fetches the mirror's pair and the cipher pass; the render
 writes `.generated/<key>/` with the compose model the restore builds the
@@ -177,9 +181,17 @@ While production still runs, three rules keep the rehearsal from touching it:
 
 - **The restored copy runs under a drill domain** (`alpha-dr-db.…`), never
   the project's. The DNS cutover is rehearsed as a plan and never performed.
-- **The restored copy archives to its own bucket.** Its manifest's
-  `backup.bucket` is a rehearsal bucket with its own credential; production's
-  primary is never named on the replacement.
+- **The restored copy is not deployed while production runs.** A rehearsal
+  ends at `restore.sh`: the volume holds the promoted cluster, the record
+  proves it, and nothing starts. It cannot archive to a bucket of its own,
+  because adoption binds the replacement to production's Infisical project
+  AND environment (the provider-inputs digest covers the environment slug,
+  D1028), so the only backup credential it can materialize is production's.
+  A rehearsal that must deploy the copy names its own
+  `backup.repository_prefix` in production's bucket, never enables a timer,
+  and accepts that its storage bucket and signing key are production's for
+  the day; that was measured as too much coupling for a disposable host
+  (2026-09-06) and is not the rehearsed path.
 - **`backup.sh schedule enable` is never run on the replacement.** Its mirror
   timer would copy the rehearsal's bucket to the mirror bucket with
   `--remove`, deleting production's own copy there. The timers stay

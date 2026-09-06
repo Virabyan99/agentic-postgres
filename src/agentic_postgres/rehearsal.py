@@ -465,7 +465,7 @@ def _backup_credential_failure(facts: Facts) -> Plan:
                     *check,
                 ),
                 expect=(
-                    f"non-zero: the repository {facts.bucket} at {facts.endpoint} refused "
+                    f"non-zero: the repository {facts.bucket} (stanza {facts.stanza}) refused "
                     "the credential and the check failed closed"
                 ),
             ),

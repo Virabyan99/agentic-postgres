@@ -137,6 +137,17 @@ def volume_exists(volume: str) -> bool:
     return docker("volume", "inspect", volume).returncode == 0
 
 
+def probe_image() -> str:
+    """The pinned runtime image from versions.env, for a plan's read of the
+    volume: a plan builds nothing (ADR 0194), and this image is the one every
+    host already holds for the probes the model runs."""
+    for line in (REPO_ROOT / "versions.env").read_text(encoding="utf-8").splitlines():
+        name, _, value = line.partition("=")
+        if name.strip() == "PYTHON_RUNTIME_IMAGE" and value.strip():
+            return value.strip()
+    raise OperatorError(EXIT_PREREQUISITE, "PYTHON_RUNTIME_IMAGE is absent from versions.env")
+
+
 def volume_holds_a_cluster(volume: str, image: str) -> bool:
     """`PG_VERSION` under PGDATA inside the volume (D1012): present means a
     cluster, whatever else is there. Read through the project's own image,
@@ -493,10 +504,11 @@ def restore(arguments: argparse.Namespace) -> int:
     print(f"  target     {arguments.target_time or 'latest'}")
     for mount in plan.inherited:
         print(f"  mount      {mount.target}  (read-only)")
-    if arguments.plan:
-        print("restore: --plan; nothing was started.")
-        return 0
-
+    # Both refusals before the plan returns (ADR 0194): a plan that printed
+    # "would restore into" the production cluster's volume exited 0 on the
+    # first host gate of Session 18 (D1031). The mounted check is a `docker
+    # ps`; the cluster check reads one file through the pinned runtime
+    # image, so the plan builds nothing.
     mounted_by = containers_mounting(plan.volume)
     if mounted_by:
         raise OperatorError(
@@ -504,6 +516,16 @@ def restore(arguments: argparse.Namespace) -> int:
             f"{plan.volume} is mounted by {mounted_by}; a restore into a volume a container "
             "holds is refused. On a production host that is the running cluster.",
         )
+    if arguments.plan:
+        if volume_exists(plan.volume) and volume_holds_a_cluster(plan.volume, probe_image()):
+            raise OperatorError(
+                EXIT_UNSAFE,
+                f"{plan.volume} already holds a cluster (PG_VERSION is present, D1012); the "
+                "run would refuse it and so does the plan (ADR 0194).",
+            )
+        print("restore: --plan; nothing was started.")
+        return 0
+
     image = build_image(arguments.rendered_dir)
     plan = node_restore.RestorePlan(**{**plan.__dict__, "image": image})
     if volume_exists(plan.volume):

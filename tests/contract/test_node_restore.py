@@ -569,15 +569,46 @@ def test_a_refused_restore_writes_no_evidence_and_stops_its_containers(
     assert not any(c[0] == "run" and "-d" in c for c in docker.calls), "the instance was started"
 
 
-def test_plan_prints_and_starts_nothing(
+def test_plan_prints_reads_the_volume_and_starts_nothing(
     restore: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    docker = Docker(exists=True, holds_cluster=True)
+    """ADR 0194: the plan reads what the run would refuse and writes nothing --
+    a `docker ps` and a volume inspect against an absent volume, no create, no
+    build, no restore, no instance."""
+    docker = Docker(exists=False)
     monkeypatch.setattr(restore, "docker", docker)
     assert restore.main([*restore.ARGV, "--from", "mirror", "--latest", "--plan"]) == 0
-    assert docker.calls == []
+    assert [c[:2] for c in docker.calls] == [["ps", "-a"], ["volume", "inspect"]]
     out = capsys.readouterr().out
     assert f"apg-{KEY}-postgres" in out and "--plan; nothing was started" in out
+
+
+@pytest.mark.parametrize(
+    ("docker", "reason"),
+    [
+        (Docker(exists=True, holds_cluster=True), "holds a cluster"),
+        (
+            Docker(exists=True, holds_cluster=False, mounted_by=f"apg-{KEY}-postgres-1"),
+            "is mounted by",
+        ),
+    ],
+)
+def test_plan_refuses_what_the_run_refuses_with_exit_7(
+    restore: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    docker: Docker,
+    reason: str,
+) -> None:
+    """D1031: the first host gate ran `--plan` against the production cluster's
+    volume and it exited 0. Both refusals now come before the plan returns,
+    read through a probe and a `docker ps`, and nothing is created or built."""
+    monkeypatch.setattr(restore, "docker", docker)
+    assert restore.main([*restore.ARGV, "--from", "mirror", "--latest", "--plan"]) == 7
+    assert reason in capsys.readouterr().err
+    assert not any(c[:2] == ["volume", "create"] for c in docker.calls)
+    assert not any(c[0] == "run" and "restore" in c for c in docker.calls)
+    assert not any(c[0] == "run" and "-d" in c for c in docker.calls)
 
 
 def test_the_command_needs_a_materialized_generation_first(

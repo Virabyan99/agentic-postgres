@@ -116,6 +116,10 @@ MUST_DIFFER = (
     "backup.bucket",
     "backup.stanza",
     "backup.repository_prefix",
+    # Version 16 (ADR 0188). The mirror bucket is this project's at the second
+    # provider, derived from its key or named by its manifest; two projects
+    # sharing one would copy over each other with --remove (D1000).
+    "backup.mirror.bucket",
     # Object storage
     "storage.bucket",
     "storage.prefix",
@@ -196,6 +200,14 @@ NOT_AUTHORITY_PREFIXES = (
     "storage.",
     "backup.enabled",
     "backup.retain_full",
+    # Version 16 (ADR 0188): whether a mirror exists and where the provider
+    # is. Two projects at one second provider share the endpoint and region,
+    # and a project without a mirror differs from one with; neither is a
+    # claim about isolation. Added at Session 18's first host gate, which
+    # found the four leaves unclassified (D1029).
+    "backup.mirror.enabled",
+    "backup.mirror.endpoint",
+    "backup.mirror.region",
     "backup_state.",
     "bootstrap.status",
     "routes.",

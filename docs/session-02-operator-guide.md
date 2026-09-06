@@ -52,7 +52,9 @@ git bundle create "/tmp/apg-${SHA:0:12}.bundle" --all
 scp "/tmp/apg-${SHA:0:12}.bundle" root@<host>:/tmp/
 
 # on the host
-git clone "/tmp/apg-${SHA:0:12}.bundle" agentic-postgres
+# -b main: the bundle carries the branch and no HEAD, and a current git refuses to
+# guess one -- without it the clone succeeds with an EMPTY tree (D1024, Ubuntu 26.04).
+git clone -b main "/tmp/apg-${SHA:0:12}.bundle" agentic-postgres
 cd agentic-postgres && git rev-parse HEAD    # CONFIRM this equals ${SHA}
 ```
 

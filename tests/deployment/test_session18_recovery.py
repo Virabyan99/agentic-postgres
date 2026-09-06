@@ -243,7 +243,11 @@ def test_the_kit_exported_from_this_host_verifies_and_holds_no_value(
         listing = (directory / dr_kit.SECRETS_LISTING).read_text(encoding="utf-8")
         for line in listing.splitlines():
             if line.strip() and not line.startswith("#"):
-                assert len(line.split()) == 3, f"{key}: a listing line is not name/path/origin"
+                # name, provider path, origin, and a facility for a gated secret
+                # (the listing's own header says so; D1030).
+                assert 3 <= len(line.split()) <= 4, (
+                    f"{key}: a listing line is not name/path/origin[/facility]"
+                )
 
     values: set[str] = set()
     for key in keys:
@@ -328,7 +332,11 @@ def test_restore_refuses_the_populated_volume_on_the_replacement(
         "--plan",
     )
     assert code == 7, f"restore.sh --plan against a populated volume exited {code}\n{out}\n{err}"
-    assert "holds a cluster" in err, f"the refusal does not say why:\n{err}"
+    # Either refusal (ADR 0194): on the replacement the volume holds the
+    # restored cluster; on production a container mounts it.
+    assert "holds a cluster" in err or "is mounted by" in err, (
+        f"the refusal does not say why:\n{err}"
+    )
 
 
 @pytest.mark.requires_environment(
