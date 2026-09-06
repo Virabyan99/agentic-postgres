@@ -103,6 +103,11 @@ Run 3's order (ADR 0192).
 | **D1012** | ADR 0189: *"only when that volume holds no cluster"* -- with no reading named. | **`PG_VERSION` under PGDATA is present in a restored volume and absent in a fresh one** (measured, arm D); `PGDATA` sits at `18/docker` inside the volume's mount (`runtime_override`'s two constants). A container mounting the volume is read from `docker ps -a --filter volume=`. | `restore.sh` probes `<mount>/18/docker/PG_VERSION` through the project's own image and refuses presence with exit 7, before building anything; `node_restore.pg_version_relative_path` derives the path. | "Holds no cluster" had to become a reading with a control, or the refusal would have been a sentence. | 0192 |
 | **D1013** | ADR 0189: `--adopt` *"refuses when the recorded project id does not exist and never searches by name"*, with no route named. | **Infisical's router declares `GET /api/v1/workspace/:projectId`** (operation `getProjectById`, response `{project: {id, orgId, …}}`, bearer auth), read from the API's source; the unauthenticated route probe against `app.infisical.com` answered 200 for every path, so nothing offline distinguishes the route from the site. The list route (`GET /api/v1/projects`) is the one adoption must never call. | `ControlPlane.get_project` calls the by-id route and nothing else; a proof drives adoption against a recorded control plane and asserts the exact call sequence; the live proof of the route is the trip's (the first `--adopt` on the replacement). | A by-name lookup is the runbook's stop condition; the guard is on the calls made, not on the words in the source. | 0189 |
 | **D1014** | CLAUDE.md §2: *"a run's targeted list must include every guard module whose subject the run touched."* Run 3 added four files to `bin/` and its targeted list held twenty-five modules. | **CI on `a8cf5d6` was red on one test**: `test_cli_contract`'s coverage guard, which holds every command in `bin/` to nine checks (the executable bit in the index, `--help`, the secret-argument scan among them) and found `dr-kit.sh`, `dr-kit.py`, `restore.sh` and `restore.py` in neither of its lists. Listed, the module's 388 passed at once: nothing was wrong, which is the shape the guard exists for (D175). | Listed in the repair commit; the run's targeted list now names `test_cli_contract` whenever a run adds or removes a command. | The rule was written after Session 17's trip and broken by the next run that added a command; a rule kept by memory is D175's shape. CI caught it, as CI is the full check for (D913). | — |
+| **D1015** | ADR 0190's table: service termination is induced by *"`docker kill` one stateless service"* and reversed by *"Compose's restart policy"*. | **Measured in rig 4** (`~/rig18/rig4.sh`, four arms with controls, Docker Desktop 29.5.2): `docker kill` on an `on-failure:5` container leaves it stopped -- exit 137, restart count 0 -- because the daemon records a manual stop and cancels the restart manager; a SIGKILL to the container's main process from the daemon's PID namespace is an unexpected exit and the same policy restarts it in 1.7 s with restart count 1; `kill -9 1` from inside the container's own namespace is ignored by the kernel; `docker start` after a `docker kill` brings it back. The table's reversal never fires for the table's induce. | The induce is `kill -KILL <host pid>` from the host; `docker start` is the conditional fallback the plan prints, and a service the policy did not bring back is a rehearsal that read nothing (exit 6). The plan says why in the line it prints. | A reversal that is a property of a third party has to be measured against the induce it is paired with; the ADR paired a manual stop with a policy that exists to ignore manual stops. | 0193 |
+| **D1016** | ADR 0190's table reads *"the mirror unit's failure and the doctor's mirror check"* for a blocked mirror path. | **The doctor's mirror check reads the copy record, which a failed copy never writes**: `backup.sh mirror` writes it only after a pass that exits 0, so the check reports the last completed copy until it is `MIRROR_STALE_AFTER_DAYS` (2) old. Under a block it says `ok, last copied <yesterday>`. The reader that names one failed copy is the verb's exit, which is what the unit runs and how the unit fails. | The scenario's reader is the mirror verb's exit; the doctor's mirror check is read and recorded as what it reports; the doctor's archiver check is the control that the primary's path was never touched; the copy after the reversal is part of the reversal. `OPS-REHEARSE-005`'s wording in §2 corrected to the mirror path. | A reader named before it was read; D982's shape one step earlier -- the reader exists and does not read this failure, by its own design. | 0193 |
+| **D1017** | ADR 0190 and `OPS-REHEARSE-008`: capability drift is *"reported by the doctor's drift check"*. | **The doctor had no drift check.** `AGT-DRIFT-001` proves the compiler offline; nothing on a host compared the lock on disk with the digest the deploy recorded in `mcp.capability_lock_sha256`. The doctor's ADR 0158 guard in `test_diagnosis` forbade reading the `mcp` block at all. | Built as the doctor's tenth check, `capability drift`: the live SHA-256 of the lock file against the recorded digest, the check handed booleans and never a digest (ADR 0159). The guard replaced by a stricter one that pins the single `mcp` read by its exact shape (ADR 0193). `--lock-file` is the rehearsal's injection. | The requirement named a reader the tree did not have (D950's shape, a brief that says "add X to Y" when Y does not exist). | 0193 |
+| **D1018** | Plan §5 Run 4: *"`load_registry` on an absent file raises, every verb reports it, and `allocate` never creates a registry it did not find"* -- one reader. | **Three readers.** `bin/database-ports.py` returned `empty_registry()` for an absent file; `bin/deploy-project.py`'s `_live_allocation` returned `None` and the deploy published the transports `unavailable` -- a loss of host state read as "nothing allocated yet"; `access_broker` already refused (exit 4). And nothing created the initial registry but an allocation, so provisioning had no step for it. | `port_allocations.RegistryMissing`, exit 4 from every verb; the deploy fails by name (exit 5); `provision-host.sh --apply` creates the empty registry once and `--check` reports its absence; an existing registry is never rewritten. All three readers proved in `test_rehearsal`. | §7 question 5: which of a decision's callers got it. Grep every reader before fixing one (D979). | 0193 |
+| **D1019** | ADR 0190's table: *"one stateless service"*, read through *"the doctor's route status"*. | **The doctor asserts 200 on one route**, the reserved health route (ADR 0015), and `edge-probe` serves it. Killing PostgREST, the obvious stateless service, leaves every doctor check green. | `rehearsal.HEALTH_SERVICE = "edge-probe"`: the service terminated is the one whose route the reader reads, found by its Compose service label. | A rehearsal of a service no reader covers passes for the wrong reason (ADR 0065's shape). | 0193 |
 
 ---
 
@@ -126,7 +131,7 @@ a claim (D697); the four new claims are `independent_repository`,
 | `OPS-REHEARSE-002` | P0 | Service termination: a killed stateless service is back and its route `ready` within the bound, and the doctor reported the gap |
 | `OPS-REHEARSE-003` | P0 | Database restart: every dependent service reconnects without a redeploy; an agent read answers after |
 | `OPS-REHEARSE-004` | P0 | Backup credential failure: `check` against a repository with a wrong credential fails closed with the repository named, and a deploy's 6c would refuse |
-| `OPS-REHEARSE-005` | P0 | WAL archiving failure: an archiver that cannot reach its repository is reported by the doctor's `archiver` check within one archive timeout, and archiving resumes when the path is restored |
+| `OPS-REHEARSE-005` | P0 | WAL archiving failure, on the MIRROR's path (ADR 0188, D1016): with the mirror endpoint rejected on the backup network, the mirror copy fails -- the unit's failure -- while the doctor's `archiver` check stays ok, and the next copy completes once the path is restored; the primary's archiving is never blocked |
 | `OPS-REHEARSE-006` | P0 | Registry loss: an absent port registry is refused by every verb, never recreated; the deploy names the loss |
 | `OPS-REHEARSE-007` | P1 | Disk threshold: the doctor's `disk_headroom` reports `warn` and `problem` at its thresholds, rehearsed by injecting the threshold, never by filling a disk |
 | `OPS-REHEARSE-008` | P1 | Capability drift: a lock whose hash differs from the deployed document's is reported by the doctor (extends `AGT-DRIFT-001` to the running deployment) |
@@ -361,6 +366,45 @@ archiving failure blocks the SECONDARY's endpoint on the backup egress network
 and reads the archiver check, then unblocks and reads it recover. Offline
 halves with recorded docker, systemctl and iptables; live halves are the
 `OPS-REHEARSE-*` proofs, gated on the trip.
+
+**Done.** (2026-09-06, D1015–D1019, ADR 0193.) **Measured first** (rig 4,
+`~/rig18/rig4.sh` and `rig4.txt`, on Docker Desktop 29.5.2, so the process
+kill went through a `--pid=host` container; on the host it is `kill` as root):
+`docker kill` leaves an `on-failure:5` container stopped, exit 137, restart
+count 0 (D1015); a SIGKILL to its main process from the daemon's namespace is
+restarted in 1.7 s; `kill -9 1` from inside is ignored; `docker start` after a
+`docker kill` is the fallback; a DOCKER-USER REJECT selected by the backup
+network's subnet and the destination address blocks that network only (the
+control network reached 1.1.1.1:443 with the rule standing) and is deleted by
+its comment in the form `iptables -S` prints. **These changed three rows of
+ADR 0190's table** (ADR 0193 amends it): the induce, the service (`edge-probe`,
+the health route's server, D1019), and the WAL scenario's reader (the mirror
+verb's exit; the doctor's mirror check reads a record a failed copy never
+writes, D1016). Built: `agentic_postgres.rehearsal` (the eight plans over
+`Facts` the command reads by label, `render_plan`, `iptables_delete_arguments`,
+`foreign_lock`, `verdict`, `record`); `bin/rehearse.sh SCENARIO --outputs FILE
+[--plan]` and `reverse` (induce, observe, reverse in a `finally`, the
+in-progress file at `/etc/agentic-postgres/rehearsal-in-progress.json` that
+refuses a second scenario and lets `reverse` replay a crashed one, the evidence
+record `evidence/rehearsal-<key>-<scenario>-<id>.json`, exit 6 for a reader that
+read nothing and 7 for a reversal that did not verify; every reading a value
+the command produced, never a subprocess's words); the doctor's tenth check
+`capability drift` (D1017) and its injections `--disk-warn-copies`,
+`--disk-problem-copies`, `--lock-file`, forwarded by `doctor.sh`, refused as
+input when impossible; the registry refusal in all three readers and its
+creation by provisioning (D1018). Not used: the alert rules' expressions --
+no scenario's reader is an alert -- and `systemctl`, since the unit's failure
+is read through the verb the unit runs. Proofs: `tests/contract/test_rehearsal.py`
+(61: the plans, the command against a recorded runner with real files for the
+registry and the lock so that "reversed" is a property of the filesystem,
+every port verb's refusal, the deploy's, provisioning's creator by scan, the
+doctor's two rehearsed readers); `test_diagnosis`'s ADR 0158 guard replaced by
+a stricter one pinning the single `mcp` read; `test_doctor_redaction`'s rig
+gains the tenth probe; the CLI contract, the reader guard and the live check
+list extended. Battery 14/14 killed with green controls (D499, D386). The
+targeted list of fourteen guard modules green (946). The live halves -- eight
+readings on the production host, `OPS-REHEARSE-002`..`008` -- are the trip's
+(Run 6 step 3); the WAL scenario refuses until the trip enables the mirror.
 
 ### Run 5 — the bump
 

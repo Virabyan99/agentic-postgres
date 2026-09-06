@@ -158,7 +158,7 @@ and the Let's Encrypt rate limits.
 
 ```bash
 sudo bin/doctor.sh --project <key>            # containers, TLS, database, pool,
-                                              # migrations, backups, WAL, disk
+                                              # migrations, backups, WAL, mirror, disk, lock
 sudo bin/doctor.sh --project <key> --verbose  # the numbers behind each verdict
 sudo bin/doctor.sh --project <key> --json     # the same verdicts as a document
 sudo bin/fleet.sh [--json] [--window HOURS]   # every project on this host: release,
@@ -169,6 +169,9 @@ sudo bin/project-retire.sh --host host.yaml --project <key> --confirm <key> \
 sudo bin/dr-kit.sh export --host host.yaml --capabilities capabilities.yaml \
      --project project.yaml --output <dir>     # the disaster kit: identifiers, never a value
 bin/dr-kit.sh verify <dir>                    # is the kit whole? (docs/node-loss-runbook.md)
+sudo bin/rehearse.sh <scenario> --outputs <outputs.json> [--plan]
+                                              # one bounded failure: induce, read, reverse
+sudo bin/rehearse.sh reverse                  # replay an interrupted rehearsal's reversal
 
 sudo bin/migrate.sh --project project.yaml status    # applied and pending
 sudo bin/backup.sh  --outputs <outputs.json> info --json

@@ -241,6 +241,13 @@ def render(doctor: Any, *, mode: str) -> str:
     checks.append(doctor.probe_archiver(doc))
     checks.append(doctor.probe_mirror("apg-canary-dev", doc))
     checks.append(doctor.probe_disk(doc))
+    # The `mcp` block is poisoned, and this probe reads its digest: the check
+    # must come out as a verdict and booleans, never the digest (ADR 0159). A
+    # file every checkout has stands in for the lock, so the digest is
+    # computed and compared (the parsing path) on every machine, rather than
+    # the probe reporting UNKNOWN on a workstation whose rendered root exists
+    # and is root-owned.
+    checks.append(doctor.probe_capability_drift(doc, lock_file=REPO_ROOT / "VERSION"))
     if mode == "json":
         return diagnosis.render_json(
             tuple(checks), project_key="apg-canary-dev", observed_at="2026-09-04T12:00:00Z"

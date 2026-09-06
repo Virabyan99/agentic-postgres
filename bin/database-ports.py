@@ -110,8 +110,16 @@ def bindable(port: int, address: str) -> bool:
 
 
 def load_registry(path: Path) -> dict[str, Any]:
+    """The registry, or `RegistryMissing` when there is no file (ADR 0190).
+
+    Never `empty_registry()` for an absent file: that is what this returned
+    until Session 18, and it meant the next `allocate` wrote a fresh registry
+    over a loss and could hand a running project's ports to another. Every
+    verb loads through here, so every verb refuses; the initial registry is
+    provisioning's to create.
+    """
     if not path.exists():
-        return port_allocations.empty_registry()
+        raise port_allocations.RegistryMissing(port_allocations.missing_registry_message(path))
     try:
         document = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
@@ -369,6 +377,8 @@ def main(argv: list[str] | None = None) -> int:
     arguments = build_parser().parse_args(argv)
     try:
         return arguments.handler(arguments)
+    except port_allocations.RegistryMissing as error:
+        return fail(EXIT_MISSING_STATE, str(error))
     except AllocationError as error:
         return fail(EXIT_VALIDATION, str(error))
     except config.ManifestError as error:

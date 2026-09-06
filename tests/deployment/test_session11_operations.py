@@ -62,6 +62,7 @@ EXPECTED_CHECKS = (
     "backup repository",
     "wal archiver",
     "disk headroom",
+    "capability drift",
 )
 
 

@@ -60,9 +60,11 @@ __all__ = [
     "WARN",
     "Check",
     "archiver",
+    "capability_drift",
     "containers",
     "database",
     "disk_headroom",
+    "disk_thresholds",
     "document",
     "exit_code",
     "migrations",
@@ -369,7 +371,27 @@ def mirror(
     return _check("backup mirror", OK, f"last copied {last_copied_at}", facts)
 
 
-def disk_headroom(*, cluster_kb: int | None, available_kb: int | None, mount: str) -> Check:
+def disk_thresholds(*, warn_copies: float, problem_copies: float) -> tuple[float, float]:
+    """The one rule a pair of thresholds must satisfy, spelled once: the
+    problem is above zero and the warning fires before it. `disk_headroom`
+    applies it and `bin/doctor.py` refuses an injected pair before reading
+    anything, so the same sentence names both refusals."""
+    if problem_copies <= 0 or warn_copies <= problem_copies:
+        raise ValueError(
+            f"disk thresholds must satisfy 0 < problem ({problem_copies}) < warn "
+            f"({warn_copies}); a warning that fires after the problem is not advisory"
+        )
+    return warn_copies, problem_copies
+
+
+def disk_headroom(
+    *,
+    cluster_kb: int | None,
+    available_kb: int | None,
+    mount: str,
+    warn_copies: float = DISK_WARN_COPIES,
+    problem_copies: float = DISK_PROBLEM_COPIES,
+) -> Check:
     """Is there room for the restore this deployment promises?
 
     **Derived, not typed** — a restore materialises a second copy of the cluster,
@@ -377,13 +399,20 @@ def disk_headroom(*, cluster_kb: int | None, available_kb: int | None, mount: st
     justify. And it is measured at ``mount``, never at `/`: the two coincide on a
     developer machine, so a check reading `/` passes there for a reason that does
     not generalise (D634).
+
+    ``warn_copies`` and ``problem_copies`` are the deployment's thresholds by
+    default and a rehearsal's when injected (`OPS-REHEARSE-007`, ADR 0190): the
+    reader is rehearsed by moving the threshold, never by filling the disk, and
+    the evidence carries the thresholds the verdict was computed at so an
+    injected reading cannot be mistaken for the host's.
     """
+    disk_thresholds(warn_copies=warn_copies, problem_copies=problem_copies)
     facts = _pairs(
         mount=mount,
         cluster_kb=cluster_kb,
         available_kb=available_kb,
-        problem_below_copies=DISK_PROBLEM_COPIES,
-        warn_below_copies=DISK_WARN_COPIES,
+        problem_below_copies=problem_copies,
+        warn_below_copies=warn_copies,
     )
     if cluster_kb is None or available_kb is None:
         return _check("disk headroom", UNKNOWN, f"could not measure {mount}", facts)
@@ -397,11 +426,68 @@ def disk_headroom(*, cluster_kb: int | None, available_kb: int | None, mount: st
         f"{available_kb // 1024} MiB free at {mount}, "
         f"cluster is {cluster_kb // 1024} MiB ({copies:.1f}x)"
     )
-    if copies < DISK_PROBLEM_COPIES:
+    if copies < problem_copies:
         return _check("disk headroom", PROBLEM, f"a restore cannot run: {summary}", facts)
-    if copies < DISK_WARN_COPIES:
+    if copies < warn_copies:
         return _check("disk headroom", WARN, f"one restore would fit, barely: {summary}", facts)
     return _check("disk headroom", OK, summary, facts)
+
+
+def capability_drift(*, recorded: bool, present: bool | None, matches: bool | None) -> Check:
+    """Is the capability lock on disk the one the deployed document recorded?
+
+    `AGT-DRIFT-001` extended to the running deployment (`OPS-REHEARSE-008`,
+    ADR 0190): the deploy compiles the lock and records its digest in the
+    document's `mcp` block; the runtime mounts the file. A lock rewritten after
+    the deploy -- by a hand-run `mcp-contract.sh lock`, a partial deploy, an
+    edit -- is a lock the document did not describe, and a restarted runtime
+    would serve it.
+
+    ``recorded`` says whether the document records a digest at all; ``present``
+    whether a lock is on disk (None when it could not be read); ``matches``
+    whether the on-disk digest equals the recorded one. **Neither digest is a
+    parameter**: the `mcp` block is one the doctor never echoes (ADR 0159), so
+    the comparison happens in the caller and only its answer arrives here.
+
+    A project with no agent plane records no lock and has none, and is OK; a
+    lock on disk that no document recorded is a warning, because nothing
+    deployed it.
+    """
+    facts = _pairs(recorded=recorded, present=present, matches=matches)
+    if not recorded:
+        if present:
+            return _check(
+                "capability drift",
+                WARN,
+                "a capability lock is on disk that the deployed document does not record",
+                facts,
+            )
+        return _check(
+            "capability drift", OK, "no capability lock is recorded for this project", facts
+        )
+    if present is None:
+        return _check("capability drift", UNKNOWN, "the capability lock could not be read", facts)
+    if not present:
+        return _check(
+            "capability drift",
+            PROBLEM,
+            "the deployed document records a capability lock and none is on disk",
+            facts,
+        )
+    if matches:
+        return _check(
+            "capability drift",
+            OK,
+            "the lock on disk is the one the deployed document recorded",
+            facts,
+        )
+    return _check(
+        "capability drift",
+        PROBLEM,
+        "the lock on disk is not the one the deployed document recorded; a restarted "
+        "runtime would serve a lock this deploy did not compile",
+        facts,
+    )
 
 
 def worst(checks: tuple[Check, ...]) -> str:

@@ -24,6 +24,7 @@ Exit codes follow the convention:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
@@ -478,19 +479,34 @@ def probe_mirror(
     )
 
 
-def probe_disk(document: dict[str, Any]) -> diagnosis.Check:
+def probe_disk(
+    document: dict[str, Any],
+    *,
+    warn_copies: float = diagnosis.DISK_WARN_COPIES,
+    problem_copies: float = diagnosis.DISK_PROBLEM_COPIES,
+) -> diagnosis.Check:
     """PGDATA's size against the space free on the filesystem holding it.
 
     **The mount point, never `/`** (D634). Measured in Run 1: the two coincide on
     a developer machine, so a check reading `/` is right there for a reason that
     does not generalise — and on a host that gives the database its own device it
     would be reading an unrelated filesystem while still printing a number.
+
+    The thresholds are the deployment's unless a rehearsal injects them
+    (`--disk-warn-copies`, `--disk-problem-copies`; ADR 0190): the reader is
+    rehearsed by moving the threshold, never by filling the disk.
     """
     db = document.get("database") or {}
     container = db.get("container")
     mount = runtime_override.POSTGRES_PGDATA
     if not container:
-        return diagnosis.disk_headroom(cluster_kb=None, available_kb=None, mount=mount)
+        return diagnosis.disk_headroom(
+            cluster_kb=None,
+            available_kb=None,
+            mount=mount,
+            warn_copies=warn_copies,
+            problem_copies=problem_copies,
+        )
 
     used = run("docker", "exec", "-i", container, "du", "-sk", mount, timeout=60)
     free = run("docker", "exec", "-i", container, "df", "-Pk", mount, timeout=20)
@@ -506,7 +522,42 @@ def probe_disk(document: dict[str, Any]) -> diagnosis.Check:
                     available_kb = int(fields[3])
                 except ValueError:
                     available_kb = None
-    return diagnosis.disk_headroom(cluster_kb=cluster_kb, available_kb=available_kb, mount=mount)
+    return diagnosis.disk_headroom(
+        cluster_kb=cluster_kb,
+        available_kb=available_kb,
+        mount=mount,
+        warn_copies=warn_copies,
+        problem_copies=problem_copies,
+    )
+
+
+def probe_capability_drift(
+    document: dict[str, Any], *, lock_file: Path | None = None
+) -> diagnosis.Check:
+    """The capability lock on disk against the digest the deploy recorded.
+
+    `AGT-DRIFT-001` on the running deployment (`OPS-REHEARSE-008`, ADR 0190).
+    The lock's path is derived from the project key through
+    `deployed_output.rendered_path` -- the path the deploy wrote it to and the
+    runtime mounts it from -- unless a rehearsal points `--lock-file` at a lock
+    with a foreign hash, which is how the reader is exercised without touching
+    the deployed file.
+
+    **The digests stay here.** The recorded one is in the `mcp` block, which the
+    doctor never echoes, so `diagnosis.capability_drift` is handed booleans and
+    the comparison's answer, never either digest (ADR 0159).
+    """
+    recorded = (document.get("mcp") or {}).get("capability_lock_sha256")
+    key = str((document.get("project") or {}).get("key") or "")
+    path = lock_file or (deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME)
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except FileNotFoundError:
+        return diagnosis.capability_drift(recorded=bool(recorded), present=False, matches=None)
+    except OSError:
+        return diagnosis.capability_drift(recorded=bool(recorded), present=None, matches=None)
+    matches = (digest == recorded) if recorded else None
+    return diagnosis.capability_drift(recorded=bool(recorded), present=True, matches=matches)
 
 
 def _first_int(text: str) -> int | None:
@@ -518,7 +569,12 @@ def _first_int(text: str) -> int | None:
 
 
 def diagnose(
-    project_key: str, root: Path = deployed_output.PROJECT_STATE_ROOT
+    project_key: str,
+    root: Path = deployed_output.PROJECT_STATE_ROOT,
+    *,
+    warn_copies: float = diagnosis.DISK_WARN_COPIES,
+    problem_copies: float = diagnosis.DISK_PROBLEM_COPIES,
+    lock_file: Path | None = None,
 ) -> tuple[diagnosis.Check, ...]:
     document = load_document(project_key, root)
     checks: list[diagnosis.Check] = [probe_containers(project_key)]
@@ -529,7 +585,8 @@ def diagnose(
     checks.append(probe_repository(project_key, root))
     checks.append(probe_archiver(document))
     checks.append(probe_mirror(project_key, document, root))
-    checks.append(probe_disk(document))
+    checks.append(probe_disk(document, warn_copies=warn_copies, problem_copies=problem_copies))
+    checks.append(probe_capability_drift(document, lock_file=lock_file))
     return tuple(checks)
 
 
@@ -546,9 +603,27 @@ def main(argv: list[str] | None = None) -> int:
     rendering = parser.add_mutually_exclusive_group()
     rendering.add_argument("--verbose", action="store_true")
     rendering.add_argument("--json", action="store_true")
+    # A rehearsal's injections (ADR 0190): the disk thresholds, and a lock file
+    # to read instead of the deployed one. They change what a reader is asked
+    # about, never what it prints; the evidence carries the values used.
+    parser.add_argument("--disk-warn-copies", type=float, default=diagnosis.DISK_WARN_COPIES)
+    parser.add_argument("--disk-problem-copies", type=float, default=diagnosis.DISK_PROBLEM_COPIES)
+    parser.add_argument("--lock-file", type=Path, default=None)
     arguments = parser.parse_args(argv)
+    try:
+        diagnosis.disk_thresholds(
+            warn_copies=arguments.disk_warn_copies, problem_copies=arguments.disk_problem_copies
+        )
+    except ValueError as problem:
+        return _die(EXIT_INPUT, str(problem))
 
-    checks = diagnose(arguments.project, arguments.root)
+    checks = diagnose(
+        arguments.project,
+        arguments.root,
+        warn_copies=arguments.disk_warn_copies,
+        problem_copies=arguments.disk_problem_copies,
+        lock_file=arguments.lock_file,
+    )
     # The rendering flags reach the RENDERER and nothing else. There is no
     # verbose or json branch in any probe above, which is what keeps "a third
     # party's bytes are never printed" a property of the shape rather than a

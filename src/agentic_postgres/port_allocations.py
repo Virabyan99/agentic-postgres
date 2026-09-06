@@ -49,11 +49,13 @@ __all__ = [
     "REGISTRY_PATH",
     "SCHEMA_NAME",
     "AllocationError",
+    "RegistryMissing",
     "activate",
     "allocate",
     "empty_registry",
     "find",
     "live_allocations",
+    "missing_registry_message",
     "release",
     "taken_ports",
     "timestamp",
@@ -76,6 +78,28 @@ LIVE_STATES = frozenset({"reserved", "active"})
 
 class AllocationError(ValueError):
     """The registry, or the request, is not one this module will act on."""
+
+
+class RegistryMissing(AllocationError):
+    """There is no registry file at all, which is a loss and not an empty one.
+
+    `OPS-REHEARSE-006` (ADR 0190). Until Session 18 an absent registry was read
+    as `empty_registry()` and the next allocation wrote a fresh file -- one
+    that could hand a running project's port to another, with no error
+    anywhere. Every reader raises this instead; `bin/database-ports.py` maps
+    it to exit 4 (missing runtime state); the initial registry is
+    `provision-host.sh --apply`'s to create, never allocation's.
+    """
+
+
+def missing_registry_message(path: object) -> str:
+    return (
+        f"no port registry at {path}. An absent registry is not an empty one: either the "
+        "host's state was lost or provisioning never finished. Nothing recreates it -- "
+        "a fresh registry could hand a running project's ports to another. Restore it "
+        "from the host's backup, or on a host that has never allocated a port run "
+        "provision-host.sh --apply, which creates the empty registry (ADR 0190)"
+    )
 
 
 def timestamp(moment: datetime | None = None) -> str:

@@ -42,8 +42,16 @@ Usage: bin/doctor.sh [--verbose] [--help]
   --project KEY      Deployed mode. Checks one project running on THIS host:
                      containers, the health route, TLS expiry, the cluster and
                      the pooler, migrations, the backup repository, the WAL
-                     archiver, and disk headroom for a restore. Needs root,
-                     because the deployed document is 0600 root.
+                     archiver, the backup mirror, disk headroom for a restore,
+                     and the capability lock against the deployed document.
+                     Needs root, because the deployed document is 0600 root.
+
+  --disk-warn-copies N, --disk-problem-copies N, --lock-file PATH
+                     Deployed mode only; a rehearsal's injections (ADR 0190).
+                     The disk thresholds in copies of the cluster, and a lock
+                     to read instead of the deployed one. The evidence carries
+                     the values used, so an injected reading is never mistaken
+                     for the host's.
 
   --verbose          Show the values behind each answer: resolved tool paths in
                      workstation mode, the numbers each verdict was computed
@@ -95,13 +103,18 @@ deployed_mode() {
     printf 'doctor: --project needs root: the deployed document is 0600 root.\n' >&2
     exit 3
   }
+  # The injections are forwarded as they were given; the Python side owns
+  # their contract and refuses an impossible pair of thresholds.
   if [ -n "${json}" ]; then
-    exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}" --json
+    exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}" --json \
+      ${INJECTIONS[@]+"${INJECTIONS[@]}"}
   fi
   if [ -n "${verbose}" ]; then
-    exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}" --verbose
+    exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}" --verbose \
+      ${INJECTIONS[@]+"${INJECTIONS[@]}"}
   fi
-  exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}"
+  exec "$(python_bin)" "${ROOT_DIR}/bin/doctor.py" --project "${project_key}" \
+    ${INJECTIONS[@]+"${INJECTIONS[@]}"}
 }
 
 ok()   { printf '  ok    %s\n' "$*"; }
@@ -178,6 +191,7 @@ check_python_minor() {
 
 main() {
   local project="" verbose="" json=""
+  INJECTIONS=()
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -188,9 +202,16 @@ main() {
         [ "$#" -ge 2 ] || { printf 'doctor: --project requires a project key.\n' >&2; exit 2; }
         project="$2"; shift 2 ;;
       --project=*) project="${1#--project=}"; shift ;;
+      --disk-warn-copies|--disk-problem-copies|--lock-file)
+        [ "$#" -ge 2 ] || { printf 'doctor: %s requires a value.\n' "$1" >&2; exit 2; }
+        INJECTIONS+=("$1" "$2"); shift 2 ;;
       *) usage >&2; printf 'doctor: unknown argument: %s\n' "$1" >&2; exit 3 ;;
     esac
   done
+  if [ "${#INJECTIONS[@]}" -gt 0 ] && [ -z "${project}" ]; then
+    printf 'doctor: %s is a deployed-mode injection; it needs --project.\n' "${INJECTIONS[0]}" >&2
+    exit 2
+  fi
 
   # Dispatched before any workstation check runs, and that ordering is the
   # contract: the two modes never execute together, which is what keeps

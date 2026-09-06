@@ -1656,10 +1656,16 @@ def _live_allocation(project_key: str, instance_uuid: str | None) -> dict[str, A
     deploy interrogates nothing, so it has no UUID and no business inventing one.
     Released records are excluded either way, so a project whose ports were given
     up publishes `unavailable` rather than a number nothing is serving.
+
+    **An absent registry is a refusal, not `None`** (ADR 0190, `OPS-REHEARSE-006`).
+    Until Session 18 this returned None and the deploy published the transports
+    `unavailable` -- a loss of host state read as "nothing allocated yet", and
+    the next allocation would have recreated the file. The deploy names the
+    loss instead; provisioning creates the initial registry.
     """
     path = Path(port_allocations.REGISTRY_PATH)
     if not path.is_file():
-        return None
+        fail(EXIT_VALIDATION, port_allocations.missing_registry_message(path))
     registry = json.loads(path.read_text(encoding="utf-8"))
     live = port_allocations.live_allocations(registry)
 

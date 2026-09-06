@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 
 import pytest
 
@@ -360,6 +361,13 @@ def test_the_doctor_reads_no_status_block_off_the_deployed_document() -> None:
     the schema gives it `wal_archived_count` and `wal_failed_count` and **no
     timestamps**, so a doctor reading it for archiver health would be forced onto
     the cumulative counter D553 measured at 26 on a healthy cluster.
+
+    **One member of one observed block is read, and it is pinned here** (ADR
+    0193, Session 18 Run 4): `mcp.capability_lock_sha256` is an identity -- WHICH
+    lock the deploy compiled -- and the drift check compares it against a live
+    digest of the file on disk, never echoes it. Every other member of `mcp`,
+    `mcp.status` first, stays unreadable, and the read's exact shape is
+    asserted so a second member cannot arrive under the same exemption.
     """
     source = (REPO_ROOT / "bin" / "doctor.py").read_text(encoding="utf-8")
     observed_blocks = {"backup_state", "mcp", "tls", "api", "jwt", "secrets", "bootstrap"}
@@ -367,15 +375,21 @@ def test_the_doctor_reads_no_status_block_off_the_deployed_document() -> None:
 
     # Premise: the scan finds the reads it is supposed to find. Without this the
     # assertion below passes on an empty set.
-    assert {"project", "database", "routes"} <= read, (
+    assert {"project", "database", "routes", "mcp"} <= read, (
         f"the scan found {sorted(read)}; it is not reading doctor.py's document access"
     )
 
-    echoed = sorted(read & observed_blocks)
+    echoed = sorted((read & observed_blocks) - {"mcp"})
     assert not echoed, (
         f"bin/doctor.py reads {echoed} off the deployed document. Those blocks record "
         "what was observed at DEPLOY time; a verdict built from one describes a moment "
         "that has passed (ADR 0158). Read it live."
+    )
+    mcp_reads = re.findall(r'document\.get\("mcp"\)[^\n]*', source)
+    assert mcp_reads == ['document.get("mcp") or {}).get("capability_lock_sha256")'], (
+        f"bin/doctor.py reads the mcp block as {mcp_reads}. The only permitted read is the "
+        "recorded lock digest -- an identity compared against a live digest of the file, "
+        "never echoed (ADR 0193); `mcp.status` and every other member stay unread."
     )
 
 

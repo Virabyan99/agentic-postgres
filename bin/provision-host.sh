@@ -29,6 +29,9 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 
 readonly ETC="/etc/agentic-postgres"
+# port_allocations.REGISTRY_PATH, spelled here because this script runs before
+# the release is installed; test_rehearsal asserts the two agree.
+readonly PORT_REGISTRY="${ETC}/database-port-allocations.json"
 readonly LIBEXEC="/usr/local/libexec/agentic-postgres"
 readonly SYSTEMD_DIR="/etc/systemd/system"
 readonly BACKUP_ROOT="/var/backups/agentic-postgres"
@@ -355,6 +358,18 @@ check_baseline() {
       violations=$((violations + 1))
     fi
   done
+
+  printf '\n== port registry ==\n'
+  # The initial registry is provisioning's to create and allocation's never to
+  # recreate (ADR 0190): an absent registry is a loss of host state, and every
+  # database-ports.sh verb refuses it with exit 4. So its absence is a
+  # deviation here, and --apply creates the empty one exactly once.
+  if [ -f "${PORT_REGISTRY}" ]; then
+    ok "port registry ${PORT_REGISTRY}"
+  else
+    bad "${PORT_REGISTRY} is absent; every port verb refuses until --apply creates it"
+    violations=$((violations + 1))
+  fi
 
   printf '\n== docker ==\n'
   # Reported as its own deviation rather than left to surface as a failed
@@ -743,6 +758,26 @@ install_units() {
   note "backup timers installed but not enabled; they need a repository first"
 }
 
+# The empty port registry, created ONCE by provisioning and never by an
+# allocation (ADR 0190, OPS-REHEARSE-006). An existing registry is never
+# touched: it says which host port reaches which cluster, and rewriting it is
+# the loss this rule exists to refuse. The document comes from
+# port_allocations.empty_registry, the one spelling of "nothing allocated".
+install_port_registry() {
+  if [ -f "${PORT_REGISTRY}" ]; then
+    note "port registry present at ${PORT_REGISTRY}; left as it is"
+    return 0
+  fi
+  local staged
+  staged="$(mktemp)"
+  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" -c \
+    'import json, sys; from agentic_postgres import port_allocations; print(json.dumps(port_allocations.empty_registry(), indent=2, sort_keys=True))' \
+    > "${staged}" || { rm -f "${staged}"; die 6 "could not render the empty port registry."; }
+  install -m 0644 -o root -g root "${staged}" "${PORT_REGISTRY}"
+  rm -f "${staged}"
+  note "created the empty port registry at ${PORT_REGISTRY}"
+}
+
 apply_baseline() {
   local ssh_port
   ssh_port="$(host_field ssh.port)"
@@ -781,6 +816,7 @@ apply_baseline() {
   # After the launchers, because the rule names a file and a rule pointing at a
   # path that does not exist is one sudo accepts and nothing can use.
   install_database_access_sudoers "$(host_field ssh.operator_user)"
+  install_port_registry
   # Before install_units, which enables the firewall unit. Enabling a unit whose
   # launcher cannot resolve a release is how an operator learns to ignore a
   # failing service.
