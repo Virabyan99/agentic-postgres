@@ -594,3 +594,56 @@ def test_the_wrapper_never_removes_a_volume_and_the_runbook_orders_it_before_the
     assert "volume rm" not in source and "volume prune" not in source
     assert "instance_container | restore_container" in source
     assert "never the volume" in source.lower() or "NEVER the volume" in source
+
+
+# The listing Compose 5.5.1 printed on the replacement host with `--profile "*"`
+# (2026-09-06, D1027): every profile's images, the built ones untagged, the
+# pulled ones by digest. Without a profile it printed nothing at all.
+MEASURED_LISTING = """apg-alpha-dev-client-prisma
+docker.io/otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc
+apg-alpha-dev-auth
+apg-alpha-dev-postgres
+apg-alpha-dev-docs
+docker.io/postgrest/postgrest:v14.16@sha256:bea1c76a856fa39d1e542d25911cf95d02fe2bf971992d033044ff209f1504b8
+apg-alpha-dev-backup-mirror
+apg-alpha-dev-edge-probe
+"""
+
+
+@pytest.mark.parametrize(
+    ("listing", "expected"),
+    [
+        (MEASURED_LISTING, "apg-alpha-dev-postgres"),
+        (
+            MEASURED_LISTING.replace("apg-alpha-dev-postgres\n", "apg-alpha-dev-postgres:latest\n"),
+            "apg-alpha-dev-postgres",
+        ),
+        ("", None),
+        ("name: apg-alpha-dev\nservices: {}\n", None),
+    ],
+)
+def test_the_image_is_named_from_every_profile_and_a_silent_listing_is_refused(
+    listing: str, expected: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1027. The first live restore built the image and then could not name
+    it: the model's services all sit behind profiles, and a `config --images`
+    with none selected prints nothing. The listing now selects every profile
+    and the name is read with or without a tag; an empty listing is the
+    refusal that stopped the trip, kept as a refusal."""
+    module = load_command("restore")
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_: Any) -> subprocess.CompletedProcess:
+        calls.append(argv)
+        if "build" in argv:
+            return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(argv, 0, stdout=listing, stderr="")
+
+    monkeypatch.setattr(module.subprocess, "run", run)
+    if expected is None:
+        with pytest.raises(module.OperatorError, match="could not name the postgres image"):
+            module.build_image(Path("/nonexistent/rendered"))
+    else:
+        assert module.build_image(Path("/nonexistent/rendered")) == expected
+    assert calls[0][-3:] == ["--runtime", "build", "postgres"]
+    assert calls[1][-5:] == ["--runtime", "--profile", "*", "config", "--images"]

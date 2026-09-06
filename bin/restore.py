@@ -181,16 +181,22 @@ def build_image(rendered: Path) -> str:
         raise OperatorError(
             EXIT_STATE, f"the postgres image did not build: {build.stderr.strip()[-600:]}"
         )
+    # Every service in the model sits behind a profile, and Compose lists the
+    # images of the selected profiles and no other: without one, `config
+    # --images` printed nothing and the first live restore named no image
+    # (D1027, measured on Compose 5.5.1 on the replacement, 2026-09-06). `*`
+    # selects every profile; the filter below picks the one built postgres,
+    # with or without a tag.
     images = subprocess.run(
-        [compose, str(rendered), "config", "--images"],
+        [compose, str(rendered), "--runtime", "--profile", "*", "config", "--images"],
         capture_output=True,
         text=True,
         check=False,
         timeout=QUICK_TIMEOUT_SECONDS,
         stdin=subprocess.DEVNULL,
     )
-    names = [line.strip() for line in images.stdout.splitlines() if line.strip()]
-    postgres = [name for name in names if name.endswith("-postgres") or name.endswith("postgres")]
+    names = [line.strip().split(":", 1)[0] for line in images.stdout.splitlines() if line.strip()]
+    postgres = [name for name in names if name.endswith("-postgres")]
     if images.returncode != 0 or len(postgres) != 1:
         raise OperatorError(
             EXIT_STATE,
