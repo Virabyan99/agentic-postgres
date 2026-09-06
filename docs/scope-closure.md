@@ -19,8 +19,8 @@ decision.
 | Claims in the evidence model | **101** | 97 at Session 17's close; four added in Session 18 Run 5 |
 | Requirements a claim reports on | **147** | 24 belong to no claim (D697); see §4 |
 | Migrations released | **30** | fix-forward only; Session 18 adds none |
-| Architecture decisions recorded | **193** | 0188–0193 are Session 18's |
-| Divergences measured | **D1–D1022** | D984–D1022 are Session 18's; D1015–D1019 were measured in Run 4's rig |
+| Architecture decisions recorded | **194** | 0188–0194 are Session 18's |
+| Divergences measured | **D1–D1032** | D984–D1032 are Session 18's; D1015–D1019 were measured in Run 4's rig, D1023–D1032 on the trip |
 
 ---
 
@@ -84,16 +84,19 @@ warnings implied: `bootstrap-providers.sh --destroy` revokes the runtime
 identity and unlinks the credential files, and **every Infisical secret, the
 repository cipher pass included, stays in place** (D957).
 
-**Session 18's four claims await the trip** (2026-09-06): `independent_repository`
-needs both permanent projects mirrored and one copy completed; `disaster_kit`
-a kit exported from the production host; `replacement_host_restore` a
-replacement built from that kit with the restore from the mirror alone; and
-`failure_rehearsal` the eight rehearsal records from the production host. Every
-offline half is proved; every live half is written, gated on the declaration
-that admits it (`--kit-dir`, `--replacement-host-outputs`,
-`--restore-evidence-file`, `--rehearsal-evidence-dir`), and has never executed
-(D1020). The same trip is the one that can close `fresh_host` and
-`documented_path` above.
+**Session 18's trip (2026-09-06) passed three of its four claims on their first
+live execution**: `independent_repository` (both projects mirrored to the
+second provider, the restore from the mirror alone verified on a replacement
+in 247 s), `disaster_kit` (the kit from production verified and holding no
+value; adoption by the recorded id with a fresh identity) and
+`failure_rehearsal` (eight readings, every one reversed).
+**`replacement_host_restore` is `not_run` by decision** (D1028): adoption binds a
+replacement to production's Infisical project and environment, so a rehearsal's
+copy cannot archive to a bucket of its own and the rehearsal ends at the
+restore; its identity half is proved by the restore record. `fresh_host` and
+`documented_path` stayed for the same want as before: no outsider, and no
+project deployed on a host built to be deleted. Ten defects found on the day
+(D1023–D1032), five of them in lines and calls that had never executed live.
 
 ---
 

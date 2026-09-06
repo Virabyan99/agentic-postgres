@@ -111,6 +111,16 @@ Run 3's order (ADR 0192).
 | **D1020** | Session 17's bump (7fefff4) and D938: *"every live half written in the run that built its plane"*; this plan's Runs 2–4 say their live halves *"are the trip's"*. | **None of Session 18's fifteen requirements had a live proof before Run 5.** The four offline modules carry no `live_host` marker and `tests/deployment/` had no Session 18 file; `claim_mode` refuses a claim with no live proof, so none of the four claims could have been registered at the bump as the runs left it. | Two deployment modules written at the bump, `test_session18_recovery.py` (seven proofs) and `test_session18_rehearsal.py` (eight), gated on four new declarations -- `APG_KIT_DIR`, `APG_REPLACEMENT_HOST_OUTPUTS`, `APG_RESTORE_EVIDENCE_FILE`, `APG_REHEARSAL_EVIDENCE_DIR` -- in the roster and exported by the gate (D687). Never executed before the trip, and each docstring says so. | D938's shape again, one session later: the lesson was in Session 17's commit message and Done paragraph and not in this plan's run texts, which said "the trip's" where they should have said "written now, gated on the trip". | — |
 | **D1021** | Plan §5 Run 5: host mode gains *"`--secondary-repo-check`, `--kit-dir`, `--replacement-host-outputs`"*. | **The first predates Run 1's reversal**: there is no second repository to check; the mirror's readiness is a state of the deployment (a record beside the document, ADR 0188), not a declaration. And two declarations the plan did not name are needed: the restore's record and the rehearsals' records, since a gate that ran a restore or a rehearsal would measure its own run. | The gate takes `--kit-dir`, `--replacement-host-outputs`, `--restore-evidence-file` and `--rehearsal-evidence-dir`; `--secondary-repo-check` is refused by name with the reason; the mirror's readiness is host mode's step 4b, checked on both projects before anything runs. | A flag named before the design it belonged to was reversed; caught by deriving the gate from the plan's own §7 rather than its §5. | — |
 | **D1022** | §2's `REC-REPO-002`: *"the primary's credential cannot read it and the mirror's cannot read the primary"*; `REC-REPO-003`: *"the wrong cipher pass is reported as empty or undecryptable, never as empty"*. | **No node id proves either clause.** A cross-account read needs a client holding one account's key against the other's bucket, which no container holds by design (ADR 0191) and no rig measured; the cipher-pass wording was never measured in rig 18 or Run 2 (no arm names it). | The registered descriptions state what is proved: the two key ids differ, the endpoints are two providers', the archiver names no mirror, and the account boundary is the providers', stated rather than probed; the cipher-pass clause is dropped from `REC-REPO-003`. | A requirement clause with no node id is D816's unverified field, and a registry that carried it would report it passed on the strength of the clauses beside it. | — |
+| **D1023** | README's operating block: `sudo bin/materialize-secrets.sh --project project.yaml --session N`. | **The command refuses it**: `--requirements is required.` The documented-path guard (D693) checks the `--session N` an operator types and nothing else about the line, so a required flag missing from the README was invisible offline; the operator hit it on the trip's first command. | The README carries `--requirements secrets.required.yaml`; the deploy materializes on its own in step 5, so the trip lost nothing but the line was wrong. | The path walked once found what nine sessions of offline guards could not: an argument the guard was not written to check. | — |
+| **D1024** | The Session 2 guide: `git clone "/tmp/apg-<sha>.bundle" agentic-postgres`. | **On Ubuntu 26.04's git the clone succeeds with an EMPTY tree**: the bundle carries `main` and no HEAD, git warns *remote HEAD refers to nonexistent ref, unable to checkout*, exits 0, and every following documented step fails on an absent file. Production's clone predates the git that refuses to guess. | `git clone -b main …` in the guide; the replacement was checked out by hand. | A documented command that exits 0 having done half its work is D267's shape for an operator: a step read as done. | — |
+| **D1025** | `docs/node-loss-runbook.md` §3: `sudo ./deploy.sh --host host.yaml --project <manifest> --through-session <N> --render-only`. | **`deploy.sh` refuses that pair** (*--render-only and --through-session ask for different things; pass one*), and the render needs no host and no root. Written in Run 3 without walking it. | The runbook renders with `./deploy.sh --project <manifest> --capabilities capabilities.yaml --render-only`, the kit's capability manifest named. | The runbook's own §7 lists what goes wrong on the day; this would have gone wrong before the day's first real step. | — |
+| **D1026** | D1013: Infisical's router declares `GET /api/v1/workspace/:projectId` with the response *wrapped under `project`*, read from the API's source; `ControlPlane.get_project` read `payload["project"]`. | **The hosted service answers 200 with the project under `workspace`** (measured on the replacement with a probe printing status and keys only; `/api/v2/workspace/{id}` answers 404). The first live `--adopt` therefore refused alpha's project as *returned no project* although it exists. The offline proof drove adoption against a recorded control plane that returned the project directly, so the wrapper key never executed. | `get_project` reads `workspace` first and `project` second; the kit proofs drive it through a recorded `_call` with both shapes, a wrapper without an id and an empty body (b60814b). | D982's shape: a route proved against a recording, and the recording shared the source's belief rather than the service's behaviour. | 0189 |
+| **D1027** | `bin/restore.py build_image`: the image is named by `compose.sh … config --images`, the model that built it. | **Every service in the model sits behind a profile, and Compose 5.5.1 lists the images of the selected profiles only**: with none selected `config --images` printed nothing (measured on the replacement; `--profile "*"` printed every image, the built ones untagged), so the first live restore built the image and then could not name it. The offline proof replaced `build_image` wholesale. | The listing selects every profile with `--runtime --profile "*"`, the name is read with or without a tag, and the proof drives `build_image` through a recorded subprocess with the measured listing (2e82f46). | The same shape as D1026 one step later, in the same hour. Two of the runbook's five commands had never executed. | — |
+| **D1028** | `docs/node-loss-runbook.md` §6, rule 2: *"the restored copy archives to its own bucket … a rehearsal bucket with its own credential"*. | **Adoption cannot give the copy a credential of its own**: `provider_inputs_digest` covers `infisical.environment_slug`, so `--adopt` refuses any environment but the one the kit records, and the only `/backup` pair the replacement can materialize is production's, scoped to production's bucket. The rule as written is unsatisfiable through the path the runbook prescribes. Decided with the operator on the day: a rehearsal ends at the restore and deploys nothing; a deploy under production's bucket with its own `repository_prefix` was priced and declined (storage bucket and signing key would be production's for the day). | The runbook's rule rewritten to the restore-only rehearsal; `replacement_host_restore` reports `not_run` by decision, its identity half proved by the restore record; `REC-KIT-002`'s live half moved to the record adoption writes (D1032). A real loss is unchanged: the operator replaces the pair at the provider before materializing. | A rule written from the loss's point of view, never checked against the rehearsal's. | 0192 |
+| **D1029** | Run 2 added `backup.mirror.*` to outputs v16; the isolation matrix classifies every leaf of the deployed document (Session 12; Session 17 Run 3 extended it for the lifecycle). | **The first host gate reported four leaves in no category**: `backup.mirror.bucket`, `.enabled`, `.endpoint`, `.region`. Run 2's plan text named the matrix nowhere. | The bucket is project scope (`MUST_DIFFER`); the flag, endpoint and region carry no authority. | Question 5 again: the document gained members and one of its readers did not. | — |
+| **D1030** | `REC-KIT-001`'s live proof (Run 5): every listing line is *name/path/origin*, three fields. | **The listing's own header says `name provider_path/provider_key origin [facility]`**: a facility-gated secret carries a fourth column, and the proof failed on the mirror pair's lines while `dr-kit.sh verify` passed. | The proof reads three or four fields. | A proof written from memory of a format its own module had already documented (D674's shape). | — |
+| **D1031** | ADR 0192: `restore.sh` *"refuses a volume a container mounts or that holds a cluster"*; the runbook: `--plan` *"prints … and starts nothing"*. | **`--plan` made neither refusal**: against the production cluster's live volume it printed *would restore into apg-alpha-dev-postgres* and exited 0, in the first host gate. The refusals were the run's, after the plan had returned. | Both refusals before the plan returns, the mounted one by `docker ps`, the cluster one through a probe from the pinned runtime image so the plan builds nothing; exit 7 either way (ADR 0194, 04d71c7). The offline proof asserts the reads and the absent writes; the live proof accepts either refusal. | A plan an operator cannot trust about the one volume that matters is worse than no plan. | 0194 |
+| **D1032** | `REC-KIT-002`'s live half (Run 5) read `APG_REPLACEMENT_HOST_OUTPUTS`, the restored project's deployed document. | **A rehearsal never produces one** (D1028), so the proof could only skip and `disaster_kit` could only report `not_run`. What adoption did is in the bootstrap state it wrote on the replacement: the kit's project id, a fresh identity, the same inputs, the project not its own. | The proof, the roster (`APG_REPLACEMENT_BOOTSTRAP_STATE`) and the gate (`--replacement-bootstrap-state`) read that file; `disaster_kit` passed on the third host gate (e49c5aa). | The record an operation leaves is better evidence of the operation than a later document that mentions it. | 0189 |
 
 ---
 
@@ -490,6 +500,64 @@ Then, in order, the operator at a terminal:
 
 **Expected**: `fresh_host` passes; `documented_path` passes if §0.3 was
 arranged; the four new claims pass; the five unrelated `not_run` remain.
+
+**Done.** (2026-09-06, one day, D1023–D1032, ADR 0194; three gate modes,
+three host runs, ten repairs in five commits: b60814b, 2e82f46, 04d71c7,
+e49c5aa and the close.) `evidence/session-18.json` (gitignored, on the
+workstation): **101 claims, 93 passed, 8 `not_run`, 0 failed**, against
+deployed release `054f54e` on both projects; host half 820 passed / 0 failed /
+11 environment skips (297 live proofs, then 523 claim proofs), external half 25
+passed. **Three of the four Session 18 claims passed on the first execution of
+their live halves** -- `independent_repository`, `failure_rehearsal`,
+`disaster_kit` -- and `replacement_host_restore` reports `not_run` **by
+decision** (D1028): the rehearsal ended at the restore. The eight `not_run` are
+Session 17's seven and that one; `fresh_host` and `documented_path` stayed for
+the same want as before, because no outsider was available and a project
+deployed on a host to be deleted the same day was judged scaffolding (the
+operator's call, §0.3's cost stated).
+
+In order. Step 1, the mirror: both manifests to schema 4 (with `profile: {}`,
+since schema 2 retired the two inert `mcp` bounds, D929), two deploys through
+session 18, `provision-host.sh --apply` on the hardened host (SSH and ufw
+skipped without an armed timer, Docker untouched; the mirror units installed;
+the port registry reported present -- Run 4's step, first used), three timers
+enabled per project, the first copies by hand (beta 2828 objects at 06:36 UTC;
+alpha's first pass left objects behind, D1001, the second completed 3143 at
+06:40), two more deploys so the documents publish the copy time, the first
+scheduled full backups ever at 02:08 and 02:15 UTC read from the doctor. Step
+2, the kit: exported at 06:46 from release 054f54e, verified on the
+workstation, identities equal to the documents'. Step 3, the rehearsals: eight
+on alpha in two minutes, every one read or recorded and reversed -- the doctor
+saw the termination gap at T+0 and the policy restarted edge-probe in 8.4 s;
+the cluster restart was absorbed in 3.0 s with no dependent restarting and the
+agent route answering 401; `check` exited 39 with a throwaway credential and 0
+with the deployed one; four mirror addresses rejected, the blocked copy exited
+5, the archiver stayed ok, the mirror check read ok under the block (D1016
+confirmed live), the copy after the reversal completed. Step 4, the
+replacement (Hetzner, Ubuntu 26.04, git 2.5x, Compose 5.5.1): the operator
+user by the Session 2 guide, the toolchain by the documented path with the
+clone repaired (D1024), one `--apply` pass (25 deviations to 4, the four the
+skipped hardening), adoption by the recorded id after the wrapper repair
+(D1026: identity 252c2cd3 minted, production's 2aee2668 named and left),
+materialize (28 files), render, `restore.sh --plan` then the restore after the
+image repair (D1027): the 03:43 incremental and WAL to 06:43:36 UTC, LSN
+1/67000000, timeline 2, instance `90db04ed…`, 237 s to restore and 9 s to
+recover, **an RTO of 247 s from the second provider** (a sample from D593's
+band). Nothing deployed there. Step 5, the gates: offline once before the trip
+(5121 passed); the first host run red on three proofs (D1029, D1030, D1031);
+the second green with `disaster_kit` unreachable (D1032); the third green with
+it passed; external from the workstation with an ephemeral agent. Not done:
+step 4's `delta-dev`, step 6's gate on the replacement (nothing deployed to
+gate), the 1.0.0 tag (the operator's, on the release both gates measured,
+`054f54e`).
+
+Left for the operator, named: destroy the replacement VPS; revoke the identity
+adoption minted for it (252c2cd3) in the Infisical console -- never production's
+(2aee2668); shred `~/rig18/b2.env` on the workstation; delete the three
+rehearsal-era objects nothing references. The scheduled mirror copies run at
+04:30 UTC from tomorrow; read the first from `journalctl` and the doctor
+(D973's method).
+
 
 ---
 

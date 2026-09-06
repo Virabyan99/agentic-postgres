@@ -11,10 +11,12 @@ the archiver never knows about (ADR 0188), a disaster kit that names every
 secret and holds none and a bootstrap that adopts a provider project by its
 recorded id (ADR 0189), a restore onto a replacement host from the mirror alone
 (ADR 0192), and eight bounded failure rehearsals that read the readers the
-deployment already has (ADR 0190, ADR 0193). Its evidence is Session 17's until
-the trip — **90 of 97 claims** measured against the live deployment on
-2026-09-05 — and the four Session 18 claims report `not_run` until the mirror is
-enabled, the kit exported, the replacement built and the rehearsals run
+deployment already has (ADR 0190, ADR 0193). Its evidence is **93 of 101
+claims**, measured against the live deployment on 2026-09-06: both projects
+mirrored, a restore from the mirror alone verified on a replacement host in
+247 s with the original identity, the kit from production verified, and the
+eight rehearsals read and reversed; `replacement_host_restore` stays `not_run`
+by decision and the seven older ones for want of the events they need
 ([recovery operations](docs/recovery-operations.md), [the Stage 3 decision
 report](docs/stage-3-decision-report.md)). `1.0.0` promises what the product
 contract's §7 says a major promises, and nothing more. Two isolated

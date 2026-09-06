@@ -26,24 +26,30 @@ the outputs document to v16, both additive with migrators, inside the major.
 | Measure | Value | Source |
 |---|---|---|
 | Claims | 101 | `evidence_claims.CLAIMS` (97 at Session 17's close, four added in Session 18) |
-| Passed | **[filled at the trip's close]** | `evidence/session-18.json` |
-| `not_run` | **[filled at the trip's close]** | the same document; §3 says why each |
-| Failed | **[filled at the trip's close]** | 0 is the release condition |
+| Passed | **93** (2026-09-06, deployed release 054f54e) | `evidence/session-18.json` |
+| `not_run` | **8** | the same document; §3 says why each |
+| Failed | **0** | 0 is the release condition |
 | Requirements in the registry | 171 | 163 P0, 8 P1, 0 P2 |
 | Requirements a claim reports on | 147 | 24 belong to no claim (D697, unchanged) |
 | Migrations released and applied | 30 | fix-forward only |
-| Architecture decisions | 193 | 0188–0193 are Session 18's |
-| Divergences measured | D1–D1022 | D984–D1022 are Session 18's |
-| Restore from the mirror alone | 151 s, every row, in rig 18 | D1002; **[the replacement's figure filled at the trip's close]** (D593: a sample from a band, `process-max` 1) |
-| Rehearsal readings on the production host | **[eight, filled at the trip's close]** | the rehearsal records |
+| Architecture decisions | 194 | 0188–0194 are Session 18's |
+| Divergences measured | D1–D1032 | D984–D1032 are Session 18's; D1023–D1032 the trip's |
+| Restore from the mirror alone | 151 s in rig 18 (D1002); **247 s on the replacement** (237 s restore of the 03:43 incremental plus WAL to 06:43 UTC, 9 s recovery), the original identity on timeline 2 | the restore record; D593: a sample from a band, `process-max` 1 |
+| Rehearsal readings on the production host | **eight**, every one read or recorded and reversed, in two minutes | the rehearsal records |
 
 ## 3. What stayed `not_run`, and why
 
 Seven claims were `not_run` at Session 17's close. Two are what Session 18
 arranges: `fresh_host` (a deployed document from a host that started empty,
 the replacement) and `documented_path` (a record from a person who did not
-build this, the outsider's afternoon). **[Which of the two closed, filled at
-the trip's close.]** Five are untouched by design and stay: `api_authorization`
+build this, the outsider's afternoon). **Neither closed.** No outsider was
+available, and deploying a new project on a host to be deleted the same day,
+with two buckets, two tokens and a DNS record made to be deleted, was judged
+scaffolding by the operator; both stay `not_run` for the want they had before.
+The eighth is `replacement_host_restore`, `not_run` by decision: a rehearsal
+ends at the restore, because adoption cannot give the restored copy a
+backup credential of its own (D1028); its identity half is in the restore
+record. Five are untouched by design and stay: `api_authorization`
 and `bootstrap_identity` need a rotation performed, `credential_rotation_planes`
 the same, `deployment_convergence` a redeploy window declared, and
 `port_allocation` a witness of the allocation on a fresh host. None is a
@@ -89,9 +95,12 @@ no coordinator, no PostgreSQL 19, no public port -- rather than from the
 current specification's. The one property that survives either answer is
 `documented_path`'s (ledger §6): a deployment that needs nothing living in one
 person's head. Under the hosted reading it matters more, not less, and the
-trip's outsider is the cheapest measurement of it there is. **[Whether the
-outsider's afternoon happened, and what they found, filled at the trip's
-close.]**
+trip's outsider is the cheapest measurement of it there is. **The afternoon
+did not happen**; what it exists to find was found anyway, by the operator
+walking the runbook and the README on the replacement: three documented
+lines that do not work as written (D1023, D1024, D1025) and two commands
+that had never executed live (D1026, D1027). An insider found five; an
+outsider would find more.
 
 ## 6. What this report does not decide
 
