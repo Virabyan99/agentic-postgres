@@ -155,6 +155,7 @@ DX_RECORD_FILE=""
 # measuring its own run.
 KIT_DIR=""
 REPLACEMENT_HOST_OUTPUTS=""
+REPLACEMENT_BOOTSTRAP_STATE=""
 RESTORE_EVIDENCE_FILE=""
 REHEARSAL_EVIDENCE_DIR=""
 # Session 14. Which alert an operator induced, by name.
@@ -189,7 +190,7 @@ print(root / 'generations' / gen / 'secret-check' / 'session2_sentinel')
 ")" \
             [--rotated-authenticator-from-file FILE] \
             [--rotated-docs-from-file FILE] [--rotated-jwt-from-file FILE] \
-            [--kit-dir DIR] [--replacement-host-outputs FILE] \
+            [--kit-dir DIR] [--replacement-host-outputs FILE] [--replacement-bootstrap-state FILE] \
             [--restore-evidence-file FILE] [--rehearsal-evidence-dir DIR] \
             [--after-reboot] [-k EXPRESSION]
 
@@ -259,6 +260,13 @@ USAGE
                         the replacement host. It records the kit's provider
                         project id with a fresh runtime identity, and the
                         original instance_uuid.
+  --replacement-bootstrap-state FILE
+                        The bootstrap state `--adopt` wrote on the replacement,
+                        fetched from /etc/agentic-postgres/projects/<key>/ there.
+                        Admits REC-KIT-002's live half: the kit's provider
+                        project by id, a fresh runtime identity, the same
+                        inputs. A rehearsal ends at the restore, so this is
+                        the record adoption leaves rather than a deploy's.
   --restore-evidence-file FILE
                         The record `bin/restore.sh --from mirror` wrote:
                         REC-REPO-003's live half. On the replacement it also
@@ -448,6 +456,11 @@ parse_arguments() {
       --replacement-host-outputs)
         [ "$#" -ge 2 ] || die 2 "--replacement-host-outputs requires a value."
         REPLACEMENT_HOST_OUTPUTS="$2"
+        shift 2
+        ;;
+      --replacement-bootstrap-state)
+        [ "$#" -ge 2 ] || die 2 "--replacement-bootstrap-state requires a value."
+        REPLACEMENT_BOOTSTRAP_STATE="$2"
         shift 2
         ;;
       --restore-evidence-file)
@@ -983,7 +996,8 @@ mode_host() {
               "${ROTATED_AUTHENTICATOR_FROM_FILE}" "${ROTATED_DOCS_FROM_FILE}" \
               "${ROTATED_JWT_FROM_FILE}" "${REDEPLOY_BEFORE_FILE}" \
               "${FRESH_HOST_OUTPUTS}" "${REMOVED_PROJECT_FILE}" "${DX_RECORD_FILE}" \
-              "${REPLACEMENT_HOST_OUTPUTS}" "${RESTORE_EVIDENCE_FILE}"; do
+              "${REPLACEMENT_HOST_OUTPUTS}" "${REPLACEMENT_BOOTSTRAP_STATE}" \
+              "${RESTORE_EVIDENCE_FILE}"; do
     [ -z "${file}" ] || [ -f "${file}" ] || die 2 "not found: ${file}"
   done
   local directory
@@ -1057,6 +1071,8 @@ mode_host() {
   [ -n "${REPLACEMENT_HOST_OUTPUTS}" ] &&
     export APG_REPLACEMENT_HOST_OUTPUTS="${REPLACEMENT_HOST_OUTPUTS}"
   [ -n "${RESTORE_EVIDENCE_FILE}" ] && export APG_RESTORE_EVIDENCE_FILE="${RESTORE_EVIDENCE_FILE}"
+  [ -n "${REPLACEMENT_BOOTSTRAP_STATE}" ] &&
+    export APG_REPLACEMENT_BOOTSTRAP_STATE="${REPLACEMENT_BOOTSTRAP_STATE}"
   [ -n "${REHEARSAL_EVIDENCE_DIR}" ] &&
     export APG_REHEARSAL_EVIDENCE_DIR="${REHEARSAL_EVIDENCE_DIR}"
   # Session 14, and D687's rule applied on the day rather than after it: a

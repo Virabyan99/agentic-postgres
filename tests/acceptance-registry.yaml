@@ -2512,9 +2512,10 @@
     kit records BY ID, mints a fresh runtime identity for the replacement, and
     refuses to look anything up by name: a recorded project that does not
     exist, a host that already records one, another organisation and a state
-    naming another key are each refused, and the replacement's deployed
-    document records the kit's provider project with a different runtime
-    identity (ADR 0189, D1013).
+    naming another key are each refused, and the bootstrap state the
+    replacement writes records the kit's provider project with a different
+    runtime identity, the same provider inputs, and the project as not its
+    own (ADR 0189, D1013, D1032).
 
 - id: REC-NODE-001
   priority: P0

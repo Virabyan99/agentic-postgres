@@ -264,34 +264,39 @@ def test_the_kit_exported_from_this_host_verifies_and_holds_no_value(
             assert value not in text, f"{file.relative_to(kit)} holds a value this host holds"
 
 
-@pytest.mark.requires_environment("APG_KIT_DIR", "APG_REPLACEMENT_HOST_OUTPUTS")
+@pytest.mark.requires_environment("APG_KIT_DIR", "APG_REPLACEMENT_BOOTSTRAP_STATE")
 def test_the_replacement_adopted_by_the_recorded_id_with_a_fresh_identity(
     project_a: dict[str, Any],
 ) -> None:
-    """`REC-KIT-002`. The replacement's deployed document records the SAME
-    Infisical project id the kit's document does for that key -- adoption by
-    id -- and a DIFFERENT runtime identity, minted for the replacement (ADR
-    0189); and it is not this host's document with a new name."""
+    """`REC-KIT-002`. The bootstrap state `--adopt` wrote on the replacement
+    records the SAME Infisical project id the kit's state does for that key --
+    adoption by id -- a DIFFERENT runtime identity, minted for the replacement,
+    the same provider inputs, and this key (ADR 0189). Read from the record
+    adoption made rather than from a deployed document, because a rehearsal
+    ends at the restore and never deploys the copy (D1028, D1032)."""
+    del project_a
     kit = _declared_dir("APG_KIT_DIR")
-    replacement = _declared_json("APG_REPLACEMENT_HOST_OUTPUTS")
-    assert replacement.get("document_kind") == "deployed"
-    key = _key(replacement)
-    original_path = kit / "projects" / key / dr_kit.DEPLOYED_DOCUMENT
-    assert original_path.is_file(), f"the kit holds no deployed document for {key}"
-    original = json.loads(original_path.read_text(encoding="utf-8"))
+    adopted = _declared_json("APG_REPLACEMENT_BOOTSTRAP_STATE")
+    key = str(adopted.get("project_key") or "")
+    assert key, "the declared state names no project key"
+    recorded_path = kit / "projects" / key / dr_kit.BOOTSTRAP_STATE
+    assert recorded_path.is_file(), f"the kit holds no bootstrap state for {key}"
+    recorded = json.loads(recorded_path.read_text(encoding="utf-8"))
 
-    kit_bootstrap = original.get("bootstrap") or {}
-    new_bootstrap = replacement.get("bootstrap") or {}
-    assert new_bootstrap.get("infisical_project_id"), "the replacement records no provider project"
-    assert new_bootstrap["infisical_project_id"] == kit_bootstrap.get("infisical_project_id"), (
+    assert adopted.get("infisical_project_id"), "the replacement records no provider project"
+    assert adopted["infisical_project_id"] == recorded.get("infisical_project_id"), (
         "the replacement is bound to a different provider project than the kit records"
     )
-    assert new_bootstrap.get("runtime_identity_id") != kit_bootstrap.get("runtime_identity_id"), (
+    assert adopted.get("runtime_identity_id"), "the replacement records no runtime identity"
+    assert adopted["runtime_identity_id"] != recorded.get("runtime_identity_id"), (
         "the replacement reuses the lost host's runtime identity; adoption mints a fresh one"
     )
-    assert replacement.get("host") != project_a.get("host") or replacement.get(
-        "source_commit"
-    ) != project_a.get("source_commit"), "the declared replacement document is this host's own"
+    assert adopted.get("provider_inputs_sha256") == recorded.get("provider_inputs_sha256"), (
+        "adoption accepted provider inputs that differ from the recorded ones"
+    )
+    assert "project" not in (adopted.get("managed_resources") or []), (
+        "the replacement records the project as its own to destroy; adoption never owns it"
+    )
 
 
 # ---------------------------------------------------------------------------

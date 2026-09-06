@@ -159,6 +159,9 @@ ENVIRONMENT_VARIABLES = (
     # and the record is what is measured (ADR 0189, ADR 0190).
     "APG_KIT_DIR",
     "APG_REPLACEMENT_HOST_OUTPUTS",
+    # The bootstrap state `--adopt` wrote on the replacement: what adoption
+    # did, read from the record it made, before any deploy (D1032).
+    "APG_REPLACEMENT_BOOTSTRAP_STATE",
     "APG_RESTORE_EVIDENCE_FILE",
     "APG_REHEARSAL_EVIDENCE_DIR",
 )
