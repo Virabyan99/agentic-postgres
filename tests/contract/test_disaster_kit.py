@@ -568,17 +568,54 @@ def test_the_wrapper_admits_adopt_with_its_state_file_and_root() -> None:
 
 def test_the_control_plane_reads_a_project_by_id_at_the_documented_route() -> None:
     """The route is the one the API's own router declares (`GET /:projectId`
-    under v1/workspace, response wrapped in `project` with `orgId`); nothing
-    offline can prove the provider honours it, and the trip does (D1013)."""
+    under v1/workspace); nothing offline can prove the provider honours it,
+    and the trip did (D1013). **The wrapper key the trip measured is
+    `workspace`** (app.infisical.com, 2026-09-06, the first live `--adopt`),
+    where the source's router declares `project` (D1026); both are read."""
     source = (REPO_ROOT / "bin" / "bootstrap-providers.py").read_text(encoding="utf-8")
     body = source.split("def get_project(")[1].split("\n    def ")[0]
     assert '"GET", f"/api/v1/workspace/{urllib.parse.quote(project_id)}"' in body
-    assert 'payload.get("project")' in body
+    assert 'payload.get("workspace")' in body and 'payload.get("project")' in body
     code = "\n".join(
         line for line in body.splitlines() if not line.strip().startswith(("#", '"""'))
     )
     assert '"/api/v1/projects"' not in code and '"/api/v1/workspace"' not in code
     assert "?" not in code.split("_call(")[1].split(")")[0], "a query string is a search"
+
+
+@pytest.mark.parametrize(
+    ("answer", "outcome"),
+    [
+        ({"workspace": {"id": "p-1", "orgId": "org-1"}}, "p-1"),
+        ({"project": {"id": "p-1", "orgId": "org-1"}}, "p-1"),
+        ({"workspace": {"orgId": "org-1"}, "project": {"id": "p-2"}}, "p-2"),
+        ({}, None),
+        ({"workspace": "p-1"}, None),
+    ],
+)
+def test_get_project_reads_the_measured_wrapper_and_the_sources_and_refuses_neither(
+    answer: dict[str, Any], outcome: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1026, behaviourally: the hosted service wraps the project under
+    `workspace`, the source under `project`; a wrapper without an id is not a
+    project, and a body with neither is the refusal that stopped the first
+    live adoption. Driven through a recorded `_call`, so the one GET is the
+    only call made."""
+    module = load_command("bootstrap-providers")
+    control = object.__new__(module.ControlPlane)
+    calls: list[tuple[str, str]] = []
+
+    def call(method: str, path: str, body: Any = None) -> dict[str, Any]:
+        calls.append((method, path))
+        return answer
+
+    monkeypatch.setattr(control, "_call", call)
+    if outcome is None:
+        with pytest.raises(bootstrap_state.BootstrapStateError, match="returned no project"):
+            control.get_project("2c146f6b-582c-4ce9-af87-4cef645c00c3")
+    else:
+        assert control.get_project("2c146f6b-582c-4ce9-af87-4cef645c00c3")["id"] == outcome
+    assert calls == [("GET", "/api/v1/workspace/2c146f6b-582c-4ce9-af87-4cef645c00c3")]
 
 
 def test_the_runbook_names_only_commands_that_exist() -> None:

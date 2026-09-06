@@ -502,12 +502,21 @@ class ControlPlane:
         return str(secret_id), str(secret)
 
     def get_project(self, project_id: str) -> dict[str, Any]:
-        """One project BY ID (ADR 0189): `GET /api/v1/workspace/{id}`, the route
-        whose response wraps the project under `project` with its `orgId`.
+        """One project BY ID (ADR 0189): `GET /api/v1/workspace/{id}`.
+
+        **The wrapper key was measured on 2026-09-06, on the first live
+        `--adopt`** (D1026): the hosted service at app.infisical.com answers
+        200 with the project under `workspace`, with its `id` and `orgId`;
+        the router on the source's `main` declares `project`, which is what
+        D1013 read and what this method expected until the replacement host
+        refused a project that exists. Both are read, the measured one first.
         A project that does not exist answers 404, which `_call` raises with
-        the status in the message; nothing here lists or searches by name."""
+        the status in the message; nothing here lists or searches by name.
+        """
         payload = self._call("GET", f"/api/v1/workspace/{urllib.parse.quote(project_id)}")
-        project = payload.get("project")
+        project = payload.get("workspace")
+        if not isinstance(project, dict) or not project.get("id"):
+            project = payload.get("project")
         if not isinstance(project, dict) or not project.get("id"):
             raise BootstrapStateError(f"the provider returned no project for id {project_id}")
         return project
