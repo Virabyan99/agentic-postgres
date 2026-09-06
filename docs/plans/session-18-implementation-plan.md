@@ -108,6 +108,9 @@ Run 3's order (ADR 0192).
 | **D1017** | ADR 0190 and `OPS-REHEARSE-008`: capability drift is *"reported by the doctor's drift check"*. | **The doctor had no drift check.** `AGT-DRIFT-001` proves the compiler offline; nothing on a host compared the lock on disk with the digest the deploy recorded in `mcp.capability_lock_sha256`. The doctor's ADR 0158 guard in `test_diagnosis` forbade reading the `mcp` block at all. | Built as the doctor's tenth check, `capability drift`: the live SHA-256 of the lock file against the recorded digest, the check handed booleans and never a digest (ADR 0159). The guard replaced by a stricter one that pins the single `mcp` read by its exact shape (ADR 0193). `--lock-file` is the rehearsal's injection. | The requirement named a reader the tree did not have (D950's shape, a brief that says "add X to Y" when Y does not exist). | 0193 |
 | **D1018** | Plan §5 Run 4: *"`load_registry` on an absent file raises, every verb reports it, and `allocate` never creates a registry it did not find"* -- one reader. | **Three readers.** `bin/database-ports.py` returned `empty_registry()` for an absent file; `bin/deploy-project.py`'s `_live_allocation` returned `None` and the deploy published the transports `unavailable` -- a loss of host state read as "nothing allocated yet"; `access_broker` already refused (exit 4). And nothing created the initial registry but an allocation, so provisioning had no step for it. | `port_allocations.RegistryMissing`, exit 4 from every verb; the deploy fails by name (exit 5); `provision-host.sh --apply` creates the empty registry once and `--check` reports its absence; an existing registry is never rewritten. All three readers proved in `test_rehearsal`. | §7 question 5: which of a decision's callers got it. Grep every reader before fixing one (D979). | 0193 |
 | **D1019** | ADR 0190's table: *"one stateless service"*, read through *"the doctor's route status"*. | **The doctor asserts 200 on one route**, the reserved health route (ADR 0015), and `edge-probe` serves it. Killing PostgREST, the obvious stateless service, leaves every doctor check green. | `rehearsal.HEALTH_SERVICE = "edge-probe"`: the service terminated is the one whose route the reader reads, found by its Compose service label. | A rehearsal of a service no reader covers passes for the wrong reason (ADR 0065's shape). | 0193 |
+| **D1020** | Session 17's bump (7fefff4) and D938: *"every live half written in the run that built its plane"*; this plan's Runs 2–4 say their live halves *"are the trip's"*. | **None of Session 18's fifteen requirements had a live proof before Run 5.** The four offline modules carry no `live_host` marker and `tests/deployment/` had no Session 18 file; `claim_mode` refuses a claim with no live proof, so none of the four claims could have been registered at the bump as the runs left it. | Two deployment modules written at the bump, `test_session18_recovery.py` (seven proofs) and `test_session18_rehearsal.py` (eight), gated on four new declarations -- `APG_KIT_DIR`, `APG_REPLACEMENT_HOST_OUTPUTS`, `APG_RESTORE_EVIDENCE_FILE`, `APG_REHEARSAL_EVIDENCE_DIR` -- in the roster and exported by the gate (D687). Never executed before the trip, and each docstring says so. | D938's shape again, one session later: the lesson was in Session 17's commit message and Done paragraph and not in this plan's run texts, which said "the trip's" where they should have said "written now, gated on the trip". | — |
+| **D1021** | Plan §5 Run 5: host mode gains *"`--secondary-repo-check`, `--kit-dir`, `--replacement-host-outputs`"*. | **The first predates Run 1's reversal**: there is no second repository to check; the mirror's readiness is a state of the deployment (a record beside the document, ADR 0188), not a declaration. And two declarations the plan did not name are needed: the restore's record and the rehearsals' records, since a gate that ran a restore or a rehearsal would measure its own run. | The gate takes `--kit-dir`, `--replacement-host-outputs`, `--restore-evidence-file` and `--rehearsal-evidence-dir`; `--secondary-repo-check` is refused by name with the reason; the mirror's readiness is host mode's step 4b, checked on both projects before anything runs. | A flag named before the design it belonged to was reversed; caught by deriving the gate from the plan's own §7 rather than its §5. | — |
+| **D1022** | §2's `REC-REPO-002`: *"the primary's credential cannot read it and the mirror's cannot read the primary"*; `REC-REPO-003`: *"the wrong cipher pass is reported as empty or undecryptable, never as empty"*. | **No node id proves either clause.** A cross-account read needs a client holding one account's key against the other's bucket, which no container holds by design (ADR 0191) and no rig measured; the cipher-pass wording was never measured in rig 18 or Run 2 (no arm names it). | The registered descriptions state what is proved: the two key ids differ, the endpoints are two providers', the archiver names no mirror, and the account boundary is the providers', stated rather than probed; the cipher-pass clause is dropped from `REC-REPO-003`. | A requirement clause with no node id is D816's unverified field, and a registry that carried it would report it passed on the strength of the clauses beside it. | — |
 
 ---
 
@@ -121,8 +124,8 @@ a claim (D697); the four new claims are `independent_repository`,
 | Requirement | Priority | What it states |
 |---|---|---|
 | `REC-REPO-001` | P0 | A project with a mirror holds, at the second provider, every backup set and archived segment the last copy saw; the copy is a scheduled unit whose failure is a failed unit and a doctor check, and the deployed document publishes the last successful copy time (ADR 0188) |
-| `REC-REPO-002` | P0 | The mirror has its own credential at its own provider; the primary's credential cannot read it and the mirror's cannot read the primary; the archiver's configuration never names the mirror |
-| `REC-REPO-003` | P0 | A restore from the mirror alone, with the mirror's credential and the primary's cipher pass and the primary's credential absent, produces a cluster the drill queries and answers from; the wrong cipher pass is reported as *empty or undecryptable*, never as empty |
+| `REC-REPO-002` | P0 | The mirror has its own credential at its own provider: the mirror pair exists exactly when the mirror is enabled and is not the primary's key, the endpoint is not the primary provider's, and the archiver's configuration never names the mirror; the account boundary is the providers', stated rather than probed (D1022) |
+| `REC-REPO-003` | P0 | A restore from the mirror alone, with the mirror's credential and the primary's cipher pass and the primary's credential absent from the container, produces a promoted cluster with the kit's identity and a migration ledger; the mirror's pair reaches pgBackRest through the container's own environment (D1009; the cipher-pass wording dropped, D1022) |
 | `REC-KIT-001` | P0 | `dr-kit.sh export` writes every artifact the node-loss runbook names and no secret value; `verify` refuses a kit missing any of them |
 | `REC-KIT-002` | P0 | `bootstrap-providers.sh --adopt` binds a host to the Infisical project the kit records BY ID, mints a fresh runtime identity, and refuses to look anything up by name |
 | `REC-NODE-001` | P0 | `restore.sh` restores a stanza into the project's own volume only when that volume holds no cluster, refuses otherwise, and never names the live volume of any other project |
@@ -418,6 +421,40 @@ README's operating block, `docs/scope-closure.md` §2 and §6 updated, and
 `docs/stage-3-decision-report.md` written with its numbers marked *filled at
 the trip's close* (D992). Documentation, registry, generated docs; the guard
 modules the bump touches in the targeted list (D968).
+
+**Done.** (2026-09-06, D1020–D1022.) `CURRENT_SESSION` 18 and
+`template_version` 1.0.0 in one commit with the fifteen requirements
+(`REC-REPO-001..003`, `REC-KIT-001..002`, `REC-NODE-001..002`,
+`OPS-REHEARSE-001..008`; §2's `REC-REPO-002/003` texts corrected to what is
+proved, D1022), the four claims and their sessions, and -- because Runs 2–4 had
+written no live half (D1020) -- two deployment modules gated on four new
+declarations: `tests/deployment/test_session18_recovery.py` (the mirror's
+completed copy the doctor reads and the third timer; the mirror's key id not
+the primary's and the archiver naming no mirror; the restore record from the
+mirror alone; the kit verifying and holding no value the active generations
+hold; adoption by the recorded id with a fresh identity; `restore.sh --plan`
+refused against the filled volume; the original identity and every route
+ready on the replacement) and `test_session18_rehearsal.py` (one proof per
+scenario over the rehearsal records, and `-001` reading the host after: no
+in-progress file, no moved-aside registry, no foreign lock, no tagged rule,
+`--plan` changing nothing). `bin/session-18-check.sh` derived by diff from
+session-17's -- the literal once, the header and the usage's modes rewritten
+line by line (D853, D858), four host-mode flags `--kit-dir`,
+`--replacement-host-outputs`, `--restore-evidence-file`,
+`--rehearsal-evidence-dir` with their cases, checks and exports (D687),
+`--secondary-repo-check` refused by name (D1021), and one Session 18
+precondition, step 4b: the mirror enabled and copied on both projects, read
+from the record beside the document. The roster gains the four variables.
+`docs/product-contract.md` §7 carries the `1.0.0` sentence (D991);
+`docs/recovery-operations.md` is written and indexed; `docs/stage-3-decision-report.md`
+is written with every trip number marked *filled at the trip's close* (D992)
+and answers §6's question as a recommendation: ship the template, and start
+the Stage 3 specification from the corrected premises. `docs/scope-closure.md`
+§1 recounted, §2 and §6 extended. README's status names 1.0.0 and its deploy
+examples and the two operations documents type `--session 18`. The acceptance
+matrix and the contract's requirement table regenerated. No code beyond the
+gate changed; the guards the bump touches ran targeted. The live halves are the
+trip's; the four claims report `not_run` until it.
 
 ### Run 6 — the trip
 

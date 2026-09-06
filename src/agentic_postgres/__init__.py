@@ -95,7 +95,16 @@ from pathlib import Path
 #: run that built its plane (D938 applied). `VERSION` moved to `0.6.0`: a
 #: project manifest bump (schema 3) and an outputs bump (v15), no migration --
 #: ADR 0162 prices the manifest bump at a minor and this took one.
-CURRENT_SESSION = 17
+#:
+#: **Session 18 moved it in Run 5, all-or-nothing again**: fifteen `REC-*` and
+#: `OPS-REHEARSE-*` requirements and four claims. The offline halves were
+#: written in the runs that built each plane; the live halves were not
+#: (D1020) and landed here, gated on the trip's declarations. `VERSION`
+#: moved to `1.0.0`: the Stage 2 release candidate, with the compatibility
+#: sentence D991 asked for in the product contract's section 7 -- a manifest
+#: bump (schema 4) and an outputs bump (v16), both additive with migrators,
+#: inside the major.
+CURRENT_SESSION = 18
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

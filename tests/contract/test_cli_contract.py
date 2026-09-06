@@ -90,6 +90,7 @@ SHELL_COMMANDS = (
     "bin/session-15-check.sh",
     "bin/session-16-check.sh",
     "bin/session-17-check.sh",
+    "bin/session-18-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
     "bin/upgrade.sh",

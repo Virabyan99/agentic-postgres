@@ -2408,3 +2408,283 @@
     Registered because the schedule Session 10 built had no requirement and
     was therefore reported by nothing, which is how it went uninstalled for
     six sessions (D944, D958).
+
+# ---------------------------------------------------------------------------
+# Session 18 — Independent recovery: the mirror, the disaster kit, the
+# replacement host, and the failure rehearsals
+# ---------------------------------------------------------------------------
+#
+# Fifteen requirements, four claims, all landing with the constant (D690). The
+# offline halves were written in the runs that built each plane (Runs 2-4);
+# the live halves were NOT (D1020) and are written here at the bump, gated on
+# the trip's declarations -- the kit directory, the replacement's document,
+# the restore record, the rehearsal records -- and never executed before it.
+# `OPS-REHEARSE-005` reads the MIRROR's path: the primary's archiving is never
+# blocked, and the archiver check is its control (ADR 0188, ADR 0193, D1016).
+
+- id: REC-REPO-001
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_backup_mirror.py::test_a_mirrored_manifest_publishes_the_block_and_the_containers_identifiers
+    - tests/contract/test_backup_mirror.py::test_the_verb_writes_the_record_only_after_a_clean_copy_and_a_parsed_listing
+    - tests/contract/test_backup_mirror.py::test_a_copy_that_exits_non_zero_writes_no_record_and_lists_nothing
+    - tests/contract/test_backup_mirror.py::test_the_doctor_probe_reads_the_record_live_and_never_the_document
+    - tests/contract/test_backup_mirror.py::test_the_deploy_folds_the_mirror_into_every_branch_of_the_backup_state
+    - tests/contract/test_backup_mirror.py::test_a_mirrored_project_has_three_timers_and_an_unmirrored_one_two
+    - tests/contract/test_backup_mirror.py::test_the_mirror_timer_is_nightly_persistent_jittered_and_binds_to_the_project
+    - tests/deployment/test_session18_recovery.py::test_every_mirrored_project_holds_a_completed_copy_the_doctor_reads
+  description: >-
+    A project with a mirror holds, at the second provider, every object the
+    primary repository held at the last copy: the copy is a scheduled host
+    unit (nightly, persistent, bound to the project) whose failure is a failed
+    unit and no record; the copy record is written only after a pass that
+    exits 0 and a listing that parses; the doctor's mirror check reads that
+    record live and never the document; and the deployed document publishes
+    the last completed copy's time (ADR 0188).
+
+- id: REC-REPO-002
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_backup_mirror.py::test_the_provider_side_readers_owe_the_mirror_pair_only_to_a_mirrored_project
+    - tests/contract/test_backup_mirror.py::test_the_mirror_pair_is_a_required_facility_secret_for_the_mirror_container
+    - tests/contract/test_backup_mirror.py::test_the_override_grants_the_mirror_container_only_for_a_mirrored_project
+    - tests/contract/test_backup_mirror.py::test_the_materializer_plans_the_mirror_files_only_with_the_facility
+    - tests/contract/test_backup_mirror.py::test_the_container_is_the_mirror_profile_on_the_backup_network_only
+    - tests/contract/test_node_restore.py::test_a_mirror_restore_mounts_the_mirror_pair_and_never_the_primarys_key
+    - tests/deployment/test_session18_recovery.py::test_the_mirror_credential_is_not_the_primarys_and_the_archiver_never_names_the_mirror
+  description: >-
+    The mirror has its own credential at its own provider: the mirror pair is
+    a facility-gated secret that exists exactly when the mirror is enabled,
+    is granted to the mirror container and the restore's postgres consumers
+    and to nothing else, and is not the primary's key; the mirror endpoint is
+    not the primary provider's; and the archiver's configuration never names
+    the mirror's endpoint or bucket. Separation of the two accounts is the
+    providers' boundary, stated rather than probed (ADR 0188, ADR 0191, D1022).
+
+- id: REC-REPO-003
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_node_restore.py::test_the_wrapper_exports_exactly_the_mirror_pair_from_the_mounted_files
+    - tests/contract/test_node_restore.py::test_a_mirror_restore_runs_in_order_and_leaves_the_volume_holding_the_cluster
+    - tests/contract/test_node_restore.py::test_the_verdict_needs_recovery_a_new_timeline_the_identity_and_a_ledger
+    - tests/contract/test_node_restore.py::test_the_argument_vectors_are_the_measured_ones
+    - tests/deployment/test_session18_recovery.py::test_a_restore_from_the_mirror_alone_verified_on_the_replacement
+  description: >-
+    A restore from the mirror alone, with the mirror's credential and the
+    primary's cipher pass and the primary's credential absent from the
+    container, produces a promoted cluster with a replay LSN, a new timeline,
+    the kit's instance_uuid and a migration ledger; the mirror's pair reaches
+    pgBackRest through the restore container's own environment, which
+    overrides the mounted configuration (D1009, ADR 0192).
+
+- id: REC-KIT-001
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_disaster_kit.py::test_the_kit_holds_every_artifact_the_runbook_names_and_nothing_it_did_not_validate
+    - tests/contract/test_disaster_kit.py::test_the_kit_carries_no_value_the_host_holds
+    - tests/contract/test_disaster_kit.py::test_a_kit_verifies_whole_and_refuses_a_missing_or_altered_artifact
+    - tests/contract/test_disaster_kit.py::test_the_command_writes_owner_only_refuses_an_existing_directory_and_verifies
+    - tests/deployment/test_session18_recovery.py::test_the_kit_exported_from_this_host_verifies_and_holds_no_value
+  description: >-
+    dr-kit.sh export writes every artifact the node-loss runbook names -- the
+    host and capability manifests and, per project, the manifest, the
+    bootstrap state, the deployed document and a listing of every secret's
+    name, provider path and origin -- and no secret value; every file is one
+    a loader validated; verify refuses a kit missing or altering any of them,
+    and a kit exported from the production host holds no value that host's
+    active generations hold (ADR 0189).
+
+- id: REC-KIT-002
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_disaster_kit.py::test_adoption_binds_by_the_recorded_id_and_never_looks_anything_up_by_name
+    - tests/contract/test_disaster_kit.py::test_a_recorded_project_that_does_not_exist_is_refused_without_a_search
+    - tests/contract/test_disaster_kit.py::test_a_host_that_already_records_the_project_is_refused
+    - tests/contract/test_disaster_kit.py::test_the_control_plane_reads_a_project_by_id_at_the_documented_route
+    - tests/deployment/test_session18_recovery.py::test_the_replacement_adopted_by_the_recorded_id_with_a_fresh_identity
+  description: >-
+    bootstrap-providers.sh --adopt binds a host to the Infisical project the
+    kit records BY ID, mints a fresh runtime identity for the replacement, and
+    refuses to look anything up by name: a recorded project that does not
+    exist, a host that already records one, another organisation and a state
+    naming another key are each refused, and the replacement's deployed
+    document records the kit's provider project with a different runtime
+    identity (ADR 0189, D1013).
+
+- id: REC-NODE-001
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_node_restore.py::test_the_plan_restores_into_the_projects_own_volume_and_names_no_other
+    - tests/contract/test_node_restore.py::test_the_refusals_come_before_anything_starts
+    - tests/contract/test_node_restore.py::test_assert_own_volume_refuses_a_foreign_volume_a_writable_mount_and_delta
+    - tests/contract/test_node_restore.py::test_the_command_refuses_a_volume_that_holds_a_cluster_before_the_restore
+    - tests/contract/test_node_restore.py::test_the_command_refuses_a_volume_a_container_mounts
+    - tests/contract/test_node_restore.py::test_the_wrapper_never_removes_a_volume_and_the_runbook_orders_it_before_the_deploy
+    - tests/deployment/test_session18_recovery.py::test_restore_refuses_the_populated_volume_on_the_replacement
+  description: >-
+    restore.sh restores a stanza into the project's own volume, derived from
+    the key and the one name every mount is checked against, only when that
+    volume holds no cluster and no container mounts it; it refuses a manifest
+    naming another key or stanza, never passes --delta, never removes a
+    volume, and refuses the volume it has just filled with exit 7 before
+    anything starts. On a replacement host it runs before the first deploy
+    (ADR 0189, ADR 0192, D1008, D1012).
+
+- id: REC-NODE-002
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_node_restore.py::test_the_evidence_document_is_the_drills_shape_with_source_and_identity
+    - tests/contract/test_disaster_kit.py::test_the_runbook_names_only_commands_that_exist
+    - tests/deployment/test_session18_recovery.py::test_the_restored_project_publishes_the_originals_identity_and_every_route_ready
+  description: >-
+    On a replacement host built from the kit alone, the restored project
+    publishes the original's instance_uuid -- the volume's identity survived
+    the restore and the restore record agrees -- and every route its deployed
+    document publishes reads ready; the runbook that got it there names only
+    commands that exist, in the measured order (ADR 0189, ADR 0192).
+
+- id: OPS-REHEARSE-001
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_rehearsal.py::test_every_scenario_plans_three_phases_and_prints_every_command
+    - tests/contract/test_rehearsal.py::test_plan_reads_the_facts_and_runs_writes_and_moves_nothing
+    - tests/contract/test_rehearsal.py::test_a_second_scenario_is_refused_while_one_is_unreversed
+    - tests/contract/test_rehearsal.py::test_an_observation_that_raises_is_still_reversed_and_reported_unread
+    - tests/contract/test_rehearsal.py::test_reverse_replays_the_reversal_an_interrupted_rehearsal_recorded
+    - tests/contract/test_rehearsal.py::test_the_evidence_carries_the_plan_every_reading_and_the_verification
+    - tests/contract/test_rehearsal.py::test_a_reader_that_read_nothing_is_unread_never_read
+    - tests/deployment/test_session18_rehearsal.py::test_every_rehearsal_reversed_and_nothing_of_its_own_is_left_behind
+  description: >-
+    rehearse.sh induces exactly the scenario named, reverses it in a finally
+    whatever the observation did, verifies the reversal, and leaves nothing of
+    its own behind: no in-progress file, no moved-aside registry, no foreign
+    lock, no tagged rule. --plan prints the three phases with every command
+    and runs, writes and moves nothing; a second scenario is refused while
+    one is un-reversed; reverse replays a crashed rehearsal's reversal; a
+    reader that read nothing is reported unread, never passed (ADR 0190, ADR
+    0193).
+
+- id: OPS-REHEARSE-002
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_rehearsal.py::test_service_termination_signals_the_process_and_never_docker_kill
+    - tests/contract/test_rehearsal.py::test_the_terminated_service_is_the_one_whose_route_the_doctor_reads
+    - tests/contract/test_rehearsal.py::test_service_termination_kills_the_process_reads_the_restart_and_the_gap
+    - tests/contract/test_rehearsal.py::test_a_service_the_policy_does_not_restart_is_started_by_the_fallback_and_reported_unread
+    - tests/deployment/test_session18_rehearsal.py::test_service_termination_was_read_on_this_host
+  description: >-
+    Service termination: the health route's service, killed by a SIGKILL to
+    its main process from the host's namespace and never by docker kill
+    (which no restart policy restarts, D1015), is back by the restart policy
+    with its restart count incremented and its route answering 200 within the
+    bound; the doctor's containers and route checks read ok after, and what
+    they read at the moment after the kill is recorded either way (ADR 0193,
+    D1019).
+
+- id: OPS-REHEARSE-003
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_rehearsal.py::test_database_restart_reads_reconnection_dependents_and_the_agent_boundary
+    - tests/deployment/test_session18_rehearsal.py::test_database_restart_was_read_on_this_host
+  description: >-
+    Database restart: after docker restart of the cluster, every dependent
+    service reconnects without a restart of its own and without a redeploy --
+    the doctor's database, containers and route checks read ok within the
+    bound, no dependent's restart count moved -- and the agent route answers
+    its boundary (401) after.
+
+- id: OPS-REHEARSE-004
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_rehearsal.py::test_backup_credential_failure_changes_nothing_and_carries_its_control
+    - tests/contract/test_rehearsal.py::test_backup_credential_failure_runs_the_wrong_check_and_the_control
+    - tests/deployment/test_session18_rehearsal.py::test_backup_credential_failure_was_read_on_this_host
+  description: >-
+    Backup credential failure: pgbackrest check with a credential that
+    authenticates to nothing, carried in one exec's environment and nowhere
+    else, fails closed with the repository named by stanza and bucket, while
+    the same check with the deployed credential passes as the control; a
+    deploy's step 6c fails on that same reader's non-zero exit.
+
+- id: OPS-REHEARSE-005
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_rehearsal.py::test_wal_scenario_blocks_only_the_mirror_addresses_from_the_backup_subnet
+    - tests/contract/test_rehearsal.py::test_iptables_delete_arguments_select_exactly_the_tagged_rules
+    - tests/contract/test_rehearsal.py::test_wal_scenario_inserts_the_rules_reads_the_failed_copy_and_deletes_by_comment
+    - tests/contract/test_rehearsal.py::test_wal_scenario_is_refused_for_a_project_without_a_mirror
+    - tests/deployment/test_session18_rehearsal.py::test_wal_archiving_failure_was_read_on_this_host
+  description: >-
+    WAL archiving failure, on the MIRROR's path (ADR 0188, D1016): with the
+    mirror endpoint's addresses rejected from the backup network's subnet in
+    DOCKER-USER, the mirror copy fails -- the unit's failure -- while the
+    doctor's archiver check stays ok before and under the block; the rules
+    are deleted by their comment and no other rule is touched; the next copy
+    completes once the path is restored. The primary's archiving is never
+    blocked, and a project without a mirror is refused.
+
+- id: OPS-REHEARSE-006
+  priority: P0
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_rehearsal.py::test_registry_loss_moves_aside_in_the_same_directory_and_refuses_when_absent
+    - tests/contract/test_rehearsal.py::test_registry_loss_moves_the_file_reads_two_refusals_and_restores_the_bytes
+    - tests/contract/test_rehearsal.py::test_every_port_verb_refuses_an_absent_registry_with_exit_4_and_recreates_nothing
+    - tests/contract/test_rehearsal.py::test_the_deploy_names_the_loss_instead_of_publishing_unavailable
+    - tests/contract/test_rehearsal.py::test_provisioning_creates_the_initial_registry_once_and_names_the_same_path
+    - tests/deployment/test_session18_rehearsal.py::test_registry_loss_was_read_on_this_host
+  description: >-
+    Registry loss: an absent port registry is refused by every
+    database-ports.sh verb with exit 4 and never recreated, the deploy
+    refuses by name instead of publishing the transports unavailable, the
+    access broker refuses, and the initial registry is provisioning's to
+    create exactly once; the rehearsal moves the registry aside in its own
+    directory, reads two refusals, and restores its original bytes (ADR 0190,
+    D1018).
+
+- id: OPS-REHEARSE-007
+  priority: P1
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_rehearsal.py::test_disk_threshold_injects_the_doctor_and_changes_nothing
+    - tests/contract/test_rehearsal.py::test_disk_threshold_reads_warn_and_problem_from_the_injected_flags
+    - tests/contract/test_rehearsal.py::test_disk_thresholds_are_injectable_and_the_evidence_carries_the_ones_used
+    - tests/contract/test_rehearsal.py::test_an_impossible_threshold_pair_is_refused_before_anything_is_read
+    - tests/deployment/test_session18_rehearsal.py::test_disk_threshold_was_read_on_this_host
+  description: >-
+    Disk threshold: the doctor's disk_headroom reports warn and problem at
+    its thresholds, rehearsed by injecting the thresholds through
+    --disk-warn-copies and --disk-problem-copies and never by filling a disk;
+    the evidence carries the thresholds each verdict was computed at, an
+    impossible pair is refused as input before anything is read, and the
+    host's own reading is what the doctor reports today (ADR 0190).
+
+- id: OPS-REHEARSE-008
+  priority: P1
+  target_session: 18
+  test_nodeids:
+    - tests/contract/test_rehearsal.py::test_capability_drift_writes_beside_the_document_and_never_over_the_lock
+    - tests/contract/test_rehearsal.py::test_capability_drift_writes_the_foreign_lock_beside_the_document_and_removes_it
+    - tests/contract/test_rehearsal.py::test_capability_drift_classifies_every_state
+    - tests/contract/test_rehearsal.py::test_the_drift_probe_compares_digests_itself_and_hands_the_check_only_booleans
+    - tests/deployment/test_session18_rehearsal.py::test_capability_drift_was_read_on_this_host
+  description: >-
+    Capability drift: the doctor's capability drift check compares the live
+    digest of the lock on disk with the digest the deployed document
+    recorded, handed booleans and never a digest, and reports a lock whose
+    hash differs as a problem; rehearsed through --lock-file against a lock
+    with a foreign hash written beside the deployed document and removed
+    after, the deployed lock never touched, and read ok on the deployment
+    today. AGT-DRIFT-001 extended to the running deployment (ADR 0193, D1017).

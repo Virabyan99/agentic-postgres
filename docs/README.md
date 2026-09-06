@@ -49,6 +49,7 @@ all flags or steps lost to retyping the previous session's page.
 | [Secret handling](secret-handling.md) | Generations, per-consumer materialization, what may never be logged |
 | [Provider bootstrap](provider-bootstrap.md) | What is created at a provider, by identifier rather than by name -- and adopted by id on a replacement host |
 | [Node-loss runbook](node-loss-runbook.md) | The host is gone: the kit, adoption, the restore from the mirror, the deploy, the cutover last |
+| [Recovery operations](recovery-operations.md) | The ordinary days before it: the mirror, the kit, the restore's promises, the eight rehearsals and what each reads |
 | [Host baseline](host-baseline.md) | What `provision-host.sh` does to a machine |
 
 ## The surface
@@ -72,6 +73,7 @@ all flags or steps lost to retyping the previous session's page.
 | [Security acceptance](security-acceptance.md) | The security requirements and how each is proved |
 | [Threat model](threat-model.md) | What is defended against, and what is not |
 | [Source specification](source-specification.md) | The original brief. **Digest-pinned** — quoted, never edited |
+| [Stage 3 decision report](stage-3-decision-report.md) | What 1.0.0 measured, what stayed not_run and why, which Stage 3 premises hold, and the template-or-control-plane recommendation |
 
 ## Plans
 

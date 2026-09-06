@@ -89,7 +89,7 @@ Priorities:
 <!-- Generated from tests/acceptance-registry.yaml by
      bin/render-acceptance-matrix.py --write. Do not hand-edit. -->
 
-**P0 — 150 requirements**
+**P0 — 163 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -243,8 +243,21 @@ Priorities:
 | `FLEET-LIFE-001` | 17 | A project manifest declares its lifecycle at schema version 3, required there and forbidden below; a version 1 or 2 manifest renders as permanent, which is what every earlier manifest meant; an ephemeral manifest without expires_at, a permanent one with it, and one born expired are each refused at render; the deployed document publishes the lifecycle at outputs version 15, the migrator fills permanent with no argument, and the isolation matrix classifies it (ADR 0186). |
 | `FLEET-RETIRE-001` | 17 | project-retire.sh removes exactly the resources its key derives through naming and its own state records, in one fixed order -- the record first, the runtime down, the units disabled, the port allocation released under the volume's identity before any volume is removed, the edge files, the provider destroy before the state directory is removed, the directories, and only with --destroy-data the two volumes -- refuses without the key said back, stops at the first failing step and names it, and its plan mutates nothing. The surviving project is untouched, which is DEP-REMOVE-001's proof reused rather than duplicated (ADR 0187). |
 | `FLEET-RETIRE-002` | 17 | A retirement never deletes a backup repository, a bucket, a token, a DNS record or the cipher pass: no command in its plan names pgbackrest, a bucket or a stanza operation; --destroy-data removes the two volumes and nothing off the host; volume removal exists in exactly two commands, the restore drill's and this one; and the retirement record names, in a sentence, what still holds the project's backups (ADR 0187, D957). |
+| `OPS-REHEARSE-001` | 18 | rehearse.sh induces exactly the scenario named, reverses it in a finally whatever the observation did, verifies the reversal, and leaves nothing of its own behind: no in-progress file, no moved-aside registry, no foreign lock, no tagged rule. --plan prints the three phases with every command and runs, writes and moves nothing; a second scenario is refused while one is un-reversed; reverse replays a crashed rehearsal's reversal; a reader that read nothing is reported unread, never passed (ADR 0190, ADR 0193). |
+| `OPS-REHEARSE-002` | 18 | Service termination: the health route's service, killed by a SIGKILL to its main process from the host's namespace and never by docker kill (which no restart policy restarts, D1015), is back by the restart policy with its restart count incremented and its route answering 200 within the bound; the doctor's containers and route checks read ok after, and what they read at the moment after the kill is recorded either way (ADR 0193, D1019). |
+| `OPS-REHEARSE-003` | 18 | Database restart: after docker restart of the cluster, every dependent service reconnects without a restart of its own and without a redeploy -- the doctor's database, containers and route checks read ok within the bound, no dependent's restart count moved -- and the agent route answers its boundary (401) after. |
+| `OPS-REHEARSE-004` | 18 | Backup credential failure: pgbackrest check with a credential that authenticates to nothing, carried in one exec's environment and nowhere else, fails closed with the repository named by stanza and bucket, while the same check with the deployed credential passes as the control; a deploy's step 6c fails on that same reader's non-zero exit. |
+| `OPS-REHEARSE-005` | 18 | WAL archiving failure, on the MIRROR's path (ADR 0188, D1016): with the mirror endpoint's addresses rejected from the backup network's subnet in DOCKER-USER, the mirror copy fails -- the unit's failure -- while the doctor's archiver check stays ok before and under the block; the rules are deleted by their comment and no other rule is touched; the next copy completes once the path is restored. The primary's archiving is never blocked, and a project without a mirror is refused. |
+| `OPS-REHEARSE-006` | 18 | Registry loss: an absent port registry is refused by every database-ports.sh verb with exit 4 and never recreated, the deploy refuses by name instead of publishing the transports unavailable, the access broker refuses, and the initial registry is provisioning's to create exactly once; the rehearsal moves the registry aside in its own directory, reads two refusals, and restores its original bytes (ADR 0190, D1018). |
+| `REC-KIT-001` | 18 | dr-kit.sh export writes every artifact the node-loss runbook names -- the host and capability manifests and, per project, the manifest, the bootstrap state, the deployed document and a listing of every secret's name, provider path and origin -- and no secret value; every file is one a loader validated; verify refuses a kit missing or altering any of them, and a kit exported from the production host holds no value that host's active generations hold (ADR 0189). |
+| `REC-KIT-002` | 18 | bootstrap-providers.sh --adopt binds a host to the Infisical project the kit records BY ID, mints a fresh runtime identity for the replacement, and refuses to look anything up by name: a recorded project that does not exist, a host that already records one, another organisation and a state naming another key are each refused, and the replacement's deployed document records the kit's provider project with a different runtime identity (ADR 0189, D1013). |
+| `REC-NODE-001` | 18 | restore.sh restores a stanza into the project's own volume, derived from the key and the one name every mount is checked against, only when that volume holds no cluster and no container mounts it; it refuses a manifest naming another key or stanza, never passes --delta, never removes a volume, and refuses the volume it has just filled with exit 7 before anything starts. On a replacement host it runs before the first deploy (ADR 0189, ADR 0192, D1008, D1012). |
+| `REC-NODE-002` | 18 | On a replacement host built from the kit alone, the restored project publishes the original's instance_uuid -- the volume's identity survived the restore and the restore record agrees -- and every route its deployed document publishes reads ready; the runbook that got it there names only commands that exist, in the measured order (ADR 0189, ADR 0192). |
+| `REC-REPO-001` | 18 | A project with a mirror holds, at the second provider, every object the primary repository held at the last copy: the copy is a scheduled host unit (nightly, persistent, bound to the project) whose failure is a failed unit and no record; the copy record is written only after a pass that exits 0 and a listing that parses; the doctor's mirror check reads that record live and never the document; and the deployed document publishes the last completed copy's time (ADR 0188). |
+| `REC-REPO-002` | 18 | The mirror has its own credential at its own provider: the mirror pair is a facility-gated secret that exists exactly when the mirror is enabled, is granted to the mirror container and the restore's postgres consumers and to nothing else, and is not the primary's key; the mirror endpoint is not the primary provider's; and the archiver's configuration never names the mirror's endpoint or bucket. Separation of the two accounts is the providers' boundary, stated rather than probed (ADR 0188, ADR 0191, D1022). |
+| `REC-REPO-003` | 18 | A restore from the mirror alone, with the mirror's credential and the primary's cipher pass and the primary's credential absent from the container, produces a promoted cluster with a replay LSN, a new timeline, the kit's instance_uuid and a migration ledger; the mirror's pair reaches pgBackRest through the restore container's own environment, which overrides the mounted configuration (D1009, ADR 0192). |
 
-**P1 — 6 requirements**
+**P1 — 8 requirements**
 
 | ID | Session | Guarantee |
 |---|---:|---|
@@ -254,6 +267,8 @@ Priorities:
 | `STO-COMPLETE-001` | 7 | Only an object verified against the provider becomes downloadable, and a retried completion is a 200 rather than a conflict. Idempotence is a separate arm because migration 0014's CAS was idempotent as a function and not as a path through it (D349). |
 | `REC-WAL-001` | 10 | A WAL archiving failure produces a visible non-zero signal. |
 | `OPS-LOG-001` | 11 | One request ID spans ingress, API, agent and audit records. The runtime mints it and stamps it on the response, where Traefik's access log keeps it as downstream_X-Request-Id; migration 0022 puts the same value on the database-source audit row. No caller-supplied id is ever adopted (ADR 0160). |
+| `OPS-REHEARSE-007` | 18 | Disk threshold: the doctor's disk_headroom reports warn and problem at its thresholds, rehearsed by injecting the thresholds through --disk-warn-copies and --disk-problem-copies and never by filling a disk; the evidence carries the thresholds each verdict was computed at, an impossible pair is refused as input before anything is read, and the host's own reading is what the doctor reports today (ADR 0190). |
+| `OPS-REHEARSE-008` | 18 | Capability drift: the doctor's capability drift check compares the live digest of the lock on disk with the digest the deployed document recorded, handed booleans and never a digest, and reports a lock whose hash differs as a problem; rehearsed through --lock-file against a lock with a foreign hash written beside the deployed document and removed after, the deployed lock never touched, and read ok on the deployment today. AGT-DRIFT-001 extended to the running deployment (ADR 0193, D1017). |
 
 Full node IDs are in [the acceptance matrix](acceptance-matrix.md).
 
@@ -397,6 +412,15 @@ session. "Not yet" without a session is not a deferral.
 **Any ambiguity discovered during implementation** is resolved in
 `docs/plans/session-01-implementation-plan.md` §2 or in a new ADR — never
 inline in the file that happened to surface it.
+
+**What `1.0.0` promises** (Session 18, D991, ADR 0162). A `1.x` release may
+add a manifest field, a migration, a contract entry, a capability or a secret
+when the addition carries a migrator or a default, so that an operator's
+manifests validate unchanged and `upgrade check` prices the change at a
+minor; the next change that removes or retypes any of those five, or that an
+operator must act on before an upgrade, needs `2.0`. The rules are the ones
+`REL-COMPAT-001` has enforced since Session 13; a major adds nothing to them
+except that promise. There is no second version axis (D704).
 
 ## Generated sections
 

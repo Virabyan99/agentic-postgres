@@ -150,6 +150,17 @@ ENVIRONMENT_VARIABLES = (
     # rules watch three different hops and one firing when another was
     # induced is the conflation D784 measured.
     "APG_INDUCED_ALERT_FILE",
+    # Session 18. Four declarations of things that happened off this host or
+    # were run on it by an operator, each a file or directory the trip brings
+    # back: the kit exported from this host, the replacement's deployed
+    # document, the record `restore.sh` wrote there, and the directory the
+    # eight rehearsals wrote their records into. A test cannot export a kit
+    # or kill a service and survive to report the result; the operator did,
+    # and the record is what is measured (ADR 0189, ADR 0190).
+    "APG_KIT_DIR",
+    "APG_REPLACEMENT_HOST_OUTPUTS",
+    "APG_RESTORE_EVIDENCE_FILE",
+    "APG_REHEARSAL_EVIDENCE_DIR",
 )
 
 

@@ -974,6 +974,11 @@ CLAIM_INTRODUCED_IN = {
     "project_lifecycle": 17,
     "project_retirement": 17,
     "backup_schedule": 17,
+    # Session 18 Run 5: four claims, landing with the constant (D690).
+    "independent_repository": 18,
+    "disaster_kit": 18,
+    "replacement_host_restore": 18,
+    "failure_rehearsal": 18,
     "document_kinds": 2,
     "provider_convergence": 2,
     "release_immutability": 2,

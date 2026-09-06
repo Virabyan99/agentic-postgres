@@ -15,12 +15,12 @@ decision.
 
 | | Count | Note |
 |---|---|---|
-| Requirements in the acceptance registry | **131** | 125 P0, 6 P1, **0 P2** — four `REL-*` added in Session 13 |
-| Claims in the evidence model | **78** | 61 at Session 12's close; 13 retrofitted in Session 13 Run 6, 4 added in Run 7 |
-| Requirements a claim reports on | **107** | was 90; see §4 — **the gap was repriced, not just narrowed** |
-| Migrations released | **22** | fix-forward only |
-| Architecture decisions recorded | **162** | 0162 is Session 13's |
-| Divergences measured | **D1–D753** | D704–D718 are the Stage 2 audit; D719–D753 are Session 13 |
+| Requirements in the acceptance registry | **171** | 163 P0, 8 P1, **0 P2** — fifteen `REC-*`/`OPS-REHEARSE-*` added in Session 18 |
+| Claims in the evidence model | **101** | 97 at Session 17's close; four added in Session 18 Run 5 |
+| Requirements a claim reports on | **147** | 24 belong to no claim (D697); see §4 |
+| Migrations released | **30** | fix-forward only; Session 18 adds none |
+| Architecture decisions recorded | **193** | 0188–0193 are Session 18's |
+| Divergences measured | **D1–D1022** | D984–D1022 are Session 18's; D1015–D1019 were measured in Run 4's rig |
 
 ---
 
@@ -83,6 +83,17 @@ project created for the purpose and retired; Session 17 plans exactly that
 warnings implied: `bootstrap-providers.sh --destroy` revokes the runtime
 identity and unlinks the credential files, and **every Infisical secret, the
 repository cipher pass included, stays in place** (D957).
+
+**Session 18's four claims await the trip** (2026-09-06): `independent_repository`
+needs both permanent projects mirrored and one copy completed; `disaster_kit`
+a kit exported from the production host; `replacement_host_restore` a
+replacement built from that kit with the restore from the mirror alone; and
+`failure_rehearsal` the eight rehearsal records from the production host. Every
+offline half is proved; every live half is written, gated on the declaration
+that admits it (`--kit-dir`, `--replacement-host-outputs`,
+`--restore-evidence-file`, `--rehearsal-evidence-dir`), and has never executed
+(D1020). The same trip is the one that can close `fresh_host` and
+`documented_path` above.
 
 ---
 
@@ -221,6 +232,14 @@ the gap during a customer deployment. Session 11's rehearsal already found
 `provision-host.sh` naming an operator user it does not create while installing
 `PermitRootLogin no` — which locks out the person deploying at 3 a.m. exactly as
 readily as it locks out a stranger.
+
+**Answered as a recommendation in
+[stage-3-decision-report.md](stage-3-decision-report.md) §5** (Session 18,
+D992): ship `1.0.0` as the template the evidence shows it to be, and put the
+control-plane question to a Stage 3 specification that starts from the
+premises the tree corrected -- no coordinator, no PostgreSQL 19, no public
+port. This entry stays as the record of the question; the report is where
+the answer and its numbers live.
 
 ---
 

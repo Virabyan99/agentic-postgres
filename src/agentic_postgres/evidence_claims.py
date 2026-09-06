@@ -525,6 +525,29 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "project_lifecycle": ("FLEET-LIFE-001", "FLEET-EXPIRE-001"),
     "project_retirement": ("FLEET-RETIRE-001", "FLEET-RETIRE-002"),
     "backup_schedule": ("FLEET-BACKUP-001",),
+    # -----------------------------------------------------------------------
+    # Session 18 -- independent recovery (ADR 0188-0193)
+    # -----------------------------------------------------------------------
+    #
+    # Four claims, all `host`, landing with the constant (D690). The live
+    # halves were written at the bump rather than in the runs that built each
+    # plane (D1020), gated on four declarations the trip brings back -- the
+    # kit, the replacement's document, the restore record, the rehearsal
+    # records -- so three of the four report `not_run` until Run 6, and
+    # `independent_repository` until both projects are mirrored.
+    "independent_repository": ("REC-REPO-001", "REC-REPO-002", "REC-REPO-003"),
+    "disaster_kit": ("REC-KIT-001", "REC-KIT-002"),
+    "replacement_host_restore": ("REC-NODE-001", "REC-NODE-002"),
+    "failure_rehearsal": (
+        "OPS-REHEARSE-001",
+        "OPS-REHEARSE-002",
+        "OPS-REHEARSE-003",
+        "OPS-REHEARSE-004",
+        "OPS-REHEARSE-005",
+        "OPS-REHEARSE-006",
+        "OPS-REHEARSE-007",
+        "OPS-REHEARSE-008",
+    ),
     #
     # **Three of the sixteen candidates are deliberately NOT here**, and each has
     # a different reason. They stay in `UNCLAIMED_BY_HISTORY`, which now records

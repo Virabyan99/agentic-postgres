@@ -4,16 +4,20 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 17 implemented**, the fifth Stage 2 release, at
-`template_version` **0.6.0**. Session 17's code is in this release — multi-project
-operation: a fleet inventory that is an operator's read and not a catalog (ADR
-0185), a project lifecycle at manifest schema 3 where permanent is what every
-earlier manifest meant and expiry is read, never acted on (ADR 0186), a
-retirement verb that removes what its key derives and never a backup (ADR 0187),
-and a backup schedule verb — and its evidence is **90 of 97 claims**, measured
-against the live deployment on 2026-09-05, the seven `not_run` unchanged from
-Session 16 less `project_removal`, which a third, ephemeral project's retirement
-closed. Two isolated
+**Status: Session 18 implemented**, the Stage 2 release candidate, at
+`template_version` **1.0.0**. Session 18's code is in this release — independent
+recovery: every backup repository mirrored to a second provider by a host unit
+the archiver never knows about (ADR 0188), a disaster kit that names every
+secret and holds none and a bootstrap that adopts a provider project by its
+recorded id (ADR 0189), a restore onto a replacement host from the mirror alone
+(ADR 0192), and eight bounded failure rehearsals that read the readers the
+deployment already has (ADR 0190, ADR 0193). Its evidence is Session 17's until
+the trip — **90 of 97 claims** measured against the live deployment on
+2026-09-05 — and the four Session 18 claims report `not_run` until the mirror is
+enabled, the kit exported, the replacement built and the rehearsals run
+([recovery operations](docs/recovery-operations.md), [the Stage 3 decision
+report](docs/stage-3-decision-report.md)). `1.0.0` promises what the product
+contract's §7 says a major promises, and nothing more. Two isolated
 projects run on one hardened host behind one shared Traefik edge on Let's Encrypt
 production certificates. Each has its own PostgreSQL 18 cluster under forced
 row-level security, two database transports, a REST and an application API behind
@@ -137,9 +141,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --session 17
+sudo bin/materialize-secrets.sh --project project.yaml --session 18
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 17
+     --capabilities capabilities.yaml --through-session 18
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a
@@ -172,6 +176,7 @@ bin/dr-kit.sh verify <dir>                    # is the kit whole? (docs/node-los
 sudo bin/rehearse.sh <scenario> --outputs <outputs.json> [--plan]
                                               # one bounded failure: induce, read, reverse
 sudo bin/rehearse.sh reverse                  # replay an interrupted rehearsal's reversal
+                                              # (docs/recovery-operations.md)
 
 sudo bin/migrate.sh --project project.yaml status    # applied and pending
 sudo bin/backup.sh  --outputs <outputs.json> info --json
