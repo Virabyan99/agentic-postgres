@@ -25,6 +25,23 @@
 
 set -euo pipefail
 
+# D1044. This script REQUIRES root, and every Python helper it invokes
+# byte-compiles the checkout as root, leaving root-owned __pycache__ trees
+# through src/ and services/. docs/host-baseline.md already warns operators not
+# to run the *gate* under sudo for exactly this reason -- "running it under
+# `sudo` leaves root-owned artifacts in a checkout that `op` has to keep clean"
+# -- and that advice cannot be followed for a command that cannot run without
+# root.
+#
+# The cost is not the gate: __pycache__/ is in .gitignore, so `git status`
+# stays clean and step 1 never sees them. The cost is that re-checking-out the
+# release as the operator fails with `Permission denied`, which is precisely
+# what a fix-and-redeploy cycle has to do, and the remedy (`sudo rm -rf`) is
+# written down nowhere.
+#
+# This script imports its helpers for a few seconds and has no use for a cache.
+export PYTHONDONTWRITEBYTECODE=1
+
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 
@@ -941,7 +958,14 @@ apply_baseline() {
     printf '  Arm the timer, confirm it shows a future trigger, then re-run --apply:\n\n'
     printf '    sudo systemd-run --on-active=10min --unit=%s \\\n' "${ROLLBACK_UNIT}"
     printf '      %s/ssh-rollback %s/ssh\n' "${LIBEXEC}" "${backup}"
-    printf '    systemctl list-timers %s%s\n\n' "${ROLLBACK_UNIT}" "'*'"
+    # `--no-pager`, and it is not cosmetic (D1043). systemctl pages through
+    # `less` when stdout is a terminal, and everything with `sudo` on this host
+    # is driven over `ssh -tt` because a TTY is required -- so this line blocks
+    # forever at `(END)` waiting for a keypress. A human presses `q` and never
+    # notices. A script, a runbook automation or an agent hangs, and it hangs
+    # at precisely the moment a ten-minute rollback timer is counting down,
+    # which is the worst moment in this product to be stuck waiting on input.
+    printf '    systemctl list-timers --no-pager %s%s\n\n' "${ROLLBACK_UNIT}" "'*'"
     printf '  Keep your current session open. Do not close it until a NEW session works.\n'
   fi
 
@@ -1018,7 +1042,10 @@ apply_baseline() {
     printf '  Arm the timer, confirm it shows a future trigger, then re-run --apply:\n\n'
     printf '    sudo systemd-run --on-active=10min --unit=%s \\\n' "${UFW_ROLLBACK_UNIT}"
     printf '      /usr/sbin/ufw --force disable\n'
-    printf '    systemctl list-timers %s%s\n\n' "${UFW_ROLLBACK_UNIT}" "'*'"
+    # `--no-pager` for the reason above (D1043); this is the second of the two
+    # arming instructions, and the firewall window is the one you least want to
+    # be blocked inside.
+    printf '    systemctl list-timers --no-pager %s%s\n\n' "${UFW_ROLLBACK_UNIT}" "'*'"
     printf '  Keep your current session open until a NEW one connects.\n'
   fi
 

@@ -21,12 +21,33 @@ __pycache__/
 # step 1 fails on ANY untracked file, and these files live in the checkout on
 # the deployment host where that gate also runs.
 #
-# Listed individually rather than as /project.*.yaml on purpose: a glob would
-# silently hide a future project.third.example.yaml that ought to be committed.
+# A glob with a negation, rather than one line per project name (D1034).
+#
+# This was a list of the two names this repository's own operator happens to
+# run, and its comment justified that: a bare glob would silently hide a future
+# project.third.example.yaml that ought to be committed. The reasoning was
+# sound and the consequence was not. host.yaml and capabilities.yaml are
+# ignored generically and work for anybody; a THIRD project's manifest -- which
+# is to say any adopter's -- landed as an untracked file, and step 1 of
+# bin/session-01-check.sh fails on any untracked file while a dirty release
+# makes a deploy refuse outright (D971). So the first act of adopting this
+# product was to fork it and edit this file, which upstream then conflicts on
+# at every merge.
+#
+# The negation keeps the property the old comment wanted. Note it is
+# `*example.yaml` and NOT `*.example.yaml`: the latter fails to match
+# `project.example.yaml` itself, because there is no segment before `.example`
+# there. Measured with `git check-ignore -v`, not reasoned about.
+#
+# `/project.yaml` is separate and not redundant: `/project.*.yaml` requires a
+# segment between the dots, so it does not match `project.yaml` -- which is
+# exactly the name README.md's own quick-start tells a reader to create
+# (D1035).
 /host.yaml
 /capabilities.yaml
-/project.alpha.yaml
-/project.beta.yaml
+/project.yaml
+/project.*.yaml
+!/project.*example.yaml
 
 # Deployed documents an operator installs from the host to run `--mode external`.
 #

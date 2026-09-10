@@ -327,10 +327,26 @@ def test_gitignore_covers_session_two_operator_inputs() -> None:
     bin/session-01-check.sh step 1 fails on any untracked file and that gate
     also runs from the checkout on the deployment host, where these files
     genuinely exist.
+
+    **Asked of git rather than of the file's text** (D1034). This scanned
+    `.gitignore` for four literal entries, so it asserted the implementation
+    that happened to exist rather than the property that matters -- and it
+    could not tell "an operator's manifests are ignored" from "these four names
+    are ignored and no adopter's manifest is", which is exactly the difference
+    an adopter paid for. `test_committed_examples_are_not_swept_up_by_the_
+    ignore_rules` below already asks git the complementary question; this is
+    the same discipline on the positive half. D464's shape, one file over.
     """
-    text = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8")
-    for entry in ("/host.yaml", "/capabilities.yaml", "/project.alpha.yaml", "/project.beta.yaml"):
-        assert entry in text, f".gitignore is missing {entry}"
+    for relative in ("host.yaml", "capabilities.yaml", "project.alpha.yaml", "project.beta.yaml"):
+        result = subprocess.run(
+            ["git", "check-ignore", "--no-index", "-q", "--", relative],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, (
+            f"{relative} is not ignored; it would fail the gate as an untracked file"
+        )
 
 
 def test_committed_examples_are_not_swept_up_by_the_ignore_rules() -> None:
@@ -341,7 +357,7 @@ def test_committed_examples_are_not_swept_up_by_the_ignore_rules() -> None:
     """
     for relative in ("project.example.yaml", "project.second.example.yaml", "host.example.yaml"):
         result = subprocess.run(
-            ["git", "check-ignore", "-q", relative],
+            ["git", "check-ignore", "--no-index", "-q", relative],
             cwd=REPO_ROOT,
             capture_output=True,
             check=False,
@@ -703,4 +719,151 @@ def test_every_bin_call_supplies_the_required_keyword_only_arguments() -> None:
     assert checked, "no keyword-only call sites were resolved; this compared nothing"
     assert not problems, "calls in bin/ missing required keyword-only arguments:\n  " + "\n  ".join(
         problems
+    )
+
+
+# ---------------------------------------------------------------------------
+# An adopter's project can exist in a checkout (D1034, D1035, D1043, D1044)
+# ---------------------------------------------------------------------------
+
+
+def _check_ignored(name: str) -> bool:
+    """Whether git itself ignores `name`. Asked of git, not of the file's text.
+
+    The rule being verified is a glob with a negation, and the interesting
+    cases turn on whether `*` may match an empty segment. Reading .gitignore
+    and reasoning about it would be a second implementation of git's matcher,
+    which is how the original per-name list came to be justified by a comment
+    that was correct about a mechanism nobody had run.
+
+    **`--no-index` is load bearing.** Without it `check-ignore` consults the
+    index first and reports a TRACKED file as not-ignored no matter what the
+    patterns say -- so the two committed fixtures answered "visible" because
+    they are committed, not because the rule is right, and a battery that
+    deleted the negation entirely left those assertions green. Measured: the
+    only case that failed was `project.third.example.yaml`, the untracked one.
+    An assertion that cannot fail for the reason it is written about is this
+    session's own subject, and it appeared inside the guard for it.
+    """
+    return (
+        subprocess.run(
+            ["git", "check-ignore", "--no-index", "-q", "--", name],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "project.yaml",
+        "project.alpha.yaml",
+        "project.beta.yaml",
+        "project.snippets.yaml",
+        "project.third.yaml",
+        "host.yaml",
+        "capabilities.yaml",
+    ],
+)
+def test_an_operators_manifest_is_ignored_whatever_it_is_called(name: str) -> None:
+    """D1034. `host.yaml` and `capabilities.yaml` were ignored generically and
+    worked for anybody; project manifests were ignored by NAME, and the only two
+    names were the ones this repository's own operator runs.
+
+    A third project -- which is to say any adopter's -- landed as an untracked
+    file. Step 1 of the gate fails on any untracked file, and a dirty release
+    makes a deploy refuse outright (D971), so the first act of adopting this
+    product was to fork it and edit .gitignore.
+
+    `project.yaml` is in this list and is not covered by `/project.*.yaml`:
+    that pattern needs a segment between the dots. It is the name README.md's
+    own quick-start tells a reader to create, which is D1035.
+    """
+    assert _check_ignored(name), f"{name} is not ignored; it would fail the gate as untracked"
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "project.example.yaml",
+        "project.second.example.yaml",
+        "project.third.example.yaml",
+        "host.example.yaml",
+        "capabilities.example.yaml",
+    ],
+)
+def test_a_committed_fixture_is_never_hidden(name: str) -> None:
+    """The property the original per-name list existed to protect, kept.
+
+    Its comment said a glob "would silently hide a future
+    project.third.example.yaml that ought to be committed" -- which was true of
+    a bare glob and is why the negation is there. `project.third.example.yaml`
+    does not exist yet, and that is the point: this asserts the rule for the
+    file nobody has written.
+    """
+    assert not _check_ignored(name), f"{name} is ignored; a committed fixture would be invisible"
+
+
+def test_the_readme_quick_start_creates_a_file_the_gate_tolerates() -> None:
+    """D1035. The README's own first command created a file that failed the
+    repository's own gate.
+
+    A reader who follows it in order -- render, then run the gate as the
+    development section instructs -- saw step 1 fail on a checkout they had not
+    otherwise touched, with no reason to suspect the README put it there. This
+    reads the destination out of the README rather than assuming it, so the
+    test still holds if the quick-start is reworded.
+    """
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    destinations = re.findall(r"^cp \S+\.example\.yaml (\S+)$", readme, re.MULTILINE)
+    assert destinations, "the README no longer shows a quick-start copy; re-point this guard"
+    for destination in destinations:
+        assert _check_ignored(destination), (
+            f"README.md tells a reader to create {destination}, which the gate "
+            "then fails on as an untracked file"
+        )
+
+
+def test_every_systemctl_command_this_product_prints_disables_the_pager() -> None:
+    """D1043. systemctl pages through `less` when stdout is a terminal, and
+    everything with `sudo` on this host is driven over `ssh -tt` because a TTY
+    is required -- so a printed `systemctl list-timers` blocks forever at
+    `(END)`.
+
+    Measured: the pass-2 script stalled there for over two minutes, having
+    armed a ten-minute rollback timer and never reached `--apply`. A human
+    presses `q` and never notices; anything driving the procedure hangs at the
+    worst possible moment.
+    """
+    offenders = []
+    for path in sorted((REPO_ROOT / "bin").glob("*.sh")):
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            if "systemctl list-timers" in stripped and "--no-pager" not in stripped:
+                offenders.append(f"{path.name}:{number}: {stripped}")
+    assert not offenders, "a printed systemctl command will block on `less` (D1043):\n" + "\n".join(
+        offenders
+    )
+
+
+def test_the_provisioner_writes_no_root_owned_bytecode() -> None:
+    """D1044. This script requires root, and every Python helper it invokes
+    byte-compiled the checkout as root.
+
+    docs/host-baseline.md already warns operators not to run the *gate* under
+    sudo for exactly this reason, and that advice cannot be followed for a
+    command that cannot run without root. The gate itself never saw the
+    artifacts -- `__pycache__/` is ignored -- while re-checking-out the release
+    as the operator failed with `Permission denied`, which is what a
+    fix-and-redeploy cycle has to do.
+    """
+    source = (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
+    assert "export PYTHONDONTWRITEBYTECODE=1" in source, (
+        "provision-host.sh runs as root and does not suppress bytecode; it will "
+        "leave root-owned __pycache__ in the operator's checkout"
     )

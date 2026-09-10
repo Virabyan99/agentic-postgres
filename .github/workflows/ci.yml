@@ -14,7 +14,19 @@ name: contract
 
 on:
   push:
-    branches: [main]
+    # `session-*` as well as main (D1057). Every session until now committed
+    # straight to main, so a branch push registering NO runs never surfaced --
+    # and when it did, it surfaced badly: `gh api .../runs?head_sha=<sha>`
+    # exits 0 with an empty list, and an empty list reads identically as "not
+    # registered yet" and "will never be triggered". A watcher polling it waits
+    # out its whole budget and reports a timeout that looks like infrastructure
+    # trouble rather than a workflow that was never going to fire.
+    #
+    # That is ADR 0195's class in the CI reader: an answer substituted for a
+    # failure to determine one. Widening the trigger is the cheap half; the
+    # other half is that an empty listing is not evidence until the workflow's
+    # own triggers have been read.
+    branches: [main, 'session-*']
   pull_request:
   workflow_dispatch:
 

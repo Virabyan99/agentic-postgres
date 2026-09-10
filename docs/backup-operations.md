@@ -128,7 +128,11 @@ shows a secret access key exactly once.
    missed while the host was down; **a timer enabled for the first time owes
    nothing** and its first run is the next calendar slot (D973, measured at
    the first enable on 2026-09-04: no trigger recorded, next elapse the next
-   slot). Read it with `systemctl list-timers 'agentic-postgres-backup-*'`.
+   slot). Read it with
+   `systemctl list-timers --no-pager 'agentic-postgres-backup-*'` — the flag is
+   required rather than tidy: anything with `sudo` on this host is driven over
+   `ssh -tt`, and without it systemctl pages through `less` and blocks forever
+   on a keypress that is never coming (D1043).
 
    They are installed disabled on purpose. A unit that fails on every boot until
    an operator is ready trains an operator to ignore it.

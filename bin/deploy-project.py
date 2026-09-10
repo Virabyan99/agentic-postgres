@@ -1047,8 +1047,55 @@ def observe_docs(url: str) -> str:
         # `check` handles an HTTP response; a connection that never became one
         # -- DNS, TLS, refused -- arrives here. That is the state a project is
         # in between `compose up` and Traefik noticing the container.
-        print(f"  no documentation route: {type(error).__name__}: {error}")
+        _report_docs_failure(url, error)
         return "unavailable"
+
+
+#: One line per (route, kind of failure), not one per attempt (D1047).
+_DOCS_FAILURES_REPORTED: set[tuple[str, str]] = set()
+
+
+def _report_docs_failure(url: str, error: Exception) -> None:
+    """Say it once, and say what it means.
+
+    D1047. `observe_docs` is called inside `await_observation`, which retries
+    until the route answers; the message was printed on every attempt, across
+    three routes, so a first deploy emitted roughly forty identical lines.
+
+    Every one of them was self-inflicted and benign. `host.yaml` sets
+    `edge.initial_acme_environment: staging`, which this product recommends and
+    which the rate limits make close to mandatory -- and a staging certificate
+    is by definition not in the system trust store, so the documented,
+    recommended, correct first-deploy path produces dozens of
+    CERTIFICATE_VERIFY_FAILED errors before exiting 0 and reporting
+    `tls issued (staging)` four lines later.
+
+    The volume is the defect as much as the message. Forty identical
+    stack-derived errors in a successful run train an operator to scroll past
+    exactly the class of line they must not scroll past, in the run where they
+    are least equipped to tell a real TLS failure from a cosmetic one.
+
+    `acme_environment()` is the deciding reader on purpose (ADR 0195): this
+    caller is choosing how to describe a condition, not reporting an
+    observation to a human who could act on the difference, and it runs as root
+    so the store is readable anyway.
+    """
+    text = str(error)
+    verification_failed = "CERTIFICATE_VERIFY_FAILED" in text
+    kind = "staging-cert" if verification_failed else type(error).__name__
+
+    key = (url, kind)
+    if key in _DOCS_FAILURES_REPORTED:
+        return
+    _DOCS_FAILURES_REPORTED.add(key)
+
+    if verification_failed and edge_state.acme_environment() == "staging":
+        print(
+            f"  docs: unverified (staging certificate) at {url}; expected before "
+            "`edge.sh promote-acme` and not a deploy failure"
+        )
+        return
+    print(f"  no documentation route: {type(error).__name__}: {error}")
 
 
 def observe_active_administrator(database: dict[str, Any]) -> bool:
