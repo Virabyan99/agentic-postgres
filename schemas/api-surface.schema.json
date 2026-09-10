@@ -2,12 +2,25 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Virabyan99/agentic-postgres/schemas/api-surface.schema.json",
   "title": "Reviewed PostgREST API surface",
-  "description": "The hand-written half of ADR 0050: every relation, column, function and method the `api` schema is allowed to expose, named exactly. It is compared against the PostgreSQL catalog and against the generated OpenAPI document in both directions, so an object present in the database and absent here is a release failure even when its grants keep it out of OpenAPI -- because the next grant change publishes it. It is deliberately NOT generated: a contract derived from the thing it constrains cannot refuse it. It is also project-neutral, because the example domain is (ADR 0003, amended by ADR 0048): one contract describes every project that serves it, and a per-project extension is a reviewed delta rather than a second file. additionalProperties is false at every level, and every string is either a bare identifier or a member of a closed enumeration -- which is how 'the contract contains no SQL' is a property of the schema rather than a rule somebody remembers.",
+  "description": "The hand-written half of ADR 0050: every relation, column, function and method the `api` schema is allowed to expose, named exactly. It is compared against the PostgreSQL catalog and against the generated OpenAPI document in both directions, so an object present in the database and absent here is a release failure even when its grants keep it out of OpenAPI -- because the next grant change publishes it. It is deliberately NOT generated: a contract derived from the thing it constrains cannot refuse it. It is also project-neutral, because the example domain is (ADR 0003, amended by ADR 0048): one contract describes every project that serves it, and a per-project extension is a reviewed delta rather than a second file. additionalProperties is false at every level, and every string is either a bare identifier or a member of a closed enumeration -- which is how 'the contract contains no SQL' is a property of the schema rather than a rule somebody remembers. **Version 2 (ADR 0198)** is a PROJECT's own contract, living beside its migration set at `projects/<slug>/contracts/postgrest-api-surface.yaml`. It names what that project adds and nothing else; the release's contract stays project-neutral, which is what its own header sentence has always claimed and what a tenant's views in the release's set had made false. The two are MERGED for every comparison, and a project may not redeclare a name the release owns in any kind.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "contract_id", "exposed_schema", "enums", "relations", "rpcs", "agent_rpcs", "agent_write_rpcs", "forbidden_schemas"],
+  "required": [
+    "schema_version",
+    "contract_id",
+    "exposed_schema",
+    "relations",
+    "rpcs"
+  ],
   "properties": {
-    "schema_version": { "type": "integer", "enum": [1] },
+    "schema_version": {
+      "type": "integer",
+      "enum": [
+        1,
+        2
+      ],
+      "description": "1 is the RELEASE's contract: the platform's whole published surface, including the agent plane and the schemas nothing may ever publish. 2 is a PROJECT's own contract (ADR 0198), which names only what that project adds -- and deliberately carries no `agent_rpcs`, no `agent_write_rpcs` and no `forbidden_schemas`, because all three are statements about the whole database. A project restating them would be a second authority for the platform's own boundary, and the interesting failure is the one where the two disagree and the weaker wins."
+    },
     "contract_id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{2,63}$",
@@ -19,40 +32,59 @@
     },
     "enums": {
       "type": "object",
-      "minProperties": 1,
-      "additionalProperties": { "$ref": "#/$defs/enum" },
-      "propertyNames": { "$ref": "#/$defs/identifier" },
-      "description": "Enum types in the exposed schema, and their values in `enumsortorder`. Listed because they are published: PostgREST emits an enum column's values into the OpenAPI document while a CHECK constraint bounding the same column appears nowhere in it (ADR 0058). A type is an object in `api` like any other, so leaving it out would give `an unlisted object in api fails the gate` an exception."
+      "additionalProperties": {
+        "$ref": "#/$defs/enum"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
+      "description": "Enum types in the exposed schema, and their values in `enumsortorder`. Listed because they are published: PostgREST emits an enum column's values into the OpenAPI document while a CHECK constraint bounding the same column appears nowhere in it (ADR 0058). A type is an object in `api` like any other, so leaving it out would give `an unlisted object in api fails the gate` an exception. Required and non-empty at version 1; optional at version 2, because a project may add tables without adding a bounded type."
     },
     "relations": {
       "type": "object",
-      "minProperties": 1,
-      "additionalProperties": { "$ref": "#/$defs/relation" },
-      "propertyNames": { "$ref": "#/$defs/identifier" }
+      "additionalProperties": {
+        "$ref": "#/$defs/relation"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      }
     },
     "rpcs": {
       "type": "object",
-      "minProperties": 1,
-      "additionalProperties": { "$ref": "#/$defs/rpc" },
-      "propertyNames": { "$ref": "#/$defs/identifier" }
+      "additionalProperties": {
+        "$ref": "#/$defs/rpc"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      }
     },
     "agent_rpcs": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/agentRpc" },
-      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": {
+        "$ref": "#/$defs/agentRpc"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
       "description": "Functions in the exposed schema that the agent plane may invoke and the published document does not name (ADR 0118). They are here because ADR 0050's invariant is that nothing exists in `api` which this file does not name -- an object kept out of OpenAPI by a grant is still reachable over HTTP, and the next grant change publishes it. `minProperties` is deliberately absent, unlike `relations` and `rpcs`: a release with no agent plane is a real state and was every release before Session 8. What keeps this section honest is not the schema but `api_surface.py`: no arguments, no name shared with `rpcs`, and every name absent from the approved snapshot."
     },
     "agent_write_rpcs": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/agentWriteRpc" },
-      "propertyNames": { "$ref": "#/$defs/identifier" },
+      "additionalProperties": {
+        "$ref": "#/$defs/agentWriteRpc"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/identifier"
+      },
       "description": "Agent-plane functions that WRITE (ADR 0136). Separate from `agent_rpcs` because they take arguments, and `agent_rpcs` forbids arguments for a reason that is still true: measured on PostgREST v14.16, a GET on a function with arguments executes it and takes the argument from the query string, whether the function is STABLE or VOLATILE. What distinguishes this category is that its members write, and PostgREST runs a GET in a READ-ONLY transaction -- so the write is refused with 25006 surfaced as 405, and nothing happens. The 405 prevents the EFFECT and not the DISCLOSURE: by then the argument is already in every log and cache between the caller and the database. That is why `arguments` is enumerated rather than merely permitted -- the list is exactly what could appear in a URL, so a reviewer reads the exposure instead of inferring it, and no argument here may carry a secret, a token, a credential or another principal's identifier."
     },
     "forbidden_schemas": {
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "$ref": "#/$defs/identifier" },
+      "items": {
+        "$ref": "#/$defs/identifier"
+      },
       "description": "Schemas that must never appear in the published surface. Listed rather than inferred as 'everything except exposed_schema': a name written down is a name a test can look for, and the four that matter here -- `public`, `app`, `app_private`, `extensions` -- are the four a misconfigured `db-schemas` or `db-extra-search-path` would actually reach."
     }
   },
@@ -66,7 +98,9 @@
     "enum": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["values"],
+      "required": [
+        "values"
+      ],
       "properties": {
         "values": {
           "type": "array",
@@ -84,25 +118,39 @@
     "relation": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "methods", "columns"],
+      "required": [
+        "kind",
+        "methods",
+        "columns"
+      ],
       "properties": {
         "kind": {
           "type": "string",
-          "enum": ["view"],
+          "enum": [
+            "view"
+          ],
           "description": "`view` only, and not as an oversight. Every published read passes through a security-invoker view over a FORCE-RLS table (ADR 0029, migration 0004); exposing a base table would run the caller's query against the table's own privileges and is the failure `security_invoker` exists to prevent."
         },
         "methods": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "type": "string", "enum": ["GET", "HEAD"] },
+          "items": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "HEAD"
+            ]
+          },
           "description": "Reads only. A view can be updatable in PostgreSQL's eyes and still carry no write grant, so method discovery over a view reflects updatability rather than authorization -- which is why the writes are RPCs and why this enumeration cannot express one."
         },
         "columns": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/identifier" },
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
           "description": "Every column, in the order the view declares them. Order is kept because it makes a review diff readable; membership is what is compared."
         }
       }
@@ -110,19 +158,29 @@
     "rpc": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["methods", "arguments"],
+      "required": [
+        "methods",
+        "arguments"
+      ],
       "properties": {
         "methods": {
           "type": "array",
           "minItems": 1,
           "maxItems": 1,
-          "items": { "type": "string", "enum": ["POST"] },
+          "items": {
+            "type": "string",
+            "enum": [
+              "POST"
+            ]
+          },
           "description": "`POST` and nothing else. PostgREST will serve a `GET /rpc/...` for a function marked immutable or stable, which puts arguments in a query string and in every log and proxy cache between the caller and the database. These functions are volatile and write."
         },
         "arguments": {
           "type": "array",
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/identifier" },
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
           "description": "The PostgreSQL parameter names, exactly. Not a friendlier spelling of them: PostgREST maps JSON body keys onto parameter names, so these strings are the wire format. An empty list is legal and means a function that takes nothing."
         }
       }
@@ -130,7 +188,10 @@
     "agentRpc": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["methods", "arguments"],
+      "required": [
+        "methods",
+        "arguments"
+      ],
       "description": "An agent-plane read function (ADR 0118). Structurally close to `rpc` and different in the two ways that matter, both of which follow from one fact: it is STABLE and takes nothing.",
       "properties": {
         "methods": {
@@ -138,7 +199,13 @@
           "minItems": 2,
           "maxItems": 2,
           "uniqueItems": true,
-          "items": { "type": "string", "enum": ["GET", "POST"] },
+          "items": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "POST"
+            ]
+          },
           "description": "Both, and this is a statement about PostgREST rather than a preference: it serves `GET /rpc/...` for a STABLE function whether or not anybody wanted it to, so a list naming only POST would describe a surface that is not the served one. `rpcs` forbids GET because it puts arguments into a query string and into every log and cache in between -- and the empty argument list below is exactly what makes that objection inapplicable here. Requiring both rather than permitting either is deliberate: 'this function is reachable two ways' is the fact a reviewer needs, and an entry naming one of them would let the other go unexamined."
         },
         "arguments": {
@@ -151,24 +218,102 @@
     "agentWriteRpc": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["methods", "arguments"],
+      "required": [
+        "methods",
+        "arguments"
+      ],
       "description": "An agent-plane function that writes (ADR 0136). It differs from `agentRpc` in the two ways that follow from writing: it takes arguments, and GET cannot complete it.",
       "properties": {
         "methods": {
           "type": "array",
           "minItems": 1,
           "maxItems": 1,
-          "items": { "type": "string", "enum": ["POST"] },
+          "items": {
+            "type": "string",
+            "enum": [
+              "POST"
+            ]
+          },
           "description": "POST, and only POST -- a statement about the served surface rather than a preference. GET reaches the function and the function's own write is then refused by the read-only transaction PostgREST runs a GET in (measured: 25006 as 405, no row written). An entry naming GET would describe a route that cannot complete, and one naming both would read as though GET were a supported way to call it."
         },
         "arguments": {
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/identifier" },
+          "items": {
+            "$ref": "#/$defs/identifier"
+          },
           "description": "Every argument, named. Non-empty by definition -- an argument-free function belongs in `agent_rpcs`, which keeps the stronger guarantee. This list is the review surface: it is exactly what could appear in a query string if somebody GETs the endpoint, and the 405 that follows does not un-log it. No argument here may carry a secret, a token, a credential or another principal's identifier; the ones that exist carry a tool name, a request id, an outcome, two counts and a parameter document the runtime redacted before sending."
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 1
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "required": [
+          "enums",
+          "agent_rpcs",
+          "agent_write_rpcs",
+          "forbidden_schemas"
+        ],
+        "properties": {
+          "enums": {
+            "minProperties": 1
+          },
+          "relations": {
+            "minProperties": 1
+          },
+          "rpcs": {
+            "minProperties": 1
+          }
+        }
+      },
+      "description": "The version 1 gate. Every bound version 1 carried before ADR 0198 is restored here by name: the four sections a release contract must have, and the three that must not be empty. This is a gate rather than a property so that version 2 can drop them, and it is enumerated rather than inherited so that reading it answers 'what does the release's contract still require' without diffing against history."
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "const": 2
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "agent_rpcs"
+              ]
+            },
+            {
+              "required": [
+                "agent_write_rpcs"
+              ]
+            },
+            {
+              "required": [
+                "forbidden_schemas"
+              ]
+            }
+          ]
+        }
+      },
+      "description": "The version 2 gate (ADR 0198). A project's contract may not carry the three sections that describe the whole database. `forbidden_schemas` is the one worth spelling out: it names the schemas nothing may ever publish, and a project able to write its own list could name a shorter one -- so the merged surface takes the release's, always, and a project that wanted to add to it would be asking for a platform change rather than an entry in its own file. `agent_rpcs` and `agent_write_rpcs` are the agent plane's, which Session 21 opens to a tenant's domain; until then a project cannot declare one and the roster stays the hardcoded six (D1056, D933)."
+    }
+  ]
 }

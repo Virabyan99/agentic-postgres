@@ -26,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, migrations, sql_surface
+from agentic_postgres import REPO_ROOT, api_surface, migrations, sql_surface
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -543,3 +543,123 @@ def test_project_set_from_reads_the_document_and_not_the_manifest(
         "other than the document supplied it"
     )
     assert migrations.project_set_from(document) is not None
+
+
+def test_the_project_reader_finds_every_object_the_project_contract_names() -> None:
+    """TEN-SURF-001, over EVERY set in `projects/`, not just the example's.
+
+    ADR 0050's invariant for a project: nothing exists in `api` which that
+    project's reviewed contract does not name, and nothing is named which the
+    SQL does not create. Both directions, because each catches a different
+    mistake -- an object added to a migration and not to the contract is an
+    unreviewed publication, and one added to the contract and not to a migration
+    is a contract describing a catalog that does not exist.
+
+    Parameterised over the directory rather than over a list of slugs, so a
+    second example set added later is covered without anybody remembering to
+    add it. The non-empty assertion is what stops that from silently becoming a
+    loop over nothing.
+    """
+    roots = sorted(
+        path
+        for path in (REPO_ROOT / "projects").iterdir()
+        if path.is_dir() and (path / "migrations" / "manifest.json").is_file()
+    )
+    assert roots, "there are no project sets in projects/, so this loop proves nothing"
+
+    for root in roots:
+        contract = api_surface.load_project_surface(api_surface.project_contract_path(root))
+        migration_set = migrations.MigrationSet(label="project", root=root / "migrations")
+        surface = sql_surface.final_surface(migration_set.load_manifest(), migration_set.root)
+
+        published = sql_surface.published_names(surface)
+        assert published, f"{root.name}: the reader found no objects in this project's SQL"
+
+        named = set(contract["relations"]) | set(contract["rpcs"]) | set(contract["enums"])
+        assert named, f"{root.name}: the contract names nothing"
+
+        assert published == named, (
+            f"{root.name}: the SQL publishes {sorted(published)} and the contract names "
+            f"{sorted(named)}. An object in the migrations and not the contract is an "
+            "unreviewed publication; one in the contract and not the migrations is a "
+            "contract describing a catalog that does not exist."
+        )
+
+        # And the columns, for every relation. The names agreeing is the cheap
+        # half: a view whose column list drifted from its contract publishes a
+        # field nobody reviewed, under a relation name somebody did.
+        for name, declared in contract["relations"].items():
+            assert surface["views"][name] == declared["columns"], (
+                f"{root.name}: api.{name} selects {surface['views'][name]} and the "
+                f"contract names {declared['columns']}"
+            )
+
+        for name, declared in contract["rpcs"].items():
+            assert surface["functions"][name] == declared["arguments"], (
+                f"{root.name}: api.{name} takes {surface['functions'][name]} and the "
+                f"contract names {declared['arguments']} -- and these strings are the "
+                "wire format, because PostgREST maps JSON body keys onto parameter names"
+            )
+
+
+def test_a_project_set_that_publishes_nothing_is_caught_by_the_reader(
+    copied: Path,
+) -> None:
+    """The arm the loop above cannot reach, and the reason it needed one.
+
+    `test_the_project_reader_finds_every_object_the_project_contract_names`
+    walks the sets that exist in `projects/`, and all of them publish something
+    -- so its `assert published` guard never fires and a battery mutation
+    removing that guard SURVIVED. A guard with no scenario is not a guard.
+
+    Here the set's migration keeps its table and loses its view and its
+    function, which is the realistic shape: a tenant adds storage in one
+    migration and the published surface in the next, and between the two their
+    contract names objects the SQL does not create. The reader must report an
+    empty surface rather than an agreeing one -- because `published == named`
+    holds trivially when both sides are empty, and that is the comparison this
+    whole file rests on.
+    """
+    path = copied / TEMPLATE
+    text = path.read_text(encoding="utf-8")
+    applied, marker, down = text.partition(sql_surface.DOWN_MARKER)
+
+    # Everything from the view onward, out. The table, its row security and its
+    # policy stay: this is a set that stores and publishes nothing.
+    cut = applied.index("CREATE VIEW api.note_embeddings")
+    path.write_text(applied[:cut] + "RESET ROLE;\n" + marker + down, encoding="utf-8")
+
+    # The two request-role placeholders go with the objects they granted on.
+    # `load_manifest` refuses a declaration whose template never uses it, and
+    # that refusal is right: a stale placeholder reads to the next person as
+    # evidence that the value still reaches the migration. Trimming it here is
+    # what an adopter making this change would have to do, which is the point --
+    # the arm has to be a set that could exist, or it measures the manifest
+    # rules rather than the reader.
+    manifest_path = copied / MANIFEST
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["migrations"][0]["placeholders"] = ["object_owner"]
+    for name in ("authenticated", "api_documentation"):
+        manifest["placeholders"].pop(name)
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+    migration_set = migrations.MigrationSet(label="project", root=copied / "migrations")
+    surface = sql_surface.final_surface(migration_set.load_manifest(), migration_set.root)
+    published = sql_surface.published_names(surface)
+
+    assert published == set(), (
+        f"the reader found {sorted(published)} in a set whose view and function were "
+        "removed, so it is reading something other than this set's SQL"
+    )
+
+    # And the comparison the loop makes is what catches it: the contract still
+    # names two objects the SQL no longer creates.
+    contract = api_surface.load_project_surface(api_surface.project_contract_path(copied))
+    named = set(contract["relations"]) | set(contract["rpcs"]) | set(contract["enums"])
+    assert named, "the contract names nothing, so the disagreement below is not one"
+    assert published != named
+
+    # The control, in the same test (D499): the committed set still publishes.
+    real = migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
+    real_surface = sql_surface.final_surface(real.load_manifest(), real.root)
+    assert sql_surface.published_names(real_surface)

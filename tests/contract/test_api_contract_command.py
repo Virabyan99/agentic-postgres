@@ -24,6 +24,7 @@ the rig, produced the same document from the same nine migrations.
 from __future__ import annotations
 
 import ast
+import copy
 import json
 import os
 import re
@@ -492,3 +493,167 @@ def test_the_missing_object_diagnostic_names_the_stale_snapshot() -> None:
     assert "--update" in block, (
         "the message names no remedy; a refusal without one is where a reader stops"
     )
+
+
+# ---------------------------------------------------------------------------
+# A project's surface and a project's snapshot (ADR 0198, TEN-SURF-001)
+# ---------------------------------------------------------------------------
+
+EXAMPLE_PROJECT = REPO_ROOT / "projects" / "example"
+
+
+def project_surface() -> dict[str, Any]:
+    return api_surface.load_project_surface(api_surface.project_contract_path(EXAMPLE_PROJECT))
+
+
+def merged() -> dict[str, Any]:
+    return api_surface.merged_surface(api_surface.load_surface(), project_surface())
+
+
+def snapshot_with_the_projects_objects() -> dict[str, Any]:
+    """The captured control plus the paths the example set publishes.
+
+    Built here rather than captured, and that is a deliberate exception to the
+    rule this file otherwise keeps. A project's REAL snapshot can only come from
+    a deployment of that project -- `--update` reads `routes.rest.url` from a
+    deployed document -- so there is no offline way to have one, which is
+    D1039's *unsatisfiable rather than unsatisfied* in its second instance.
+
+    What this fixture may therefore prove is bounded, and the bound is worth
+    stating: it proves the COMPARISON accepts a document naming the merged
+    surface's objects, not that PostgREST produces such a document. The second
+    half is the trip's (`TEN-SURF-001`'s live node). Composed from the captured
+    control so the shape around the added paths is a real served document's.
+    """
+    document = copy.deepcopy(approved_snapshot())
+    for name in project_surface()["relations"]:
+        document["paths"][f"/{name}"] = {"get": {"responses": {"200": {"description": "OK"}}}}
+    for name in project_surface()["rpcs"]:
+        document["paths"][f"/rpc/{name}"] = {"post": {"responses": {"200": {"description": "OK"}}}}
+    return document
+
+
+def test_the_merged_surface_agrees_with_a_snapshot_carrying_both_sets_objects(
+    api_contract,
+) -> None:
+    """The comparison the deploy will make, made offline against a built document."""
+    assert (
+        api_contract.compare_snapshot_to_surface(snapshot_with_the_projects_objects(), merged())
+        == []
+    )
+
+
+def test_the_releases_snapshot_against_the_merged_surface_names_the_missing_objects(
+    api_contract,
+) -> None:
+    """The negative, and the reason the flag governs BOTH halves.
+
+    The release's snapshot against the merged surface reports exactly the
+    project's objects as unpublished -- which is what `--check --project` would
+    say if it loaded the merged surface and forgot to load the project's
+    snapshot. Asserted as an equality on the set of names rather than as "some
+    problems", because "it complained" is true of every broken comparison.
+    """
+    problems = api_contract.compare_snapshot_to_surface(approved_snapshot(), merged())
+    named = {
+        name
+        for name in ("note_embeddings", "rpc/set_note_embedding")
+        if any(repr(name) in problem for problem in problems)
+    }
+    assert named == {"note_embeddings", "rpc/set_note_embedding"}
+    assert len(problems) == 2, problems
+
+
+def test_the_projects_snapshot_against_the_releases_surface_names_them_as_unreviewed(
+    api_contract,
+) -> None:
+    """The other direction, and the other half of the same mistake.
+
+    A `--check --project` that loaded the project's snapshot but kept the
+    RELEASE's surface would report the project's own objects as reaching the
+    published document without a reviewed entry -- the case the contract exists
+    for, fired at a project that did nothing wrong.
+    """
+    problems = api_contract.compare_snapshot_to_surface(
+        snapshot_with_the_projects_objects(), api_surface.load_surface()
+    )
+    assert len(problems) == 2, problems
+    assert all("which the reviewed surface does not name" in problem for problem in problems)
+
+
+def test_check_with_a_project_reads_the_projects_snapshot_path(api_contract) -> None:
+    """Which file `--project` sends the comparison to.
+
+    The resolver's answer, and then -- the half that matters -- what the COMMAND
+    does with it. A battery mutation replacing `load_project_snapshot(root)`
+    with `load_snapshot()` survived the first three assertions, because a path
+    resolver is not a command: nothing here had ever said which file
+    `command_check` opens.
+
+    The distinguishing signal is the MESSAGE and not the exit code, and that is
+    not an accident of this test. Both states exit 5. Unmutated, `--check
+    --project` fails because the project's snapshot is ABSENT; mutated, it loads
+    the release's snapshot -- which exists -- and fails because that document
+    does not publish the project's objects. Those are ADR 0195's two outcomes:
+    *I could not find the thing* and *the things disagree*, and a reader that
+    could not tell them apart would send an operator to audit a contract when
+    the answer is "capture the snapshot".
+    """
+    root = api_contract.project_root(REPO_ROOT / "project.example.yaml")
+    assert root == EXAMPLE_PROJECT
+    assert api_surface.project_snapshot_path(root) == (
+        EXAMPLE_PROJECT / "contracts" / "postgrest-openapi.canonical.json"
+    )
+    assert api_surface.project_snapshot_path(root) != api_contract.SNAPSHOT_PATH
+
+    result = run("--check", "--project", str(REPO_ROOT / "project.example.yaml"))
+    assert result.returncode == 5, result.stdout + result.stderr
+    message = result.stdout + result.stderr
+    assert "there is no approved snapshot at" in message, message
+    assert "projects/example/contracts/postgrest-openapi.canonical.json" in message, message
+    assert "disagree" not in message, (
+        "`--check --project` reported a disagreement rather than a missing snapshot, "
+        "which means it compared the merged surface against the RELEASE's snapshot"
+    )
+
+
+def test_a_manifest_with_no_set_is_refused_by_project(api_contract) -> None:
+    """The control for the resolver: a project without a set has no contract.
+
+    Exit 2 and not 5: the operator asked for something that does not apply,
+    rather than for something that is out of sync.
+    """
+    with pytest.raises(api_contract.ContractError) as raised:
+        api_contract.project_root(REPO_ROOT / "project.second.example.yaml")
+    assert raised.value.code == 2
+    assert "declares no migrations.set" in str(raised.value)
+
+
+def test_the_project_flag_changes_no_behaviour_when_it_is_absent(api_contract) -> None:
+    """`--check` without `--project` is what it was.
+
+    The standing comparison -- the committed snapshot against the reviewed
+    surface -- is the one every gate runs, and a project flag that quietly
+    altered it would change what the release's own gate measures.
+    """
+    result = run("--check")
+    assert result.returncode == 0, result.stderr
+    assert "4 objects" in result.stdout + result.stderr
+
+
+def test_update_with_a_project_names_the_destination_and_still_writes_nothing() -> None:
+    """The D1039 clause survives the flag.
+
+    `--update` streams to stdout and writes no file, so that a capture run under
+    sudo lands owned by the unprivileged source owner who reviews and commits
+    it. `--project` adds a sentence on STDERR naming where the candidate
+    belongs; it must not add a writer. Asserted on the module's source, because
+    "writes no file" is the kind of claim a test passes by not exercising the
+    path that would.
+    """
+    body = MODULE.read_text(encoding="utf-8").split("def command_update(", 1)[1]
+    body = body.split("\ndef ", 1)[0]
+    assert "sys.stdout.buffer.write" in body
+    for writer in ("write_text", "write_bytes", "open(", "shutil.copy"):
+        assert writer not in body, f"command_update contains {writer!r}"
+    assert "file=sys.stderr" in body

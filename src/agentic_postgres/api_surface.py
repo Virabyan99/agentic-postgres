@@ -37,6 +37,21 @@ CONTRACT_PATH = REPO_ROOT / "contracts" / "postgrest-api-surface.yaml"
 
 SCHEMA_NAME = "api-surface.schema.json"
 
+#: Where a project's own contract and snapshot live, relative to its set's
+#: directory. Fixed, for `CONTRACT_PATH`'s reason one level down: a project
+#: contract that could be pointed somewhere else is one that can be pointed at a
+#: copy of the thing it constrains.
+PROJECT_CONTRACT_NAME = "postgrest-api-surface.yaml"
+PROJECT_SNAPSHOT_NAME = "postgrest-openapi.canonical.json"
+PROJECT_CONTRACTS_DIRECTORY = "contracts"
+
+#: The three sections a project's contract may not carry (ADR 0198). Held here
+#: as well as in the schema for `REQUIRED_FORBIDDEN_SCHEMAS`'s reason: two copies
+#: of a fact with a test between them are one fact, and the failure this guards
+#: is a project quietly declaring a shorter `forbidden_schemas` than the
+#: platform's.
+PLATFORM_ONLY_SECTIONS = ("agent_rpcs", "agent_write_rpcs", "forbidden_schemas")
+
 #: The four schemas that must never be published, whatever the file says. Held
 #: here as well as in the file for the reason `output_migrations` keeps its own
 #: copy of the profile transports: two copies of a fact with a test between them
@@ -76,6 +91,10 @@ __all__ = [
     "AGENT_RPC_METHODS",
     "AGENT_WRITE_RPC_METHODS",
     "CONTRACT_PATH",
+    "PLATFORM_ONLY_SECTIONS",
+    "PROJECT_CONTRACTS_DIRECTORY",
+    "PROJECT_CONTRACT_NAME",
+    "PROJECT_SNAPSHOT_NAME",
     "RELATION_METHODS",
     "REQUIRED_FORBIDDEN_SCHEMAS",
     "RPC_METHODS",
@@ -84,7 +103,11 @@ __all__ = [
     "contract_digest",
     "declared_objects",
     "declared_types",
+    "load_project_surface",
     "load_surface",
+    "merged_surface",
+    "project_contract_path",
+    "project_snapshot_path",
     "published_objects",
     "validate_surface",
 ]
@@ -113,6 +136,164 @@ def load_surface(path: Path = CONTRACT_PATH) -> dict[str, Any]:
     config.validate_against_schema(document, SCHEMA_NAME)
     validate_surface(document)
     return document
+
+
+def project_contract_path(root: Path) -> Path:
+    """A project's reviewed contract, from its set's directory.
+
+    ``root`` is `projects/<slug>` -- the directory the project manifest names,
+    not the `migrations/` beneath it. Both artefacts a project owns hang off the
+    same directory, so the manifest names one thing and the tree derives the
+    rest (ADR 0002's habit, applied to a path).
+    """
+    return root / PROJECT_CONTRACTS_DIRECTORY / PROJECT_CONTRACT_NAME
+
+
+def project_snapshot_path(root: Path) -> Path:
+    """A project's approved OpenAPI snapshot. Captured from ITS deployment."""
+    return root / PROJECT_CONTRACTS_DIRECTORY / PROJECT_SNAPSHOT_NAME
+
+
+def load_project_surface(path: Path) -> dict[str, Any]:
+    """Parse, schema-check and validate a project's own contract.
+
+    Through the same strict loader as the release's, so a project's file
+    inherits every refusal the manifests get: duplicate keys, multiple
+    documents, merge keys, a symlink, an oversized file. A duplicate `relations`
+    key silently keeping the last value would be a contract with objects nobody
+    reviewed in it -- and a project's file is the one an adopter writes.
+    """
+    document = config.load_manifest(path)
+    config.validate_against_schema(document, SCHEMA_NAME)
+
+    if document["schema_version"] != 2:
+        raise SurfaceError(
+            f"{path} declares schema_version {document['schema_version']}, and a project's "
+            "contract is version 2. Version 1 is the RELEASE's contract, which names the "
+            "agent plane and the forbidden schemas -- neither of which is a project's to "
+            "declare (ADR 0198)."
+        )
+
+    # Belt and braces with the schema's version 2 gate, for
+    # REQUIRED_FORBIDDEN_SCHEMAS' reason: the failure being guarded against is a
+    # project declaring a SHORTER forbidden list than the platform's, and a
+    # single authority for that is one edit away from being none.
+    present = [section for section in PLATFORM_ONLY_SECTIONS if section in document]
+    if present:
+        raise SurfaceError(
+            f"{path} declares {present}, which describe the whole database rather than "
+            "this project. `forbidden_schemas` names the schemas nothing may ever publish "
+            "and the merged surface always takes the release's; the agent plane's sections "
+            "are the platform's until a session opens them to a tenant's domain."
+        )
+
+    validate_project_surface(document)
+    return document
+
+
+def validate_project_surface(document: dict[str, Any]) -> None:
+    """The rules a PROJECT's contract must satisfy, beyond the schema's.
+
+    The release's `validate_surface` cannot be run over this document: four of
+    its five rules read sections a version 2 contract does not have. What
+    carries over is stated here rather than refactored into a shared helper,
+    because the two documents are subject to different rules and a helper
+    covering both would be a place for one of them to lose one.
+    """
+    exposed = document["exposed_schema"]
+
+    if not (document["relations"] or document["rpcs"]):
+        raise SurfaceError(
+            "a project contract that names no relation and no RPC describes nothing, and a "
+            "surface with nothing in it agrees with every catalog. Remove the file, or name "
+            "what the project publishes."
+        )
+
+    for name, relation in document["relations"].items():
+        extra = set(relation["methods"]) - RELATION_METHODS
+        if extra:
+            raise SurfaceError(
+                f"relation {name!r} declares {sorted(extra)}. Writes are RPCs that derive "
+                "ownership; a table-style write on a view would let a caller name the "
+                "owner_id it likes and satisfy the row policy by saying so"
+            )
+    for name, rpc in document["rpcs"].items():
+        extra = set(rpc["methods"]) - RPC_METHODS
+        if extra:
+            raise SurfaceError(
+                f"rpc {name!r} declares {sorted(extra)}. A GET /rpc/ puts the arguments in "
+                "a query string, which is in every log and every cache between the caller "
+                "and the database"
+            )
+
+    for pointer, value in _strings(document):
+        if _WILDCARD.search(value):
+            raise SurfaceError(
+                f"{pointer} contains a wildcard: {value!r}. A contract that names a class "
+                "of objects cannot refuse a member of it"
+            )
+
+    if exposed in REQUIRED_FORBIDDEN_SCHEMAS:
+        raise SurfaceError(
+            f"exposed_schema {exposed!r} is a schema the platform forbids publishing. A "
+            "project publishes into the same one schema the release does."
+        )
+
+    _refuse_name_collisions(document)
+
+
+def merged_surface(release: dict[str, Any], project: dict[str, Any] | None) -> dict[str, Any]:
+    """The release's surface plus one project's, for every comparison.
+
+    **A project may not redeclare a name the release owns, in any kind.**
+    PostgREST serves relations at `/{name}` and functions at `/rpc/{name}`, so a
+    project view called `notes` would replace the release's on a deployed
+    cluster, with the release's reviewed contract still describing the old one --
+    and the comparison that exists to notice would be comparing the merged
+    document against itself.
+
+    The union is refused across ALL kinds rather than kind by kind, for
+    `_refuse_name_collisions`' reason: two declared objects are
+    indistinguishable in every sentence written about them, and an enum type may
+    not share a name with a relation at all.
+
+    `forbidden_schemas` and the two agent sections are the RELEASE's, unchanged.
+    A project cannot carry them (the loader refuses one that does), so there is
+    nothing to merge and, more to the point, nothing a project could shorten.
+    """
+    if project is None:
+        return release
+
+    if project["exposed_schema"] != release["exposed_schema"]:
+        raise SurfaceError(
+            f"the project contract exposes {project['exposed_schema']!r} and the release "
+            f"exposes {release['exposed_schema']!r}. PostgREST is configured with one "
+            "schema, so a project publishing into another would name objects no request "
+            "can reach"
+        )
+
+    kinds = ("relations", "rpcs", "enums")
+    release_names = {
+        name
+        for kind in ("relations", "rpcs", "agent_rpcs", "agent_write_rpcs", "enums")
+        for name in release.get(kind, {})
+    }
+    project_names = {name for kind in kinds for name in project.get(kind, {})}
+
+    collisions = sorted(release_names & project_names)
+    if collisions:
+        raise SurfaceError(
+            f"the project contract redeclares {collisions}, which the release already "
+            "names. A project adds to the published surface and never replaces part of it: "
+            "`CREATE OR REPLACE VIEW api.notes` in a project's set would serve the "
+            "project's view under the release's reviewed name."
+        )
+
+    merged = {key: value for key, value in release.items()}
+    for kind in kinds:
+        merged[kind] = {**release.get(kind, {}), **project.get(kind, {})}
+    merged["contract_id"] = f"{release['contract_id']}+{project['contract_id']}"
+    return merged
 
 
 def validate_surface(document: dict[str, Any]) -> None:
@@ -245,9 +426,15 @@ def _refuse_name_collisions(document: dict[str, Any]) -> None:
         "agent_write_rpcs": "an agent-plane write RPC",
         "enums": "an enum type",
     }
+    # `.get`, because a version 2 (project) contract carries three of these five
+    # sections and the schema's version 2 gate refuses the other two outright.
+    # This is not a loosening for version 1: that gate REQUIRES all four
+    # sections, so a version 1 document missing one is refused before this runs
+    # -- which `test_a_release_contract_missing_a_platform_section_is_refused`
+    # asserts, so the two readings cannot drift apart.
     seen: dict[str, str] = {}
     for kind, label in labels.items():
-        for name in document[kind]:
+        for name in document.get(kind, {}):
             if name in seen:
                 raise SurfaceError(
                     f"{name!r} is declared as both {seen[name]} and {label}. Declared "

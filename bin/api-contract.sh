@@ -36,8 +36,8 @@ readonly ROOT_DIR
 
 usage() {
   cat <<'USAGE'
-Usage: bin/api-contract.sh --check [--project-outputs FILE]
-       sudo bin/api-contract.sh --update --project-outputs FILE > candidate.json
+Usage: bin/api-contract.sh --check [--project FILE] [--project-outputs FILE]
+       sudo bin/api-contract.sh --update [--project FILE] --project-outputs FILE > candidate.json
 
   --check            Compare. Never writes. With no --project-outputs the
                      comparison is offline: the committed snapshot against the
@@ -51,6 +51,16 @@ Usage: bin/api-contract.sh --check [--project-outputs FILE]
                      address is read from routes.rest.url -- a deployed document
                      records what happened, where a manifest records what was
                      asked for.
+  --project FILE     The project MANIFEST, for a project that declares a
+                     migration set of its own (ADR 0198). With --check, the
+                     comparison becomes the MERGED surface -- the release's plus
+                     that project's -- against that project's own snapshot;
+                     both halves move together, because the merged surface
+                     against the release's snapshot would call every project
+                     object unpublished, and the release's surface against the
+                     project's snapshot would call every project object
+                     unreviewed. With --update it names the path the candidate
+                     belongs at, on standard error, and still writes nothing.
   --help             Show this message.
 
 The documentation token is read from the environment variable APG_DOCS_TOKEN.
@@ -92,6 +102,7 @@ main() {
 
   local mode=""
   local outputs=""
+  local project=""
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --help|-h)
@@ -108,6 +119,11 @@ main() {
         outputs="$2"
         shift 2
         ;;
+      --project)
+        [ "$#" -ge 2 ] || die 2 "--project requires a file."
+        project="$2"
+        shift 2
+        ;;
       *)
         usage >&2
         die 2 "unknown argument: $1"
@@ -121,6 +137,13 @@ main() {
   if [ -n "${outputs}" ]; then
     [ -f "${outputs}" ] || die 2 "deployed document not found: ${outputs}"
     arguments+=(--project-outputs "${outputs}")
+  fi
+  if [ -n "${project}" ]; then
+    # Checked here as well as in the module, because a path that does not exist
+    # must not read as "the release's contract, then" -- which is the shape
+    # `bin/migrate.sh`'s two lock verbs carry for the same flag.
+    [ -f "${project}" ] || die 2 "project manifest not found: ${project}"
+    arguments+=(--project "${project}")
   fi
 
   exec "$(python_bin)" "${ROOT_DIR}/bin/api-contract.py" "${arguments[@]}"

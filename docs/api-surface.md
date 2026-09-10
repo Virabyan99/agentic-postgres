@@ -5,7 +5,8 @@ authority when two of them disagree.
 
 Background: [database security](database-security.md) ·
 [project isolation](project-isolation.md) ·
-[ADR 0050](decisions/0050-the-published-surface-is-a-reviewed-allowlist.md).
+[ADR 0050](decisions/0050-a-reviewed-api-surface-is-a-generated-artifact.md) ·
+[ADR 0198](decisions/0198-a-project-owns-a-migration-set-a-reviewed-surface-and-a-snapshot-beside-the-releases.md).
 
 ## The four authorities, in order
 
@@ -110,3 +111,63 @@ captured *from* a deployment that does not exist yet.
 Two projects share one canonical snapshot digest and must publish **different**
 project digests: the reviewed surface is project-neutral, and the document each
 serves carries its own host.
+
+## A project's surface
+
+ADR 0198. A project that declares a migration set of its own also owns a
+reviewed surface and a snapshot, beside that set:
+
+```
+projects/<slug>/contracts/postgrest-api-surface.yaml      # api-surface schema 2
+projects/<slug>/contracts/postgrest-openapi.canonical.json
+```
+
+**The release's contract does not gain the project's objects, and that is the
+whole design.** Its header sentence has always said it is project-neutral
+because the example domain is; a tenant's views living in the release's set had
+made that false. With the two separated it is true again, and the release's
+anti-vacuity guard keeps its equality against `{notes, tasks}` for every
+adopter rather than being loosened to a containment check.
+
+**Version 2 carries no `agent_rpcs`, no `agent_write_rpcs` and no
+`forbidden_schemas`, and the schema refuses them.** All three describe the whole
+database. `forbidden_schemas` is the one worth naming: it lists the schemas
+nothing may ever publish, and a project able to write its own list could write a
+shorter one — so the merged surface takes the release's, always. The agent
+sections are the platform's until a session opens the plane to a tenant's
+domain.
+
+**The two are merged for every comparison, and a project may not redeclare a
+name the release owns** — in any kind, not kind by kind. PostgREST serves
+relations at `/{name}` and functions at `/rpc/{name}`, so those two do not
+collide on the wire; but a project view called `notes` would replace the
+release's on a deployed cluster while the release's reviewed contract still
+described the old one. An enum is refused for a further reason: PostgreSQL puts
+types and relations in one namespace, so a project enum named `notes` names a
+catalog that cannot exist.
+
+Both halves of the comparison move together:
+
+```bash
+# The release's surface against the release's snapshot. Every gate runs this.
+bin/api-contract.sh --check
+
+# The MERGED surface against the PROJECT's snapshot.
+bin/api-contract.sh --check --project project.yaml
+
+# The candidate, after the deploy that serves the set. Streams to stdout and
+# writes nothing; the path it belongs at is printed on stderr.
+sudo bin/api-contract.sh --update --project project.yaml \
+  --project-outputs /home/op/<key>-outputs.json > candidate.json
+```
+
+Loading one half and not the other is the mistake the flag exists to prevent.
+The merged surface against the *release's* snapshot reports every project object
+as unpublished; the *release's* surface against the project's snapshot reports
+every project object as reaching the document without a reviewed entry — the
+case the contract exists for, fired at a project that did nothing wrong.
+
+A project's first `--check --project` exits **5** and names the path, for the
+same reason a project's first deploy can never publish a snapshot: the document
+is captured *from* a deployment that does not exist yet. That is unsatisfiable
+rather than unsatisfied, and the message says which.

@@ -1,0 +1,65 @@
+# The example project's own reviewed API surface. ADR 0198, api-surface schema
+# version 2.
+#
+# This is the second of the two files an adopter writes, and the pair is the
+# whole of what a project owns: `migrations/` says what the schema becomes, and
+# this says what may be published from it. Neither of them is a file the release
+# tracks and edits -- which is the property ADR 0197 found the documented path
+# could not deliver, and the reason `DX-001` is answered "no" rather than left
+# unattempted.
+#
+# It carries no `agent_rpcs`, no `agent_write_rpcs` and no `forbidden_schemas`,
+# and the schema refuses them at version 2. All three describe the whole
+# database. `forbidden_schemas` is the one worth naming: it lists the schemas
+# nothing may ever publish, and a project able to write its own list could write
+# a shorter one. The merged surface takes the release's, always.
+#
+# Everything below is compared against the generated OpenAPI document that THIS
+# project's deployment serves -- `contracts/postgrest-openapi.canonical.json`
+# beside this file -- in both directions. An object served and not named here is
+# a release failure; an object named here and not served is a migration that has
+# not shipped, a grant that keeps it out, or a snapshot that predates this file
+# (the three clauses D1039 found were two).
+schema_version: 2
+
+# Names the surface, not the project. A second project deploying this same set
+# would carry the same contract_id, because it is the same reviewed shape.
+contract_id: example-note-embeddings-v1
+
+# The one schema PostgREST exposes, and it is the release's. A project does not
+# get a schema of its own: `api` is the only one `db-schemas` names, and every
+# additional entry would be a boundary to reason about separately.
+exposed_schema: api
+
+# The read surface. `kind: view` is the only value the schema admits, and not as
+# an oversight: every published read passes through a security-invoker view over
+# a FORCE-RLS table (ADR 0029), and exposing a base table would run the caller's
+# query against the table's own privileges.
+#
+# Columns in the order the view declares them, because that makes a review diff
+# readable; membership is what is compared.
+relations:
+  note_embeddings:
+    kind: view
+    methods: [GET, HEAD]
+    columns: [note_id, owner_id, embedding, updated_at]
+
+# The write surface. POST only -- a GET /rpc/ puts the arguments in a query
+# string and therefore in every log and cache between the caller and the
+# database, and this function's second argument is a 768-dimension vector.
+#
+# Argument names are the PostgreSQL parameter names, exactly, because that is
+# what a caller puts in the JSON body. There is no `p_owner_id`, and that
+# absence is the security property: a signature that took one would let a caller
+# satisfy the row policy by naming somebody else.
+rpcs:
+  set_note_embedding:
+    methods: [POST]
+    arguments: [p_note_id, p_embedding]
+
+# No enum types. Optional at version 2, because a project may add tables without
+# adding a bounded type -- unlike the release's contract, where `enums` is
+# required and non-empty because `api.task_status` is published into the
+# generated document and a CHECK constraint bounding the same column would
+# appear nowhere in it (ADR 0058).
+enums: {}

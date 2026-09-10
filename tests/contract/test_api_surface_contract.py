@@ -421,9 +421,46 @@ def test_the_digest_is_of_the_bytes_not_the_parse() -> None:
 
 
 def test_the_schema_is_referenced_by_the_module_and_exists() -> None:
+    """ADR 0198 adds version 2, and this asserts more than it did before.
+
+    It pinned the enum to `[1]`. Widening that to `[1, 2]` on its own would be
+    the kind of edit that reads as bookkeeping and quietly stops saying
+    anything, so the replacement names what each version IS -- which is the
+    property a reader of this file actually needs and which the old assertion
+    never carried.
+    """
     schema = config.load_schema(api_surface.SCHEMA_NAME)
-    assert schema["properties"]["schema_version"]["enum"] == [1]
+    assert schema["properties"]["schema_version"]["enum"] == [1, 2]
     assert schema["additionalProperties"] is False
+
+    # Version 1 is the release's and must still require every section it
+    # required before. Version 2 is a project's and must forbid the three that
+    # describe the whole database. Both gates are read from the schema rather
+    # than assumed, because the version 2 change moved these bounds off the
+    # properties and a gate that lost one would be invisible here otherwise.
+    gates = {gate["if"]["properties"]["schema_version"]["const"]: gate for gate in schema["allOf"]}
+    assert set(gates) == {1, 2}
+
+    assert set(gates[1]["then"]["required"]) == {
+        "enums",
+        "agent_rpcs",
+        "agent_write_rpcs",
+        "forbidden_schemas",
+    }
+    for section in ("enums", "relations", "rpcs"):
+        assert gates[1]["then"]["properties"][section]["minProperties"] == 1
+
+    forbidden_at_two = {entry["required"][0] for entry in gates[2]["then"]["not"]["anyOf"]}
+    assert forbidden_at_two == set(api_surface.PLATFORM_ONLY_SECTIONS)
+
+    # And the module's own copy of that list agrees with the schema's. Two
+    # copies of a fact with a test between them are one fact -- the reason
+    # REQUIRED_FORBIDDEN_SCHEMAS is held in both places too.
+    assert set(api_surface.PLATFORM_ONLY_SECTIONS) == {
+        "agent_rpcs",
+        "agent_write_rpcs",
+        "forbidden_schemas",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -538,3 +575,176 @@ def test_the_published_set_is_exactly_what_the_snapshot_names() -> None:
         f"the snapshot names {sorted(served)} and the reviewed published surface names "
         f"{sorted(expected)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# A project's own reviewed surface (ADR 0198, TEN-SURF-001)
+# ---------------------------------------------------------------------------
+
+EXAMPLE_PROJECT = REPO_ROOT / "projects" / "example"
+
+
+@pytest.fixture
+def project_surface() -> dict[str, Any]:
+    return api_surface.load_project_surface(api_surface.project_contract_path(EXAMPLE_PROJECT))
+
+
+def test_the_example_projects_contract_loads_at_version_two(
+    project_surface: dict[str, Any],
+) -> None:
+    """The file an adopter writes, through the same strict loader as the release's.
+
+    Anti-vacuity first: a contract naming nothing would satisfy every comparison
+    below, so what it names is asserted before anything is compared against it.
+    """
+    assert project_surface["schema_version"] == 2
+    assert project_surface["exposed_schema"] == "api"
+    assert set(project_surface["relations"]) == {"note_embeddings"}
+    assert set(project_surface["rpcs"]) == {"set_note_embedding"}
+
+
+@pytest.mark.parametrize("section", api_surface.PLATFORM_ONLY_SECTIONS)
+def test_a_project_contract_may_not_carry_a_platform_section(
+    tmp_path: Path, project_surface: dict[str, Any], section: str
+) -> None:
+    """`forbidden_schemas` is the one with teeth.
+
+    It names the schemas nothing may ever publish. A project able to write its
+    own list could write a shorter one, and the merged surface would then check
+    the served document against the weaker of two authorities. The agent
+    sections are refused for the neighbouring reason: the roster is a hardcoded
+    six and a project cannot add to it (D1056, D933).
+    """
+    import yaml
+
+    document = copy.deepcopy(project_surface)
+    document[section] = {} if section != "forbidden_schemas" else ["app_private"]
+    path = tmp_path / "postgrest-api-surface.yaml"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(config.ManifestError):
+        api_surface.load_project_surface(path)
+
+
+def test_a_project_surface_cannot_redeclare_a_release_object(
+    surface: dict[str, Any], project_surface: dict[str, Any]
+) -> None:
+    """Across every kind, not kind by kind.
+
+    PostgREST serves relations at `/{name}` and functions at `/rpc/{name}`, so
+    those two do not collide on the wire -- but a project view named `notes`
+    would replace the release's on a deployed cluster while the release's
+    reviewed contract still described the old one, and the comparison that
+    exists to notice would be comparing the merged document against itself.
+
+    The enum arm matters for a reason the others do not share: PostgreSQL puts
+    types and relations in one namespace, so a project enum named `notes` names
+    a catalog that cannot exist.
+    """
+    for kind, name in (
+        ("relations", "notes"),
+        ("rpcs", "create_note"),
+        ("relations", "mcp_agent_context"),
+        ("enums", "task_status"),
+    ):
+        candidate = copy.deepcopy(project_surface)
+        candidate.setdefault(kind, {})
+        if kind == "enums":
+            candidate[kind][name] = {"values": ["a"]}
+        elif kind == "relations":
+            candidate[kind][name] = {"kind": "view", "methods": ["GET"], "columns": ["id"]}
+        else:
+            candidate[kind][name] = {"methods": ["POST"], "arguments": ["p_x"]}
+
+        with pytest.raises(api_surface.SurfaceError, match="redeclares"):
+            api_surface.merged_surface(surface, candidate)
+
+    # The control, in the same test: the real pair still merges.
+    api_surface.merged_surface(surface, project_surface)
+
+
+def test_the_merged_surface_keeps_the_releases_platform_sections(
+    surface: dict[str, Any], project_surface: dict[str, Any]
+) -> None:
+    """The merge adds and never replaces.
+
+    Asserted on `forbidden_schemas` and the two agent sections specifically,
+    because those are the three a project cannot carry -- so the only way they
+    could change is if the merge dropped them, and a merged surface missing
+    `forbidden_schemas` would make `compare_snapshot_to_surface`'s forbidden
+    check iterate an empty list and pass.
+    """
+    merged = api_surface.merged_surface(surface, project_surface)
+
+    assert merged["forbidden_schemas"] == surface["forbidden_schemas"]
+    assert set(merged["forbidden_schemas"]) >= api_surface.REQUIRED_FORBIDDEN_SCHEMAS
+    assert merged["agent_rpcs"] == surface["agent_rpcs"]
+    assert merged["agent_write_rpcs"] == surface["agent_write_rpcs"]
+
+    assert set(merged["relations"]) == set(surface["relations"]) | {"note_embeddings"}
+    assert set(merged["rpcs"]) == set(surface["rpcs"]) | {"set_note_embedding"}
+
+
+def test_merging_no_project_is_the_release_unchanged(surface: dict[str, Any]) -> None:
+    """The control for every merge assertion above.
+
+    Without it, "the merge keeps the release's sections" would hold for a merge
+    that ignored its project argument entirely.
+    """
+    assert api_surface.merged_surface(surface, None) is surface
+
+
+def test_a_project_contract_that_names_nothing_is_refused(
+    tmp_path: Path, project_surface: dict[str, Any]
+) -> None:
+    """A surface with nothing in it agrees with every catalog.
+
+    The release's contract states this bound in the schema (`minProperties: 1`
+    on `relations` and `rpcs`); a project's cannot, because a project may
+    legitimately publish only a view or only an RPC. So the rule moves into the
+    module, where the reason can sit beside it.
+    """
+    import yaml
+
+    document = copy.deepcopy(project_surface)
+    document["relations"] = {}
+    document["rpcs"] = {}
+    path = tmp_path / "postgrest-api-surface.yaml"
+    path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(api_surface.SurfaceError, match="describes nothing"):
+        api_surface.load_project_surface(path)
+
+
+def test_a_release_contract_missing_a_platform_section_is_refused(
+    tmp_path: Path, surface: dict[str, Any]
+) -> None:
+    """The version 1 gate still requires what it required before ADR 0198.
+
+    Version 2 exists by moving four `required` entries and three
+    `minProperties` bounds off the properties and into a version 1 gate. That is
+    a widening only if the gate puts every one of them back; if it does not, the
+    release's contract silently stopped being required to name its own agent
+    plane. Asserted rather than reviewed, because the diff that would introduce
+    it looks like tidying.
+    """
+    import yaml
+
+    for section in ("enums", "agent_rpcs", "agent_write_rpcs", "forbidden_schemas"):
+        document = copy.deepcopy(surface)
+        del document[section]
+        path = tmp_path / f"missing-{section}.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        with pytest.raises(config.ManifestError):
+            api_surface.load_surface(path)
+
+    for section in ("enums", "relations", "rpcs"):
+        document = copy.deepcopy(surface)
+        document[section] = {}
+        path = tmp_path / f"empty-{section}.yaml"
+        path.write_text(yaml.safe_dump(document, sort_keys=False), encoding="utf-8")
+        with pytest.raises(config.ManifestError):
+            api_surface.load_surface(path)
+
+    # The control: the real contract still loads through the same loader.
+    api_surface.load_surface()

@@ -42,7 +42,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import REPO_ROOT, api_surface, openapi_normalize
+from agentic_postgres import REPO_ROOT, api_surface, config, openapi_normalize
 from agentic_postgres.config import ManifestError
 from agentic_postgres.openapi_normalize import NormalizationError
 
@@ -240,6 +240,62 @@ def compare_snapshot_to_surface(snapshot: dict[str, Any], surface: dict[str, Any
     return problems
 
 
+def project_root(project_path: Path) -> Path:
+    """The set directory a project manifest names, as an absolute path.
+
+    Takes the MANIFEST rather than the directory, so that `--project` means the
+    same thing here as it does to `bin/migrate.sh`: the file an operator already
+    has in their hand. A second spelling of the same flag is how one of the two
+    eventually gets pointed somewhere else.
+    """
+    document = config.load_project_manifest(project_path)
+    named = config.project_migration_set(document)
+    if named is None:
+        raise ContractError(
+            2,
+            f"{project_path} declares no migrations.set, so it has no contract of its own. "
+            "A project's reviewed surface lives beside its migration set (ADR 0198); "
+            "without one this project publishes exactly the release's surface and "
+            "`--check` without --project is the comparison you want.",
+        )
+    return REPO_ROOT / named
+
+
+def load_project_snapshot(root: Path) -> dict[str, Any]:
+    """A project's own approved snapshot, refused unless canonical.
+
+    `load_snapshot`'s rules, applied to the other file: a snapshot somebody
+    reformatted or edited one line of has stopped being the generated artifact
+    ADR 0050 says it is. The message names the project's path rather than the
+    release's, because the operator reading it did not write the release.
+    """
+    path = api_surface.project_snapshot_path(root)
+    if not path.is_file():
+        raise ContractError(
+            5,
+            f"there is no approved snapshot at {path.relative_to(REPO_ROOT)}. It cannot be "
+            "written by hand and it cannot be written by this command: capture it with "
+            "`--update --project FILE --project-outputs FILE` after the deploy that serves "
+            "this project's set, review it, and commit it.",
+        )
+    raw = path.read_bytes()
+    document = json.loads(raw)
+    if raw != openapi_normalize.canonical_bytes(document):
+        raise ContractError(
+            5,
+            f"{path.relative_to(REPO_ROOT)} is not in canonical form, so it is not what "
+            "the generator produced. Re-capture it; do not edit it.",
+        )
+    if document.get("host") != openapi_normalize.SENTINEL_HOST:
+        raise ContractError(
+            5,
+            f"{path.name} carries host {document.get('host')!r} rather than the sentinel "
+            f"{openapi_normalize.SENTINEL_HOST!r}. A snapshot holding a real project's "
+            "address is one deployment's document committed as every deployment's.",
+        )
+    return document
+
+
 def load_snapshot() -> dict[str, Any]:
     """The committed snapshot, refused unless it is in canonical form.
 
@@ -281,7 +337,7 @@ def load_snapshot() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def command_update(deployed_path: Path) -> int:
+def command_update(deployed_path: Path, project_path: Path | None = None) -> int:
     deployed = load_deployed(deployed_path)
     host, base_path = published_address(deployed)
 
@@ -297,6 +353,21 @@ def command_update(deployed_path: Path) -> int:
     # stderr so a redirected capture is the document and nothing else.
     sys.stdout.buffer.write(openapi_normalize.canonical_bytes(candidate))
     sys.stdout.buffer.flush()
+
+    # Where it belongs, on stderr, so a redirected capture is still the document
+    # and nothing else. The path is PRINTED rather than written to, because
+    # `--update` may run under sudo and the file has to end up owned by the
+    # unprivileged source owner who reviews and commits it -- which is the whole
+    # reason this command streams instead of writing.
+    if project_path is not None:
+        destination = api_surface.project_snapshot_path(project_root(project_path))
+        print(
+            f"api-contract: this candidate belongs at "
+            f"{destination.relative_to(REPO_ROOT)} -- the project's own snapshot, "
+            "captured from the project's own deployment.",
+            file=sys.stderr,
+        )
+
     print(
         f"api-contract: captured {len(candidate.get('paths', {}))} paths from {host}. "
         "Review the diff and commit it as the source owner; this command wrote no file.",
@@ -305,9 +376,23 @@ def command_update(deployed_path: Path) -> int:
     return 0
 
 
-def command_check(deployed_path: Path | None) -> int:
+def command_check(deployed_path: Path | None, project_path: Path | None = None) -> int:
     surface = api_surface.load_surface()
-    snapshot = load_snapshot()
+
+    # With --project, both halves move together: the MERGED surface against the
+    # PROJECT's snapshot. Neither on its own is a comparison -- the merged
+    # surface against the release's snapshot would report every project object
+    # as unpublished, and the release's surface against the project's snapshot
+    # would report every project object as unreviewed. That symmetry is why the
+    # flag governs both rather than one.
+    if project_path is not None:
+        root = project_root(project_path)
+        surface = api_surface.merged_surface(
+            surface, api_surface.load_project_surface(api_surface.project_contract_path(root))
+        )
+        snapshot = load_project_snapshot(root)
+    else:
+        snapshot = load_snapshot()
 
     problems = compare_snapshot_to_surface(snapshot, surface)
     if problems:
@@ -390,16 +475,29 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help="the project's deployed outputs document",
     )
+    parser.add_argument(
+        "--project",
+        metavar="FILE",
+        help=(
+            "the project manifest, when the project declares a migration set of its own: "
+            "--check then compares the merged surface against that project's snapshot, and "
+            "--update names the path its candidate belongs at (ADR 0198)"
+        ),
+    )
 
     arguments = parser.parse_args(argv)
 
     try:
+        project = Path(arguments.project) if arguments.project else None
+        if project is not None and not project.is_file():
+            raise ContractError(2, f"project manifest not found: {project}")
+
         if arguments.update:
             if not arguments.project_outputs:
                 raise ContractError(2, "--update requires --project-outputs.")
-            return command_update(Path(arguments.project_outputs))
+            return command_update(Path(arguments.project_outputs), project)
         outputs = Path(arguments.project_outputs) if arguments.project_outputs else None
-        return command_check(outputs)
+        return command_check(outputs, project)
     except ContractError as error:
         print(f"api-contract: {error}", file=sys.stderr)
         return error.code
