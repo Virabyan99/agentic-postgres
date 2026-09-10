@@ -15,6 +15,7 @@ authenticating for as long as it existed.
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 
 import argon2
@@ -336,6 +337,31 @@ def test_the_executor_never_exceeds_its_concurrency() -> None:
     assert 0 < peak <= 2, f"{peak} hashes were resident at once with a concurrency of 2"
 
 
+class _BlockingHasher:
+    """A hash that does not finish until the test says so.
+
+    The barrier D1041 was missing. `BoundedHasher` takes its hasher as an
+    argument, so the property under test -- that a permit follows the thread
+    rather than the caller -- can be observed at a moment the test controls
+    instead of one it hopes for.
+    """
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def hash(self, password: str) -> str:
+        # `password` is unread on purpose: the signature is what BoundedHasher
+        # calls, and what is under test is the permit accounting around it.
+        del password
+        self.started.set()
+        # No timeout by accident: a barrier that expires is the race again,
+        # slower. The test always sets this, and a hang here is a real defect
+        # in the permit accounting rather than a flake.
+        self.release.wait(timeout=30)
+        return "$argon2id$fake"
+
+
 def test_a_cancelled_caller_whose_hash_is_running_keeps_its_permit_until_it_finishes() -> None:
     """The permit follows the thread, not the caller.
 
@@ -343,18 +369,42 @@ def test_a_cancelled_caller_whose_hash_is_running_keeps_its_permit_until_it_fini
     64 MiB is still running. If the permit went back on cancellation, a burst
     of disconnecting clients would let the container hold `2n` hashes against a
     limit derived for `n` (ADR 0082).
+
+    **This test used to race, and its failure message named the wrong cause**
+    (D1041, ADR 0195). Nothing synchronised the read of `during` against the
+    hash *finishing*: it assumed the coroutine got back onto the event loop
+    before a 64 MiB Argon2 hash completed on a worker thread. On an idle
+    machine that held. Under CPU contention the loop is starved between
+    `cancel()` and the read, the hash completes, the permit is released
+    legitimately, and `in_flight()` returns 0 -- whereupon the test asserted
+    "the permit was released while the hash was still resident", which is the
+    exact defect it exists to catch and was not what happened. A reader who
+    trusted the message went looking for a bug in `BoundedHasher` that was not
+    there. Measured both ways on one machine at one commit: failed inside a
+    full gate run alongside the suite's Docker fixtures, passed three times out
+    of three alone immediately afterwards.
+
+    The fake replaces Argon2 and nothing else. What is under test is
+    `BoundedHasher`'s permit accounting, not the KDF; the real hasher was only
+    ever the thing that made the window narrow enough to lose.
     """
-    hasher = BoundedHasher(concurrency=1)
+    blocking = _BlockingHasher()
+    hasher = BoundedHasher(hasher=blocking, concurrency=1)
 
     async def drive() -> tuple[int, int]:
         task = asyncio.create_task(hasher.hash(PASSPHRASE))
-        while hasher.in_flight() == 0:  # pragma: no branch
+        # The worker is inside `hash` and cannot leave it. Waiting on the
+        # thread's own signal rather than on `in_flight()` means the
+        # observation below is bounded by the barrier, not by a scheduler.
+        while not blocking.started.is_set():  # pragma: no branch
             await asyncio.sleep(0.001)
+
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
         during = hasher.in_flight()
 
+        blocking.release.set()
         for _ in range(500):
             if hasher.in_flight() == 0:
                 break
@@ -362,8 +412,41 @@ def test_a_cancelled_caller_whose_hash_is_running_keeps_its_permit_until_it_fini
         return during, hasher.in_flight()
 
     during, after = asyncio.run(drive())
-    assert during == 1, "the permit was released while the hash was still resident"
+    assert during == 1, (
+        "the permit was released while the hash was still resident; the worker "
+        "is provably still inside hash() because the barrier has not been set"
+    )
     assert after == 0, "the worker never returned its permit"
+
+
+def test_the_permit_observation_is_bounded_by_the_barrier_and_not_by_timing() -> None:
+    """The paired control for the repair above (D499).
+
+    If the fake ever stopped blocking, the test above would go back to
+    observing a hash that may already have finished -- passing for the wrong
+    reason on an idle machine and failing with a confidently wrong message on a
+    busy one. This asserts the barrier actually holds the worker.
+    """
+    blocking = _BlockingHasher()
+    hasher = BoundedHasher(hasher=blocking, concurrency=1)
+
+    async def drive() -> int:
+        task = asyncio.create_task(hasher.hash(PASSPHRASE))
+        while not blocking.started.is_set():  # pragma: no branch
+            await asyncio.sleep(0.001)
+        # Give the loop many chances to observe a completion. There must not be
+        # one: the worker is blocked.
+        for _ in range(50):
+            await asyncio.sleep(0.001)
+        resident = hasher.in_flight()
+        blocking.release.set()
+        await task
+        return resident
+
+    assert asyncio.run(drive()) == 1, (
+        "the hash finished while the barrier was unset; the fake is no longer "
+        "blocking and the guard above has gone back to being a race"
+    )
 
 
 def test_a_cancelled_submission_that_never_started_does_not_leak_its_permit() -> None:

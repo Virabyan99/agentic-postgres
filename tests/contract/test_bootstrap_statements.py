@@ -746,3 +746,50 @@ def test_the_authenticator_is_activated_with_its_ceiling(bootstrap: Any) -> None
     assert 'api_budget = int(document["database"]["api_connection_budget"])' in source, (
         "the API's ceiling is computed here rather than read from the document"
     )
+
+
+# ---------------------------------------------------------------------------
+# The extension home is established once, not per fixture (D1037)
+# ---------------------------------------------------------------------------
+
+
+def test_no_fixture_creates_the_extensions_schema_without_the_extension() -> None:
+    """D1037, as a class rather than as the one instance that was found.
+
+    `bin/postgres-bootstrap.py::build_statements()` establishes the extension
+    home in two consecutive statements: the schema, then
+    `CREATE EXTENSION ... WITH SCHEMA extensions`. Five of the six contract
+    fixtures that stand a cluster up call that function and inherit both. One
+    reimplemented it by hand and stopped after the first, which cost nothing
+    until the first migration that declares a vector column -- and then
+    surfaced as 88 errors in a file about authentication, naming vectors
+    nowhere.
+
+    `CREATE EXTENSION` appeared nowhere in `tests/` at all before this session.
+    Asserting the pairing is what stops the next hand-rolled bootstrap from
+    reintroducing it, and it is cheaper than a rule nobody reads.
+    """
+    offenders = []
+    for path in sorted((REPO_ROOT / "tests").rglob("test_*.py")):
+        body = path.read_text(encoding="utf-8")
+        if "SCHEMA extensions" not in body:
+            continue
+        if "CREATE EXTENSION" in body or "build_statements" in body:
+            continue
+        offenders.append(path.relative_to(REPO_ROOT).as_posix())
+
+    assert not offenders, (
+        "a fixture creates the `extensions` schema without the extension that "
+        "bin/postgres-bootstrap.py installs beside it; a migration using "
+        "pgvector will fail there with an error naming neither: " + ", ".join(offenders)
+    )
+
+
+def test_the_bootstrap_still_pairs_the_schema_with_the_extension() -> None:
+    """The paired control. The test above is only meaningful while the product
+    itself establishes both in one place -- if `build_statements` stopped
+    installing the extension, every fixture would be 'correct' and every
+    deployment broken."""
+    bootstrap = (REPO_ROOT / "bin" / "postgres-bootstrap.py").read_text(encoding="utf-8")
+    assert "CREATE SCHEMA IF NOT EXISTS extensions" in bootstrap
+    assert "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions" in bootstrap

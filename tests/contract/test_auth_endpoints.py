@@ -166,6 +166,23 @@ def cluster(tmp_path_factory: pytest.TempPathFactory) -> Any:
         cluster = Cluster(name, port, database)
         cluster.psql(f'CREATE DATABASE {database} OWNER "{owner}"', database="postgres")
         cluster.psql(f'CREATE SCHEMA extensions AUTHORIZATION "{owner}"')
+        # And the extension itself, which `bin/postgres-bootstrap.py`'s
+        # `build_statements()` emits on the very next line (D1037).
+        #
+        # This fixture -- alone among the six that stand a cluster up --
+        # reimplements the bootstrap by hand rather than calling it, and the
+        # hand-rolled copy stopped one statement short. That is a second
+        # implementation of something the product already implements, which is
+        # exactly what ADR 0002 argues against for names.
+        #
+        # It cost nothing for thirty migrations because not one of them used
+        # pgvector, and `docs/source-specification.md` §5.4 explicitly invites
+        # the migration that breaks it: "pgvector data and additional project
+        # tables are optional migrations." The first such migration fails here
+        # with `type "extensions.vector" does not exist` and takes all 88 tests
+        # in this file with it -- a file about login, JWKS, admin users, agent
+        # secrets and scope ceilings, not one of whose tests concerns vectors.
+        cluster.psql("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions")
 
         manifest = migrations.load_manifest()
         for entry in manifest["migrations"]:

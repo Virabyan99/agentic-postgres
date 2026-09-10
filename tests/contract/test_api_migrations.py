@@ -42,7 +42,29 @@ AGENT_PLANE = "templates/0013-agent-plane-and-current-state-hook.sql"
 #: that, mechanically, rather than the comment claiming it.
 AGENT_READ_PLANE = "templates/0018-agent-read-plane.sql"
 
-_CREATE_VIEW = re.compile(r"CREATE VIEW api\.(\w+)\b.*?AS\s+SELECT\s+(.*?)\s+FROM\b", re.DOTALL)
+# `OR REPLACE` is optional here for the same reason it is optional in
+# _CREATE_FUNCTION below, and the asymmetry between the two was a hole rather
+# than a style difference (D1036).
+#
+# Measured: migration 0004 creates api.notes and api.tasks with
+# CREATE OR REPLACE VIEW, and 0007 recreates them with a bare CREATE VIEW. This
+# reader saw the published surface at all ONLY because 0007 happens to use the
+# bare form -- luck, and load bearing for every relation assertion in this file.
+#
+# The direction that matters is the silent one. A view added with OR REPLACE
+# never enters `final_surface`, so it is absent from the left side of
+# `set(final_surface["views"]) == set(surface["relations"])`, so the equality
+# holds while the view is published to clients and named in no reviewed
+# document. This file exists to enforce ADR 0050's invariant -- nothing lives
+# in `api` which the reviewed contract does not name -- and that invariant was
+# one keyword away from being unenforced, with nothing able to report it.
+#
+# Found from the opposite direction by an outsider whose own view was in the
+# contract and invisible here, so the comparison failed loudly. Added the
+# ordinary way it would have stayed green.
+_CREATE_VIEW = re.compile(
+    r"CREATE (?:OR REPLACE )?VIEW api\.(\w+)\b.*?AS\s+SELECT\s+(.*?)\s+FROM\b", re.DOTALL
+)
 _DROP_VIEW = re.compile(r"DROP VIEW api\.(\w+)")
 _CREATE_FUNCTION = re.compile(
     r"CREATE (?:OR REPLACE )?FUNCTION api\.(\w+)\s*\((.*?)\)\s*\n\s*RETURNS", re.DOTALL
@@ -1151,3 +1173,50 @@ def test_the_reset_role_is_below_the_privileges_block() -> None:
     assert body.index("RESET ROLE") > body.index("REVOKE ALL ON FUNCTION")
     assert body.index("RESET ROLE") > body.rindex("GRANT EXECUTE ON FUNCTION")
     assert body.index("SET LOCAL ROLE") < body.index("CREATE FUNCTION")
+
+
+# ---------------------------------------------------------------------------
+# The reader sees every form the migrations actually use (D1036)
+# ---------------------------------------------------------------------------
+
+
+def test_the_reader_sees_a_view_introduced_with_or_replace() -> None:
+    """D1036. `_CREATE_FUNCTION` accepted `OR REPLACE` and `_CREATE_VIEW` did
+    not, and the difference was a hole rather than a style choice.
+
+    Migration 0004 introduces both published views with
+    `CREATE OR REPLACE VIEW`. Every relation assertion in this module found
+    them only because 0007 later recreates them with the bare form -- luck, and
+    load bearing.
+
+    The direction that matters is silent. A view added with `OR REPLACE` never
+    enters `final_surface`, so it is missing from the left side of the equality
+    every other test compares, so the equality *holds* while an unreviewed
+    relation is published to clients. ADR 0050's invariant was one keyword from
+    unenforced with nothing able to report it.
+
+    Asserted against the real migration rather than a fabricated string,
+    because what is being proved is that this reader can see this repository.
+    """
+    text = (TEMPLATES / "0004-security-invoker-api-views.sql").read_text(encoding="utf-8")
+    assert "CREATE OR REPLACE VIEW api." in text, (
+        "0004 no longer uses OR REPLACE; this guard has lost its subject and "
+        "must be re-pointed at whichever migration does, not deleted"
+    )
+
+    found = {match.group(1) for match in _CREATE_VIEW.finditer(text)}
+    assert found == {"notes", "tasks"}, (
+        f"the view reader saw {sorted(found)} in 0004; a published view "
+        "declared with OR REPLACE is invisible to every assertion in this file"
+    )
+
+
+def test_the_view_and_function_readers_accept_the_same_declaration_forms() -> None:
+    """The class, not the instance. The two readers guard one invariant and
+    an asymmetry between them is a hole in whichever is narrower -- which is
+    how this one survived from migration 0004 to now."""
+    for name, pattern in (("view", _CREATE_VIEW), ("function", _CREATE_FUNCTION)):
+        assert "OR REPLACE" in pattern.pattern, (
+            f"the {name} reader does not accept OR REPLACE; a declaration using "
+            "it would be published and unreviewed"
+        )
