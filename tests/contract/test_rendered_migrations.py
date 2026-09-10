@@ -391,3 +391,129 @@ def test_the_verifier_refuses_a_file_edited_after_rendering(tmp_path: Path) -> N
     (directory / "0002_planted.sql").write_text("SELECT 2;\n", encoding="utf-8")
     with pytest.raises(migrations.MigrationError, match="does not match its manifest"):
         module.assert_rendered_files_match(str(tmp_path))
+
+
+# ---------------------------------------------------------------------------
+# The installed render is the declared one (D1053)
+# ---------------------------------------------------------------------------
+
+
+def _migrate_helper():
+    """Load bin/migrate.py as a module, the way the verifier test above does."""
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location(
+        "migrate_helper", REPO_ROOT / "bin" / "migrate.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def _write_render(directory: Path, entries: list[tuple[str, str, str]]) -> None:
+    """A rendered migration directory carrying exactly `entries`, internally
+    consistent -- which is the state that made D1053 invisible."""
+    directory.mkdir(parents=True, exist_ok=True)
+    recorded = []
+    for version, name, payload in entries:
+        filename = f"{version}_{name}.sql"
+        (directory / filename).write_text(payload, encoding="utf-8")
+        recorded.append(
+            {
+                "version": version,
+                "name": name,
+                "file": filename,
+                "sha256": migrations.digest(payload),
+            }
+        )
+    (directory / rendering.MIGRATION_MANIFEST_NAME).write_text(
+        json.dumps(
+            {
+                "project_key": "alpha-dev",
+                "migrations_table": rendering.MIGRATIONS_TABLE,
+                "migrations": recorded,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_a_stale_installed_render_is_refused_rather_than_applied(tmp_path: Path) -> None:
+    """D1053. `--runtime` reads the render the last deploy installed, which can
+    be older than the checkout the operator is standing in.
+
+    Measured on a real host: 34 migrations committed, bundled and checked out;
+    `migrate --runtime up` listed all 34, applied the installed 33, printed
+    `ledger recorded for 33 migrations`, and exited 0. Nothing else said
+    anything. The one contrary signal was a count in a summary line that D941
+    exists to tell operators not to trust.
+    """
+    module = _migrate_helper()
+
+    installed = [("0001", "x", "SELECT 1;\n"), ("0002", "y", "SELECT 2;\n")]
+    _write_render(tmp_path / "migrations", installed)
+
+    # What the checkout declares: the same two, plus one the deploy predates.
+    declared = [
+        ("0001", "x", migrations.digest("SELECT 1;\n")),
+        ("0002", "y", migrations.digest("SELECT 2;\n")),
+        ("0003", "z", migrations.digest("SELECT 3;\n")),
+    ]
+
+    with pytest.raises(migrations.MigrationError) as error:
+        module.assert_installed_render_is_current(declared, str(tmp_path))
+
+    message = str(error.value)
+    # Both numbers, because having both and printing neither is the defect.
+    assert "declares 3" in message and "carries 2" in message, message
+    assert "0003_z" in message, message
+    # And the remedy, named. A refusal that does not say what to do next is
+    # where an operator stops.
+    assert "deploy.sh" in message, message
+
+
+def test_a_current_installed_render_is_accepted(tmp_path: Path) -> None:
+    """The paired control (D499). A check that refuses everything would pass the
+    test above and break every legitimate migration, so the agreeing case has to
+    be exercised in the same module or the refusal proves nothing."""
+    module = _migrate_helper()
+
+    entries = [("0001", "x", "SELECT 1;\n"), ("0002", "y", "SELECT 2;\n")]
+    _write_render(tmp_path / "migrations", entries)
+
+    declared = [(version, name, migrations.digest(payload)) for version, name, payload in entries]
+    module.assert_installed_render_is_current(declared, str(tmp_path))
+
+
+def test_a_render_of_the_same_migrations_with_different_content_is_refused(
+    tmp_path: Path,
+) -> None:
+    """Counts agreeing is not the set agreeing.
+
+    A render produced by an earlier release can carry the same versions and
+    names with different rendered text -- different role names, a repaired
+    template. Comparing lengths would accept it, which is why the comparison is
+    over (version, name, digest) rather than over a number.
+    """
+    module = _migrate_helper()
+
+    _write_render(tmp_path / "migrations", [("0001", "x", "SELECT 1;\n")])
+    declared = [("0001", "x", migrations.digest("SELECT 999;\n"))]
+
+    with pytest.raises(migrations.MigrationError, match="different content"):
+        module.assert_installed_render_is_current(declared, str(tmp_path))
+
+
+def test_the_currency_check_runs_before_the_integrity_check() -> None:
+    """Order is the difference between naming the remedy and describing a
+    symptom. A stale render is internally consistent, so
+    `assert_rendered_files_match` passes on it and reports nothing; asking
+    whether it is *current* first is what produces "run deploy.sh"."""
+    source = (REPO_ROOT / "bin" / "migrate.py").read_text(encoding="utf-8")
+    currency = source.index("assert_installed_render_is_current(rendered")
+    integrity = source.index("assert_rendered_files_match(arguments.rendered_dir)")
+    assert currency < integrity, (
+        "the integrity check runs before the currency check; a stale render "
+        "would be reported as an edited one"
+    )

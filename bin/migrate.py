@@ -73,6 +73,73 @@ def assert_rendered_files_match(rendered_dir: str) -> None:
             )
 
 
+def assert_installed_render_is_current(
+    rendered: list[tuple[str, str, str]], rendered_dir: str
+) -> None:
+    """The set this checkout declares is the set the installed render carries.
+
+    D1053. `assert_rendered_files_match` above compares the rendered directory
+    against the manifest written *beside it*, which makes it internally
+    consistent and says nothing about whether it is current. `render_set` reads
+    this checkout's manifest. Until this function existed the two were never
+    compared, so `--runtime up` on a host whose last deploy predated a new
+    migration listed 34 migrations, applied the installed 33, and exited 0.
+
+    The only signal was a count in the summary line -- and D941 exists because
+    that line is not to be trusted: *read the cluster, never the migrator's
+    summary line*. A tool whose correct use requires ignoring its own output is
+    not reporting, it is decorating.
+
+    This is the third appearance of one defect. D60 was `up` printing the set
+    and returning 0 having applied nothing; the comment in `main` still records
+    the repair. D941 wrote down that the summary line lies. Neither reader
+    compared the two sets, because neither of them was the reader that had both
+    numbers -- which is question 5 of the defect pattern, answered wrong twice.
+    """
+    directory = Path(rendered_dir) / "migrations"
+    recorded = json.loads(
+        (directory / rendering.MIGRATION_MANIFEST_NAME).read_text(encoding="utf-8")
+    )
+    installed = {
+        (entry["version"], entry["name"]): entry["sha256"] for entry in recorded["migrations"]
+    }
+    declared = {(version, name): sha for version, name, sha in rendered}
+
+    if declared == installed:
+        return
+
+    missing = sorted(declared.keys() - installed.keys())
+    extra = sorted(installed.keys() - declared.keys())
+    changed = sorted(
+        key for key in declared.keys() & installed.keys() if declared[key] != installed[key]
+    )
+
+    detail = []
+    if missing:
+        detail.append(
+            "not installed: " + ", ".join(f"{version}_{name}" for version, name in missing)
+        )
+    if extra:
+        detail.append(
+            "installed but not declared: "
+            + ", ".join(f"{version}_{name}" for version, name in extra)
+        )
+    if changed:
+        detail.append(
+            "installed with different content: "
+            + ", ".join(f"{version}_{name}" for version, name in changed)
+        )
+
+    raise migrations.MigrationError(
+        f"this checkout declares {len(declared)} migrations and the installed render "
+        f"at {rendered_dir} carries {len(installed)}; "
+        + "; ".join(detail)
+        + ". Applying the installed set would report success having applied "
+        "something other than what this checkout declares. Run deploy.sh, which "
+        "re-renders and then migrates."
+    )
+
+
 def run_dbmate(mode: str, document: dict, rendered_dir: str) -> int:
     """Run one dbmate subcommand through bin/compose.sh, as migration_user.
 
@@ -243,6 +310,11 @@ def main() -> int:
                 print("migrate: --rendered-dir is required for status and up", file=sys.stderr)
                 return 2
 
+            # Currency first, then integrity (D1053). A stale render is
+            # internally consistent, so the integrity check below passes on it
+            # and says nothing; asking "is this the set this checkout declares"
+            # first means the answer names the right remedy.
+            assert_installed_render_is_current(rendered, arguments.rendered_dir)
             assert_rendered_files_match(arguments.rendered_dir)
             return run_dbmate(arguments.mode, document, arguments.rendered_dir)
 

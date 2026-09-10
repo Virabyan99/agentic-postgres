@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -619,3 +621,141 @@ def test_the_release_side_launcher_reads_the_session_from_the_document() -> None
     assert '--session "${session}"' in text
     assert "set -euo pipefail" in text
     assert "must run as root" in text
+
+
+# ---------------------------------------------------------------------------
+# The rollback interlock (D1042)
+# ---------------------------------------------------------------------------
+
+#: Extracted from the shipped file rather than restated here, because a test
+#: carrying its own copy of the predicate proves the copy and not the product.
+#: That is ADR 0002's argument about names, applied to a shell function.
+_TIMER_IS_ARMED = re.compile(r"^timer_is_armed\(\) \{.*?^\}", re.MULTILINE | re.DOTALL)
+
+#: A producer that is still writing after the consumer has seen its match.
+#:
+#: That is the entire mechanism: `grep -q` leaves at the first match, the
+#: producer's next write takes SIGPIPE, and `set -o pipefail` promotes 141 to
+#: the pipeline's status -- so the predicate reads FALSE while the timer is
+#: armed. The real `systemctl` is a D-Bus client which does this
+#: non-deterministically; measured on a live host, 19 TRUE out of 20. The
+#: filler lines here make it deterministic, which is what a guard needs and
+#: what a 1-in-20 reproduction could never give one.
+_FAKE_SYSTEMCTL = """#!/usr/bin/env bash
+printf '%s\\n' "NEXT LEFT LAST PASSED UNIT ACTIVATES"
+printf '%s\\n' "Mon 2026-09-10 12:00:00 UTC 9min left n/a n/a apg-ssh-rollback.timer x.service"
+for i in $(seq 1 400); do printf 'filler line %d\\n' "$i"; done
+"""
+
+_PROBE = """set -euo pipefail
+{body}
+t=0; f=0
+for _ in $(seq 1 {runs}); do
+  if timer_is_armed "apg-ssh-rollback"; then t=$((t+1)); else f=$((f+1)); fi
+done
+printf '%d %d\\n' "$t" "$f"
+"""
+
+
+def _run_interlock_probe(body: str, runs: int = 30) -> tuple[int, int]:
+    """Evaluate one predicate `runs` times, under the shipped file's own shell
+    options, against the fake producer. Returns (true_count, false_count).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text(_FAKE_SYSTEMCTL, encoding="utf-8")
+        systemctl.chmod(0o755)
+
+        probe = root / "probe.sh"
+        # `set -euo pipefail` is line 26 of bin/provision-host.sh. Without it
+        # this defect does not exist at all, which is why the probe sets it
+        # rather than inheriting whatever the runner happens to have.
+        probe.write_text(_PROBE.format(body=body, runs=runs), encoding="utf-8")
+
+        result = subprocess.run(
+            ["bash", str(probe)],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={"PATH": f"{fake_bin}:/usr/bin:/bin"},
+        )
+    true_count, false_count = (int(n) for n in result.stdout.split())
+    return true_count, false_count
+
+
+def test_the_rollback_interlock_does_not_lose_a_sigpipe_race() -> None:
+    """D1042. `timer_is_armed` guards the only two steps in this product that
+    can lock an operator out of their own host -- the SSH hardening in pass 2
+    and the firewall in pass 3 -- and it read FALSE on an armed timer about one
+    time in twenty.
+
+    The direction was safe: it refuses to harden rather than hardening with no
+    net. It still cost a ten-minute rollback window every time it lost, while
+    printing the one thing that was not true, and the documented remedy was to
+    arm another timer and roll the same dice.
+
+    The control below is what makes this assertion mean anything.
+    """
+    if not shutil.which("bash"):  # pragma: no cover - bash is present on CI
+        pytest.skip("bash is not available")
+
+    source = (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
+    match = _TIMER_IS_ARMED.search(source)
+    assert match, "timer_is_armed() is no longer extractable from bin/provision-host.sh"
+
+    true_count, false_count = _run_interlock_probe(match.group(0))
+    assert false_count == 0, (
+        f"the interlock read FALSE {false_count} time(s) out of 30 against an armed "
+        "timer; each one costs the operator a fresh rollback window"
+    )
+    assert true_count == 30
+
+
+def test_the_interlock_probe_can_still_see_the_defect_it_guards() -> None:
+    """The paired control (D499). A probe that cannot fail proves nothing, and
+    six of this session's findings exist precisely because a check could not
+    tell its own failure from one of its answers.
+
+    This is the predicate as 1.0.0 shipped it. If it ever comes out TRUE, the
+    guard above has stopped measuring and must be repaired before it is trusted
+    again -- not deleted, and not believed.
+    """
+    if not shutil.which("bash"):  # pragma: no cover - bash is present on CI
+        pytest.skip("bash is not available")
+
+    shipped_in_1_0_0 = (
+        'timer_is_armed() {\n  systemctl list-timers "$1*" --all 2>/dev/null | grep -q "$1"\n}'
+    )
+    _, false_count = _run_interlock_probe(shipped_in_1_0_0)
+    assert false_count > 0, (
+        "the 1.0.0 predicate came out TRUE under a producer that keeps writing "
+        "after the match; this probe is no longer reproducing D1042, which "
+        "makes the guard above vacuous"
+    )
+
+
+def test_no_pipe_into_grep_q_survives_in_the_provisioner() -> None:
+    """The class, not the instance (ADR 0195).
+
+    Repairing `timer_is_armed` alone would leave six more of the same shape in
+    the same file under the same `pipefail`, one of which -- `ss | grep -qE`
+    over the Docker TCP ports -- failed toward reporting `no Docker TCP socket`
+    on a host where one was listening. That is the only instance whose direction
+    was unsafe, and it was found by sweeping rather than by being reported.
+
+    Comments are stripped before the scan so that the explanations of the defect
+    are not mistaken for the defect.
+    """
+    source = (REPO_ROOT / "bin" / "provision-host.sh").read_text(encoding="utf-8")
+    offenders = [
+        line.strip()
+        for line in source.splitlines()
+        if not line.lstrip().startswith("#") and re.search(r"\|\s*grep\s+-q", line)
+    ]
+    assert not offenders, (
+        "a command is piped into `grep -q` under `set -o pipefail`; capture the "
+        "output first (D1042):\n" + "\n".join(offenders)
+    )

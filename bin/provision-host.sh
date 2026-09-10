@@ -228,7 +228,7 @@ PYTHON
 # ---------------------------------------------------------------------------
 
 check_baseline() {
-  local violations=0 ssh_port
+  local violations=0 ssh_port listeners ufw_status clock
   ssh_port="$(host_field ssh.port)"
 
   printf '\n== host ==\n'
@@ -252,7 +252,10 @@ check_baseline() {
       ;;
   esac
 
-  if timedatectl show -p NTPSynchronized --value 2>/dev/null | grep -q yes; then
+  # Captured, not piped (D1042): timedatectl is a D-Bus client, the same
+  # producer shape as the systemctl call that lost this race on a real host.
+  clock="$(timedatectl show -p NTPSynchronized --value 2>/dev/null || true)"
+  if [ "${clock}" = "yes" ]; then
     ok "clock is synchronised"
   else
     # A skewed clock breaks ACME validation in a way whose error message is
@@ -273,7 +276,11 @@ check_baseline() {
     local resolved
     resolved="$(sshd -T 2>/dev/null || true)"
     for pair in "${SSHD_REQUIRED_POLICY[@]}"; do
-      if printf '%s\n' "${resolved}" | grep -qi "^${pair}$"; then
+      # Herestring, not a pipe (D1042). The producer here is a shell builtin
+      # rather than a D-Bus client, so this one was never observed to lose the
+      # race -- but leaving one instance of the shape in the file is how the
+      # next author learns it is acceptable.
+      if grep -qi "^${pair}$" <<<"${resolved}"; then
         ok "sshd resolved ${pair}"
       else
         # Resolved, not configured. OpenSSH takes the first obtained value
@@ -395,20 +402,47 @@ check_baseline() {
     bad "daemon.json is not installed"
     violations=$((violations + 1))
   fi
-  if ss -H -lnt 2>/dev/null | grep -qE ':(2375|2376)\b'; then
+  # Captured rather than piped, and this is the site where the pipe was
+  # dangerous rather than merely wrong (D1042). `ss | grep -qE` under this
+  # file's `pipefail` returns 141 if the consumer leaves before the producer
+  # finishes, and 141 is not 0, so the `if` takes the ELSE branch and this
+  # check reports `no Docker TCP socket` on a host where one is listening.
+  # Every other instance of this shape in this file fails toward refusing
+  # something; this one failed toward certifying an exposed daemon.
+  listeners="$(ss -H -lnt 2>/dev/null || true)"
+  if grep -qE ':(2375|2376)\b' <<<"${listeners}"; then
     bad "the Docker daemon is listening on TCP"
     violations=$((violations + 1))
   else
     ok "no Docker TCP socket"
   fi
 
-  printf '\n== firewall ==\n'
-  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q 'Status: active'; then
-    ok "ufw is active"
+  # D1049. A baseline that certifies a host on which the product's own commands
+  # cannot run is measuring the wrong thing. `--apply` installs jq alongside
+  # Docker, but a host provisioned before that change will not have it, so the
+  # deviation has to be reportable and not merely preventable.
+  if command -v jq >/dev/null 2>&1; then
+    ok "jq is installed"
   else
-    bad "ufw is not active"
+    bad "jq is not installed; connect.sh, doctor.sh and edge.sh all require it"
     violations=$((violations + 1))
   fi
+
+  printf '\n== firewall ==\n'
+  # Captured, not piped (D1042). `ufw status` is a Python program that keeps
+  # working after it writes, so it is exactly the producer shape that loses
+  # this race.
+  ufw_status=""
+  if command -v ufw >/dev/null 2>&1; then
+    ufw_status="$(ufw status 2>/dev/null || true)"
+  fi
+  case "${ufw_status}" in
+    *"Status: active"*)
+      ok "ufw is active" ;;
+    *)
+      bad "ufw is not active"
+      violations=$((violations + 1)) ;;
+  esac
   if [ -f "${ETC}/docker-user-rules.v4" ]; then
     ok "DOCKER-USER policy rendered"
   else
@@ -466,8 +500,38 @@ PYTHON
 # Apply
 # ---------------------------------------------------------------------------
 
+# No pipe, and that is the whole point of the rewrite (D1042).
+#
+# This was `systemctl list-timers "$1*" --all 2>/dev/null | grep -q "$1"`, and
+# under this file's own `set -o pipefail` (line 26) it is a SIGPIPE race:
+# `grep -q` exits at its first match and closes the pipe, `systemctl` is then
+# killed by SIGPIPE and exits 141, and pipefail propagates 141 as the
+# pipeline's status -- so the predicate reads FALSE while the timer is armed.
+# The producer does not have to be large for this: it has to still be working
+# when the consumer leaves, which a D-Bus client always is.
+#
+# Measured on a real host by an outsider bringing this product up, twenty
+# consecutive evaluations against a timer with seven minutes still to run:
+# TRUE=19, FALSE=1. Intermittent is worse than broken here, because the
+# operator is told "no rollback timer is armed" with a timer visibly armed,
+# and the documented remedy is to arm another one and roll the same dice.
+#
+# This predicate guards BOTH steps in this product that can lock an operator
+# out of their own host. The failure direction is safe -- it refuses to harden
+# rather than hardening without a net -- and that is the only reason this was
+# a defect rather than an incident. It still cost a full ten-minute rollback
+# window every time it lost.
+#
+# Capturing to a variable removes the pipe, so there is nothing left to race.
+# `--no-pager` for the reason every systemctl call here needs it: under the TTY
+# that `sudo` requires, it would otherwise block on `less` (D1043).
 timer_is_armed() {
-  systemctl list-timers "$1*" --all 2>/dev/null | grep -q "$1"
+  local listing
+  listing="$(systemctl list-timers "$1*" --all --no-pager 2>/dev/null)" || return 1
+  case "${listing}" in
+    *"$1"*) return 0 ;;
+    *)      return 1 ;;
+  esac
 }
 
 # Advisory. Being first in the include order beats a plain directive in a later
@@ -508,7 +572,8 @@ verify_resolved_sshd_policy() {
   fi
 
   for pair in "${SSHD_REQUIRED_POLICY[@]}"; do
-    printf '%s\n' "${resolved}" | grep -qi "^${pair}$" || {
+    # Herestring, not a pipe (D1042); see the note in check_baseline.
+    grep -qi "^${pair}$" <<<"${resolved}" || {
       printf '  RESOLVED POLICY WRONG: expected %q\n' "${pair}" >&2
       missing=$((missing + 1))
     }
@@ -667,8 +732,24 @@ install_docker() {
     "$(dpkg --print-architecture)" "${codename}" > /etc/apt/sources.list.d/docker.list
 
   apt-get update -qq
+  # `jq` rides along with Docker's own install (D1049) because three of this
+  # product's host-side commands need it -- bin/connect.sh, bin/doctor.sh and
+  # bin/edge.sh -- and nothing here installed or checked for it. The baseline
+  # therefore reported "the host meets the Session 2 baseline", zero deviations,
+  # on a host where `edge.sh promote-acme` died at exit 3 with `jq is not
+  # installed`. The only place the documentation names it is the WORKSTATION
+  # development setup, which an operator provisioning a host has no reason to
+  # have run.
+  #
+  # `bin/doctor.sh` is the tool an operator reaches for when something is
+  # wrong, so the instrument and the fault shared a cause.
+  #
+  # Note what kept this cheap and keep it that way: edge.sh checks for jq
+  # BEFORE it contacts Let's Encrypt, so the refused promotion spent nothing.
+  # Had the check come after validation began, a missing 300 KB package would
+  # have burned an ACME rate limit that takes seven days to return.
   apt-get install -y -qq \
-    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null \
+    docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin jq >/dev/null \
     || die 3 "the Docker packages could not be installed."
 
   # The operator is deliberately NOT added to the docker group. Membership is
@@ -779,7 +860,7 @@ install_port_registry() {
 }
 
 apply_baseline() {
-  local ssh_port
+  local ssh_port added_rules live_status
   ssh_port="$(host_field ssh.port)"
 
   # "Never two armed windows at once" (implementation plan §3). With both timers
@@ -908,13 +989,20 @@ apply_baseline() {
   # rules, which is what will be in force the moment `enable` runs.
   #
   # The port is anchored on both sides: an unanchored 22 also matches 122/tcp.
-  ufw show added 2>/dev/null | grep -qE "(^|[[:space:]])${ssh_port}/tcp([[:space:]]|\$)" \
+  # Captured, not piped (D1042). This one refuses rather than proceeding when
+  # it loses, so its direction is safe -- and it costs the operator a whole
+  # ten-minute rollback window every time it does, which is the same bill
+  # `timer_is_armed` was running up.
+  added_rules="$(ufw show added 2>/dev/null || true)"
+  grep -qE "(^|[[:space:]])${ssh_port}/tcp([[:space:]]|\$)" <<<"${added_rules}" \
     || die 6 "no rule covers the SSH port; refusing to enable the firewall."
 
   ufw default deny incoming >/dev/null
   ufw default allow outgoing >/dev/null
 
-  if ufw status 2>/dev/null | grep -q 'Status: active'; then
+  # Captured, not piped (D1042).
+  live_status="$(ufw status 2>/dev/null || true)"
+  if [ "${live_status}" != "${live_status#*Status: active}" ]; then
     # Already enforcing. Re-running is not a new window and must not demand a
     # timer, or every idempotent re-apply becomes a two-step ceremony.
     note "ufw is already active; rules reconciled"
