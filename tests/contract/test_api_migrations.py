@@ -1220,3 +1220,72 @@ def test_the_view_and_function_readers_accept_the_same_declaration_forms() -> No
             f"the {name} reader does not accept OR REPLACE; a declaration using "
             "it would be published and unreviewed"
         )
+
+
+# ---------------------------------------------------------------------------
+# The task domain is unreachable, and the roster is why it cannot just go
+# (D1055, ADR 0196)
+# ---------------------------------------------------------------------------
+
+
+def test_no_published_operation_creates_a_task() -> None:
+    """D1055, measured in rig 19 and asserted here so it cannot drift quietly.
+
+    `0005` created `api.create_task`; `0007` revoked and dropped it, correctly
+    (ADR 0048). Nothing replaced it. Measured on a throwaway cluster with all
+    thirty released migrations applied: `api.create_task` does not exist, the
+    only holder of INSERT on `app.tasks` is `object_owner` (NOLOGIN), and both
+    `app_runtime` and `authenticated` are refused with `permission denied for
+    schema app` -- `0006` revokes the schema USAGE that `0003`'s comment still
+    claims they have.
+
+    This test is expected to FAIL when ADR 0196's migration ships. That is the
+    point: it is the marker for a known, recorded, unrepaired state, and it
+    turns red the moment the state changes rather than staying green over a
+    surface nobody can use.
+    """
+    creates = [
+        entry["template"]
+        for entry in migrations.load_manifest()["migrations"]
+        if "CREATE OR REPLACE FUNCTION api.create_task" in statements(entry["template"])
+        or "CREATE FUNCTION api.create_task" in statements(entry["template"])
+    ]
+    drops = [
+        entry["template"]
+        for entry in migrations.load_manifest()["migrations"]
+        if "DROP FUNCTION api.create_task" in statements(entry["template"])
+    ]
+    assert creates, (
+        "no migration ever created api.create_task; the history is not what ADR 0196 describes"
+    )
+    assert drops, "api.create_task was never dropped; ADR 0196's premise no longer holds"
+    assert drops[-1] > creates[-1], (
+        "api.create_task is created after it is last dropped -- ADR 0196's migration "
+        "has shipped, and this marker should be replaced by an assertion that a "
+        "task can be created"
+    )
+
+
+def test_retiring_the_task_tools_is_blocked_by_the_roster() -> None:
+    """The asymmetry that decided ADR 0196, asserted rather than argued.
+
+    Dropping the `query_tasks` capability would be free -- the roster stays six,
+    because `query_notes` and `query_tasks` are two capabilities behind one
+    tool. `update_task_status` IS a tool, so removing it leaves five, and the
+    lock loader refuses at startup. That is D933, still open, and it is the
+    reason retirement costs restoration's work plus D933's.
+    """
+    tools = (REPO_ROOT / "services" / "auth-api" / "app" / "mcp_tools.py").read_text(
+        encoding="utf-8"
+    )
+    assert "there are exactly six" in tools, (
+        "the roster's own statement of itself has changed; re-read ADR 0127 and D933 "
+        "before trusting ADR 0196's asymmetry argument"
+    )
+
+    lock = (REPO_ROOT / "services" / "auth-api" / "app" / "mcp_lock.py").read_text(encoding="utf-8")
+    assert "EXPECTED_TOOL_NAMES" in lock
+    assert "names != EXPECTED_TOOL_NAMES" in lock, (
+        "the lock no longer refuses a roster that is not exactly the expected one; "
+        "if that is deliberate, D933 may be closed and ADR 0196 revisited"
+    )
