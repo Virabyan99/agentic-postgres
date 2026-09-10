@@ -73,7 +73,7 @@ F-004 to F-008 and F-021 to F-023 in the launch folder.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1098**. Rows D1087–D1097
+Six columns, next free number after this table **D1104**. Rows D1087–D1097
 were measured at planning on 2026-09-10 at `95ea0be`; the runs add theirs
 below them as they go.
 
@@ -90,6 +90,12 @@ below them as they go.
 | **D1095** | `docs/api-surface.md` line 8 links ADR 0050 as `decisions/0050-the-published-surface-is-a-reviewed-allowlist.md`. | **No such file.** The ADR is `0050-a-reviewed-api-surface-is-a-generated-artifact.md` and the index names it so. `test_repository_contract.py` tracks `docs/api-surface.md` for existence and not for its links, so the dead link has survived since Session 5. | Corrected in Run 5 beside D1086. | Housekeeping, and the second stale sentence this planning found in a document the gate tracks (D1086 is the first). Nothing reads a link. | — |
 | **D1096** | `bin/migrate.py record_ledger`: `templates = {entry["version"]: entry for entry in migrations.build_lock(manifest)["migrations"]}` then `templates[entry["version"]]` for every rendered entry. | **A project migration's version is absent from the release lock, so the ledger write raises `KeyError` on the first deploy that renders one** — after dbmate has applied it, which leaves a cluster with an applied migration and no ledger row, exit 5 (`the ledger could not be recorded` is not even reached; the exception is unhandled). `app_private.migration_ledger` has `version, name, template_sha256, rendered_sha256` and no column saying which set a row came from. | **`record_ledger` builds its template digests from every set's lock** (`sets_for`, D1088) and records project rows in the same table; the set is recoverable from the version's presence in one lock or the other, so **no column is added** and no platform migration is spent on the ledger. Run 2, with a proof that renders a project set and records its ledger against a recorded `psql`. | Found by reading the reader before changing the writer (D979). A KeyError after dbmate returned is the worst order a failure can arrive in here: the cluster has moved and the record has not. | 0198 |
 | **D1097** | `bin/api.sh`: three enumerated operations (`list-notes`, `create-note`, `update-task-status`); the host gates drive the surface through it. | **The live half of `API-TASK-001` needs a fourth**: `create-task --title T [--note-id U]`, so the trip can create a task through the product's own enumerated door rather than a hand-written `curl`. Adding a verb touches `test_cli_contract` (D1014) and `bin/api.py`'s `OPERATIONS`, and `update-task-status` finally has a row to act on. | Run 5 adds the operation; the targeted list names `test_cli_contract` and `test_api_command`. | The one operation the adopter could not perform (F-023's checklist item, *"a CAS conflict"*) becomes performable with the product's own tool, and the round trip against a real row is measured for the first time. | 0196 |
+| **D1098** | This plan D1092: what `--strict` does with a *pending* migration whose version is older than an *applied* one is **unmeasured** in this tree, and the rule it states might be *"a refusal the tree needs to write or one dbmate already makes"*. | **dbmate already makes it, loudly.** Rig 20a, on the pinned `amacneil/dbmate:2.34.1` against the pinned cluster, four arms in one throwaway cluster. Arm A (`20260904120030` applied, then `20260903000000` added as pending): **exit 2, nothing applied** -- *"migration `20260903000000` is out of order with already applied migrations, the version number has to be higher than the applied migration `20260904120030` in --strict mode"*. Arm B (a NEWER pending version): applied, exit 0. Arm C (both files, **fresh** database): both applied in filename order, exit 0 -- so the fresh-cluster / deployed-cluster divergence D1092 predicted is real, and it is arm C that applies what arm A refuses. Control (one file alone): applied, exit 0. | **D1092's rule stands and its place is now settled.** `follows_release_version` in the project lock, refused by `verify_lock`, is a **freeze-time** refusal standing in front of a **deploy-time** one that already exists. It is kept for the reason every refusal here is moved earlier: dbmate's arrives after the cluster has been reached, on a host, during a deploy, with a human waiting; `verify_lock`'s arrives on a workstation before anything is rendered. Neither replaces the other, and the deploy-time one is the backstop that makes the freeze-time one safe to be wrong about. **Not a stop condition** (§9): the refusal is neither silent nor unstateable. | A rule written from dbmate's documentation is D267's shape. Arm B and arm C are what make arm A readable: without them, "it refused" could have been a broken directory mount rather than the ordering check. | 0198 |
+| **D1099** | `bin/migrate.sh status` is the read-only verb the operator guides tell a human to run before `up` -- *"read-only, look first"* (Session 8 guide §4). | **`dbmate status` exits 0 with an out-of-order pending migration and reports it as an ordinary `Pending: 1`.** Measured in rig 20a immediately after arm A's refusal: the listing reads `[ ] 20260903000000_y.sql` / `[X] 20260904120030_x.sql`, `Applied: 1`, `Pending: 1`, exit 0. The condition that will refuse the very next `up` is nowhere in the verb an operator reads first. | **Recorded, not repaired.** The doctor does not read this verb -- `probe_migrations` counts `app_private.migration_ledger` against the release manifest -- so nothing automated is misled. The `follows_release_version` check is the repair from the other end: it refuses at freeze, so the state `status` cannot see is one an adopter cannot reach through the product's own verbs. | The state is in a field, never in the exit code -- `postgrest --ready` and `pgbackrest info` again (D145, D548), and D506 exactly: a `--runtime status` reading `Applied: 18, Pending: 0` was a green line for work that had not happened. Third-party, so ADR 0195's rule cannot be applied to it; the honest move is to know it. | 0198 |
+| **D1100** | ADR 0196, from rig 19: *"no role that any service connects as can create a task, on any surface this product publishes"* -- the sentence the decision to restore is argued from. | **True, but not for the reason given.** Rig 20b applied the draft 0031 to a 30-migration cluster as `migration_user` over TCP (D285's route) and then measured the same question with a control arm carrying **no** 0031. In that control, `app_runtime` **successfully creates a note** through `api.create_note` -- `has_function_privilege` true -- on a cluster that is exactly 1.0.1. The cause is `pg_auth_members`: `app_runtime IS A MEMBER OF authenticated (inherit=true)`, established deliberately by `postgres-bootstrap.py` with `WITH ADMIN FALSE, INHERIT TRUE, SET FALSE` and three paragraphs of reasoning. So rig 19 measured the **table** (INSERT on `app.tasks`, `object_owner` only) and read it as a statement about **every surface**. What made a task uncreatable was the absence of the FUNCTION, not the absence of a role that could call one. | **ADR 0196's decision is unchanged and its sentence is narrowed here rather than in the released ADR.** Nothing is wrong with the deployment: `app_runtime` is *meant* to hold the application user's rights. Migration 0031's manifest description states the measured version. | A premise wrong in the reassuring direction survives longest (D930, D957) -- and this one was reassuring in the direction of *doing the work*, which is the harder kind to catch, because the conclusion it supports is correct. It matters because the sentence was about to become a test: see D1101. | 0196 |
+| **D1101** | This plan §5 Run 1, rig 20b: *"`has_function_privilege` for every role in `naming.ROLE_SUFFIXES`, expecting `authenticated` and `agent_writer` only"*, and §2's node id `test_create_task_is_reachable_by_the_two_writer_roles_and_no_other`. | **That expectation is unsatisfiable by any correct deployment.** Measured over all fourteen roles: `has_function_privilege` answers **true** for `authenticated` and `agent_writer` (the grant), for `object_owner` (it owns the function), for `api_documentation` (0009's rule -- and without it the snapshot never publishes the function at all, F-007), and for `app_runtime` (inherited, D1100). It answers false for the other nine and for `PUBLIC`. The **direct ACL** is exactly the four the migration names: `proacl` reads `object_owner=X`, `authenticated=X`, `agent_writer=X`, `api_documentation=X`. | **The proof reads `proacl`, not `has_function_privilege`**, and its docstring says why. The behavioural half is separate and reads SQLSTATEs: `PT401` with no identity, `PT404` for a note absent AND for another owner's, `42501` for `anon` and `agent_reader`, a row for `authenticated` and `agent_writer`. Run 5's node id is renamed accordingly. | **Exactly D266's mistake, one catalog over**: that control first read `pg_roles.rolinherit` and failed against a *correct* rig, because the option lives on the membership row. A test asserting "the two writer roles and no other" through a function that follows inheritance and ownership would have been red on every green deployment -- written from the plan, in Run 5, with no rig to contradict it. This is what Run 1 is for. | 0196 |
+| **D1102** | This plan §5 Run 1: **Commit** *"the recaptured fixture only if its diff is exactly `rpc/create_task`"*, with **Targeted:** *"nothing changes but documents"*; and §5 Run 5: *"the control fixture was recaptured in Run 1, so `test_api_contract_command`'s control tests are green"*. | **The diff is exactly `rpc/create_task` -- and the fixture cannot be committed alone.** Rig 20c's ARM A (30 migrations, no 0031) reproduces the committed fixture **byte for byte**, which is what makes ARM B readable at all; ARM B differs in one top-level key (`paths`), adds `/rpc/create_task`, removes nothing, changes no path body and no definition. But `tests/contract/test_openapi_normalize.py` asserts the fixture's path set against a **hardcoded literal**, so landing the recapture on its own turns four tests red -- in a run whose targeted list is "nothing but documents". | **The recaptured bytes are carried to Run 5** and committed with 0031, the manifest entry, the contract entry and the eight enumeration updates, so the expected-red set is created exactly once, deliberately, where D1093 says it is. The bytes and every rig live at `~/rig20/` in WSL (`rig20c-arm-b-raw.json`); ARM A is the control that says a regeneration is the same document. Run 1 commits the two ADRs, the index and this table. | D1093's discipline is that writing the set down is what keeps *expected red* from becoming *ignored red*. A run that reddens four tests as a side effect of a documents-only commit is that discipline leaking on the first run of the session. | 0198 |
+| **D1103** | This plan D1093: the bump commit is *"EXPECTED RED on exactly five snapshot tests"*, and Run 5 *"list their five node ids in the commit message"*. | **Eleven, and only three of them are the snapshot's.** The full Run 5 state was built and measured rather than predicted -- 0031 in `migrations/templates/` and the manifest, `freeze-lock` re-frozen to 31 entries, the contract naming `create_task`, the fixture recaptured, the canonical snapshot untouched -- and the whole of `tests/contract` run against it: **11 failed, 5195 passed, 3 skipped**, all four files restored by copy and `cmp`, `git status` empty afterwards. **Eight are enumeration updates Run 5 makes in its own commit**: `test_api_migrations::test_the_reader_is_not_vacuous`, `::test_the_write_surface_is_the_reviewed_rpcs` (asserts `'create_task' not in`), `::test_no_published_operation_creates_a_task`, `test_api_surface_contract::test_it_states_adr_0003s_domain_as_adr_0048_amends_it`, `::test_every_declared_object_is_schema_qualified_once`, `::test_the_declared_types_are_separate_from_the_declared_objects`, `test_openapi_normalize::test_the_fixture_is_a_real_captured_document`, `::test_declared_objects_names_relations_and_rpcs_the_way_the_surface_does`. **Three are genuinely blocked on a deployed recapture**: `test_api_surface_contract::test_the_published_set_is_exactly_what_the_snapshot_names`, `test_api_contract_command::test_the_approved_snapshot_exists_and_check_compares_it` (`--check` exits 5 naming `rpc/create_task`), and `::test_a_failing_check_leaves_both_contract_files_untouched` (it expects *cannot reach the REST service* and the surface/snapshot disagreement pre-empts that message). | **Run 5 updates the eight and pushes red on the three**, naming those three in its commit message; Run 7's recapture turns them green. `test_no_published_operation_creates_a_task` **names its own replacement in its failure message** -- *"ADR 0196's migration has shipped, and this marker should be replaced by an assertion that a task can be created"* -- so somebody left Run 5 the instruction and it is followed rather than reinvented. §9's stop condition reads against **three**, not five. | An expected-red set that is *predicted* is the same defect as an unmeasured value, one step earlier: a reader comparing CI's eleven against the plan's five would have had to decide, at the end of a long run, which six were fine. Question 1 of the defect pattern -- what would have to break for this to go red -- asked of the plan's own arithmetic. | 0196 |
 
 ---
 
@@ -193,6 +199,99 @@ runs its battery (appendix). Mark the run **Done.** here with what it measured.
 **Targeted:** nothing changes but documents. **Commit:** the two ADRs, the
 index, the recaptured fixture *only if* its diff is exactly `rpc/create_task`
 (otherwise stop, §9).
+
+**Done.** 2026-09-10. Three rigs, six divergence rows (D1098–D1103), two ADRs.
+Everything below was run; the scripts and their outputs are at `~/rig20/` in
+WSL. No stop condition was met.
+
+**Rig 20a — dbmate ordering (D1098, D1099).** `~/rig20/rig20a.sh`, output
+`rig20a.txt`. One throwaway cluster on the pinned `pgvector/pgvector:pg18`
+digest, four databases, the pinned `amacneil/dbmate:2.34.1` digest run with the
+product's own flag positions (`--env`, `--migrations-dir`, `--migrations-table
+app_private.schema_migrations`, `--no-dump-schema`, then `up --strict`).
+
+| Arm | Directory | Exit | dbmate said |
+|---|---|---|---|
+| control | `20260904120030` alone | 0 | applied it |
+| A | that applied, then `20260903000000` added **pending** | **2** | *migration `20260903000000` is out of order with already applied migrations, the version number has to be higher than the applied migration `20260904120030` in --strict mode* |
+| B | that applied, then `20260915000000` added | 0 | applied the new one only |
+| C | **both** files, fresh database | 0 | applied both, in filename order |
+
+Arm A applied **nothing** — `app_private.schema_migrations` still held one row
+and `public.rig_y` did not exist. So the deploy-time refusal D1092 hoped for is
+already dbmate's, and arm C proves the divergence the rule exists to prevent is
+real. `follows_release_version` stays, as the freeze-time refusal in front of
+it. Then `dbmate status` on arm A's directory: exit **0**, `Applied: 1`,
+`Pending: 1`, the out-of-order file listed as an ordinary pending one — D1099.
+
+**Rig 20b — ADR 0196's `create_task` (D1100, D1101).** `~/rig20/rig20b2.py`,
+output `rig20b2.txt`; the draft template is `~/rig20/0031-draft.sql`. Two arms
+on one cluster: thirty released migrations rendered by the product's own
+`render_migration` and applied **as `migration_user` over TCP** (D285's route —
+a superuser rig bypasses every ownership check), then the draft 0031 by the same
+route, **exit 0**. Every probe is read as a **SQLSTATE** rather than as output:
+the first pass of this rig dropped `ON_ERROR_STOP=1` and every refusal "passed"
+by printing a `CONTEXT` line, which is D386's shape in a rig instead of a
+battery, and is why the second pass exists.
+
+| Probe | SQLSTATE |
+|---|---|
+| `authenticated` + `app.user_id`, no note | a row |
+| `authenticated` + the caller's **own** note | a row |
+| `authenticated`, **no** `app.user_id` | `PT401` |
+| `authenticated` + **another owner's** note | `PT404` |
+| `authenticated` + a note id that does not exist | `PT404` — the same answer, 0007's reason |
+| `anon` + `app.user_id` | `42501` |
+| `agent_reader` + `app.user_id` | `42501` |
+| `agent_writer` + `app.user_id` | a row |
+| `app_runtime` + `app.user_id` | **a row** — see D1100 |
+
+`proacl` on `api.create_task` is exactly `object_owner`, `authenticated`,
+`agent_writer`, `api_documentation`. `has_function_privilege` additionally
+answers true for `app_runtime`, which inherits `authenticated`
+(`inherit=true`, established deliberately in `postgres-bootstrap.py`) — and
+which, on the **control arm with no 0031 at all**, already creates notes through
+`api.create_note` on a cluster that is exactly 1.0.1. That is D1100, and D1101 is
+its consequence for Run 5's proof. `update_task_status` was then run against the
+row the first probe made — `pending → in_progress`, then the same swap again
+returning `PT409` — the compare-and-swap's first run against a row outside a
+fixture, four rows in `app.tasks` where rig 19 measured zero permanently.
+
+**Rig 20c — the control fixture (D1102).** `~/rig20/rig20c.py`, output
+`rig20c.txt`, arms at `rig20c-arm-a-raw.json` and `rig20c-arm-b-raw.json`. One
+cluster, one PostgREST on the pinned `postgrest:v14.16` digest with
+`openapi-mode = follow-privileges`, the documentation role as the anon role and
+`PGRST_OPENAPI_SERVER_PROXY_URI=https://alpha.example.test/api/rest` so
+`CAPTURED_HOST` and `CAPTURED_BASE_PATH` stay true.
+
+**The rig has a control on itself, and it is the reason ARM B is readable.**
+ARM A is the same capture with no 0031: it equals the committed fixture
+normalized, and — measured, not required — **byte for byte** as well. Without
+that, "the only difference is `create_task`" would be a sentence about a
+comparison nobody could make. ARM B, captured after 0031 applied and the
+migration's own `NOTIFY pgrst, 'reload schema'` was polled for:
+
+- top-level keys that differ: `['paths']`
+- paths **added**: `['/rpc/create_task']`; removed: none; bodies changed: none
+- definitions that differ: none
+
+So §9's stop condition is not met and the recapture may be made. What it may
+**not** be is committed alone: the fixture's path set is asserted against a
+hardcoded literal in `test_openapi_normalize.py`, so the bytes travel to Run 5
+(D1102).
+
+**The expected-red set, measured (D1103).** `~/rig20/measure-run5.sh` built the
+full Run 5 state in the working tree — 0031 in the templates and the manifest,
+`bin/migrate.sh freeze-lock` re-frozen to **31** entries, the reviewed contract
+naming `create_task`, the fixture recaptured, the canonical snapshot untouched —
+and ran the whole of `tests/contract` against it: **11 failed, 5195 passed, 3
+skipped in 516 s**. Eight are enumeration updates Run 5 makes; three are blocked
+on a deployed recapture. D1103 has both lists. All four files were then restored
+by copy, `cmp`-verified, the template removed, and `git status --porcelain` came
+back **empty**.
+
+**Committed:** the two ADRs, the index, D1098–D1103 and this paragraph. No code
+changed; the recaptured fixture is Run 5's.
 
 ### Run 2 — the project migration set
 
