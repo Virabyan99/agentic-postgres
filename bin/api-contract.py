@@ -406,8 +406,15 @@ def command_check(deployed_path: Path | None, project_path: Path | None = None) 
             surface, api_surface.load_project_surface(api_surface.project_contract_path(root))
         )
         snapshot = load_project_snapshot(root)
+        # The release's snapshot is still loaded, and not as a fallback: the
+        # deployed document's `canonical_openapi_sha256` is a RELEASE-wide
+        # digest that every project of a release records identically, so the
+        # clause below has to keep hold of it after `snapshot` has become the
+        # project's.
+        release_snapshot = load_snapshot()
     else:
         snapshot = load_snapshot()
+        release_snapshot = snapshot
 
     problems = compare_snapshot_to_surface(snapshot, surface)
     if problems:
@@ -454,13 +461,27 @@ def command_check(deployed_path: Path | None, project_path: Path | None = None) 
             )
         return 6
 
+    # **The RELEASE's snapshot, even under `--project`.** This clause asks
+    # "was this deployment built against the release I am holding?", and
+    # `bin/deploy-project.py` answers it by writing `canonical_openapi_sha256`
+    # from `SNAPSHOT_PATH` unconditionally -- what a given project actually
+    # serves goes in `project_openapi_sha256` beside it. Comparing the
+    # release-wide digest against a project's own snapshot compared two
+    # different things and fired for every project that HAS a set, which made
+    # `--check --project --project-outputs` unable to exit 0 at all.
+    #
+    # It was invisible offline for the reason the fixture states in its own
+    # docstring: a real project snapshot only comes from a deployment of that
+    # project, so no offline test can hold one AND a deployed document, and
+    # this line had never executed with `project_path` set.
     recorded = (deployed.get("api") or {}).get("canonical_openapi_sha256")
-    actual = openapi_normalize.fingerprint(snapshot)
+    actual = openapi_normalize.fingerprint(release_snapshot)
     if recorded is not None and recorded != actual:
         print(
             f"api-contract: the deployed document records canonical_openapi_sha256 "
-            f"{recorded[:16]}..., but the committed snapshot hashes to {actual[:16]}.... "
-            "The deployment is serving a surface that was approved at a different commit.",
+            f"{recorded[:16]}..., but the committed RELEASE snapshot hashes to "
+            f"{actual[:16]}.... The deployment was built against a different "
+            "commit's approved surface.",
             file=sys.stderr,
         )
         return 6

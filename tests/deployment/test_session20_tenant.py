@@ -41,7 +41,14 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, api_surface, deployed_output, migrations
+from agentic_postgres import (
+    REPO_ROOT,
+    api_surface,
+    config,
+    deployed_output,
+    migrations,
+    rendering,
+)
 
 pytestmark = [
     pytest.mark.p0,
@@ -177,7 +184,7 @@ def test_alpha_declares_no_set_and_holds_none_of_betas_objects(
 def test_betas_served_document_names_the_release_and_project_surfaces_and_nothing_else(
     project_a: dict[str, Any], project_b: dict[str, Any], as_root, sh_status
 ) -> None:
-    """The half no offline proof can have.
+    """The half no offline proof can have, made by the product's own comparison.
 
     Offline, the merged comparison runs against a snapshot BUILT under
     `tmp_path`: a project's real snapshot comes from a deployment of that
@@ -185,69 +192,115 @@ def test_betas_served_document_names_the_release_and_project_surfaces_and_nothin
     is that the comparison ACCEPTS a document naming the merged surface's
     objects. This is whether PostgREST produces one.
 
-    Alpha is the control in the same test, and it is the assertion with teeth:
-    the release's objects appear in both documents, so "beta serves the merged
-    surface" would hold for a beta serving only the release's. Alpha must serve
-    the release's and NOT beta's.
+    **The first version hand-rolled a `curl` and measured the anonymous view.**
+    `bin/dev-token.sh` puts the minted token in the child's ENVIRONMENT and in
+    nothing else -- no argument, no file, no output, which is the whole of D105,
+    and `bin/dev-token.py`'s own comment says `bin/api-contract.sh` reads
+    exactly one of those variables. `curl` reads no bearer from the environment.
+    So the request went out unauthenticated, PostgREST answered as `anon`, and
+    beta "served" exactly `{'/'}` -- the proof failed for a reason with nothing
+    to do with its subject, which is this repository's signature defect arriving
+    inside a proof written to catch it.
+
+    `bin/api-contract.sh --check --project FILE --project-outputs FILE` is the
+    caller `TEN-SURF-001` actually names, and it was there the whole time: it
+    reads `APG_DOCS_TOKEN` from the environment because it is the command
+    `dev-token.sh` exists to run, and with a deployed document it compares
+    THREE things -- the reviewed surface, the committed snapshot, and the
+    document the deployment is serving right now -- exiting 6 and naming the
+    objects when they disagree.
+
+    **Alpha is the control, and the assertion with teeth.** It declares no set,
+    so `--check` without `--project` compares the RELEASE's surface and
+    snapshot against alpha's live document. If a set had reached a project that
+    did not declare one, alpha's document would name an object the release's
+    reviewed surface does not, and the command would exit 6 saying "served but
+    not approved". The boundary is proved by a neighbour that does not cross
+    it, and no offline proof has two deployments to compare.
     """
+    # The manifest handed to --project must name the set beta ACTUALLY
+    # deployed, not one this test picked. The deployed document records the
+    # root at outputs v17 (ADR 0158: the document is the address book), and the
+    # tracked example manifest declares it. Assert they agree before either is
+    # used -- otherwise passing a manifest of this test's choosing would assume
+    # exactly the thing under test.
+    recorded = ((project_b.get("migrations") or {}).get("project_set") or {}).get("root")
+    assert recorded == SET_ROOT, (
+        f"beta's deployed document records project set {recorded!r}, not {SET_ROOT!r}. "
+        "The comparison below would then be against a contract beta does not serve."
+    )
+    manifest = REPO_ROOT / "project.example.yaml"
+    declared = config.project_migration_set(config.load_project_manifest(manifest, expiry=False))
+    assert declared == SET_ROOT, (
+        f"{manifest.name} declares migrations.set {declared!r}, not {SET_ROOT!r}"
+    )
+
+    beta_outputs = os.environ["APG_PROJECT_B_OUTPUTS"]
+    alpha_outputs = os.environ["APG_PROJECT_A_OUTPUTS"]
+
+    code, out, err = sh_status(
+        str(REPO_ROOT / "bin" / "dev-token.sh"),
+        "--project-outputs", beta_outputs,
+        "--role", "docs", "--",
+        str(REPO_ROOT / "bin" / "api-contract.sh"), "--check",
+        "--project", str(manifest),
+        "--project-outputs", beta_outputs,
+    )  # fmt: skip
+    assert code == 0, (
+        "beta's live document, its own snapshot and the merged surface do not all "
+        f"agree (exit {code}). Exit 6 names the objects; exit 5 means the snapshot "
+        f"and the reviewed surface disagree before any fetch.\n{out}\n{err}"
+    )
+
+    # The control, and the boundary.
+    code, out, err = sh_status(
+        str(REPO_ROOT / "bin" / "dev-token.sh"),
+        "--project-outputs", alpha_outputs,
+        "--role", "docs", "--",
+        str(REPO_ROOT / "bin" / "api-contract.sh"), "--check",
+        "--project-outputs", alpha_outputs,
+    )  # fmt: skip
+    assert code == 0, (
+        "alpha's live document does not match the RELEASE's surface and snapshot "
+        f"(exit {code}). If it names one of the project's objects, a set reached a "
+        f"project that did not declare one.\n{out}\n{err}"
+    )
+
+    # Anti-vacuity. Both commands above exit 0 against the release's surface if
+    # beta's snapshot happens to be the release's -- the two comparisons would
+    # then be the same comparison run twice, and the boundary would be unproved.
+    # These assertions are what make them different: beta's own snapshot names
+    # the project's objects, and the merged surface names both sets'.
     release = api_surface.load_surface()
     project = api_surface.load_project_surface(
         api_surface.project_contract_path(REPO_ROOT / SET_ROOT)
     )
     merged = api_surface.merged_surface(release, project)
-
-    def served(document: dict[str, Any]) -> set[str]:
-        url = document["routes"]["rest"]["url"]
-        assert document["routes"]["rest"]["status"] == "ready", (
-            f"{_key(document)} publishes no ready REST route, so nothing can be captured"
-        )
-        code, out, err = sh_status(
-            str(REPO_ROOT / "bin" / "dev-token.sh"),
-            "--project-outputs", os.environ["APG_PROJECT_B_OUTPUTS"],
-            "--role", "docs", "--",
-            "curl", "-ksS", "--max-time", "20", url.rstrip("/") + "/",
-        )  # fmt: skip
-        assert code == 0, f"the served document could not be fetched from {url}\n{err}"
-        return set(json.loads(out).get("paths", {}))
-
-    beta_paths = served(project_b)
-    assert beta_paths, "beta served a document naming no paths at all"
-
-    for name in project["relations"]:
-        assert f"/{name}" in beta_paths, (
-            f"beta does not serve /{name}, which its own contract names. Either the "
-            "migration did not apply, or the grant to api_documentation is missing -- "
-            "openapi-mode = follow-privileges reads the document as that role (F-007)"
-        )
-    for name in project["rpcs"]:
-        assert f"/rpc/{name}" in beta_paths, f"beta does not serve /rpc/{name}"
-
-    for name in merged["relations"]:
-        assert f"/{name}" in beta_paths, f"beta does not serve the merged relation /{name}"
-
-    # The control. Alpha declares no set, so it must serve the release's surface
-    # and none of beta's.
-    alpha_url = project_a["routes"]["rest"]["url"]
-    code, out, err = sh_status(
-        str(REPO_ROOT / "bin" / "dev-token.sh"),
-        "--project-outputs", os.environ["APG_PROJECT_A_OUTPUTS"],
-        "--role", "docs", "--",
-        "curl", "-ksS", "--max-time", "20", alpha_url.rstrip("/") + "/",
-    )  # fmt: skip
-    assert code == 0, f"alpha's document could not be fetched\n{err}"
-    alpha_paths = set(json.loads(out).get("paths", {}))
-
-    for name in project["relations"]:
-        assert f"/{name}" not in alpha_paths, (
-            f"alpha serves /{name}, which belongs to a project set it does not declare"
-        )
-    for name in project["rpcs"]:
-        assert f"/rpc/{name}" not in alpha_paths, f"alpha serves /rpc/{name}"
-
-    assert "/rpc/create_note" in alpha_paths, (
-        "alpha serves none of the release's own RPCs either, so the comparison above "
-        "is between two empty sets"
+    beta_snapshot = json.loads(
+        api_surface.project_snapshot_path(REPO_ROOT / SET_ROOT).read_text(encoding="utf-8")
     )
+    served = set(beta_snapshot.get("paths", {}))
+
+    assert project["relations"] or project["rpcs"], (
+        "the project contract names no objects, so every assertion below is vacuous"
+    )
+    for name in project["relations"]:
+        assert f"/{name}" in served, (
+            f"beta's own snapshot does not name /{name}, so the comparison that "
+            "passed above was not the merged one"
+        )
+    for name in project["rpcs"]:
+        assert f"/rpc/{name}" in served, f"beta's own snapshot does not name /rpc/{name}"
+    for name in merged["relations"]:
+        assert f"/{name}" in served, f"beta's snapshot does not name the merged relation /{name}"
+
+    release_snapshot = json.loads(rendering.CANONICAL_OPENAPI.read_text(encoding="utf-8"))
+    release_served = set(release_snapshot.get("paths", {}))
+    for name in project["relations"]:
+        assert f"/{name}" not in release_served, (
+            f"the RELEASE's snapshot names /{name}, so alpha's comparison and beta's "
+            "are the same comparison and the boundary above is unproved"
+        )
 
 
 # ---------------------------------------------------------------------------

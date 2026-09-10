@@ -632,6 +632,81 @@ def test_check_with_a_project_reads_the_projects_snapshot_path(api_contract) -> 
     assert "5 objects" in release.stdout + release.stderr
 
 
+def test_check_with_a_project_compares_the_releases_digest_and_not_the_projects(
+    api_contract, monkeypatch
+) -> None:
+    """`canonical_openapi_sha256` is release-wide, and `--project` must not rebind it.
+
+    **The clause this guards had never executed.** `command_check` rebinds
+    `snapshot` to the project's under `--project`, and the last clause compared
+    the deployed document's `canonical_openapi_sha256` against
+    `fingerprint(snapshot)`. That digest is written by `bin/deploy-project.py`
+    from `SNAPSHOT_PATH` unconditionally -- what a project actually serves is
+    recorded beside it as `project_openapi_sha256` -- so it is byte-identical on
+    every project of a release. Measured on the host at Session 20's trip: alpha
+    and beta both record `85adb686...`, which is the release snapshot's
+    fingerprint, while the example project's snapshot fingerprints to
+    `808ac715...`. The comparison was therefore between two different things and
+    fired for every project that HAS a set: `--check --project --project-outputs`
+    could not exit 0 at all.
+
+    Nothing offline reached it, and the reason is written into
+    `snapshot_with_the_projects_objects`'s own docstring: a project's real
+    snapshot only comes from a deployment of that project, so no offline test
+    could hold one AND a deployed document. This one reaches the clause by
+    driving `command_check` directly -- a route the product does not take, which
+    proves the end state rather than the product (ADR 0065/0066) -- with the
+    fetch and the document supplied, so that the ONLY thing left varying is
+    which digest the clause chose.
+
+    The second half is the control the first cannot reach: recording the
+    PROJECT's digest -- the value the broken version demanded -- must still exit
+    6. Without it this test would pass against a clause deleted outright.
+    """
+    release = api_contract.load_snapshot()
+    project = api_contract.load_project_snapshot(REPO_ROOT / "projects" / "example")
+    release_digest = openapi_normalize.fingerprint(release)
+    project_digest = openapi_normalize.fingerprint(project)
+    assert release_digest != project_digest, (
+        "the release and project snapshots fingerprint identically, so neither "
+        "assertion below distinguishes which one the clause read"
+    )
+
+    # A document shaped like a real capture: the canonical snapshot with the
+    # two placeholders substituted back out to a published address. The
+    # normalizer then has its real work to do and the byte comparison ahead of
+    # the clause passes on its own terms rather than by being stubbed out.
+    published_host = "beta.example.test:443"
+    published_base_path = "/api/rest"
+    url = f"https://{published_host}{published_base_path}"
+    capture = copy.deepcopy(project)
+    capture["host"] = published_host
+    capture["basePath"] = published_base_path
+    served = json.dumps(capture).encode("utf-8")
+
+    def check(recorded: str) -> int:
+        deployed = {
+            "routes": {"rest": {"status": "ready", "url": url}},
+            "api": {"canonical_openapi_sha256": recorded},
+        }
+        monkeypatch.setattr(api_contract, "load_deployed", lambda _path: deployed)
+        monkeypatch.setattr(api_contract, "fetch_live", lambda _url: served)
+        return api_contract.command_check(
+            Path("/nonexistent-deployed-document.json"),
+            REPO_ROOT / "project.example.yaml",
+        )
+
+    assert check(release_digest) == 0, (
+        "a deployment recording the RELEASE's digest -- which is the only digest "
+        "deploy-project.py writes there -- was refused by --check --project"
+    )
+
+    assert check(project_digest) == 6, (
+        "the digest clause no longer fires at all: a document recording something "
+        "other than the release's snapshot was accepted"
+    )
+
+
 def test_a_manifest_with_no_set_is_refused_by_project(api_contract) -> None:
     """The control for the resolver: a project without a set has no contract.
 
