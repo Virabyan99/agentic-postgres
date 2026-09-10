@@ -126,6 +126,12 @@ PYTHON_COMMANDS = (
     "bin/render-mount-digests.py",
     "bin/render-secret-override.py",
     "bin/rehearse.py",
+    # Session 20, ADR 0199. The one place a rendered document's path is
+    # resolved and its absence interpreted, so that `[ -f ]` -- which answers
+    # false both for a missing file and for one this user cannot traverse to --
+    # is not asked the question in three shells that each decided for themselves
+    # what the answer meant (D1060).
+    "bin/rendered-document.py",
     "bin/restore.py",
     "bin/restore-test.py",
     "bin/rotate-secret.py",

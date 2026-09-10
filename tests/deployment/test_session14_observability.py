@@ -42,7 +42,13 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, capacity, edge_credentials, runtime_override
+from agentic_postgres import (
+    REPO_ROOT,
+    capacity,
+    deployed_output,
+    edge_credentials,
+    runtime_override,
+)
 
 pytestmark = [pytest.mark.p0, pytest.mark.deployment]
 
@@ -211,7 +217,7 @@ def test_the_deployed_document_reports_the_metrics_route_it_observed(
     observed, which is a readiness claim about a container nobody looked at.
     """
     published = project_a["routes"]["metrics"]
-    assert published["status"] in {"ready", "unavailable"}
+    assert published["status"] in set(deployed_output.ROUTE_STATUSES)
 
     status, _body = fetch(published["url"]) if published["url"] else (None, "")
     if published["status"] == "ready":

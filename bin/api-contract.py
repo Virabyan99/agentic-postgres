@@ -42,7 +42,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from agentic_postgres import REPO_ROOT, api_surface, config, openapi_normalize
+from agentic_postgres import REPO_ROOT, api_surface, config, deployed_output, openapi_normalize
 from agentic_postgres.config import ManifestError
 from agentic_postgres.openapi_normalize import NormalizationError
 
@@ -90,7 +90,22 @@ def published_address(deployed: dict[str, Any]) -> tuple[str, str]:
     """
     routes = deployed.get("routes") or {}
     rest = routes.get("rest") or {}
-    if rest.get("status") != "ready" or not rest.get("url"):
+    status = rest.get("status")
+
+    # Version 17's third word gets its own message, and the reason is the whole
+    # of ADR 0199: `unobserved` means the deploy did not look, so the remedy is
+    # to make it look. Folding it into the sentence below would send an operator
+    # to check which session their project was deployed through, when the answer
+    # is "redeploy".
+    if status == deployed_output.ROUTE_UNOBSERVED["status"]:
+        raise ContractError(
+            2,
+            "the deployed document records routes.rest as `unobserved`: that deploy did "
+            "not observe the route, so there is no address to capture from and no claim "
+            "that the route is down. Redeploy so the route is observed, then capture.",
+        )
+
+    if status != "ready" or not rest.get("url"):
         raise ContractError(
             2,
             "the deployed document publishes no ready REST route. A project deployed "

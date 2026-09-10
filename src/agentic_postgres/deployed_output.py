@@ -34,7 +34,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import access_policy, backup_report, config
+from agentic_postgres import REPO_ROOT, access_policy, backup_report, config
 from agentic_postgres.config import ManifestError
 
 SCHEMA_VERSION = 17
@@ -199,11 +199,15 @@ __all__ = [
     "ROUTE_STATUSES",
     "ROUTE_UNOBSERVED",
     "SCHEMA_VERSION",
+    "RenderedDocumentAbsent",
+    "RenderedDocumentUnreadable",
     "activated_login_roles",
     "build_deployed_document",
     "deployed_path",
     "mirror_record_path",
     "published_route",
+    "read_rendered_document",
+    "rendered_document_path",
     "rendered_path",
     "validate_deployed_document",
     "write_deployed_document",
@@ -229,6 +233,136 @@ def rendered_path(project_key: str, *, root: Path = RENDERED_ROOT) -> Path:
     caller that wants the directory derive it back out with `.parent`.
     """
     return root / project_key
+
+
+class RenderedDocumentAbsent(ManifestError):
+    """There is no rendered document for this project here.
+
+    The project was never deployed on this host, or was deployed under a
+    different key. Exit 4.
+    """
+
+
+class RenderedDocumentUnreadable(ManifestError):
+    """A rendered document exists and this user cannot read it. Exit 3.
+
+    **The distinction from :class:`RenderedDocumentAbsent` is the whole point**
+    (ADR 0199, D1060). After a root deploy `.generated/<key>` is root-owned, so
+    `op` cannot traverse it -- and every reader in this repository answered
+    *"the project was never deployed here"*, which is false about a project
+    deployed forty minutes earlier. Measured on the host on 2026-09-10 with beta
+    as the control.
+
+    ADR 0195's rule: a reader has three outcomes, not two -- the answer, the
+    other answer, and *I could not determine it*. This is the third, and it
+    carries the owner and the remedy because an operator who reads "never
+    deployed" goes looking for a deploy that did not happen.
+    """
+
+    def __init__(self, path: Path, owner: str | None) -> None:
+        self.path = path
+        self.owner = owner
+        described = f"owned by {owner}" if owner else "owned by another user"
+        super().__init__(
+            f"cannot read {path}: it exists and is {described}. "
+            "Run as root, or `sudo chown -R op:op .generated` -- a root deploy leaves "
+            "the rendered directory root-owned. This is NOT the same as the project "
+            "never having been deployed here."
+        )
+
+
+def _owner_of(path: Path) -> str | None:
+    """The owning user's name for the first component that exists.
+
+    Walks upward, because the thing that cannot be traversed is usually the
+    DIRECTORY rather than the file -- `.generated/<key>` root-owned at 0700 is
+    what D1060 measured, and `stat` on the file inside it raises the same
+    PermissionError the traversal did.
+
+    Returns None rather than raising if the name cannot be resolved. A reader
+    reporting "I could not determine who owns it" must not itself fail to
+    determine that and then raise -- which would be this ADR's defect inside
+    this ADR's repair.
+    """
+    import pwd
+
+    for candidate in (path, *path.parents):
+        try:
+            uid = candidate.stat().st_uid
+        except OSError:
+            continue
+        try:
+            return pwd.getpwuid(uid).pw_name
+        except KeyError:
+            return str(uid)
+    return None
+
+
+def rendered_document_path(
+    project_key: str,
+    *,
+    runtime: bool,
+    repo_root: Path = REPO_ROOT,
+    root: Path = RENDERED_ROOT,
+) -> Path:
+    """Where a rendered document is, without asking whether it is there.
+
+    ``runtime`` selects the INSTALLED render under `/var/lib` over the
+    checkout's `.generated/`. The two are different questions and D506 is what
+    happens when a reader confuses them: `--runtime status` on a host whose last
+    deploy predated a new migration read `Applied: 18, Pending: 0` and exited 0.
+    """
+    directory = (
+        rendered_path(project_key, root=root) if runtime else repo_root / ".generated" / project_key
+    )
+    return directory / "outputs.json"
+
+
+def read_rendered_document(
+    project_key: str,
+    *,
+    runtime: bool,
+    repo_root: Path = REPO_ROOT,
+    root: Path = RENDERED_ROOT,
+) -> tuple[Path, dict[str, Any]]:
+    """The rendered document, or an exception that says WHICH failure this is.
+
+    Returns the path beside the document, because every caller wants both and a
+    caller that recomputed the path would be a second derivation of it.
+
+    The three outcomes:
+
+    * the document, parsed;
+    * :class:`RenderedDocumentAbsent` -- nothing is there;
+    * :class:`RenderedDocumentUnreadable` -- something is there and this user
+      cannot see it.
+
+    The order matters. `is_file()` answers False for BOTH a missing file and one
+    inside a directory this user cannot traverse, which is exactly why every
+    `[ -f ... ] || die 4` in this repository reported the wrong one. So the read
+    is attempted and the errno decides, rather than a test being asked a
+    question it cannot answer.
+    """
+    path = rendered_document_path(project_key, runtime=runtime, repo_root=repo_root, root=root)
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError as error:
+        raise RenderedDocumentAbsent(
+            f"no rendered document for {project_key} at {path}; "
+            "the project was never deployed here."
+        ) from error
+    except PermissionError as error:
+        raise RenderedDocumentUnreadable(path, _owner_of(path)) from error
+    except NotADirectoryError as error:
+        raise RenderedDocumentAbsent(
+            f"no rendered document for {project_key} at {path}; "
+            "a path component is not a directory."
+        ) from error
+
+    try:
+        return path, json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ManifestError(f"{path} is not valid JSON: {error}") from error
 
 
 def observe_transports(

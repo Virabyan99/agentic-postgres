@@ -44,7 +44,10 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 
 readonly STATE_ROOT="/etc/agentic-postgres/projects"
-readonly RENDERED_ROOT="/var/lib/agentic-postgres/rendered"
+# Where the rendered document lives is bin/rendered-document.py's to know
+# (ADR 0199, D1060). This script used to carry the path and its own `[ -f ]`
+# test, which answered "the project was never deployed here" for a document it
+# merely could not traverse to.
 
 MODE="check"
 PROJECT_MANIFEST=""
@@ -125,15 +128,6 @@ print(naming.project_key(project["slug"], project["environment"]))
     || die 5 "the project manifest is not valid; no identity was derived from it."
 }
 
-outputs_path() {
-  local key="$1"
-  if [ "${RUNTIME}" -eq 1 ]; then
-    printf '%s/%s/outputs.json\n' "${RENDERED_ROOT}" "${key}"
-  else
-    printf '%s/.generated/%s/outputs.json\n' "${ROOT_DIR}" "${key}"
-  fi
-}
-
 main() {
   parse_args "$@"
 
@@ -146,9 +140,27 @@ main() {
 
   local key document
   key="$(project_key)"
-  document="$(outputs_path "${key}")"
-  [ -f "${document}" ] \
-    || die 4 "no rendered document for ${key} at ${document}; the project was never deployed here."
+
+  # ADR 0199, D1060. See bin/rendered-document.py: `[ -f ... ]` answers false
+  # for a missing document AND for one inside a directory this user cannot
+  # traverse, and all three shells reported the first for both.
+  #
+  # This one runs as root, so the unreadable case is rare here -- and it is
+  # wired the same way anyway, because the reason there were three copies of
+  # the wrong answer is that each script decided for itself which cases were
+  # worth distinguishing.
+  local resolved status
+  if [ "${RUNTIME}" -eq 1 ]; then
+    resolved="$("$(python_bin)" "${ROOT_DIR}/bin/rendered-document.py" \
+      --project-key "${key}" --runtime)" || status=$?
+  else
+    resolved="$("$(python_bin)" "${ROOT_DIR}/bin/rendered-document.py" \
+      --project-key "${key}")" || status=$?
+  fi
+  if [ -n "${status:-}" ]; then
+    exit "${status}"
+  fi
+  document="${resolved}"
 
   "$(python_bin)" "${ROOT_DIR}/bin/postgres-bootstrap.py" \
     --outputs "${document}" \

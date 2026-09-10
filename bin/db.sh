@@ -37,7 +37,10 @@ set -euo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly ROOT_DIR
 
-readonly RENDERED_ROOT="/var/lib/agentic-postgres/rendered"
+# Where the rendered document lives is bin/rendered-document.py's to know
+# (ADR 0199, D1060). This script used to carry the path and its own `[ -f ]`
+# test, which answered "the project was never deployed here" for a document it
+# merely could not traverse to.
 
 # The complete set of files `sql` will execute, by basename. Adding an entry is
 # a reviewable diff; there is no wildcard and no directory scan.
@@ -151,13 +154,22 @@ main() {
 
   local key document
   key="$(project_key)"
+
+  # ADR 0199, D1060. See bin/rendered-document.py: `[ -f ... ]` cannot tell a
+  # missing document from one this user cannot traverse to, and answered
+  # "never deployed here" for both.
+  local resolved status
   if [ "${RUNTIME}" -eq 1 ]; then
-    document="${RENDERED_ROOT}/${key}/outputs.json"
+    resolved="$("$(python_bin)" "${ROOT_DIR}/bin/rendered-document.py" \
+      --project-key "${key}" --runtime)" || status=$?
   else
-    document="${ROOT_DIR}/.generated/${key}/outputs.json"
+    resolved="$("$(python_bin)" "${ROOT_DIR}/bin/rendered-document.py" \
+      --project-key "${key}")" || status=$?
   fi
-  [ -f "${document}" ] \
-    || die 4 "no rendered document for ${key} at ${document}; the project was never deployed here."
+  if [ -n "${status:-}" ]; then
+    exit "${status}"
+  fi
+  document="${resolved}"
 
   local container database
   container="$(container_of "${document}")"

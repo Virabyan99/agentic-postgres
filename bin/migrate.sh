@@ -177,9 +177,24 @@ main() {
       else
         rendered_dir="${ROOT_DIR}/.generated/${key}"
       fi
-      document="${rendered_dir}/outputs.json"
-      [ -f "${document}" ] \
-        || die 4 "no rendered document for ${key} at ${document}; the project was never deployed here."
+      # ADR 0199, D1060. NOT `[ -f "${document}" ]`: that answers false for a
+      # missing file AND for one inside a directory this user cannot traverse,
+      # so after a root deploy `op` was told the project "was never deployed
+      # here" about a project deployed minutes earlier. One reader, in Python,
+      # where the errno is available; it prints the path and exits 3 for
+      # unreadable, 4 for absent.
+      local resolved status
+      if [ "${RUNTIME}" -eq 1 ]; then
+        resolved="$("$(python_bin)" "${ROOT_DIR}/bin/rendered-document.py" \
+          --project-key "${key}" --runtime)" || status=$?
+      else
+        resolved="$("$(python_bin)" "${ROOT_DIR}/bin/rendered-document.py" \
+          --project-key "${key}")" || status=$?
+      fi
+      if [ -n "${status:-}" ]; then
+        exit "${status}"
+      fi
+      document="${resolved}"
 
       # `status` reads the ledger, which means it starts a container, which
       # means it needs what any container start needs here. It was cheaper to

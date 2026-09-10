@@ -859,6 +859,35 @@ def observe_database(database: dict[str, Any]) -> dict[str, Any]:
         raise  # unreachable; fail() exits
 
 
+#: What curl writes for `%{http_code}` when it never received an HTTP response.
+#: Measured rather than assumed: `curl -w %{http_code}` prints `000` on a
+#: connection that failed, and prints nothing at all if the process could not be
+#: run. Both mean the same thing here -- the deploy did not obtain an answer.
+_NO_HTTP_STATUS = frozenset({"", "000"})
+
+
+def observed(status: str, *, ready_when: str) -> str:
+    """One place where a probe's result becomes a recorded word. ADR 0199.
+
+    Three outcomes from two inputs, which is the whole of D1048:
+
+    * the expected status -> `ready`;
+    * some other status   -> `unavailable`, because the route ANSWERED and the
+      answer was wrong, which the deploy determined;
+    * no status at all    -> `unobserved`, because nothing was determined.
+
+    Called by every route observer that makes an HTTP request, so the printed
+    line and the recorded word come from one function -- a status computed twice
+    is wrong the second time (D701), and this one outlives the run that computed
+    it.
+    """
+    if status == ready_when:
+        return "ready"
+    if status in _NO_HTTP_STATUS:
+        return deployed_output.ROUTE_UNOBSERVED["status"]
+    return "unavailable"
+
+
 def observe_health(url: str) -> str:
     """Ask the route whether it serves, from the host.
 
@@ -867,7 +896,11 @@ def observe_health(url: str) -> str:
     the difference between `ready` and a manifest's hope.
     """
     result = run("curl", "-ksS", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", url)
-    return "ready" if result.stdout.strip() == "200" else "unavailable"
+    status = result.stdout.strip()
+    word = observed(status, ready_when="200")
+    if word != "ready":
+        print(f"  the health route answered {status or '(nothing)'}: recorded {word}")
+    return word
 
 
 def publish_edge_credentials(
@@ -1046,9 +1079,12 @@ def observe_docs(url: str) -> str:
     except Exception as error:
         # `check` handles an HTTP response; a connection that never became one
         # -- DNS, TLS, refused -- arrives here. That is the state a project is
-        # in between `compose up` and Traefik noticing the container.
+        # in between `compose up` and Traefik noticing the container, and it is
+        # the clearest instance in this file of a route the deploy DID NOT
+        # OBSERVE rather than one it observed failing (ADR 0199, D1047's staging
+        # certificate arrives here too).
         _report_docs_failure(url, error)
-        return "unavailable"
+        return deployed_output.ROUTE_UNOBSERVED["status"]
 
 
 #: One line per (route, kind of failure), not one per attempt (D1047).
@@ -1204,10 +1240,13 @@ def observe_app(url: str, *, administrator: bool) -> str:
         f"{url}/auth/me",
     )
     status = result.stdout.strip()
-    if status == "401":
-        return "ready"
-    print(f"  the application route answered {status or '(nothing)'} rather than 401")
-    return "unavailable"
+    word = observed(status, ready_when="401")
+    if word != "ready":
+        print(
+            f"  the application route answered {status or '(nothing)'} rather than 401: "
+            f"recorded {word}"
+        )
+    return word
 
 
 #: The two halves of the R2 credential, by the names `secrets.required.yaml`
@@ -1450,10 +1489,12 @@ def observe_storage(url: str, *, credentialed: bool) -> str:
         f"{url}/objects/00000000-0000-4000-8000-000000000000/download-url",
     )
     status = result.stdout.strip()
-    if status == "401":
-        return "ready"
-    print(f"  the storage route answered {status or '(nothing)'} rather than 401")
-    return "unavailable"
+    word = observed(status, ready_when="401")
+    if word != "ready":
+        print(
+            f"  the storage route answered {status or '(nothing)'} rather than 401: recorded {word}"
+        )
+    return word
 
 
 def observe_mcp(url: str, *, lock_path: Path, project_key: str) -> tuple[str, dict[str, Any]]:

@@ -1015,16 +1015,34 @@ def test_a_refusal_with_no_challenge_is_unavailable(tmp_path) -> None:
         assert module.observe_docs(url) == "unavailable"
 
 
-def test_a_route_nothing_answers_on_is_unavailable_rather_than_an_exception() -> None:
+def test_a_route_nothing_answers_on_is_unobserved_rather_than_an_exception() -> None:
     """A deploy that cannot describe its own route has still deployed.
 
     `check` handles an HTTP response; a connection that never became one -- DNS,
     TLS, refused -- would otherwise propagate out of step 7 and abort a deploy
-    whose services are already running.
+    whose services are already running. That half is unchanged and is what this
+    test was originally for.
+
+    **The word changes under ADR 0199**, and the change is the point. This
+    asserted `unavailable`, which says the deploy determined the route is not
+    serving. It determined nothing: the connection never became a response. That
+    is the first-deploy router race (D326's shape) and D1047's staging
+    certificate, both recorded as though the route had answered and answered
+    wrongly.
+
+    Stricter than what it replaces, not weaker: the returned value must be a
+    word the schema admits AND must be the one that means *not observed*, where
+    before it merely had to be a string equal to `unavailable`.
     """
     module = deploy_module()
     # Port 1 on loopback: nothing listens, and the refusal is immediate.
-    assert module.observe_docs("http://127.0.0.1:1/docs/rest") == "unavailable"
+    word = module.observe_docs("http://127.0.0.1:1/docs/rest")
+    assert word == deployed_output.ROUTE_UNOBSERVED["status"]
+    assert word in deployed_output.ROUTE_STATUSES
+    assert word != "unavailable", (
+        "a connection that never became a response was recorded as an observed "
+        "failure, which is the state D1048 exists to separate"
+    )
 
 
 def test_every_observation_reaches_the_published_document() -> None:
