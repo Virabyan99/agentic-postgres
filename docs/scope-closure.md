@@ -20,7 +20,7 @@ decision.
 | Requirements a claim reports on | **147** | 24 belong to no claim (D697); see §4 |
 | Migrations released | **30** | fix-forward only; Session 18 adds none |
 | Architecture decisions recorded | **197** | 0188–0194 are Session 18's; 0195–0197 are Session 19's |
-| Divergences measured | **D1–D1059** | D984–D1032 are Session 18's; **D1033–D1059 are Session 19's**, and twenty-four of them come from an adopter's account of building on 1.0.0 rather than from this project's own work |
+| Divergences measured | **D1–D1060** | D984–D1032 are Session 18's; **D1033–D1059 are Session 19's**, and twenty-four of them come from an adopter's account of building on 1.0.0 rather than from this project's own work |
 
 ---
 
@@ -278,6 +278,7 @@ rows. This section is only what stays open.
 | **D1048's document half** — `unavailable` for a route that was merely unobserved | `routes.*.status` is a schema enum with `const` couplings forcing a null URL. A third member is an outputs version with a migrator and a guarded reader for every consumer (D600). The printed line carries the distinction meanwhile. |
 | **D1058** — `0003`'s comment has been false since `0006` | Not repairable in place. A released template's bytes are the unit `verify-lock` checks, so editing even a comment changes a recorded digest. |
 | **D1059** — a cancelled CI run is not a failed one | `concurrency: cancel-in-progress: true` means a superseded run concludes `cancelled`, and a reader bucketing everything that is not `success` as failure reports a verdict the run never reached. Observed on this session's own push. |
+| **D1060** — a project that is deployed is reported as never deployed | `.generated/<key>` is root-owned after a root deploy, so `migrate.sh render` as `op` cannot traverse it and says *"the project was never deployed here"* rather than *"I could not read it"*. Measured on the production host on 2026-09-10, with beta as the control. ADR 0195's class, third live site, found after 1.0.1 was tagged. |
 | **D933** now blocks two things | It blocked a project disabling a write capability (ADR 0183). It now also blocks retiring the task tools, which is why ADR 0196 chose restoration. That asymmetry is the argument for repairing it in Stage 3, beside D1056's closed scope vocabulary. |
 
 **What the session says about the two claims that have been open since Session
