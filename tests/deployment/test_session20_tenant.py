@@ -290,8 +290,14 @@ def test_both_deployed_documents_are_v17_and_the_doctor_reads_the_sets(
         expected = len(migrations.release_set().load_manifest()["migrations"])
         if block is not None:
             expected += block["count"]
-        assert int(check["facts"]["released"]) == expected, (
-            f"{key}'s doctor counts {check['facts']['released']} released migrations and "
+        # `evidence`, not `facts`. `diagnosis._check` takes an `evidence` tuple
+        # of pairs and `bin/doctor.py` renders it with `dict(check.evidence)`.
+        # This asserted a key name read from memory of the shape rather than
+        # from the module, and died with KeyError on the host -- after the
+        # verdict it actually cares about had already passed.
+        counted = dict(check["evidence"])
+        assert int(counted["released"]) == expected, (
+            f"{key}'s doctor counts {counted['released']} released migrations and "
             f"this release plus that project's set declares {expected}"
         )
 

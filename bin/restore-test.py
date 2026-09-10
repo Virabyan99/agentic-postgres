@@ -473,19 +473,52 @@ def observe_restored_instance(plan: restore_drill.DrillPlan) -> dict[str, Any]:
     return observed
 
 
-def released_versions() -> list[str]:
-    """The versions `migrations/released.lock.json` says this release carries.
+def released_versions(document: dict[str, Any] | None = None) -> list[str]:
+    """The versions this PROJECT applies: the release's set, plus its own.
 
-    Read from the lock rather than counted from `migrations/templates/`: the lock
-    is what `bin/migrate.sh freeze-lock` froze and what the renderer installs, so
-    a template added and not frozen is a template this release does not have.
+    Read from each set's LOCK rather than counted from its templates: a lock is
+    what `freeze-lock` froze and what the renderer installs, so a template added
+    and not frozen is a template this release does not have.
+
+    ``document`` is the project's deployed document, which is what names its
+    set (ADR 0198). Without one this answers the release's alone -- correct for
+    a project that declares no set, and the shape every caller had before
+    Session 20.
+
+    **Found on the host** (D1088's twelfth caller). A PITR drill against beta,
+    which declares a set, reported *"restored 32 versions, the release declares
+    31; only in the restore ['20260914120001']"* and failed
+    `schema_matches_the_release`. The restore was correct and the comparison was
+    not: it asked the release's lock what a project applies.
+
+    The SET EQUALITY is unchanged, deliberately. A restored cluster with the
+    right number of migrations and a different set is a cluster restored from
+    another release, and counting would report it healthy.
     """
+    versions: list[str] = []
     lock = json.loads((REPO_ROOT / "migrations" / "released.lock.json").read_text("utf-8"))
-    return [str(entry["version"]) for entry in lock["migrations"]]
+    versions += [str(entry["version"]) for entry in lock["migrations"]]
+
+    named = ((document or {}).get("migrations") or {}).get("project_set")
+    if named:
+        project_lock = REPO_ROOT / named["root"] / "migrations" / "released.lock.json"
+        if not project_lock.is_file():
+            raise SystemExit(
+                f"restore-test: the deployed document names the migration set "
+                f"{named['root']!r} and this checkout has no lock at {project_lock}. "
+                "The drill cannot say what the restored cluster should hold."
+            )
+        parsed = json.loads(project_lock.read_text("utf-8"))
+        versions += [str(entry["version"]) for entry in parsed["migrations"]]
+
+    return sorted(versions)
 
 
 def smoke_checks(
-    plan: restore_drill.DrillPlan, observed: dict[str, Any], owner_id: str | None
+    plan: restore_drill.DrillPlan,
+    observed: dict[str, Any],
+    owner_id: str | None,
+    document: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """What the drill proves about the restored instance (`REC-SMOKE-001`).
 
@@ -500,7 +533,10 @@ def smoke_checks(
     `passed` so a drill run without `--smoke-owner-id` cannot satisfy it.
     """
     code, answer = query(plan, "SELECT 1")
-    released = released_versions()
+    # The project's OWN document, threaded from `main` rather than re-read here:
+    # it is already loaded, and a second reader of it would be a second answer
+    # to which sets this project applies.
+    released = released_versions(document)
     present = [
         line
         for line in query(
@@ -710,7 +746,7 @@ def drill(arguments: argparse.Namespace) -> int:
         rto_seconds = time.monotonic() - rto_started
 
         observed = observe_restored_instance(plan)
-        smoke = smoke_checks(plan, observed, arguments.smoke_owner_id)
+        smoke = smoke_checks(plan, observed, arguments.smoke_owner_id, document)
 
         evidence = restore_drill.evidence_document(
             plan=plan,

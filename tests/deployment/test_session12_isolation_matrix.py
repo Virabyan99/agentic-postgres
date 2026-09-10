@@ -229,6 +229,14 @@ NOT_AUTHORITY_PREFIXES = (
     # stating: a set is not an identity. `project_set.root` reads like one, and
     # asserting two projects must differ in it would make a supported topology
     # into a failure.
+    # The bare leaf as well as the prefix, and the difference is the whole of
+    # D1029 repeating. `migrations.project_set.` covers `.root`,
+    # `.lock_sha256` and `.count` -- the leaves a project WITH a set renders.
+    # A project WITHOUT one renders the bare leaf as an explicit null, and
+    # that is ALPHA: the control this session added to prove the boundary. The
+    # first host gate of Session 20 reported exactly one unclassified field,
+    # and it was the control's.
+    "migrations.project_set",
     "migrations.project_set.",
     "backup_state.",
     "bootstrap.status",

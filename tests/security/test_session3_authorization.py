@@ -641,13 +641,29 @@ def test_public_cannot_execute_the_write_rpcs(project_a: dict[str, Any]) -> None
     assert leaked == "", f"PUBLIC can execute {leaked}"
 
 
-def test_the_retired_write_rpc_is_gone(project_a: dict[str, Any]) -> None:
-    """ADR 0048's retirement, asserted as an absence.
+def test_the_restored_write_rpc_is_published(project_a: dict[str, Any]) -> None:
+    """ADR 0196's restoration, asserted on the deployed catalog.
 
+    **This test asserted an ABSENCE for fifteen sessions, and was right to.**
     ADR 0003 argued that operation 4 is a narrow status transition rather than a
-    second create, and Session 3 shipped a second create. The convergence
-    migration drops it, and this is the assertion that the drop happened rather
-    than the grant merely being revoked.
+    second create; Session 3 shipped a second create; ADR 0048's convergence
+    migration dropped it, and this asserted the drop had happened rather than
+    the grant merely being revoked.
+
+    What ADR 0048 did not notice is that the drop left NO way to make a task at
+    all. Rig 19 measured it on a throwaway cluster: `object_owner` -- NOLOGIN,
+    reachable only by migrations -- was the sole holder of INSERT on
+    `app.tasks`, so `update_task_status` had never run against a row outside a
+    fixture and `query_resource` over `tasks` returned an empty set on every
+    deployment. Migration 0031 restores a create under the same review ADR 0048
+    applied, and the enumeration below gains it.
+
+    **Found by the host gate rather than by Run 1's measurement**, and the
+    reason is worth recording: Run 1 built the full Session 20 state and ran
+    `tests/contract` against it to enumerate what would go red. This module is
+    `tests/security` and runs only against a deployment, so no offline
+    measurement could have reached it. The expected-red set was complete for
+    the suite it was measured over and not for the suite that exists.
     """
     present = sql(
         project_a,
@@ -664,11 +680,12 @@ def test_the_retired_write_rpc_is_gone(project_a: dict[str, Any]) -> None:
     # granted to `agent_reader` alone, which is what keeps them out of the
     # OpenAPI document an anonymous caller receives (ADR 0118).
     #
-    # The name of this test is about ADR 0048's retirement and its assertion
-    # enumerates the whole schema. Both are worth keeping: the enumeration is
-    # what catches a fifth function nobody reviewed.
+    # SEVEN since migration 0031 (ADR 0196). The enumeration is the whole
+    # schema rather than a check for one name, and that is what makes it worth
+    # keeping through a change that ADDS a function: it catches an eighth
+    # nobody reviewed just as it caught the absence of this seventh.
     assert present == (
-        "agent_audit_begin,agent_audit_complete,create_note,"
+        "agent_audit_begin,agent_audit_complete,create_note,create_task,"
         "mcp_agent_context,owner_activity_report,update_task_status"
     ), present
 
