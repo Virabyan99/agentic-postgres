@@ -387,6 +387,96 @@ once, `FAILED` not `ERROR`, files restored by copy and `cmp`.
 `test_auth_endpoints`, `test_session12_isolation_matrix` (offline half),
 `test_cli_contract`.
 
+**Done.** 2026-09-10, `e4a6ada`. Everything in the list above is built; the
+module names in the plan were written from memory and three of them do not
+exist in this tree (`test_config` is `test_project_manifest`,
+`test_database_commands` is `test_cli_contract`'s subject, and the ledger had
+no module at all -- see below).
+
+**What the run found that the plan did not say.**
+
+- **`record_ledger` had no test whatsoever**, which is how D1096 survived to be
+  found by reading rather than by a failure. `tests/contract/
+  test_migration_ledger.py` is new (5 tests, against a recorded `psql`), and
+  the mutation that reverts the function to the release lock alone is one of
+  the battery's four.
+- **The `v14` outputs fixture is built by SUBTRACTION from the current
+  document**, so it had already grown one line per version -- `backup.mirror`
+  was appended by version 16 under a comment saying it did not exist when the
+  fixture was written. Version 17 would have been the third. It now chains
+  through `v15`, which chains through a new `v16`, so each version's fixture
+  removes exactly what that version adds. The failure mode this removes is
+  silent in the direction that matters: a v14 document still carrying a v17
+  field makes the step under test refuse for a reason that has nothing to do
+  with the step.
+- **`test_project_manifest`'s three downgrade helpers each deep-copied the base
+  separately**, so the version-5 gate refused three unrelated tests until each
+  was taught to pop `migrations`. They now chain, for the `v14` fixture's
+  reason.
+- **The outputs schema has six `ready`/`unavailable` enums of identical shape**,
+  and only `publishedRoute` and the deployed branch's `routes.health` may gain
+  `unobserved` -- `deployedApi`, `mcp` and the TLS block answer whether a PLANE
+  came up, which is a different question. A textual patch matched six places;
+  `publishedRoute` is edited structurally, by name, and the patch ASSERTS the
+  other three did not gain the word.
+- **The rendered branch's `routes.health.status` is `const: "planned"`** and was
+  left alone: a render observes nothing, so there is nothing there for a third
+  word to mean.
+
+**Measured, end to end.** `./deploy.sh --render-only` on both fixtures:
+`fixture-alpha-dev` renders **31** `.sql` files in one directory, 30 labelled
+`set: release` (20260807120001..20260904120030) and 1 labelled `set: project`
+(20260914120001), with `migrations.project_set = {root: projects/example,
+count: 1, lock_sha256: b77be65d…}`; `fixture-alpine-dev` -- schema 5, no set --
+renders **30** and `project_set: null`. Both documents carry the same
+`release_lock_sha256`, which is what the isolation matrix now asserts must
+match.
+
+`bin/migrate.sh --project project.example.yaml freeze-lock` wrote
+`projects/example/migrations/released.lock.json` at schema version 2 with
+`follows_release_version 20260904120030`, and `git diff` on
+`migrations/released.lock.json` was **empty** -- the release's lock is not a
+project verb's to write. `verify-lock --project` verifies both.
+
+**The lint refuses, and the refusals were measured before they were trusted.**
+Eleven arms against a copy of the example set under a temporary directory, each
+anchor pre-flighted to match exactly once, the real set green in the same
+invocation: `app_private` named, a role created, a schema created, an extension
+created, default privileges altered, `SET ROLE` instead of the local preamble, a
+release view dropped, a release function dropped, `FORCE ROW LEVEL SECURITY`
+removed, the `down` block's `AP900` removed, a placeholder outside the
+allowlist. A twelfth arm asserts a forbidden word inside a COMMENT is not a
+forbidden statement -- Session 2 Run 7's defect, and the reason
+`sql_surface.sql_only` exists.
+
+**The version rule refuses both boundaries**: a project version older than the
+recorded release version, and one EQUAL to it. Two controls in the same
+invocation: the committed example lock verifies, and the release lock verifies
+while carrying no `follows_release_version` at all -- so the rule cannot have
+leaked onto the release's own migrations.
+
+**CI now applies the example project set to a throwaway cluster on every push.**
+The five fixtures D1088 names switched to `sets_for`, and
+`test_migrations_apply_as_the_migration_user` applies it **as `migration_user`
+over TCP** -- the route D285 exists for, since every offline rig that applies
+migrations as a superuser bypasses the ownership check entirely. That is
+D1067's shadow database, arriving as a consequence of where the set lives rather
+than as something built. All five green (1642 passed with them, 1398 without).
+
+**Battery: 4 mutations, 4 killed, every paired control green.** The lint's
+`app_private` rule removed; the `follows_release_version` comparison inverted;
+`record_ledger` reverted to the release lock alone; `sets_for` returning the
+release only. Every anchor pre-flighted, `FAILED` distinguished from `ERROR`,
+files restored by copy and byte-compared. **The battery's own baseline pass
+caught one of its control targets naming a test that does not exist** -- which
+would have read as a kill for that mutation, and is D499's rule catching the
+person applying it.
+
+**Not built here**, and deliberately: a project's reviewed surface and its own
+snapshot are Run 3's; the six honest readers and `unobserved`'s writer are Run
+4's (the schema and the migrator's half of ADR 0199 are here, because one
+outputs version carries both).
+
 ### Run 3 — a project's reviewed surface, and the reader as a module
 
 **Builds.**
