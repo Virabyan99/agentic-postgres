@@ -91,6 +91,10 @@ SHELL_COMMANDS = (
     "bin/session-16-check.sh",
     "bin/session-17-check.sh",
     "bin/session-18-check.sh",
+    # Session 20. Derived from 18s by diff (D505, D507, D678, D693, D703);
+    # its five declaration flags are removed, because every live half this
+    # session adds reads a roster variable the gate already exports.
+    "bin/session-20-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
     "bin/upgrade.sh",

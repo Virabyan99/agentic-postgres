@@ -979,6 +979,12 @@ CLAIM_INTRODUCED_IN = {
     "disaster_kit": 18,
     "replacement_host_restore": 18,
     "failure_rehearsal": 18,
+    # Session 20 (ADR 0198, ADR 0199). There is no session 19 here and never
+    # will be: that session built no plane and registered no requirement, so
+    # `CURRENT_SESSION` went 18 -> 20 while `VERSION` moved alone (D1063).
+    "tenant_extension_point": 20,
+    "task_domain": 20,
+    "honest_readers": 20,
     "document_kinds": 2,
     "provider_convergence": 2,
     "release_immutability": 2,

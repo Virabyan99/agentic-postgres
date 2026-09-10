@@ -93,6 +93,14 @@ MODE_MARKERS = {"host": "live_host", "external": "external"}
 #: session keeps proving an earlier one's guarantees, not that a later
 #: requirement withdraws one from the earlier session's evidence.
 CLAIMS: dict[str, tuple[str, ...]] = {
+    # Session 20 (ADR 0198, ADR 0199). Three claims: what an adopter can now
+    # add, the task domain restored, and the two readers that had two outcomes
+    # where they needed three. Each has exactly one live node id, which is what
+    # `claim_mode` requires -- a claim whose halves are all offline is a claim
+    # about a checkout rather than about a deployment.
+    "tenant_extension_point": ("TEN-SET-001", "TEN-SET-002", "TEN-SURF-001", "TEN-DOC-001"),
+    "task_domain": ("API-TASK-001",),
+    "honest_readers": ("OPS-READ-001", "OPS-READ-002"),
     "isolation": ("DEP-ISO-002",),
     "secret_leakage": ("SEC-SECRET-001", "SEC-SECRET-002"),
     "least_privilege": ("SEC-DB-001", "SEC-DB-002", "DBX-MIG-001"),

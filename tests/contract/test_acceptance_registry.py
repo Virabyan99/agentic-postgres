@@ -37,7 +37,12 @@ VALID_PRIORITIES = {"P0", "P1", "P2"}
 #: Enumerated rather than patterned, for ADR 0006's reason: a rule that accepted
 #: any uppercase word would accept a typo as a new family.
 ID_PATTERN = re.compile(
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET)-[A-Z0-9]+(-\d+)?$"
+    # `TEN` is Session 20 (ADR 0198): a TENANT extension point -- what an
+    # adopter adds, as opposed to what the platform provides. It is its own
+    # prefix rather than more `DEP` or `CFG` because the question it answers
+    # is whose the thing is, and that is the distinction this session exists
+    # to make.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN)-[A-Z0-9]+(-\d+)?$"
 )
 
 

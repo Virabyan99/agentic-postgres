@@ -4,16 +4,27 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 18 implemented**, the Stage 2 release candidate, at
-`template_version` **1.0.1**. **Adopt `1.0.1`, not `1.0.0`**: the `1.0.0` tag
-predates its own documented-path repairs, so the one ref a new adopter has
-reason to trust was the one that still had them (D1033). `1.0.1` is Session
-19's repair release — nineteen defects found by somebody building an
-application on 1.0.0, on a host that started empty; see
-[the session plan](docs/plans/session-19-implementation-plan.md) and
-[scope closure](docs/scope-closure.md) §8. No manifest field, migration,
-contract entry, capability or secret changed, and nothing in it is a change an
-operator must act on before upgrading. Session 18's code is in this release — independent
+**Status: Session 20 implemented**, at `template_version` **1.1.0**.
+
+Session 20 is the tenant extension point: an application adds its own tables by
+writing a directory under `projects/<slug>/` and a key in its own manifest, and
+edits none of the release's files — which is what ADR 0197 measured the absence
+of, at seven files, one of them uneditable without a running host. See
+[Adding your own tables](#adding-your-own-tables), the
+[session plan](docs/plans/session-20-implementation-plan.md), and ADR 0198.
+A minor: a manifest field with a default (schema 5), one released migration
+(`api.create_task`, restoring what ADR 0048 removed), a contract entry, an
+outputs bump with a migrator (v17), and a new api-surface version for a
+project's own contract. Every one is additive; a manifest below 5 still loads
+and renders as a project with no set of its own.
+
+There is no Session 19 in the acceptance registry and there never will be. It
+was a repair session — nineteen defects found by somebody building an
+application on 1.0.0, on a host that started empty (see
+[its plan](docs/plans/session-19-implementation-plan.md) and
+[scope closure](docs/scope-closure.md) §8) — and it moved `VERSION` alone, to
+`1.0.1`, the only time in this project's history the two numbers have come
+apart. **Adopt `1.1.0`.** Session 18's code is in this release — independent
 recovery: every backup repository mirrored to a second provider by a host unit
 the archiver never knows about (ADR 0188), a disaster kit that names every
 secret and holds none and a bootstrap that adopts a provider project by its
@@ -151,9 +162,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 18
+sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 20
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 18
+     --capabilities capabilities.yaml --through-session 20
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a

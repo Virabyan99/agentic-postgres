@@ -119,7 +119,30 @@ from pathlib import Path
 #: repairs** (D1033). `b60814b`, `2e82f46`, `04d71c7` and `e49c5aa` all landed
 #: after that tag was made, so the one ref a new adopter has any reason to
 #: trust was the one ref that still had the defects.
-CURRENT_SESSION = 18
+#:
+#: **Session 20 moves it to 20, all-or-nothing again** (D690): seven `TEN-*`,
+#: `API-*` and `OPS-READ-*` requirements and three claims, with every offline
+#: half written in the run that built its plane and every live half here,
+#: gated on the trip's declarations -- D938's rule, applied deliberately after
+#: D1020 recorded Session 18 missing it.
+#:
+#: **19 is skipped, and the skip is the record** (D1063). `CURRENT_SESSION`
+#: keys the evidence model, and Session 19 built no plane, registered no
+#: requirement and wrote no evidence document -- so there is no session 19 in
+#: the acceptance registry and never will be. A reader finding 18 followed by
+#: 20 is reading a repair session that moved `VERSION` alone, which is the one
+#: time in this project's history the two numbers have come apart.
+#:
+#: `VERSION` moves to `1.1.0`, and ADR 0162 prices it. The session adds a
+#: project manifest field with a default (`migrations.set`, schema 5), one
+#: released migration (0031), one reviewed contract entry (`create_task`), an
+#: outputs bump with a migrator (v17), and a new api-surface schema version for
+#: a project's own contract. Every one of them is ADDITIVE: a manifest below 5
+#: still loads and renders as a project with no set of its own, a version 16
+#: document migrates, and no operator must act on any of it before upgrading.
+#: A minor, and Run 7's `upgrade plan` on the host is what confirms it -- a
+#: `major` required there is a stop condition, not a number to write down.
+CURRENT_SESSION = 20
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere
