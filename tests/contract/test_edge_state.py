@@ -18,6 +18,7 @@ a state file that nothing in the repository writes.
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -300,3 +301,98 @@ def test_nothing_decides_the_acme_environment_by_writing_it_down() -> None:
         f"these assert an ACME environment instead of reading it from the store: {offenders}. "
         "Use edge_state.acme_environment()."
     )
+
+
+# ---------------------------------------------------------------------------
+# Deciding versus reporting (D1050, ADR 0195)
+# ---------------------------------------------------------------------------
+
+
+def test_an_unreadable_store_is_not_reported_as_staging(tmp_path: Path) -> None:
+    """D1050. `production.json` is 0600 inside a 0700 root-owned directory, so
+    a non-root caller gets PermissionError -- and the deciding reader folds that
+    into "staging".
+
+    `bin/edge.sh status` is documented as *"Redacted, and readable without
+    root"* and delegated to that reader, so it could never report `production`
+    on any host at any time. Not intermittently: never. An operator who
+    promotes ACME and runs the documented confirmation is told the promotion did
+    not happen, and the natural next action spends a rate limit that takes seven
+    days to return.
+    """
+    store = tmp_path / "production.json"
+    store.write_text('{"letsencrypt": {}}', encoding="utf-8")
+
+    # Ground truth first: readable, this is a promotion.
+    assert edge_state.observe_acme_environment(acme_directory=tmp_path) == "production"
+
+    tmp_path.chmod(0o000)
+    try:
+        if os.geteuid() == 0:  # pragma: no cover - root ignores the mode
+            pytest.skip("running as root; a mode cannot make this unreadable")
+        observed = edge_state.observe_acme_environment(acme_directory=tmp_path)
+    finally:
+        tmp_path.chmod(0o700)
+
+    assert observed is None, (
+        "an unreadable ACME store was reported as a determinate environment; "
+        "that is the substitution ADR 0195 forbids for a report"
+    )
+
+
+def test_the_deciding_reader_still_fails_closed(tmp_path: Path) -> None:
+    """The paired control, and the point of ADR 0195's distinction.
+
+    A deploy that is about to render a configuration, refuse a second
+    promotion, or write `tls.acme_environment` into a document whose schema
+    admits exactly two values is entitled to treat "I could not read it" as
+    "not promoted". This test exists so that a later reading of ADR 0195 does
+    not turn every fail-closed decision into an optimistic one.
+    """
+    store = tmp_path / "production.json"
+    store.write_text('{"letsencrypt": {}}', encoding="utf-8")
+    tmp_path.chmod(0o000)
+    try:
+        if os.geteuid() == 0:  # pragma: no cover - root ignores the mode
+            pytest.skip("running as root; a mode cannot make this unreadable")
+        decided = edge_state.acme_environment(acme_directory=tmp_path)
+    finally:
+        tmp_path.chmod(0o700)
+
+    assert decided == "staging"
+
+
+def test_the_two_readers_agree_whenever_the_store_can_be_read(tmp_path: Path) -> None:
+    """They must differ in exactly one circumstance and no other, or the split
+    has introduced a second answer to one question -- which is the defect the
+    deciding reader's own docstring was written about."""
+    cases = [
+        ("absent", None),
+        ("empty", ""),
+        ("populated", '{"letsencrypt": {}}'),
+    ]
+    for label, content in cases:
+        directory = tmp_path / label
+        directory.mkdir()
+        if content is not None:
+            (directory / "production.json").write_text(content, encoding="utf-8")
+        decided = edge_state.acme_environment(acme_directory=directory)
+        observed = edge_state.observe_acme_environment(acme_directory=directory)
+        assert observed is not None, f"{label}: readable, so the report must have an answer"
+        assert decided == observed, f"{label}: the two readers disagree ({decided} != {observed})"
+
+
+def test_the_status_verb_reads_the_reporting_reader() -> None:
+    """The repair has to reach the caller that had the defect (question 5).
+
+    Splitting the reader and leaving `do_status` on the deciding one would
+    change nothing an operator sees, which is precisely how the literal
+    `"staging"` in `observe_tls` survived its first repair.
+    """
+    edge = (REPO_ROOT / "bin" / "edge.sh").read_text(encoding="utf-8")
+    status = edge[edge.index("do_status() {") :]
+    status = status[: status.index("\n}\n")]
+    assert "acme_environment_observed" in status, (
+        "do_status calls the deciding reader; it can never print production"
+    )
+    assert "unknown" in status, "do_status has no way to say it did not determine the answer"

@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import pwd
 import shutil
 import sys
 from datetime import UTC, datetime
@@ -117,11 +118,47 @@ def export(arguments: argparse.Namespace) -> int:
     )
     for entry in entries:
         print(f"  {entry.relative}")
+    owner = _hand_to_operator(output, arguments.host)
     print(
         "dr-kit: no value is in it. Copy it OFF this host now; it is what a replacement "
         "is built from."
     )
+    if owner:
+        print(f"dr-kit: the kit is owned by {owner}; modes are unchanged (0700/0600).")
     return 0
+
+
+def _hand_to_operator(output: Path, host_path: Path) -> str | None:
+    """Give the kit to the account the closing line tells to carry it away.
+
+    D1052. The export runs as root and wrote the kit root-owned, 0700/0600 --
+    typically into the operator's own home directory -- and then instructed
+    that operator to copy it off the host, which they could not do. They could
+    not verify it either: `verify` is documented as needing no root, and it
+    answered "this is not a kit" about a kit that verifies under sudo.
+
+    The modes do not change. Ownership moves to `ssh.operator_user`, the
+    account every other operator-facing artifact on this host belongs to and
+    the one the deploy already installs deployed documents to. If this is not
+    running as root there is nothing to hand over and nothing to say.
+    """
+    if os.geteuid() != 0:
+        return None
+    try:
+        from agentic_postgres.host_config import load_host_manifest
+
+        operator = load_host_manifest(host_path)["ssh"]["operator_user"]
+        entry = pwd.getpwnam(operator)
+    except (KeyError, OSError, ValueError):
+        # Not fatal. A root-owned kit is still a correct kit, and the line
+        # above has already told the operator to take it; a warning here would
+        # read like a failed export.
+        return None
+
+    os.chown(output, entry.pw_uid, entry.pw_gid)
+    for path in output.rglob("*"):
+        os.chown(path, entry.pw_uid, entry.pw_gid)
+    return operator
 
 
 def verify(arguments: argparse.Namespace) -> int:

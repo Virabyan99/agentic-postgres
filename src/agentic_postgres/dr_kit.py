@@ -217,10 +217,45 @@ def verify_kit(kit_dir: Path) -> list[str]:
     """
     problems: list[str] = []
     manifest_path = kit_dir / KIT_MANIFEST
-    if not manifest_path.is_file():
+
+    # "I cannot look" and "I looked and it is not a kit" are different facts,
+    # and only one of them is about the artifact (D1052, ADR 0195). The export
+    # writes the kit 0700/0600 and, until this session, as root -- so an
+    # operator who had just run `export` successfully, and was told by its
+    # closing line to copy the kit off the host, ran the verb documented as
+    # needing no root and was told the result was not a kit. They go looking
+    # for a broken export, which is the one place the fault is not.
+    try:
+        # `list`, because `Path.iterdir` is a generator and returning one
+        # touches nothing -- a lazy probe here would have reported success on a
+        # directory it never opened, which is the same defect in the guard as
+        # in the thing it guards.
+        list(kit_dir.iterdir())
+        present = manifest_path.is_file()
+    except (FileNotFoundError, NotADirectoryError):
+        # Determinate, and the answer is no. ADR 0195 cuts both ways: folding a
+        # real answer into "I could not tell" is the same defect as folding a
+        # failure into an answer, and it would cost an operator the one message
+        # that is actually about the artifact.
+        present = False
+    except PermissionError:
+        return [
+            f"cannot read {kit_dir}: permission denied. This says nothing about "
+            "whether it is a kit. Re-run under sudo, or take ownership of the "
+            "directory if an older release exported it as root."
+        ]
+    except OSError as problem:
+        return [f"cannot read {kit_dir}: {problem}. This says nothing about whether it is a kit."]
+
+    if not present:
         return [f"no {KIT_MANIFEST} in {kit_dir}; this is not a kit"]
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except PermissionError:
+        return [
+            f"cannot read {manifest_path}: permission denied. The kit may be "
+            "whole; this run could not tell. Re-run under sudo."
+        ]
     except (OSError, ValueError) as problem:
         return [f"{manifest_path} is not readable as JSON: {problem}"]
     if not isinstance(manifest, dict) or manifest.get("kind") != KIT_KIND:

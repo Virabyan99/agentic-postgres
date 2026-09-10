@@ -2574,8 +2574,29 @@ def main(argv: list[str] | None = None) -> int:
     # route the summary omitted was the one Session 5 was about, and nothing
     # noticed for two sessions because a missing line looks like a route that
     # does not exist. Deriving it means a sixth route is printed by existing.
+    #
+    # D1048, ADR 0195. `unavailable` is the schema's word for both "this route
+    # is not there" and "this deploy did not observe it converge", and a first
+    # deploy structurally cannot observe a router it creates in the same run
+    # (D326's two-stage shape). Measured by an outsider on a first bring-up:
+    # `rest unavailable` printed while the route was serving and correctly
+    # refusing an anonymous caller with 401.
+    #
+    # The document keeps `unavailable`. It is an enum in outputs.schema.json
+    # with `const` couplings that force a null URL, so a third member is an
+    # outputs version with a migrator and a guarded reader for every consumer
+    # (D600), not a word change. The printed line is where the distinction is
+    # free, and this deploy is the one caller that knows which it means.
+    #
+    # `app` already gets a paragraph saying a project awaiting its first
+    # administrator is not a failed deploy. This is that courtesy for the
+    # routes that were merely not looked at yet.
+    nothing_converged = not any(route["status"] == "ready" for route in document["routes"].values())
     for name, route in sorted(document["routes"].items()):
-        print(f"  {name.replace('_', ' '):12} {route['status']}")
+        line = f"  {name.replace('_', ' '):12} {route['status']}"
+        if route["status"] == "unavailable" and nothing_converged:
+            line += "  (unobserved: this deploy created the router; the next reads it)"
+        print(line)
     print(f"  database     {document['database']['observed']['status']}")
     print(f"\n\033[1mdeploy: {key} deployed through session {arguments.through_session}\033[0m")
     return 0

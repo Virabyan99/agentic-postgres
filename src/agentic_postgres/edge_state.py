@@ -61,6 +61,7 @@ __all__ = [
     "acme_environment",
     "build_state",
     "load_state",
+    "observe_acme_environment",
     "validate_state",
     "write_state",
 ]
@@ -86,6 +87,41 @@ def acme_environment(*, acme_directory: Path = ACME_DIR) -> str:
     response` branches on this field, so with it pinned to `staging` the branch
     that asserts HSTS *is* sent could never be taken: the promotion's most
     visible effect had no test able to see it.
+
+    **This is the DECIDING reader, and it fails closed on purpose** (ADR 0195).
+    A caller that is about to act -- render a configuration, refuse a second
+    promotion, write `tls.acme_environment` into a document whose schema admits
+    two values -- is entitled to treat an unreadable store as *not promoted*,
+    because guessing the other way is worse. A caller that is about to
+    *report* is not: it wants `observe_acme_environment` below, which can say
+    it does not know.
+    """
+    observed = observe_acme_environment(acme_directory=acme_directory)
+    return observed if observed is not None else "staging"
+
+
+def observe_acme_environment(*, acme_directory: Path = ACME_DIR) -> str | None:
+    """The same question, for a caller that reports rather than decides.
+
+    Returns `"production"`, `"staging"`, or `None` when the store could not be
+    read at all. D1050, ADR 0195.
+
+    `production.json` is mode 0600 inside a 0700 directory, both root-owned, so
+    a non-root caller gets `PermissionError` -- which is an `OSError`, which the
+    deciding reader above folds into `"staging"`. `bin/edge.sh status` is
+    documented as *"Redacted, and readable without root"*, and it delegated to
+    the deciding reader, so **it could never report `production` on any host at
+    any time.** Not intermittently: never. It reported a plausible wrong answer
+    rather than declining to answer, and an operator who promotes ACME and then
+    runs the documented status command to confirm it was told the promotion did
+    not happen. The natural next action is to promote again, and that spends a
+    production rate limit that takes seven days to come back.
+
+    The function this one splits out already carried the scar of this exact
+    symptom arriving by a different route -- a literal `"staging"` in
+    `observe_tls`, *"unable to say `production` on any host at any time"* -- and
+    the repair went to that reader and not to this rule. That is question 5 of
+    the defect pattern, which is why ADR 0195 is about the class.
     """
     store = acme_directory / "production.json"
     try:
@@ -98,12 +134,15 @@ def acme_environment(*, acme_directory: Path = ACME_DIR) -> str:
         # directory named `production.json` would have reported a promotion
         # that never happened.
         if not store.is_file():
+            # Determined, and the answer is staging: the parent directory was
+            # readable enough to establish that no promotion store exists.
+            store.parent.stat()
             return "staging"
         return "production" if store.stat().st_size > 0 else "staging"
     except OSError:
-        # Unreadable by this process. Nothing here has seen evidence of a
-        # promotion, and staging is the honest answer.
-        return "staging"
+        # NOT an answer. The caller decides what to do with not knowing, and a
+        # report says so rather than picking the routine-looking one.
+        return None
 
 
 def build_state(*, installed_release_commit: str, host_manifest_sha256: str) -> dict[str, Any]:

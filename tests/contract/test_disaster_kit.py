@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import uuid
 from pathlib import Path
@@ -638,3 +639,69 @@ def test_the_runbook_names_only_commands_that_exist() -> None:
         "the runbook deploys before it restores (D1008)"
     )
     assert "schedule enable" in runbook and "never" in runbook.lower()
+
+
+# ---------------------------------------------------------------------------
+# An unreadable kit is not an invalid kit (D1052, ADR 0195)
+# ---------------------------------------------------------------------------
+
+
+def test_an_unreadable_directory_is_not_reported_as_not_a_kit(tmp_path: Path) -> None:
+    """D1052. The export runs as root and wrote the kit 0700/0600 into the
+    operator's own home, then told that operator to copy it off the host.
+
+    Running the verb documented as needing no root produced *"this is not a
+    kit"* -- a definite claim about the artifact, when the truth was a fact
+    about access. An operator who has just watched `export` succeed and is then
+    told the result is not a kit goes looking for a broken export, which is the
+    one place the fault is not.
+    """
+    kit = tmp_path / "kit"
+    kit.mkdir()
+    (kit / dr_kit.KIT_MANIFEST).write_text("{}", encoding="utf-8")
+
+    kit.chmod(0o000)
+    try:
+        if os.geteuid() == 0:  # pragma: no cover - root ignores the mode
+            pytest.skip("running as root; a mode cannot make this unreadable")
+        problems = dr_kit.verify_kit(kit)
+    finally:
+        kit.chmod(0o700)
+
+    assert problems, "an unreadable kit reported no problems at all"
+    joined = " ".join(problems)
+    assert "this is not a kit" not in joined, (
+        "an unreadable directory was reported as not being a kit: " + joined
+    )
+    assert "permission denied" in joined.lower(), joined
+    # The remedy, named. A refusal that does not say what to do next is where an
+    # operator stops.
+    assert "sudo" in joined.lower(), joined
+
+
+def test_a_directory_that_really_is_not_a_kit_still_says_so(tmp_path: Path) -> None:
+    """The paired control. A check that answered "permission denied" to
+    everything would satisfy the test above and lose the property the message
+    exists for."""
+    empty = tmp_path / "not-a-kit"
+    empty.mkdir()
+    problems = dr_kit.verify_kit(empty)
+    assert problems == [f"no {dr_kit.KIT_MANIFEST} in {empty}; this is not a kit"], problems
+
+
+def test_the_export_hands_the_kit_to_the_operator_it_instructs() -> None:
+    """The export's closing line tells the operator to carry the kit away, and
+    until this session the kit was root-owned, so they could not.
+
+    Asserted against the source rather than by running a root export, which no
+    contract test may do. What is asserted is that the handover exists, reads
+    the operator from the host manifest rather than guessing a name, and does
+    not touch the modes -- the kit stays 0700/0600 whoever owns it.
+    """
+    source = (REPO_ROOT / "bin" / "dr-kit.py").read_text(encoding="utf-8")
+    assert "_hand_to_operator" in source
+    handover = source[source.index("def _hand_to_operator") :]
+    assert "operator_user" in handover, "the handover invents an owner instead of reading one"
+    assert "os.chown" in handover
+    assert "chmod" not in handover, "the handover changes modes; only ownership may move"
+    assert "os.geteuid() != 0" in handover, "a non-root export must not attempt a chown"

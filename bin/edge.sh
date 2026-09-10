@@ -155,6 +155,26 @@ print(acme_environment(acme_directory=Path(sys.argv[1])), end="")
 PYTHON
 }
 
+# The same question for a caller that REPORTS rather than decides (ADR 0195).
+#
+# `status` is documented as readable without root, and the ACME store is 0600
+# inside a 0700 root-owned directory -- so delegating to the deciding reader
+# above meant `status` could never print `production` on any host at any time,
+# and printed `staging` instead of declining to answer (D1050). An operator who
+# promotes and then runs the documented confirmation is told the promotion did
+# not happen, and the natural next action spends a seven-day rate limit.
+acme_environment_observed() {
+  PYTHONPATH="${ROOT_DIR}/src" "$(python_bin)" - "${ACME_DIR}" <<'PYTHON'
+import sys
+from pathlib import Path
+
+from agentic_postgres.edge_state import observe_acme_environment
+
+observed = observe_acme_environment(acme_directory=Path(sys.argv[1]))
+print("unknown" if observed is None else observed, end="")
+PYTHON
+}
+
 compose() {
   "${ROOT_DIR}/bin/compose.sh" --edge --host "${HOST_MANIFEST}" "$@"
 }
@@ -227,8 +247,16 @@ do_down() {
 }
 
 do_status() {
+  local observed
+  observed="$(acme_environment_observed)"
   printf 'edge stack       apg-edge\n'
-  printf 'acme environment %s\n' "$(acme_environment)"
+  if [ "${observed}" = "unknown" ]; then
+    # Not "staging". The answer was not obtained, and substituting a plausible
+    # one is what made this dangerous (D1050, ADR 0195).
+    printf 'acme environment unknown (needs root to read %s)\n' "${ACME_DIR}"
+  else
+    printf 'acme environment %s\n' "${observed}"
+  fi
   printf 'state directory  %s\n' "${EDGE_STATE_DIR}"
 
   if [ -f "${EDGE_STATE_FILE}" ] && command -v jq >/dev/null 2>&1; then
