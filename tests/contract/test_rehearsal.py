@@ -976,7 +976,29 @@ def test_every_port_verb_refuses_an_absent_registry_with_exit_4_and_recreates_no
 ) -> None:
     """Until Session 18 an absent file loaded as an empty registry and the next
     `allocate` wrote a fresh one -- a loss read as a clean slate. Every verb
-    now exits 4 naming the path, and the path is still absent afterwards."""
+    now refuses, and the path is still absent afterwards.
+
+    **The refusal an unprivileged caller gets is the LOCK's, and admitting that
+    is not a weakening** (Session 20 Run 7). The writing verbs take `HostLock`
+    on `/run/lock/agentic-postgres-database-ports.lock` before they read the
+    registry. On this workstation and in CI that file does not exist, the caller
+    creates it, and the registry check is reached: exit 4. On the production
+    host a root run left the file `root:root 0644` on 2026-09-06, so `op` cannot
+    open it and the same verb exits 3 -- *"Allocation writes host state and
+    needs root"* -- before the registry is ever consulted. Measured on both.
+
+    Both are correct product behaviour and neither is this test's subject. What
+    IS its subject holds either way and is asserted in both branches: the verb
+    REFUSES, and **it recreates nothing**. That last clause is the whole of what
+    Session 18 repaired, and a run stopped at the lock could not have recreated
+    a registry it never opened.
+
+    Exposed by running the Session 1 gate as `op` on the host -- the one
+    environment where the lock file is somebody else's. No `--lock-file` flag
+    was added to make this hermetic: the lock is what makes probe-and-write
+    atomic, and a caller able to redirect it could run two allocations that do
+    not see each other.
+    """
     missing = tmp_path / "etc" / "database-port-allocations.json"
     host = str(REPO_ROOT / "host.example.yaml")
     common = ["--registry", str(missing), "--instance-uuid", INSTANCE_UUID]
@@ -986,12 +1008,31 @@ def test_every_port_verb_refuses_an_absent_registry_with_exit_4_and_recreates_no
         "allocate": ["allocate", "--host", host, *common, "--project-key", KEY, "--plan"],
         "verify": ["verify", "--host", host, *common, "--plan"],
     }
+    reached_the_registry = 0
     for verb, argv in verbs.items():
-        assert ports.main(argv) == 4, verb
+        code = ports.main(argv)
         err = capsys.readouterr().err
-        assert str(missing) in err and "not an empty one" in err, verb
+
+        assert code in (3, 4), f"{verb} exited {code}; 4 is an absent registry, 3 is the lock"
+        if code == 4:
+            assert str(missing) in err and "not an empty one" in err, verb
+            reached_the_registry += 1
+        else:
+            assert "needs root" in err, (
+                f"{verb} exited 3 for a reason other than the host lock: {err!r}"
+            )
+
+        # The subject, asserted in both branches.
         assert not missing.exists(), f"{verb} recreated the registry"
         assert not missing.parent.exists() or not any(missing.parent.iterdir()), verb
+
+    # Anti-vacuity. `show` takes no lock, so at least one verb reaches the
+    # registry check in every environment. A run where all four stopped at the
+    # lock would have asserted only that a lock refusal writes nothing, which is
+    # not what this test is for.
+    assert reached_the_registry >= 1, (
+        "no verb reached the registry check, so this asserted nothing about an absent registry"
+    )
 
 
 def test_a_present_registry_still_loads_and_the_message_is_the_modules(
