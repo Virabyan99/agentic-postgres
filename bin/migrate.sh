@@ -52,8 +52,15 @@ Subcommands:
   status        List applied and pending migrations. Reads only.
   up            Apply every pending migration, in order, transactionally.
   render        Render the migration set for this project and report digests.
-  freeze-lock   Write migrations/released.lock.json from a clean tree.
-  verify-lock   Check the committed lock against the manifest and templates.
+  freeze-lock   Write a released lock from a clean tree. Without --project,
+                the RELEASE's: migrations/released.lock.json. With --project,
+                that project's own: projects/<slug>/migrations/
+                released.lock.json, and the release's is not touched.
+  verify-lock   Check the release's committed lock against the manifest and
+                templates. With --project, check that project's own lock too,
+                and lint the set -- the release's is always checked, because a
+                project verb that could leave it unverified would be the one
+                way to render an unlocked platform migration.
 
   --project FILE  Path to a project manifest (non-secret).
   --runtime       Read the installed rendered document under /var/lib.
@@ -66,8 +73,16 @@ the cluster, so both need root and a running project.
 There is no `down`. Released platform migrations are fix-forward only: every
 down block raises AP900, and the remedy for a mistake is a new migration.
 
-freeze-lock is the only command that writes the lock. The gate verifies it and
-never creates it, so a lock that is missing is a review that did not happen.
+freeze-lock is the only command that writes a lock. The gate verifies and
+never creates one, so a lock that is missing is a review that did not happen.
+
+There are two locks when a project declares a migration set (ADR 0198): the
+release's, covering the platform's own migrations, and the project's, covering
+the SQL under projects/<slug>/. A project lock additionally records
+follows_release_version -- the release version its migrations must all sort
+after -- because dbmate applies one directory in filename order, and a project
+version older than an applied release version is refused by `up --strict` on a
+deployed cluster while a fresh cluster applies the same pair silently.
 
 Never pass a secret value as a command-line argument.
 USAGE
@@ -92,12 +107,23 @@ parse_args() {
 
   [ -n "${SUBCOMMAND}" ] || die 2 "a subcommand is required."
 
-  # freeze-lock and verify-lock operate on the committed set, which is not a
-  # property of any one project. Requiring --project there would invite an
-  # operator to believe the lock is per project, which is exactly what it is
-  # not (ADR 0028).
+  # freeze-lock and verify-lock default to the RELEASE's lock, which is not a
+  # property of any one project (ADR 0028) -- so --project stays optional there
+  # rather than required, and its absence still means the release's.
+  #
+  # ADR 0198 gives the flag a meaning it did not have: with it, these two verbs
+  # act on the lock of the set that project declares. The comment this replaces
+  # said requiring --project "would invite an operator to believe the lock is
+  # per project, which is exactly what it is not". That is still true of the
+  # release's lock and no longer true of every lock, which is why the flag is
+  # optional and its two meanings are spelled out in the usage above.
   case "${SUBCOMMAND}" in
-    freeze-lock|verify-lock) : ;;
+    freeze-lock|verify-lock)
+      # Optional, but not unchecked: a path that does not exist must not read
+      # as "the release's lock, then".
+      if [ -n "${PROJECT_MANIFEST}" ] && [ ! -f "${PROJECT_MANIFEST}" ]; then
+        die 2 "project manifest not found: ${PROJECT_MANIFEST}"
+      fi ;;
     *)
       [ -n "${PROJECT_MANIFEST}" ] || die 2 "--project is required."
       [ -f "${PROJECT_MANIFEST}" ] || die 2 "project manifest not found: ${PROJECT_MANIFEST}" ;;
@@ -130,9 +156,19 @@ main() {
 
   case "${SUBCOMMAND}" in
     freeze-lock)
-      "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode freeze-lock ;;
+      if [ -n "${PROJECT_MANIFEST}" ]; then
+        "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode freeze-lock \
+          --project "${PROJECT_MANIFEST}"
+      else
+        "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode freeze-lock
+      fi ;;
     verify-lock)
-      "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode verify-lock ;;
+      if [ -n "${PROJECT_MANIFEST}" ]; then
+        "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode verify-lock \
+          --project "${PROJECT_MANIFEST}"
+      else
+        "$(python_bin)" "${ROOT_DIR}/bin/migrate.py" --mode verify-lock
+      fi ;;
     render|status|up)
       local key rendered_dir document
       key="$(project_key)"

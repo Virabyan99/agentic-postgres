@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "placeholders": {
+    "object_owner": {
+      "type": "identifier",
+      "source": "database.roles.object_owner",
+      "description": "The role every object in this set is created as, reached by SET LOCAL ROLE and never by connecting. The migration user holds this membership with INHERIT FALSE, so the preamble is the only route to the owner's authority (ADR 0026)."
+    },
+    "authenticated": {
+      "type": "identifier",
+      "source": "database.roles.authenticated",
+      "description": "The request role a signed-in caller is switched into by PostgREST. This project grants it SELECT on its view and EXECUTE on its write function, and nothing else."
+    },
+    "api_documentation": {
+      "type": "identifier",
+      "source": "database.roles.api_documentation",
+      "description": "The role the OpenAPI capture reads the published surface as. Under openapi-mode = follow-privileges a relation it cannot select and a function it cannot execute are absent from the generated document, so a project that omits these grants publishes a contract it cannot then compare against (F-007, migration 0009's rule)."
+    }
+  },
+  "migrations": [
+    {
+      "version": "20260914120001",
+      "name": "note_embeddings",
+      "template": "templates/0001-note-embeddings.sql",
+      "placeholders": ["object_owner", "authenticated", "api_documentation"],
+      "description": "The example project's own domain, and the product's demonstration of what a tenant's migration set is: a pgvector column beside each of the caller's notes, owned per row, under FORCE row level security, published through a security_invoker view and one SECURITY DEFINER write function in migration 0031's shape. Nothing in it is part of the release -- the release's reviewed contract names no object here, its lock does not cover this template, and its anti-vacuity guard never sees these names, which is what lets that guard keep its equality rather than being loosened to a containment check (D1089). The version stamp is later than the release lock's newest at the moment this set was frozen, recorded in this set's own lock as follows_release_version: dbmate applies one directory in filename order, and rig 20a measured that `up --strict` refuses an out-of-order pending migration with exit 2 on a deployed cluster while a fresh cluster applies the same pair silently -- one set, two schemas (D1098, ADR 0198). This is also the pgvector example D698 and D714 recorded as never registered, arriving as what it always was."
+    }
+  ]
+}

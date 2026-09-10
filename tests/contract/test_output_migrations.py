@@ -545,6 +545,7 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -704,7 +705,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 16"):
+    with pytest.raises(MigrationError, match="already version 17"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -737,7 +738,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1 through 14"):
+    with pytest.raises(MigrationError, match="only versions 1 through 16"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -962,6 +963,7 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1161,6 +1163,7 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1304,6 +1307,7 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1458,6 +1462,7 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1803,6 +1808,7 @@ def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1989,6 +1995,7 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2056,6 +2063,7 @@ def test_the_v9_fixture_is_a_real_render_at_version_9(v9_fixture: dict[str, Any]
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2195,6 +2203,7 @@ def test_the_v10_fixture_is_a_real_render_at_version_10(v10_fixture: dict[str, A
     migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     migrated = output_migrations.migrate_v14_to_v15(migrated)
     migrated = output_migrations.migrate_v15_to_v16(migrated)
+    migrated = output_migrations.migrate_v16_to_v17(migrated)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2355,26 +2364,43 @@ def test_the_renderer_and_the_migrator_agree_on_the_storage_budget(
 
 
 @pytest.fixture
-def v14(chained: dict[str, Any]) -> dict[str, Any]:
-    """A version 14 document, derived from the chain's current one by removing
-    what version 15 added -- the construction `test_project_manifest` uses for a
-    downgrade, and checked first so a refusal below is the step's, not this."""
-    document = json.loads(json.dumps(chained))
+def v14(v15: dict[str, Any]) -> dict[str, Any]:
+    """A version 14 document, derived from the version 15 one by removing what
+    version 15 added -- the construction `test_project_manifest` uses for a
+    downgrade, and checked first so a refusal below is the step's, not this.
+
+    Derived from `v15` rather than from `chained` directly, and that is a repair
+    rather than a tidy-up. Built by subtraction from the CURRENT document, this
+    fixture had to lose one more field every time a version added one --
+    `backup.mirror` was already appended here by version 16, in a comment
+    explaining that it did not exist when the fixture was written. Version 17
+    would have been the third, and the failure mode is silent in the direction
+    that matters: a v14 document still carrying a v17 field makes the step under
+    test refuse for a reason that has nothing to do with the step.
+
+    Chained, each version's fixture removes exactly what that version adds, and
+    the list stops being one somebody has to remember to extend."""
+    document = json.loads(json.dumps(v15))
     document["project"].pop("lifecycle", None)
-    # Version 16 added `backup.mirror` after this fixture was written; a
-    # version 14 document carries neither.
-    document["backup"].pop("mirror", None)
     document["schema_version"] = 14
     return document
 
 
-def test_the_chain_ends_at_version_16_permanent_and_unmirrored(chained: dict[str, Any]) -> None:
-    """The premise of the `v14` and `v15` fixtures, as a test rather than inside
-    a fixture (D386): a mutation that made the chain end elsewhere must FAIL an
-    assertion, not ERROR every test that shares the fixture."""
-    assert chained["schema_version"] == 16
+def test_the_chain_ends_at_version_17_permanent_unmirrored_and_setless(
+    chained: dict[str, Any],
+) -> None:
+    """The premise of the `v14`, `v15` and `v16` fixtures, as a test rather than
+    inside a fixture (D386): a mutation that made the chain end elsewhere must
+    FAIL an assertion, not ERROR every test that shares the fixture."""
+    assert chained["schema_version"] == 17
     assert chained["project"]["lifecycle"] == output_migrations.PERMANENT_LIFECYCLE
     assert chained["backup"]["mirror"] == output_migrations.NO_MIRROR
+    # Version 17, ADR 0198. A migrated document has no project set -- no
+    # document below 17 could name one -- and its release lock digest is NULL
+    # rather than today's: the digest describes the release that RENDERED a
+    # document, and writing the current one into an archived document would
+    # claim that deployment applied a set it has never seen.
+    assert chained["migrations"] == {"release_lock_sha256": None, "project_set": None}
 
 
 def test_v15_adds_the_lifecycle_and_nothing_else(v14: dict[str, Any]) -> None:
@@ -2385,7 +2411,8 @@ def test_v15_adds_the_lifecycle_and_nothing_else(v14: dict[str, Any]) -> None:
     # one step further before it is validated; what version 15 added is
     # asserted on the version 15 document itself, above.
     config.validate_against_schema(
-        output_migrations.migrate_v15_to_v16(migrated), "outputs.schema.json"
+        output_migrations.migrate_v16_to_v17(output_migrations.migrate_v15_to_v16(migrated)),
+        "outputs.schema.json",
     )
 
     stripped = json.loads(json.dumps(migrated))
@@ -2425,11 +2452,26 @@ def test_v15_refuses_a_document_already_at_15(v14: dict[str, Any]) -> None:
 
 
 @pytest.fixture
-def v15(chained: dict[str, Any]) -> dict[str, Any]:
-    """A version 15 document, derived from the chain's current one by removing
-    what version 16 added. Its premise is asserted by
-    `test_the_chain_ends_at_version_16_permanent_and_unmirrored` (D386)."""
+def v16(chained: dict[str, Any]) -> dict[str, Any]:
+    """A version 16 document, derived from the chain's current one by removing
+    what version 17 added. Its premise is asserted by
+    `test_the_chain_ends_at_version_17_permanent_unmirrored_and_setless`
+    (D386)."""
     document = json.loads(json.dumps(chained))
+    document.pop("migrations", None)
+    document["schema_version"] = 16
+    return document
+
+
+@pytest.fixture
+def v15(v16: dict[str, Any]) -> dict[str, Any]:
+    """A version 15 document, derived from the version 16 one by removing what
+    version 16 added.
+
+    Derived from `v16` rather than from `chained` directly, so that the two
+    fixtures cannot disagree about what a version 16 document is -- which is
+    what a second hand-built copy would eventually do."""
+    document = json.loads(json.dumps(v16))
     document["backup"].pop("mirror", None)
     document["schema_version"] = 15
     return document
@@ -2444,7 +2486,12 @@ def test_v16_adds_the_mirror_and_nothing_else(v15: dict[str, Any]) -> None:
         "bucket": None,
         "region": None,
     }
-    config.validate_against_schema(migrated, "outputs.schema.json")
+    # The schema admits the current version only, so the document is carried
+    # one step further before it is validated; what version 16 added is
+    # asserted on the version 16 document itself, above.
+    config.validate_against_schema(
+        output_migrations.migrate_v16_to_v17(migrated), "outputs.schema.json"
+    )
 
     stripped = json.loads(json.dumps(migrated))
     del stripped["backup"]["mirror"]
@@ -2473,9 +2520,60 @@ def test_v16_refuses_a_document_that_already_carries_a_mirror(v15: dict[str, Any
         output_migrations.migrate_v15_to_v16(v15)
 
 
-def test_v16_refuses_a_current_document(chained: dict[str, Any]) -> None:
+def test_v16_refuses_a_current_document(v16: dict[str, Any]) -> None:
+    """The step refuses a document that is already at its own target version.
+
+    Takes `v16` rather than `chained`, which is version 17 since ADR 0198: the
+    property under test is *a step will not re-run on its own output*, and
+    against a version 17 document this step refuses for a different reason -- a
+    version mismatch -- so the old assertion would have passed while measuring
+    something else."""
     with pytest.raises(MigrationError, match="already version 16"):
-        output_migrations.migrate_v15_to_v16(chained)
+        output_migrations.migrate_v15_to_v16(v16)
+
+
+def test_v17_refuses_a_current_document(chained: dict[str, Any]) -> None:
+    """The same property for the step this session adds."""
+    with pytest.raises(MigrationError, match="already version 17"):
+        output_migrations.migrate_v16_to_v17(chained)
+
+
+def test_v17_adds_the_migrations_block_and_nothing_else(v16: dict[str, Any]) -> None:
+    """ADR 0198, and the half of ADR 0199 that belongs to the migrator (D1094).
+
+    The second assertion is the load-bearing one. A migrator COULD look at a
+    version 16 document and reason about which recorded `unavailable` had
+    really been an unobserved route -- an `unavailable` on `docs` beside a
+    staging certificate, say. It must not: the writer that had the information
+    wrote one word for two states, and nothing downstream can recover the
+    distinction. Guessing would be ADR 0195's own defect applied to itself, in a
+    record that outlives the guess.
+    """
+    migrated = output_migrations.migrate_v16_to_v17(v16)
+    assert migrated["schema_version"] == 17
+    assert migrated["migrations"] == {"release_lock_sha256": None, "project_set": None}
+
+    stripped = json.loads(json.dumps(migrated))
+    del stripped["migrations"]
+    stripped["schema_version"] = 16
+    assert stripped == v16, "the step changed something other than what version 17 adds"
+
+
+def test_v17_leaves_every_recorded_route_word_alone(v16: dict[str, Any]) -> None:
+    """A route recorded `unavailable` at version 16 is `unavailable` at 17.
+
+    Written against a DEPLOYED-shaped route block rather than the rendered
+    fixture's bare URLs, because the rendered branch has no route status to
+    preserve -- which is exactly why this assertion has to name the field it
+    guards rather than trusting the round trip above.
+    """
+    v16["routes"]["health"] = {"status": "unavailable", "url": "https://example.test/__apg/healthz"}
+    migrated = output_migrations.migrate_v16_to_v17(v16)
+    assert migrated["routes"]["health"]["status"] == "unavailable", (
+        "the migrator rewrote a recorded route word; it cannot know which "
+        "`unavailable` had been unobserved, and a guess written into a document "
+        "outlives the guess (ADR 0199, D1094)"
+    )
 
 
 def test_v16_refuses_a_deployed_document(v15: dict[str, Any]) -> None:

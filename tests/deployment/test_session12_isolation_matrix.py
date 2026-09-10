@@ -142,6 +142,16 @@ MUST_MATCH = (
     "edge.stack_name",
     "edge.control_network",
     "edge.egress_network",
+    # Version 17 (ADR 0198). Two projects on one host are deployed from ONE
+    # release checkout, and the release lock's digest is a property of that
+    # release rather than of either project. Two projects disagreeing about it
+    # means two releases are installed on one machine -- which is precisely the
+    # class of thing the host leaves above exist to notice, arriving in a field
+    # that names the SQL each cluster holds.
+    #
+    # Classified here rather than at the first host gate, because that is where
+    # D1029 found the mirror's four leaves unclassified and it cost a repair.
+    "migrations.release_lock_sha256",
 )
 
 #: **Release state is deliberately NOT in MUST_MATCH**, and the first draft had
@@ -208,6 +218,18 @@ NOT_AUTHORITY_PREFIXES = (
     "backup.mirror.enabled",
     "backup.mirror.endpoint",
     "backup.mirror.region",
+    # Version 17 (ADR 0198). Whether a project has a migration set of its own,
+    # where it lives, what its lock digests to and how many migrations it holds.
+    # One project declaring a set while the other does not is the ordinary case
+    # -- it is what `project.example.yaml` and `project.second.example.yaml` are
+    # -- and two projects sharing a set would be two tenants of one application,
+    # which is also legitimate. Neither is a claim about isolation.
+    #
+    # NOT in MUST_DIFFER for that second reason, and the distinction is worth
+    # stating: a set is not an identity. `project_set.root` reads like one, and
+    # asserting two projects must differ in it would make a supported topology
+    # into a failure.
+    "migrations.project_set.",
     "backup_state.",
     "bootstrap.status",
     "routes.",

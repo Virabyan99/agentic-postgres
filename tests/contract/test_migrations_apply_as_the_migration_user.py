@@ -186,16 +186,37 @@ def test_every_released_migration_applies_as_the_migration_user(cluster: dict[st
     schema exists and before dbmate runs -- using the product's own
     `build_statements`, so the grants under test are the deployed ones.
     """
-    manifest = migrations.load_manifest()
     document = cluster["document"]
-    released = manifest["migrations"]
-    assert released, "no released migrations"
+
+    # ADR 0198. EVERY set this project applies, release first -- and this is the
+    # module where that matters most, because it is the one that exists after a
+    # deploy took a live project down (D285). A project's set runs through the
+    # same migration plane as the same `migration_user`, which holds NOINHERIT
+    # and reaches the owner only through `SET LOCAL ROLE`; if it is not applied
+    # here, by that role, then nothing proves it can be applied at all.
+    #
+    # Every offline rig that applies migrations as a superuser bypasses the
+    # ownership check entirely, which is exactly how D285's defect survived four
+    # sessions of green proofs. Applying a tenant's SQL only under a superuser
+    # would recreate that hole for the half of the schema an adopter writes.
+    planned = []
+    for migration_set in migrations.sets_for(document):
+        set_manifest = migration_set.load_manifest()
+        planned += [
+            (entry, set_manifest, migration_set.root) for entry in set_manifest["migrations"]
+        ]
+    assert planned, "no migrations at all"
+    assert any(migration_set.is_project for migration_set in migrations.sets_for(document)), (
+        "the fixture project declares no migration set, so this module applies only the "
+        "release's SQL as the migration user and a tenant's set is proved by nothing "
+        "(ADR 0198). Re-render the fixture from project.example.yaml."
+    )
 
     bootstrap = _bootstrap_module()
 
     applied: list[str] = []
-    for index, entry in enumerate(released):
-        payload = migrations.render_migration(entry, manifest, document)
+    for index, (entry, manifest, root) in enumerate(planned):
+        payload = migrations.render_migration(entry, manifest, document, root)
         body = payload.split("-- migrate:down", 1)[0].replace("-- migrate:up", "", 1)
 
         # `postgres-bootstrap.py` runs between the schema existing and dbmate
@@ -221,7 +242,7 @@ def test_every_released_migration_applies_as_the_migration_user(cluster: dict[st
         )
         applied.append(entry["name"])
 
-    assert len(applied) == len(released)
+    assert len(applied) == len(planned)
 
 
 def test_a_superuser_is_not_what_the_host_uses(cluster: dict[str, Any]) -> None:

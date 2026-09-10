@@ -184,9 +184,23 @@ def cluster(tmp_path_factory: pytest.TempPathFactory) -> Any:
         # secrets and scope ceilings, not one of whose tests concerns vectors.
         cluster.psql("CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions")
 
-        manifest = migrations.load_manifest()
-        for entry in manifest["migrations"]:
-            payload = migrations.render_migration(entry, manifest, document)
+        # ADR 0198: every set this project applies, release first. The fixture
+        # project declares one of its own, so this applies the example project
+        # set to a throwaway cluster on every CI push -- D1067's shadow
+        # database, arriving as a consequence of where the set lives rather
+        # than as something built.
+        #
+        # Flattened before the loop rather than nested inside it, so the body
+        # below is byte-for-byte what it was: the review that matters here is
+        # which set is applied, not whether the psql invocation moved.
+        planned = []
+        for migration_set in migrations.sets_for(document):
+            set_manifest = migration_set.load_manifest()
+            planned += [
+                (entry, set_manifest, migration_set.root) for entry in set_manifest["migrations"]
+            ]
+        for entry, manifest, root in planned:
+            payload = migrations.render_migration(entry, manifest, document, root)
             up = payload.split("-- migrate:down", 1)[0].replace("-- migrate:up", "", 1)
             applied = _docker(
                 "exec", "-i", name, "psql", "-qtA", "-v", "ON_ERROR_STOP=1",

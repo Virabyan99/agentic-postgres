@@ -46,17 +46,83 @@ def manifest() -> dict:
     return json.loads((MIGRATIONS / rendering.MIGRATION_MANIFEST_NAME).read_text(encoding="utf-8"))
 
 
+@pytest.fixture(scope="module")
+def document() -> dict:
+    """The rendered document beside the set, which is what names the sets.
+
+    Read from the fixture rather than from `project.example.yaml`, because
+    `migrations.sets_for` takes the DEPLOYED-shaped document -- ADR 0002's rule,
+    so a second reader of the manifest never becomes a second derivation path.
+    """
+    return json.loads((ALPHA / "outputs.json").read_text(encoding="utf-8"))
+
+
 def test_the_rendered_set_exists_beside_the_document_that_produced_it() -> None:
     assert MIGRATIONS.is_dir(), "render wrote no migrations directory"
     assert sorted(path.name for path in MIGRATIONS.glob("*.sql"))
 
 
-def test_one_file_per_declared_migration(manifest: dict) -> None:
-    declared = migrations.load_manifest()["migrations"]
+def test_one_file_per_declared_migration(manifest: dict, document: dict) -> None:
+    """Every set this project applies, not the release's alone (ADR 0198).
+
+    `migrations.load_manifest()` -- the default root -- is what this used to
+    read, and it is one of the eleven callers D1088 names: it meant *every
+    migration this project applies* and answered *the release's*. The fixture
+    project declares a set of its own, so those two numbers are no longer the
+    same, and the version that took the default would have gone red here
+    exactly once and been "fixed" by changing 31 to 30.
+    """
+    declared = [
+        entry
+        for migration_set in migrations.sets_for(document)
+        for entry in migration_set.load_manifest()["migrations"]
+    ]
     assert len(manifest["migrations"]) == len(declared)
     assert {path.name for path in MIGRATIONS.glob("*.sql")} == {
         entry["file"] for entry in manifest["migrations"]
     }
+
+
+def test_the_rendered_manifest_names_the_set_of_every_file(manifest: dict, document: dict) -> None:
+    """TEN-SET-001. Which set each rendered payload came from is RECORDED.
+
+    Goes red if a payload lands in the directory without a `set`, if a project's
+    migration is recorded as the release's, or if the release's set is empty --
+    which would make every other assertion here hold against two empty sets.
+
+    The version order is asserted here rather than left to dbmate because dbmate
+    orders one directory by filename and rig 20a measured what that costs when
+    the order is wrong: `up --strict` exits 2 having applied nothing on a
+    deployed cluster, while a fresh cluster applies the same pair silently
+    (D1098). The render is where that is still cheap to catch.
+    """
+    labels = {entry["file"]: entry["set"] for entry in manifest["migrations"]}
+    assert labels, "the rendered manifest names no migrations at all"
+
+    by_label: dict[str, list[str]] = {}
+    for entry in manifest["migrations"]:
+        by_label.setdefault(entry["set"], []).append(entry["version"])
+
+    assert by_label["release"], "no migration is recorded as the release's"
+    assert set(by_label) <= {"release", "project"}, f"unknown set labels: {sorted(by_label)}"
+
+    versions = [entry["version"] for entry in manifest["migrations"]]
+    assert versions == sorted(versions), (
+        f"the rendered set is not in ascending version order: {versions}"
+    )
+
+    declared = migrations.project_set_from(document)
+    if declared is None:
+        assert "project" not in by_label, (
+            "a payload is recorded as a project's, and this project declares no set"
+        )
+        assert manifest["project_set"] is None
+    else:
+        assert by_label["project"], "the project declares a set and no payload came from it"
+        assert manifest["project_set"]["count"] == len(by_label["project"])
+        # Every project version sorts after every release version, which is the
+        # rule `freeze-lock --project` records as `follows_release_version`.
+        assert min(by_label["project"]) > max(by_label["release"])
 
 
 def test_each_recorded_digest_is_the_digest_of_the_file(manifest: dict) -> None:

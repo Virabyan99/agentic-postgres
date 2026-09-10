@@ -352,10 +352,24 @@ def _pooler_answers(document: dict[str, Any]) -> bool | None:
 
 
 def probe_migrations(document: dict[str, Any]) -> diagnosis.Check:
-    """The ledger, against what this release has released."""
+    """The ledger, against every set this project applies.
+
+    `migrations.load_manifest()` -- the release's alone -- is what this counted
+    until ADR 0198, and it is one of the eleven callers D1088 names: it meant
+    *every migration this project applies* and answered *the release's*. On a
+    project with a set of its own that reads as a cluster AHEAD of the release,
+    which `diagnosis.migrations` reports as a warning -- a green-adjacent line
+    for the one project whose tenant tables the check exists to notice.
+
+    `sets_for` reads the DOCUMENT, so a host whose checkout does not carry the
+    project's directory still counts what the deployment declared.
+    """
     db = document.get("database") or {}
     container, name = db.get("container"), db.get("name")
-    released = len(migrations.load_manifest().get("migrations") or [])
+    released = sum(
+        len(migration_set.load_manifest().get("migrations") or [])
+        for migration_set in migrations.sets_for(document)
+    )
     if not container or not name:
         return diagnosis.migrations(applied=None, released=released)
 

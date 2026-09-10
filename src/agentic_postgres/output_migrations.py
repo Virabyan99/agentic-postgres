@@ -101,12 +101,19 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 16
+CURRENT_VERSION = 17
 
 #: What a document below version 16 means by carrying no mirror (ADR 0188):
 #: none. Like `PERMANENT_LIFECYCLE`, a constant with one possible value
 #: rather than an argument.
 NO_MIRROR: dict[str, Any] = {"enabled": False, "endpoint": None, "bucket": None, "region": None}
+
+#: What a project with no migration set of its own records at version 17
+#: (ADR 0198). `None` rather than an empty object, and the distinction is
+#: the usual one: an empty object would say *a set with nothing in it*,
+#: which is a state a project can also be in and which a reader must be able
+#: to tell apart from *no set at all*.
+NO_PROJECT_SET: None = None
 
 #: What a document below version 15 means by carrying no lifecycle (ADR 0186).
 #: The one value in this module that is NOT an argument: it is not a fact the
@@ -252,8 +259,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}:
-        raise MigrationError(f"only versions 1 through 14 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}:
+        raise MigrationError(f"only versions 1 through 16 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -309,7 +316,10 @@ def migrate_rendered(
     if detect_version(document) == 14:
         document = migrate_v14_to_v15(document)
 
-    return migrate_v15_to_v16(document)
+    if detect_version(document) == 15:
+        document = migrate_v15_to_v16(document)
+
+    return migrate_v16_to_v17(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1267,6 +1277,56 @@ def migrate_v15_to_v16(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def migrate_v16_to_v17(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 17 ``rendered`` document derived from a version 16 one.
+
+    Version 17 adds ``migrations`` (ADR 0198): the digest of the release lock
+    this deployment applied, and the project's own set if it has one. No
+    document below 17 has either, because neither field existed, so this step
+    takes no argument -- the release lock digest is a property of the RELEASE
+    and not of the archived document, and inventing one would be worse than
+    leaving it absent. It is written by the render; the migrator only makes the
+    block exist.
+
+    **Every route's recorded word is left exactly as it was found** (ADR 0199,
+    D1094). Version 17 also adds `unobserved` to `routes.*.status`, and the
+    tempting thing for a migrator to do is decide which recorded `unavailable`
+    had actually been an unobserved one. It must not. **The information is not
+    in the document**: the writer that had it wrote one word for two states, and
+    nothing downstream can recover the distinction. A migrator that guessed
+    would be ADR 0195's own defect applied to itself -- a report substituting an
+    answer for a failure to determine one -- written into a record that outlives
+    the guess and is read by six consumers as fact.
+
+    Only a version 17 *deploy* writes `unobserved`, and only where the
+    observation was not made.
+    """
+    version = detect_version(document)
+    if version == 17:
+        raise MigrationError("document is already version 17; migration would be a no-op")
+    if version != 16:
+        raise MigrationError(f"only version 16 can be migrated to 17, got {version}")
+
+    require_kind(document, "rendered")
+
+    if "migrations" in document:
+        raise MigrationError(
+            "the document already carries a migrations block; this is not a version 16 document"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["migrations"] = {
+        # Absent rather than invented. The release lock digest describes the
+        # release that rendered a document, and this document was rendered by an
+        # older one; a migrator that wrote today's digest would claim the
+        # archived deployment applied a set it has never seen.
+        "release_lock_sha256": None,
+        "project_set": NO_PROJECT_SET,
+    }
+    migrated["schema_version"] = 17
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1282,6 +1342,7 @@ __all__ = [
     "CURRENT_VERSION",
     "HEALTH_ROUTE_PATH",
     "NO_MIRROR",
+    "NO_PROJECT_SET",
     "PERMANENT_LIFECYCLE",
     "MigrationError",
     "detect_version",
@@ -1302,5 +1363,6 @@ __all__ = [
     "migrate_v13_to_v14",
     "migrate_v14_to_v15",
     "migrate_v15_to_v16",
+    "migrate_v16_to_v17",
     "require_kind",
 ]

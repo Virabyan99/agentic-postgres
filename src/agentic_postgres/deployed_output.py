@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import access_policy, backup_report, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -132,7 +132,30 @@ MCP_NOT_PUBLISHED: dict[str, Any] = {
 #: A route that this deployment does not publish. `health` is deliberately not
 #: expressible this way: its URL is the same string for every project at every
 #: session, so nulling it would delete an address rather than withhold a claim.
+#:
+#: This is the DETERMINED answer -- the deploy looked, or knew without looking,
+#: and the route is not served. Use :data:`ROUTE_UNOBSERVED` when the deploy did
+#: not make the observation at all (ADR 0199).
 ROUTE_NOT_PUBLISHED: dict[str, Any] = {"status": "unavailable", "url": None}
+
+#: A route this deployment DID NOT LOOK AT. Version 17, ADR 0199.
+#:
+#: The distinction this makes is the one ADR 0195 is about: a report has three
+#: outcomes, not two -- the answer, the other answer, and *I could not determine
+#: it*. Until version 17 the first-deploy router race (D326's shape), a docs
+#: probe that met a staging certificate (D1047) and a probe that timed out all
+#: recorded the same word as a route observed failing, and nothing in the
+#: document told them apart.
+#:
+#: The URL is withheld exactly as `unavailable` withholds it: a route nothing
+#: observed is a route nothing can promise an address for. What changes is that
+#: the document stops asserting a failure it did not witness.
+ROUTE_UNOBSERVED: dict[str, Any] = {"status": "unobserved", "url": None}
+
+#: The three words a published route may carry, in one place, because a set
+#: spelled out at each of five call sites is a set that gains a member at four
+#: of them (D600's shape, and D1094's).
+ROUTE_STATUSES = frozenset({"ready", "unavailable", "unobserved"})
 
 #: The repository of a deployment nothing has asked yet. Version 13.
 #:
@@ -173,6 +196,8 @@ __all__ = [
     "PROJECT_STATE_ROOT",
     "RENDERED_ROOT",
     "ROUTE_NOT_PUBLISHED",
+    "ROUTE_STATUSES",
+    "ROUTE_UNOBSERVED",
     "SCHEMA_VERSION",
     "activated_login_roles",
     "build_deployed_document",
@@ -284,12 +309,16 @@ def published_route(rendered_url: str, status: str) -> dict[str, Any]:
     leaving it optional because the value that would otherwise sit there is a
     URL that reads exactly like a working one.
     """
-    if status not in {"ready", "unavailable"}:
+    if status not in ROUTE_STATUSES:
         raise ManifestError(
-            f"a published route is 'ready' or 'unavailable', not {status!r}. "
+            f"a published route is one of {sorted(ROUTE_STATUSES)}, not {status!r}. "
             "'planned' is the rendered branch's word, and copying it here would "
             "publish a manifest's intention as an observation"
         )
+    # One function decides the URL, for both words that withhold it. The printed
+    # summary and the document take the word from here too, because a status
+    # computed twice is wrong the second time (D701) -- and this one outlives
+    # the run that computed it.
     return {"status": status, "url": rendered_url if status == "ready" else None}
 
 
@@ -519,6 +548,18 @@ def build_deployed_document(
         # second authority for a value only a deployment can know.
         "mcp": dict(mcp),
         "template_version": rendered["template_version"],
+        # Version 17 (ADR 0198). Carried whole from the render, for the reason
+        # `storage` and `backup` above are: one `$def` serves both branches, so
+        # copying it key by key here would be a second list to keep in step.
+        #
+        # And carried rather than recomputed, which is the load-bearing half. A
+        # deployment applied the sets the RELEASE THAT RENDERED IT declared; a
+        # deployed document that re-derived this from the checkout it happens to
+        # be sitting in would answer for the checkout rather than for the
+        # deployment -- and would go on answering after the checkout moved. That
+        # is D700's shape (`backup_state` is a deploy-time snapshot) arriving in
+        # a block whose whole purpose is to say which SQL a cluster holds.
+        "migrations": dict(rendered["migrations"]),
         "observed_at": datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
     }
     return validate_deployed_document(document)

@@ -61,13 +61,18 @@ MAX_MANIFEST_BYTES = 65_536
 #: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 #: The project manifest version at which `backup.mirror` exists (ADR 0188):
 #: optional at 4, forbidden below. A manifest below 4 has no mirror, and the
 #: deployed document says `enabled: false` for it.
 PROJECT_MIRROR_FROM = 4
+
+#: The project manifest version at which `migrations.set` exists (ADR 0198):
+#: optional at 5, forbidden below. A manifest below 5 has no set of its own and
+#: the deployed document records `migrations.project_set: null` for it.
+PROJECT_MIGRATION_SET_FROM = 5
 
 #: The project manifest version at which `mcp.profile` exists (ADR 0183).
 PROJECT_PROFILE_FROM = 2
@@ -982,8 +987,24 @@ def expires_at_of(lifecycle: dict[str, str]) -> datetime | None:
     return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 
 
+def project_migration_set(document: dict[str, Any]) -> str | None:
+    """The repository-relative set this manifest names, or None.
+
+    One reader, because `migrations.set` is about to be read by the render, the
+    validator, the outputs writer and the doctor -- and four readers of one
+    optional key is how three of them end up disagreeing about what an absent
+    key means (D1088's shape, prevented rather than repaired).
+    """
+    block = document.get("migrations")
+    return None if not block else block["set"]
+
+
 def validate_project_semantics(
-    document: dict[str, Any], *, now: datetime | None = None, expiry: bool = True
+    document: dict[str, Any],
+    *,
+    now: datetime | None = None,
+    expiry: bool = True,
+    repo_root: Path | None = None,
 ) -> None:
     """Apply every rule of runbook §3.4 that JSON Schema cannot express.
 
@@ -1035,6 +1056,34 @@ def validate_project_semantics(
             f"mcp.public_base_path {mcp['public_base_path']!r} overlap ambiguously; "
             "one route tree is a prefix of the other"
         )
+
+    # ADR 0198. The schema constrains the SHAPE of the path -- under
+    # `projects/`, no traversal -- and only the filesystem can answer whether it
+    # is there. The refusal is here rather than at the render's later stages for
+    # the reason every refusal in this product is moved earlier: a manifest
+    # naming a set that is not in the checkout would otherwise deploy, apply the
+    # release's migrations, and silently skip the project's -- a cluster missing
+    # a tenant's tables with a green deploy behind it.
+    #
+    # `repo_root` is a parameter rather than REPO_ROOT because a test builds a
+    # set under `tmp_path`, and a validator that could only be satisfied by the
+    # real checkout would be one no refusal could be proved against.
+    set_path = project_migration_set(document)
+    if set_path is not None:
+        root = (repo_root if repo_root is not None else REPO_ROOT) / set_path
+        if not root.is_dir():
+            raise ManifestError(
+                f"migrations.set names {set_path!r}, which is not a directory in this "
+                f"checkout ({root}). A project's migration set is tracked in the release "
+                "checkout (ADR 0198); it is not fetched, and it is not read from the host."
+            )
+        manifest_path = root / "migrations" / "manifest.json"
+        if not manifest_path.is_file():
+            raise ManifestError(
+                f"migrations.set names {set_path!r}, which has no "
+                f"migrations/manifest.json ({manifest_path}). A set is a manifest, its "
+                "templates and its own lock."
+            )
 
     database = document["database"]
     if database["pool_size"] > database["max_client_connections"]:

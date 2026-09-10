@@ -509,6 +509,48 @@ def build_outputs(
             )
         },
         "template_version": template_version(),
+        # Version 17 (ADR 0198). Which sets this project applies, identified by
+        # the digest of each set's committed LOCK rather than of its manifest:
+        # the lock is what `verify_lock` compares and what a reviewer approved,
+        # so this says "the set somebody reviewed" rather than "the set somebody
+        # described".
+        #
+        # Read here from the project manifest, and by everything downstream from
+        # THIS document -- ADR 0002's rule, so a second reader of the manifest
+        # never becomes a second derivation path.
+        "migrations": _migrations_block(project),
+    }
+
+
+def _migrations_block(project: dict[str, Any]) -> dict[str, Any]:
+    """`migrations` for the rendered document. Version 17, ADR 0198.
+
+    The release's lock digest is always present here, because a render happens
+    inside a checkout that has one; it is null only in a document migrated up
+    from version 16, which predates the field entirely.
+
+    A project's set is `null` unless the manifest names one. Null and not an
+    empty object: an empty object would say *a set with nothing in it*, which is
+    a state a project can also be in and which a reader must be able to tell
+    apart from *no set at all*.
+    """
+    from agentic_postgres import migrations as migration_module
+
+    project_set: dict[str, Any] | None = None
+    named = config.project_migration_set(project)
+    if named is not None:
+        root = REPO_ROOT / named / "migrations"
+        lock_path = root / "released.lock.json"
+        manifest = migration_module.load_manifest(root / "manifest.json")
+        project_set = {
+            "root": named,
+            "lock_sha256": sha256(lock_path.read_bytes()).hexdigest(),
+            "count": len(manifest["migrations"]),
+        }
+
+    return {
+        "release_lock_sha256": sha256(migration_module.LOCK_PATH.read_bytes()).hexdigest(),
+        "project_set": project_set,
     }
 
 
@@ -1999,38 +2041,98 @@ MIGRATION_MANIFEST_NAME = "rendered-manifest.json"
 
 
 def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path:
-    """Render this project's migration set into `<directory>/migrations/`.
+    """Render every set this project applies into `<directory>/migrations/`.
 
     A rendered payload, not a template: ADR 0028 makes the *rendered* text the
     immutable unit, and this is where it becomes a file. The digest recorded
     beside each one is the digest of exactly these bytes, so `migrate.sh` can
     refuse a file edited after it was rendered without re-rendering it to find
     out.
+
+    **One directory, two sets** (ADR 0198). dbmate is handed a directory, not a
+    list, so the release's migrations and the project's land side by side and
+    dbmate orders the whole of it by filename. That is why the version rule
+    exists and why it is checked again here rather than trusted: rig 20a
+    measured `up --strict` exiting 2 and applying nothing when the order is
+    broken on a deployed cluster, and applying the same pair silently on a fresh
+    one -- one set producing two schemas (D1098).
     """
     from agentic_postgres import migrations
 
-    manifest = migrations.load_manifest()
     target = directory / "migrations"
     target.mkdir(mode=MIGRATION_DIRECTORY_MODE)
 
     entries = []
-    for entry in manifest["migrations"]:
-        payload = migrations.render_migration(entry, manifest, document)
-        # dbmate orders by filename and parses `<version>_<name>.sql`. The name
-        # is built from the manifest's own two fields rather than from the
-        # template's filename: the template path is an input this repository
-        # controls, and the applied version is a value the ledger keeps forever.
-        filename = f"{entry['version']}_{entry['name']}.sql"
-        path = target / filename
-        path.write_text(payload, encoding="utf-8")
-        path.chmod(MIGRATION_FILE_MODE)
-        entries.append(
-            {
-                "version": entry["version"],
-                "name": entry["name"],
-                "file": filename,
-                "sha256": migrations.digest(payload),
+    project_set_record: dict[str, Any] | None = None
+
+    for migration_set in migrations.sets_for(document):
+        manifest = migration_set.load_manifest()
+        if migration_set.is_project:
+            # Before a byte of it is written. ADR 0028's rule is that the
+            # rendered payload is the immutable unit, and the lock is what says
+            # which payload a reviewer approved; a render that published SQL its
+            # lock does not cover would make the digest recorded beside it a
+            # digest of something nobody reviewed.
+            #
+            # The release's own lock is verified by `bin/migrate.py` before any
+            # mode that reaches this, so it is not re-verified here -- and the
+            # asymmetry is deliberate rather than an omission: a project set is
+            # the half an adopter edits.
+            migrations.verify_lock(manifest, migration_set.load_lock(), migration_set.root)
+            migrations.lint_project_set(migration_set)
+        for entry in manifest["migrations"]:
+            payload = migrations.render_migration(entry, manifest, document, migration_set.root)
+            # dbmate orders by filename and parses `<version>_<name>.sql`. The
+            # name is built from the manifest's own two fields rather than from
+            # the template's filename: the template path is an input this
+            # repository controls, and the applied version is a value the ledger
+            # keeps forever.
+            filename = f"{entry['version']}_{entry['name']}.sql"
+            path = target / filename
+            path.write_text(payload, encoding="utf-8")
+            path.chmod(MIGRATION_FILE_MODE)
+            entries.append(
+                {
+                    "version": entry["version"],
+                    "name": entry["name"],
+                    "file": filename,
+                    "sha256": migrations.digest(payload),
+                    # Which set this payload came from. Recorded rather than
+                    # inferred, because the only other way to answer it later is
+                    # to look the version up in one lock and then the other --
+                    # which is exactly the reader D1096 broke.
+                    "set": migration_set.label,
+                }
+            )
+        if migration_set.is_project:
+            project_set_record = {
+                "root": str(migration_set.root.parent.relative_to(REPO_ROOT)),
+                # The lock's bytes, not the manifest's: the lock is what
+                # `verify_lock` compares and what a reviewer signed off on, so
+                # it is the digest that says "this deployment applied the set
+                # somebody reviewed" rather than "the set somebody described".
+                "lock_sha256": sha256(migration_set.lock_path.read_bytes()).hexdigest(),
+                "count": len(manifest["migrations"]),
             }
+
+    # The order files were written is the order sets were applied. Assert it is
+    # ALSO ascending version order, which is the order dbmate will use -- if the
+    # two ever disagree, the deploy would apply a different sequence from the one
+    # this function just described, and the cluster would be the first to know.
+    versions = [entry["version"] for entry in entries]
+    if versions != sorted(versions):
+        raise RenderError(
+            "the rendered migrations are not in ascending version order: "
+            f"{versions}. dbmate orders one directory by filename, so a project "
+            "version that sorts before a release version would be applied in a "
+            "different order than this render describes. Re-stamp the project's "
+            "migration later than the release lock's newest and freeze again."
+        )
+    duplicates = sorted({v for v in versions if versions.count(v) > 1})
+    if duplicates:
+        raise RenderError(
+            f"two migrations share a version across sets: {duplicates}. dbmate keys "
+            "its ledger on the version, so one of them would silently never apply."
         )
 
     manifest_path = target / MIGRATION_MANIFEST_NAME
@@ -2039,6 +2141,7 @@ def write_rendered_migrations(directory: Path, document: dict[str, Any]) -> Path
             {
                 "project_key": document["project"]["key"],
                 "migrations_table": MIGRATIONS_TABLE,
+                "project_set": project_set_record,
                 "migrations": entries,
             }
         ).decode("utf-8"),

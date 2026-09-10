@@ -9,15 +9,33 @@
 # project.second.example.yaml they also exercise the collision contract --
 # "fixture-alpha" and "fixture-alpine" share a 12-character prefix.
 
-# Schema version 4 (ADR 0188): `backup.mirror` may name a copy of the backup
+# Schema version 5 (ADR 0198): `migrations.set` names this project's OWN
+# migration set, tracked in the release checkout under `projects/<slug>/`.
+# Optional at 5 and forbidden below it, because a set is a facility a project
+# may or may not have -- `project.second.example.yaml` is version 5 with no set
+# and is the control for every proof about one.
+#
+# Version 4 (ADR 0188): `backup.mirror` may name a copy of the backup
 # repository at a second provider, optional and omitted here -- see the
 # `backup` block. Version 3 (ADR 0186): `project.lifecycle` says whether a
 # project is permanent or ephemeral. Version 2 (ADR 0183) replaced
 # `mcp.max_result_rows` and `mcp.max_response_bytes`, two fields nothing ever
-# read (D929), with `mcp.profile`. Versions 1 to 3 still load -- both host
-# manifests are version 1 -- and render as permanent, unmirrored projects,
-# which is what they always were.
-schema_version: 4
+# read (D929), with `mcp.profile`. Versions 1 to 4 still load -- both host
+# manifests are version 1 -- and render as permanent, unmirrored projects with
+# no set of their own, which is what they always were.
+schema_version: 5
+
+# This project's own migrations, and the whole of what an adopter adds. The
+# directory is tracked in this checkout: a release is exactly the commit it is
+# named for, and SQL applied from outside it would be a schema no commit
+# determines (D1087). Nothing in `migrations/`, `contracts/` or the release's
+# tests is edited to add it.
+#
+# The release's set is applied first and the project's second, which is also
+# the version order dbmate uses, because `freeze-lock --project` refuses a
+# project version that does not sort after the release lock's newest.
+migrations:
+  set: projects/example
 
 project:
   slug: fixture-alpha

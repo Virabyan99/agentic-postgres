@@ -538,15 +538,50 @@ def test_the_health_route_keeps_its_url_when_it_is_unavailable(rendered: dict) -
     assert document["routes"]["health"]["url"] == rendered["routes"]["health"]["url"]
 
 
-@pytest.mark.parametrize("status", ["planned", "issued", "ready ", ""])
+@pytest.mark.parametrize("status", ["planned", "issued", "ready ", "", "unknown", "not_observed"])
 def test_a_route_status_that_is_not_one_is_refused(rendered: dict, status: str) -> None:
     """`planned` is in this list for the reason the health status was.
 
     It is the rendered branch's word, it reads correctly, and copying it here
     would publish a manifest's intention as an observation.
+
+    Version 17 adds a third word and this list grows rather than shrinks (ADR
+    0199): `unknown` and `not_observed` are the two spellings a reader reaching
+    for the new state would most plausibly invent, and both are refused, because
+    the vocabulary is an enumeration and not a shape.
     """
-    with pytest.raises(ManifestError, match="'ready' or 'unavailable'"):
+    with pytest.raises(ManifestError, match="a published route is one of"):
         build(rendered, rest_status=status)
+
+
+def test_a_route_the_deploy_did_not_observe_is_recorded_unobserved(rendered: dict) -> None:
+    """OPS-READ-002, ADR 0199. The third word is WRITABLE, not just declarable.
+
+    A widening whose writer never produces the new value is an unverified field
+    (D816, D929), so this drives the value through `build` rather than asserting
+    the enum. The URL is withheld exactly as `unavailable` withholds it -- a
+    route nothing observed is a route nothing can promise an address for -- and
+    that is asserted here because it is the half a `const` coupling in the
+    schema would let pass if the builder wrote the URL anyway.
+    """
+    document = build(rendered, rest_status="unobserved")
+    assert document["routes"]["rest"] == {"status": "unobserved", "url": None}
+
+
+def test_unobserved_and_unavailable_are_not_the_same_record(rendered: dict) -> None:
+    """The distinction ADR 0195 is about, asserted as a difference.
+
+    Both withhold the URL, so a reader comparing only `url` cannot tell them
+    apart -- which is precisely the state version 16 was in, and precisely why
+    asserting the null URL above is not enough on its own.
+    """
+    unobserved = build(rendered, rest_status="unobserved")["routes"]["rest"]
+    unavailable = build(rendered, rest_status="unavailable")["routes"]["rest"]
+    assert unobserved["url"] == unavailable["url"] is None
+    assert unobserved["status"] != unavailable["status"], (
+        "a route the deploy did not look at records the same word as one it "
+        "observed failing; the document cannot then tell a reader which it was"
+    )
 
 
 def test_a_published_api_needs_a_published_route(rendered: dict) -> None:

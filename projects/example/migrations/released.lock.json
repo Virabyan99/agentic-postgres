@@ -1,0 +1,18 @@
+{
+  "follows_release_version": "20260904120030",
+  "migrations": [
+    {
+      "canonical_render_sha256": "a757664826f2e6ff9762359195f2fbd686b49a468f15776b9b59c30c919b90e7",
+      "name": "note_embeddings",
+      "placeholders": [
+        "api_documentation",
+        "authenticated",
+        "object_owner"
+      ],
+      "template": "templates/0001-note-embeddings.sql",
+      "template_sha256": "7c00a706536b7395b3412327154f51ca22f8122d932cc2600bf597bc3810d860",
+      "version": "20260914120001"
+    }
+  ],
+  "schema_version": 2
+}

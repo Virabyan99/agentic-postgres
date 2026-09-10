@@ -9,7 +9,13 @@
 # one rendered from project.example.yaml. See runbook §8 and
 # tests/contract/test_render_isolation.py.
 
-schema_version: 4
+# Schema version 5 (ADR 0198), deliberately WITHOUT a `migrations` block. This
+# manifest is the control: same version as `project.example.yaml`, no set of
+# its own, so a proof that a set renders is read against a project at the same
+# version that has none. A version 5 manifest omitting the key has no migration
+# set and applies exactly the release's migrations -- which is what every
+# manifest below version 5 also does.
+schema_version: 5
 
 project:
   slug: fixture-alpine

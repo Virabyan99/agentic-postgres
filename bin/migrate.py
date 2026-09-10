@@ -28,12 +28,25 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def render_set(document: dict) -> list[tuple[str, str, str]]:
-    """(version, name, rendered digest) for this project, in applied order."""
-    manifest = migrations.load_manifest()
+    """(version, name, rendered digest) for this project, in applied order.
+
+    **Every set, release first** (ADR 0198). `sets_for` answers the release's
+    alone for a project that declares none, so a project without a set renders
+    exactly what it rendered before this existed.
+
+    The order is the release's set and then the project's, which is also the
+    version order dbmate will use, because a project's versions are required to
+    sort after the release lock's newest at freeze. That requirement is not
+    decoration: rig 20a measured `up --strict` exiting 2 and applying nothing
+    when it is broken on a deployed cluster, while a fresh cluster applies the
+    same pair of files silently -- one set, two schemas (D1098).
+    """
     rendered = []
-    for entry in manifest["migrations"]:
-        payload = migrations.render_migration(entry, manifest, document)
-        rendered.append((entry["version"], entry["name"], migrations.digest(payload)))
+    for migration_set in migrations.sets_for(document, REPO_ROOT):
+        manifest = migration_set.load_manifest()
+        for entry in manifest["migrations"]:
+            payload = migrations.render_migration(entry, manifest, document, migration_set.root)
+            rendered.append((entry["version"], entry["name"], migrations.digest(payload)))
     return rendered
 
 
@@ -188,8 +201,28 @@ def record_ledger(document: dict, rendered_dir: str) -> int:
     no privilege on this table at all, which is the property that makes the row
     worth reading.
     """
-    manifest = migrations.load_manifest()
-    templates = {entry["version"]: entry for entry in migrations.build_lock(manifest)["migrations"]}
+    # **Every set's lock, not the release's alone.** D1096: this used to build
+    # its digests from `build_lock(load_manifest())` -- the release lock -- and
+    # then index it by every RENDERED entry's version. A project migration's
+    # version is absent from that dictionary, so the first deploy that rendered
+    # one raised `KeyError` **after dbmate had already applied it**, from an
+    # unhandled exception that never reached the "the ledger could not be
+    # recorded" path below. A cluster that has moved and a record that has not
+    # is the worst order a failure can arrive in here.
+    #
+    # No column is added and no platform migration is spent: which set a row
+    # came from is recoverable from which lock holds its version.
+    #
+    # Found by reading the reader before changing the writer (D979).
+    templates: dict[str, dict] = {}
+    for migration_set in migrations.sets_for(document, REPO_ROOT):
+        set_manifest = migration_set.load_manifest()
+        follows = migration_set.load_lock().get("follows_release_version")
+        built = migrations.build_lock(
+            set_manifest, migration_set.root, follows_release_version=follows
+        )
+        for entry in built["migrations"]:
+            templates[entry["version"]] = entry
     rendered = json.loads(
         (Path(rendered_dir) / "migrations" / rendering.MIGRATION_MANIFEST_NAME).read_text(
             encoding="utf-8"
@@ -257,15 +290,83 @@ def record_ledger(document: dict, rendered_dir: str) -> int:
     return 0
 
 
+def project_set_from_manifest(project_path: str) -> migrations.MigrationSet:
+    """The set a project manifest names, read from the manifest itself.
+
+    The manifest and NOT a deployed document, because `freeze-lock --project`
+    runs on a workstation before anything is deployed -- which is the whole
+    point of a freeze. `migrations.project_set_from` reads the document and is
+    what the render and the ledger use; these two verbs are the one place the
+    manifest is the only thing that exists.
+    """
+    from agentic_postgres import config
+
+    document = config.load_project_manifest(Path(project_path))
+    named = config.project_migration_set(document)
+    if named is None:
+        raise migrations.ProjectSetError(
+            f"{project_path} declares no migrations.set, so it has no lock of its own. "
+            "A project's set is declared at project manifest schema version 5 "
+            "(ADR 0198); without one this project applies the release's migrations "
+            "and nothing else."
+        )
+    return migrations.MigrationSet(label="project", root=REPO_ROOT / named / "migrations")
+
+
+def freeze_project_lock(project_path: str) -> int:
+    """Freeze the project's own lock. The release's is never touched.
+
+    `follows_release_version` is computed here, at the freeze, from the release
+    manifest's newest version -- and recorded, rather than recomputed at verify
+    time. The release gains migrations after a project freezes, and a check that
+    compared against the release's CURRENT newest would invalidate every project
+    lock the day a platform migration shipped. What the rule needs is that the
+    freeze was done under it, and the recorded value is that evidence.
+    """
+    migration_set = project_set_from_manifest(project_path)
+    manifest = migration_set.load_manifest()
+    follows = migrations.newest_release_version()
+    lock = migrations.build_lock(manifest, migration_set.root, follows_release_version=follows)
+
+    # Refuse before writing. A freeze that wrote a lock recording a rule it
+    # breaks would make `verify-lock` the first thing to notice, which is one
+    # commit too late.
+    migrations.verify_lock(manifest, lock, migration_set.root)
+    migrations.lint_project_set(migration_set)
+
+    migration_set.lock_path.write_text(
+        json.dumps(lock, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(f"migrate: wrote {migration_set.lock_path} ({len(lock['migrations'])} migrations)")
+    print(f"  follows_release_version {follows}; the release lock was not touched.")
+    print("  Review and commit it before the gate runs.")
+    return 0
+
+
+def verify_project_lock(project_path: str) -> int:
+    migration_set = project_set_from_manifest(project_path)
+    manifest = migration_set.load_manifest()
+    migrations.verify_lock(manifest, migration_set.load_lock(), migration_set.root)
+    migrations.lint_project_set(migration_set)
+    print(
+        f"migrate: {migration_set.root} agrees with its own lock, and the set is "
+        "within what a project may contain"
+    )
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--mode", required=True)
     parser.add_argument("--outputs")
     parser.add_argument("--rendered-dir")
+    parser.add_argument("--project")
     arguments = parser.parse_args()
 
     try:
         if arguments.mode == "freeze-lock":
+            if arguments.project:
+                return freeze_project_lock(arguments.project)
             manifest = migrations.load_manifest()
             lock = migrations.build_lock(manifest)
             migrations.LOCK_PATH.write_text(
@@ -276,9 +377,15 @@ def main() -> int:
             return 0
 
         if arguments.mode == "verify-lock":
+            # The release's, always. `--project` adds the project's; it never
+            # replaces it, because a project verb that could leave the release
+            # lock unverified would be the one way to render an unlocked
+            # platform migration.
             manifest = migrations.load_manifest()
             migrations.verify_lock(manifest, migrations.load_lock())
             print("migrate: the released lock agrees with the manifest and templates")
+            if arguments.project:
+                return verify_project_lock(arguments.project)
             return 0
 
         document = json.loads(Path(arguments.outputs).read_text(encoding="utf-8"))

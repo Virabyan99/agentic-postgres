@@ -40,11 +40,12 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import REPO_ROOT, config
+from agentic_postgres import REPO_ROOT, config, sql_surface
 
 MIGRATIONS_ROOT = REPO_ROOT / "migrations"
 MANIFEST_PATH = MIGRATIONS_ROOT / "manifest.json"
@@ -68,8 +69,168 @@ RESIDUE = re.compile(r"\{\{|\}\}")
 PLACEHOLDER_TYPES = frozenset({"identifier", "literal"})
 
 
+#: Where a project's own set may live, relative to the repository root. The
+#: shape is fixed by ADR 0198 and the project schema's pattern agrees with it;
+#: a set outside the checkout would be SQL applied by a release that does not
+#: contain it, which is the state `installed_release.assert_clean` exists to
+#: refuse (D1087).
+PROJECT_SETS_DIRECTORY = "projects"
+
+#: The only outputs paths a PROJECT template's placeholders may read.
+#:
+#: The release's own manifest may read anything the outputs document holds --
+#: it is reviewed with the release. A project's may read the six request roles
+#: and the database name, and nothing else: not `app_runtime`, not
+#: `migration_user`, not `backup_user`, not a container name, not a URL. The
+#: point is not that those values are secret; it is that a project's SQL has no
+#: business naming the platform's own identities, and a placeholder is the only
+#: way a value reaches a template at all.
+PROJECT_PLACEHOLDER_SOURCES = frozenset(
+    {
+        "database.roles.object_owner",
+        "database.roles.authenticated",
+        "database.roles.anon",
+        "database.roles.agent_reader",
+        "database.roles.agent_writer",
+        "database.roles.api_documentation",
+        "database.name",
+    }
+)
+
+#: The one role preamble a project template may set. `SET LOCAL ROLE` and not
+#: `SET ROLE`: local is scoped to the transaction dbmate wraps the migration in,
+#: so a template that forgot to `RESET ROLE` cannot leak the owner's authority
+#: into whatever runs next on that connection.
+PROJECT_ROLE_PREAMBLE = "SET LOCAL ROLE {{object_owner}}"
+
+#: What a project's `down` block must raise. The same refusal every released
+#: platform migration carries: this plane is fix-forward (D912), and a project
+#: that shipped a working rollback would be one `dbmate down` away from dropping
+#: a tenant's table on a host.
+PROJECT_DOWN_SENTINEL = "AP900"
+
+_SET_ROLE = re.compile(r"\bSET\s+(?:LOCAL\s+)?ROLE\b[^;]*", re.IGNORECASE)
+_FORBIDDEN_STATEMENTS = (
+    (re.compile(r"\bapp_private\b", re.IGNORECASE), "names the app_private schema"),
+    (re.compile(r"\b(CREATE|ALTER|DROP)\s+ROLE\b", re.IGNORECASE), "creates or alters a role"),
+    (re.compile(r"\b(CREATE|ALTER|DROP)\s+SCHEMA\b", re.IGNORECASE), "creates or alters a schema"),
+    (
+        re.compile(r"\b(CREATE|ALTER|DROP)\s+EXTENSION\b", re.IGNORECASE),
+        "creates or alters an extension",
+    ),
+    (
+        re.compile(r"\bALTER\s+DEFAULT\s+PRIVILEGES\b", re.IGNORECASE),
+        "alters default privileges",
+    ),
+    (re.compile(r"\bSECURITY\s+LABEL\b", re.IGNORECASE), "sets a security label"),
+    (re.compile(r"\bCREATE\s+(OR\s+REPLACE\s+)?RULE\b", re.IGNORECASE), "creates a rule"),
+    (re.compile(r"\bCREATE\s+PUBLICATION\b", re.IGNORECASE), "creates a publication"),
+    (re.compile(r"\bCREATE\s+SUBSCRIPTION\b", re.IGNORECASE), "creates a subscription"),
+    (re.compile(r"\bCOPY\b[^;]*\bFROM\s+PROGRAM\b", re.IGNORECASE), "runs a program"),
+)
+
+#: A table created in `app` -- the schema whose FORCE row-level security is what
+#: makes every SECURITY DEFINER write in this product safe (ADR 0003, 0005).
+_CREATE_APP_TABLE = re.compile(
+    r"\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?app\.(\w+)", re.IGNORECASE
+)
+_FORCE_RLS = re.compile(
+    r"\bALTER\s+TABLE\s+app\.(\w+)\s+FORCE\s+ROW\s+LEVEL\s+SECURITY", re.IGNORECASE
+)
+_ENABLE_RLS = re.compile(
+    r"\bALTER\s+TABLE\s+app\.(\w+)\s+ENABLE\s+ROW\s+LEVEL\s+SECURITY", re.IGNORECASE
+)
+
+
 class MigrationError(ValueError):
     """The manifest, a template, or the lock is not usable as declared."""
+
+
+class ProjectSetError(MigrationError):
+    """A project's migration set is not something this release may apply.
+
+    Its own class because the remedy differs from every other MigrationError
+    here: those are a mistake in the release, which the release fixes; this is a
+    refusal addressed to an adopter about their own file, and the operator
+    reading it did not write the code that raised it.
+    """
+
+
+@dataclass(frozen=True)
+class MigrationSet:
+    """One directory of migrations, its manifest and its lock.
+
+    Frozen, and carrying its own paths rather than deriving them at each use,
+    because D1088 is what happens when a location is a default instead of a
+    value: `migrations.py` was already parameterised by root and path -- every
+    function took one -- and the hardcoding an adopter hit lived in the eleven
+    CALLERS that used the default. A value that must be passed cannot be
+    defaulted by accident.
+
+    ``label`` is `release` or `project`, and it is not decoration: `verify_lock`
+    applies the version rule to a project lock and not to the release's, and
+    `record_ledger` needs to say which set a digest came from.
+    """
+
+    label: str
+    root: Path
+
+    @property
+    def manifest_path(self) -> Path:
+        return self.root / "manifest.json"
+
+    @property
+    def lock_path(self) -> Path:
+        return self.root / "released.lock.json"
+
+    @property
+    def is_project(self) -> bool:
+        return self.label == "project"
+
+    def load_manifest(self) -> dict[str, Any]:
+        return load_manifest(self.manifest_path)
+
+    def load_lock(self) -> dict[str, Any]:
+        return load_lock(self.lock_path)
+
+
+def release_set() -> MigrationSet:
+    """The release's own set. Always present, always applied first."""
+    return MigrationSet(label="release", root=MIGRATIONS_ROOT)
+
+
+def project_set_from(document: dict[str, Any], repo_root: Path = REPO_ROOT) -> MigrationSet | None:
+    """The project's set, if the rendered document names one.
+
+    Reads the DEPLOYED DOCUMENT and not the project manifest, for ADR 0002's
+    reason: `outputs.json` is the one place every derived fact is read from, and
+    a second reader of the manifest would be a second derivation path. A version
+    16 document has no `migrations` block at all and answers None, which is what
+    every project without a set answers too.
+    """
+    block = (document.get("migrations") or {}).get("project_set")
+    if not block:
+        return None
+    root = repo_root / block["root"]
+    return MigrationSet(label="project", root=root / "migrations")
+
+
+def sets_for(document: dict[str, Any], repo_root: Path = REPO_ROOT) -> tuple[MigrationSet, ...]:
+    """Every set this project applies, in the order it applies them.
+
+    **The release's first, always.** A project's versions are required to sort
+    after the release lock's newest at freeze (`follows_release_version`), so
+    this order is also the version order dbmate will use -- and rig 20a measured
+    what happens when it is not: `up --strict` exits 2 having applied nothing,
+    naming both versions (D1098).
+
+    Every caller that means *every migration this project applies* calls this.
+    Every caller that means *the release's migrations* keeps `load_manifest()`
+    and says so in a comment -- that distinction is the whole of D1088, and an
+    uncommented default is where it comes back.
+    """
+    project = project_set_from(document, repo_root)
+    return (release_set(),) if project is None else (release_set(), project)
 
 
 # ---------------------------------------------------------------------------
@@ -254,12 +415,36 @@ def canonical_outputs(manifest: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
-def build_lock(manifest: dict[str, Any], root: Path = MIGRATIONS_ROOT) -> dict[str, Any]:
+def newest_release_version(root: Path = MIGRATIONS_ROOT) -> str:
+    """The newest version the release's own manifest declares.
+
+    Read from the manifest rather than from the lock so that `freeze-lock` on a
+    release that has just gained a migration computes the same answer before and
+    after its own lock is written.
+    """
+    versions = [entry["version"] for entry in load_manifest(root / "manifest.json")["migrations"]]
+    return max(versions)
+
+
+def build_lock(
+    manifest: dict[str, Any],
+    root: Path = MIGRATIONS_ROOT,
+    *,
+    follows_release_version: str | None = None,
+) -> dict[str, Any]:
     """Produce the lock's content. `bin/migrate.sh freeze-lock` writes it.
 
     Separated from the command so that verifying a lock and creating one share
     exactly one implementation. A gate that verified with different code than
     the one that wrote it would be checking its own arithmetic.
+
+    ``follows_release_version`` makes this a PROJECT lock: schema version 2, and
+    the release version every migration in this set must sort after. It is
+    recorded rather than recomputed at verify time, deliberately -- the release
+    gains migrations after a project freezes, and a check that compared against
+    the release's CURRENT newest would invalidate every project lock the day a
+    platform migration shipped. What the rule actually needs is that the freeze
+    was done under it, and the recorded value is that evidence (ADR 0198).
     """
     canonical = canonical_outputs(manifest)
     entries = []
@@ -280,7 +465,13 @@ def build_lock(manifest: dict[str, Any], root: Path = MIGRATIONS_ROOT) -> dict[s
                 ),
             }
         )
-    return {"schema_version": 1, "migrations": entries}
+    if follows_release_version is None:
+        return {"schema_version": 1, "migrations": entries}
+    return {
+        "schema_version": 2,
+        "follows_release_version": follows_release_version,
+        "migrations": entries,
+    }
 
 
 def load_lock(path: Path = LOCK_PATH) -> dict[str, Any]:
@@ -303,7 +494,11 @@ def verify_lock(
     being rewritten, and a changed canonical digest with an unchanged template
     means the *renderer* moved under a set of templates nobody touched.
     """
-    expected = build_lock(manifest, root)
+    follows = lock.get("follows_release_version")
+    expected = build_lock(manifest, root, follows_release_version=follows)
+
+    if follows is not None:
+        _assert_follows_release_version(manifest, follows)
 
     have = {entry["version"]: entry for entry in lock.get("migrations", [])}
     want = {entry["version"]: entry for entry in expected["migrations"]}
@@ -331,20 +526,177 @@ def verify_lock(
                 )
 
 
+def _assert_follows_release_version(manifest: dict[str, Any], follows: str) -> None:
+    """Every version in a project set sorts after the recorded release version.
+
+    Rig 20a measured why this matters and, just as usefully, what already
+    catches it: dbmate 2.34.1 `up --strict` refuses an out-of-order pending
+    migration with exit 2 and applies nothing, naming both versions. So this is
+    a FREEZE-TIME refusal standing in front of a DEPLOY-TIME one that already
+    exists -- kept for the reason every refusal here is moved earlier. dbmate's
+    arrives after the cluster has been reached, on a host, during a deploy, with
+    a human waiting; this one arrives on a workstation before anything is
+    rendered (D1098, ADR 0198).
+
+    The direction is not symmetric and that is the whole rule. A project
+    migration older than an APPLIED release migration is refused by the cluster;
+    a release migration newer than an applied project migration is fine, because
+    it sorts after everything on both a fresh cluster and a deployed one. So the
+    rule constrains only what a project may author, and never what the release
+    may.
+    """
+    if not re.fullmatch(r"[0-9]{14}", follows):
+        raise ProjectSetError(
+            f"follows_release_version is not a 14-digit version stamp: {follows!r}"
+        )
+    offending = sorted(
+        entry["version"] for entry in manifest["migrations"] if entry["version"] <= follows
+    )
+    if offending:
+        raise ProjectSetError(
+            f"these project migrations do not sort after the release version this set was "
+            f"frozen against ({follows}): {offending}. dbmate applies one directory in "
+            "filename order, so a project version older than an applied release version is "
+            "refused by `up --strict` on a deployed cluster and applied silently on a fresh "
+            "one -- the same set producing two different schemas. Re-stamp the migration "
+            "with a version later than the release's newest and freeze again."
+        )
+
+
+# ---------------------------------------------------------------------------
+# The lint (TEN-SET-002)
+# ---------------------------------------------------------------------------
+
+
+def lint_project_set(project: MigrationSet, release: MigrationSet | None = None) -> None:
+    """Refuse a project set before anything renders it. ADR 0198.
+
+    **Every refusal here is a boundary, not a style rule.** The product's whole
+    security argument is that PostgreSQL is the final authorization authority
+    and that `app_private` -- the pre-request hook, the agent audit, the quota
+    and idempotency tables -- is unreachable from anything a caller can address.
+    A project's SQL runs as `object_owner` through the same plane as the
+    release's, so without this it could revoke the hook, grant itself a role, or
+    drop a platform view, and the deploy would apply it without comment.
+
+    The refusals are stated as a list rather than as a policy engine on purpose.
+    A lint that could be configured is a lint an adopter would configure, and
+    §9's stop conditions say so directly: if a set needs `app_private`, a role,
+    or the pre-request hook to do something an adopter reasonably wants, that is
+    a product decision for a later session, recorded -- not an exception here.
+    """
+    release = release or release_set()
+    manifest = project.load_manifest()
+
+    # The placeholder allowlist. Checked against the manifest's declared
+    # SOURCES rather than against placeholder names, because the name is the
+    # adopter's to choose and the source is what actually reaches the SQL.
+    for name, specification in manifest["placeholders"].items():
+        source = specification["source"]
+        if source not in PROJECT_PLACEHOLDER_SOURCES:
+            raise ProjectSetError(
+                f"{project.root}: placeholder {name!r} reads {source!r}, which a project set "
+                f"may not read. Allowed: {sorted(PROJECT_PLACEHOLDER_SOURCES)}. A project's "
+                "SQL names the request roles and its own database, and none of the platform's "
+                "other identities."
+            )
+
+    release_surface = sql_surface.final_surface(release.load_manifest(), release.root)
+    release_owns = sql_surface.published_names(release_surface)
+
+    for entry in manifest["migrations"]:
+        template = (project.root / entry["template"]).read_text(encoding="utf-8")
+        applied = sql_surface.statements(template)
+        where = f"{project.root}: {entry['version']} ({entry['template']})"
+
+        for pattern, description in _FORBIDDEN_STATEMENTS:
+            match = pattern.search(applied)
+            if match is not None:
+                raise ProjectSetError(
+                    f"{where} {description}: {match.group(0).strip()!r}. A project set runs as "
+                    "the object owner through the platform's own migration plane; the platform's "
+                    "state is not addressable from it."
+                )
+
+        for statement in _SET_ROLE.findall(applied):
+            if statement.strip() != PROJECT_ROLE_PREAMBLE:
+                raise ProjectSetError(
+                    f"{where} sets a role other than the owner preamble: "
+                    f"{statement.strip()!r}. The only permitted form is "
+                    f"{PROJECT_ROLE_PREAMBLE!r} -- LOCAL, so the authority cannot outlive the "
+                    "transaction dbmate wraps this migration in."
+                )
+
+        for name in sql_surface.DROP_VIEW.findall(applied) + sql_surface.DROP_FUNCTION.findall(
+            applied
+        ):
+            if name in release_owns:
+                raise ProjectSetError(
+                    f"{where} drops api.{name}, which the release's own surface publishes. "
+                    "A project adds to the published surface and never removes from it: the "
+                    "release's contract names that object, and a cluster where it is missing "
+                    "serves a document the release cannot honour."
+                )
+
+        # A table in `app` without FORCE. Not merely ENABLE: without FORCE the
+        # policies do not apply to the table's OWNER, and every write RPC in
+        # this product is SECURITY DEFINER running as exactly that owner. A
+        # tenant table with ENABLE alone turns its own write function into an
+        # ownership-laundering primitive, which is 0005's own comment.
+        created = set(_CREATE_APP_TABLE.findall(applied))
+        forced = set(_FORCE_RLS.findall(applied))
+        enabled = set(_ENABLE_RLS.findall(applied))
+        missing = sorted(created - forced)
+        if missing:
+            detail = ", ".join(
+                f"app.{name} ({'ENABLE without FORCE' if name in enabled else 'no row security'})"
+                for name in missing
+            )
+            raise ProjectSetError(
+                f"{where} creates a table in app without FORCE ROW LEVEL SECURITY: {detail}. "
+                "FORCE is what makes the row policies apply to the table's owner, and every "
+                "write function this product publishes is SECURITY DEFINER running as that "
+                "owner. Without it the function can write any row (migration 0005's comment)."
+            )
+
+        down = sql_surface.down_section(template)
+        if not down.strip():
+            raise ProjectSetError(
+                f"{where} has no `{sql_surface.DOWN_MARKER}` section. dbmate would treat a "
+                f"rollback as an empty success; this plane is fix-forward, so the section must "
+                f"exist and must raise {PROJECT_DOWN_SENTINEL}."
+            )
+        if PROJECT_DOWN_SENTINEL not in sql_surface.sql_only(down):
+            raise ProjectSetError(
+                f"{where} has a `down` block that does not raise {PROJECT_DOWN_SENTINEL}. "
+                "A project that shipped a working rollback would be one `dbmate down` away "
+                "from dropping a tenant's table on a host."
+            )
+
+
 __all__ = [
     "LOCK_PATH",
     "MANIFEST_PATH",
     "MIGRATIONS_ROOT",
+    "PROJECT_PLACEHOLDER_SOURCES",
+    "PROJECT_SETS_DIRECTORY",
     "MigrationError",
+    "MigrationSet",
+    "ProjectSetError",
     "build_lock",
     "canonical_outputs",
     "digest",
+    "lint_project_set",
     "load_lock",
     "load_manifest",
+    "newest_release_version",
+    "project_set_from",
     "quote_identifier",
     "quote_literal",
+    "release_set",
     "render",
     "render_migration",
     "resolve_placeholders",
+    "sets_for",
     "verify_lock",
 ]

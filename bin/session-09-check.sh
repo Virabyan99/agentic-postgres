@@ -570,7 +570,14 @@ document = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 container = document["database"]["container"]
 database = document["database"]["name"]
 
-released = [entry["version"] for entry in migrations.load_manifest()["migrations"]]
+# ADR 0198: every set this deployment applies, not the release's alone. The
+# document is what names them, so a host whose checkout does not carry the
+# project's directory still reports against what was deployed.
+released = [
+    entry["version"]
+    for migration_set in migrations.sets_for(document)
+    for entry in migration_set.load_manifest()["migrations"]
+]
 
 probe = subprocess.run(  # noqa: S603
     [
@@ -594,7 +601,11 @@ applied = {line.strip() for line in probe.stdout.splitlines() if line.strip()}
 missing = [version for version in released if version not in applied]
 
 if missing:
-    names = {entry["version"]: entry["name"] for entry in migrations.load_manifest()["migrations"]}
+    names = {
+        entry["version"]: entry["name"]
+        for migration_set in migrations.sets_for(document)
+        for entry in migration_set.load_manifest()["migrations"]
+    }
     listed = ", ".join(f"{version} ({names[version]})" for version in missing)
     sys.exit(
         f"{len(missing)} released migration(s) are NOT applied to {database}: {listed}.\n"

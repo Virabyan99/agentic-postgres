@@ -29,13 +29,14 @@
         "storage",
         "backup",
         "capabilities",
-        "template_version"
+        "template_version",
+        "migrations"
       ],
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            16
+            17
           ]
         },
         "document_kind": {
@@ -284,6 +285,9 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 64
+        },
+        "migrations": {
+          "$ref": "#/$defs/migrationSets"
         }
       }
     },
@@ -311,14 +315,15 @@
         "storage",
         "mcp",
         "backup",
-        "backup_state"
+        "backup_state",
+        "migrations"
       ],
       "description": "Root-owned, mode 0600, written under /etc/agentic-postgres/projects/{project_key}/ only after successful convergence. It is a published observation, not the authority for provider ownership -- that is bootstrap-state.json. It carries provider IDs and client IDs; it never carries a client secret, an access token, a sentinel value, a secret checksum or a credential-bearing URL.",
       "properties": {
         "schema_version": {
           "type": "integer",
           "enum": [
-            16
+            17
           ]
         },
         "document_kind": {
@@ -460,8 +465,10 @@
                   "type": "string",
                   "enum": [
                     "ready",
-                    "unavailable"
-                  ]
+                    "unavailable",
+                    "unobserved"
+                  ],
+                  "description": "Version 17 adds `unobserved` (ADR 0199). `ready` means the deploy observed the route serving; `unavailable` means it DETERMINED the route is not published or observed it failing (D230's absent administrator, D326's absent credential, a non-200 answer); `unobserved` means the observation was not made -- the first-deploy router race, a probe that met a staging certificate (D1047), a timeout. The three divide by what was determined and never by what was convenient, and the migrator from version 16 never guesses which of the two an older `unavailable` had been, because the information is not in the document."
                 },
                 "url": {
                   "$ref": "#/$defs/httpsUrl"
@@ -668,6 +675,9 @@
         },
         "backup_state": {
           "$ref": "#/$defs/backupState"
+        },
+        "migrations": {
+          "$ref": "#/$defs/migrationSets"
         }
       }
     },
@@ -1058,14 +1068,16 @@
         "status",
         "url"
       ],
-      "description": "A route this session publishes, and the honest way to say it was not published. `unavailable` forces a null URL -- unlike `health`, whose address exists for every project at every session. A deployment through session 4 serves no REST and no documentation, and naming a URL for a surface nothing is listening on would be exactly the failure `endpoint` was tightened in version 4 to prevent: a record that claims to exist and points at nothing.",
+      "description": "A route this session publishes, and the two honest ways to say it was not. `unavailable` and `unobserved` both force a null URL -- unlike `health`, whose address exists for every project at every session. A deployment through session 4 serves no REST and no documentation, and naming a URL for a surface nothing is listening on would be exactly the failure `endpoint` was tightened in version 4 to prevent: a record that claims to exist and points at nothing. Version 17 separates the two reasons a URL is withheld (ADR 0199): the deploy determined the route is not published, or the deploy did not look.",
       "properties": {
         "status": {
           "type": "string",
           "enum": [
             "ready",
-            "unavailable"
-          ]
+            "unavailable",
+            "unobserved"
+          ],
+          "description": "Version 17 adds `unobserved` (ADR 0199). `ready` means the deploy observed the route serving; `unavailable` means it DETERMINED the route is not published or observed it failing (D230's absent administrator, D326's absent credential, a non-200 answer); `unobserved` means the observation was not made -- the first-deploy router race, a probe that met a staging certificate (D1047), a timeout. The three divide by what was determined and never by what was convenient, and the migrator from version 16 never guesses which of the two an older `unavailable` had been, because the information is not in the document."
         },
         "url": {
           "oneOf": [
@@ -1081,7 +1093,10 @@
       "if": {
         "properties": {
           "status": {
-            "const": "unavailable"
+            "enum": [
+              "unavailable",
+              "unobserved"
+            ]
           }
         },
         "required": [
@@ -2226,6 +2241,63 @@
           "wal_failed_count": {
             "type": "null"
           }
+        }
+      }
+    },
+    "migrationSets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "release_lock_sha256",
+        "project_set"
+      ],
+      "description": "Version 17 (ADR 0198). Which migration sets this project applies. The release's is always one of them and is identified by the digest of its committed lock; a project's own set is `null` unless the project manifest names one at schema version 5. Both fields are REQUIRED and one of them is nullable, which is the shape D600 asks for: an absent field cannot be told apart from a field nobody wrote, while an explicit null says the render looked and there was no set.",
+      "properties": {
+        "release_lock_sha256": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "sha256 of migrations/released.lock.json as the rendering release committed it. Null only in a document migrated up from version 16, which predates the field: the digest describes the release that rendered a document, and writing today's into an archived one would claim that deployment applied a set it never saw."
+        },
+        "project_set": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "root",
+                "lock_sha256",
+                "count"
+              ],
+              "properties": {
+                "root": {
+                  "type": "string",
+                  "pattern": "^projects/[a-z][a-z0-9-]{2,30}$",
+                  "description": "Repository-relative directory of the project's own set, tracked in the release checkout. The same pattern the project manifest constrains `migrations.set` to."
+                },
+                "lock_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "sha256 of the project set's own released.lock.json. The LOCK's bytes and not the manifest's: the lock is what `verify_lock` compares and what a reviewer approved, so this says the deployment applied the set somebody reviewed rather than the set somebody described."
+                },
+                "count": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "How many migrations the project's set declares. Read by the doctor against the ledger, which is why it is a number here rather than something a reader recomputes from the checkout: a host's doctor has the document and may not have the set."
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null for a project that declares no set of its own -- which is every project below manifest schema version 5, and any version 5 project that omits the key."
         }
       }
     }

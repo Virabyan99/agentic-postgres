@@ -9,8 +9,8 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [1, 2, 3, 4],
-      "description": "Manifest format version. 1 to 4. Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it: a copy of the backup repository at a second provider, made by a host unit and never known to the archiver. Version 2 (ADR 0183) replaces `mcp.max_result_rows` and `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with `mcp.profile`, which the lock compiler reads. A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it (ADR 0177's rule, applied to this document), and the two replaced fields are the mirror image: required at 1, forbidden at 2. Version 3 (ADR 0186) adds `project.lifecycle`, required at 3 and forbidden below it; `permanent` is what every earlier version meant by omitting it. Versions 1 and 2 still load, because `project.alpha.yaml` and `project.beta.yaml` live only on the host and no commit can edit them."
+      "enum": [1, 2, 3, 4, 5],
+      "description": "Manifest format version. 1 to 5. Version 5 (ADR 0198) adds `migrations`, optional at 5 and forbidden below it: the repository-relative directory of the project's OWN migration set, tracked in the release checkout under `projects/<slug>/`. Optional rather than required for `backup.mirror`'s reason -- a set is a facility a project may not have. It lives in the checkout and never beside this manifest on the host, because a release is exactly the commit it is named for and SQL applied from outside it would be a schema no commit determines (D1087). Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it. Version 4 (ADR 0188) adds `backup.mirror`, optional at 4 and forbidden below it: a copy of the backup repository at a second provider, made by a host unit and never known to the archiver. Version 2 (ADR 0183) replaces `mcp.max_result_rows` and `mcp.max_response_bytes` -- two fields nothing ever read (D929) -- with `mcp.profile`, which the lock compiler reads. A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it (ADR 0177's rule, applied to this document), and the two replaced fields are the mirror image: required at 1, forbidden at 2. Version 3 (ADR 0186) adds `project.lifecycle`, required at 3 and forbidden below it; `permanent` is what every earlier version meant by omitting it. Versions 1 and 2 still load, because `project.alpha.yaml` and `project.beta.yaml` live only on the host and no commit can edit them."
     },
     "project": {
       "type": "object",
@@ -58,6 +58,19 @@
               "else": { "not": { "required": ["expires_at"] } }
             }
           ]
+        }
+      }
+    },
+    "migrations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["set"],
+      "description": "Version 5 (ADR 0198). The project's own migration set: SQL this project owns, rendered by the same incapable {{name}} substitution as the release's, applied after the release's set by the same dbmate plane as the same migration_user, frozen under its own lock and digested into the deployed document. An adopter adds a directory here and a key here, and edits none of the release's files -- which is what ADR 0197 found the documented path could not do.",
+      "properties": {
+        "set": {
+          "type": "string",
+          "pattern": "^projects/[a-z][a-z0-9-]{2,30}$",
+          "description": "Repository-relative directory holding `migrations/manifest.json`, `migrations/templates/NNNN-*.sql`, `migrations/released.lock.json` and `contracts/`. The pattern admits no '/' beyond the fixed prefix and no '..', so a manifest cannot name a directory outside `projects/` -- the same refusal the migration manifest's `template` pattern makes about a template path. The render additionally refuses a directory that is absent, because a manifest naming a set that is not in the checkout is a deploy that would apply the release's migrations and silently skip the project's."
         }
       }
     },
@@ -617,6 +630,16 @@
         "properties": { "backup": { "not": { "required": ["mirror"] } } }
       },
       "description": "The version 4 gate (ADR 0188): `backup.mirror` is forbidden below 4 and OPTIONAL at 4 -- optional rather than required because a mirror is a facility a project may not have, unlike a lifecycle every project has. Below 4 a manifest says nothing and has no mirror; the deployed document says `enabled: false` for it (outputs version 16), exactly as a version 15 document is migrated."
+    },
+    {
+      "if": {
+        "properties": { "schema_version": { "maximum": 4 } },
+        "required": ["schema_version"]
+      },
+      "then": {
+        "not": { "required": ["migrations"] }
+      },
+      "description": "The version 5 gate (ADR 0198): `migrations` is forbidden below 5 and OPTIONAL at 5 -- ADR 0177's rule again, and `backup.mirror`'s shape rather than `project.lifecycle`'s, because a migration set is a facility a project may or may not have while a lifecycle is a fact every project has. Below 5 a manifest says nothing and has no set; the deployed document records `migrations.project_set: null` for it (outputs version 17), exactly as a version 16 document is migrated. A manifest declaring 4 and carrying a set is the state this refuses -- a field read by a version the manifest does not claim to be."
     }
   ]
 }

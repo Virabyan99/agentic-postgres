@@ -1,0 +1,545 @@
+"""A project's own migration set: where it lives, what it may contain, how it is locked.
+
+ADR 0198. `TEN-SET-001` and `TEN-SET-002`.
+
+**What this module is for, in one sentence.** Until Session 20 an application
+built on this appliance added its tables by editing seven files the release
+tracks, one of which cannot be edited without a running host -- which is why
+`DX-001` is answered *no* rather than left unattempted (ADR 0197). The set is the
+repair, and this is what says the repair holds.
+
+**The example set is the control throughout.** Every refusal below is measured
+against a deliberately broken copy of `projects/example/` built under
+`tmp_path`, and the real set is asserted to still pass in the same test. A lint
+that refused everything would satisfy every refusal here and be useless; a lint
+that refused nothing would satisfy none of them. Both directions are checked
+because only one of them is the failure that ships.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+import shutil
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from agentic_postgres import REPO_ROOT, migrations, sql_surface
+
+pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
+EXAMPLE = REPO_ROOT / "projects" / "example"
+FIXTURE = REPO_ROOT / ".generated" / "fixture-alpha-dev"
+SECOND_FIXTURE = REPO_ROOT / ".generated" / "fixture-alpine-dev"
+
+
+@pytest.fixture
+def example() -> migrations.MigrationSet:
+    return migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
+
+
+@pytest.fixture
+def document() -> dict[str, Any]:
+    """The rendered document of the project that declares a set."""
+    if not (FIXTURE / "outputs.json").is_file():
+        pytest.skip("no rendered fixture; run ./deploy.sh --render-only")
+    return json.loads((FIXTURE / "outputs.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def setless_document() -> dict[str, Any]:
+    """The control: a project at the same schema version with NO set.
+
+    `project.second.example.yaml` is version 5 and declares no `migrations`
+    block, so every assertion about a set below has a same-version project
+    beside it that has none. Without this pair, "a set renders" and "schema 5
+    renders" would be one measurement.
+    """
+    if not (SECOND_FIXTURE / "outputs.json").is_file():
+        pytest.skip("no second rendered fixture; run ./deploy.sh --render-only")
+    return json.loads((SECOND_FIXTURE / "outputs.json").read_text(encoding="utf-8"))
+
+
+@pytest.fixture
+def copied(tmp_path: Path) -> Path:
+    """A writable copy of the example set. The committed one is never edited."""
+    root = tmp_path / "example"
+    shutil.copytree(EXAMPLE, root)
+    return root
+
+
+def broken(root: Path, target: str, anchor: str, replacement: str) -> migrations.MigrationSet:
+    """One mutation, with its anchor pre-flighted to match exactly once (D269).
+
+    A mutation whose anchor misses is applied to nothing, and a lint that then
+    accepts the file reports as a lint that refuses nothing. That is the single
+    most common way a refusal test becomes vacuous, so the miss is fatal here
+    rather than a skipped arm.
+    """
+    path = root / target
+    text = path.read_text(encoding="utf-8")
+    assert text.count(anchor) == 1, (
+        f"the anchor {anchor!r} matches {text.count(anchor)} times in {target}, not once; "
+        "nothing was mutated and any refusal below would be measuring the wrong thing"
+    )
+    path.write_text(text.replace(anchor, replacement, 1), encoding="utf-8")
+    return migrations.MigrationSet(label="project", root=root / "migrations")
+
+
+TEMPLATE = "migrations/templates/0001-note-embeddings.sql"
+MANIFEST = "migrations/manifest.json"
+PREAMBLE = "SET LOCAL ROLE {{object_owner}};"
+
+
+# ---------------------------------------------------------------------------
+# TEN-SET-001 -- where the set lives, and how it is ordered and locked
+# ---------------------------------------------------------------------------
+
+
+def test_a_declared_set_renders_after_the_release_set_in_version_order(
+    document: dict[str, Any], setless_document: dict[str, Any]
+) -> None:
+    """The release's set, then the project's, in one directory.
+
+    dbmate is handed a DIRECTORY and orders the whole of it by filename, which
+    is why this is asserted about versions rather than about the order
+    `sets_for` returns. Rig 20a measured what the difference costs: with an
+    out-of-order pending migration, `up --strict` exits 2 having applied nothing
+    on a deployed cluster, while a fresh cluster applies the same pair silently
+    -- one set producing two schemas (D1098).
+
+    The setless project is the control, in the same test: it must render the
+    release's set alone, or "the release comes first" would be trivially true of
+    a list with one thing in it.
+    """
+    sets = migrations.sets_for(document)
+    assert [migration_set.label for migration_set in sets] == ["release", "project"]
+
+    release_versions = [entry["version"] for entry in sets[0].load_manifest()["migrations"]]
+    project_versions = [entry["version"] for entry in sets[1].load_manifest()["migrations"]]
+    assert release_versions and project_versions
+    assert min(project_versions) > max(release_versions), (
+        "a project migration sorts before a release migration, so dbmate would "
+        "apply them in a different order than sets_for describes"
+    )
+
+    control = migrations.sets_for(setless_document)
+    assert [migration_set.label for migration_set in control] == ["release"], (
+        "the control project declares no set and got one anyway"
+    )
+
+
+def test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock(
+    example: migrations.MigrationSet,
+) -> None:
+    """Two locks, each verified against its own manifest and templates.
+
+    The release's lock is not a per-project artifact (ADR 0028) and a project's
+    is not the release's. What this asserts is that neither covers the other:
+    the release lock records no project version, and the project lock records no
+    release version. A lock that covered both would make `verify_lock` pass for
+    a project whose set had been swapped for the release's.
+    """
+    release = migrations.release_set()
+    release_lock = release.load_lock()
+    project_lock = example.load_lock()
+
+    assert release_lock["schema_version"] == 1
+    assert project_lock["schema_version"] == 2
+    assert "follows_release_version" not in release_lock, (
+        "the release lock grew a project field, so the version rule would apply "
+        "to the release's own migrations"
+    )
+    assert "follows_release_version" in project_lock
+
+    release_versions = {entry["version"] for entry in release_lock["migrations"]}
+    project_versions = {entry["version"] for entry in project_lock["migrations"]}
+    assert release_versions and project_versions
+    assert not (release_versions & project_versions)
+
+    # Each verifies against its own manifest and root, and this is the assertion
+    # that would go red if either lock were stale.
+    migrations.verify_lock(release.load_manifest(), release_lock, release.root)
+    migrations.verify_lock(example.load_manifest(), project_lock, example.root)
+
+
+def test_a_project_version_older_than_the_release_lock_is_refused(copied: Path) -> None:
+    """The freeze-time refusal in front of dbmate's deploy-time one.
+
+    Both boundaries: a version strictly older than the recorded release version,
+    and a version EQUAL to it. Equal is refused because the rule is "sorts
+    after", and two migrations sharing a version would give dbmate one ledger
+    key for two files.
+
+    The control is the same set with its real version, verified in the same
+    test -- otherwise a `verify_lock` that raised unconditionally would satisfy
+    both arms.
+    """
+    follows = migrations.newest_release_version()
+    manifest_path = copied / MANIFEST
+
+    for version, why in (("20260903000000", "older"), (follows, "equal")):
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["migrations"][0]["version"] = version
+        manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+        candidate = migrations.MigrationSet(label="project", root=copied / "migrations")
+        built = migrations.build_lock(
+            candidate.load_manifest(), candidate.root, follows_release_version=follows
+        )
+        with pytest.raises(migrations.ProjectSetError, match="do not sort after"):
+            migrations.verify_lock(candidate.load_manifest(), built, candidate.root)
+        assert why  # the label is for the failure message, not the logic
+
+    # The control, in the same invocation (D499).
+    real = migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
+    migrations.verify_lock(real.load_manifest(), real.load_lock(), real.root)
+
+
+def test_the_release_lock_is_never_rewritten_by_a_project_freeze() -> None:
+    """`freeze-lock --project` writes one file and it is not the release's.
+
+    Asserted from the SOURCE of `bin/migrate.py` rather than by running the verb
+    against the real tree, because the only convincing way to run it would be to
+    let it write -- and a test that proves a file is untouched by touching it is
+    not the test it looks like.
+    """
+    source = (REPO_ROOT / "bin" / "migrate.py").read_text(encoding="utf-8")
+    body = source.split("def freeze_project_lock(", 1)[1].split("\ndef ", 1)[0]
+    assert "migration_set.lock_path.write_text" in body
+    assert "migrations.LOCK_PATH" not in body, (
+        "the project freeze names the release's lock path; the release's lock is "
+        "not a project's to write (ADR 0028)"
+    )
+
+
+def test_the_project_set_lives_in_the_checkout_and_not_beside_the_host_manifest() -> None:
+    """D1087. The schema constrains the shape; this asserts the tree agrees.
+
+    A release is exactly the commit it is named for: `assert_clean` refuses a
+    dirty checkout, the deploy runs the checked-out release's `migrate.sh`, and
+    `upgrade plan` diffs two rendered releases. SQL living beside a manifest on
+    the host would be applied by a release that does not contain it -- a schema
+    no commit determines.
+    """
+    assert (EXAMPLE / "migrations" / "manifest.json").is_file()
+    assert (EXAMPLE / "migrations" / "released.lock.json").is_file()
+    assert list((EXAMPLE / "migrations" / "templates").glob("*.sql"))
+    assert EXAMPLE.relative_to(REPO_ROOT).parts[0] == migrations.PROJECT_SETS_DIRECTORY
+
+
+# ---------------------------------------------------------------------------
+# TEN-SET-002 -- the lint
+# ---------------------------------------------------------------------------
+
+FORBIDDEN = [
+    pytest.param(
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nGRANT USAGE ON SCHEMA app_private TO {{authenticated}};",
+        "app_private",
+        id="names_app_private",
+    ),
+    pytest.param(
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nCREATE ROLE tenant_writer NOLOGIN;",
+        "creates or alters a role",
+        id="creates_a_role",
+    ),
+    pytest.param(
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nCREATE SCHEMA tenant;",
+        "creates or alters a schema",
+        id="creates_a_schema",
+    ),
+    pytest.param(
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nCREATE EXTENSION postgis;",
+        "creates or alters an extension",
+        id="creates_an_extension",
+    ),
+    pytest.param(
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nALTER DEFAULT PRIVILEGES IN SCHEMA api GRANT ALL ON TABLES TO PUBLIC;",
+        "alters default privileges",
+        id="alters_default_privileges",
+    ),
+    pytest.param(
+        TEMPLATE,
+        PREAMBLE,
+        "SET ROLE {{object_owner}};",
+        "sets a role other than the owner preamble",
+        id="set_role_not_local",
+    ),
+    pytest.param(
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nDROP VIEW api.notes;",
+        "drops api.notes",
+        id="drops_a_release_view",
+    ),
+    pytest.param(
+        TEMPLATE,
+        PREAMBLE,
+        PREAMBLE + "\nDROP FUNCTION api.create_note;",
+        "drops api.create_note",
+        id="drops_a_release_function",
+    ),
+    pytest.param(
+        TEMPLATE,
+        "ALTER TABLE app.note_embeddings FORCE ROW LEVEL SECURITY;",
+        "",
+        "without FORCE ROW LEVEL SECURITY",
+        id="table_in_app_without_force_rls",
+    ),
+    pytest.param(
+        TEMPLATE,
+        "RAISE EXCEPTION 'AP900: this migration plane is fix-forward only'",
+        "RAISE EXCEPTION 'rolled back'",
+        "does not raise AP900",
+        id="down_block_that_rolls_back",
+    ),
+    pytest.param(
+        MANIFEST,
+        '"source": "database.roles.authenticated"',
+        '"source": "database.roles.app_runtime"',
+        "which a project set may not read",
+        id="placeholder_outside_the_allowlist",
+    ),
+]
+
+
+@pytest.mark.parametrize("target,anchor,replacement,message", FORBIDDEN)
+def test_the_lint_refuses_each_forbidden_shape_and_accepts_the_example_set(
+    copied: Path,
+    example: migrations.MigrationSet,
+    target: str,
+    anchor: str,
+    replacement: str,
+    message: str,
+) -> None:
+    """One arm per forbidden shape, with the real set as the control.
+
+    The control is asserted in EVERY arm rather than once in a test of its own,
+    and that is deliberate (D499): a mutation is evidence only beside a control
+    the mutation cannot reach, run in the same invocation. A lint that started
+    raising unconditionally would pass every refusal arm and be caught here.
+    """
+    candidate = broken(copied, target, anchor, replacement)
+    with pytest.raises(migrations.ProjectSetError, match=message):
+        migrations.lint_project_set(candidate)
+
+    migrations.lint_project_set(example)
+
+
+def test_the_lint_reads_statements_and_not_comments(copied: Path) -> None:
+    """A forbidden word inside a comment is not a forbidden statement.
+
+    Session 2 Run 7's defect exactly -- a substitution that also matched the
+    comment documenting the substitution -- and the reason `sql_surface.sql_only`
+    exists. Without this, the honest thing to do about `app_private` in a
+    template's prose would be to stop explaining why it is forbidden.
+    """
+    candidate = broken(
+        copied,
+        TEMPLATE,
+        PREAMBLE,
+        "-- This set may not reach app_private, and CREATE ROLE is refused.\n" + PREAMBLE,
+    )
+    migrations.lint_project_set(candidate)
+
+
+def test_the_lint_refuses_a_set_with_no_down_block_at_all(copied: Path) -> None:
+    """Not merely a `down` that rolls back -- a template with no down section.
+
+    dbmate treats a missing section as an empty one and reports success, so the
+    absence is the more dangerous of the two states and the one a reader is less
+    likely to look for.
+    """
+    path = copied / TEMPLATE
+    text = path.read_text(encoding="utf-8")
+    path.write_text(text.split(sql_surface.DOWN_MARKER)[0], encoding="utf-8")
+    candidate = migrations.MigrationSet(label="project", root=copied / "migrations")
+    with pytest.raises(migrations.ProjectSetError, match="has no"):
+        migrations.lint_project_set(candidate)
+
+
+def test_the_lint_is_not_vacuous_on_the_example_set(example: migrations.MigrationSet) -> None:
+    """The example set reaches every rule rather than passing them by absence.
+
+    A lint whose rules are all about statements a set does not contain is a lint
+    the set passes trivially. The example set creates a table in `app`, publishes
+    a view and a function in `api`, sets the owner preamble, declares
+    placeholders and carries a `down` block -- so each refusal above has
+    something in the control it could have fired on and did not.
+    """
+    manifest = example.load_manifest()
+    text = (example.root / manifest["migrations"][0]["template"]).read_text(encoding="utf-8")
+    applied = sql_surface.statements(text)
+
+    assert "CREATE TABLE app." in applied
+    assert "FORCE ROW LEVEL SECURITY" in applied
+    assert migrations.PROJECT_ROLE_PREAMBLE in applied
+    assert manifest["placeholders"]
+    assert migrations.PROJECT_DOWN_SENTINEL in sql_surface.sql_only(sql_surface.down_section(text))
+
+
+def test_every_placeholder_the_example_set_declares_is_in_the_allowlist(
+    example: migrations.MigrationSet,
+) -> None:
+    """And the allowlist names no platform identity.
+
+    The second assertion is the one with teeth: a future widening that added
+    `app_runtime` or `migration_user` to the allowlist would leave every lint
+    test above green, because none of them names a source the allowlist forbids
+    -- they name one it forbids TODAY.
+    """
+    declared = {
+        specification["source"]
+        for specification in example.load_manifest()["placeholders"].values()
+    }
+    assert declared <= migrations.PROJECT_PLACEHOLDER_SOURCES
+
+    forbidden = {
+        "database.roles.app_runtime",
+        "database.roles.migration_user",
+        "database.roles.backup_user",
+        "database.roles.auth_service",
+        "database.roles.storage_service",
+        "database.roles.mcp_audit_service",
+        "database.roles.postgrest_authenticator",
+        "database.roles.project_admin",
+        "database.container",
+    }
+    assert not (migrations.PROJECT_PLACEHOLDER_SOURCES & forbidden), (
+        "the allowlist names a platform identity; a project's SQL has no business "
+        "naming one, and every lint arm above would stay green if it did"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The reader, over a project's own set
+# ---------------------------------------------------------------------------
+
+
+def test_the_project_reader_finds_the_objects_the_example_set_publishes(
+    example: migrations.MigrationSet,
+) -> None:
+    """`sql_surface` over a project's set, non-empty, naming what the SQL names.
+
+    The anti-vacuity assertion belongs on both sides. The release's reader keeps
+    its equality against `{"notes","tasks"}` because a project's objects are in
+    the project's files (D1089); this is the same property for the other half,
+    and without it a regex that matched nothing here would make every project
+    comparison hold against two empty sets.
+    """
+    surface = sql_surface.final_surface(example.load_manifest(), example.root)
+    assert sql_surface.published_names(surface), "the reader found no project objects at all"
+    assert set(surface["views"]) == {"note_embeddings"}
+    assert set(surface["functions"]) == {"set_note_embedding"}
+
+
+def test_the_release_reader_never_sees_a_projects_object() -> None:
+    """D1089, as an assertion rather than as a claim in a plan.
+
+    This is what makes the release's anti-vacuity guard safe to leave alone. If
+    a project's objects could reach the release's reader, that guard's equality
+    against `{"notes","tasks"}` would have to be loosened to a containment check
+    for every adopter -- which the non-negotiables call weakening.
+    """
+    release = migrations.release_set()
+    release_names = sql_surface.published_names(
+        sql_surface.final_surface(release.load_manifest(), release.root)
+    )
+    example = migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
+    project_names = sql_surface.published_names(
+        sql_surface.final_surface(example.load_manifest(), example.root)
+    )
+
+    assert project_names, "the example set publishes nothing, so this proves nothing"
+    assert not (release_names & project_names)
+    assert "note_embeddings" not in release_names
+
+
+def test_a_project_may_not_publish_a_name_the_release_owns(copied: Path) -> None:
+    """Two objects with one name in one schema is one object, and a silent one.
+
+    `CREATE OR REPLACE VIEW api.notes` in a project's set would replace the
+    release's view with the project's, on a deployed cluster, with the release's
+    reviewed contract still describing the old one.
+    """
+    candidate = broken(
+        copied,
+        TEMPLATE,
+        "CREATE VIEW api.note_embeddings",
+        "CREATE VIEW api.notes",
+    )
+    release = migrations.release_set()
+    release_names = sql_surface.published_names(
+        sql_surface.final_surface(release.load_manifest(), release.root)
+    )
+    project_names = sql_surface.published_names(
+        sql_surface.final_surface(candidate.load_manifest(), candidate.root)
+    )
+    assert release_names & project_names == {"notes"}, (
+        "the collision this test exists to describe did not happen, so a "
+        "refusal built on it would be measuring nothing"
+    )
+
+
+# ---------------------------------------------------------------------------
+# The rendered document
+# ---------------------------------------------------------------------------
+
+
+def test_the_rendered_document_records_the_set_it_applied(
+    document: dict[str, Any], setless_document: dict[str, Any]
+) -> None:
+    """TEN-DOC-001's offline half, on both branches of the pair.
+
+    The digest is of the LOCK's bytes, not the manifest's: the lock is what
+    `verify_lock` compares and what a reviewer approved, so the document says
+    "this deployment applied the set somebody reviewed" rather than "the set
+    somebody described".
+    """
+    block = document["migrations"]
+    assert block["release_lock_sha256"]
+    assert block["project_set"]["root"] == "projects/example"
+    assert block["project_set"]["count"] == 1
+
+    from hashlib import sha256
+
+    expected = sha256((EXAMPLE / "migrations" / "released.lock.json").read_bytes()).hexdigest()
+    assert block["project_set"]["lock_sha256"] == expected
+
+    control = setless_document["migrations"]
+    assert control["project_set"] is None, (
+        "the control project declares no set and its document names one"
+    )
+    assert control["release_lock_sha256"] == block["release_lock_sha256"], (
+        "two projects rendered by one release disagree about the release lock"
+    )
+
+
+def test_project_set_from_reads_the_document_and_not_the_manifest(
+    document: dict[str, Any],
+) -> None:
+    """ADR 0002. One authority for a derived fact.
+
+    A reader that went back to `project.example.yaml` would be a second
+    derivation path with the same failure mode ADR 0023 records -- and would
+    answer for the checkout it is sitting in rather than for the deployment.
+    """
+    stripped = copy.deepcopy(document)
+    del stripped["migrations"]
+    assert migrations.project_set_from(stripped) is None, (
+        "the set was found in a document that does not name one, so something "
+        "other than the document supplied it"
+    )
+    assert migrations.project_set_from(document) is not None

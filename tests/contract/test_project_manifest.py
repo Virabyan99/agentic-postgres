@@ -81,10 +81,15 @@ def test_required_section_is_required(tmp_path: Path, base: dict[str, Any], sect
 
 def downgrade_to_two(document: dict[str, Any]) -> dict[str, Any]:
     """The same manifest at schema version 2 (ADR 0186): the lifecycle out,
-    which is what a version 2 manifest says and means permanent."""
+    which is what a version 2 manifest says and means permanent.
+
+    The set goes out too, and it is popped here rather than assumed absent: the
+    base fixture is a version 5 manifest that declares one, and a version 2
+    document carrying it is exactly the state the version 5 gate refuses."""
     document = copy.deepcopy(document)
     document["schema_version"] = 2
     document["project"].pop("lifecycle", None)
+    document.pop("migrations", None)
     return document
 
 
@@ -714,9 +719,22 @@ MIRROR = {
 }
 
 
-def downgrade_to_three(document: dict[str, Any]) -> dict[str, Any]:
-    """The same manifest at schema version 3: the mirror out."""
+def downgrade_to_four(document: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest at schema version 4 (ADR 0198): the migration set out,
+    which is what a version 4 manifest says and means -- this project applies
+    the release's migrations and nothing else."""
     document = copy.deepcopy(document)
+    document["schema_version"] = 4
+    document.pop("migrations", None)
+    return document
+
+
+def downgrade_to_three(document: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest at schema version 3: the mirror out, and the set with
+    it. Chained through `downgrade_to_four` rather than deep-copying the base
+    again, so the four downgrades cannot disagree about what each version
+    carries -- which is what four independent copies eventually do."""
+    document = downgrade_to_four(document)
     document["schema_version"] = 3
     document["backup"].pop("mirror", None)
     return document
