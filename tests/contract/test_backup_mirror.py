@@ -49,6 +49,7 @@ from agentic_postgres import (
     diagnosis,
     fleet,
     naming,
+    output_migrations,
     rendering,
     retirement,
     secret_override,
@@ -165,7 +166,13 @@ def test_a_mirrored_manifest_publishes_the_block_and_the_containers_identifiers(
     the container reads -- source and destination alike, every one of them
     from the document rather than typed (ADR 0002)."""
     outputs, env = mirrored["outputs"], mirrored["env"]
-    assert outputs["schema_version"] == 16
+    # The CURRENT version rather than a literal. This said `== 16` and went red
+    # on the version bump that had nothing to do with mirrors; the property the
+    # test is named for is the mirror block, and pinning the version here made
+    # every future bump a change to this file. A literal is right where the
+    # version IS the subject (the migrator's own tests) and wrong everywhere
+    # else.
+    assert outputs["schema_version"] == output_migrations.CURRENT_VERSION
     assert outputs["backup"]["mirror"] == {
         **MIRROR,
         "bucket": naming.backup_mirror_bucket_name(KEY),

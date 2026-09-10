@@ -267,18 +267,34 @@ def test_the_subcommands_that_reach_a_cluster_refuse_without_root() -> None:
 
 
 def test_render_reports_a_digest_per_migration() -> None:
-    """One line per migration, counted against the manifest rather than a literal.
+    """One line per migration, counted against every set rather than a literal.
 
     The name says "per migration", so the assertion should too. It said `== 5`
-    until a sixth migration existed.
+    until a sixth migration existed; it then counted the RELEASE's manifest,
+    which was right until a project could bring a set of its own (ADR 0198).
+    Both repairs are the same repair one step apart, and the second one is
+    D1088's twelfth caller of a default.
+
+    Counted from the rendered document rather than from the project manifest,
+    because that is what `migrate.sh render` itself reads.
     """
     import json
 
-    manifest = json.loads((REPO_ROOT / "migrations" / "manifest.json").read_text(encoding="utf-8"))
+    from agentic_postgres import migrations as migration_module
+
+    document = json.loads(
+        (REPO_ROOT / ".generated" / "fixture-alpha-dev" / "outputs.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    declared = sum(
+        len(migration_set.load_manifest()["migrations"])
+        for migration_set in migration_module.sets_for(document)
+    )
     result = run(MIGRATE, *MANIFEST, "render")
     assert result.returncode == 0, result.stderr
     lines = [line for line in result.stdout.splitlines() if line.strip()]
-    assert len(lines) == len(manifest["migrations"]), result.stdout
+    assert len(lines) == declared, result.stdout
 
 
 def test_two_subcommands_at_once_are_refused_by_migrate() -> None:

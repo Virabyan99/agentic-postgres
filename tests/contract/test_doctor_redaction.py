@@ -60,6 +60,12 @@ PRINTABLE_BLOCKS = {
     "host",
     "edge",
     "runtime",
+    # Version 17 (ADR 0198). Two digests, a repo-relative directory and a count.
+    # No credential, no address, no provider identifier -- and the operator
+    # asking "which SQL does this cluster hold" is precisely who runs the
+    # doctor. Refusing to print it would send them to read the deployed
+    # document by hand, which is where the sensitive blocks are.
+    "migrations",
 }
 
 #: Blocks that must never appear in output, at any verbosity.

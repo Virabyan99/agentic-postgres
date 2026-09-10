@@ -749,6 +749,11 @@ def test_the_provider_destroy_accepts_the_expired_manifest_a_retirement_hands_it
 
     manifest = yaml.safe_load((REPO_ROOT / "project.example.yaml").read_text(encoding="utf-8"))
     manifest["schema_version"] = 3
+    # The example manifest is version 5 and declares a migration set (ADR 0198);
+    # a version 3 document carrying one is exactly what the version-5 gate
+    # refuses, and the refusal would arrive at the LOADER -- which is the thing
+    # this test is measuring the absence of.
+    manifest.pop("migrations", None)
     # A slug no machine holds bootstrap state for: with the example's own slug
     # the destroy got past the loader and met this workstation's root-owned
     # state file for that key, which is a different refusal (D67) and would

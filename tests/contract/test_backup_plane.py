@@ -384,8 +384,17 @@ def test_the_v12_step_reaches_a_document_that_validates(v12: dict[str, Any]) -> 
     )
     # And the v15 step (ADR 0186): the tenth hand-chain, one module over from
     # the nine D965 records, found by CI rather than by the grep (D965).
+    #
+    # And the v17 step (ADR 0198), found by CI again -- the comment above
+    # recorded the trap and the next version walked into it anyway, because a
+    # grep for `migrate_v15_to_v16` finds this line and a grep for "the hand
+    # chains" finds nothing. Eleven sites now. What would stop the twelfth is a
+    # helper that carries a document to the current version and is the only
+    # thing these tests call; that is a change to eleven modules and it is
+    # recorded here rather than made in a run that is already large.
     current = output_migrations.migrate_v14_to_v15(current)
     current = output_migrations.migrate_v15_to_v16(current)
+    current = output_migrations.migrate_v16_to_v17(current)
     assert current["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(current, "outputs.schema.json")
 
