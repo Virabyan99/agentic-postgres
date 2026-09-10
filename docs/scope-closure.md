@@ -19,8 +19,8 @@ decision.
 | Claims in the evidence model | **101** | 97 at Session 17's close; four added in Session 18 Run 5 |
 | Requirements a claim reports on | **147** | 24 belong to no claim (D697); see §4 |
 | Migrations released | **30** | fix-forward only; Session 18 adds none |
-| Architecture decisions recorded | **194** | 0188–0194 are Session 18's |
-| Divergences measured | **D1–D1032** | D984–D1032 are Session 18's; D1015–D1019 were measured in Run 4's rig, D1023–D1032 on the trip |
+| Architecture decisions recorded | **197** | 0188–0194 are Session 18's; 0195–0197 are Session 19's |
+| Divergences measured | **D1–D1059** | D984–D1032 are Session 18's; **D1033–D1059 are Session 19's**, and twenty-four of them come from an adopter's account of building on 1.0.0 rather than from this project's own work |
 
 ---
 
@@ -257,3 +257,45 @@ all resolve and whose session numbers are checked against the release.
 (D683), the outsider's witness (`DX-001`, `DEP-001`), two P2 capabilities that
 were never registered, and the 37 requirements the evidence document does not
 report on.
+
+
+---
+
+## 8. What Session 19 repaired, and what it left open
+
+An outsider built an application on 1.0.0, on a host that started empty, and
+recorded twenty-five findings. Nineteen were defects in the shipped release and
+are repaired; `docs/plans/session-19-implementation-plan.md` §1 carries the
+rows. This section is only what stays open.
+
+**Open, and each needs a decision rather than an afternoon:**
+
+| Item | Why it is open |
+|---|---|
+| **D1045** — the provider's error message is discarded | The body is withheld deliberately: *"on identity endpoints it can echo the request, and this message reaches a log."* Relaxing "no bodies" to "no raw bodies" is a security decision in a credential path. It cost 25 minutes of API archaeology to recover a sentence the server had already sent. |
+| **D1055's migration** — a reviewed `api.create_task` | Decided in ADR 0196 and specified there. It cannot be written offline: a new published object needs a snapshot recaptured from a *deployed* document, so it belongs to one sitting that ends in a deploy. Until then the plane publishes `tasks` and `update_task_status` against a table nothing can populate. |
+| **D1038, D1054** — the example domain is the suite's whole surface, and the project-neutral contract's control is one project's capture | Both are the tenant extension point seen from different angles. Loosening either to a containment check is what the non-negotiables call weakening, and the ADR each would need has Stage 3's question as its real subject. |
+| **D1048's document half** — `unavailable` for a route that was merely unobserved | `routes.*.status` is a schema enum with `const` couplings forcing a null URL. A third member is an outputs version with a migrator and a guarded reader for every consumer (D600). The printed line carries the distinction meanwhile. |
+| **D1058** — `0003`'s comment has been false since `0006` | Not repairable in place. A released template's bytes are the unit `verify-lock` checks, so editing even a comment changes a recorded digest. |
+| **D1059** — a cancelled CI run is not a failed one | `concurrency: cancel-in-progress: true` means a superseded run concludes `cancelled`, and a reader bucketing everything that is not `success` as failure reports a verdict the run never reached. Observed on this session's own push. |
+| **D933** now blocks two things | It blocked a project disabling a write capability (ADR 0183). It now also blocks retiring the task tools, which is why ADR 0196 chose restoration. That asymmetry is the argument for repairing it in Stage 3, beside D1056's closed scope vocabulary. |
+
+**What the session says about the two claims that have been open since Session
+12** is ADR 0197, and it separates them:
+
+- **`fresh_host`** — the artefact exists. An empty host reached a working
+  deployment, and who drove the bring-up does not bear on that question.
+  Supplying `APG_FRESH_HOST_OUTPUTS` is mechanical and is the operator's.
+- **`documented_path`** — answered, and the answer is no. `DX-001` requires the
+  path be completed *without source edits*, and the run edited seven tracked
+  files. Two are already gone (D1034, D1035); the remaining five are one design
+  question and it is Stage 3's. The claim has moved from *"nobody has tried"* to
+  *"somebody tried and the path does not hold"*, which is a stronger statement
+  and should not be softened into a green tick.
+
+**The pattern worth carrying forward.** Six of the twenty-five findings were one
+defect — a check whose failure path returns one of the answers it was supposed
+to choose between — and ADR 0195 states the rule. Six *more* instances were
+found during the repair itself, four of them in guards written that day. The
+class is a trap rather than carelessness, and the cheapest defence is the one
+`bin/backup.sh` already had: say that you did not get an answer.
