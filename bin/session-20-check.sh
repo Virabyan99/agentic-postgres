@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 #
-# The Session 18 gate: independent recovery and the failure rehearsals. The
+# The Session 20 gate: the tenant extension point, the task domain restored,
+# and two readers made honest (ADR 0198, ADR 0199). Derived from Session 18's
+# by diff (D505, D507, D678, D693, D703). The
 # mirror at a second provider, the disaster kit, adoption by id, the restore
 # onto a replacement host, and eight bounded rehearsals. It does not replace
 # bin/session-01-check.sh, which must still exit 0, nor the Session 2-17
@@ -46,8 +48,8 @@
 #                     decision -- and still needs this mode for the cumulative
 #                     reason below.
 #
-# **Session 18's own claims are `host` and offline.** The gate still has three
-# modes because `claims_through_session(18)` is CUMULATIVE: a Session 18 document
+# **Session 20's own claims are `host` and offline.** The gate still has three
+# modes because `claims_through_session(20)` is CUMULATIVE: a Session 20 document
 # must answer for the external claims inherited from Sessions 4-9, and the
 # writer refuses a document silent about a claim. Run both, merge.
 #
@@ -200,24 +202,27 @@ USAGE
             --project-a-outputs FILE --ssh-destination op@HOST \
             [--public-ipv6 ADDR] [--project-b-outputs FILE] [-k EXPRESSION]
 
-  --mode offline   Contracts, schemas and models, plus Session 18's own offline
-                   halves: the mirror's render, contract and verbs, the kit and
-                   adoption against a recorded control plane, the restore's
-                   plan and refusals against a recorded docker, and the eight
-                   rehearsal plans and the command against a recorded runner
-                   with real files. No host, no root.
-  --mode host      Both permanent projects mirrored with a completed copy the
-                   doctor reads and a third timer enabled; the mirror's
-                   credential not the primary's; and, through the four
-                   declarations below, the kit exported from this host, the
-                   replacement adopted by the recorded id, the restore from
-                   the mirror alone, and the eight rehearsal records. Needs
-                   root, host.yaml in the checkout, and the declarations for
-                   every claim that is about something that happened elsewhere.
-  --mode external  What the public internet reaches. Session 18 adds no external
-                   claim -- a mirror, a kit and a rehearsal are reachable from
-                   nowhere but the host, by decision -- but the inherited ones
-                   still need it, because claims_through_session(18) is
+  --mode offline   Contracts, schemas and models, plus Session 20's own offline
+                   halves: a project's migration set rendered after the
+                   release's in version order and locked apart from it, the
+                   lint's eleven refusals with the example set as control, the
+                   merged surface and the project reader, outputs v17's
+                   migrator, the ledger over both sets, and the six honest
+                   readers. No host, no root.
+  --mode host      Beta's own migration set applied, ledgered and served, with
+                   ALPHA as the control that declares none and holds none of
+                   it; both documents at outputs v17 sharing one release lock
+                   digest; a task created through the enumerated operation and
+                   moved by the compare-and-swap; and no route on either
+                   project reading `unobserved`. Needs root, host.yaml in the
+                   checkout, and the declarations for every claim that is about
+                   something that happened elsewhere.
+  --mode external  What the public internet reaches. Session 20 adds no external
+                   claim -- a migration set, a reviewed surface and a rendered
+                   document are reachable from nowhere but the host, and the
+                   one surface a stranger CAN reach is the published OpenAPI,
+                   which API-CONTRACT-001 already measures -- but the inherited
+                   ones still need it, because claims_through_session(20) is
                    cumulative. MUST run from a network that is not the
                    deployment host.
 
@@ -938,18 +943,19 @@ mode_host() {
   # proof the flag exists to admit -- and a skip is indistinguishable from "no
   # rotation happened in this run", which is the honest reading of the flag's
   # absence and the wrong reading of its misspelling.
+  # Session 18's five declaration flags are not in this gate, so they are not
+  # in this loop either. Removing the flags and leaving the pre-flight that
+  # validates them is what killed the first host run of this gate: `set -u`,
+  # `REPLACEMENT_HOST_OUTPUTS: unbound variable`, before anything was checked.
+  # D1088's shape in this session's own gate -- the definition moved and a
+  # reader did not.
   local file
   for file in "${SENTINEL_FILE}" "${ADMIN_PASSWORD_FILE}" "${ROTATED_FROM_FILE}" \
               "${ROTATED_AUTHENTICATOR_FROM_FILE}" "${ROTATED_DOCS_FROM_FILE}" \
               "${ROTATED_JWT_FROM_FILE}" "${REDEPLOY_BEFORE_FILE}" \
-              "${FRESH_HOST_OUTPUTS}" "${REMOVED_PROJECT_FILE}" "${DX_RECORD_FILE}" \
-              "${REPLACEMENT_HOST_OUTPUTS}" "${REPLACEMENT_BOOTSTRAP_STATE}" \
-              "${RESTORE_EVIDENCE_FILE}"; do
+              "${FRESH_HOST_OUTPUTS}" "${REMOVED_PROJECT_FILE}" \
+              "${DX_RECORD_FILE}"; do
     [ -z "${file}" ] || [ -f "${file}" ] || die 2 "not found: ${file}"
-  done
-  local directory
-  for directory in "${KIT_DIR}" "${REHEARSAL_EVIDENCE_DIR}"; do
-    [ -z "${directory}" ] || [ -d "${directory}" ] || die 2 "not a directory: ${directory}"
   done
 
   [ "$(id -u)" -eq 0 ] || die 3 "--mode host requires root: it reads root-only host state."
@@ -960,7 +966,8 @@ mode_host() {
   if [ -z "${ADMIN_PASSWORD_FILE}" ]; then
     printf '%s: no --admin-password-file, so the proofs needing an\n' "${PROGRAM}"
     printf 'administrator session will skip, and every claim they support will report\n'
-    printf 'not_run. None of Session 18'"'"'s own four needs it.\n'
+    printf 'not_run. Session 20'"'"'s task_domain is one of them: its live half\n'
+    printf 'logs in for real, because a minted token carries no subject (D298, D675).\n'
   fi
 
   step "1. Host baseline, unchanged by this run"
