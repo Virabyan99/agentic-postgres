@@ -73,16 +73,25 @@ awaited a host trip, and the README said it was unclaimed (D954) — the D860
 shape in the other direction, finished work described as unfinished, which is
 the direction nobody chases.
 
-**`DEP-REMOVE-001` awaits a project actually removed.** Its proof reads
+**`DEP-REMOVE-001` PASSED on 2026-09-05** (D1086). Its proof reads
 `APG_REMOVED_PROJECT_FILE`, a record of the removed project's key and resource
 names captured *before* the removal, and asserts the survivor serves and holds
-its rows while nothing named for the removed key still runs. Only two projects
-exist and every two-project proof needs both, so closing it means a third
-project created for the purpose and retired; Session 17 plans exactly that
-(D953). What the removal surface does today is narrower than this ledger's
-warnings implied: `bootstrap-providers.sh --destroy` revokes the runtime
-identity and unlinks the credential files, and **every Infisical secret, the
-repository cipher pass included, stays in place** (D957).
+its rows while nothing named for the removed key still runs. Closing it needed a
+third project created for the purpose and retired, which Session 17 did:
+`gamma-dev` was created 2026-09-04, retired 2026-09-05 with `--record`, and
+`project_removal` passed for the first time since Session 12.
+
+This paragraph said *"awaits a project actually removed"* for five days after it
+did not. **That is D954's shape, three lines below a paragraph describing D954's
+shape** -- finished work recorded as unfinished, which is the direction nobody
+chases because nothing fails. Corrected in Session 20 Run 5.
+
+What the removal surface does is still narrower than this ledger's warnings once
+implied, and that half was and remains true: `bootstrap-providers.sh --destroy`
+revokes the runtime identity and unlinks the credential files, and **every
+Infisical secret, the repository cipher pass included, stays in place** (D957).
+Gamma's own leftovers are the operator's console decision and are recorded in
+the launch folder's §9.
 
 **Session 18's trip (2026-09-06) passed three of its four claims on their first
 live execution**: `independent_repository` (both projects mirrored to the

@@ -118,7 +118,10 @@ def test_the_approved_snapshot_exists_and_check_compares_it() -> None:
     result = run("--check")
     assert result.returncode == 0, result.stderr
     # The count is the comparison's own evidence that it had something to do.
-    assert "4 objects" in result.stdout + result.stderr
+    # Five since ADR 0196: two relations and three RPCs. The count is the
+    # comparisons own evidence that it had something to do, so it moves with
+    # the surface rather than being loosened to "some objects".
+    assert "5 objects" in result.stdout + result.stderr
 
 
 # ---------------------------------------------------------------------------
@@ -635,10 +638,47 @@ def test_the_project_flag_changes_no_behaviour_when_it_is_absent(api_contract) -
     The standing comparison -- the committed snapshot against the reviewed
     surface -- is the one every gate runs, and a project flag that quietly
     altered it would change what the release's own gate measures.
+
+    **Asserted on WHICH comparison ran, not on whether it passed**, and that is
+    a repair rather than a convenience. Written in Run 3, this asserted exit 0;
+    Run 5 ships migration 0031 and its contract entry, so `--check` is red by
+    construction until Run 7's deploy lets the canonical snapshot be recaptured
+    from a deployed document (D1093, D1039's *unsatisfiable rather than
+    unsatisfied*). A version asserting green would have been a fourth expected
+    red -- and would have gone green again at Run 7 for a reason unrelated to
+    the property it is named for.
+
+    So it reads the message. Without `--project` the comparison is the
+    release's snapshot against the release's surface, and it says so in either
+    state: today by naming the object the release's snapshot does not yet
+    publish, after Run 7 by counting the five it does. Neither sentence can
+    come from the project comparison, which fails at a missing project snapshot
+    before it compares anything.
     """
     result = run("--check")
-    assert result.returncode == 0, result.stderr
-    assert "4 objects" in result.stdout + result.stderr
+    message = result.stdout + result.stderr
+
+    assert "projects/example" not in message, (
+        "`--check` with no --project consulted a project's files; the standing "
+        "comparison every gate runs is the release's alone"
+    )
+    assert "there is no approved snapshot" not in message, (
+        "`--check` with no --project reported a missing snapshot, which is the "
+        "PROJECT path's failure -- the release's snapshot is committed"
+    )
+
+    if result.returncode == 0:
+        # After Run 7's recapture. Five objects: two relations and three RPCs.
+        # The count is the comparison's own evidence that it had something to
+        # do, so it moves with the surface rather than being loosened.
+        assert "5 objects" in message
+    else:
+        # Between Run 5 and Run 7. The release's surface names `create_task`
+        # and the release's snapshot predates it -- which is exactly the third
+        # clause D1039 added to this message.
+        assert result.returncode == 5, message
+        assert "rpc/create_task" in message
+        assert "re-capture it" in message
 
 
 def test_update_with_a_project_names_the_destination_and_still_writes_nothing() -> None:

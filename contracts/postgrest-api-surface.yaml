@@ -64,6 +64,17 @@ rpcs:
   # narrow transition rather than a general update, so that Session 8 has an
   # approved shape to reference from `capabilities.yaml`; `p_expected_status`
   # makes it optimistic rather than last-writer-wins.
+  # ADR 0196, and made deliberately rather than inherited. `0005` shipped a
+  # create; `0007` dropped it because ADR 0048 found a second create ADR 0003
+  # never sanctioned. What 0007 did not do was notice that the removal left no
+  # way to make a task at all: rig 19 measured `object_owner` -- NOLOGIN,
+  # reachable only by migrations -- as the sole holder of INSERT on `app.tasks`,
+  # so `update_task_status` below has never had a row to act on outside a
+  # fixture. Migration 0031 restores it. No `p_owner_id`, and that absence is
+  # the security property: the owner comes from the request identity.
+  create_task:
+    methods: [POST]
+    arguments: [p_title, p_note_id]
   update_task_status:
     methods: [POST]
     arguments: [p_task_id, p_expected_status, p_new_status]

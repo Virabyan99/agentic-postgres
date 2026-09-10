@@ -70,8 +70,15 @@ def test_it_states_adr_0003s_domain_as_adr_0048_amends_it(surface: dict[str, Any
     agreeing with the defect.
     """
     assert set(surface["relations"]) == {"notes", "tasks"}
-    assert set(surface["rpcs"]) == {"create_note", "update_task_status"}
-    assert "create_task" not in surface["rpcs"]
+    # ADR 0196 amends ADR 0048's amendment, and the exclusion inverts rather
+    # than disappearing. `0007` was right to drop the create ADR 0003 never
+    # sanctioned; what it did not notice is that the removal left NO way to make
+    # a task, so `update_task_status` -- ADR 0003's operation 4 -- had never run
+    # against a row outside a fixture. `0031` restores one, reviewed here
+    # deliberately rather than inherited.
+    assert set(surface["rpcs"]) == {"create_note", "create_task", "update_task_status"}
+    assert surface["rpcs"]["create_task"]["arguments"] == ["p_title", "p_note_id"]
+    assert surface["rpcs"]["create_task"]["methods"] == ["POST"]
     assert "status" in surface["relations"]["tasks"]["columns"]
     assert "done" not in surface["relations"]["tasks"]["columns"]
     assert "content" in surface["relations"]["notes"]["columns"]
@@ -141,6 +148,12 @@ def test_every_declared_object_is_schema_qualified_once(surface: dict[str, Any])
         "api.notes",
         "api.tasks",
         "api.create_note",
+        # ADR 0196, migration 0031. Declared AND published, unlike the four
+        # agent-plane functions below: `0031` grants EXECUTE to
+        # `api_documentation`, and under `openapi-mode = follow-privileges` that
+        # grant is exactly what puts a function into the generated document
+        # (F-007, migration 0009's rule).
+        "api.create_task",
         "api.update_task_status",
         # ADR 0118. `declared_objects` answers "what may exist in the exposed
         # schema", and these two do exist there -- reachable over HTTP by the
@@ -160,6 +173,7 @@ def test_every_declared_object_is_schema_qualified_once(surface: dict[str, Any])
         "api.notes",
         "api.tasks",
         "api.create_note",
+        "api.create_task",
         "api.update_task_status",
     }
     assert api_surface.published_objects(surface) < api_surface.declared_objects(surface), (
@@ -308,6 +322,12 @@ def test_the_declared_types_are_separate_from_the_declared_objects(
         "api.notes",
         "api.tasks",
         "api.create_note",
+        # ADR 0196, migration 0031. Declared AND published, unlike the four
+        # agent-plane functions below: `0031` grants EXECUTE to
+        # `api_documentation`, and under `openapi-mode = follow-privileges` that
+        # grant is exactly what puts a function into the generated document
+        # (F-007, migration 0009's rule).
+        "api.create_task",
         "api.update_task_status",
         # ADR 0118. `declared_objects` answers "what may exist in the exposed
         # schema", and these two do exist there -- reachable over HTTP by the
@@ -327,6 +347,7 @@ def test_the_declared_types_are_separate_from_the_declared_objects(
         "api.notes",
         "api.tasks",
         "api.create_note",
+        "api.create_task",
         "api.update_task_status",
     }
     assert api_surface.published_objects(surface) < api_surface.declared_objects(surface), (

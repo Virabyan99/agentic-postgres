@@ -109,6 +109,74 @@ bookkeeping and it is not the audit trail.
 Never edit a template that has shipped. The preflight will refuse, which is the
 system working; the fix is a new migration.
 
+## A project's set
+
+ADR 0198. A project may bring migrations of its own. They live **tracked in the
+release checkout**, under a directory the project manifest names at schema
+version 5:
+
+```yaml
+schema_version: 5
+migrations:
+  set: projects/<slug>
+```
+
+```
+projects/<slug>/migrations/manifest.json
+projects/<slug>/migrations/templates/NNNN-*.sql
+projects/<slug>/migrations/released.lock.json
+```
+
+Not beside the manifest on the host, and the reason is the one this whole plane
+rests on: a release is exactly the commit it is named for. `assert_clean`
+refuses a dirty checkout, the deploy runs `release/bin/migrate.sh` from the
+checked-out release, and `upgrade plan` diffs two rendered releases. SQL applied
+from outside that commit would be a schema no commit determines — which is the
+state `assert_clean` exists to refuse.
+
+**Two locks, never one.** The release's covers the platform's migrations; the
+project's covers the SQL under `projects/<slug>/`. Neither verb writes the
+other's:
+
+```bash
+bin/migrate.sh freeze-lock                        # the release's
+bin/migrate.sh --project project.yaml freeze-lock # the project's
+bin/migrate.sh --project project.yaml verify-lock # both; the release's always
+```
+
+A project lock also records `follows_release_version` — the release version its
+migrations must all sort **after**. dbmate is handed a directory and orders the
+whole of it by filename, so the two sets interleave by version stamp. Measured
+on the pinned dbmate 2.34.1, with a control: a pending migration whose version
+is older than an applied one makes `up --strict` exit 2 having applied
+**nothing**, naming both versions; the same pair on a *fresh* cluster applies in
+filename order and exits 0. One set, two schemas. `freeze-lock --project`
+refuses at freeze so that never reaches a host, and dbmate's own refusal is the
+backstop behind it.
+
+**What a project's set may not contain**, refused before it is rendered:
+
+| Refused | Because |
+|---|---|
+| anything naming `app_private` | the pre-request hook, the agent audit, the quota and idempotency tables are the platform's state |
+| `CREATE`/`ALTER`/`DROP ROLE`, `SCHEMA`, `EXTENSION`; `ALTER DEFAULT PRIVILEGES` | the bootstrap plane owns roles; the migration plane owns objects |
+| any `SET ROLE` but `SET LOCAL ROLE {{object_owner}}` | LOCAL, so the authority cannot outlive the transaction dbmate wraps the migration in |
+| dropping an object the release publishes | a project adds to the published surface and never removes from it |
+| a placeholder outside the six request roles and `database.name` | a project's SQL names its own database and the request roles, not the platform's identities |
+| a table in `app` without `FORCE ROW LEVEL SECURITY` | FORCE is what makes the policies apply to the table's **owner**, and every write function here is `SECURITY DEFINER` running as that owner |
+| a `down` block that does not raise `AP900` | this plane is fix-forward; a working rollback is one `dbmate down` from dropping a tenant's table |
+
+Each is a boundary rather than a style rule. If an application genuinely needs
+one of them, that is a product decision to raise — not a lint to configure.
+
+The deployed document records what was applied: `migrations.release_lock_sha256`
+and `migrations.project_set` (the directory, the digest of the project lock, and
+the count). The doctor counts both sets against `app_private.migration_ledger`,
+which holds a row per migration from either set.
+
+`projects/example/` is a worked one — a pgvector column beside each note, a
+`security_invoker` view, and one `SECURITY DEFINER` write function.
+
 ## Two things that bit, and are now grants rather than surprises
 
 - **`CREATE TABLE IF NOT EXISTS` checks `CREATE` on the schema *before* the

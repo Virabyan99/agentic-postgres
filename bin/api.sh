@@ -39,6 +39,7 @@ Usage: bin/api.sh --project-outputs FILE OPERATION [OPTIONS]
     list-notes           GET /notes
     list-tasks           GET /tasks
     create-note          POST /rpc/create_note        --title T [--content C]
+    create-task          POST /rpc/create_task        --title T [--note-id U]
     update-task-status   POST /rpc/update_task_status --task-id U
                                                       --expected-status S
                                                       --new-status S

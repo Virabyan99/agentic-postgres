@@ -349,6 +349,19 @@
       "template": "templates/0030-agent-dry-run.sql",
       "template_sha256": "62a2dd916308cdeb06923f2b8bf4b7fef2030c1c0b64c642fb87b35d97311daf",
       "version": "20260904120030"
+    },
+    {
+      "canonical_render_sha256": "b5de6b83b72c03ef88ebe1349a36c8412c9161d3903c4b9325d282f01088d7bb",
+      "name": "create_task",
+      "placeholders": [
+        "agent_writer",
+        "api_documentation",
+        "authenticated",
+        "object_owner"
+      ],
+      "template": "templates/0031-create-task.sql",
+      "template_sha256": "46d9b4e3915a7de504061d511128fae2b61c2c2c976bc30cb41e27748c9ca8a8",
+      "version": "20260912120031"
     }
   ],
   "schema_version": 1

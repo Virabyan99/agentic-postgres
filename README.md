@@ -222,39 +222,81 @@ ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@<host> sudo apg-diag containers
 
 ## Adding your own tables
 
-**This product ships one example domain, and adopting it means adding to that
-domain in this repository.** There is no tenant extension point:
-`migrations.load_manifest()` reads one hardcoded path, and a project manifest
-carries no migration keys. `docs/source-specification.md` §5.4 says the same
-thing from the other side — *"pgvector data and additional project tables are
-optional migrations"*. That is a defensible design, because a fork is a
-reviewable diff and reviewability is the property this repository argues for
-throughout. It is not an obvious one, and until Session 19 an adopter
-discovered it by reading `migrations/loader.py`.
+**Your tables live in your own directory, and you edit none of the
+release's files.** A project that declares a migration set owns everything
+under `projects/<slug>/`:
 
-Adding one table, one view and a few RPCs touches six places. Five are ordinary
-work; the sixth changes the shape of a first bring-up.
+```
+projects/<slug>/migrations/manifest.json
+projects/<slug>/migrations/templates/NNNN-*.sql
+projects/<slug>/migrations/released.lock.json
+projects/<slug>/contracts/postgrest-api-surface.yaml       # api-surface schema 2
+projects/<slug>/contracts/postgrest-openapi.canonical.json
+```
+
+It is **tracked in this checkout** rather than left beside your manifest on the
+host, and that is the design rather than an accident: a release is exactly the
+commit it is named for — `assert_clean` refuses a dirty checkout and the deploy
+runs the checked-out release's `migrate.sh` — so SQL applied from outside the
+commit would be a schema no commit determines. A fork is a reviewable diff, and
+reviewability is the property this repository argues for throughout. What used
+to make the fork expensive was **which** files it had to edit, not that it was
+a fork (ADR 0198).
+
+Point your project manifest at it, at schema version 5:
+
+```yaml
+schema_version: 5
+migrations:
+  set: projects/<slug>
+```
+
+Then, in order:
 
 | # | What | Offline? |
 |---|---|---|
-| 1 | `migrations/templates/00xx-*.sql` — your table, its FORCE-RLS policies, its `api` view, its `SECURITY DEFINER` RPCs | yes |
-| 2 | `migrations/manifest.json` — the entry, then `bin/migrate.sh --project FILE freeze-lock` | yes |
-| 3 | `contracts/postgrest-api-surface.yaml` — the reviewed surface. Amending it is sanctioned and the file says so: *"a project that needs an object this does not name needs a reviewed change here, not a second contract."* | yes |
-| 4 | `tests/contract/test_api_migrations.py` — two hand-written sets name the published surface by hand, deliberately, so an empty scrape cannot agree with an empty contract | yes |
-| 5 | `tests/contract/test_api_surface_contract.py` — the same, for the reviewed contract's own assertions | yes |
-| 6 | `contracts/postgrest-openapi.canonical.json` — captured from a **running deployment** and refuses a hand edit | **no** |
+| 1 | `projects/<slug>/migrations/templates/0001-*.sql` — your table, its FORCE-RLS policies, its `api` view, its `SECURITY DEFINER` RPCs | yes |
+| 2 | `projects/<slug>/migrations/manifest.json` — the entry, then `bin/migrate.sh --project project.yaml freeze-lock` | yes |
+| 3 | `projects/<slug>/contracts/postgrest-api-surface.yaml` — your reviewed surface, merged with the release's for every comparison | yes |
+| 4 | `projects/<slug>/contracts/postgrest-openapi.canonical.json` — captured from a **running deployment** and refuses a hand edit | **no** |
 
-Row 6 is the one to know about in advance. `bin/api-contract.sh --update` reads
-`routes.rest.url` from a deployed document; the surface is served only once the
-migrations are applied; and the migrations are applied by the deploy. So the
-snapshot check **cannot be satisfied before your first deploy** — it is
-unsatisfiable rather than unsatisfied, and the check says so since Session 19.
-Expect it red, deploy, then re-capture:
+`projects/example/` is a worked one: a pgvector column beside each note, a
+`security_invoker` view, and one `SECURITY DEFINER` write function.
+
+**What you do not touch:** `migrations/manifest.json`,
+`migrations/released.lock.json`, `contracts/postgrest-api-surface.yaml`, the
+release's snapshot, and the two hand-written test modules. Those are the seven
+files ADR 0197 counted, and the reason `DX-001` was answered *no* rather than
+left unattempted.
+
+Row 4 is the one to know about in advance, and it is unchanged in kind.
+`bin/api-contract.sh --update` reads `routes.rest.url` from a deployed
+document; the surface is served only once the migrations are applied; and the
+migrations are applied by the deploy. So the snapshot check **cannot be
+satisfied before your first deploy** — it is unsatisfiable rather than
+unsatisfied, and the check says so. Expect it red, deploy, then capture:
 
 ```bash
-sudo bin/api-contract.sh --update --project-outputs <outputs.json> > candidate.json
-# review it, then commit it as contracts/postgrest-openapi.canonical.json
+sudo bin/api-contract.sh --update --project project.yaml \
+  --project-outputs <outputs.json> > candidate.json
+# it prints the path the candidate belongs at, on stderr; review it and commit it
 ```
+
+**What the release will refuse in your set**, before it renders a byte of it:
+anything naming `app_private`; creating or altering a role, schema, extension
+or default privilege; setting a role other than `SET LOCAL ROLE
+{{object_owner}}`; dropping an object the release publishes; a placeholder
+outside the six request roles and the database name; a table in `app` without
+`FORCE ROW LEVEL SECURITY`; and a `down` block that does not raise `AP900`. Each
+is a boundary rather than a style rule, and if your application genuinely needs
+one of them that is a product decision to raise, not a lint to configure.
+
+Your migration versions must sort **after** the release lock's newest at the
+moment you freeze; `freeze-lock --project` records that version and
+`verify-lock` refuses a set that breaks it. dbmate applies one directory in
+filename order, and an out-of-order version is refused by `up --strict` on a
+deployed cluster while a fresh cluster applies it silently — one set producing
+two schemas.
 
 Two rules that are not negotiable and will refuse you rather than warn you:
 
@@ -336,15 +378,19 @@ substitute. See [ADR 0004](docs/decisions/0004-version-lock-format.md).
 
 ## What is intentionally unavailable
 
-**Removing a project is not built, and it is the one Session 12 claim still
-open.** The runtime comes down with `bin/project-runtime.sh` (the volume is
-kept), and provider resources are released with `bin/bootstrap-providers.sh
---destroy --confirm <key>` — which revokes the runtime identity and **leaves
-every secret in place**, the backup cipher pass included. The scoped removal
-that provably leaves a co-tenant project untouched is `DEP-REMOVE-001`; its
-proof is written and gated on a project actually removed, which has not
-happened. The two-project runtime isolation matrix, `DEP-ISO-001`, is claimed
-and has passed on every host gate since Session 12.
+**Removing a project is built and proved.** The runtime comes down with
+`bin/project-runtime.sh` (the volume is kept), a whole project is retired with
+`bin/project-retire.sh`, and provider resources are released with
+`bin/bootstrap-providers.sh --destroy --confirm <key>` — which revokes the
+runtime identity and **leaves every secret in place**, the backup cipher pass
+included. That last sentence is the one to read twice: retiring a project does
+not delete its secrets or its backups.
+
+The scoped removal that provably leaves a co-tenant project untouched is
+`DEP-REMOVE-001`, and it **passed on 2026-09-05**: a third project, `gamma-dev`,
+was created for the purpose and retired with `--record`. The two-project runtime
+isolation matrix, `DEP-ISO-001`, is claimed and has passed on every host gate
+since Session 12.
 
 Not deferred — **outside the product**:
 

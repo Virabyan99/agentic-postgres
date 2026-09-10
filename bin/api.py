@@ -51,6 +51,11 @@ OPERATIONS: dict[str, tuple[str, str]] = {
     "list-notes": ("GET", "/notes"),
     "list-tasks": ("GET", "/tasks"),
     "create-note": ("POST", "/rpc/create_note"),
+    # ADR 0196, migration 0031, D1097. The operation an adopter could not
+    # perform: until 0031 no role any service connects as could create a task,
+    # so `update-task-status` below -- enumerated since Session 12 -- had never
+    # had a row to act on outside a fixture.
+    "create-task": ("POST", "/rpc/create_task"),
     "update-task-status": ("POST", "/rpc/update_task_status"),
 }
 
@@ -135,6 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("operation", choices=sorted(OPERATIONS))
     parser.add_argument("--title", metavar="TEXT")
     parser.add_argument("--content", metavar="TEXT")
+    parser.add_argument("--note-id", metavar="UUID")
     parser.add_argument("--task-id", metavar="UUID")
     parser.add_argument("--expected-status", metavar="STATUS")
     parser.add_argument("--new-status", metavar="STATUS")
@@ -150,6 +156,18 @@ def main(argv: list[str] | None = None) -> int:
             if not arguments.title:
                 raise ApiError(2, "create-note requires --title")
             body = {"p_title": arguments.title, "p_content": arguments.content or ""}
+        elif arguments.operation == "create-task":
+            if not arguments.title:
+                raise ApiError(2, "create-task requires --title")
+            # `p_note_id` is omitted rather than sent as null when absent. The
+            # function's default IS null, and PostgREST maps body keys onto
+            # parameter names -- so sending the key with a null and omitting it
+            # reach the same row, while omitting it is the shape a caller who
+            # has no note actually writes. There is no `p_owner_id` and that
+            # absence is the security property.
+            body = {"p_title": arguments.title}
+            if arguments.note_id:
+                body["p_note_id"] = arguments.note_id
         elif arguments.operation == "update-task-status":
             allowed = statuses()
             missing = [

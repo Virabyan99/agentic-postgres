@@ -189,15 +189,27 @@ def test_the_reader_is_not_vacuous(final_surface: dict[str, Any]) -> None:
     the one this file exists to avoid producing itself.
     """
     assert set(final_surface["views"]) == {"notes", "tasks"}, final_surface["views"]
-    # Six functions in `api` since Session 9 Run 1: the two published write
-    # RPCs, the two agent-plane read functions migration 0018 adds (ADR 0118),
-    # and the two audit functions 0019 adds (ADR 0135, ADR 0136). Written out
-    # rather than read from the contract, deliberately -- this is the test that
-    # proves the reader found something, so comparing it against the document
-    # every other test compares against would let an empty scrape agree with an
-    # empty contract.
+    # SEVEN functions in `api` since Session 20: the three published write RPCs,
+    # the two agent-plane read functions migration 0018 adds (ADR 0118), and the
+    # two audit functions 0019 adds (ADR 0135, ADR 0136). Written out rather
+    # than read from the contract, deliberately -- this is the test that proves
+    # the reader found something, so comparing it against the document every
+    # other test compares against would let an empty scrape agree with an empty
+    # contract.
+    #
+    # **This equality is not loosened and does not need to be** (D1089). A
+    # project's own objects live in `projects/<slug>/` and are read by a
+    # different set, so the release's reader never sees one -- which is what
+    # lets this stay an equality for every adopter instead of becoming a
+    # containment check, and containment is what the non-negotiables call
+    # weakening.
     assert set(final_surface["functions"]) == {
         "create_note",
+        # ADR 0196. `0005` shipped a create; `0007` dropped it because ADR 0048
+        # found a second create ADR 0003 never sanctioned; `0031` restores it,
+        # reviewed rather than inherited. Until it did, `update_task_status`
+        # below had never run against a row outside a fixture.
+        "create_task",
         "update_task_status",
         "mcp_agent_context",
         "owner_activity_report",
@@ -231,11 +243,25 @@ def test_every_published_column_is_the_reviewed_column_list(
 def test_the_write_surface_is_the_reviewed_rpcs(
     final_surface: dict[str, Any], surface: dict[str, Any]
 ) -> None:
-    """`create_task` is the one that matters.
+    """`create_task` is the one that matters, and ADR 0196 changes what it says.
 
     ADR 0003 argued at length that operation 4 is a narrow status transition
     rather than a second create, and Session 3 shipped a second create. This is
     the assertion that would have failed for two sessions.
+
+    **What ADR 0048's removal did not notice** is that it left no way to make a
+    task at all: rig 19 measured `object_owner` -- NOLOGIN, reachable only by
+    migrations -- as the sole holder of INSERT on `app.tasks`, so
+    `update_task_status` had never run against a row outside a fixture, and
+    `query_resource` over `tasks` returned an empty set on every deployment and
+    could not do otherwise. Migration 0031 restores a create under the same
+    review ADR 0048 applied.
+
+    So the exclusion below inverts rather than disappearing. It is now a
+    REQUIREMENT that the function is present with its reviewed parameters, and
+    that its argument list contains no owner -- the absence of which is the
+    security property, since a signature taking one would let a caller satisfy
+    the INSERT policy by naming somebody else.
 
     **Three sections, since Session 9 Run 1.** The migrations create six
     functions in `api`, and ADR 0050's invariant is that the reviewed contract
@@ -250,7 +276,14 @@ def test_the_write_surface_is_the_reviewed_rpcs(
     """
     reviewed = set(surface["rpcs"]) | set(surface["agent_rpcs"]) | set(surface["agent_write_rpcs"])
     assert set(final_surface["functions"]) == reviewed
-    assert "create_task" not in final_surface["functions"]
+    assert final_surface["functions"]["create_task"] == ["p_title", "p_note_id"]
+    assert not any(
+        "owner" in parameter for parameter in final_surface["functions"]["create_task"]
+    ), (
+        "api.create_task takes an owner parameter. There is no owner_id argument and that "
+        "absence IS the security property: the policy would pass, because the row really "
+        "would be owned by whoever the caller said"
+    )
 
     # Pairwise disjoint, stated as three comparisons rather than one over a
     # union, so a name in two sections says WHICH two. A function in both
@@ -1223,26 +1256,32 @@ def test_the_view_and_function_readers_accept_the_same_declaration_forms() -> No
 
 
 # ---------------------------------------------------------------------------
-# The task domain is unreachable, and the roster is why it cannot just go
-# (D1055, ADR 0196)
+# The task domain, restored by a reviewed create (D1055, ADR 0196)
 # ---------------------------------------------------------------------------
 
 
-def test_no_published_operation_creates_a_task() -> None:
-    """D1055, measured in rig 19 and asserted here so it cannot drift quietly.
+def test_a_published_operation_creates_a_task() -> None:
+    """The replacement the marker asked for, in its own failure message.
 
-    `0005` created `api.create_task`; `0007` revoked and dropped it, correctly
-    (ADR 0048). Nothing replaced it. Measured on a throwaway cluster with all
-    thirty released migrations applied: `api.create_task` does not exist, the
-    only holder of INSERT on `app.tasks` is `object_owner` (NOLOGIN), and both
-    `app_runtime` and `authenticated` are refused with `permission denied for
-    schema app` -- `0006` revokes the schema USAGE that `0003`'s comment still
-    claims they have.
+    Its predecessor asserted that NOTHING creates a task -- the marker for a
+    known, recorded, unrepaired state (D1055, measured in rig 19: no
+    `api.create_task` in the catalog, `object_owner` the only holder of INSERT
+    on `app.tasks`, and `0006` revoking the schema USAGE that `0003`'s comment
+    still claims `app_runtime` has). It said it was *"expected to FAIL when ADR
+    0196's migration ships"*, and when `0031` shipped it failed with exactly the
+    sentence it had written for this moment: *"this marker should be replaced by
+    an assertion that a task can be created"*.
 
-    This test is expected to FAIL when ADR 0196's migration ships. That is the
-    point: it is the marker for a known, recorded, unrepaired state, and it
-    turns red the moment the state changes rather than staying green over a
-    surface nobody can use.
+    So it is -- and the history it recorded is asserted rather than lost:
+    created, dropped, and created again, in that order, by three migrations. A
+    create that sorted before the drop would be `0005`'s, which is the state
+    this test used to describe.
+
+    What a cluster is needed for is `test_migrations_apply_as_the_migration_
+    user`'s and rig 20b's: `PT401` with no identity, `PT404` for a note absent
+    AND for another owner's, `42501` for `anon` and `agent_reader`, a row for
+    `authenticated` and `agent_writer`. What is asserted here is the shape,
+    which is a property of the template.
     """
     creates = [
         entry["template"]
@@ -1259,11 +1298,30 @@ def test_no_published_operation_creates_a_task() -> None:
         "no migration ever created api.create_task; the history is not what ADR 0196 describes"
     )
     assert drops, "api.create_task was never dropped; ADR 0196's premise no longer holds"
-    assert drops[-1] > creates[-1], (
-        "api.create_task is created after it is last dropped -- ADR 0196's migration "
-        "has shipped, and this marker should be replaced by an assertion that a "
-        "task can be created"
+
+    # Created, dropped, created again. The ORDER is the assertion.
+    assert creates[-1] > drops[-1], (
+        f"api.create_task is dropped after it is last created ({drops[-1]} follows "
+        f"{creates[-1]}), so the published surface again names a resource nothing can "
+        "reach -- which is the state ADR 0196 exists to end"
     )
+    assert len(creates) == 2, (
+        f"expected 0005's create and 0031's, got {creates}. A third would mean a "
+        "migration replaced the reviewed one without an ADR"
+    )
+
+    # The restored function's shape. The absence of an owner parameter IS the
+    # security property, and it is asserted on the SIGNATURE rather than on the
+    # contract, because the contract is the document this file exists to check
+    # the migrations against.
+    body = statements(creates[-1])
+    signature = body.split("CREATE FUNCTION api.create_task", 1)[1].split(")", 1)[0]
+    assert "owner" not in signature, signature
+    assert "app.current_user_id()" in body, (
+        "api.create_task does not derive the owner from the request identity"
+    )
+    assert "SECURITY DEFINER" in body
+    assert "SET search_path = pg_catalog, pg_temp" in body
 
 
 def test_retiring_the_task_tools_is_blocked_by_the_roster() -> None:

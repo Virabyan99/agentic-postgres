@@ -363,6 +363,15 @@ def test_the_readme_tells_an_adopter_what_adding_a_table_costs() -> None:
     from a running deployment and refuses a hand edit, so a first bring-up
     necessarily runs with that check red and an adopter has to know that is
     expected rather than a mistake they made.
+
+    **ADR 0198 changes what this section has to say, not whether it says it.**
+    Written in Session 19, it asserted the README states there is *"no tenant
+    extension point"* -- the honest answer at the time, and the fact ADR 0197
+    answered `DX-001` "no" over. Session 20 built one, so that assertion is
+    replaced rather than dropped: the section must now name the directory an
+    adopter owns, and must say that none of the release's files is edited --
+    which is the property the seven-file count in ADR 0197 measured the absence
+    of.
     """
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     # The newlines are load bearing. Without them this is a PREFIX, and a
@@ -376,14 +385,38 @@ def test_the_readme_tells_an_adopter_what_adding_a_table_costs() -> None:
     )
     section = readme.split("\n## Adding your own tables\n", 1)[1].split("\n## ", 1)[0]
 
-    # The three that were discovered the expensive way.
-    assert "no tenant extension point" in section, "the fork requirement is not stated"
+    # Where the adopter's own files go (ADR 0198). Named exactly, because the
+    # whole repair is WHICH files a fork touches.
+    assert "projects/<slug>" in section, (
+        "the section does not name the directory an adopter owns; without it the "
+        "instruction is 'fork and edit', which is what ADR 0197 measured at seven "
+        "release files"
+    )
+    assert "schema_version: 5" in section, (
+        "the section does not show the manifest key that declares a set, so an "
+        "adopter has the directory and no way to point at it"
+    )
+    assert "you do not touch" in section.lower(), (
+        "the section does not say which of the release's files an adopter leaves "
+        "alone -- and that list IS the repair; without it a reader cannot tell "
+        "this from the fork-and-edit instruction it replaces"
+    )
+
+    # The two that were discovered the expensive way and are unchanged in kind.
     assert "postgrest-openapi.canonical.json" in section, "the snapshot is not named"
     assert "before your first deploy" in section, (
         "the section does not say the snapshot check is red until after a deploy, "
         "which is the fact that turns a dead end into an instruction"
     )
-    assert "Fix forward" in section, "the rule that will refuse an adopter is not stated"
+
+    # What the release will refuse in a project's set, before it renders it.
+    # An adopter who meets one of these on a host has already written the
+    # migration; meeting it in the README costs nothing.
+    assert "FORCE ROW LEVEL SECURITY" in section, (
+        "the section does not say a table in `app` must carry FORCE row level "
+        "security, which is the refusal an adopter is most likely to hit"
+    )
+    assert "app_private" in section, "the section does not say the platform's state is off limits"
 
 
 def test_the_readme_says_the_agent_plane_does_not_serve_an_adopters_tables() -> None:

@@ -95,6 +95,11 @@ def test_the_fixture_is_a_real_captured_document(served: dict[str, Any]) -> None
         "/notes",
         "/tasks",
         "/rpc/create_note",
+        # ADR 0196. The fixture was recaptured in Session 20 from a throwaway
+        # cluster serving 31 migrations; rig 20c's control arm reproduced the
+        # PREVIOUS fixture byte for byte first, so this one added path is the
+        # whole of what 0031 changed in the served document.
+        "/rpc/create_task",
         "/rpc/update_task_status",
     }
 
@@ -498,6 +503,7 @@ def test_declared_objects_names_relations_and_rpcs_the_way_the_surface_does(
         "notes",
         "tasks",
         "rpc/create_note",
+        "rpc/create_task",
         "rpc/update_task_status",
     }
 
