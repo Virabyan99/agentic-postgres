@@ -462,3 +462,49 @@ def test_a_valid_file_round_trips(tmp_path: Path) -> None:
     path = tmp_path / "bootstrap-state.json"
     path.write_text(json.dumps(make_state()), encoding="utf-8")
     assert bootstrap_state.load_state(path)["project_key"] == "alpha-dev"
+
+
+# ---------------------------------------------------------------------------
+# A partial --apply says what it left behind (D1046)
+# ---------------------------------------------------------------------------
+
+
+def test_a_failed_apply_reports_what_it_already_created() -> None:
+    """D1046. `--apply` creates the Infisical project, then the identity, then
+    the credential, and writes its state file only at the end -- it cannot write
+    it earlier, because `validate_state` requires a complete document.
+
+    Measured: `create_identity` failed on the account's identity limit; the
+    project had already been created; no state file was written; and `--plan`,
+    which compares the contract against recorded state and contacts nothing,
+    then proposed creating a project that already existed. The orphan was found
+    only by querying the provider's API by hand, which is outside the documented
+    path entirely.
+
+    `--adopt` is the command built to bind to an existing project and it binds
+    BY ID, refusing any lookup by name (ADR 0189) -- right for adoption, and it
+    means an ID recorded nowhere cannot be handed to it. So the ID is what the
+    failure has to print, and this asserts the run keeps them to print.
+
+    Asserted against the source: making the real call fail would need a
+    provider, and this test may not have one.
+    """
+    source = (REPO_ROOT / "bin" / "bootstrap-providers.py").read_text(encoding="utf-8")
+
+    assert "created_so_far" in source, (
+        "--apply no longer tracks what it created; a partial failure leaves an "
+        "orphan that nothing on this host records"
+    )
+    # Recorded after the two creations that can be orphaned by a later failure.
+    assert 'created_so_far.append(("Infisical project"' in source
+    assert 'created_so_far.append(("machine identity"' in source
+
+    # And reported on the way out, with the remedy named.
+    failure_branch = source[source.index("except (BootstrapStateError, KeyError, ValueError)") :]
+    failure_branch = failure_branch[: failure_branch.index("paths = credential_paths")]
+    assert "created_so_far" in failure_branch, (
+        "the failure path does not print what the run created; the run knows and "
+        "does not say, which is the whole defect"
+    )
+    for remedy in ("--destroy", "--adopt", "console"):
+        assert remedy in failure_branch, f"the failure message does not mention {remedy}"

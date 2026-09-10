@@ -94,12 +94,27 @@ POSTGRES_UID = "999"
 
 #: How long a backup may take before this command stops waiting.
 #:
-#: An hour, and it is a bound rather than a measurement: nothing in this
-#: repository has ever timed a full backup against R2. It is named here so that
-#: the number is a decision somebody can revise rather than a default nobody
-#: chose, and the message on timeout says which it is.
+#: An hour, and still a bound rather than a measurement -- but no longer an
+#: unmeasured one. A first full backup of a 31.7 MB database against R2 took
+#: **15 minutes 36 seconds** on a bring-up in 2026-09 (4.1 MB in the
+#: repository, ~87% compression), so an hour has headroom of roughly four
+#: times at that size and says nothing about a larger one. `process-max` is 1
+#: by decision (D593), so this scales with data rather than with the host.
 BACKUP_TIMEOUT_SECONDS = 3600
-QUICK_TIMEOUT_SECONDS = 300
+
+#: How long a *quick* verb -- `info`, `check`, a mirror count -- may wait.
+#:
+#: Was 300, and 300 was wrong in the way a chosen number usually is: smaller
+#: than the operation standing next to it (D1051). `backup --type full` returns
+#: while pgBackRest is still running `expire`, so the very next verb in the
+#: documented sequence met a repository that was not quiescent and died here
+#: after five minutes -- immediately after a backup that had worked perfectly,
+#: with nothing saying so.
+#:
+#: `info` is not itself slow: measured at 1 second inside the container and 2
+#: through this wrapper. The stall was contention, so what this bound has to
+#: cover is waiting for the repository, not the read.
+QUICK_TIMEOUT_SECONDS = 900
 
 #: How long a mirror copy may take. The one measured figure is Run 2's rig: a
 #: 31 MB repository copied from R2 to Backblaze in under a minute, and the
@@ -391,6 +406,15 @@ def verb_backup(arguments: argparse.Namespace) -> int:
         f"backup: {arguments.type} complete; repository holds "
         f"{summary['backup_count']} backup(s), newest full "
         f"{summary['last_full_backup_label'] or 'none'}"
+    )
+    # D1051. pgBackRest runs `expire` as part of a backup and this command
+    # returns before it finishes, so the repository stays busy afterwards and
+    # the next verb -- `info`, which any sane runbook calls for here to confirm
+    # the backup exists -- can block on it. Nothing was broken when that
+    # happened on a first bring-up, and nothing said so either.
+    print(
+        "  the repository stays busy while pgBackRest finishes expiring; "
+        "`info` may block for a few minutes yet"
     )
     return 0
 
@@ -765,8 +789,12 @@ def main(argv: list[str] | None = None) -> int:
     except subprocess.TimeoutExpired as error:
         print(
             f"backup: pgBackRest did not answer within {error.timeout}s. That bound is "
-            "chosen rather than measured -- nothing here has ever timed a full backup "
-            "against R2 -- and a backup may still be running inside the container.",
+            "chosen rather than derived -- the one measurement is a 31.7 MB database "
+            "taking 15m36s for a full backup against R2, and `process-max` is 1 by "
+            "decision (D593), so it scales with data and not with the host -- and "
+            "work may still be running inside the container. A backup returns before "
+            "pgBackRest finishes expiring, so a read that timed out here may simply "
+            "have been waiting for the repository.",
             file=sys.stderr,
         )
         return EXIT_STATE

@@ -1133,3 +1133,78 @@ def test_the_deploy_does_not_recompute_a_status_the_command_already_computed() -
         f"{published['status']!r} for one repository at one moment. Two readers of the "
         "same subject disagreeing is what sent this session looking (D700)"
     )
+
+
+# ---------------------------------------------------------------------------
+# A bound larger than the operation it guards (D1051)
+# ---------------------------------------------------------------------------
+
+
+def _backup_module():
+    """`bin/backup.py`, loaded by path the way `deploy` above is: it is a
+    program, not a package member."""
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location(
+        "apg_backup", REPO_ROOT / "bin" / "backup.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_the_quick_bound_is_not_smaller_than_the_wait_it_covers() -> None:
+    """D1051. `backup --type full` returns while pgBackRest is still running
+    `expire`, so the next verb in the documented sequence -- `info`, which any
+    sane runbook calls for to confirm the backup exists -- met a repository that
+    was not quiescent and died on this bound after five minutes, immediately
+    after a backup that had worked perfectly.
+
+    `info` is not itself slow: measured at 1 second inside the container and 2
+    through the wrapper. What this bound covers is waiting for the repository,
+    so it has to be large enough to outlast an expire, not large enough to read
+    a document.
+
+    The number that made 300 obviously wrong: a full backup of a 31.7 MB
+    database took 15m36s on the same host, three times this bound. `process-max`
+    is 1 by decision (D593), so both figures scale with data rather than host.
+    """
+    module = _backup_module()
+    assert module.QUICK_TIMEOUT_SECONDS > 300, (
+        "the quick bound is back to a value smaller than the expire it has to "
+        "outlast; a successful backup will be followed by a timeout"
+    )
+    assert module.QUICK_TIMEOUT_SECONDS < module.BACKUP_TIMEOUT_SECONDS, (
+        "a quick verb may not wait as long as a backup; that is not a bound"
+    )
+
+
+def test_a_completed_backup_says_the_repository_is_still_busy() -> None:
+    """The half that is documentation rather than arithmetic.
+
+    Nothing was broken when a documented `info` stalled for five minutes after
+    a successful backup, and nothing said so either. Raising the bound stops the
+    timeout; saying it stops the alarm.
+    """
+    source = (REPO_ROOT / "bin" / "backup.py").read_text(encoding="utf-8")
+    assert "stays busy" in source and "expiring" in source, (
+        "a completed backup does not warn that the repository is still busy"
+    )
+
+
+def test_the_timeout_message_no_longer_claims_nothing_has_been_measured() -> None:
+    """The message was this product's best example of reporting honestly -- it
+    said it had no answer, admitted its threshold was arbitrary, and warned that
+    work might still be in flight (ADR 0195 quotes it).
+
+    One clause of it is now false. A full backup HAS been timed against R2, so
+    a message still saying "nothing here has ever timed a full backup" would be
+    the same defect the rest of this session repaired: a confident sentence that
+    is not true.
+    """
+    source = (REPO_ROOT / "bin" / "backup.py").read_text(encoding="utf-8")
+    assert "never" not in source.split("did not answer within")[1][:600], (
+        "the timeout message still claims a full backup has never been timed"
+    )
+    assert "15m36s" in source, "the measurement is not recorded where the bound is chosen"

@@ -458,3 +458,37 @@ def test_invalid_input_exits_two(args: tuple[str, ...], expected: int) -> None:
 
 def test_help_works_from_another_directory(tmp_path: Path) -> None:
     assert run("--help", cwd=tmp_path).returncode == 0
+
+
+# ---------------------------------------------------------------------------
+# The diagnostic names the cause an adopter actually hits (D1039)
+# ---------------------------------------------------------------------------
+
+
+def test_the_missing_object_diagnostic_names_the_stale_snapshot() -> None:
+    """D1039. The message offered two hypotheses and an outsider adding an
+    application to this product hit neither: the migration had shipped and the
+    grants were correct. The snapshot simply predated the surface.
+
+    Trusting the message, they spent their time auditing grants that were fine.
+
+    The third clause is also what distinguishes "I have made a mistake" from
+    "this cannot be done yet". `--update` reads `routes.rest.url` from a
+    DEPLOYED document, the surface is served only once the migrations are
+    applied, and the migrations are applied by the deploy -- so on a first
+    bring-up this check is *unsatisfiable* until after that deploy, while the
+    natural reading of the process puts the gate first. Only the message can
+    say which state the reader is in.
+    """
+    source = (REPO_ROOT / "bin" / "api-contract.py").read_text(encoding="utf-8")
+    block = source[source.index("which the snapshot does not publish") :][:900]
+
+    assert "has not shipped" in block, "the first hypothesis was lost"
+    assert "grants" in block, "the second hypothesis was lost"
+    assert "predates" in block, (
+        "the diagnostic still names only the two causes that were not the cause; "
+        "a stale snapshot is the one an adopter meets first"
+    )
+    assert "--update" in block, (
+        "the message names no remedy; a refusal without one is where a reader stops"
+    )

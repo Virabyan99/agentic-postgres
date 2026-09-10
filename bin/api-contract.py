@@ -209,10 +209,25 @@ def compare_snapshot_to_surface(snapshot: dict[str, Any], surface: dict[str, Any
             "case the contract exists for"
         )
     for name in sorted(reviewed - published):
+        # Three clauses, not two (D1039). The first two are real causes, and an
+        # outsider adding an application to this product hit neither: the
+        # migration had shipped and the grants were correct. The snapshot simply
+        # predated the surface. Trusting the message, they spent their time
+        # auditing grants that were fine.
+        #
+        # The third clause is also the one that says this check can be
+        # *unsatisfiable* rather than merely unsatisfied. `--update` reads
+        # `routes.rest.url` from a DEPLOYED document; the surface is served only
+        # once the migrations are applied; the migrations are applied by the
+        # deploy. So on a first bring-up it cannot be made to agree until after
+        # that deploy, while the natural reading of the process puts the gate
+        # first. "I have made a mistake" and "this cannot be done yet" are
+        # different states, and only this message can tell them apart.
         problems.append(
             f"the reviewed surface names {name!r}, which the snapshot does not publish. "
             "Either the migration that creates it has not shipped, or its grants keep it "
-            "out of the document"
+            "out of the document, or the snapshot predates this surface -- re-capture it "
+            "with `--update --project-outputs FILE` after the deploy that serves it"
         )
 
     exposed = surface["exposed_schema"]

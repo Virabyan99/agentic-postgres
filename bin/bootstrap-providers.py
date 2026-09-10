@@ -818,12 +818,32 @@ def apply(
         # and a traceback through http.client is how this credential leaked.
         fail(EXIT_PREREQUISITE, str(exc))
 
+    # D1046. What this run has already created at the provider, in order, so a
+    # failure part-way can say so. The state file is written only at the end --
+    # it cannot be written earlier, because `validate_state` requires a complete
+    # document and a half-populated one would not validate -- so on a failure
+    # here NOTHING records that a project now exists.
+    #
+    # Measured: `create_identity` failed on the account's identity limit, the
+    # Infisical project `snippets-dev` had already been created, no state file
+    # was written, and `--plan` (which compares the contract against recorded
+    # state and contacts nothing) then proposed creating a project that already
+    # existed. The orphan was found only by querying the provider's API by
+    # hand, which is outside the documented path entirely.
+    #
+    # `--adopt` is the command built to bind to an existing project, and it
+    # binds BY ID and refuses any lookup by name (ADR 0189) -- correct for
+    # adoption, and it means an ID recorded nowhere cannot be handed to it. So
+    # the ID is what this has to print.
+    created_so_far: list[tuple[str, str]] = []
     try:
         control = ControlPlane.login(infisical["api_url"], operator_id, operator_secret)
         organization = infisical["organization_id"]
 
         project_id = control.create_project(key, key, organization)
+        created_so_far.append(("Infisical project", project_id))
         identity_id = control.create_identity(f"{key}-runtime", organization)
+        created_so_far.append(("machine identity", identity_id))
         client_id = control.attach_universal_auth(identity_id)
         secret_id, client_secret = control.create_client_secret(identity_id, f"{key} runtime")
 
@@ -860,6 +880,21 @@ def apply(
     # what `generate_secret_value` raises, and an uncaught one here prints a
     # traceback from a command that handles credentials.
     except (BootstrapStateError, KeyError, ValueError) as exc:
+        # Say what is now at the provider before leaving (D1046). This run
+        # knows; until now it did not say, and no state file records it, so the
+        # next `--plan` proposes creating what already exists and a blind
+        # re-`--apply` produces a duplicate.
+        if created_so_far:
+            print("bootstrap-providers: this run created the following before failing:", flush=True)
+            for kind, identifier in created_so_far:
+                print(f"  {kind}  {identifier}", flush=True)
+            print(
+                "  No state file was written, so --destroy cannot see these and "
+                "--plan will propose creating them again. Remove them at the "
+                "provider's console by the IDs above, or pass the project id to "
+                "--adopt --state, before re-running --apply.",
+                flush=True,
+            )
         fail(EXIT_PROVIDER, str(exc))
 
     paths = credential_paths(key)
