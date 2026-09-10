@@ -302,7 +302,7 @@ def test_both_deployed_documents_are_v17_and_the_doctor_reads_the_sets(
 
 
 def test_a_task_created_through_the_enumerated_operation_is_the_row_update_task_status_moves(
-    project_a: dict[str, Any], as_root, sh_status
+    project_a: dict[str, Any], owner_session, as_root
 ) -> None:
     """ADR 0003's operation 4, against real data, for the first time.
 
@@ -311,52 +311,75 @@ def test_a_task_created_through_the_enumerated_operation_is_the_row_update_task_
     0031 no role any service connects as could create a task (rig 19). Two of
     the agent plane's six tools addressed a permanently empty table.
 
-    Driven through `bin/api.sh` rather than a hand-written `curl`: the point is
-    that the product's own enumerated door now opens, which is F-023's
-    checklist item. The stale-expectation arm is the compare-and-swap itself --
-    one success and one refusal, rather than a last-writer-wins overwrite.
+    **`owner_session`, not `dev-token.sh`** (D298, D675). A minted token carries
+    NO SUBJECT (ADR 0095) and migration 0013's `auth_claims_are_current` is an
+    EXISTS over five equalities no minted token satisfies -- so
+    `app.current_user_id()` would be NULL and `create_task` would answer
+    `PT401`, saying nothing about what this proof names. Ten proofs returned
+    AP401 the first time a host gate ran after 0013 and were all moved to this
+    fixture; the Session 20 plan's own text said to use a minted token, which is
+    that defect restated as an instruction.
+
+    `bin/api.sh` is still the caller, because F-023's point is the product's own
+    ENUMERATED door rather than a hand-written `curl`. It reads its bearer from
+    `APG_API_TOKEN`, so the owner's token goes there.
+
+    The stale-expectation arm is the compare-and-swap itself: one success and
+    one refusal, rather than a last-writer-wins overwrite.
     """
     outputs = os.environ["APG_PROJECT_A_OUTPUTS"]
+    environment = {**os.environ, "APG_API_TOKEN": owner_session.token}
 
-    def api(*arguments: str) -> tuple[int, str, str]:
-        return sh_status(
-            str(REPO_ROOT / "bin" / "dev-token.sh"),
-            "--project-outputs", outputs, "--role", "authenticated", "--",
-            str(REPO_ROOT / "bin" / "api.sh"), "--project-outputs", outputs, *arguments,
-        )  # fmt: skip
+    def api(*arguments: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [str(REPO_ROOT / "bin" / "api.sh"), "--project-outputs", outputs, *arguments],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=environment,
+            cwd=REPO_ROOT,
+        )
 
-    code, out, err = api("create-task", "--title", "session 20 trip")
-    assert code == 0, f"create-task failed\n{out}\n{err}"
-    created = json.loads(out)
+    made = api("create-task", "--title", "session 20 trip")
+    assert made.returncode == 0, f"create-task failed\n{made.stdout}\n{made.stderr}"
+    created = json.loads(made.stdout)
     if isinstance(created, list):
         created = created[0]
+
     task_id = created["id"]
     assert created["status"] == "pending", created
-    assert created["owner_id"], "the created task carries no owner"
+    assert created["owner_id"] == owner_session.user_id, (
+        "the task is owned by somebody other than the caller. There is no owner "
+        "parameter; the owner comes from the request identity, and if these differ "
+        "the derivation is not the one ADR 0196 specifies"
+    )
 
-    code, out, err = api(
+    moved = api(
         "update-task-status", "--task-id", task_id,
         "--expected-status", "pending", "--new-status", "in_progress",
     )  # fmt: skip
-    assert code == 0, f"update-task-status failed on the row create-task made\n{out}\n{err}"
-    moved = json.loads(out)
-    if isinstance(moved, list):
-        moved = moved[0]
-    assert moved["id"] == task_id
-    assert moved["status"] == "in_progress"
+    assert moved.returncode == 0, (
+        f"update-task-status failed on the row create-task made\n{moved.stdout}\n{moved.stderr}"
+    )
+    updated = json.loads(moved.stdout)
+    if isinstance(updated, list):
+        updated = updated[0]
+    assert updated["id"] == task_id
+    assert updated["status"] == "in_progress"
 
     # The compare-and-swap, with the expectation now stale. One success and one
     # refusal is the whole argument for `p_expected_status`: without it the
-    # second caller silently overwrites the first.
-    code, out, err = api(
+    # second caller silently overwrites the first, and nothing says so.
+    stale = api(
         "update-task-status", "--task-id", task_id,
         "--expected-status", "pending", "--new-status", "completed",
     )  # fmt: skip
-    assert code != 0, (
+    assert stale.returncode != 0, (
         "a second transition from a stale expected status SUCCEEDED, so the "
-        "compare-and-swap is last-writer-wins"
+        "compare-and-swap is last-writer-wins and ADR 0116 is not activated"
     )
-    assert "PT409" in out + err or "409" in out + err, out + err
+    combined = stale.stdout + stale.stderr
+    assert "PT409" in combined or "409" in combined, combined
 
 
 # ---------------------------------------------------------------------------

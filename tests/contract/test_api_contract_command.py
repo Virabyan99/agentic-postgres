@@ -593,14 +593,22 @@ def test_check_with_a_project_reads_the_projects_snapshot_path(api_contract) -> 
     resolver is not a command: nothing here had ever said which file
     `command_check` opens.
 
-    The distinguishing signal is the MESSAGE and not the exit code, and that is
-    not an accident of this test. Both states exit 5. Unmutated, `--check
-    --project` fails because the project's snapshot is ABSENT; mutated, it loads
-    the release's snapshot -- which exists -- and fails because that document
-    does not publish the project's objects. Those are ADR 0195's two outcomes:
-    *I could not find the thing* and *the things disagree*, and a reader that
-    could not tell them apart would send an operator to audit a contract when
-    the answer is "capture the snapshot".
+    **Rewritten on the trip, and the version it replaces is why.** Until Run 7's
+    deploy there was no project snapshot to compare against, so this asserted
+    the refusal: exit 5, *there is no approved snapshot at projects/example/...*,
+    and NOT the word "disagree" -- which distinguished a missing file from a
+    contract mismatch, ADR 0195's two outcomes, when both exited 5.
+
+    That assertion was true for exactly as long as the state it described. Beta
+    is deployed, its snapshot is captured and committed, and the comparison now
+    succeeds -- so the test asserts the SUCCESS, and asserts it by the one number
+    that can tell the merged comparison from the release's.
+
+    **The count is the assertion.** `--check --project` reports 7 objects: the
+    release's five plus the project's two. `--check` alone reports 5. A
+    `command_check` that loaded the merged surface and forgot the project's
+    snapshot -- the battery's mutation -- would report 5 with a project flag on
+    the command line, and every other assertion here would still hold.
     """
     root = api_contract.project_root(REPO_ROOT / "project.example.yaml")
     assert root == EXAMPLE_PROJECT
@@ -609,15 +617,19 @@ def test_check_with_a_project_reads_the_projects_snapshot_path(api_contract) -> 
     )
     assert api_surface.project_snapshot_path(root) != api_contract.SNAPSHOT_PATH
 
-    result = run("--check", "--project", str(REPO_ROOT / "project.example.yaml"))
-    assert result.returncode == 5, result.stdout + result.stderr
-    message = result.stdout + result.stderr
-    assert "there is no approved snapshot at" in message, message
-    assert "projects/example/contracts/postgrest-openapi.canonical.json" in message, message
-    assert "disagree" not in message, (
-        "`--check --project` reported a disagreement rather than a missing snapshot, "
-        "which means it compared the merged surface against the RELEASE's snapshot"
+    merged = run("--check", "--project", str(REPO_ROOT / "project.example.yaml"))
+    assert merged.returncode == 0, merged.stdout + merged.stderr
+    assert "7 objects" in merged.stdout + merged.stderr, (
+        "`--check --project` did not compare the merged surface: 7 is the release's "
+        "five published objects plus the example project's two, and any other number "
+        "means one half of the pair was not loaded"
     )
+
+    # The control, in the same test. Without it, "7 objects" would be a number
+    # nobody could tell from the release's own.
+    release = run("--check")
+    assert release.returncode == 0, release.stdout + release.stderr
+    assert "5 objects" in release.stdout + release.stderr
 
 
 def test_a_manifest_with_no_set_is_refused_by_project(api_contract) -> None:
