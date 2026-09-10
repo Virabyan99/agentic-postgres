@@ -1,0 +1,664 @@
+# Session 20 — The tenant extension point
+
+**Status:** planned 2026-09-10 at `95ea0be`, the commit that carries the Stage 3
+plan of record. Not started.
+**Brief:** `docs/plans/stage-3-plan.md` §5 *Session 20*, and its rows D1082
+(the extension point, measured from four sides), D1067 (`apg migrate dev` is
+absorbed here), D1080 (`documented_path`'s cause), D1083 (ADR 0196's migration
+lands in this session's deploy sitting), D1086 (the stale removal paragraphs).
+**Shape:** seven runs. Runs 1–6 are offline and green in CI on a `session-20`
+branch; Run 7 is a host trip that ends with the branch merged to `main`.
+**Product version at close:** `CURRENT_SESSION` 20; `template_version` as
+`upgrade plan` prices it, proposed `1.1.0` (D1081).
+**Written for whoever picks this up cold.** Every path is exact, every third
+party the session touches is measured in Run 1 before anything is built on
+it, and the appendix says how a run is executed in this repository — read
+`CLAUDE.md` §1 in the launch folder before the first command.
+
+---
+
+## 0. Where the session starts
+
+Stage 2 closed at 1.0.0; Session 19 repaired an adopter's nineteen findings and
+tagged 1.0.1 on `b8bab01`; the Stage 3 plan was committed at `95ea0be` on
+2026-09-10 with six sessions, 20–25, on PostgreSQL 18.4. **Session 20 is
+first because every later session builds for a surface, and today the
+surface is the product's example domain** (`notes`, `tasks`, the contract
+named `notes-tasks-v1`). An application built on this appliance adds its
+tables by forking the product and editing seven tracked files, one of which
+cannot be edited without a running host (ADR 0197). That is why
+`documented_path` is `not_run` with the answer *no*, and it is what this
+session removes.
+
+**What is deployed**: host `62.238.99.122`, checkout `b8bab01`, release
+`054f54e` on `alpha-dev` and `beta-dev`, both manifests at project schema 1,
+outputs v16 in the tree and v15 published (the host publishes v16 only after
+this trip), 30 migrations applied on both clusters, doctor 10/10, backups and
+the B2 mirror current. `.generated/alpha-dev` is op-owned again since
+2026-09-10; the first root deploy of this trip makes it root-owned again,
+which is the live site of D1060.
+
+**What this session builds, in one paragraph.** A project's own migration set
+beside the release's — declared in the project manifest (schema 5), living in
+the release checkout under `projects/<slug>/`, rendered through the same
+`{{name}}` substitution, frozen under its own lock, applied after the release's
+set by the same dbmate plane as the same `migration_user`, and digested into
+the deployed document (outputs v17). A lint over what such a set may contain.
+A project's own reviewed surface and OpenAPI snapshot beside its set, so the
+release's contract, its control fixture and its two hand-written test sets are
+never edited by an adopter again. The reviewed `api.create_task` ADR 0196
+specified (migration 0031), in this session's deploy sitting. Two readers made
+honest: `migrate.sh render` distinguishing *unreadable* from *absent* (D1060),
+and `routes.*.status` gaining `unobserved` (D1048). The README and ledger
+paragraphs that describe `project_removal` as open, corrected (D1086).
+
+**The premises were checked against the tree before this plan was costed**,
+and two of the Stage 3 plan's own sentences turned out to be wrong in the
+reassuring direction (D1087, D1089). §1 has the rows. The largest finding is
+that `src/agentic_postgres/migrations.py` is already parameterised by root and
+path — every function takes one — and the hardcoding the adopter hit lives in
+its **eleven callers**, all of which use the default. The extension point is
+a change to callers, not to the module.
+
+**Read before touching anything**: ADR 0028 (templates, the rendered payload
+as the immutable unit, what the lock records), ADR 0050 (the reviewed surface
+is hand-written and the gate cannot approve its own subject), ADR 0195 (a
+report may not substitute an answer for a failure to determine one), ADR 0196
+(the task domain, and the migration this session writes), ADR 0197 (what
+`documented_path` now means), D1036–D1040 and D1053–D1055 in
+`docs/plans/session-19-implementation-plan.md` §1, and `FINDINGS.md` F-002,
+F-004 to F-008 and F-021 to F-023 in the launch folder.
+
+---
+
+## 1. The divergence table
+
+Six columns, next free number after this table **D1098**. Rows D1087–D1097
+were measured at planning on 2026-09-10 at `95ea0be`; the runs add theirs
+below them as they go.
+
+| # | Said | Repository does | This session | Why | ADR |
+|---|---|---|---|---|---|
+| **D1087** | Stage 3 plan §5: the project's set lives *"outside the release's `migrations/templates/` — on the host beside the manifest, where D971 already puts a third project's manifest."* | **A release is exactly the commit it is named for**: `installed_release.assert_clean` refuses a dirty checkout, the deploy runs `release/bin/migrate.sh` from the checked-out release, the lock is what `verify_lock` compares, and `upgrade plan` diffs two rendered releases (D732). SQL living beside a manifest on the host would be applied by a release that does not contain it — a schema no commit determines, which `assert_clean` exists to refuse. D971's manifest is *configuration* (a domain, a bucket); a migration is *code*. | **The set lives in the release checkout, tracked, under `projects/<slug>/`** — `migrations/manifest.json`, `migrations/templates/NNNN-*.sql`, `migrations/released.lock.json`, `contracts/postgrest-api-surface.yaml`, `contracts/postgrest-openapi.canonical.json`. The project manifest names it by a repo-relative path the schema constrains to that shape. An adopter's fork commits their directory; the product's own files are untouched. | The property the product argues for throughout is that a deploy is a reviewed commit; the adopter's account (F-008) agreed: *"a fork is a reviewable diff … which is the property the product is arguing for and gets."* What made the fork expensive was *which* files it had to edit, not that it was a fork. | 0198 |
+| **D1088** | Stage 3 plan D1082, README §*Adding your own tables*: *"`migrations.load_manifest()` reads one hardcoded path."* | **The module is already parameterised.** `load_manifest(path=MANIFEST_PATH)`, `render_migration(..., root=MIGRATIONS_ROOT)`, `build_lock(manifest, root)`, `verify_lock(manifest, lock, root)`, `load_lock(path=LOCK_PATH)`. The default is what is hardcoded, and **eleven callers use it**: `bin/migrate.py` (five sites: `render_set`, `record_ledger`, `freeze-lock`, `verify-lock`, `main`), `rendering.write_rendered_migrations`, `bin/doctor.py:358`, `bin/session-09-check.sh` (two sites), `test_migrations_apply_as_the_migration_user.py:189`, and the four contract fixtures that mirror it (`test_storage_plane`, `test_auth_service_reaches_its_data`, `test_storage_service_reaches_its_data`, `test_agent_audit_plane`, `test_auth_endpoints`). `test_rendered_migrations.py` and `test_database_row_request_id.py` read the release manifest and mean to. | **A `MigrationSet` value (root, label) and `sets_for(document)`** in `migrations.py`, returning the release set and, when the rendered document names one, the project set. Every caller above that means *every migration this project applies* switches to `sets_for`; every caller that means *the release's migrations* keeps the default and says so in a comment. Run 2 lists each one. | Question 5 of the defect pattern: a definition with eleven readers. The README's sentence is true of the callers and false of the module, and a session that rewrote the module to add a parameter it already has would have left the eleven readers where they are. | 0198 |
+| **D1089** | Stage 3 plan §5 Session 20: *"the anti-vacuity guard rewritten as 'the reader found the platform's objects and the sets are non-empty' (F-006, D1038)"*. | **With the project's set separate, the release's reader never sees a project object**: `test_api_migrations.final_surface` walks `migrations.load_manifest()["migrations"]` — the release set — and its equality against `{"notes","tasks"}` holds for every adopter, because an adopter's views are in `projects/<slug>/`. The rewrite F-006 proposed was needed only while a tenant's views were in the release set. **Loosening the equality to containment is what the non-negotiables call weakening**, and it is now unnecessary. | **The guard is not rewritten.** `test_the_reader_is_not_vacuous` keeps its equality, gaining `create_task` for 0031 (Run 5, under ADR 0196). The *reader* becomes a module (`sql_surface.py`) so the same interpreter runs over a project's set against the project's own contract, with its own anti-vacuity assertion: *non-empty, and every object the project contract names* (Run 3). D1038 closes by construction. | A stronger test that stays is better than a weaker one that accommodates. The stage plan priced a shape change here and the design removes the need for it; recording that is cheaper than making it. | 0050 |
+| **D1090** | Stage 3 plan §5: *"the control fixture generated from the reviewed contract rather than captured from a deployment (D1054)"*. | **The captured control is a real PostgREST document and it stays valid for the same reason as D1089**: the release contract no longer gains a project's objects, so the capture from `alpha.example.test` cannot drift from it. A fixture *generated* from the contract would agree with the contract by construction — question 6's shape, a fixture sharing the code's belief — and could never have caught D1036 (a view the reader could not see). **It must be recaptured exactly once in this session**, because 0031 adds `rpc/create_task` to the release surface; Session 5 Run 9 captured it *"independently from `.generated/fixture-alpha-dev/migrations/` on a throwaway cluster"*, and Run 1's rig repeats that route. | **Captures stay captures.** The release's control is recaptured in Run 1 from a throwaway cluster serving 31 migrations; a project's snapshot lives with its set and is captured from that project's deployment. `test_the_contract_is_project_neutral` keeps asserting the release contract names no project's slug or domain, and the project contract is *allowed* to. D1054 closes by separation, not by generation. | The contract's header sentence — *"project-neutral, because the domain is"* — becomes true again once the domain a project adds is the project's file. | 0050 |
+| **D1091** | `DX-001`: *"completes the documented path without source edits or undocumented commands"*; ADR 0197: the run required seven tracked-file edits and so the claim is *no*. | **After this session an adopter adds files** — a directory under `projects/<slug>/` and a key in their gitignored manifest — **and edits none** of the release's: not `migrations/manifest.json`, not `released.lock.json`, not `contracts/postgrest-api-surface.yaml`, not the two test modules, not the release snapshot. Whether adding one's own files to a fork is a *source edit* is a reading of the requirement's text that nobody has written down. | **ADR 0198 states it**: a source edit is a change to a file the release tracks and the project does not own; authoring under `projects/<slug>/` is writing the application, which the requirement cannot forbid without forbidding the product's purpose. **The claim still does not move here** — Session 25's second walk by somebody who did not build this is the proof (Stage 3 plan §4), and Run 7's rehearsal of it by a fresh agent context is a *reading*, not a declaration. | A definition that the walker and the reviewer both read before the walk is what makes the walk's record comparable with ADR 0197's count of seven. Without it, a second run could report zero by calling every edit "authoring". | 0198 |
+| **D1092** | ADR 0028 and `migrate.sh`: one manifest, one directory, applied *"in order, transactionally"*, `--strict`. | **dbmate is handed one directory and orders by filename; the release's newest version is `20260904120030`.** Two sets in one directory interleave by version stamp, and a project migration written before a later release migration sorts before it on a fresh cluster and after it on a cluster where the release's arrived first. What `--strict` does with a *pending* migration whose version is older than an *applied* one is **unmeasured** in this tree (test_image_contracts measures flag positions, not this). | **Run 1 measures it with a control** (rig 20a). Whatever it says, the rule is: a project set's versions must be later than the release lock's newest version at the time the project lock is frozen, recorded in the project lock as `follows_release_version`, and refused by `verify_lock` otherwise; a release migration is always authored later than any project migration a deployed cluster holds, so the order on every cluster is the order on a fresh one. | A rule written from dbmate's documentation is D267's shape; the rig's arm B (an older pending version behind an applied newer one) is the one that decides whether the rule is a convention or a refusal. | 0198 |
+| **D1093** | `docs/plans/stage-3-plan.md` §5: the session *"ends in a deploy sitting"*; ADR 0196: the migration, the contract entry, the re-frozen lock and the recaptured snapshot *"belong to one sitting that ends in a deploy"*. | **The sitting is circular unless CI runs on a branch.** `test_the_published_set_is_exactly_what_the_snapshot_names` and four tests in `test_api_contract_command.py` compare the committed snapshot with the reviewed contract; the snapshot is captured from a deployed document (`api-contract.sh --update` reads `routes.rest.url`); the deploy needs the release checked out, and the host takes a release by bundle from a commit. So the commit carrying 0031 and its contract entry is **red on five tests by construction** until the deploy that lets it be recaptured (D1039's *unsatisfiable, not unsatisfied*). D1057 made branch pushes run CI. | **Runs 1–6 land on a `session-20` branch.** The bump commit is pushed red on exactly those five tests and green on everything else (the run records the five names); the host takes the branch's commit; the deploy applies 0031; both snapshots are captured; the snapshot commit is pushed to the branch; CI is green; the branch is merged to `main` fast-forward. A red CI run on that branch with any *other* failure is a stop condition. | The repository's rule is *push and read that commit's verdict*, and this is the one session where the verdict is known in advance to be red on a named set. Writing the set down is what keeps "expected red" from becoming "ignored red". | 0196 |
+| **D1094** | Stage 3 plan D1048: a third `routes.*.status` member is *"an outputs version with a migrator and a guarded reader for every consumer (D600)"*. | **A migrator cannot know which recorded `unavailable` meant unobserved.** A v16 document says `unavailable` for a route the deploy did not observe (D326's first-deploy race, D1047's staging certificate) and for a route it observed failing, with nothing in the document to tell them apart. Readers of the status outside the deploy: `diagnosis.py` (the doctor), `fleet.py` through the doctor's JSON, `bin/api-contract.py published_address` (reads the URL), `test_session14_observability.py:214` (`in {"ready","unavailable"}`), and `deployed_output.py:287`'s validation. | **`migrate_v16_to_v17` leaves every route's word as recorded** and adds the `migrations` block; only a v17 *deploy* writes `unobserved`, and only where the observation was not made — never where D230 or D326 recorded a determinate *not published*. Every reader above is taught the third word in Run 4, with the widening in `test_session14_observability` recorded as an allowlist widened to a measured set. | ADR 0195 applied to the migrator itself: guessing which `unavailable` was which would be a report substituting an answer for a failure to determine one, written into a document that outlives the guess. | 0199 |
+| **D1095** | `docs/api-surface.md` line 8 links ADR 0050 as `decisions/0050-the-published-surface-is-a-reviewed-allowlist.md`. | **No such file.** The ADR is `0050-a-reviewed-api-surface-is-a-generated-artifact.md` and the index names it so. `test_repository_contract.py` tracks `docs/api-surface.md` for existence and not for its links, so the dead link has survived since Session 5. | Corrected in Run 5 beside D1086. | Housekeeping, and the second stale sentence this planning found in a document the gate tracks (D1086 is the first). Nothing reads a link. | — |
+| **D1096** | `bin/migrate.py record_ledger`: `templates = {entry["version"]: entry for entry in migrations.build_lock(manifest)["migrations"]}` then `templates[entry["version"]]` for every rendered entry. | **A project migration's version is absent from the release lock, so the ledger write raises `KeyError` on the first deploy that renders one** — after dbmate has applied it, which leaves a cluster with an applied migration and no ledger row, exit 5 (`the ledger could not be recorded` is not even reached; the exception is unhandled). `app_private.migration_ledger` has `version, name, template_sha256, rendered_sha256` and no column saying which set a row came from. | **`record_ledger` builds its template digests from every set's lock** (`sets_for`, D1088) and records project rows in the same table; the set is recoverable from the version's presence in one lock or the other, so **no column is added** and no platform migration is spent on the ledger. Run 2, with a proof that renders a project set and records its ledger against a recorded `psql`. | Found by reading the reader before changing the writer (D979). A KeyError after dbmate returned is the worst order a failure can arrive in here: the cluster has moved and the record has not. | 0198 |
+| **D1097** | `bin/api.sh`: three enumerated operations (`list-notes`, `create-note`, `update-task-status`); the host gates drive the surface through it. | **The live half of `API-TASK-001` needs a fourth**: `create-task --title T [--note-id U]`, so the trip can create a task through the product's own enumerated door rather than a hand-written `curl`. Adding a verb touches `test_cli_contract` (D1014) and `bin/api.py`'s `OPERATIONS`, and `update-task-status` finally has a row to act on. | Run 5 adds the operation; the targeted list names `test_cli_contract` and `test_api_command`. | The one operation the adopter could not perform (F-023's checklist item, *"a CAS conflict"*) becomes performable with the product's own tool, and the round trip against a real row is measured for the first time. | 0196 |
+
+---
+
+## 2. What the session adds to `tests/acceptance-registry.yaml`
+
+Family `TEN-*` new; `API-*` and `OPS-*` extended. Every requirement belongs to
+a claim (D697); the three new claims are `tenant_extension_point`,
+`task_domain` and `honest_readers`, all dated 20. `DEP-001` and `DX-001` are
+unchanged and keep their Session 12 claims (ADR 0197). All P0.
+
+| Requirement | What it states | Offline node ids (proposed) | Live half |
+|---|---|---|---|
+| `TEN-SET-001` | A project manifest at schema 5 may name a migration set under `projects/<slug>/`; the render writes the release's set and then the project's into one directory in version order; `freeze-lock --project` and `verify-lock --project` freeze and verify the project's own lock; the release lock is never rewritten by a project; a project version older than the release lock's newest at freeze is refused | `test_project_migration_sets.py::test_a_declared_set_renders_after_the_release_set_in_version_order`, `::test_the_project_lock_is_frozen_and_verified_apart_from_the_release_lock`, `::test_a_project_version_older_than_the_release_lock_is_refused`, `test_rendered_migrations.py::test_the_rendered_manifest_names_the_set_of_every_file` | `test_session20_tenant.py::test_the_project_set_beta_declares_is_applied_ledgered_and_published` |
+| `TEN-SET-002` | A project set is refused before it is rendered if any template names `app_private`, creates or alters a role, schema, extension or default privilege, sets a role other than `SET LOCAL ROLE {{object_owner}}`, drops or alters an object the release's final surface owns, declares a placeholder outside the request-role allowlist, creates a table in `app` without `FORCE ROW LEVEL SECURITY`, or carries a `down` block that does not raise `AP900` | `test_project_migration_sets.py::test_the_lint_refuses_each_forbidden_shape_and_accepts_the_example_set` (parametrised, one arm per shape, the example set as the control) | — (offline by nature; the claim's live half is `TEN-SET-001`'s) |
+| `TEN-SURF-001` | A project's reviewed surface (`projects/<slug>/contracts/postgrest-api-surface.yaml`, api-surface schema version 2) is merged with the release's for every comparison; a name the release owns is refused; `api-contract.sh check --project FILE` compares the merged surface with the project's own snapshot and `--update --project FILE` prints the path the candidate belongs at; the release contract, its snapshot and its control fixture are not read differently for a project that has a set | `test_project_migration_sets.py::test_the_project_reader_finds_every_object_the_project_contract_names`, `test_api_surface_contract.py::test_a_project_surface_cannot_redeclare_a_release_object`, `test_api_contract_command.py::test_check_with_a_project_compares_the_merged_surface_against_the_project_snapshot` | `test_session20_tenant.py::test_betas_served_document_names_the_release_and_project_surfaces_and_nothing_else` |
+| `TEN-DOC-001` | Outputs v17 records `migrations.release_lock_sha256` and `migrations.project_set` (null, or root, lock digest and count) on both branches; a v16 document migrates; the doctor's migration check counts both sets against the ledger; the isolation matrix classifies the new leaves | `test_output_migrations.py::test_v16_to_v17_adds_the_migrations_block_and_leaves_every_route_word`, `test_diagnosis.py::test_the_migration_check_counts_the_project_set` | `test_session20_tenant.py::test_both_deployed_documents_are_v17_and_the_doctor_reads_the_sets` |
+| `API-TASK-001` | `api.create_task(p_title, p_note_id DEFAULT NULL)` exists (migration 0031, ADR 0196), derives `owner_id` from `app.current_user_id()`, raises `PT401` with no identity and `PT404` for a note absent or another owner's, is executable by `authenticated` and `agent_writer` and by no other role, ends in `NOTIFY pgrst`; the reviewed contract names it and the snapshot publishes it | `test_api_migrations.py` (the vacuity set gains it; `test_every_new_function_revokes_public_before_it_grants` covers it), `test_migrations_apply_as_the_migration_user.py::test_create_task_is_reachable_by_the_two_writer_roles_and_no_other` | `test_session20_tenant.py::test_a_task_created_through_the_enumerated_operation_is_the_row_update_task_status_moves` |
+| `OPS-READ-001` | `migrate.sh render`, `db.sh`, `postgres-bootstrap.sh`, `doctor`, `upgrade` and `project-retire` distinguish a rendered document they cannot read (exit 3, naming the owner and the remedy) from one that does not exist (exit 4, *never deployed here*) | `test_database_commands.py::test_an_unreadable_rendered_document_is_reported_as_unreadable_not_absent` (parametrised over the six readers, a `chmod 000` directory as the arm and an absent one as the control) | `test_session20_tenant.py::test_render_as_the_operator_after_a_root_deploy_says_unreadable_not_never_deployed` |
+| `OPS-READ-002` | `routes.*.status` carries `unobserved` for a route the deploy did not observe, `unavailable` only for one it observed not serving or determinately not published (D230, D326); every reader of the status accepts the third word; the printed summary and the document agree | `test_deployed_output.py::test_a_route_the_deploy_did_not_observe_is_recorded_unobserved`, `test_diagnosis.py::test_the_doctor_reports_an_unobserved_route_as_unobserved` | `test_session20_tenant.py::test_no_route_on_either_project_reads_unobserved_after_a_redeploy` |
+
+**Claims** (`src/agentic_postgres/evidence_claims.py`): `tenant_extension_point:
+("TEN-SET-001", "TEN-SET-002", "TEN-SURF-001", "TEN-DOC-001")`; `task_domain:
+("API-TASK-001",)`; `honest_readers: ("OPS-READ-001", "OPS-READ-002")`.
+`claim_mode` requires a live node id per claim; each has one above.
+
+**No new gate variable.** Every live half reads `APG_PROJECT_A_OUTPUTS`,
+`APG_PROJECT_B_OUTPUTS` and `APG_LIVE_HOST`, already in the roster.
+`test_render_as_the_operator_after_a_root_deploy_…` runs `bin/migrate.sh` as
+the gate's own user against `.generated/alpha-dev` and reads its exit code and
+message; it is a reading of the host, not a declaration.
+
+---
+
+## 4. Irreversible operations
+
+| Operation | Where | What makes it safe |
+|---|---|---|
+| Migration `0031-create-task.sql` applied to alpha and beta | Run 7 | Fix-forward (D912); its `down` raises `AP900`; the body is ADR 0196's specification and 0005's shape with 0007's column list; rig 20b applies it to a throwaway cluster with 30 migrations before it first; grants proved by role in the rig |
+| The example project set applied to beta | Run 7 | One table with FORCE RLS, one view, one RPC, all under `projects/example/`; removing it later is a new project migration, never a deletion (ADR 0028); beta is the operator's development project and the operator decides it (§0) |
+| `migrations/released.lock.json` re-frozen with 0031 | Run 5 | `freeze-lock` from a clean tree; `verify-lock` refuses a removed or altered entry; the diff is one added entry, reviewed |
+| The release snapshot and the control fixture recaptured | Runs 1 and 7 | Each capture is from a running PostgREST and refuses a hand edit; the review compares the diff to exactly `rpc/create_task` (release) and the example set's objects (beta) |
+| `CURRENT_SESSION` 18 → 20 | Run 6 | All-or-nothing (D690); every `target_session: 20` requirement has its proofs in the same commit |
+| `VERSION` 1.0.1 → 1.1.0 | Run 6 | Proposed, not chosen: Run 7 reads `upgrade plan` on both projects and a major *required* is a stop condition (§9) |
+| Both projects deployed `--through-session 20` | Run 7 | Unredirected, at a TTY (D972); `upgrade check` and `plan` first; alpha then beta, the doctor between |
+| Merge of `session-20` into `main` | Run 7 | Fast-forward only, after CI is green on the branch's last commit |
+
+Not irreversible and worth saying: `sudo chown -R op:op .generated` after each
+root deploy (CLAUDE.md §2), and the branch itself, which is deleted after the
+merge.
+
+---
+
+## 5. Build order, run by run
+
+Each run ends with: ruff, the targeted modules (named), derived docs
+regenerated where a generator's input moved, `chmod 755 bin/*`, one commit on
+the `session-20` branch with a message file, a push, and **that commit's CI
+verdict read** by full SHA with three buckets (D1059). A run that writes a test
+runs its battery (appendix). Mark the run **Done.** here with what it measured.
+
+### Run 1 — the measurements, the ADRs, and the recaptured control
+
+**Rigs** (scripts under `/tmp` in WSL, outputs to files, controls named):
+
+- **20a, dbmate ordering.** A throwaway cluster on `POSTGRES_IMAGE` (the
+  `cluster` fixture's route), the `dbmate` image from `versions.env`, one
+  directory. Arm A: apply `20260904120030_x.sql` then add `20260903000000_y.sql`
+  and run `up --strict`; arm B: add `20260915000000_z.sql` instead; control:
+  the directory with A's file only. Record exit codes and dbmate's message. This
+  decides whether D1092's rule is a refusal the tree needs to write or one
+  dbmate already makes.
+- **20b, `create_task`.** The same cluster with all 30 rendered fixture
+  migrations plus the draft `0031`, rig 19's four probes as the control (ADR
+  0196's table): as `authenticated` with `app.user_id` set → a row in
+  `api.tasks`; without the GUC → `PT401`; with another owner's note id →
+  `PT404`; as `app_runtime` → refused; `has_function_privilege` for every role
+  in `naming.ROLE_SUFFIXES`, expecting `authenticated` and `agent_writer` only.
+- **20c, the control recapture.** A throwaway cluster from
+  `project.second.example.yaml`'s render (no project set), PostgREST at
+  `POSTGREST_IMAGE` serving `api` as `api_documentation`, request with `Host:
+  alpha.example.test:443` and `basePath` `/api/rest` so `CAPTURED_HOST` and
+  `CAPTURED_BASE_PATH` in `test_api_contract_command.py` stay true; normalise
+  with `openapi_normalize`; diff against the committed fixture — **the only
+  difference may be `rpc/create_task`**. This is Session 5 Run 9's route; grep
+  its plan for the exact commands before writing new ones.
+
+**ADRs**, indexed in `docs/decisions/README.md`:
+
+- **0198 — A project owns a migration set, a reviewed surface and a snapshot
+  beside the release's.** Where it lives (D1087), the version rule (D1092),
+  the placeholder allowlist and the lint (`TEN-SET-002`), the merged surface
+  and per-project snapshot (`TEN-SURF-001`), what a *source edit* is (D1091),
+  what the release never does for a project (rewrite its lock, read its
+  contract into the release's tests). Related: 0028, 0050, 0197.
+- **0199 — A route the deploy did not observe is `unobserved`, and a migrator
+  never guesses which one that was.** D1048, D1094, the readers, the
+  `const` couplings (`unobserved` ⇒ `url: null`), and D1060's sibling rule for
+  the six readers (`OPS-READ-001`). Related: 0195, 0158, D600.
+
+**Measures.** The three rigs' outputs, pasted into this run's Done paragraph.
+**Targeted:** nothing changes but documents. **Commit:** the two ADRs, the
+index, the recaptured fixture *only if* its diff is exactly `rpc/create_task`
+(otherwise stop, §9).
+
+### Run 2 — the project migration set
+
+**Builds.**
+
+1. `src/agentic_postgres/migrations.py`: `MigrationSet` (frozen dataclass:
+   `label` in `{"release","project"}`, `root: Path`, `manifest_path`,
+   `lock_path`), `release_set()`, `project_set_from(document, repo_root)`
+   reading `document["migrations"]["project_set"]["root"]`, `sets_for(document,
+   repo_root)`; `verify_lock` gains the `follows_release_version` check for a
+   project lock (D1092, as rig 20a decided); `PROJECT_PLACEHOLDER_SOURCES`, the
+   allowlist (`database.roles.{object_owner, authenticated, anon, agent_reader,
+   agent_writer, api_documentation}` and `database.name`); `lint_project_set(
+   set)` implementing `TEN-SET-002` over the applied half with comments
+   stripped — move `up_section` and `sql_only` out of
+   `tests/contract/test_api_migrations.py` into a new
+   `src/agentic_postgres/sql_surface.py` so the lint and the test read SQL the
+   same way (the test imports them back; its assertions do not change).
+2. `schemas/project.schema.json`: `schema_version` enum gains 5; top-level
+   optional `migrations: { set: string }` with pattern
+   `^projects/[a-z][a-z0-9-]{2,30}$`, forbidden below 5 (an `allOf` gate in
+   ADR 0188's shape, optional at 5 because a set is a facility). `config.py`:
+   `SUPPORTED_PROJECT_SCHEMA_VERSIONS` gains 5; `validate_project_semantics`
+   refuses a set whose directory is absent. `bin/render-config.py --bounds-doc
+   --write` regenerates the bounds document.
+3. `schemas/migration-manifest.schema.json`: unchanged for the manifest; the
+   project **lock** gains `follows_release_version` (a new key in the lock
+   document, `schema_version` 2 for a project lock, 1 for the release's).
+4. `rendering.write_rendered_migrations`: renders `sets_for(document)` in
+   version order into one directory; each `rendered-manifest.json` entry gains
+   `"set"`; the manifest gains `project_set`. `render_project` validates
+   `migrations.set` and lints the project set before publishing.
+5. Outputs **v17** (`schemas/outputs.schema.json`, `output_migrations.
+   migrate_v16_to_v17`, `CURRENT_VERSION = 17`, `deployed_output`): a
+   `migrations` block on both branches — `release_lock_sha256` and
+   `project_set: null | {root, lock_sha256, count}`. The migrator adds the
+   block from `NO_PROJECT_SET` and touches nothing else (D1094's route half is
+   Run 4's). Nine tests chain the migrator by hand (D965) and each gains the
+   v17 step by one replace-all edit; say so in the commit.
+6. `bin/migrate.py`: `render_set` and `record_ledger` over `sets_for` (D1096);
+   `freeze-lock --project FILE` freezes the project set's lock and refuses a
+   manifest with no set; `verify-lock` verifies the release and, with
+   `--project`, the project's too; `bin/migrate.sh parse_args` admits
+   `--project` for those two verbs and the usage says which lock each writes.
+7. `bin/doctor.py:358` counts `sets_for`; `bin/session-09-check.sh`'s two
+   sites and the five contract fixtures (D1088) switch to `sets_for` with the
+   fixture's document, so **CI applies the example project set to a throwaway
+   cluster on every push** — that is the shadow database D1067 absorbed.
+8. `projects/example/`: the product's own example set, which the fixture
+   manifest declares. `migrations/manifest.json` (schema 1, placeholders from
+   the allowlist), `templates/0001-note-embeddings.sql` (version
+   `20260914120001`): `app.note_embeddings(note_id uuid primary key references
+   app.notes(id) on delete cascade, owner_id uuid not null, embedding
+   extensions.vector(768) not null, updated_at timestamptz not null default
+   now())` with `ENABLE` and `FORCE ROW LEVEL SECURITY` and the owner policy
+   on `app.current_user_id()`, `api.note_embeddings` as a `security_invoker`
+   view, `api.set_note_embedding(p_note_id uuid, p_embedding extensions.vector)`
+   `SECURITY DEFINER` in 0031's shape (Run 5) with `PT401`/`PT404`, `REVOKE ALL
+   … FROM PUBLIC`, `GRANT EXECUTE … TO {{authenticated}}`, view `SELECT` and
+   function `EXECUTE` to `{{api_documentation}}` (F-007: without them the
+   snapshot never publishes it), `NOTIFY pgrst, 'reload schema'`, a `down`
+   raising `AP900`; `released.lock.json` frozen by the new verb. This is the
+   pgvector example D698 and D714 said was never registered, arriving as what
+   it always was — a project's migration.
+9. `project.example.yaml` → schema 5 with `migrations: {set: projects/example}`;
+   `project.second.example.yaml` → schema 5 without a set. Re-render both
+   fixtures (`--render-only`); `.generated/fixture-*` are refreshed, not added.
+10. The isolation matrix (`tests/deployment/test_session12_isolation_matrix.py`
+    and its classification list): `migrations.release_lock_sha256` must match;
+    `migrations.project_set.*` carries no authority and may differ (D1029's
+    lesson, paid in advance).
+
+**Tests.** `tests/contract/test_project_migration_sets.py` (new; every
+`TEN-SET-*` node id in §2, driving the example set and hand-built refused
+sets under `tmp_path`); `test_migrations.py` and `test_rendered_migrations.py`
+extended for two sets; `test_output_migrations.py` for v17; `test_config.py`
+for schema 5; `test_migrate_command` (or `test_database_commands.py`) for the
+two verbs' `--project`; `test_diagnosis.py` for the doctor's count.
+
+**Battery.** Mutations: the lint's `app_private` regex removed (kill expected
+in the lint test, control: the release set still renders); `follows_release_
+version` check inverted; `record_ledger` reverted to the release lock alone
+(kill in the ledger proof with a project set); `sets_for` returning the
+release only (kill in the render-order test). Each with an anchor that matches
+once, `FAILED` not `ERROR`, files restored by copy and `cmp`.
+
+**Targeted:** `test_migrations`, `test_project_migration_sets`,
+`test_rendered_migrations`, `test_output_migrations`, `test_config`,
+`test_database_commands`, `test_diagnosis`, `test_fleet`, `test_api_migrations`
+(the reader moved), `test_migrations_apply_as_the_migration_user`,
+`test_storage_plane`, `test_auth_service_reaches_its_data`,
+`test_storage_service_reaches_its_data`, `test_agent_audit_plane`,
+`test_auth_endpoints`, `test_session12_isolation_matrix` (offline half),
+`test_cli_contract`.
+
+### Run 3 — a project's reviewed surface, and the reader as a module
+
+**Builds.**
+
+1. `schemas/api-surface.schema.json`: version 2, the project form — `schema_
+   version: 2`, `contract_id`, `exposed_schema: api`, `relations`, `rpcs`,
+   `enums` (may be empty at 2; the release's version 1 keeps `minProperties`),
+   and **no** `agent_rpcs`, `agent_write_rpcs` or `forbidden_schemas` (the
+   release's apply to the whole database).
+2. `api_surface.py`: `load_project_surface(path)`, `merged_surface(release,
+   project)` refusing any name the release declares in any kind
+   (`_refuse_name_collisions` over the union), `project_contract_path(set)`,
+   `project_snapshot_path(set)`. `CONTRACT_PATH` stays fixed; a project's is
+   fixed relative to its set.
+3. `src/agentic_postgres/sql_surface.py` (begun in Run 2): `final_surface(set)`
+   — the interpreter from `test_api_migrations.py` (`_CREATE_VIEW`, `_CREATE_
+   FUNCTION`, `_CREATE_ENUM`, the drops), unchanged in behaviour, importable.
+   `test_api_migrations.py` imports it; its assertions do not move (D1089).
+4. `tests/contract/test_project_migration_sets.py` gains the `TEN-SURF-001`
+   reader test: over every `projects/*/` set, `final_surface` finds exactly the
+   objects the project's contract names, non-empty.
+5. `bin/api-contract.py` / `.sh`: `--project FILE` on `check` and `update`.
+   With it, `check` loads the merged surface and the project's snapshot;
+   `update` prints, on stderr, the path the candidate belongs at
+   (`projects/<slug>/contracts/postgrest-openapi.canonical.json`) and keeps
+   streaming the candidate to stdout (the D1039 clause stays). Without it,
+   behaviour is unchanged. `test_api_surface_contract.py` gains the
+   redeclaration refusal; `test_api_contract_command.py` gains the project
+   check against a snapshot built under `tmp_path` from the captured control
+   plus the example set's paths.
+6. `docs/api-surface.md`: a section *A project's surface*; the broken link
+   fixed here or in Run 5 (D1095), whichever commit touches the file first.
+
+**Battery.** `merged_surface` collision check removed (kill); the project
+reader's non-empty assertion removed (kill against an empty set under
+`tmp_path`); `--project` ignored in `check` (kill: the merged comparison must
+report the example set's objects missing from the release snapshot).
+
+**Targeted:** `test_api_surface_contract`, `test_api_contract_command`,
+`test_api_migrations`, `test_project_migration_sets`, `test_cli_contract`,
+`test_repository_contract`.
+
+### Run 4 — two readers made honest (ADR 0199)
+
+**Builds.**
+
+1. **D1060, `OPS-READ-001`.** One reader in Python:
+   `installed_release.rendered_document(key, *, runtime: bool)` raising
+   `RenderedDocumentUnreadable(path, owner)` on `PermissionError` (file or a
+   directory on the way) and `RenderedDocumentAbsent(path)` on
+   `FileNotFoundError`. `bin/migrate.sh`, `bin/db.sh` and
+   `bin/postgres-bootstrap.sh` replace their `[ -f … ] || die 4` with a call
+   through `python_bin` that prints the path on success, exits 3 with *cannot
+   read <path>: owned by <owner>; run as root, or `sudo chown -R op:op
+   .generated`* on unreadable, and 4 with the existing sentence on absent.
+   `bin/doctor.py`, `bin/upgrade.py` and `bin/project-retire.py` map the two
+   exceptions to 3 and 4. A guard test asserts none of the three shells tests
+   `-f` on a rendered document itself (the `test_root_script_policy.code_of`
+   reader, comments stripped).
+2. **D1048, `OPS-READ-002`.** `outputs.schema.json` `publishedRoute.status`
+   enum gains `unobserved` with the same `const` coupling to a null URL;
+   `deployed_output.ROUTE_UNOBSERVED`; validation at `deployed_output.py:287`
+   accepts three words; `bin/deploy-project.py` records `unobserved` where the
+   observation was not made — the first-deploy router race (D326's shape,
+   where the deploy prints *"this deploy did not observe it"*), the docs probe
+   under a staging certificate (D1047), a timeout — and keeps `unavailable`
+   for D230 (no administrator), D326's *no credential* and an observed
+   failure; the printed summary and the document use the same word, from one
+   function. Readers: `diagnosis.py` reports the word and never folds it;
+   `fleet.py` passes it through; `api-contract.py published_address` refuses an
+   unobserved route with the remedy (*redeploy so the route is observed*);
+   `test_session14_observability.py:214` widens to the three words (recorded
+   as a widening to a measured set).
+3. `output_migrations.migrate_v16_to_v17` already exists (Run 2); it does not
+   rewrite a route word (D1094), and a test asserts a v16 document with
+   `unavailable` migrates with `unavailable`.
+
+**Battery.** The Python reader folding `PermissionError` into absent (kill in
+the parametrised six-reader test; control: the absent arm still exits 4);
+`deploy-project` writing `unavailable` for an unobserved route (kill in
+`test_deployed_output`); the doctor folding `unobserved` into `unavailable`
+(kill in `test_diagnosis`).
+
+**Targeted:** `test_database_commands`, `test_installed_release`,
+`test_deployed_output`, `test_output_migrations`, `test_diagnosis`,
+`test_fleet`, `test_api_contract_command`, `test_deploy_project` (whatever the
+deploy's contract module is named — `grep -l "deploy-project" tests/contract`),
+`test_upgrade_plan`, `test_retirement`, `test_cli_contract`.
+
+### Run 5 — migration 0031, the contract, the documents
+
+**Builds.**
+
+1. `migrations/templates/0031-create-task.sql`, version `20260912120031`,
+   exactly ADR 0196's specification: `api.create_task(p_title text, p_note_id
+   uuid DEFAULT NULL) RETURNS api.tasks`, `SECURITY DEFINER`, `SET search_path
+   = pg_catalog, pg_temp`, `owner_id` from `app.current_user_id()` and never a
+   parameter, `PT401` with no identity, `PT404` for a note absent or another
+   owner's, `RETURNING` 0007's column list (`id, owner_id, note_id, title,
+   description, status, created_at, updated_at`), `REVOKE ALL … FROM PUBLIC`,
+   `GRANT EXECUTE … TO {{authenticated}}, {{agent_writer}}`, `GRANT EXECUTE …
+   TO {{api_documentation}}` (so the snapshot publishes it), `NOTIFY pgrst,
+   'reload schema'`, the header comment stating D1058's correction (the
+   runtime identity does *not* work on these tables directly, since 0006), a
+   `down` raising `AP900`. `migrations/manifest.json` gains the entry;
+   `bin/migrate.sh freeze-lock` re-freezes the release lock (one added entry).
+2. `contracts/postgrest-api-surface.yaml`: `create_task: {methods: [POST],
+   arguments: [p_title, p_note_id]}` under `rpcs`, with the comment that ADR
+   0196 restores what ADR 0048 removed, reviewed rather than inherited.
+3. Tests that change **under ADR 0196**: `test_it_states_adr_0003s_domain_as_
+   adr_0048_amends_it` (`create_task` now *in* `rpcs`, and the docstring says
+   why), `test_the_reader_is_not_vacuous`'s function set gains `create_task`,
+   the migration-user module gains `test_create_task_is_reachable_by_the_two_
+   writer_roles_and_no_other` (rig 20b's probes as a test), `test_the_status_
+   codes_are_the_measured_ones` if it enumerates raises. The release snapshot
+   is **not** touched here (D1093: it is captured in Run 7); the control
+   fixture was recaptured in Run 1, so `test_api_contract_command`'s control
+   tests are green and `test_the_published_set_is_exactly_what_the_snapshot_
+   names` plus the four snapshot-dependent command tests are the expected red
+   — list their five node ids in the commit message.
+4. `bin/api.py` `OPERATIONS` gains `create-task: ("POST", "/rpc/create_task")`
+   with `--title` required and `--note-id` optional; `bin/api.sh` usage names
+   it (D1097).
+5. `README.md`: *Adding your own tables* rewritten around `projects/<slug>/`
+   (the manifest key, the three files, `freeze-lock --project`, `api-contract.sh
+   --update --project` after the first deploy with the snapshot's path, and the
+   sentence that none of the release's files is edited); *What is intentionally
+   unavailable* corrected for D1086 (what is unavailable is the agent surface,
+   which Session 21 takes, and `tasks` gets a creator here); the ADR 0196
+   paragraph rewritten to say the migration shipped. `docs/scope-closure.md`
+   §2's `DEP-REMOVE-001` paragraph gets the D860 treatment (passed 2026-09-05,
+   gamma-dev) and §8's ADR 0196 row is closed. `docs/migrations.md` gains *A
+   project's set*. `docs/api-surface.md` link fixed (D1095).
+6. Derived documents: `bin/render-acceptance-matrix.py --write` runs in Run 6
+   with the registry; here `bin/app-contract.sh --check` and
+   `bin/mcp-contract.sh check` must still pass (the MCP contract names
+   `update_task_status`'s operation and nothing here changes it).
+
+**Battery.** 0031's `GRANT … TO {{api_documentation}}` removed (kill: the
+reader test that the documentation role holds the surface, if it enumerates;
+otherwise a new assertion); the `PT404` branch removed (kill in the migration-
+user test, control: `PT401` still raised).
+
+**Targeted:** `test_api_migrations`, `test_migrations`,
+`test_migrations_apply_as_the_migration_user`, `test_api_surface_contract`,
+`test_api_contract_command` (five expected red, named), `test_api_command`,
+`test_cli_contract`, `test_repository_contract`, `test_documented_path` (D693's
+guard over README commands).
+
+### Run 6 — the bump
+
+1. `src/agentic_postgres/__init__.py`: `CURRENT_SESSION = 20`, with the
+   comment block extended (why 19 is skipped, D1063). `VERSION` → `1.1.0`
+   with the ADR 0162 reasoning in the `__init__` comment: a manifest field
+   with a default, a migration, a contract entry, an outputs bump with a
+   migrator — additive, so a minor is proposed and Run 7's `upgrade plan`
+   confirms or stops.
+2. `tests/acceptance-registry.yaml`: the seven requirements of §2, `target_
+   session: 20`, node ids as written there (adjusted to the names the runs
+   used). `evidence_claims.py`: the three claims. `bin/render-acceptance-
+   matrix.py --write`; `bin/render-evaluation-report.py --write` if the
+   evaluation cases moved (they should not).
+3. `tests/deployment/test_session20_tenant.py`: the six live halves of §2,
+   `requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS",
+   "APG_PROJECT_B_OUTPUTS")`, each docstring saying what only a deployment can
+   prove (Session 18's module is the model). The `create-task` proof drives
+   `bin/api.sh` under a `dev-token.sh`-minted token the gate already mints for
+   other proofs — grep `test_session17_fleet.py` and the Session 17 gate for
+   the pattern.
+4. `bin/session-20-check.sh` **derived from `bin/session-18-check.sh` by
+   diff** (D505, D507, D678, D693, D703): `readonly SESSION=20`, the header
+   and usage rewritten line by line (both halves, D853/D858), host mode's
+   precondition block replaced — both projects deployed `--through-session
+   20` publishing outputs v17, beta's manifest at schema 5 naming
+   `projects/example`, 31 release migrations and one project migration in
+   beta's ledger — and the four Session 18 declaration flags **removed** from
+   this gate's usage (they belong to 18's, which still runs). `SHELL_COMMANDS`
+   in `test_cli_contract` gains it.
+5. `deploy.sh --through-session 20` is admitted by D59's rule the moment the
+   constant moves; nothing else to edit there. `grep -rn "through-session 18"
+   README.md docs/*.md` and update every documented line (D693's guard fails
+   otherwise).
+6. `docs/new-team-member.md` re-derived by diff (D693), a paragraph in
+   `docs/tenant-migrations.md`? — **no new document**: `docs/migrations.md`
+   §*A project's set* (Run 5) is the reference and the README points at it.
+
+**Targeted:** `test_evidence_claims`, `test_acceptance_registry` (or whatever
+guards the registry: `grep -l "acceptance-registry" tests/contract`),
+`test_cli_contract`, `test_documented_path`, `test_repository_contract`,
+`test_session_gates` (the gate-derivation guards: `grep -l "session-18-check"
+tests/contract`). Then `bin/session-01-check.sh` once on the clean tree, and
+`pytest --setup-plan tests/deployment/test_session20_tenant.py` with the three
+variables set to the fixture documents (D671, D676).
+
+**Push.** The branch's CI is expected red on exactly the five snapshot tests
+(D1093). Record the run id and the five names in this run's Done paragraph.
+
+### Run 7 — the trip, and the sitting that ends in a deploy
+
+Before the day: `grep -n "goes wrong" -A20` in the Session 11, 17 and 18
+operator guides and plans (D977); `pytest --setup-plan` for every deployment
+module with the variables set; the transport script `/tmp/r7-transport2.sh`
+in WSL still works and takes a SHA (edit it, do not retype it); the CI watcher
+`s19-ci-watch.sh` in the scratchpad with `SHA=` edited.
+
+Then, in order, **the operator at a TTY runs anything with `sudo`** and pastes
+the output; the agent reads, never redirects a deploy (D972):
+
+1. Bundle the branch's bump commit, `scp`, `git bundle verify`, fetch,
+   `git rev-parse FETCH_HEAD` confirmed, checkout as `op`, `uv sync`.
+2. As root: `bin/upgrade.sh check --project alpha-dev` and `plan`; the same
+   for beta. **Record the plan's bump class** (D1081): a `minor` confirms
+   1.1.0; a `major` required is §9's stop.
+3. `project.beta.yaml` on the host → `schema_version: 5`, `migrations: {set:
+   projects/example}` (the operator edits it; the render validates it with
+   `./deploy.sh --project project.beta.yaml --capabilities capabilities.yaml
+   --render-only` as op first). Alpha's manifest stays at schema 1 — the
+   control that a v1 manifest still deploys under a schema-5 release (D930).
+4. Deploy alpha `--through-session 20`, unredirected. Read: 0031 applied
+   (`migrate.sh status` **and** the cluster's ledger, never the summary line,
+   D941), outputs v17, every route `ready`, the doctor 10/10 with the
+   migration check counting 31. Then beta: 31 + 1, `api.note_embeddings`
+   served, the doctor reading the project set.
+5. **Capture**: `sudo bin/dev-token.sh --project-outputs <alpha> --role docs --
+   bin/api-contract.sh --update --project-outputs <alpha> > /home/op/release-
+   candidate.json`; the same for beta with `--project project.beta.yaml`, into
+   the path the command prints. Copy both to the workstation, `diff` the
+   release candidate against the committed snapshot (exactly `rpc/create_task`)
+   and review beta's, commit both to the branch, push, **CI green** on that
+   SHA. Merge fast-forward to `main`, push, delete the branch.
+6. `sudo chown -R op:op .generated` — **but first**, as op, `bin/migrate.sh
+   --project project.alpha.yaml render` against the root-owned directory the
+   deploy just left: exit 3 with the unreadable message is `OPS-READ-001`'s
+   live reading; paste it.
+7. Transport the merge commit, check out `main` on the host, `uv sync`; gates:
+   `bin/session-01-check.sh`, `bin/session-20-check.sh --mode offline`, `--mode
+   host` (root, the documented arguments), `--mode external` from the
+   workstation (D466); `--mode host` for Session 18's gate too, because the
+   inherited claims are cumulative; merge the evidence documents;
+   `evidence/session-20.json` with its claim table pasted into this run's Done
+   paragraph.
+8. `create-task` through `bin/api.sh` on alpha as the gate's proof (`API-TASK-
+   001`), and `update-task-status` on the row it made — the compare-and-swap's
+   first run against real data.
+9. **The second-walk rehearsal, offline, on the workstation**: a fresh agent
+   context, given only the merged `README.md` and `docs/migrations.md`, adds a
+   table, a view and an RPC as a project set to `project.second.example.yaml`'s
+   fixture and renders it, recording every file it touched. The record is
+   pasted here as a reading; **the claim does not move** (D1091). Any release
+   file the walk touched is a D row and a Session 25 item.
+10. D rows for what the day found, this run **Done.**, `CLAUDE.md` §2 and
+    §9, memory, commit, push, CI.
+
+---
+
+## 7. Evidence and claims
+
+| Claim | Offline may report | Needs a live half for |
+|---|---|---|
+| `tenant_extension_point` | The example set rendered after the release's in version order; the project lock frozen and verified apart; the lint's refusals with the example set as control; the merged surface and the project reader; v17's migrator; the doctor counting two sets from a fixture root | Beta's deployed document at v17 naming the set; the ledger holding its row; `api.note_embeddings` served on beta and absent on alpha; the doctor's check on the host |
+| `task_domain` | 0031's reader properties; the migration-user proof of grants and `PT401`/`PT404` on a throwaway cluster | A task created through `bin/api.sh create-task` on alpha and moved by `update-task-status` |
+| `honest_readers` | The six readers' exit codes against a `chmod 000` directory and an absent one; `unobserved` written, migrated and reported in fixtures | `migrate.sh render` as op after a root deploy; no route `unobserved` after a redeploy on either project |
+| `fresh_host` (12) | — | `APG_FRESH_HOST_OUTPUTS`, the operator's (ADR 0197); untouched here |
+| `documented_path` (12) | The commands the path names exist (standing, D693) | Session 25's walk; **not this session's rehearsal** (D1091) |
+
+The five other `not_run` claims stay so (D478). No claim spans both modes; a
+skip is not a pass; the branch's expected red is on tests, never on a claim.
+
+---
+
+## 8. Security invariants this session touches
+
+| Invariant | Control | Proof |
+|---|---|---|
+| PostgreSQL is the final authorization authority | A project table in `app` must carry `FORCE ROW LEVEL SECURITY` or the lint refuses the set; views are `security_invoker`; RPCs derive the owner | `TEN-SET-002`; the example set's own policy |
+| A project set cannot reach the platform's state | The lint: no `app_private`, no role, schema, extension or default-privilege statement, no `SET ROLE` but the owner preamble, no drop or alter of a release object; placeholders from the allowlist only | `TEN-SET-002` |
+| Nothing exists in `api` the reviewed surface does not name (ADR 0050) | The project reader over the project's set against the project's contract; the merged surface for every snapshot comparison; a release name cannot be redeclared | `TEN-SURF-001` |
+| The rendered payload is the immutable unit (ADR 0028) | Two locks, each verified before any render or apply; the release lock never rewritten by a project verb | `TEN-SET-001` |
+| A release is exactly its commit | The set lives in the checkout; `assert_clean` unchanged | D1087 |
+| `create_task` cannot name an owner | The parameter list is `(p_title, p_note_id)`; the owner is the GUC's | `API-TASK-001` |
+| A report may not substitute an answer for a failure to determine one (ADR 0195) | Six readers distinguish unreadable from absent; three route words; the migrator never guesses | `OPS-READ-001`, `OPS-READ-002` |
+| The migration user reaches owner authority only by `SET LOCAL ROLE` | Unchanged; the project set runs as the same role through the same plane | `test_migrations_apply_as_the_migration_user` over both sets |
+| No secret value in a template, lock, ledger or rendered file | The placeholder-name refusals in the manifest schema apply to a project set unchanged | `test_migrations`' existing refusals, run over the example set |
+| The MCP runtime holds no credential; the agent plane is unchanged | Session 21's subject; this session adds no capability, no scope, no tool | `bin/mcp-contract.sh check` green at every commit |
+
+---
+
+## 9. Stop conditions
+
+Stop and ask when:
+
+- **rig 20a shows dbmate applies an older pending migration behind an applied
+  newer one silently**, or refuses it in a way the rule in D1092 cannot state;
+  the version rule is then decided with the operator, not written around;
+- **rig 20c's diff is anything but `rpc/create_task`** — the control fixture
+  is not recaptured, and the reason is a row;
+- **`upgrade plan` on the host prices the change at major** (step 2 of Run
+  7): `VERSION` becomes `2.0.0` only by a decision recorded with the plan's
+  own output, and the ADR 0162 reasoning in `__init__.py` is rewritten first;
+- the lint would need a `raw` placeholder type, a `--force`, or an allowlist
+  loosened to a pattern to let the example set through;
+- a project set would need to touch `app_private`, a role, or the pre-request
+  hook to do something an adopter reasonably wants — that is a product
+  decision for a later session, recorded, not a lint exception;
+- the migrator would need to rewrite a route's recorded word (D1094);
+- CI on the branch is red on **any test other than the five named** in Run 5's
+  commit message;
+- the beta deploy fails after 0031 applied and before the project set did —
+  fix forward on the host with the operator, never `down`;
+- a currently-passing test would be weakened, or an equality turned into a
+  containment check — **D1089 is the row that says this session does not need
+  to**;
+- `--render-only` stops working with no host and no root, on a manifest with
+  or without a set.
+
+---
+
+## Appendix — what to consult, and how a run is executed here
+
+**Consult, in this order.** `docs/plans/stage-3-plan.md` §1 rows D1082, D1083,
+D1067, D1080, D1081, D1086 and §5 *Session 20*; this document's §1;
+`docs/plans/session-19-implementation-plan.md` §1 (D1036–D1040, D1053–D1056,
+D1058, D1060); ADR 0028, 0050, 0162, 0195, 0196, 0197; `FINDINGS.md` F-002,
+F-004 to F-008, F-021 to F-023; `docs/plans/session-05-implementation-plan.md`
+Run 9 (how the control fixture was captured from a throwaway cluster) before
+rig 20c; `docs/plans/session-18-implementation-plan.md` §5 Run 6 and
+`docs/session-11-operator-guide.md` §2 before Run 7.
+
+**How a run is executed in this repository** (the short form of `CLAUDE.md`
+§1 and §5; read those, they are the record of what each of these cost):
+
+- The Bash tool is Git Bash on Windows. The tree is in WSL:
+  `wsl bash -lc "cd ~/projects/agentic-postgres && . .venv/bin/activate && …"`.
+  Anything with nested quotes, `$VAR`, a heredoc or a loop variable goes in a
+  script written with the Write tool to `\\wsl$\Ubuntu\tmp\x.sh` and run with
+  `wsl bash -lc "bash /tmp/x.sh"`, printing its own exit codes.
+- File content and commit messages are written with the Write tool and read by
+  the script (`git commit -F /tmp/msg.txt`). Never a heredoc for content.
+- `chmod 755 bin/*.sh bin/*.py deploy.sh` before every `git add`; writing
+  through `\\wsl$\` strips the executable bit and the index mode is a contract.
+- Never pipe a suite or a gate into `tail`; redirect to a file, `rm` it first.
+- `PYTHONDONTWRITEBYTECODE=1` and `__pycache__` cleared before a battery.
+- A run's commit: `ruff format && ruff check` (print the exit code), the
+  targeted modules, the derived-document generators whose inputs moved,
+  `chmod`, `git add -A`, commit with `-F`, push to `session-20`, then read that
+  SHA's verdict: `gh api "repos/Virabyan99/agentic-postgres/actions/runs?head_
+  sha=<40 chars>" --jq '.workflow_runs[] | [.id,.status,.conclusion] | @tsv'`,
+  judged on HTTP status, with `success` / `cancelled` / anything else as three
+  buckets (D1059). An empty listing is not a verdict until the workflow's
+  triggers have been read (D1057).
+- Documentation-only commits run nothing before push. Code runs the targeted
+  modules; CI is the full check. The gate (`bin/session-01-check.sh`) runs on
+  a clean tree at Run 6's close and before the trip, never at a run's close.
+- A rig is a throwaway script with a control arm, its output in a file and its
+  numbers pasted into the Done paragraph. Never write a measurement you did
+  not run (D267). Delete what a rig publishes under `.generated/` unless the
+  key already existed.
+- The battery: every mutation's anchor pre-flighted to match exactly once and
+  a miss fatal (D269); a paired control the mutation cannot reach, in the same
+  invocation, green (D499); the reader distinguishes `FAILED` (a kill) from
+  `ERROR` (a broken fixture) (D386); restore by copy and `cmp`, never
+  `git checkout --`.
+- The host: `op` over SSH with `-i ~/.ssh/agentic_postgres_ed25519` for reads,
+  renders and offline gates; anything reaching Docker or `sudo` is the
+  operator at a TTY, and the agent reads the pasted output. Never redirect a
+  sudo deploy (D972). Never retry ACME. `apg-diag` verbs for read-only
+  diagnosis as `apg-agent`.
+
+**Grep the plans before measuring a third party.** dbmate: D57, D60, D262,
+D941, D1053; PostgREST's OpenAPI and `follow-privileges`: D158, D274, ADR 0060,
+ADR 0118; the outputs migrator's hand-chained tests: D965; the isolation
+matrix's classification: D702, D1029; the snapshot capture: Session 5 Run 9,
+D1039. Nothing indexes the ~1,097 measured facts by subject; `grep` is the
+index.
