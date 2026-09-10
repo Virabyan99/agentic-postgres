@@ -521,6 +521,95 @@ report the example set's objects missing from the release snapshot).
 `test_api_migrations`, `test_project_migration_sets`, `test_cli_contract`,
 `test_repository_contract`.
 
+**Done.** 2026-09-10, `63435df`, CI green. 1083 targeted; no Docker-backed
+module is in this run's blast radius, because nothing here changes what a
+migration applies.
+
+**The schema change is a widening only if the gate is complete, so the gate is
+read rather than reviewed.** Version 2 exists by moving four `required` entries
+and three `minProperties` bounds off the properties and into a version 1 gate.
+If that gate lost one, the release's contract would silently stop being required
+to name its own agent plane -- and the diff that did it would look like tidying.
+`test_the_schema_is_referenced_by_the_module_and_exists` now reads both gates
+out of the schema and asserts exactly what version 1 restores and what version 2
+forbids; it also cross-checks `api_surface.PLATFORM_ONLY_SECTIONS` against the
+schema's own list, for `REQUIRED_FORBIDDEN_SCHEMAS`' reason. The assertion it
+replaces was `enum == [1]`, which would have become `enum == [1, 2]` and said
+nothing.
+
+**Measured, offline.** `bin/api-contract.sh` exit codes, printed from inside a
+script (D-class: `echo "$?"` after `wsl bash -lc` reads Git Bash's status):
+`--check` alone **0** and still reporting *4 objects*; `--check --project
+project.example.yaml` **5**, naming
+`projects/example/contracts/postgrest-openapi.canonical.json`; `--check
+--project project.second.example.yaml` **2**, because a manifest with no set has
+no contract of its own; a `--project` naming a file that does not exist **2**,
+so a bad path can never read as *the release's contract, then*.
+
+The merged surface: `notes-tasks-v1+example-note-embeddings-v1`, relations
+`{note_embeddings, notes, tasks}`, rpcs `{create_note, set_note_embedding,
+update_task_status}`, and `forbidden_schemas` and both agent sections **the
+release's, unchanged**. The SQL reader over `projects/example` finds exactly
+`{note_embeddings, set_note_embedding}` -- the two names the project's contract
+declares, with the view's four columns and the function's two argument names
+agreeing.
+
+**The battery found two weaknesses in this run's own proofs, and both were
+real.** Recorded here because a battery whose survivors are all reported as
+"uninformative" is a battery nobody reads.
+
+1. *The non-empty guard had no scenario.* `test_the_project_reader_finds_every_
+   object_the_project_contract_names` loops over the sets that exist in
+   `projects/`, all of which publish something, so its `assert published` can
+   never fire. The mutation was also mine to get wrong: it removed an assertion
+   from a TEST rather than changing the product, which is D493's shape and could
+   not have killed anything. Repaired on both sides -- the mutation now strips
+   functions and enums from `sql_surface.published_names`, leaving views, so the
+   example set's view still matches and only the RPC goes missing (a PARTIAL
+   answer, which is the failure a total one would never have); and a new arm
+   cuts the example set's view and function under `tmp_path` and asserts the
+   reader reports nothing. **That arm had to trim the manifest's placeholders
+   too** -- `load_manifest` refused the declared-but-unused pair, correctly --
+   which is exactly what an adopter making the same change would have to do, and
+   is why the arm is a set that could exist rather than one that measures the
+   manifest rules.
+
+2. *A test named for a command asserted a path resolver.* `test_check_with_a_
+   project_reads_the_projects_snapshot_path` checked that
+   `project_snapshot_path` returns the project's file -- and a mutation
+   replacing `load_project_snapshot(root)` with `load_snapshot()` inside
+   `command_check` survived it, because nothing had ever said which file the
+   COMMAND opens. It now drives the command. **Both states exit 5**, so the exit
+   code cannot distinguish them and the signal is the message: unmutated,
+   *there is no approved snapshot at projects/example/...*; mutated, *the
+   snapshot and the reviewed surface disagree*. Those are ADR 0195's two
+   outcomes -- I could not find the thing, and the things disagree -- and a
+   reader that could not tell them apart would send an operator to audit a
+   contract when the answer is "capture the snapshot".
+
+   The test asserts `"disagree" not in message`, which is the unusual half: a
+   negative on the message text is normally a weak assertion, and here it is the
+   only thing that separates two states with one exit code.
+
+After repair: **4 mutations, 4 killed, every paired control green**, every file
+restored by copy and byte-compared.
+
+**One thing this run could not prove and did not pretend to.** A project's real
+snapshot can only come from a deployment of that project -- `--update` reads
+`routes.rest.url` from a deployed document -- so the merged comparison is proved
+against a snapshot BUILT under `tmp_path` from the captured control plus the
+example set's paths. What that proves is bounded and the fixture's docstring
+says so: the comparison accepts a document naming the merged surface's objects.
+That PostgREST produces such a document is `TEN-SURF-001`'s live half, and it is
+Run 7's. This is D1039's *unsatisfiable rather than unsatisfied* in its second
+instance.
+
+**D1095 closed** in this run, since it touched `docs/api-surface.md` first: the
+document has linked `decisions/0050-the-published-surface-is-a-reviewed-
+allowlist.md` since Session 5 and no such file has ever existed.
+`test_repository_contract` tracks the document for existence and not for its
+links, which is why nothing read it. Both links in the header now resolve.
+
 ### Run 4 — two readers made honest (ADR 0199)
 
 **Builds.**
