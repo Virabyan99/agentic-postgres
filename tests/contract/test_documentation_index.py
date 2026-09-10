@@ -346,3 +346,66 @@ def test_doctor_reaches_its_own_conclusion(arguments: tuple[str, ...]) -> None:
 def test_the_readme_points_at_the_index(readme: str) -> None:
     """An index nothing links to is a page nobody opens."""
     assert "docs/README.md" in readme
+
+
+# ---------------------------------------------------------------------------
+# What an adopter has to be told before they start (D1040, D1056)
+# ---------------------------------------------------------------------------
+
+
+def test_the_readme_tells_an_adopter_what_adding_a_table_costs() -> None:
+    """D1040. Every fact was already in the repository -- in
+    docs/source-specification.md §5.4, in the contract file's own header, in
+    `bin/api-contract.sh --help` -- and nowhere was it collected into the
+    sequence an adopter actually performs.
+
+    The one that changes the shape of the work is the snapshot: it is captured
+    from a running deployment and refuses a hand edit, so a first bring-up
+    necessarily runs with that check red and an adopter has to know that is
+    expected rather than a mistake they made.
+    """
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    # The newlines are load bearing. Without them this is a PREFIX, and a
+    # battery renaming the heading to "## Adding your own tables REMOVED"
+    # left this assertion green -- D200's shape, which this repository has
+    # already paid for once in test_api_migrations.py's HOOK_DEFINITION.
+    assert "\n## Adding your own tables\n" in readme, (
+        "the README does not tell an adopter what adding a table costs; every "
+        "fact is elsewhere in the repository and none of it is in the order it "
+        "is needed"
+    )
+    section = readme.split("\n## Adding your own tables\n", 1)[1].split("\n## ", 1)[0]
+
+    # The three that were discovered the expensive way.
+    assert "no tenant extension point" in section, "the fork requirement is not stated"
+    assert "postgrest-openapi.canonical.json" in section, "the snapshot is not named"
+    assert "before your first deploy" in section, (
+        "the section does not say the snapshot check is red until after a deploy, "
+        "which is the fact that turns a dead end into an instruction"
+    )
+    assert "Fix forward" in section, "the rule that will refuse an adopter is not stated"
+
+
+def test_the_readme_says_the_agent_plane_does_not_serve_an_adopters_tables() -> None:
+    """D1056. The single largest gap between what this product is and what
+    someone adopting it would expect, and it was nowhere in the README.
+
+    Both closures are working as designed and each is enough on its own: the
+    roster is enumerated rather than discovered (ADR 0127), and the scope
+    vocabulary is a closed enum that cannot name an application's data. An
+    adopter who reads that up front makes a better-informed decision than one
+    who finds it in a schema enum after building.
+    """
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    section = readme.split("## What is intentionally unavailable", 1)[1].split("\n## ", 1)[0]
+
+    assert "agent plane serves this product's example domain" in section, (
+        "the README does not say the agent surface is closed to an adopter's tables"
+    )
+    assert "closed enum" in section, "the scope vocabulary's closure is not stated"
+    assert "ADR 0127" in section, "the roster's closure is not attributed"
+    # And the two must be described as deliberate, because they are -- a reader
+    # told this is a bug goes looking for a fix that does not exist.
+    assert "working as designed" in section or "deliberate" in section, (
+        "the closures read as defects rather than as decisions"
+    )

@@ -212,6 +212,54 @@ Read-only diagnosis without a terminal is `apg-diag`, over its own SSH identity:
 ssh -i ~/.ssh/apg_agent_ed25519 apg-agent@<host> sudo apg-diag containers
 ```
 
+## Adding your own tables
+
+**This product ships one example domain, and adopting it means adding to that
+domain in this repository.** There is no tenant extension point:
+`migrations.load_manifest()` reads one hardcoded path, and a project manifest
+carries no migration keys. `docs/source-specification.md` §5.4 says the same
+thing from the other side — *"pgvector data and additional project tables are
+optional migrations"*. That is a defensible design, because a fork is a
+reviewable diff and reviewability is the property this repository argues for
+throughout. It is not an obvious one, and until Session 19 an adopter
+discovered it by reading `migrations/loader.py`.
+
+Adding one table, one view and a few RPCs touches six places. Five are ordinary
+work; the sixth changes the shape of a first bring-up.
+
+| # | What | Offline? |
+|---|---|---|
+| 1 | `migrations/templates/00xx-*.sql` — your table, its FORCE-RLS policies, its `api` view, its `SECURITY DEFINER` RPCs | yes |
+| 2 | `migrations/manifest.json` — the entry, then `bin/migrate.sh --project FILE freeze-lock` | yes |
+| 3 | `contracts/postgrest-api-surface.yaml` — the reviewed surface. Amending it is sanctioned and the file says so: *"a project that needs an object this does not name needs a reviewed change here, not a second contract."* | yes |
+| 4 | `tests/contract/test_api_migrations.py` — two hand-written sets name the published surface by hand, deliberately, so an empty scrape cannot agree with an empty contract | yes |
+| 5 | `tests/contract/test_api_surface_contract.py` — the same, for the reviewed contract's own assertions | yes |
+| 6 | `contracts/postgrest-openapi.canonical.json` — captured from a **running deployment** and refuses a hand edit | **no** |
+
+Row 6 is the one to know about in advance. `bin/api-contract.sh --update` reads
+`routes.rest.url` from a deployed document; the surface is served only once the
+migrations are applied; and the migrations are applied by the deploy. So the
+snapshot check **cannot be satisfied before your first deploy** — it is
+unsatisfiable rather than unsatisfied, and the check says so since Session 19.
+Expect it red, deploy, then re-capture:
+
+```bash
+sudo bin/api-contract.sh --update --project-outputs <outputs.json> > candidate.json
+# review it, then commit it as contracts/postgrest-openapi.canonical.json
+```
+
+Two rules that are not negotiable and will refuse you rather than warn you:
+
+- **Fix forward.** A released migration is never amended — its bytes are the
+  unit `verify-lock` checks, so editing even a comment changes a digest the
+  lock records. Every `-- migrate:down` block raises `AP900` on purpose.
+- **Your manifest is ignored, not untracked.** `project.yaml` and
+  `project.<name>.yaml` are covered by `.gitignore`; the gate fails on any
+  untracked file and a dirty release makes a deploy refuse outright (D971).
+
+**What your tables do not get: an agent.** See *What is intentionally
+unavailable*.
+
 ## Checks
 
 ```bash
@@ -298,6 +346,30 @@ Not deferred — **outside the product**:
 - Database branching or copy-on-write forks
 - Automatic failover or multi-region replication
 - **Arbitrary SQL execution by an agent, under any authentication**
+
+**The agent plane serves this product's example domain, and not yours.** The
+six tools are the whole agent surface and they can only ever address `notes`
+and `tasks`. Two things close it, independently, and both are working as
+designed:
+
+- The roster is enumerated rather than discovered (ADR 0127). `mcp_lock`
+  refuses any lock that does not serve exactly those six names, so a seventh
+  tool is refused at startup rather than ignored.
+- The scope vocabulary is a closed enum — `notes:read`, `notes:write`,
+  `tasks:read`, `tasks:write`, `meta:read`. There is no way to *declare* a
+  scope for an application's own data, and the schema says the closure is
+  deliberate: the data class is closed by ADR 0003 and grows only when that is
+  superseded. A capability that borrows `notes:read` to read something that is
+  not a note is representable, and a second gate catches it: the manifest no
+  longer compiles to the approved contract, and `bin/mcp-contract.sh` says so.
+
+So an application built on this appliance gets a first-class REST surface, a
+first-class storage surface, and **no agent surface at all for its own tables**.
+Extending the vocabulary supersedes ADR 0003 and is not a configuration change.
+
+Related and open: `tasks` itself currently has no reviewed way to come into
+existence, so two of the six tools address a table nothing can populate
+(ADR 0196).
 
 ## Repository map
 

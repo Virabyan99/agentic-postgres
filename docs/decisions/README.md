@@ -260,3 +260,4 @@ unlisted ADR is one nobody reads, and `0004` went unlisted for a session.
 | [0194](0194-a-plan-makes-every-refusal-the-run-makes-before-anything-is-built.md) | A restore plan makes every refusal the run makes, before anything is built | 18 | Accepted |
 | [0195](0195-a-report-may-not-substitute-an-answer-for-a-failure-to-determine-one.md) | A report may not substitute an answer for a failure to determine one; a decision may still fail closed | 19 | Accepted |
 | [0196](0196-the-task-domain-is-restored-by-a-reviewed-create-rather-than-retired.md) | The task domain is restored by a reviewed create, because retiring it is blocked by the six-tool roster | 19 | Accepted |
+| [0197](0197-the-outsiders-bring-up-settles-one-of-the-two-open-claims-and-answers-the-other-no.md) | The outsider's bring-up settles fresh_host and answers documented_path "no": the path required source edits | 19 | Accepted |
