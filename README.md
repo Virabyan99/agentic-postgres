@@ -5,7 +5,15 @@ template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
 **Status: Session 18 implemented**, the Stage 2 release candidate, at
-`template_version` **1.0.0**. Session 18's code is in this release — independent
+`template_version` **1.0.1**. **Adopt `1.0.1`, not `1.0.0`**: the `1.0.0` tag
+predates its own documented-path repairs, so the one ref a new adopter has
+reason to trust was the one that still had them (D1033). `1.0.1` is Session
+19's repair release — nineteen defects found by somebody building an
+application on 1.0.0, on a host that started empty; see
+[the session plan](docs/plans/session-19-implementation-plan.md) and
+[scope closure](docs/scope-closure.md) §8. No manifest field, migration,
+contract entry, capability or secret changed, and nothing in it is a change an
+operator must act on before upgrading. Session 18's code is in this release — independent
 recovery: every backup repository mirrored to a second provider by a host unit
 the archiver never knows about (ADR 0188), a disaster kit that names every
 secret and holds none and a bootstrap that adopts a provider project by its

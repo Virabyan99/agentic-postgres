@@ -104,6 +104,21 @@ from pathlib import Path
 #: sentence D991 asked for in the product contract's section 7 -- a manifest
 #: bump (schema 4) and an outputs bump (v16), both additive with migrators,
 #: inside the major.
+#:
+#: **Session 19 moved it to `1.0.1`, and `CURRENT_SESSION` stays 18.** The two
+#: numbers answer different questions, and this is the first release where they
+#: come apart: `CURRENT_SESSION` is what the evidence model is keyed to, and
+#: Session 19 built no plane, registered no requirement and wrote no evidence
+#: document. It repaired nineteen defects an adopter found in 1.0.0.
+#:
+#: A patch under section 7's sentence: no manifest field, no migration, no
+#: contract entry, no capability and no secret was added, removed or retyped,
+#: and nothing here is a change an operator must act on before upgrading.
+#:
+#: The tag exists because **1.0.0 does not carry its own documented-path
+#: repairs** (D1033). `b60814b`, `2e82f46`, `04d71c7` and `e49c5aa` all landed
+#: after that tag was made, so the one ref a new adopter has any reason to
+#: trust was the one ref that still had the defects.
 CURRENT_SESSION = 18
 
 #: Repository root, resolved from this file rather than the caller's cwd so
