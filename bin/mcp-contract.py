@@ -48,6 +48,7 @@ from agentic_postgres import (
     capability_compiler,
     config,
     openapi_normalize,
+    scope_registry,
 )
 
 EXIT_OK = 0
@@ -246,6 +247,10 @@ def command_lock(arguments: argparse.Namespace) -> int:
                 "project_manifest_sha256": sha256(arguments.project.read_bytes()).hexdigest(),
             },
             profile=profile,
+            # The deployment's scope classes, for the issuer (ADR 0200). Over
+            # the RELEASE surface here: a project's own relations join it when
+            # a project declares capabilities (ADR 0201, Session 21 Run 4).
+            vocabulary=scope_registry.vocabulary_block(),
         )
     except (KeyError, config.ManifestError) as exc:
         return fail(EXIT_CONTRACT, f"cannot compile the lock: {exc}")

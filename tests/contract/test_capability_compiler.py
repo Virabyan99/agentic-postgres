@@ -30,6 +30,7 @@ from agentic_postgres import (
     config,
     deployed_output,
     openapi_normalize,
+    scope_registry,
 )
 from agentic_postgres.capability_compiler import CompilerError
 
@@ -579,6 +580,7 @@ def test_the_lock_carries_the_digests_of_everything_it_was_compiled_from(
             "api_surface_sha256": "b" * 64,
             "canonical_openapi_sha256": "c" * 64,
         },
+        vocabulary=scope_registry.vocabulary_block(),
     )
     assert set(lock["compiled_from"]) == {
         "capabilities_sha256",

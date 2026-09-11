@@ -35,6 +35,7 @@ from fastapi import FastAPI, Response
 from fastapi.responses import JSONResponse
 
 from app import db, keys, openapi_docs, routes, storage_client, storage_routes
+from app import scopes as scope_map
 from app import settings as settings_module
 from app.hashing import BoundedHasher
 from app.profile import HASH_CONCURRENCY
@@ -149,6 +150,15 @@ async def lifespan(application: FastAPI) -> AsyncIterator[None]:
             issuer=settings.issuer,
             audience=settings.audience,
             role_suffixes={name: suffix for suffix, name in settings.role_names.items()},
+            # The deployment's scope classes, out of the mounted lock (ADR
+            # 0200, D1126). Read once, here, before anything is served: an
+            # issuer that cannot say what a token may carry does not start,
+            # for D381's reason. `None` for storage, which never issues.
+            vocabulary=(
+                scope_map.load_vocabulary(settings.capability_lock_file)
+                if settings.capability_lock_file is not None
+                else None
+            ),
         )
         if mode == "storage":
             application.state.storage = _build_storage(pool)

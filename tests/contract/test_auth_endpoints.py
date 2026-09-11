@@ -311,7 +311,41 @@ def environment(cluster: dict[str, Any], signing_key: Path) -> dict[str, str]:
     passfile = cluster["work"] / "pgpass"
     passfile.write_text(f"*:*:*:*:{cluster['auth_password']}\n", encoding="utf-8")
     passfile.chmod(0o600)
+
+    # The issuer reads its scope vocabulary out of the mounted capability lock
+    # (ADR 0200, D1126). The lock here is compiled by the product's compiler
+    # from the committed contract, with the vocabulary of the MERGED example
+    # surface -- the release's relations plus the example project's -- so the
+    # tenant-scope proof below can grant `note_embeddings:write` and refuse a
+    # name no surface derives, through the endpoint, in one app.
+    from agentic_postgres import api_surface, capability_compiler, scope_registry
+
+    project = api_surface.load_project_surface(
+        api_surface.project_contract_path(REPO_ROOT / "projects" / "example")
+    )
+    merged = api_surface.merged_surface(api_surface.load_surface(), project)
+    canonical = json.loads(
+        (
+            REPO_ROOT / "contracts" / "snapshots" / "mcp" / "mcp-capabilities.canonical.json"
+        ).read_text(encoding="utf-8")
+    )
+    lock = capability_compiler.compile_lock(
+        canonical=canonical,
+        project_key="fixture-alpha-dev",
+        upstream="https://alpha.example.test/api/rest",
+        sources={
+            "capabilities_sha256": "0" * 64,
+            "api_surface_sha256": "0" * 64,
+            "canonical_openapi_sha256": "0" * 64,
+        },
+        vocabulary=scope_registry.vocabulary_block(merged),
+    )
+    lock_path = cluster["work"] / "capability-lock.json"
+    lock_path.write_text(
+        capability_compiler.canonical_bytes(lock).decode("utf-8"), encoding="utf-8"
+    )
     return {
+        "APG_MCP_LOCK_FILE": str(lock_path),
         "APG_PROJECT_KEY": "fixture-alpha-dev",
         "APG_PROJECT_ENVIRONMENT": "dev",
         "APG_JWT_ISSUER": document["jwt"]["issuer"],
@@ -1018,6 +1052,44 @@ def test_an_agent_may_not_hold_a_scope_outside_its_roles_ceiling(drive: Any) -> 
     )
     assert response.status_code == 422, response.text
     assert "notes:write" in response.json()["message"]
+
+
+def test_an_agent_is_granted_a_tenant_scope_only_where_the_lock_derives_it(drive: Any) -> None:
+    """ADR 0200 at the endpoint, through the product's own issuer.
+
+    Rig 21c measured the ceiling as the ONLY vocabulary gate on the issue path
+    and, at `5a43f12`, a static map: `note_embeddings:write` was refused 422 on
+    every deployment. This app's lock carries the vocabulary of the merged
+    example surface, so the same grant is accepted -- and a name no surface
+    derives is refused by the same ceiling, which is the half that says the
+    ceiling did not simply open. `test_scope_vocabulary` proves the other
+    surface's ceiling in the service's own module; one app holds one lock.
+    """
+    admin = _login(drive).json()["access_token"]
+
+    def create(name: str, scopes: list[str]) -> httpx.Response:
+        return drive(
+            "POST",
+            "/admin/agents",
+            headers={"Authorization": f"Bearer {admin}"},
+            content=json.dumps(
+                {"name": name, "description": "", "role": "agent_writer", "scopes": scopes}
+            ),
+        )
+
+    granted = create("tenant-writer", ["meta:read", "note_embeddings:write"])
+    assert granted.status_code == 201, granted.text
+
+    refused = create("borrowed-writer", ["meta:read", "snippets:write"])
+    assert refused.status_code == 422, refused.text
+    assert "snippets:write" in refused.json()["message"]
+    assert "note_embeddings:write" in refused.json()["message"], (
+        "the ceiling named in the refusal should be this deployment's, tenant relation "
+        "included -- a static ceiling would not list it"
+    )
+
+    control = create("release-writer", ["notes:write"])
+    assert control.status_code == 201, control.text
 
 
 def test_the_agent_surface_needs_the_agent_scope_not_the_user_one(drive: Any) -> None:

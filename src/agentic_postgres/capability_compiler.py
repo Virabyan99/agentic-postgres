@@ -31,6 +31,7 @@ import json
 from hashlib import sha256
 from typing import Any
 
+from agentic_postgres import scope_registry
 from agentic_postgres.config import CapabilityContractError
 
 #: The MCP tool names the reviewed manifest compiles to, lexicographically. A
@@ -68,7 +69,12 @@ CONTRACT_ID = "notes-tasks-agent-v1"
 #: always did. A fixed number on a document whose shape varies is a version that
 #: describes nothing -- and a v1 manifest still has to render, because
 #: `capabilities.yaml` lives only on the host.
-COMPILED_SCHEMA_VERSIONS = frozenset({1, 2, 3})
+COMPILED_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
+
+#: The lock version at which the compiler writes the deployment's scope
+#: VOCABULARY into the lock (ADR 0200), for the issuer to read its ceilings
+#: from (D1126). Required at and above, forbidden below (ADR 0177).
+VOCABULARY_FROM = 4
 
 #: Ordered, so a tool backed by several capabilities can take the riskiest.
 #: Ascending; `_riskiest` compares by index and nothing else compares risks.
@@ -236,6 +242,27 @@ def _resolve(capability: dict[str, Any], operations: dict[str, dict[str, Any]]) 
     return {"source": source, "operation_id": identifier, "backend": resolved}
 
 
+def _check_scopes(
+    capability: dict[str, Any], requestable: frozenset[str], surface: dict[str, Any]
+) -> None:
+    """Every scope a capability requires is one the reviewed surface derives.
+
+    F-025's borrowed scope is refused HERE at schema version 4: `snippets:read`
+    over a surface that publishes no `snippets` relation names an authority no
+    reviewed object backs, and an honest name over a relation the merged
+    surface publishes is accepted -- which is the whole of what ADR 0200 opens.
+    """
+    outside = sorted(set(capability["required_scopes"]) - requestable)
+    if outside:
+        raise CompilerError(
+            f"capability {capability['name']!r} requires {outside}, which the reviewed "
+            "surface does not derive. A data scope is <relation>:read or <relation>:write "
+            f"for a relation the surface publishes -- {sorted(surface['relations'])} -- or "
+            "meta:read (ADR 0200). Publish the relation in the reviewed surface first, or "
+            "name the scope of the relation this capability actually reads"
+        )
+
+
 def _check_columns(capability: dict[str, Any], surface: dict[str, Any]) -> None:
     """A frozen column allowlist may only name reviewed columns.
 
@@ -373,8 +400,16 @@ def compile_canonical(
     operations = surface_operations(surface)
     entries = [entry for entry in capabilities["capabilities"] if entry.get("enabled")]
 
+    # **The vocabulary is the surface's** (ADR 0200). At schema version 4 a
+    # manifest's scope is a SHAPE the schema admits, and approval is decided
+    # here: every name must be one the reviewed surface derives. Below 4 the
+    # schema's enum already refused anything else, and the enum is a subset of
+    # every derived vocabulary, so the check is true there by construction.
+    requestable = scope_registry.vocabulary(surface)
+
     grouped: dict[str, list[dict[str, Any]]] = {}
     for capability in entries:
+        _check_scopes(capability, requestable, surface)
         _check_columns(capability, surface)
         _check_write_shape(capability)
         resolved = _resolve(capability, operations)
@@ -704,8 +739,16 @@ def compile_lock(
     upstream: str,
     sources: dict[str, str],
     profile: dict[str, Any] | None = None,
+    vocabulary: dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     """The deployed lock: the canonical contract plus where to send a request.
+
+    `vocabulary` is the deployment's scope classes (ADR 0200), the block the
+    issuer reads its ceilings from (D1126): REQUIRED at lock schema version 4
+    and above, FORBIDDEN below (ADR 0177), so a lock cannot carry a vocabulary
+    nothing at its version reads, nor lack one at a version whose issuer
+    requires it. Written by `scope_registry.vocabulary_block` over the surface
+    the contract was compiled against.
 
     `upstream` is the ONE address the runtime may call -- Run 6's fixed upstream.
     It is carried here rather than derived by the runtime for ADR 0002's reason:
@@ -735,6 +778,28 @@ def compile_lock(
             "prove was reviewed"
         )
 
+    version = canonical["schema_version"]
+    if version >= VOCABULARY_FROM and vocabulary is None:
+        raise CompilerError(
+            f"a lock at schema version {version} carries the deployment's scope vocabulary "
+            "and none was given; the issuer reads its ceilings from it (ADR 0200)"
+        )
+    if version < VOCABULARY_FROM and vocabulary is not None:
+        raise CompilerError(
+            f"a lock at schema version {version} carries no vocabulary; the block arrives at "
+            f"{VOCABULARY_FROM} (ADR 0177)"
+        )
+    if vocabulary is not None:
+        expected = ("data", "storage", "administrative")
+        if tuple(sorted(vocabulary)) != tuple(sorted(expected)):
+            raise CompilerError(
+                f"the vocabulary names {sorted(vocabulary)}; the classes are {list(expected)}"
+            )
+        for name in expected:
+            members = vocabulary[name]
+            if not isinstance(members, list) or members != sorted(set(members)):
+                raise CompilerError(f"vocabulary.{name} must be a sorted list without repeats")
+
     tools = canonical["tools"]
     if profile is not None:
         tools = apply_profile(canonical, profile)["tools"]
@@ -755,6 +820,8 @@ def compile_lock(
             name: {field: entries[field] for field in sorted(entries)}
             for name, entries in sorted(profile.items())
         }
+    if vocabulary is not None:
+        lock["vocabulary"] = {name: list(vocabulary[name]) for name in sorted(vocabulary)}
     return lock
 
 

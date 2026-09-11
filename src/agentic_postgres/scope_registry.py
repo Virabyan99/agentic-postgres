@@ -1,76 +1,95 @@
-"""Which scopes a token for a given role may carry (ADR 0079).
+"""The scope vocabulary, derived, and the role ceiling over it (ADR 0079, ADR 0200).
 
-**This is a mapping, not a vocabulary.** Every name here is checked against
-`schemas/capabilities.schema.json`, which ADR 0006 makes the sole authority and
-which says of itself that "the code carries no second copy". A name in this file
-that the schema does not admit is an error at the moment it is read, not a scope
-that quietly works.
+**The data class is a function of a reviewed surface** (ADR 0200):
+`<relation>:read` and `<relation>:write` for every relation the surface
+publishes, plus `meta:read` for schema introspection. The storage and
+administrative classes stay ENUMERATED in `schemas/capabilities.schema.json`,
+exactly as ADR 0100 left them. The schema is still the sole authority for what
+it enumerates and for the *shape* of the third class (ADR 0006); the reviewed
+surface -- `contracts/postgrest-api-surface.yaml`, merged with a project's own
+under ADR 0198 -- is the authority for the third class's members, and it
+changes on a reviewed edit and on nothing else (D1135).
 
-ADR 0049 already stated most of this in prose -- a reader token holds a subset of
-the `:read` scopes, the documentation role holds exactly `meta:read` -- and prose
-is not something a token can be checked against. This is the same statement as
-data.
+**This is a mapping, not a vocabulary.** The role ceiling says which CLASSES a
+token naming a role may carry (`ROLE_CLASSES`, the one declaration, in the
+service's build context); the ceiling itself is computed from the vocabulary of
+a deployment, never written out. No data-scope literal survives outside the
+schema and the example manifest, and a test says so.
 
-**What this file decides and what it does not.** It decides the *ceiling*: the
-largest set a token naming a role may carry. It does not decide what any
-particular subject holds, which comes from a server-side record and is the whole
-point of `API-ADMIN-001` -- an administrator without the scope is refused, so the
-role never implies the scope.
+**Where the vocabulary reaches the issuer.** The service cannot read the
+schema or the surface (ADR 0084), so the compiler writes the vocabulary into
+the lock (`vocabulary_block`) and the auth container mounts the lock (D1126).
+This module is the half that needs the schema and the surface; the service's
+`scopes.py` is the half that turns a vocabulary into a ceiling.
 
 **A role that no token may name is absent, and asking about one raises.**
 `bin/dev-token.py` makes the same choice for the same reason, in its own words:
 "a command that offers the option invites somebody to find out."
-
-**The mapping itself lives in `services/auth-api/app/scopes.py`** (ADR 0084),
-because the issuer needs it and the image's build context cannot reach `src/`.
-What stays here is the half that needs the schema: every name the mapping grants
-is checked against `capabilities.schema.json` on the way out, so a scope added
-to the service that the schema does not admit fails the moment the repository
-reads the registry -- which is before any deployment could carry it.
 """
 
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Any
 
-from agentic_postgres import config, service_source
+from agentic_postgres import api_surface, config, service_source
 from agentic_postgres.config import ManifestError
 
 _scopes = service_source.load("scopes")
 
 __all__ = [
-    "ROLE_SCOPES",
+    "ROLE_CLASSES",
     "administrative_scopes",
     "agent_requestable_scopes",
     "approved_scopes",
     "assert_classes_partition_the_vocabulary",
     "assert_scopes_permitted",
+    "enumerated_agent_scopes",
     "permitted_scopes",
     "storage_scopes",
+    "vocabulary",
+    "vocabulary_block",
 ]
 
 
-@lru_cache(maxsize=1)
-def approved_scopes() -> frozenset[str]:
-    """Every name the schema admits, all three classes. Loaded, never restated."""
-    return frozenset(config.load_schema("capabilities.schema.json")["$defs"]["scope"]["enum"])
+def vocabulary(surface: dict[str, Any]) -> frozenset[str]:
+    """The data class a reviewed surface derives (ADR 0200).
+
+    Pure over its argument: a surface document, never a path, a URL or a
+    served OpenAPI document (D1135). `merged_surface(release, project)` is what
+    a project's deployment passes; the release surface alone is what every
+    other reader passes.
+    """
+    names = {_scopes.INTROSPECTION_SCOPE}
+    for relation in surface["relations"]:
+        names.add(f"{relation}:read")
+        names.add(f"{relation}:write")
+    return frozenset(names)
 
 
 @lru_cache(maxsize=1)
-def agent_requestable_scopes() -> frozenset[str]:
-    """The subset a capability manifest may declare in ``required_scopes``."""
+def _release_surface() -> dict[str, Any]:
+    return api_surface.load_surface()
+
+
+def _surface(surface: dict[str, Any] | None) -> dict[str, Any]:
+    # The RELEASE surface is the default, and it means "the release's
+    # relations": every reader that wants a deployment's vocabulary passes the
+    # merged surface explicitly (ADR 0198's rule for a kept default).
+    return _release_surface() if surface is None else surface
+
+
+@lru_cache(maxsize=1)
+def enumerated_agent_scopes() -> frozenset[str]:
+    """`$defs/agent_scope`: the data class a manifest at capability schema 3 or
+    below may name. A subset of every derived vocabulary, because the release's
+    relations always exist; asserted in :func:`assert_classes_partition_the_vocabulary`."""
     return frozenset(config.load_schema("capabilities.schema.json")["$defs"]["agent_scope"]["enum"])
 
 
 @lru_cache(maxsize=1)
 def storage_scopes() -> frozenset[str]:
-    """The object-storage class (ADR 0100).
-
-    Listed in the schema rather than derived, and that asymmetry with
-    :func:`administrative_scopes` is the decision rather than an inconsistency.
-    Exactly one class can be the complement; a second one derived the same way
-    would be indistinguishable from it.
-    """
+    """The object-storage class (ADR 0100). Enumerated in the schema, never derived."""
     return frozenset(
         config.load_schema("capabilities.schema.json")["$defs"]["storage_scope"]["enum"]
     )
@@ -78,50 +97,58 @@ def storage_scopes() -> frozenset[str]:
 
 @lru_cache(maxsize=1)
 def administrative_scopes() -> frozenset[str]:
-    """The class a capability manifest may not request.
+    """The class a capability manifest may not request (ADR 0079, ADR 0100).
 
-    **Read from the schema, not derived**, and that is ADR 0100's correction to
-    ADR 0079. It was `approved_scopes() - agent_requestable_scopes()`, which is
-    correct for exactly two classes and silently wrong for three: with
-    `objects:read` in the union and in no other class, this function called it
-    administrative. Run 1 measured what that looks like -- `authenticated`
-    appearing to hold an administrative scope, and the two tests that noticed
-    both looking exactly like tests somebody would update when adding a scope.
-
-    ADR 0079 derived it so the four names would be written once. They are now
-    written twice, here and in the union, and
-    :func:`assert_classes_partition_the_vocabulary` is what makes the second
-    copy safe -- it compares the classes against the union exactly, which is a
-    stronger relation than "no name is written twice" and the only one that
-    catches an *unclassified* name. A complement cannot catch that, because a
-    complement has no notion of one.
+    Read from the schema, not derived, and that is ADR 0100's correction to
+    ADR 0079: a complement is correct for exactly two classes and silently
+    wrong for three. :func:`assert_classes_partition_the_vocabulary` is what
+    makes the enumeration safe.
     """
     return frozenset(
         config.load_schema("capabilities.schema.json")["$defs"]["administrative_scope"]["enum"]
     )
 
 
-def assert_classes_partition_the_vocabulary() -> None:
-    """The three classes are disjoint and their union is exactly `$defs/scope`.
+def agent_requestable_scopes(surface: dict[str, Any] | None = None) -> frozenset[str]:
+    """The data class for a surface: what a manifest may declare in ``required_scopes``."""
+    return vocabulary(_surface(surface))
 
-    One relation, checked in three directions, and it replaces the complement
-    that used to make it unnecessary to state. What it buys is that a name added
-    to the vocabulary and to no class **fails here**, with a message naming it,
-    instead of being absorbed into whichever class was derived by subtraction.
+
+def approved_scopes(surface: dict[str, Any] | None = None) -> frozenset[str]:
+    """Every name a deployment on `surface` admits: the three classes' union."""
+    return agent_requestable_scopes(surface) | storage_scopes() | administrative_scopes()
+
+
+def assert_classes_partition_the_vocabulary(surface: dict[str, Any] | None = None) -> None:
+    """The three classes are disjoint and cover exactly what they should.
+
+    Two relations, and both are kept (ADR 0100, ADR 0200):
+
+    1. **The schema's own enums partition `$defs/scope`** -- the ≤3 data class,
+       the storage class and the administrative class are disjoint and their
+       union is exactly the enumerated union. A name added to `$defs/scope` and
+       to no class **fails here**, with a message naming it, instead of being
+       absorbed into whichever class was derived by subtraction.
+    2. **The derived data class for this surface** is disjoint from the two
+       enumerated classes -- `api_surface` refuses a reserved relation name at
+       load and at merge, and this is the check behind that refusal -- and, for
+       the release surface, still contains every name the ≤3 enum lets an older
+       manifest declare, so nothing a deployed manifest names has stopped
+       existing under it.
 
     Raises rather than reporting: the callers are the issuer and the
     repository's own registry reads, and a vocabulary whose classes do not
     partition it is not a condition to carry forward.
     """
-    approved = approved_scopes()
+    enumerated = frozenset(config.load_schema("capabilities.schema.json")["$defs"]["scope"]["enum"])
     classes = {
-        "$defs/agent_scope": agent_requestable_scopes(),
+        "$defs/agent_scope": enumerated_agent_scopes(),
         "$defs/storage_scope": storage_scopes(),
         "$defs/administrative_scope": administrative_scopes(),
     }
 
     for name, members in classes.items():
-        outside = members - approved
+        outside = members - enumerated
         if outside:
             raise ManifestError(
                 f"{name} names {sorted(outside)}, which $defs/scope does not admit. "
@@ -140,7 +167,7 @@ def assert_classes_partition_the_vocabulary() -> None:
                     "of them means one of the two decisions was never made"
                 )
 
-    unclassified = approved - set().union(*classes.values())
+    unclassified = enumerated - set().union(*classes.values())
     if unclassified:
         raise ManifestError(
             f"$defs/scope admits {sorted(unclassified)} and no class claims them. Before "
@@ -150,49 +177,85 @@ def assert_classes_partition_the_vocabulary() -> None:
             "an ADR before it needs an enum"
         )
 
+    derived = vocabulary(_surface(surface))
+    for name, members in (
+        ("$defs/storage_scope", storage_scopes()),
+        ("$defs/administrative_scope", administrative_scopes()),
+    ):
+        overlap = derived & members
+        if overlap:
+            raise ManifestError(
+                f"the reviewed surface derives {sorted(overlap)}, which {name} already names. "
+                "A relation may not be named for a storage or administrative resource; "
+                "api_surface refuses one at load and at merge, and this is the check behind "
+                "that refusal (ADR 0200)"
+            )
+    if surface is None:
+        missing = enumerated_agent_scopes() - derived
+        if missing:
+            raise ManifestError(
+                f"the release surface no longer derives {sorted(missing)}, which a manifest "
+                "at capability schema 3 or below may still name. The release's relations "
+                "are the floor of every vocabulary (ADR 0200)"
+            )
+
 
 #: Re-exported from the service's build context, which is the one
 #: declaration (ADR 0084). Assigned rather than restated: a copy here would
 #: be two authorities for one authorization model, and D175 records that a
 #: test comparing two constants goes green again the moment somebody
-#: regenerates the copy.
-ROLE_SCOPES: dict[str, frozenset[str]] = _scopes.ROLE_SCOPES
+#: regenerates the copy. Values are CLASS names, never scope names.
+ROLE_CLASSES: dict[str, frozenset[str]] = _scopes.ROLE_CLASSES
 
 
-def permitted_scopes(role_suffix: str) -> frozenset[str]:
-    """The ceiling for one role, validated against the schema on the way out.
+def vocabulary_block(surface: dict[str, Any] | None = None) -> dict[str, list[str]]:
+    """The block the compiler writes into a lock and the issuer reads out of it.
 
-    Validation happens here rather than at import so that a schema edit which
-    removes a name is caught by whatever reads the registry next, with a message
-    naming both sides, rather than by an import error in an unrelated command.
-
-    The partition check runs first, and before the role lookup, because it is a
-    statement about the vocabulary rather than about this call: a schema whose
-    classes do not partition it is wrong for every role, and answering one
-    question correctly out of a broken vocabulary is how the misclassification
-    ADR 0100 describes stayed invisible.
+    Three sorted lists under the three class names. The data list INCLUDES
+    `meta:read`, because it is what a manifest may request; the service's
+    `ceiling` is what keeps introspection out of a human's ceiling.
     """
-    assert_classes_partition_the_vocabulary()
+    return {
+        _scopes.DATA: sorted(agent_requestable_scopes(surface)),
+        _scopes.STORAGE: sorted(storage_scopes()),
+        _scopes.ADMINISTRATIVE: sorted(administrative_scopes()),
+    }
 
-    if role_suffix not in ROLE_SCOPES:
+
+def permitted_scopes(role_suffix: str, surface: dict[str, Any] | None = None) -> frozenset[str]:
+    """The ceiling for one role over a surface's vocabulary.
+
+    The partition check runs first, and before the role lookup, because it is
+    a statement about the vocabulary rather than about this call: a vocabulary
+    whose classes do not partition it is wrong for every role, and answering
+    one question correctly out of a broken vocabulary is how the
+    misclassification ADR 0100 describes stayed invisible.
+    """
+    assert_classes_partition_the_vocabulary(surface)
+
+    if role_suffix not in ROLE_CLASSES:
         raise ManifestError(
             f"no token may name the role {role_suffix!r}. The roles a token may name are "
-            f"{sorted(ROLE_SCOPES)}; the rest are service identities, and offering one as "
+            f"{sorted(ROLE_CLASSES)}; the rest are service identities, and offering one as "
             "an option invites somebody to find out what it can do"
         )
 
-    scopes = ROLE_SCOPES[role_suffix]
-    unapproved = scopes - approved_scopes()
-    if unapproved:
+    block = {name: frozenset(members) for name, members in vocabulary_block(surface).items()}
+    scopes = _scopes.ceiling(role_suffix, block)
+    if scopes is None:  # pragma: no cover -- the membership test above refuses first
+        raise ManifestError(f"no token may name the role {role_suffix!r}")
+    unapproved = scopes - approved_scopes(surface)
+    if unapproved:  # pragma: no cover -- a ceiling is computed from the classes it names
         raise ManifestError(
-            f"the scope registry grants {role_suffix} scopes the capability schema does "
-            f"not admit: {sorted(unapproved)}. The schema is the sole authority (ADR 0006) "
-            "and this file is a mapping onto it"
+            f"the ceiling for {role_suffix} names {sorted(unapproved)}, which the vocabulary "
+            "does not admit"
         )
     return scopes
 
 
-def assert_scopes_permitted(role_suffix: str, scopes: list[str]) -> frozenset[str]:
+def assert_scopes_permitted(
+    role_suffix: str, scopes: list[str], surface: dict[str, Any] | None = None
+) -> frozenset[str]:
     """The check an issuer runs before signing. Returns the set it validated.
 
     Refuses an empty list as well as an over-wide one. A token with no scopes for
@@ -200,7 +263,7 @@ def assert_scopes_permitted(role_suffix: str, scopes: list[str]) -> frozenset[st
     authority nothing described, and `verify_claims` requires the claim to be
     present.
     """
-    ceiling = permitted_scopes(role_suffix)
+    ceiling = permitted_scopes(role_suffix, surface)
 
     if not isinstance(scopes, list) or not all(isinstance(item, str) for item in scopes):
         raise ManifestError("scopes must be a list of strings")

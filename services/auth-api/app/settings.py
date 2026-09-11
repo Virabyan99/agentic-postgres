@@ -145,6 +145,11 @@ class Settings:
     jwks_file: Path | None
     listen_port: int
     role_names: dict[str, str]
+    #: Where the ISSUER reads the deployment's scope vocabulary (ADR 0200,
+    #: D1126): the compiled capability lock, mounted read-only into the auth
+    #: container exactly as the agent plane mounts it. `None` in storage mode,
+    #: which verifies and never issues, and refused there rather than ignored.
+    capability_lock_file: Path | None
 
     @property
     def conninfo(self) -> str:
@@ -321,6 +326,14 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
         # token, and a container that starts and refuses everything is worse
         # than one that does not start: it looks deployed (ADR 0113, D381).
         jwks_file: Path | None = Path(_required("APG_JWKS_FILE"))
+        # A verifier bounds no scope, so it is given no vocabulary; the lock in
+        # a storage container would be a document nothing reads (D816).
+        if os.environ.get("APG_MCP_LOCK_FILE"):
+            raise MissingSetting(
+                "APG_MCP_LOCK_FILE is set in storage mode; storage issues nothing and reads "
+                "no ceiling, so the lock is a document nothing there would read (ADR 0200)"
+            )
+        capability_lock_file: Path | None = None
     else:
         signing_key_file = Path(_required("APG_SIGNING_KEY_FILE"))
         # Absent in auth mode, and refused rather than ignored, for the same
@@ -333,6 +346,11 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
                 "with, and must not be given a second key set (ADR 0113)"
             )
         jwks_file = None
+        # The issuer's ceilings are a function of the deployment's vocabulary,
+        # and the vocabulary is in the lock (ADR 0200). Required, for D381's
+        # reason: an issuer with no vocabulary would refuse every grant and
+        # look deployed.
+        capability_lock_file = Path(_required("APG_MCP_LOCK_FILE"))
 
     return Settings(
         project_key=_required("APG_PROJECT_KEY"),
@@ -349,6 +367,7 @@ def load(environ: dict[str, str] | None = None, *, mode: str = "auth") -> Settin
         jwks_file=jwks_file,
         listen_port=_required_int("APG_LISTEN_PORT"),
         role_names=_required_role_names("APG_ROLE_NAMES"),
+        capability_lock_file=capability_lock_file,
     )
 
 
@@ -373,7 +392,15 @@ SHARED_VARIABLES: tuple[str, ...] = (
     "APG_ROLE_NAMES",
 )
 
-REQUIRED_VARIABLES: tuple[str, ...] = (*SHARED_VARIABLES, "APG_SIGNING_KEY_FILE")
+#: Session 21 (ADR 0200): the issuer reads its scope vocabulary out of the
+#: capability lock, mounted into the auth container as it is into the agent
+#: plane's. In the auth list and in storage's FORBIDDEN list, so a compose file
+#: that handed the lock to both would fail the guard.
+REQUIRED_VARIABLES: tuple[str, ...] = (
+    *SHARED_VARIABLES,
+    "APG_SIGNING_KEY_FILE",
+    "APG_MCP_LOCK_FILE",
+)
 
 #: Session 7. What the storage mode reads INSTEAD of the signing key, plus the
 #: six settings that are its own. Declared beside the auth set so
@@ -434,7 +461,7 @@ FORBIDDEN_VARIABLES: dict[str, tuple[str, ...]] = {
     # An issuer verifies with what it signs with, so a second key set is
     # refused rather than ignored (ADR 0113).
     "auth": ("APG_JWKS_FILE",),
-    "storage": ("APG_SIGNING_KEY_FILE",),
+    "storage": ("APG_SIGNING_KEY_FILE", "APG_MCP_LOCK_FILE"),
     # The longest list, and every entry is load-bearing. A signing key would
     # make a verifier into an undeclared issuer (ADR 0098); a database setting
     # would make ADR 0099's considered zero into an oversight (D407). D309 was

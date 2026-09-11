@@ -5,30 +5,52 @@
   "description": "The only agent-visible capability surface. Empty by default. This file is also the sole authority for the approved scope vocabulary (implementation plan decision C); the code carries no second copy.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "capabilities"],
+  "required": [
+    "schema_version",
+    "capabilities"
+  ],
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [1, 2, 3],
-      "description": "1, 2 or 3. **A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it** (ADR 0177), and both halves are deliberate: forbidding it earlier keeps a manifest from carrying a field nothing reads at that version, and requiring it keeps the introducing version from being one in which it is optional and therefore absent. v2 adds `version`, `lifecycle` and `risk` for every kind. v3 adds `max_response_bytes` and `max_concurrent_calls` to reads and writes, and `supports_dry_run` and `requires_approval` to writes -- all four FORBIDDEN on a metadata capability, which bounds none of them (ADR 0179). Every older version still loads, because `capabilities.yaml` is a gitignored operator input that exists only on the host: a schema refusing one outright would fail the next deploy on a file no commit can fix."
+      "enum": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "description": "1, 2, 3 or 4. **A field is FORBIDDEN below the version that introduces it and REQUIRED at or above it** (ADR 0177), and both halves are deliberate: forbidding it earlier keeps a manifest from carrying a field nothing reads at that version, and requiring it keeps the introducing version from being one in which it is optional and therefore absent. v2 adds `version`, `lifecycle` and `risk` for every kind. v3 adds `max_response_bytes` and `max_concurrent_calls` to reads and writes, and `supports_dry_run` and `requires_approval` to writes -- all four FORBIDDEN on a metadata capability, which bounds none of them (ADR 0179). Every older version still loads, because `capabilities.yaml` is a gitignored operator input that exists only on the host: a schema refusing one outright would fail the next deploy on a file no commit can fix. v4 (ADR 0200) changes what `required_scopes` may NAME rather than which fields a capability carries: at 4 a scope is a shape -- `<relation>:read`, `<relation>:write` or `meta:read` -- and the compiler approves each name against the vocabulary the reviewed surface derives; at 3 and below it is one of $defs/agent_scope's five, which is the vocabulary those manifests were written against and a subset of every derived one."
     },
     "capabilities": {
       "type": "array",
       "default": [],
-      "items": { "$ref": "#/$defs/capability" },
+      "items": {
+        "$ref": "#/$defs/capability"
+      },
       "description": "Enabled agent tools. An entry may exist while disabled; enabling one requires a live backing API contract."
     }
   },
   "allOf": [
     {
       "if": {
-        "properties": { "schema_version": { "minimum": 2 } },
-        "required": ["schema_version"]
+        "properties": {
+          "schema_version": {
+            "minimum": 2
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
       },
       "then": {
         "properties": {
           "capabilities": {
-            "items": { "required": ["version", "lifecycle", "risk"] }
+            "items": {
+              "required": [
+                "version",
+                "lifecycle",
+                "risk"
+              ]
+            }
           }
         }
       },
@@ -38,9 +60,21 @@
             "items": {
               "not": {
                 "anyOf": [
-                  { "required": ["version"] },
-                  { "required": ["lifecycle"] },
-                  { "required": ["risk"] }
+                  {
+                    "required": [
+                      "version"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "lifecycle"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "risk"
+                    ]
+                  }
                 ]
               }
             }
@@ -51,8 +85,14 @@
     },
     {
       "if": {
-        "properties": { "schema_version": { "minimum": 3 } },
-        "required": ["schema_version"]
+        "properties": {
+          "schema_version": {
+            "minimum": 3
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
       },
       "then": {
         "properties": {
@@ -61,17 +101,42 @@
               "allOf": [
                 {
                   "if": {
-                    "properties": { "kind": { "enum": ["read", "write"] } },
-                    "required": ["kind"]
+                    "properties": {
+                      "kind": {
+                        "enum": [
+                          "read",
+                          "write"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
                   },
-                  "then": { "required": ["max_response_bytes", "max_concurrent_calls"] }
+                  "then": {
+                    "required": [
+                      "max_response_bytes",
+                      "max_concurrent_calls"
+                    ]
+                  }
                 },
                 {
                   "if": {
-                    "properties": { "kind": { "const": "write" } },
-                    "required": ["kind"]
+                    "properties": {
+                      "kind": {
+                        "const": "write"
+                      }
+                    },
+                    "required": [
+                      "kind"
+                    ]
                   },
-                  "then": { "required": ["supports_dry_run", "requires_approval"] }
+                  "then": {
+                    "required": [
+                      "supports_dry_run",
+                      "requires_approval"
+                    ]
+                  }
                 }
               ]
             }
@@ -84,10 +149,26 @@
             "items": {
               "not": {
                 "anyOf": [
-                  { "required": ["max_response_bytes"] },
-                  { "required": ["max_concurrent_calls"] },
-                  { "required": ["supports_dry_run"] },
-                  { "required": ["requires_approval"] }
+                  {
+                    "required": [
+                      "max_response_bytes"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "max_concurrent_calls"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "supports_dry_run"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "requires_approval"
+                    ]
+                  }
                 ]
               }
             }
@@ -95,6 +176,34 @@
         }
       },
       "description": "The v3 gate (ADR 0179). Required by KIND rather than uniformly: a read and a write both produce a response and both take a concurrency slot, and only a write has anything to not-do, so only a write declares a dry run and an approval. A metadata capability is forbidden all four by `$defs/capability`'s own branch -- stated there rather than here, because it is a fact about the kind and not about the version."
+    },
+    {
+      "if": {
+        "properties": {
+          "schema_version": {
+            "maximum": 3
+          }
+        },
+        "required": [
+          "schema_version"
+        ]
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "items": {
+              "properties": {
+                "required_scopes": {
+                  "items": {
+                    "$ref": "#/$defs/agent_scope"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "description": "The v4 gate (ADR 0200), and it runs the other way from the two above: it NARROWS the versions below it rather than requiring a field at and above. A manifest at schema version 3 or below names only $defs/agent_scope's five, which is the vocabulary it was written against; at 4 the shape applies and the compiler approves each name against the derived vocabulary. Every older version still loads, because `capabilities.yaml` is a gitignored operator input that exists only on the host."
     }
   ],
   "$defs": {
@@ -114,7 +223,7 @@
         "admin_agents:write",
         "admin_audit:read"
       ],
-      "description": "Every approved scope name: the union of three closed classes, and the classes are the point (ADR 0079, ADR 0100). DATA scopes are one per (frozen-domain resource, verb) plus meta:read for schema introspection, closed by docs/decisions/0003-example-domain.md and growing only when that is superseded. STORAGE scopes are one per (object, verb) over the object-storage surface, closed by that surface. ADMINISTRATIVE scopes are one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. All three classes are LISTED; the administrative one was derived as this union less the other two until ADR 0100, and that sentence outlived the change by two sessions -- see $defs/administrative_scope, which has said so since Session 7 Run 1. A name added here and to no class raises where the registry is read: see scope_registry.assert_classes_partition_the_vocabulary. A capability manifest may request only the data class: see $defs/agent_scope."
+      "description": "Every ENUMERATED scope name: the union of the three classes as they stood before ADR 0200, and still the union the partition check runs over (ADR 0079, ADR 0100). DATA scopes here are the five a manifest at schema version 3 or below may name; since ADR 0200 the data class is DERIVED from the reviewed surface -- one `<relation>:read` and `<relation>:write` per published relation plus meta:read -- and this enum is its floor, not its extent. STORAGE scopes are one per (object, verb) over the object-storage surface, closed by that surface. ADMINISTRATIVE scopes are one per (platform identity resource, verb) over the auth service's own surface, closed by that surface. A name added here and to no class raises where the registry is read: see scope_registry.assert_classes_partition_the_vocabulary."
     },
     "agent_scope": {
       "type": "string",
@@ -125,7 +234,7 @@
         "tasks:write",
         "meta:read"
       ],
-      "description": "The scopes a capability manifest may declare in required_scopes: the data class only. An administrative scope is issuable to a human administrator's token and is not requestable by a tool manifest. ADR 0006 rejected a pattern-validated vocabulary precisely because it would accept admin:everything, and one enum serving both purposes reintroduces that by another route. A STORAGE scope is absent for the same reason and one more: object storage is human-only in Session 7, and this $ref is where that is enforced rather than asserted."
+      "description": "The data class a capability manifest at schema version 3 OR BELOW may declare in required_scopes -- the five names those manifests were written against, and a subset of every vocabulary the reviewed surface derives (ADR 0200). At version 4 the class is derived from the surface and this enum is not consulted; see $defs/agent_scope_name and the v4 gate. An administrative scope is issuable to a human administrator's token and is not requestable by a tool manifest at any version: ADR 0006 rejected a pattern-validated vocabulary precisely because it would accept admin:everything, and at version 4 what refuses it is the compiler (a name outside the derived class) and api_surface (a relation may not be named for an administrative or storage resource). A STORAGE scope is absent for the same reason and one more: object storage is human-only since Session 7."
     },
     "storage_scope": {
       "type": "string",
@@ -149,7 +258,13 @@
     "capability": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "kind", "enabled", "required_scopes", "operation"],
+      "required": [
+        "name",
+        "kind",
+        "enabled",
+        "required_scopes",
+        "operation"
+      ],
       "properties": {
         "name": {
           "type": "string",
@@ -161,7 +276,10 @@
           "pattern": "^[a-z][a-z0-9_]{2,47}$",
           "description": "The MCP tool this capability is exposed through. Absent means the tool is this capability's own `name`, which is every case but one. Present, it groups capabilities: `query_notes` and `query_tasks` both declare `query_resource`, so one tool carries two frozen resources with a SEPARATE scope requirement each (ADR 0120). That is what the capability plan's \"notes:read or tasks:read\" means, and it is unrepresentable in a single entry -- required_scopes is a conjunction, so one entry naming both would refuse an agent holding either. Capabilities sharing a tool must agree on `kind` and `operation.source`; the compiler refuses them otherwise, because one name with two authorization models is two tools wearing one label."
         },
-        "description": { "type": "string", "maxLength": 500 },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
         "version": {
           "type": "string",
           "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
@@ -169,17 +287,29 @@
         },
         "lifecycle": {
           "type": "string",
-          "enum": ["active", "deprecated", "retired"],
+          "enum": [
+            "active",
+            "deprecated",
+            "retired"
+          ],
           "description": "Where the capability is in its life, required at schema_version 2 (ADR 0177). **`retired` may not be `enabled: true`, and the compiler refuses it** -- which is not a new rule but the existing one reached by a declaration: `compile_canonical` already drops disabled capabilities entirely, because \"a runtime that received them would have to be trusted to ignore them, and the lock is meant to be the thing that cannot be argued with\". So retirement is enforced by the lock's ABSENCE rather than by a runtime check somebody could forget. `deprecated` compiles in and stays callable, and travels into the lock and the catalog so an operator can see what is on its way out; a lifecycle that refused a deprecated call would make the word mean `retired` and leave one of the two states unreachable. No default, because a default is a value nobody chose."
         },
         "risk": {
           "type": "string",
-          "enum": ["low", "moderate", "high"],
+          "enum": [
+            "low",
+            "moderate",
+            "high"
+          ],
           "description": "What is at stake when this capability runs, required at schema_version 2 (ADR 0177). **Validated in this run, not yet behavioural**: a metadata capability must be `low` -- it reaches no backend, holds no credential and answers from the lock, so any other value would describe a hazard that does not exist -- and a write may not be `low`, because it changes rows. AGT-RISK-001 requires risk to SELECT a behaviour, and that lands in Run 3 with the denial taxonomy and the audit columns. It deliberately does not narrow a budget: rows, bytes, elapsed time and concurrency are independent by decision (ADR 0129), and a risk class tightening one of them would be a second authority over it."
         },
         "kind": {
           "type": "string",
-          "enum": ["read", "write", "metadata"],
+          "enum": [
+            "read",
+            "write",
+            "metadata"
+          ],
           "description": "`read` reaches a backend and returns rows; `write` reaches one and changes rows; `metadata` reaches NOTHING and answers from the deployed capability lock (ADR 0120). The third member exists because `list_resources` and `describe_resource` would otherwise have to declare a resource, columns and max_rows describing a query they never make -- values invented to satisfy a schema, which the next reader cannot tell from the real ones (D267). A metadata capability is FORBIDDEN those fields by the allOf below, so \"this tool cannot reach a backend\" is a property of the manifest rather than of the runtime's good behaviour."
         },
         "enabled": {
@@ -190,17 +320,27 @@
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,
-          "items": { "$ref": "#/$defs/agent_scope" }
+          "items": {
+            "$ref": "#/$defs/agent_scope_name"
+          },
+          "description": "The scopes a caller must hold, every one of them (a conjunction; ADR 0120's disjunction is two capabilities behind one tool). Items are the data class's SHAPE; the v4 gate below is where the vocabulary a manifest may name is decided per version."
         },
         "operation": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["source", "operation_id"],
+          "required": [
+            "source",
+            "operation_id"
+          ],
           "description": "Reference to one pre-existing operation. Never SQL, never a raw query string, never a runtime-selected name.",
           "properties": {
             "source": {
               "type": "string",
-              "enum": ["postgrest", "fastapi", "lock"],
+              "enum": [
+                "postgrest",
+                "fastapi",
+                "lock"
+              ],
               "description": "Where the backing operation lives. `lock` is the deployed capability lock itself and is the only source a `metadata` capability may name -- it is not a service, holds no credential and answers no query."
             },
             "operation_id": {
@@ -231,7 +371,10 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["column", "operators"],
+            "required": [
+              "column",
+              "operators"
+            ],
             "properties": {
               "column": {
                 "type": "string",
@@ -243,7 +386,16 @@
                 "uniqueItems": true,
                 "items": {
                   "type": "string",
-                  "enum": ["eq", "neq", "lt", "lte", "gt", "gte", "in", "is_null"],
+                  "enum": [
+                    "eq",
+                    "neq",
+                    "lt",
+                    "lte",
+                    "gt",
+                    "gte",
+                    "in",
+                    "is_null"
+                  ],
                   "description": "Structured operators only. No expressions."
                 }
               }
@@ -256,13 +408,22 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["column", "direction"],
+            "required": [
+              "column",
+              "direction"
+            ],
             "properties": {
               "column": {
                 "type": "string",
                 "pattern": "^[a-z][a-z0-9_]{0,62}$"
               },
-              "direction": { "type": "string", "enum": ["asc", "desc"] }
+              "direction": {
+                "type": "string",
+                "enum": [
+                  "asc",
+                  "desc"
+                ]
+              }
             }
           }
         },
@@ -278,7 +439,9 @@
           "maximum": 100,
           "description": "Write side-effect bound."
         },
-        "idempotent": { "type": "boolean" },
+        "idempotent": {
+          "type": "boolean"
+        },
         "max_response_bytes": {
           "type": "integer",
           "minimum": 1024,
@@ -307,7 +470,9 @@
         "audit": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["redact"],
+          "required": [
+            "redact"
+          ],
           "properties": {
             "redact": {
               "type": "array",
@@ -324,36 +489,105 @@
       "allOf": [
         {
           "if": {
-            "properties": { "kind": { "const": "read" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "read"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
-          "then": { "required": ["resource", "columns", "max_rows"] }
+          "then": {
+            "required": [
+              "resource",
+              "columns",
+              "max_rows"
+            ]
+          }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "write" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "write"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
-          "then": { "required": ["max_affected_rows", "idempotent"] }
+          "then": {
+            "required": [
+              "max_affected_rows",
+              "idempotent"
+            ]
+          }
         },
         {
           "if": {
-            "properties": { "kind": { "const": "metadata" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "metadata"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
             "not": {
               "anyOf": [
-                { "required": ["resource"] },
-                { "required": ["columns"] },
-                { "required": ["filters"] },
-                { "required": ["order_by"] },
-                { "required": ["max_rows"] },
-                { "required": ["max_affected_rows"] },
-                { "required": ["max_response_bytes"] },
-                { "required": ["max_concurrent_calls"] },
-                { "required": ["supports_dry_run"] },
-                { "required": ["requires_approval"] }
+                {
+                  "required": [
+                    "resource"
+                  ]
+                },
+                {
+                  "required": [
+                    "columns"
+                  ]
+                },
+                {
+                  "required": [
+                    "filters"
+                  ]
+                },
+                {
+                  "required": [
+                    "order_by"
+                  ]
+                },
+                {
+                  "required": [
+                    "max_rows"
+                  ]
+                },
+                {
+                  "required": [
+                    "max_affected_rows"
+                  ]
+                },
+                {
+                  "required": [
+                    "max_response_bytes"
+                  ]
+                },
+                {
+                  "required": [
+                    "max_concurrent_calls"
+                  ]
+                },
+                {
+                  "required": [
+                    "supports_dry_run"
+                  ]
+                },
+                {
+                  "required": [
+                    "requires_approval"
+                  ]
+                }
               ]
             }
           },
@@ -361,25 +595,52 @@
         },
         {
           "if": {
-            "properties": { "kind": { "const": "metadata" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "metadata"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
-            "properties": { "risk": { "const": "low" } }
+            "properties": {
+              "risk": {
+                "const": "low"
+              }
+            }
           },
           "description": "A metadata capability reaches no backend, holds no credential and answers from the deployed lock, so `moderate` or `high` would name a hazard that does not exist (ADR 0177). Written as a constraint on the value rather than as a required field, so it says nothing at schema_version 1, where `risk` is absent."
         },
         {
           "if": {
-            "properties": { "kind": { "const": "write" } },
-            "required": ["kind"]
+            "properties": {
+              "kind": {
+                "const": "write"
+              }
+            },
+            "required": [
+              "kind"
+            ]
           },
           "then": {
-            "properties": { "risk": { "not": { "const": "low" } } }
+            "properties": {
+              "risk": {
+                "not": {
+                  "const": "low"
+                }
+              }
+            }
           },
           "description": "A write changes rows, so `low` is a claim the kind contradicts (ADR 0177). The pair with the branch above is the whole of what `risk` reads in Session 16 Run 2; the behaviour AGT-RISK-001 asks for arrives in Run 3."
         }
       ]
+    },
+    "agent_scope_name": {
+      "type": "string",
+      "pattern": "^([a-z][a-z0-9_]{0,62}:(read|write)|meta:read)$",
+      "description": "The SHAPE of a data scope (ADR 0200): `<relation>:read`, `<relation>:write`, or `meta:read`. A shape says a name is well-formed; it cannot say it was approved (ADR 0006), and approval is the compiler's: every name a capability at schema version 4 declares must be in the vocabulary the reviewed surface derives, and a relation may not be named for a storage or administrative resource, so the derived class can never contain one. Below version 4 the enumerated $defs/agent_scope applies instead, through the version gate."
     }
   }
 }

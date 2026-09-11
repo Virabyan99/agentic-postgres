@@ -27,7 +27,14 @@ from typing import Any
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, api_surface, capability_compiler, config, openapi_normalize
+from agentic_postgres import (
+    REPO_ROOT,
+    api_surface,
+    capability_compiler,
+    config,
+    openapi_normalize,
+    scope_registry,
+)
 from agentic_postgres.capability_compiler import PROFILE_FIELDS, CompilerError, apply_profile
 from app import mcp_lock
 
@@ -331,6 +338,7 @@ def test_the_lock_records_the_profile_and_keeps_the_approved_digest(
         upstream="https://fixture-alpine-dev.test/api/rest",
         sources=SOURCES,
         profile=profile,
+        vocabulary=scope_registry.vocabulary_block(),
     )
     approved = sha256(capability_compiler.canonical_bytes(canonical)).hexdigest()
     assert lock["canonical_sha256"] == approved
@@ -355,6 +363,7 @@ def test_the_lock_records_the_profile_and_keeps_the_approved_digest(
         project_key="fixture-alpha-dev",
         upstream="https://fixture-alpha-dev.test/api/rest",
         sources=SOURCES,
+        vocabulary=scope_registry.vocabulary_block(),
     )
     assert "profile" not in plain
     assert plain["tools"] == canonical["tools"]
@@ -411,6 +420,7 @@ def test_the_runtime_loads_a_profiled_lock_and_refuses_one_that_disagrees(
         upstream="https://fixture-alpine-dev.test/api/rest",
         sources=SOURCES,
         profile=profile,
+        vocabulary=scope_registry.vocabulary_block(),
     )
 
     def load(mutate: Any) -> mcp_lock.CapabilityLock:

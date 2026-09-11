@@ -62,7 +62,7 @@ MAX_MANIFEST_BYTES = 65_536
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
 SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5})
-SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3})
+SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
 
 #: The project manifest version at which `backup.mirror` exists (ADR 0188):
 #: optional at 4, forbidden below. A manifest below 4 has no mirror, and the

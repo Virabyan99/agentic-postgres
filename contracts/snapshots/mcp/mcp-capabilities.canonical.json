@@ -1,7 +1,7 @@
 {
   "capability_count": 7,
   "contract_id": "notes-tasks-agent-v1",
-  "schema_version": 3,
+  "schema_version": 4,
   "tool_count": 6,
   "tools": [
     {

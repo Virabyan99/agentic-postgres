@@ -109,6 +109,7 @@ __all__ = [
     "project_contract_path",
     "project_snapshot_path",
     "published_objects",
+    "reserved_resource_names",
     "validate_surface",
 ]
 
@@ -240,6 +241,36 @@ def validate_project_surface(document: dict[str, Any]) -> None:
         )
 
     _refuse_name_collisions(document)
+    _refuse_reserved_relation_names(document)
+
+
+def reserved_resource_names() -> frozenset[str]:
+    """The resource half of every enumerated storage and administrative scope.
+
+    Read from the schema rather than restated (ADR 0006): `objects`,
+    `admin_users`, `admin_agents`, `admin_audit` today, and whatever a later
+    ADR adds to either enumerated class. A relation named for one would derive
+    a data scope indistinguishable from an enumerated one, so the derived class
+    could never name an administrative or storage scope only because no surface
+    can be loaded that would make it (ADR 0200).
+    """
+    schema = config.load_schema(SCHEMA_NAME.replace("api-surface", "capabilities"))
+    names = set()
+    for kind in ("storage_scope", "administrative_scope"):
+        for scope in schema["$defs"][kind]["enum"]:
+            names.add(scope.split(":", 1)[0])
+    return frozenset(names)
+
+
+def _refuse_reserved_relation_names(document: dict[str, Any]) -> None:
+    reserved = sorted(set(document.get("relations", {})) & reserved_resource_names())
+    if reserved:
+        raise SurfaceError(
+            f"the contract publishes relations named {reserved}, which are the resources of "
+            "enumerated storage or administrative scopes. A data scope is derived from a "
+            "relation's name (ADR 0200), and one that read `admin_users:read` would be "
+            "requestable by a capability manifest. Rename the relation."
+        )
 
 
 def merged_surface(release: dict[str, Any], project: dict[str, Any] | None) -> dict[str, Any]:
@@ -293,6 +324,10 @@ def merged_surface(release: dict[str, Any], project: dict[str, Any] | None) -> d
     for kind in kinds:
         merged[kind] = {**release.get(kind, {}), **project.get(kind, {})}
     merged["contract_id"] = f"{release['contract_id']}+{project['contract_id']}"
+    # At merge as well as at load (ADR 0200): the merged surface is what the
+    # vocabulary is derived from, and a caller that built a project document
+    # without loading it from a file reaches this check and no other.
+    _refuse_reserved_relation_names(merged)
     return merged
 
 
@@ -404,6 +439,7 @@ def validate_surface(document: dict[str, Any]) -> None:
             )
 
     _refuse_name_collisions(document)
+    _refuse_reserved_relation_names(document)
 
 
 def _refuse_name_collisions(document: dict[str, Any]) -> None:

@@ -404,6 +404,13 @@ MCP_JWKS_CONTAINER_PATH = "/etc/mcp/jwks.json"
 MCP_LOCK_FILENAME = "mcp-capability-lock.json"
 MCP_LOCK_CONTAINER_PATH = "/etc/mcp/capability-lock.json"
 
+#: Session 21 (ADR 0200, D1126). The SAME lock, mounted read-only into the
+#: issuer: its scope ceilings are a function of the deployment's vocabulary,
+#: and the vocabulary is written into the lock by the compiler. A different
+#: container path from the agent plane's, under the auth service's own prefix,
+#: so `compose.yaml` names each mount for the service that reads it.
+AUTH_LOCK_CONTAINER_PATH = "/etc/auth/capability-lock.json"
+
 #: Container paths a sensitive-named environment key may reference (ADR 0064).
 #:
 #: `PGRST_JWT_SECRET` is refused by ADR 0008's denylist -- it ends in `_secret`
@@ -444,6 +451,7 @@ __all__ = [
     "APP_SNAPSHOT_CONTAINER_PATH",
     "APP_SNAPSHOT_ENV_KEY",
     "APP_SNAPSHOT_FILENAME",
+    "AUTH_LOCK_CONTAINER_PATH",
     "AUTH_SERVICE",
     "AUTH_SERVICE_PORT",
     "DATABASE_SERVICE",
@@ -773,7 +781,16 @@ def build_override(
                     app_router_name=app_router_name,
                     app_buffering_middleware_name=app_buffering_middleware_name,
                     app_stripprefix_middleware_name=app_stripprefix_middleware_name,
-                )
+                ),
+                # Session 21 (ADR 0200, D1126). The issuer's ceilings are a
+                # function of the deployment's scope vocabulary, and the
+                # vocabulary lives in the compiled lock -- so the auth service
+                # mounts the same lock the agent plane does, read-only. It holds
+                # names and bounds and no credential. ADR 0155 does the rest: a
+                # lock whose bytes changed recreates this container too.
+                "volumes": [
+                    f"{rendered_directory}/{MCP_LOCK_FILENAME}:{AUTH_LOCK_CONTAINER_PATH}:ro",
+                ],
             },
             # Session 7 Run 7. A separate Compose service from `auth` rather than
             # a second router onto it (which is what `docs` does for its two

@@ -13,8 +13,16 @@
 #
 # It may never contain SQL, SQL fragments, raw PostgREST query strings,
 # arbitrary paths, runtime-selected operation names, or ad-hoc columns. The
-# schema enforces that structurally; see schemas/capabilities.schema.json,
-# which is also the sole authority for the approved scope vocabulary.
+# schema enforces that structurally; see schemas/capabilities.schema.json.
+#
+# **The scope vocabulary has two authorities, and they divide by class** (ADR
+# 0200). The schema enumerates the storage and administrative classes and the
+# SHAPE of a data scope; the reviewed surface -- contracts/postgrest-api-surface.yaml,
+# merged with a project's own -- is the authority for the data class's MEMBERS:
+# `<relation>:read` and `<relation>:write` for every relation it publishes, plus
+# `meta:read`. At schema_version 4 a name here is approved by the compiler
+# against that derived vocabulary; the five names below are what the release
+# surface derives, and a name it does not derive is refused at compile time.
 #
 # **Seven capabilities, six tools** (ADR 0120). A capability is the
 # authorization unit -- one (resource, verb), which is what `required_scopes`
@@ -36,7 +44,7 @@
 # refuses a write that groups (ADR 0120) or one that carries a read's shape
 # (D470).
 
-schema_version: 3
+schema_version: 4
 
 capabilities:
   # --- The two metadata tools ------------------------------------------------

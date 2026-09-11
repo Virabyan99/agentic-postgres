@@ -262,32 +262,33 @@ def test_unknown_top_level_key_is_rejected(tmp_path: Path) -> None:
         check(tmp_path, {"schema_version": 1, "capabilities": [], "extra": True})
 
 
-def test_scope_vocabulary_lives_only_in_the_schema() -> None:
-    """Plan decision C: the schema is the sole authority; code holds no copy.
+def test_the_enumerated_data_class_is_the_floor_of_every_vocabulary() -> None:
+    """Plan decision C's descendant, under ADR 0079 and then ADR 0200.
 
-    **Replaced by a stricter assertion, authorised by ADR 0079.** This pinned
-    `$defs/scope` to five names. That enum is now the *union* of two closed
-    classes -- the data class ADR 0003 freezes, and the administrative class the
-    auth service's own surface closes -- so the equality is asserted over the
-    class that ADR 0003 governs, in `tests/contract/test_scope_registry.py`.
-
-    Stricter rather than weaker: the old assertion could not tell an added data
-    scope from an added administrative one, and the new pair can. What stays
-    here is the authority property, which is what this test is named for.
+    **Replaced by a stricter pair, authorised by ADR 0200.** This pinned
+    `$defs/agent_scope` to five names as the whole data class. Since ADR 0200
+    the data class is DERIVED from the reviewed surface, so what this enum IS
+    now is the vocabulary a manifest at schema version 3 or below may name --
+    and it must stay exactly the five those manifests were written against, a
+    proper subset of the enumerated union, and a subset of what the release
+    surface derives (asserted in `test_scope_registry`). The property that no
+    module carries a second copy moved to
+    `test_scope_vocabulary::test_no_data_scope_literal_survives_outside_the_schema_and_the_example_manifest`,
+    which forbids the names as string constants anywhere in the product.
     """
     schema = config.load_schema("capabilities.schema.json")
     vocabulary = set(schema["$defs"]["scope"]["enum"])
-    agent_requestable = set(schema["$defs"]["agent_scope"]["enum"])
+    older = set(schema["$defs"]["agent_scope"]["enum"])
 
-    assert agent_requestable == {
+    assert older == {
         "notes:read",
         "notes:write",
         "tasks:read",
         "tasks:write",
         "meta:read",
     }
-    assert agent_requestable < vocabulary, (
-        "the agent-requestable class must be a proper subset of the vocabulary; equal, "
+    assert older < vocabulary, (
+        "the older data class must be a proper subset of the enumerated union; equal, "
         "the split has been undone and an administrative scope is requestable again"
     )
     assert not hasattr(config, "APPROVED_SCOPES")

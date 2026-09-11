@@ -1727,7 +1727,7 @@ def build_compose_env(
         "AUTH_ROLE_NAMES": json.dumps(
             {
                 suffix: identity.roles[suffix]
-                for suffix in sorted(scope_registry.ROLE_SCOPES)
+                for suffix in sorted(scope_registry.ROLE_CLASSES)
                 if suffix in identity.roles
             },
             separators=(",", ":"),

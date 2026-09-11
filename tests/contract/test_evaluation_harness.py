@@ -36,7 +36,7 @@ from typing import Any
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, capability_compiler
+from agentic_postgres import REPO_ROOT, capability_compiler, scope_registry
 from agentic_postgres import evaluation_harness as harness
 from agentic_postgres.evaluation_harness import Case, HarnessError
 from app import mcp_errors, mcp_tools
@@ -89,6 +89,9 @@ def lock(contract: dict[str, Any], tmp_path_factory: pytest.TempPathFactory) -> 
             "api_surface_sha256": "b" * 64,
             "canonical_openapi_sha256": "c" * 64,
         },
+        # A lock at schema version 4 carries the deployment's vocabulary
+        # (ADR 0200); the release surface's, as the deploy writes it today.
+        vocabulary=scope_registry.vocabulary_block(),
     )
     path = tmp_path_factory.mktemp("lock") / "lock.json"
     path.write_bytes(capability_compiler.canonical_bytes(document))
@@ -463,6 +466,9 @@ def test_the_report_is_current_and_carries_the_contracts_digest(
             "api_surface_sha256": "b" * 64,
             "canonical_openapi_sha256": "c" * 64,
         },
+        # A lock at schema version 4 carries the deployment's vocabulary
+        # (ADR 0200); the release surface's, as the deploy writes it today.
+        vocabulary=scope_registry.vocabulary_block(),
     )
     assert lock["canonical_sha256"] == digest
     assert digest in REPORT.read_text("utf-8")

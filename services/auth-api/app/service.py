@@ -113,9 +113,15 @@ class AuthService:
         issuer: str,
         audience: str,
         role_suffixes: dict[str, str],
+        vocabulary: dict[str, frozenset[str]] | None,
     ) -> None:
         self.repository = repository
         self.hasher = hasher
+        #: The deployment's scope classes, read out of the mounted capability
+        #: lock (ADR 0200, D1126). `None` in storage mode, which verifies and
+        #: never issues; every path that bounds a scope goes through
+        #: `_ceiling`, which refuses rather than guessing when it is absent.
+        self.vocabulary = vocabulary
         #: `None` in storage mode. Every issuing path checks it, because "this
         #: service cannot issue" is a property worth enforcing rather than a
         #: route that happens not to be mounted.
@@ -204,7 +210,7 @@ class AuthService:
             raise InvalidRequest(
                 "the stored role is not one this deployment derives; no token may name it"
             )
-        ceiling = scope_map.ceiling(suffix)
+        ceiling = self._ceiling(suffix)
         if ceiling is None:
             raise InvalidRequest(f"no token may name the role {suffix!r}")
 
@@ -401,6 +407,20 @@ class AuthService:
                 return name
         raise InvalidRequest(f"this deployment derives no role named {role_suffix!r}")
 
+    def _ceiling(self, role_suffix: str) -> frozenset[str] | None:
+        """The ceiling over THIS deployment's vocabulary (ADR 0200).
+
+        A verifier-only runtime has no vocabulary and bounds no scope; reaching
+        here from storage mode is a defect, stated rather than left to a
+        `KeyError` on `None`, for D381's reason.
+        """
+        if self.vocabulary is None:
+            raise RuntimeError(
+                "this runtime was given no scope vocabulary and cannot bound a scope; the "
+                "issuer reads it from the mounted capability lock (ADR 0200)"
+            )
+        return scope_map.ceiling(role_suffix, self.vocabulary)
+
     def _check_scopes(self, role_suffix: str, scopes: list[str]) -> list[str]:
         """Sorted, deduplicated, and inside the ceiling -- or refused.
 
@@ -408,7 +428,7 @@ class AuthService:
         the database's CHECK requires it too and a client that had to know that
         would be a client encoding a storage detail.
         """
-        ceiling = scope_map.ceiling(role_suffix)
+        ceiling = self._ceiling(role_suffix)
         if ceiling is None:
             raise InvalidRequest(f"no token may name the role {role_suffix!r}")
         requested = sorted(set(scopes))

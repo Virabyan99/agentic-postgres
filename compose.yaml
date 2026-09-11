@@ -1151,6 +1151,14 @@ services:
       # name. Derivation stays in naming.py (ADR 0002); the container is
       # handed the answer rather than computing a second one.
       APG_ROLE_NAMES: ${AUTH_ROLE_NAMES:?required}
+      # Session 21 (ADR 0200, D1126). The compiled capability lock for THIS
+      # project, mounted read-only by `runtime_override.py` from the rendered
+      # directory -- the same file the agent plane mounts, at this service's
+      # own path. The issuer reads the deployment's scope VOCABULARY out of it
+      # and computes every ceiling from that, so a tenant's scope is issuable
+      # exactly where the reviewed surface derives it. Names and bounds only;
+      # no credential.
+      APG_MCP_LOCK_FILE: /etc/auth/capability-lock.json
     # Container-local, and the only health surface this service has (D231).
     # `/health/ready` opens a connection from the pool and runs one statement,
     # so an unhealthy container is one that could not serve a request -- not one

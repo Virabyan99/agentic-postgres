@@ -38,7 +38,16 @@ from typing import Any
 #: while this still said 1 would deploy a project whose MCP service refuses to
 #: come up -- and `DEFERRED_SERVICES` starts it at step 6b, so the failure lands
 #: in the middle of a convergence rather than at its edge.
-SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2, 3})
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
+
+#: The lock version at which the compiler writes the deployment's scope
+#: VOCABULARY into the lock (ADR 0200): the data class the reviewed surface
+#: derives, and the two enumerated classes. Required at and above, forbidden
+#: below (ADR 0177). The agent plane does not consult it -- its scope check
+#: holds the caller's scopes against each tool's own `required_scopes` -- but
+#: it parses it, so a lock the ISSUER would refuse is refused here first, at
+#: the same startup, rather than by a second container minutes later.
+VOCABULARY_FROM = 4
 
 #: The lock version at which a tool carries `risk` and its backing
 #: `capabilities`. Below it those keys must be ABSENT and above it required --
@@ -221,6 +230,9 @@ class CapabilityLock:
     #: tools are what the runtime obeys, and this is the record of why they
     #: differ from the reviewed contract.
     profile: dict[str, dict[str, Any]] | None = None
+    #: The deployment's scope classes (ADR 0200), present at lock schema
+    #: version 4 and above and `None` below, where the field does not exist.
+    vocabulary: dict[str, tuple[str, ...]] | None = None
 
     def tool(self, name: str) -> Tool:
         for candidate in self.tools:
@@ -299,7 +311,35 @@ def load_lock(path: Path | str) -> CapabilityLock:
         capability_count=_require(document, "capability_count", int, "the lock"),
         tools=ordered,
         profile=_profile(document, ordered),
+        vocabulary=_vocabulary(document, version),
     )
+
+
+def _vocabulary(document: dict[str, Any], version: int) -> dict[str, tuple[str, ...]] | None:
+    """The three classes at lock version 4 and above; absent below (ADR 0177).
+
+    The same shape `scopes.load_vocabulary` requires of the issuer's copy --
+    three sorted, deduplicated string lists under the three class names -- so
+    a lock either container would refuse is refused by both.
+    """
+    if version < VOCABULARY_FROM:
+        if "vocabulary" in document:
+            raise LockError(
+                f"the lock carries a vocabulary at schema_version {version}; the block "
+                f"arrives at {VOCABULARY_FROM} (ADR 0177)"
+            )
+        return None
+    block = _require(document, "vocabulary", dict, "the lock")
+    expected = ("administrative", "data", "storage")
+    if tuple(sorted(block)) != expected:
+        raise LockError(f"the lock's vocabulary names {sorted(block)}, not {list(expected)}")
+    classes: dict[str, tuple[str, ...]] = {}
+    for name in expected:
+        members = _strings(block[name], f"the lock's vocabulary.{name}")
+        if list(members) != sorted(set(members)):
+            raise LockError(f"the lock's vocabulary.{name} is not sorted and deduplicated")
+        classes[name] = members
+    return classes
 
 
 #: The seven fields a profile may narrow, and where each lives on a parsed tool

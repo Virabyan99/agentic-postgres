@@ -28,7 +28,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from tests.contract.test_runtime_override import NAMES, RENDERED
 
-from agentic_postgres import jwt_keys, runtime_override
+from agentic_postgres import jwt_keys, runtime_override, scope_registry
 from app import claims, keys
 from app import service as service_module
 from app import settings as settings_module
@@ -108,6 +108,8 @@ def test_a_verifier_only_runtime_builds_with_no_signing_key(tmp_path: Path) -> N
         issuer="https://example.test",
         audience="apg",
         role_suffixes={},
+        # A verifier bounds no scope, so it is given no vocabulary (ADR 0200).
+        vocabulary=None,
     )
 
     assert service.signing_key is None
@@ -149,6 +151,8 @@ def test_a_verifier_only_runtime_refuses_to_issue(tmp_path: Path) -> None:
         issuer="https://example.test",
         audience="apg",
         role_suffixes={},
+        # A verifier bounds no scope, so it is given no vocabulary (ADR 0200).
+        vocabulary=None,
     )
 
     # The real entry point, refusing before it touches the credential -- which
@@ -191,6 +195,11 @@ def test_an_agent_token_is_refused_before_any_subject_lookup() -> None:
         issuer=ISSUER,
         audience=AUDIENCE,
         role_suffixes={ROLE_NAME: "authenticated"},
+        # This one ISSUES the agent token it then refuses to verify, so it holds
+        # the release vocabulary the ceiling is computed from (ADR 0200).
+        vocabulary={
+            name: frozenset(members) for name, members in scope_registry.vocabulary_block().items()
+        },
     )
 
     credential = Credential(

@@ -86,9 +86,9 @@ account this session is written from.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1144**. Rows D1124–D1139
+Six columns, next free number after this table **D1145**. Rows D1124–D1139
 were measured at planning on 2026-09-11 at `5a43f12`; the runs add theirs
-below them as they go (D1140–D1143 are Run 1's).
+below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's).
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -112,6 +112,7 @@ below them as they go (D1140–D1143 are Run 1's).
 | **D1141** | D1122, and this plan's D1132: `dr-kit.sh verify` *"must migrate a stored deployed document to the current schema BEFORE validating it"*; *"`migrate_v16_to_v17` is exactly the function that would make the stored document readable."* | **The named repair cannot be built without reversing a standing decision, and the function named does not do what the row says.** `migrate_v16_to_v17` — every step in the chain — calls `require_kind(document, "rendered")`; `test_a_deployed_document_is_not_migrated` asserts the refusal under ADR 0012 (*"an observation republished under a version that never measured it"*); `migrate_rendered` takes eighteen rendered-branch parameters a deployed document does not have. There is no deployed-branch migrator anywhere. And `outputs.schema.json` admits exactly **one** `schema_version` on both branches — `enum: [17]` — so every reader that validates a deployed document refuses any document an earlier release wrote. Measured at `7fae1ae`: the v16 kit at `~/dr-kits/dr-kit-1.0.1` exits 5 on both documents (*not valid under any of the given schemas*); the v17 kit copied off the host today exits 0. | **`verify` checks a stored document by the version it declares, three ways** (`dr_kit.verify_deployed_document`, `KIT_FIRST_OUTPUTS_VERSION = 16`): the current version validates against the full schema exactly as before; a version between the facility's first and the current one is checked for what a kit is FOR — `document_kind: deployed`, this project's key, no sensitive key anywhere — because a restore reads identity and provider ids from it and nothing else; a version above the current one, or below 16, is reported as a document *this release cannot read*, never as *does not validate* (ADR 0195's third outcome). `REC-KIT-003`'s two proofs; the v16 kit is the arm, the v17 kit and a corrupted copy the controls. | Question 6 of the defect pattern asked of a plan row: D1122's author and the plan both believed a migrator existed for the document because one exists for the other branch with the same version numbers. The rule that stopped it — a deployed document is an observation and is never rewritten — is the right rule, and the kit's reader had to be made version-aware rather than the document made current. | 0189, 0195 |
 | **D1142** | `deployed_output.validate_deployed_document` is called by five readers — `dr_kit.py` (export and verify), `fleet.py:96`, `bin/project-retire.py:93`, `write_deployed_document` — and by every command that loads a deployed document through it. | **Every one of them refuses a deployed document an earlier release wrote**, by the same `enum: [17]` D1141 measured, from the moment a newer release is checked out until that project is redeployed. On the trip that window is short; on a replacement host built from a kit it is the whole restore. Measured only through the kit's path; the others share the function and were not exercised. | **Recorded, not repaired.** The kit's verifier is the one reader whose whole purpose is that window, and it is version-aware now. Whether `fleet`, `doctor` and `project-retire` should read an older document (and what they may say about it) is a decision for the hardening session, §10. | D600's rule — every reader of the deployed document is guarded against the schema — was applied with a single-version schema, so "guarded" means "refuses the previous release's document". That was invisible while every read happened after a redeploy. | 0195 |
 | **D1143** | This plan §5 Run 1: *"the registry gains the requirement here (its proofs are offline and the constant does not move for it — `target_session: 21` is set in Run 6 with the rest)."* | **The registry refuses an entry whose `target_session` exceeds `CURRENT_SESSION`** (`test_acceptance_registry.py:131`: `1 <= target_session <= CURRENT_SESSION`), and every entry must carry one. An entry with no target session or a future one cannot be committed before the bump. | `REC-KIT-003`'s two proofs are written and green in Run 1 and **registered in Run 6** with the rest, exactly as `AGT-*` are. The plan text is corrected here rather than in place. | D690's rule seen from the registry's side: a session's requirements arrive with the constant, all of them, and a proof may exist before its requirement does but not the other way round. | — |
+| **D1144** | `deploy.sh --through-session N` is admitted for every N from 2 to `CURRENT_SESSION` (`bin/deploy-project.py:1894`, D59); the auth service exists from session 6 (`profiles: [session6]`). | **The lock is compiled only when `through_session >= AGENT_PLANE_SESSION` (8)** (`deploy-project.py:2159`), and since this run the issuer REQUIRES `APG_MCP_LOCK_FILE` (`settings.REQUIRED_VARIABLES`) and the override mounts the lock into `auth` unconditionally (D1126). A deploy through session 6 or 7 would therefore start an issuer whose mount source does not exist -- refused by the step 6b mount pre-flight, or by `settings.load` if it got that far. Nothing has deployed through a session below 8 since Session 8, and both production projects are through 20. | **Recorded, not repaired.** The honest floor for a deploy that starts the issuer is now 8, and lifting `deploy.sh`'s admitted minimum from 2 is a D59 change for Run 6 (the bump) or Session 25 to take with the operator; a conditional mount would be a lock-less issuer that starts, which is D381's shape. | ADR 0177's rule applied to a container rather than a field: a capability arriving at a version must be refused below it, not silently absent. The consequence was found by reading the deploy's order (the lock is written before step 6, so the mount is satisfied on every deploy that compiles one) rather than by a test, because no test deploys through 7. | 0200 |
 
 ---
 
@@ -438,6 +439,90 @@ overlay: `grep -l "runtime_override" tests/contract`), `test_compose_model`
 `test_session12_isolation_matrix` (offline), `test_cli_contract`. Then
 `bin/mcp-contract.sh check`, `python bin/render-mcp-catalog.py --write`,
 `python bin/render-evaluation-report.py --write`.
+
+**Done.** 2026-09-11, on the `session-21` branch. ADR 0200's first half is
+built; one divergence row (D1144); battery 5/5.
+
+**Built, as listed, with these differences from the list.** The registry's
+partition check keeps BOTH relations: the schema's enums still partition
+`$defs/scope` exactly as ADR 0100 left them (so a name added to the union and
+to no class still fails), and the derived class is asserted disjoint from the
+two enumerated classes and, for the release surface, a superset of the ≤3 enum
+-- a `narrowed` release surface that dropped `tasks` is refused where the
+registry is read. `ROLE_CLASSES` names five classes (`data`, `data_read`,
+`introspection`, `storage`, `administrative`), and the service's
+`ceiling(role, vocabulary)` computes every ceiling; an equality test asserts
+that every ceiling over the release surface is byte for byte what Session 9
+Run 7 left, and that the merged example surface adds exactly
+`note_embeddings:read/write` to the human, the writer and the admin, the read
+half to the reader, and nothing to `anon` or the documentation role. The
+schema's version-4 gate runs the other way from the two before it: it NARROWS
+versions 3 and below to the enum, and the base binds `required_scopes` to a
+shape; the compiler's `_check_scopes` approves each name against
+`scope_registry.vocabulary(surface)`. `api_surface.reserved_resource_names()`
+reads the resource half of the two enumerated classes from the schema and
+refuses a relation named for one at load, at project load and at merge. The
+lock at schema 4 carries `vocabulary`; `compile_lock` requires it at 4 and
+forbids it below; `mcp_lock` parses it the same way; `scopes.load_vocabulary`
+is the issuer's reader; `main.py` hands it to `AuthService`, whose
+`_ceiling` refuses in storage mode rather than guessing; `settings` requires
+`APG_MCP_LOCK_FILE` in auth mode and forbids it in storage; the override
+mounts the lock into `auth` at `/etc/auth/capability-lock.json` and
+`compose.yaml` names it.
+
+**Where the F-025 arms live**: `tests/contract/test_scope_vocabulary.py`
+(new, 7 tests), not `test_capabilities_manifest` as §2 proposed -- Run 6's
+registry names the module that exists. The manifest module's
+`test_scope_vocabulary_lives_only_in_the_schema` became
+`test_the_enumerated_data_class_is_the_floor_of_every_vocabulary`; the
+registry module was rewritten with the replacements ADR 0200 lists; the
+no-literal guard walks every `.py` under `src/`, `bin/` and `services/` for
+the four relation-derived names as string constants (docstrings excluded) and
+every `.sh` for them outside comments, with the schema and the example
+manifest as the control that the names still exist somewhere.
+
+**What the run found.** Eight test sites build a lock with `compile_lock`
+directly (`test_evaluation_harness` ×2, `test_capability_compiler`,
+`test_capability_profile` ×3, and two of this run's own) and every one needed
+the vocabulary once the canonical went to 4 -- the harness's module-scoped
+lock fixture erroring took 66 parametrised cases with it, which is the
+`ERROR`-versus-`FAILED` distinction doing its job. `test_verifier_key_sets`
+constructs `AuthService` three times; the two verifier-only services take
+`vocabulary=None`, and the third ISSUES an agent token it then refuses to
+verify, so it holds the release vocabulary -- a test that constructs an
+issuing service must now hold one. D1144 is the consequence for a deploy
+through a session below 8.
+
+**Measured.** `bin/mcp-contract.sh check` and `check --project` exit 0 on the
+recompiled canonical, which differs from the committed one in exactly
+`schema_version` (measured by comparison before the copy); `mcp-contract.sh
+lock` over the alpha fixture writes schema 4 with
+`vocabulary.data = [meta:read, notes:read, notes:write, tasks:read, tasks:write]`;
+both fixtures re-render; `docs/mcp-tool-catalog.md` and
+`docs/evaluation-report.md` move by their digest line only. Rig 21c's refusal
+is now the endpoint proof's control: on an app whose lock carries the merged
+example vocabulary, `note_embeddings:write` is granted to an `agent_writer`
+(201), `snippets:write` is refused (422) with a ceiling that names the tenant
+relation, and `notes:write` still 201.
+
+**Battery 5/5 killed, every control green** (`~/rig21/battery-r2.txt`):
+`vocabulary()` returning the enum (kill in the derived-class test; control:
+the release ceilings unchanged); the reserved-relation refusal removed (kill
+in the load-and-merge test); the issuer's ceiling with the static map restored
+(kill in the two-vocabulary test AND in the endpoint proof through the real
+issuer on the pinned cluster); the auth mount removed (kill; control: the
+existing `mount_sources` test); the compiler's approval disabled (kill in the
+F-025 test; control: the lock test). Anchors matched once; files restored by
+copy and byte-compared.
+
+**Targeted:** twenty-seven modules (the list above, plus `test_scope_vocabulary`,
+`test_capability_profile`, `test_mcp_route`, `test_mcp_authorization`,
+`test_agent_plane_contract`, `test_auth_service_shape`,
+`test_verifier_key_sets`, `test_storage_endpoints`, `test_compose_contract`,
+`test_compose_mount_specs`, `test_api_commands`, `test_deployment_suite_shape`,
+`test_repository_contract`, `test_api_surface_contract`,
+`test_project_migration_sets`) -- green, 4 skipped (Docker port arms); ruff
+clean.
 
 ### Run 3 — the roster from the lock (ADR 0200's second half)
 
