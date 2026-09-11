@@ -419,26 +419,35 @@ def test_the_readme_tells_an_adopter_what_adding_a_table_costs() -> None:
     assert "app_private" in section, "the section does not say the platform's state is off limits"
 
 
-def test_the_readme_says_the_agent_plane_does_not_serve_an_adopters_tables() -> None:
-    """D1056. The single largest gap between what this product is and what
-    someone adopting it would expect, and it was nowhere in the README.
+def test_the_readme_says_what_closes_the_agent_plane_and_how_a_project_opens_it() -> None:
+    """**Replaces `test_the_readme_says_the_agent_plane_does_not_serve_an_adopters_tables`**
+    under ADR 0200, and it is stricter: the old guard held the README to a
+    closure that no longer exists (D1056's two, both removed in Session 21),
+    and this one holds it to what closes the plane NOW and to the way in.
 
-    Both closures are working as designed and each is enough on its own: the
-    roster is enumerated rather than discovered (ADR 0127), and the scope
-    vocabulary is a closed enum that cannot name an application's data. An
-    adopter who reads that up front makes a better-informed decision than one
-    who finds it in a schema enum after building.
+    What must be said, because an adopter reads it before building: a scope is
+    derived from a relation the reviewed surface publishes and the compiler
+    refuses any other; the runtime registers what the compiler signed; a
+    project opens the plane by owning a capability manifest (ADR 0201); and a
+    borrowed scope is still caught. What must NOT be said any more is the old
+    closure, because a README that kept it would send an adopter away from a
+    door that is open.
     """
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     section = readme.split("## What is intentionally unavailable", 1)[1].split("\n## ", 1)[0]
 
-    assert "agent plane serves this product's example domain" in section, (
-        "the README does not say the agent surface is closed to an adopter's tables"
+    assert "ADR 0200" in section, "the opening of the agent plane is not attributed"
+    assert "derived from a relation the reviewed surface publishes" in section, (
+        "the README does not say where a scope comes from now"
     )
-    assert "closed enum" in section, "the scope vocabulary's closure is not stated"
-    assert "ADR 0127" in section, "the roster's closure is not attributed"
-    # And the two must be described as deliberate, because they are -- a reader
-    # told this is a bug goes looking for a fix that does not exist.
-    assert "working as designed" in section or "deliberate" in section, (
-        "the closures read as defects rather than as decisions"
+    assert "compiler refuses" in section, "the compiler's approval is not stated"
+    assert "refuses a lock the compiler did not sign" in section, (
+        "the README does not say what replaced the six-name roster"
     )
+    assert "capability manifest" in section and "ADR 0201" in section, (
+        "the README does not say how a project opens the plane to its own tables"
+    )
+    assert "borrows `notes:read`" in section, "the borrowed-scope catch is no longer stated"
+    # The old closure must be gone, not merely contradicted somewhere else.
+    for stale in ("closed enum", "exactly six names", "no agent surface at all"):
+        assert stale not in section, f"the README still states the old closure: {stale!r}"

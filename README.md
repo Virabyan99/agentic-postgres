@@ -414,8 +414,9 @@ Not deferred — **outside the product**:
 
 **The agent plane addresses what the reviewed surface publishes, and nothing
 else** (ADR 0200). Until Session 21 it could only ever address `notes` and
-`tasks`: the runtime refused any lock that did not serve exactly six names,
-and the scope vocabulary was a closed enum of five. Both closures are gone,
+`tasks`: the runtime refused any lock that did not serve the six names it was
+written with, and the scope vocabulary was an enumeration of five. Both
+closures are gone,
 and what closes the plane now is the same thing that closes the REST surface:
 
 - A scope is derived from a relation the reviewed surface publishes —
