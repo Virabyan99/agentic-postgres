@@ -463,7 +463,7 @@
   target_session: 3
   test_nodeids:
     - tests/security/test_session3_authorization.py::test_public_cannot_execute_the_write_rpcs
-    - tests/security/test_session3_authorization.py::test_the_retired_write_rpc_is_gone
+    - tests/security/test_session3_authorization.py::test_the_restored_write_rpc_is_published
   description: >-
     Default EXECUTE on newly created functions is revoked from PUBLIC, for every
     function in `api` rather than for a named pair -- and the published document
