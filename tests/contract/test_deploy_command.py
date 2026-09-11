@@ -371,3 +371,156 @@ def test_a_runtime_render_does_not_deploy() -> None:
         "the runtime render passes publications; ADR 0044 says nothing is published"
     )
     assert "no host port is opened" in body
+
+
+# ---------------------------------------------------------------------------
+# The plane-confirmed tool count (D1152, D1153)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def deploy_module():
+    """The deploy, imported so `observe_mcp` can be driven rather than grepped.
+
+    The same shape `test_deploy_establishes_roots.py` uses, and for the same
+    reason: what is under test here is a decision this function takes between
+    two readings, and a text slice asserting a digest comparison appears would
+    pass against a function that compares the wrong two things (D191).
+    """
+    import importlib.util
+
+    path = REPO_ROOT / "bin" / "deploy-project.py"
+    specification = importlib.util.spec_from_file_location("apg_deploy_tool_count", path)
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def _mcp_fixture(deploy_module, tmp_path, monkeypatch, *, served_digest, served_count):
+    """A lock on disk, a 401 from the route, and a plane that reports `served_*`.
+
+    Everything `observe_mcp` reads from outside itself is replaced here: `curl`
+    and `docker exec` are the only two, and both go through the module's own
+    `run`, so one seam covers both. The recorded probe stdout is the shape the
+    real probe prints -- a five-element JSON array -- because the thing under
+    test is how `observe_mcp` reads that array, and a dict handed straight to it
+    would not exercise `agent_plane_constants` at all.
+    """
+    import json as _json
+
+    lock_path = tmp_path / "capability-lock.json"
+    lock_path.write_text(
+        _json.dumps(
+            {
+                "schema_version": 4,
+                "canonical_sha256": "c" * 64,
+                "tools_sha256": "f" * 64,
+                "tool_count": 7,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    probe_output = _json.dumps(["2025-06-18", False, "agent", served_digest, served_count])
+
+    class _Result:
+        def __init__(self, stdout: str, returncode: int = 0, stderr: str = "") -> None:
+            self.stdout = stdout
+            self.returncode = returncode
+            self.stderr = stderr
+
+    def fake_run(*args: str, **_: object):
+        if args and args[0] == "curl":
+            return _Result("401")
+        if args and args[0] == "docker" and "exec" in args:
+            return _Result(probe_output)
+        raise AssertionError(f"observe_mcp reached an unexpected command: {args}")
+
+    monkeypatch.setattr(deploy_module, "run", fake_run)
+    monkeypatch.setattr(deploy_module, "mcp_container", lambda key: "apg-mcp")
+    return lock_path
+
+
+def test_tool_count_is_published_only_when_the_plane_confirms_the_lock(
+    deploy_module, tmp_path, monkeypatch
+) -> None:
+    """The agreeing case: the plane loaded the lock on disk, so the count stands.
+
+    Goes red if the comparison is dropped, or if it is made against a field that
+    is equal for two different tool lists.
+    """
+    lock_path = _mcp_fixture(
+        deploy_module, tmp_path, monkeypatch, served_digest="f" * 64, served_count=7
+    )
+
+    status, block = deploy_module.observe_mcp(
+        "https://example.test/mcp",
+        lock_path=lock_path,
+        project_key="alpha-dev",
+        project_capabilities=None,
+    )
+
+    assert status == "ready"
+    assert block["tool_count"] == 7, (
+        "the plane reported the same lock the file holds and the document still withheld the count"
+    )
+    # The control, in the same test: the rest of the block is read from the FILE
+    # and is unaffected by the plane's answer, so a change that made every field
+    # wait on the probe would show up here.
+    assert block["capability_contract_sha256"] == "c" * 64
+
+
+def test_a_plane_serving_another_lock_publishes_null_and_names_both_digests(
+    deploy_module, tmp_path, monkeypatch, capsys
+) -> None:
+    """D1152's eight minutes: the file says seven, the plane serves six.
+
+    The count is withheld rather than taken from either side, and the line the
+    operator reads names both digests. ADR 0195: the third outcome is reported,
+    never folded into one of the first two.
+    """
+    lock_path = _mcp_fixture(
+        deploy_module, tmp_path, monkeypatch, served_digest="a" * 64, served_count=6
+    )
+
+    status, block = deploy_module.observe_mcp(
+        "https://example.test/mcp",
+        lock_path=lock_path,
+        project_key="beta-dev",
+        project_capabilities=None,
+    )
+
+    assert status == "ready", (
+        "the plane answered 401 and holds a lock; it is the COUNT that is unknown, not the route"
+    )
+    assert block["tool_count"] is None, (
+        f"the document published {block['tool_count']!r} for a plane serving a lock "
+        "the file does not hold -- which is the substitution D1152 cost eight minutes"
+    )
+    printed = capsys.readouterr().out
+    assert "aaaaaaaaaaaa" in printed and "ffffffffffff" in printed, (
+        f"the line names one digest or neither: {printed!r}. An operator who cannot "
+        "see both cannot tell which side is stale"
+    )
+
+    # And the control: a plane too old to report a lock at all is a THIRD
+    # outcome, not the disagreeing one, and says so differently.
+    lock_path = _mcp_fixture(
+        deploy_module, tmp_path, monkeypatch, served_digest=None, served_count=None
+    )
+    _, block = deploy_module.observe_mcp(
+        "https://example.test/mcp",
+        lock_path=lock_path,
+        project_key="beta-dev",
+        project_capabilities=None,
+    )
+    assert block["tool_count"] is None
+    printed = capsys.readouterr().out
+    assert "did not say which lock it loaded" in printed, (
+        f"a plane that reported nothing was described as serving a different lock: {printed!r}"
+    )
+    assert "the plane serves lock" not in printed, (
+        "a plane that said nothing was reported as serving a different lock, which "
+        "is the second outcome standing in for the third (ADR 0195)"
+    )

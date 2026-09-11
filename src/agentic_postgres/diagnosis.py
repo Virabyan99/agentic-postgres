@@ -433,8 +433,11 @@ def disk_headroom(
     return _check("disk headroom", OK, summary, facts)
 
 
-def capability_drift(*, recorded: bool, present: bool | None, matches: bool | None) -> Check:
-    """Is the capability lock on disk the one the deployed document recorded?
+def capability_drift(
+    *, recorded: bool, present: bool | None, matches: bool | None, plane: bool | None
+) -> Check:
+    """Is the lock on disk the one the document recorded -- and the one the
+    running plane loaded?
 
     `AGT-DRIFT-001` extended to the running deployment (`OPS-REHEARSE-008`,
     ADR 0190): the deploy compiles the lock and records its digest in the
@@ -445,15 +448,27 @@ def capability_drift(*, recorded: bool, present: bool | None, matches: bool | No
 
     ``recorded`` says whether the document records a digest at all; ``present``
     whether a lock is on disk (None when it could not be read); ``matches``
-    whether the on-disk digest equals the recorded one. **Neither digest is a
-    parameter**: the `mcp` block is one the doctor never echoes (ADR 0159), so
-    the comparison happens in the caller and only its answer arrives here.
+    whether the on-disk digest equals the recorded one; ``plane`` whether the
+    RUNNING agent plane reports serving the lock on disk, and **None when that
+    could not be determined** -- no container, a plane that did not answer, or
+    one running a release that does not say. **No digest is a parameter**: the
+    `mcp` block is one the doctor never echoes (ADR 0159), so every comparison
+    happens in the caller and only its answer arrives here.
+
+    ``plane`` is a third reading rather than a refinement of ``matches``, and
+    D1152 is why. A deploy whose only change is the lock recreates no container
+    unless the container's mount digest moved (ADR 0155), so a file that agrees
+    with the document says nothing about the process serving requests: on
+    2026-09-11 beta served six tools for eight minutes against a document and a
+    file that both said seven, and every check here was green. A plane that
+    cannot be asked is `UNKNOWN` and not `OK` -- this module's own rule, stated
+    at `exit_code`: a check that could not run is not a healthy check.
 
     A project with no agent plane records no lock and has none, and is OK; a
     lock on disk that no document recorded is a warning, because nothing
-    deployed it.
+    deployed it. Neither of those asks the plane anything.
     """
-    facts = _pairs(recorded=recorded, present=present, matches=matches)
+    facts = _pairs(recorded=recorded, present=present, matches=matches, plane=plane)
     if not recorded:
         if present:
             return _check(
@@ -474,18 +489,36 @@ def capability_drift(*, recorded: bool, present: bool | None, matches: bool | No
             "the deployed document records a capability lock and none is on disk",
             facts,
         )
-    if matches:
+    if not matches:
         return _check(
             "capability drift",
-            OK,
-            "the lock on disk is the one the deployed document recorded",
+            PROBLEM,
+            "the lock on disk is not the one the deployed document recorded; a restarted "
+            "runtime would serve a lock this deploy did not compile",
+            facts,
+        )
+    # The file agrees with the document. That leaves the process (D1152).
+    if plane is None:
+        return _check(
+            "capability drift",
+            UNKNOWN,
+            "the lock on disk is the one the document recorded, and the running agent "
+            "plane could not be asked which lock it loaded",
+            facts,
+        )
+    if not plane:
+        return _check(
+            "capability drift",
+            PROBLEM,
+            "the running agent plane is serving a lock that is not the one on disk; the "
+            "deployment is answering from a document this deploy did not compile",
             facts,
         )
     return _check(
         "capability drift",
-        PROBLEM,
-        "the lock on disk is not the one the deployed document recorded; a restarted "
-        "runtime would serve a lock this deploy did not compile",
+        OK,
+        "the lock on disk is the one the deployed document recorded, and the one the "
+        "running agent plane loaded",
         facts,
     )
 

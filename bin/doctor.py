@@ -29,6 +29,7 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 from agentic_postgres import (
     REPO_ROOT,
     access_broker,
+    agent_plane,
     backup_report,
     config,
     deployed_output,
@@ -546,7 +548,10 @@ def probe_disk(
 
 
 def probe_capability_drift(
-    document: dict[str, Any], *, lock_file: Path | None = None
+    document: dict[str, Any],
+    *,
+    lock_file: Path | None = None,
+    plane_reader: Callable[[str, bytes], bool | None] | None = None,
 ) -> diagnosis.Check:
     """The capability lock on disk against the digest the deploy recorded.
 
@@ -560,18 +565,78 @@ def probe_capability_drift(
     **The digests stay here.** The recorded one is in the `mcp` block, which the
     doctor never echoes, so `diagnosis.capability_drift` is handed booleans and
     the comparison's answer, never either digest (ADR 0159).
+
+    Since D1153 it also asks the RUNNING plane which lock it loaded, through the
+    one probe the deploy uses (`agent_plane.PROBE`). A file that agrees with the
+    document says nothing about the process: a deploy whose only change is the
+    lock recreates no container unless the container's mount digest moved (ADR
+    0155), and on 2026-09-11 that cost eight minutes of a document describing a
+    plane it did not match, with every check here green (D1152).
     """
     recorded = (document.get("mcp") or {}).get("capability_lock_sha256")
     key = str((document.get("project") or {}).get("key") or "")
     path = lock_file or (deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME)
     try:
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        raw = path.read_bytes()
     except FileNotFoundError:
-        return diagnosis.capability_drift(recorded=bool(recorded), present=False, matches=None)
+        return diagnosis.capability_drift(
+            recorded=bool(recorded), present=False, matches=None, plane=None
+        )
     except OSError:
-        return diagnosis.capability_drift(recorded=bool(recorded), present=None, matches=None)
+        return diagnosis.capability_drift(
+            recorded=bool(recorded), present=None, matches=None, plane=None
+        )
+    digest = hashlib.sha256(raw).hexdigest()
     matches = (digest == recorded) if recorded else None
-    return diagnosis.capability_drift(recorded=bool(recorded), present=True, matches=matches)
+    # Asked only where the answer can change the verdict. A project with no
+    # recorded lock has no plane to ask about, and a file that already disagrees
+    # with the document is a PROBLEM whatever the plane says -- so the probe is
+    # not run to produce a fact nothing reads.
+    reader = plane_reader or probe_plane_lock
+    plane = reader(key, raw) if recorded and matches else None
+    return diagnosis.capability_drift(
+        recorded=bool(recorded), present=True, matches=matches, plane=plane
+    )
+
+
+def probe_plane_lock(project_key: str, lock_bytes: bytes) -> bool | None:
+    """Does the running agent plane serve the lock these bytes are?
+
+    `True` it does, `False` it serves another, **`None` this could not be
+    determined** -- no single container, `docker` unavailable or timed out, an
+    unreadable answer, or a runtime from before D1153 that does not say which
+    lock it loaded. Three outcomes, and the third is reported rather than folded
+    into either of the first two (ADR 0195).
+
+    The lock's signature is read from the file rather than recomputed here:
+    `tools_sha256` is what the compiler signed over the tool list, and it is the
+    value the plane reports. A digest of the whole file is a different question
+    and one the plane cannot answer.
+    """
+    try:
+        document = json.loads(lock_bytes)
+    except ValueError:
+        return None
+    signature = document.get("tools_sha256") if isinstance(document, dict) else None
+    if not isinstance(signature, str) or not signature:
+        return None
+
+    listing = run(
+        "docker",
+        "ps",
+        *agent_plane.container_filters(project_key, runtime_override.MCP_SERVICE),
+        timeout=20,
+    )
+    if listing is None or listing.returncode != 0:
+        return None
+    container = agent_plane.sole_container(listing.stdout)
+    if container is None:
+        return None
+
+    answered = run("docker", "exec", "-i", container, "python", "-c", agent_plane.PROBE)
+    if answered is None or answered.returncode != 0:
+        return None
+    return agent_plane.serves_lock(agent_plane.parse_report(answered.stdout), signature)
 
 
 def _first_int(text: str) -> int | None:

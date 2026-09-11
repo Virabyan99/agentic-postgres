@@ -446,3 +446,49 @@ def test_the_schema_still_gives_the_backup_state_no_timestamps() -> None:
         "document cannot answer archiver health because it has only the cumulative "
         "counters; re-read it before anything starts trusting this block."
     )
+
+
+def test_capability_drift_reads_the_plane_and_reports_unknown_when_it_cannot() -> None:
+    """D1152: the file agreeing with the document says nothing about the process.
+
+    A deploy whose only change is the lock recreates no container unless the
+    container's mount digest moved (ADR 0155). On 2026-09-11 beta served six
+    tools for eight minutes while the document and the file both said seven, and
+    every state above was green -- because none of them asked the plane.
+
+    Three outcomes on the branch where the first two readings agree, and the
+    third is the point: a plane that cannot be asked is UNKNOWN, which this
+    module's `exit_code` does not treat as a pass. A `plane=None` folded into OK
+    would have been green through those eight minutes; folded into PROBLEM it
+    would be red on every project whose plane is momentarily unreachable.
+    """
+    drift = diagnosis.capability_drift
+    agreed = {"recorded": True, "present": True, "matches": True}
+
+    assert drift(**agreed, plane=True).verdict == diagnosis.OK
+    assert drift(**agreed, plane=False).verdict == diagnosis.PROBLEM
+    assert drift(**agreed, plane=None).verdict == diagnosis.UNKNOWN
+
+    serving_another = drift(**agreed, plane=False)
+    assert "running agent plane" in serving_another.detail
+    assert ("plane", "False") in serving_another.evidence
+
+    unasked = drift(**agreed, plane=None)
+    assert "could not be asked" in unasked.detail
+    assert ("plane", "null") in unasked.evidence
+
+    # The controls, in the same test (D499). UNKNOWN is not a pass here, and the
+    # verdict a disagreeing PLANE produces is the same severity as a disagreeing
+    # FILE -- so neither reading is the weaker one.
+    assert diagnosis.exit_code((unasked,)) == 6
+    assert diagnosis.exit_code((drift(**agreed, plane=True),)) == 0
+    assert diagnosis.worst((serving_another,)) == diagnosis.worst(
+        (drift(recorded=True, present=True, matches=False, plane=None),)
+    )
+
+    # And the earlier readings still short-circuit: a document that records no
+    # lock has no plane to ask about, so `plane` changes nothing there.
+    for plane in (True, False, None):
+        assert (
+            drift(recorded=False, present=False, matches=None, plane=plane).verdict == diagnosis.OK
+        )

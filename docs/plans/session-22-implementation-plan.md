@@ -103,10 +103,12 @@ D1060, D1066, D1071, D1076, D1098, D1110, D1131.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1180**. Rows D1157–D1175
+Six columns, next free number after this table **D1184**. Rows D1157–D1175
 were measured at planning on 2026-09-11 at `90c1c19`; the runs add theirs
 below them as they go, each run's numbers named in its Done paragraph. Run 1
-added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`.
+added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`;
+Run 2 added **D1180–D1183**, three of them found by building and one by the
+battery.
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -133,6 +135,10 @@ added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`.
 | **D1177** | D1160: the fixture *"hands it to `psql` through `docker exec -e PGPASSWORD=…` — which puts the value in the host's `docker` argument vector"*, read as though the password is what gets the fixture in. | The vector claim is exactly right. The **authentication** claim is not: the pinned image's `pg_hba.conf` is `local all all trust`, `host all all 127.0.0.1/32 trust`, `host all all ::1/128 trust`, and `host all all all scram-sha-256` only after those. Rig 22a: `docker exec … psql -U postgres -h 127.0.0.1` with **no password at all** returns a row, exit 0. So inside the container the password is decorative, and `_apply_as_migration_user`'s docstring reason — *"the socket … could quietly connect as a role this test has not established a password for"* — does not hold (`-U` decides the role either way; its conclusion, connect as the migration user, does hold). Rig 22a-3 found where it IS load-bearing: a client reaching the cluster from anywhere else — across the bridge, or over the published loopback port — is refused *"fe_sendauth: no password supplied"* without it and *"password authentication failed"* with a wrong one. | The two `0600` env files are kept and are **required**, because `apg dev psql` connects from OUTSIDE that trust boundary (the published `127.0.0.1` port), where scram is the matching line. The isolation proof does not assert that the in-container exec is authenticated, because it is not. `--env-file` is the mechanism on both `docker run` and `docker exec` (docker 29.5.2, measured); `-e NAME=VALUE` never appears in `bin/`. | A credential that is not load-bearing where it is used reads as a working authentication and is a proof of nothing. Naming the boundary is cheaper than discovering it from the first adopter who moves the command. | 0203 |
 | **D1178** | D1162: *"The 21 unclaimed requirements are enumerated in `UNCLAIMED_BY_HISTORY` (`:1081`)"*, in a sentence whose other citations are `bin/write-session-evidence.py`. | The constant is in **`tests/contract/test_evidence_claims.py:1031`**, not in the library and not in the writer (`git grep -n UNCLAIMED_BY_HISTORY -- src bin tests`). `evidence_claims.py:578` only mentions it in a comment. The three readers are all in that same test module: the orphan check, the stale check and the settled-debt check. | ADR 0202's clause about the 21 is enforced where it already is — **a contract test's constant** — and Run 5 adds nothing to `evidence_claims.py` for it. What Run 5 does add is `OFFLINE_CLAIMS`, in the library, beside `CLAIMS`; the two lists answer different questions and stay apart. | A guard's address decides which run owns it. Looking for it in the writer would have produced a second list that drifts from the first. | 0202 |
 | **D1179** | D1157: *"`apg dev psql` (the application role, `app.user_id` preset to the development subject through `PGOPTIONS`, measured in rig 22b)"*, with no statement of what that role may then ask. | `PGOPTIONS='-c app.user_id=<uuid>'` works and is the boundary: as `app_runtime`, `api.notes` returns **1** row with the subject set, **0** with none, **0** with a different subject (rig 22b-2). But the application role has **no USAGE on schema `app`** (migration 0006) — 22b's first probe, `SELECT app.current_user_id()`, died with *permission denied for schema app*, and the readable probe is `current_setting('app.user_id', true)` plus `api.*`. And the `authenticated` role **cannot connect at all**: *"FATAL: permission denied for database"* — it is a role PostgREST switches into, never one that logs in. | `psql` connects as **`app_runtime`** and never as `authenticated`; whatever banner or probe it prints reads `current_setting('app.user_id', true)` and `api.*` only. The cluster proof asserts the three-way RLS result above (with / without / another subject) as the boundary, because that is the property a developer is being handed. | A command that greets a developer with a query their role may not run fails on its first line, and the role that *looks* like the request role cannot open a connection. Both were one probe away. | 0203 |
+| **D1180** | Run 2 step 1: *"The set's lock records `follows_release_version` `20260904120030`; a second migration must sort after it and after `20260914120001`."* | Both true, and a third thing happened: **`freeze-lock --project` RECOMPUTES `follows_release_version` from the release lock's newest**, so re-freezing the set moved it from `20260904120030` to **`20260912120031`** — migration 0031 (`api.create_task`, ADR 0196) shipped in Session 20, after this set was first frozen. `verify-lock` passes and both of the set's versions (`…120001`, `…120002`) still sort after it, which is the property the field exists for. | Accepted, and asserted as the PROPERTY rather than as the literal: `test_the_example_lock_records_two_migrations_in_order` asserts `min(versions) > follows`, never `follows == "20260904120030"`. Recorded here because a reviewer reading the set's lock diff sees a frozen field move and needs to know a re-freeze does that. An adopter re-freezing a set after taking a new release moves theirs too, and the refusal that matters — a project version at or below the release's newest — is unchanged. | A frozen field that a command recomputes is not frozen against that command, and the plan read it as one. Asserting the literal would have made every future release move this test. | — |
+| **D1181** | Run 2 step 1: *"put it last and say so in its docstring, or have it call the applying helper itself; read how the module orders things and do what it does."* Taken as: the module runs in file order, `pytest-randomly` is not installed, so the grant proof may read the state the applying proof left. | **True of a whole-module run and false of how the gate runs it.** Run 2's battery put the two node ids on one command line and pytest ran them in the order given: the grant proof ran FIRST, found no `api.note_embeddings`, and went red on a missing relation rather than on a missing grant. The gate selects claim proofs BY NODE ID (`static_nodeids_for_mode`), so that is not a hypothetical ordering — it is the one that would have run. The first version of the test carried an assertion that named the reordering, which is a better failure and still the wrong verdict. | The applying loop is now `_apply_every_set(cluster)`, a module-level FUNCTION — not a fixture, because an assertion that fails inside a fixture is an ERROR and this is the module whose failure means a deploy takes a live project down (D285, D386). Both proofs call it; the grant proof calls it only when `api.note_embeddings` is absent, so a whole-module run applies once and either node id alone applies for itself. Measured: module 3 passed, the grant proof alone 1 passed, battery 6/6. | The battery earned its cost here: the defect was in a test written the same day, and it was invisible to the run that wrote it. Session 19's rule again — four of its six vacuous guards were written that day. | — |
+| **D1182** | Run 2 step 2: *"add a module-level `LOADED_LOCK: dict | None = None` … `m.LOADED_LOCK["tools_sha256"]`, `m.LOADED_LOCK["tool_count"]`"*. | **`load_lock` returns a `CapabilityLock` dataclass, not a dict** (`services/auth-api/app/mcp_lock.py:226`), and that dataclass **did not carry `tools_sha256` at all**: the digest is read at `:346`, compared against a recomputation, and discarded. So there was no value to report — the runtime verified which lock it held and then forgot. `tool_count` is a field and was already there. | `CapabilityLock` gains `tools_sha256: str | None = None` — the value the lock CARRIED, not a recomputation, because a recomputed digest agrees with the tools by construction and says nothing about which document was read. `None` below lock schema 4, where the field does not exist (ADR 0177). `LOADED_LOCK` is typed `CapabilityLock | None`. Additive with a default, and both existing constructions are keyword-only, so no caller moves (ADR 0175). **Consequence stated:** a deployment whose lock is schema < 4 can never confirm a count, so `mcp.tool_count` is withheld there. Both live projects are at schema 4. | The plan priced a field that existed; what existed was a value the loader threw away. A dict would also have made the probe report whatever the runtime happened to hold rather than a named field. | — |
+| **D1183** | Run 2 step 2: *"three outcomes: `ok` (file = document = plane), `problem` (any two differ, naming which), `unknown` (the plane did not answer)"* — with no statement of what that does OFFLINE. | `diagnosis.capability_drift` gains a required `plane: bool \| None`, so its arity moves and every caller is updated (ADR 0175): two in `test_rehearsal.py`, one in `bin/doctor.py`. And the agreeing case is now **UNKNOWN in a checkout**, because there is no container to ask — which made `test_the_drift_probe_compares_digests_itself_and_hands_the_check_only_booleans` red on its first assertion. Evidence values must stay `True`/`False`/`null` (ADR 0159, asserted by that same test), so the plane's answer is a third BOOLEAN and never a word. | `probe_capability_drift` gains `plane_reader=`, injectable, defaulting to the real probe — so the OK branch is reachable offline and the redaction test checks BOTH the unreachable-plane case and the confirmed one. On the host the doctor's tenth check needs `docker`, which the command already requires (`doctor.sh` runs under sudo at a TTY). The verdict on a project whose plane is momentarily unreachable is UNKNOWN, which `exit_code` treats as 6 — deliberate, and this module's own stated rule: a check that could not run is not a healthy check. | A third reading that could not be exercised offline would be a branch only a trip can enter, which is how D1121 happened. The injection is what makes the OK branch reachable without a host. | — |
 
 ---
 
@@ -335,9 +341,12 @@ index's last six rows; Session column 22, Status Accepted):
 **Targeted:** none (documentation). **Push.** CI is expected green (docs
 only). Record the run id. Mark Done with 22a–22e's numbers.
 
-**Done.** 2026-09-11, on `session-22` branched from `dd9e2be`. Seven rig
-scripts, five measurements, two ADRs (0202, 0203, both indexed), four new
-divergence rows (**D1176–D1179**); next free **D1180**. Docker 29.5.2, native
+**Done.** 2026-09-11, `ff75d1c` on `session-22`, branched from `dd9e2be`.
+**CI GREEN** — run `34622182568`, workflow `contract`, `completed success` on
+`ff75d1c569c01bcfe6b3887360e1ad03f1433f5c`, which also confirms D1057 live: a
+`session-*` branch registers a run. Seven rig scripts, five measurements, two
+ADRs (0202, 0203, both indexed), four new divergence rows (**D1176–D1179**);
+next free **D1180**. Docker 29.5.2, native
 engine in WSL2 (kernel 6.6.87.2-microsoft-standard-WSL2, 8 cores, 7,786 MB),
 image `pgvector/pgvector:pg18@sha256:69167330…` cached, 158,801,932 bytes.
 
@@ -476,18 +485,33 @@ Nothing new inherits them. In this order, one commit.
    ```python
    def test_the_example_sets_grants_reach_the_agent_roles_and_not_anon(cluster) -> None:
        roles = cluster["roles"]
+
        def has(role: str, kind: str, target: str) -> str:
            function = "has_table_privilege" if kind == "table" else "has_function_privilege"
            privilege = "SELECT" if kind == "table" else "EXECUTE"
            return _docker(
-               "exec", "-i", cluster["name"], "psql", "-qtA", "-v", "ON_ERROR_STOP=1",
-               "-U", "postgres", "-d", cluster["database"], "-c",
+               "exec",
+               "-i",
+               cluster["name"],
+               "psql",
+               "-qtA",
+               "-v",
+               "ON_ERROR_STOP=1",
+               "-U",
+               "postgres",
+               "-d",
+               cluster["database"],
+               "-c",
                f"SELECT {function}('{role}', '{target}', '{privilege}')::text",
            ).stdout.strip()
+
        assert has(roles["agent_reader"], "table", "api.note_embeddings") == "true"
        assert has(roles["agent_writer"], "table", "api.note_embeddings") == "true"
-       assert has(roles["agent_writer"], "function", "api.set_note_embedding(uuid, extensions.vector)") == "true"
-       assert has(roles["anon"], "table", "api.note_embeddings") == "false"   # the control
+       assert (
+           has(roles["agent_writer"], "function", "api.set_note_embedding(uuid, extensions.vector)")
+           == "true"
+       )
+       assert has(roles["anon"], "table", "api.note_embeddings") == "false"  # the control
    ```
 
    (This test must run **after** the module's first test applies the sets;
@@ -573,6 +597,21 @@ registry entries for `OPS-PLANE-001` and `AGT-TENANT-002` are written in
 Run 6; until then the new tests exist unregistered and
 `test_no_new_requirement_goes_unreported_by_every_claim` is untouched),
 plus every module `git grep -l "postgres-bootstrap.py\|agent_plane_constants\|_restore_checkout_ownership" -- tests` names. **Push.** CI green expected.
+
+**Done.** 2026-09-11. Four repairs, four divergence rows (**D1180–D1183**),
+next free **D1184**. `ruff format` and `ruff check` both exit 0. **29 targeted
+modules, 1494 passed, 2 skipped, 0 failed** — the list derived from the tree
+(`git grep -l 'restore_checkout_ownership\|agent_plane_constants\|AGENT_PLANE_PROBE\|capability_drift\|load_rendered\|rendering.publish\|LOADED_LOCK\|tools_sha256\|postgres-bootstrap.py' -- tests`), each module checked for existence individually; two the plan named do not exist (`test_evidence_documents`, `test_mcp_contract_command`) and are named here rather than silently skipped (D1104). **Battery 6/6 killed**, every paired control green in the same invocation, every file restored by copy and verified with `cmp`.
+
+*D1167 — the grant.* `projects/example/migrations/templates/0002-agent-grants.sql`, version `20260914120002`, two GRANTs and the set's own `down` sentinel copied verbatim. `PROJECT_PLACEHOLDER_SOURCES` already admitted `database.roles.agent_reader` and `agent_writer` (read, not assumed), so no allowlist moved; the manifest declares both with a description each. `freeze-lock --project` then `verify-lock`, both exit 0 — and the lock's `follows_release_version` moved (**D1180**). Both fixtures re-rendered: `fixture-alpha-dev` now carries **33** rendered migrations (31 release + 2 project) against `fixture-alpine-dev`'s 31, which is the control for "a project with no set gets none". Proof `test_the_example_sets_grants_reach_the_agent_roles_and_not_anon` on the cluster that applies both sets: `has_table_privilege` true for both agent roles on `api.note_embeddings`, `has_function_privilege` true for the writer on `set_note_embedding`, **false for `anon`** and **true for `agent_reader` on `api.notes`** — the two controls, one saying the grant is not to the world and one saying the mechanism is privilege rather than absence. `test_the_example_lock_records_two_migrations_in_order` in `test_project_migration_sets`. The battery's mutation (a) — drop `agent_writer` from the `GRANT EXECUTE` — killed it with the `anon` control still green. One reader the grep found and the plan did not: `test_the_rendered_document_records_the_set_it_applied` asserted `project_set.count == 1`; it now compares against the lock's own length with a floor of 2, because a literal is how a count stops being checked. README §*Giving an agent your tables* gains the paragraph.
+
+*D1166 — the plane-confirmed count.* `LOADED_LOCK` set once in `create_mcp_app` at the line the server is built from, and `CapabilityLock.tools_sha256` added because the loader verified the signature and discarded it (**D1182**). The probe, the parse and the container lookup moved to `src/agentic_postgres/agent_plane.py` so the deploy and the doctor ask **one** question (D486): `PROBE`, `Report`, `parse_report`, `serves_lock`, `container_filters`, `sole_container`. `observe_mcp` publishes `tool_count` only when `serves_lock` is True, prints one line naming both digests when it is False and a different line when it is None — three outcomes, the third reported (ADR 0195). The doctor's tenth check takes `plane: bool | None` and its arity move updated every caller (**D1183**); `probe_capability_drift` gains an injectable `plane_reader` so the OK branch is reachable offline. Proofs: two in `test_deploy_command` against recorded probe output, three verdicts in `test_diagnosis`, two in `test_lock_roster` (the kept signature, and that a lock the loader REFUSES records nothing). Battery (b) and (e) killed. Two more readers the grep found: `AGT-PLANE-001`'s registry text said the count is *"the compiled contract's"* and now says what it is; `bin/session-21-check.sh` printed `{tool_count} tools` and would have said *"None tools"*, which is a measurement-shaped non-measurement.
+
+*D1165 — the two skipping proofs.* Both `skipif(os.geteuid() == 0)` removed. Under root the reading is made as the checkout's owner through `sudo -u '#<uid>'` — D1131's shape — and out of process, because privilege cannot be dropped for one call and put back; the subprocess IMPORTS the reader rather than reimplementing it (D673). Unprivileged, 24 passed. **The `sudo -u` prefix is not measured on this workstation**: `sudo -n` is refused here (interactive authentication required). So the rest of the root branch is measured instead — `test_the_reading_the_root_branch_makes_gives_the_same_answer` calls the out-of-process reader directly, unprivileged, and asserts its answer equals the in-process one, with a readable directory as the control. **It found a defect in the branch on its first run**: the subprocess passed `repo_root` as a `str` and `rendered_document_path` does `repo_root / …`, so the root branch would have died with `TypeError: unsupported operand type(s) for /: 'str' and 'str'` — on the gate, as a claim that could never pass, which is the eleventh never-executed proof this project has carried onto a host and the first caught before the trip. What remains unmeasured is the prefix alone, which is D1131's shape, already proved live on Session 21's trip. Named as owed in §10 rather than reported as repaired.
+
+*D1164 / D1151 — the renderer hands back, and two readers speak.* `restore_checkout_ownership` moved to `rendering`, and **`render_project` calls it itself** after `publish`; `deploy-project.py` binds the name to the same function, so `test_deploy_establishes_roots`'s source-level guard now reads the moved body and additionally asserts the deploy has not grown a second copy. `rendering.publish` catches `PermissionError` on both `os.replace` calls and raises a `RenderError` naming the owner, the caller and the `chown`; `evidence.load_rendered` does the same on `is_file()`/`read_text()`. `rendering.owner_of` walks upward, the way `deployed_output` already does, because a 0000 directory refuses `stat` on everything inside it. Battery (c1) — remove the handback — and (c2) — move it before `publish` — both killed; (d) — relay the bare `PermissionError` — killed. The first (c) was a survivor and the survivor was right: the mutation ADDED a call and kept the original, so it changed nothing under test (D493, an uninformative mutation, rewritten as two).
+
+*What the battery found in this run's own work.* **D1181**: the grant proof read the state the applying proof left, which holds for a whole-module run and fails for the node-id selection the gate actually uses. The applying loop is now one function both proofs call. The defect was written the same day and was invisible to every green run before the battery.
 
 ### Run 3 — the module, the extraction, and `up | status | down | reset`
 
@@ -1164,6 +1203,15 @@ rotation performed (D860); `replacement_host_restore` (D1028);
 - Re-export the DR kit after the deploy and copy it off (Session 21's
   standing item).
 - `honest_readers` expected `passed` in both halves for the first time.
+- **Run the two repaired `test_honest_readers` proofs AS ROOT.** D1165's
+  repair replaces a `skipif` with a `sudo -u` re-entry, and the branch it
+  replaces is the one the gate takes. It could not be executed on this
+  workstation: `sudo -n` is refused here (interactive authentication
+  required), so both proofs are green unprivileged and **the root path has
+  never run**. It runs for the first time in the gate's own static claim
+  sweep, which is the tenth time this project has carried a never-executed
+  proof onto a host. If it skips there, read `_as_checkout_owner` first: a
+  root-owned checkout takes the remaining skip branch by design.
 
 **Created here, not addressed:**
 

@@ -1426,8 +1426,9 @@
     - tests/deployment/test_session8_agent_plane.py::test_a_cross_origin_request_is_refused_at_the_plane
   description: >-
     The agent plane is published at exactly one path, the deployed document says
-    so, and the tool_count it publishes is the compiled contract's while a
-    caller's own tools/list carries only the names that caller's scopes reach --
+    so, and the tool_count it publishes is the one the RUNNING plane confirmed
+    it had loaded -- withheld as null when it did not (D1153) -- while a
+    caller's own tools/list carries only the names that caller's scopes reach:
     two numbers answering two questions (ADR 0140). Its health
     surface is private by the ABSENCE of a route rather than by a check -- both
     paths answer 200 on the container's own socket and sit outside the verifier

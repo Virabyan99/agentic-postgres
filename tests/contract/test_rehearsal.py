@@ -373,7 +373,7 @@ def test_the_check_names_the_module_reads_are_the_doctors_own() -> None:
         diagnosis.archiver(failing=False, last_archived_time="t").name,
         diagnosis.mirror(enabled=False, status=None, last_copied_at=None, age_days=None).name,
         diagnosis.disk_headroom(cluster_kb=1, available_kb=9, mount="/m").name,
-        diagnosis.capability_drift(recorded=False, present=False, matches=None).name,
+        diagnosis.capability_drift(recorded=False, present=False, matches=None, plane=None).name,
     }
     assert set(rehearsal.DEPLOYED_DOCTOR_CHECKS.values()) == produced
     document = diagnosis.render_json(
@@ -1154,12 +1154,14 @@ def test_an_impossible_threshold_pair_is_refused_before_anything_is_read(
 
 def test_capability_drift_classifies_every_state() -> None:
     drift = diagnosis.capability_drift
-    assert drift(recorded=False, present=False, matches=None).verdict == diagnosis.OK
-    assert drift(recorded=False, present=True, matches=None).verdict == diagnosis.WARN
-    assert drift(recorded=True, present=None, matches=None).verdict == diagnosis.UNKNOWN
-    assert drift(recorded=True, present=False, matches=None).verdict == diagnosis.PROBLEM
-    assert drift(recorded=True, present=True, matches=True).verdict == diagnosis.OK
-    check = drift(recorded=True, present=True, matches=False)
+    assert drift(recorded=False, present=False, matches=None, plane=None).verdict == diagnosis.OK
+    assert drift(recorded=False, present=True, matches=None, plane=None).verdict == diagnosis.WARN
+    assert drift(recorded=True, present=None, matches=None, plane=None).verdict == diagnosis.UNKNOWN
+    assert (
+        drift(recorded=True, present=False, matches=None, plane=None).verdict == diagnosis.PROBLEM
+    )
+    assert drift(recorded=True, present=True, matches=True, plane=True).verdict == diagnosis.OK
+    check = drift(recorded=True, present=True, matches=False, plane=None)
     assert check.verdict == diagnosis.PROBLEM and check.name == "capability drift"
     assert ("matches", "False") in check.evidence
 
@@ -1168,7 +1170,14 @@ def test_the_drift_probe_compares_digests_itself_and_hands_the_check_only_boolea
     tmp_path: Path,
 ) -> None:
     """The `mcp` block is one the doctor never echoes (ADR 0159): the recorded
-    digest reaches neither the detail nor the evidence, in any state."""
+    digest reaches neither the detail nor the evidence, in any state.
+
+    The agreeing case is checked twice since D1153: once with the plane
+    unreachable, which is what a checkout is and which is UNKNOWN rather than
+    OK, and once with it answering, which is the deployment's own state. Both
+    have to redact, and the second is what says the OK branch is reachable at
+    all rather than being dead code nothing here can enter.
+    """
     doctor = load_command("doctor")
     lock = tmp_path / "mcp-capability-lock.json"
     lock.write_text(LOCK_TEXT, encoding="utf-8")
@@ -1177,14 +1186,21 @@ def test_the_drift_probe_compares_digests_itself_and_hands_the_check_only_boolea
     document = deployed_document(lock_sha=LOCK_SHA)
 
     same = doctor.probe_capability_drift(document, lock_file=lock)
-    assert same.verdict == diagnosis.OK
+    assert same.verdict == diagnosis.UNKNOWN, (
+        "there is no agent plane to ask in a checkout, and a probe that reported OK "
+        "for a process it never reached is D1152's substitution"
+    )
+    confirmed = doctor.probe_capability_drift(
+        document, lock_file=lock, plane_reader=lambda key, raw: True
+    )
+    assert confirmed.verdict == diagnosis.OK
     drifted = doctor.probe_capability_drift(document, lock_file=foreign)
     assert drifted.verdict == diagnosis.PROBLEM
     absent = doctor.probe_capability_drift(document, lock_file=tmp_path / "none.json")
     assert absent.verdict == diagnosis.PROBLEM
     unrecorded = doctor.probe_capability_drift(deployed_document(lock_sha=None), lock_file=lock)
     assert unrecorded.verdict == diagnosis.WARN
-    for check in (same, drifted, absent, unrecorded):
+    for check in (same, confirmed, drifted, absent, unrecorded):
         assert LOCK_SHA not in check.detail
         assert LOCK_SHA not in json.dumps(check.evidence)
         assert all(value in {"True", "False", "null"} for _, value in check.evidence)

@@ -20,6 +20,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import pwd
 import re
 import secrets
 import shutil
@@ -2045,17 +2046,115 @@ def write_private(path: Path, payload: bytes) -> None:
     os.chmod(path, FILE_MODE)
 
 
+def restore_checkout_ownership(path: Path) -> None:
+    """Give the operator back the files this render wrote into their checkout.
+
+    A render under `sudo` writes everything in `.generated/` as root. The
+    operator's own `bin/session-01-check.sh` then cannot read its own rendered
+    output, and six contract tests fail with `PermissionError` on a host where
+    nothing is actually wrong.
+
+    The authoritative copy is the root-owned one installed under
+    `/var/lib/agentic-postgres/rendered/`; this tree is a by-product of running
+    the renderer here, so handing it back costs nothing. Best-effort on purpose:
+    a render must not fail because it could not tidy up a scratch directory.
+
+    **The lock file counts.** `project_lock` opens `.generated/.locks/<key>.lock`
+    at mode 0600, and under sudo that file is root's. It sits outside the
+    rendered directory, so restoring only that directory left the lock behind --
+    and the *next* unprivileged render of that project died with
+    `PermissionError` on the lock before it had validated anything. Latent since
+    Session 2 (D65).
+
+    **It lives here, and `render_project` calls it, because a render is a render
+    whoever invoked it** (D1164). The deploy was repaired for D1110 and the
+    renderer was not, so `tests/deployment/test_session13_upgrade_plan.py`'s
+    `candidate` fixture -- which runs `./deploy.sh --render-only` on a real
+    project's installed manifest, as root, during the live sweep, and removes
+    what it published only if it created it -- left `.generated/alpha-dev`
+    root-owned, and two op-side readers then crashed on it (D1151, D1154).
+
+    `SUDO_UID` absent is a no-op: an unprivileged render already wrote as the
+    right user, and a render from a REAL root login has no operator to hand
+    anything back to. That is the one case still needing
+    `sudo chown -R op:op .generated`, and it is what the messages below name.
+    """
+    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
+    if not (uid and gid):
+        return
+
+    targets = [path, *path.rglob("*")]
+    if LOCK_ROOT.is_dir():
+        targets += [LOCK_ROOT, *LOCK_ROOT.glob("*.lock")]
+
+    for target in targets:
+        try:
+            os.chown(target, int(uid), int(gid))
+        except OSError:
+            # Per target, not per run. One unreachable path must not stop the
+            # rest from being handed back -- which is what a single try around
+            # the whole loop did.
+            continue
+
+
+def owner_of(path: Path) -> str:
+    """The owning user's name, walking upward when the path itself cannot answer.
+
+    The shape `deployed_output` already uses, and for the same reason: a
+    directory at mode 0000 refuses `stat` on everything inside it, so the
+    question is answered about the nearest ancestor that can answer it.
+    ``"unknown"`` when nothing can -- reported rather than guessed (ADR 0195).
+    """
+    for candidate in (path, *path.parents):
+        try:
+            return pwd.getpwuid(candidate.stat().st_uid).pw_name
+        except (OSError, KeyError):
+            continue
+    return "unknown"
+
+
+def current_user() -> str:
+    try:
+        return pwd.getpwuid(os.geteuid()).pw_name
+    except KeyError:
+        return f"uid {os.geteuid()}"
+
+
+def _cannot_replace(target: Path) -> str:
+    """Who owns the thing in the way, who is asking, and the command that fixes it."""
+    me = current_user()
+    return (
+        f"cannot replace {target}: it is owned by {owner_of(target)} and this user is "
+        f"{me}. A privileged render left it behind; `sudo chown -R {me}:{me} {target}` "
+        "hands it back."
+    )
+
+
 def publish(staging: Path, target: Path) -> None:
-    """Swap the staged directory into place, with rollback (plan decision J)."""
+    """Swap the staged directory into place, with rollback (plan decision J).
+
+    A `PermissionError` here is NAMED rather than relayed (D1151). The state it
+    reports is the one an operator meets after a privileged render left the
+    directory root-owned, and `[Errno 13] Permission denied: '.generated/x'`
+    sends them looking for a disk fault. The owner, the caller and the `chown`
+    that fixes it are what they actually need.
+    """
     refuse_symlink(target)
 
     backup: Path | None = None
     if target.exists():
-        backup = STAGING_ROOT / f"{target.name}.backup.{secrets.token_hex(6)}"
-        os.replace(target, backup)
+        try:
+            backup = STAGING_ROOT / f"{target.name}.backup.{secrets.token_hex(6)}"
+            os.replace(target, backup)
+        except PermissionError as exc:
+            raise RenderError(_cannot_replace(target)) from exc
 
     try:
         os.replace(staging, target)
+    except PermissionError as exc:
+        if backup is not None:
+            os.replace(backup, target)
+        raise RenderError(_cannot_replace(target)) from exc
     except OSError as exc:
         if backup is not None:
             os.replace(backup, target)
@@ -2367,6 +2466,12 @@ def render_project(
                 _validate_staged_compose(staging)
 
             publish(staging, target)
+            # D1164: a render under `sudo` hands the directory back, whoever
+            # called it. The deploy called this itself for D1110 and every other
+            # caller did not -- so a root `--render-only` from a test fixture
+            # left `.generated/<key>` root-owned and two op-side readers crashed
+            # on it (D1151, D1154). A no-op without SUDO_UID.
+            restore_checkout_ownership(target)
         except Exception:
             shutil.rmtree(staging, ignore_errors=True)
             raise

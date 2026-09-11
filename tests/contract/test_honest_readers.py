@@ -63,12 +63,91 @@ def rendered(tmp_path: Path) -> Path:
 
 def run_resolver(key: str, *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [str(REPO_ROOT / ".venv" / "bin" / "python"), str(RESOLVER), "--project-key", key],
+        [*_as_checkout_owner(), str(REPO_ROOT / ".venv" / "bin" / "python"), str(RESOLVER),
+         "--project-key", key],
         capture_output=True,
         text=True,
         check=False,
         cwd=cwd or REPO_ROOT,
+    )  # fmt: skip
+
+
+def _as_checkout_owner() -> list[str]:
+    """The `sudo -u` prefix that puts a reading in D1060's position, or nothing.
+
+    **D1155, and D1131's shape.** Both refusals in this module are observed by
+    reading through a directory the caller cannot traverse -- and root traverses
+    everything, so as root there is nothing to observe. The two proofs used to
+    carry `skipif(os.geteuid() == 0)`, and the gate runs its static claim proofs
+    as root: they skipped on every gate that could have recorded them, and
+    `honest_readers` stayed `not_run` for two sessions with both halves written.
+    A proof that skips under the identity the gate runs as is a proof the gate
+    can never record (D1121, both halves).
+
+    So under root the reading is made as the checkout's OWNER, which is the user
+    `op` is after a deploy. Unprivileged, nothing is prefixed and the reading is
+    made directly.
+    """
+    if os.geteuid() != 0:
+        return []
+    owner = REPO_ROOT.stat()
+    if owner.st_uid == 0:
+        pytest.skip(
+            f"{REPO_ROOT} is root-owned, so there is no unprivileged checkout owner to "
+            "make the reading as (D1121/D1155); chown the checkout to the operator first"
+        )
+    return ["sudo", "-n", "-u", f"#{owner.st_uid}", "-g", f"#{owner.st_gid}"]
+
+
+#: Read `read_rendered_document` out of process, as the checkout's owner.
+#:
+#: In process there is no way to drop privilege for one call and put it back, so
+#: the reading is made by a subprocess that does the same thing the library does
+#: and prints the two values this module asserts on. What it must NOT do is
+#: reimplement the reader: it imports and calls it.
+_READ_AS_OWNER = """
+import json, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+from agentic_postgres import deployed_output
+
+try:
+    deployed_output.read_rendered_document(
+        sys.argv[3], runtime=False, repo_root=pathlib.Path(sys.argv[2])
     )
+except deployed_output.RenderedDocumentUnreadable as error:
+    print(json.dumps({"kind": "unreadable", "message": str(error), "owner": error.owner}))
+except deployed_output.RenderedDocumentAbsent as error:
+    print(json.dumps({"kind": "absent", "message": str(error), "owner": None}))
+else:
+    print(json.dumps({"kind": "read", "message": "", "owner": None}))
+"""
+
+
+def _unreadable_as_the_checkout_owner(root: Path) -> tuple[str, str | None]:
+    """`(message, owner)` from a reading made as the checkout's owner."""
+    result = subprocess.run(
+        [
+            *_as_checkout_owner(),
+            str(REPO_ROOT / ".venv" / "bin" / "python"),
+            "-c",
+            _READ_AS_OWNER,
+            str(REPO_ROOT / "src"),
+            str(root),
+            "fixture-honest-dev",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, (
+        f"the reading as the checkout owner did not run: {result.stderr.strip()[:400]}"
+    )
+    answer = json.loads(result.stdout)
+    assert answer["kind"] == "unreadable", (
+        f"reading a 0000 directory as the checkout owner returned {answer['kind']!r}: "
+        f"{answer['message']!r}"
+    )
+    return answer["message"], answer["owner"]
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +176,6 @@ def test_an_absent_document_is_absent_and_says_never_deployed(tmp_path: Path) ->
     assert "never deployed here" in str(raised.value)
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root traverses a 0000 directory")
 def test_an_unreadable_document_is_unreadable_and_never_absent(rendered: Path) -> None:
     """The whole defect, in one assertion.
 
@@ -105,25 +183,84 @@ def test_an_unreadable_document_is_unreadable_and_never_absent(rendered: Path) -
     shape the host produces: a root-owned `.generated/<key>` that `op` cannot
     traverse. `stat` on the file inside it raises the same PermissionError the
     traversal did, which is why the owner is resolved by walking upward.
+
+    Under root the reading is made as the checkout's owner rather than skipped
+    (D1155); `_as_checkout_owner` carries the reason.
     """
     directory = rendered / ".generated" / "fixture-honest-dev"
     directory.chmod(0o000)
     try:
-        with pytest.raises(deployed_output.RenderedDocumentUnreadable) as raised:
-            deployed_output.read_rendered_document(
-                "fixture-honest-dev", runtime=False, repo_root=rendered
-            )
+        if os.geteuid() == 0:
+            message, owner = _unreadable_as_the_checkout_owner(rendered)
+        else:
+            with pytest.raises(deployed_output.RenderedDocumentUnreadable) as raised:
+                deployed_output.read_rendered_document(
+                    "fixture-honest-dev", runtime=False, repo_root=rendered
+                )
+            message, owner = str(raised.value), raised.value.owner
     finally:
         directory.chmod(0o755)
 
-    message = str(raised.value)
+    assert directory.stat().st_mode & 0o777 == 0o755, (
+        "the fixture directory was not restored, so the next proof inherits a 0000 tree"
+    )
+    assert (directory / "outputs.json").is_file()
+
     assert "cannot read" in message
     assert "never deployed" not in message, (
         "an unreadable document was reported with the sentence that means absent, "
         "which is the defect D1060 records"
     )
     assert "chown" in message, "the remedy is not named, so the operator has only the problem"
-    assert raised.value.owner, "the owner could not be determined and was not reported as such"
+    assert owner, "the owner could not be determined and was not reported as such"
+
+
+def test_the_reading_the_root_branch_makes_gives_the_same_answer(rendered: Path) -> None:
+    """The out-of-process reading, exercised where it can be exercised.
+
+    D1165's repair replaces a `skipif` with a re-entry as the checkout's owner,
+    and that branch runs only under root -- which is the gate and is not this
+    workstation. **Everything about it except the `sudo -u` prefix can still be
+    run here**, and this runs it: `_unreadable_as_the_checkout_owner` called
+    directly, unprivileged, where `_as_checkout_owner` contributes no prefix.
+
+    So what stays unmeasured until the gate is the prefix alone, and that is
+    D1131's shape, already proved live on the Session 21 trip. What is measured
+    here is the part that is new: that the subprocess imports the reader rather
+    than reimplementing it, that its JSON says `unreadable`, and that the answer
+    it gives is the SAME answer the in-process reading gives -- which is the
+    property that makes the two branches one test rather than two.
+
+    Goes red if: the subprocess loses a path and dies on an import (the first
+    version did, with `No module named 'app'`); the reader is reimplemented
+    inside it; or the two branches drift apart.
+    """
+    directory = rendered / ".generated" / "fixture-honest-dev"
+    directory.chmod(0o000)
+    try:
+        out_of_process = _unreadable_as_the_checkout_owner(rendered)
+        if os.geteuid() != 0:
+            with pytest.raises(deployed_output.RenderedDocumentUnreadable) as raised:
+                deployed_output.read_rendered_document(
+                    "fixture-honest-dev", runtime=False, repo_root=rendered
+                )
+            in_process = (str(raised.value), raised.value.owner)
+        else:  # pragma: no cover -- root has no in-process reading to compare
+            in_process = out_of_process
+    finally:
+        directory.chmod(0o755)
+
+    assert out_of_process == in_process, (
+        f"the reading made out of process says {out_of_process!r} and the one made in "
+        f"process says {in_process!r}. The root branch and the unprivileged branch are "
+        "supposed to be the same reading made by a different user"
+    )
+
+    # The control: with the directory readable, the same subprocess reads the
+    # document and the helper's own assertion refuses the answer -- so the
+    # helper is not one that reports 'unreadable' whatever it finds.
+    with pytest.raises(AssertionError, match="returned 'read'"):
+        _unreadable_as_the_checkout_owner(rendered)
 
 
 def test_the_two_failures_are_different_exceptions() -> None:
@@ -162,13 +299,17 @@ def test_the_resolver_prints_only_the_path_on_success() -> None:
     assert result.stdout.strip().endswith(".generated/fixture-alpha-dev/outputs.json")
 
 
-@pytest.mark.skipif(os.geteuid() == 0, reason="root traverses a 0000 directory")
 def test_the_resolver_exits_three_when_it_cannot_traverse() -> None:
     """The live shape of D1060, on this workstation's own checkout.
 
     Restored in a `finally`, and the restoration is asserted rather than
     assumed: a test that left `.generated/fixture-alpha-dev` at mode 000 would
     fail every Docker-backed fixture in the suite with an unrelated message.
+
+    Under root the resolver is run as the checkout's owner rather than skipped
+    (D1155): `run_resolver` carries the prefix, so this and the control above it
+    -- `test_the_resolver_prints_only_the_path_on_success` -- are the same
+    reading made by the same user, which is what makes the pair a comparison.
     """
     directory = REPO_ROOT / ".generated" / "fixture-alpha-dev"
     if not (directory / "outputs.json").is_file():
@@ -489,3 +630,94 @@ def test_published_address_refuses_an_unobserved_route_with_the_remedy() -> None
         "an observed-and-not-serving route was given the unobserved remedy, so the two "
         "states are indistinguishable to the operator reading the message"
     )
+
+
+def test_publish_and_load_rendered_name_the_owner_and_the_remedy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1151: the two readers that crashed on the state D1154 recorded.
+
+    The Session 21 sweep left `.generated/alpha-dev` root-owned, and
+    `rendering.publish` and `evidence.load_rendered` both died with
+    `PermissionError` -- `[Errno 13] Permission denied` about a path whose
+    parent the operator owns, which reads as a broken disk rather than as a
+    permission a privileged render took. This is ADR 0195's rule applied to the
+    two of them: the third outcome is reported, and a report that cannot be
+    acted on is half a report, so the owner and the `chown` are named.
+
+    `publish`'s half is in `test_render_atomicity.py`, where the renderer's
+    proofs live; this is `load_rendered`'s, and the assertion that the two say
+    the same three things is what keeps them one class rather than two repairs.
+
+    Under root the reading is made as the checkout's owner (D1155,
+    `_as_checkout_owner`): root traverses a 0000 directory and there would be
+    nothing to observe.
+    """
+    generated = tmp_path / ".generated"
+    directory = generated / "fixture-shut-dev"
+    directory.mkdir(parents=True)
+    (directory / "outputs.json").write_text(
+        json.dumps({"schema_version": 17, "document_kind": "rendered"}), encoding="utf-8"
+    )
+    directory.chmod(0o000)
+    try:
+        result = subprocess.run(
+            [
+                *_as_checkout_owner(),
+                str(REPO_ROOT / ".venv" / "bin" / "python"),
+                "-c",
+                _LOAD_RENDERED_AS_OWNER,
+                str(REPO_ROOT / "src"),
+                str(REPO_ROOT / "services" / "auth-api"),
+                str(tmp_path),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    finally:
+        directory.chmod(0o755)
+
+    assert directory.stat().st_mode & 0o777 == 0o755, "the fixture directory was not restored"
+    assert result.returncode == 0, (
+        f"the reading as the checkout owner did not run: {result.stderr.strip()[:400]}"
+    )
+    answer = json.loads(result.stdout)
+    assert answer["kind"] == "evidence_error", (
+        f"an unreadable rendered directory came back as {answer['kind']!r}: "
+        f"{answer['message']!r}. A bare PermissionError is what D1151 records"
+    )
+
+    message = answer["message"]
+    assert "cannot read" in message
+    assert "owned by" in message and "this user is" in message, message
+    assert "chown" in message, "the remedy is not named, so the operator has only the problem"
+    assert "Errno 13" not in message, (
+        "the operating system's own message was relayed rather than read"
+    )
+
+
+#: `evidence.load_rendered` against a checkout-shaped root, out of process.
+#:
+#: Out of process for the same reason the reader above is: privilege cannot be
+#: dropped for one call and put back. It imports the library rather than
+#: reimplementing it -- a fixture that shared the code's belief is D673's class.
+_LOAD_RENDERED_AS_OWNER = """
+import json, pathlib, sys
+# Both roots, because `pytest.ini` puts both on the path and the import chain
+# behind `evidence` reaches the service package. A subprocess with only `src`
+# dies with `No module named 'app'`, which is a path problem wearing the costume
+# of the permission problem under test.
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+from agentic_postgres import evidence
+
+evidence.REPO_ROOT = pathlib.Path(sys.argv[3])
+try:
+    evidence.load_rendered()
+except evidence.EvidenceError as error:
+    print(json.dumps({"kind": "evidence_error", "message": str(error)}))
+except PermissionError as error:
+    print(json.dumps({"kind": "permission_error", "message": str(error)}))
+else:
+    print(json.dumps({"kind": "read", "message": ""}))
+"""

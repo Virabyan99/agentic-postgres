@@ -387,6 +387,19 @@ An agent is then granted your scopes -- `<view>:read`, `<view>:write` -- through
 ceiling is read from the deployed lock, so the same grant on a project whose
 surface does not publish the view is refused at agent creation (ADR 0200).
 
+**The SQL grant is yours, and nothing above it can see one.** A tool over your
+view is served the moment the lock carries it, and refused by the database
+until your own set grants `SELECT` on the view to `{{agent_reader}}` and
+`{{agent_writer}}`, and `EXECUTE` on the write function to `{{agent_writer}}`.
+The scaffold reads your manifest, `check --project` compares your contract
+against your snapshot, and the snapshot is captured as `api_documentation` --
+so none of the three is looking at a `GRANT`, and none of them should be: a
+grant is an authorization decision and PostgreSQL is the authority that takes
+it. The release does this for its own objects in migrations 0004 and 0007;
+`projects/example/migrations/templates/0002-agent-grants.sql` is the worked
+example of a tenant doing it, and it is a **second** migration because the
+first is frozen and applied (fix-forward, D912).
+
 **What a project may not declare**, each refused by name at compile time: a
 `kind: metadata` capability (the pair is the runtime's own); an agent-plane
 operation; a read over an RPC that takes arguments; a capability or tool name

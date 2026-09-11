@@ -1,5 +1,5 @@
 {
-  "follows_release_version": "20260904120030",
+  "follows_release_version": "20260912120031",
   "migrations": [
     {
       "canonical_render_sha256": "a757664826f2e6ff9762359195f2fbd686b49a468f15776b9b59c30c919b90e7",
@@ -12,6 +12,18 @@
       "template": "templates/0001-note-embeddings.sql",
       "template_sha256": "7c00a706536b7395b3412327154f51ca22f8122d932cc2600bf597bc3810d860",
       "version": "20260914120001"
+    },
+    {
+      "canonical_render_sha256": "472afdb4edfbe878ea584ebcc8543e421b273fbc91199efc07d78ec6a72887ad",
+      "name": "agent_grants",
+      "placeholders": [
+        "agent_reader",
+        "agent_writer",
+        "object_owner"
+      ],
+      "template": "templates/0002-agent-grants.sql",
+      "template_sha256": "10e1a9d7e2f49ecf0469d0bef074fb5e7fe78e0c10f47df49ad6267ddb2b8c52",
+      "version": "20260914120002"
     }
   ],
   "schema_version": 2

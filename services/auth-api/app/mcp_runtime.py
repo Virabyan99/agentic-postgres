@@ -34,7 +34,7 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 from app import settings as settings_module
 from app.claims import ClaimError, verify_claims
 from app.mcp_authorization import AgentContextMiddleware, ToolVisibilityMiddleware
-from app.mcp_lock import load_lock
+from app.mcp_lock import CapabilityLock, load_lock
 from app.mcp_origin import RefuseBrowserOrigins
 from app.request_id import StampRequestId
 from app.tokens import LocalKeySet, MalformedToken, pre_parse
@@ -97,9 +97,25 @@ MCP_ROUTE_PATH = "/mcp"
 HEALTH_LIVE_PATH = "/health/live"
 HEALTH_READY_PATH = "/health/ready"
 
+#: The lock THIS PROCESS loaded, set once by `create_mcp_app`, read by nothing
+#: in the request path.
+#:
+#: D1152/D1153. It exists so that something outside the container can ask the
+#: RUNNING plane which lock it is serving, instead of reading the file on disk
+#: and speaking of the plane. A deploy whose only change is the lock recreates
+#: no container unless its mount digest moved (ADR 0155), so the file and the
+#: process can disagree -- and on 2026-09-11 they did, for eight minutes, with
+#: the deployed document publishing seven tools against a plane serving six.
+#:
+#: `None` before the app is built, which is the honest value in a process that
+#: has not loaded one: an importer reading `0` or `""` here would be reading an
+#: answer where there is none (ADR 0195).
+LOADED_LOCK: CapabilityLock | None = None
+
 __all__ = [
     "ACCEPTED_TOKEN_USE",
     "AUTHORIZATION_SPEC_CONFORMANT",
+    "LOADED_LOCK",
     "MINIMUM_AUTHZ_VERSION",
     "PROTOCOL_REVISION",
     "AgentTokenVerifier",
@@ -385,6 +401,12 @@ def create_mcp_app() -> Starlette:
     # An agent plane answering discovery with an empty list is a surface nobody
     # can tell from a correctly-empty one.
     lock = load_lock(settings.capability_lock_file)
+    # Recorded here and nowhere else: after `load_lock` has accepted it and
+    # before a server exists to serve it, so the module-level value and the
+    # server's lock are the same object by construction rather than by two
+    # assignments agreeing (D1153).
+    global LOADED_LOCK
+    LOADED_LOCK = lock
     server = build_server(
         AgentTokenVerifier(key_set, issuer=settings.issuer, audience=settings.audience),
         project_key=settings.project_key,

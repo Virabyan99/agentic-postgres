@@ -49,9 +49,21 @@ def test_the_render_lock_is_handed_back_with_the_rendered_directory(source: str)
     `PermissionError` on the lock before it had validated anything. Latent since
     Session 2 and found on the host in Run 7, three sessions after the deploy
     that caused it.
+
+    The body moved to `rendering.restore_checkout_ownership` in Session 22, so
+    that `render_project` calls it for EVERY caller and not only this one
+    (D1164). This reads it there, and asserts that the deploy's own name still
+    resolves to that one function rather than to a second copy that can drift.
     """
-    body = source.split("def _restore_checkout_ownership")[1].split("\ndef ")[0]
-    assert "LOCK_ROOT" in body, "the deploy restores the rendered directory but not the lock"
+    import inspect
+
+    from agentic_postgres import rendering
+
+    body = inspect.getsource(rendering.restore_checkout_ownership)
+    assert "LOCK_ROOT" in body, "the renderer restores the rendered directory but not the lock"
+    assert "_restore_checkout_ownership = rendering.restore_checkout_ownership" in source, (
+        "the deploy carries its own copy of the handback again; one render, one function"
+    )
 
 
 @pytest.fixture

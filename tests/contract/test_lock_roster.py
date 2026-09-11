@@ -478,3 +478,128 @@ def test_a_read_over_an_rpc_with_arguments_and_a_metadata_capability_outside_the
         capability_compiler.compile_canonical(
             capabilities=stranger, surface=surface, published_objects=published
         )
+
+
+# ---------------------------------------------------------------------------
+# The lock this process loaded, readable from outside it (D1152, D1153)
+# ---------------------------------------------------------------------------
+
+
+def test_the_loaded_lock_keeps_the_signature_the_file_carried(
+    release: tuple[dict[str, Any], dict[str, Any], set[str]], tmp_path: Path
+) -> None:
+    """`CapabilityLock.tools_sha256` is the file's value, not a recomputation.
+
+    The distinction matters because `load_lock` already recomputes the digest to
+    VERIFY it; keeping the recomputed value would make the field agree with the
+    tools by construction and say nothing about which document was read. What is
+    wanted is the value the compiler signed, so that two processes reporting the
+    same string are serving the same reviewed list.
+
+    Goes red if the field is dropped, recomputed, or filled in at a schema
+    version that carries no signature.
+    """
+    manifest, surface, published = release
+    mcp_lock = service_source.load("mcp_lock")
+
+    canonical = capability_compiler.compile_canonical(
+        capabilities=manifest, surface=surface, published_objects=published
+    )
+    document = _lock_document(canonical, scope_registry.vocabulary_block())
+    path = _write_lock(tmp_path, document, "signed.json")
+    loaded = mcp_lock.load_lock(path)
+
+    assert loaded.tools_sha256 == document["tools_sha256"]
+    assert (
+        loaded.tools_sha256
+        == mcp_lock.hashlib.sha256(
+            mcp_lock.canonical_bytes(json.loads(path.read_text(encoding="utf-8"))["tools"])
+        ).hexdigest()
+    ), "the kept signature is not over the tool list the file carries"
+
+    # The control: the count is equal for lists that are not, which is why the
+    # deploy compares the signature and not the count (D1153).
+    assert loaded.tool_count == document["tool_count"]
+
+
+def test_the_runtime_records_the_lock_it_loaded_at_module_level(
+    release: tuple[dict[str, Any], dict[str, Any], set[str]], tmp_path: Path, monkeypatch
+) -> None:
+    """`create_mcp_app` publishes the lock it built the server from.
+
+    D1152: a deploy whose only change was the lock recreated no container, and
+    the deployed document read the FILE and spoke of the plane. The repair is
+    that the plane can be asked, and this is the value it answers with -- set
+    once, at the line the server is built from, so the two cannot disagree.
+
+    Goes red if the assignment is removed, if it is made before `load_lock`
+    accepts the document, or if it records something other than the object the
+    server was built with.
+    """
+    manifest, surface, published = release
+    mcp_runtime = service_source.load("mcp_runtime")
+    mcp_lock = service_source.load("mcp_lock")
+
+    canonical = capability_compiler.compile_canonical(
+        capabilities=manifest, surface=surface, published_objects=published
+    )
+    document = _lock_document(canonical, scope_registry.vocabulary_block())
+    path = _write_lock(tmp_path, document, "loaded.json")
+
+    assert mcp_runtime.LOADED_LOCK is None, (
+        "a module that has not built an app already reports a lock, so the value "
+        "below would not be evidence that building one recorded it"
+    )
+
+    built: dict[str, Any] = {}
+
+    def fake_build_server(verifier, **keywords):
+        built["lock"] = keywords["lock"]
+        return object()
+
+    class _Settings:
+        jwks_file = tmp_path / "jwks.json"
+        capability_lock_file = path
+        issuer = "https://issuer.test"
+        audience = "https://audience.test"
+        project_key = "probe-dev"
+        postgrest_url = "https://postgrest.test"
+        max_concurrent_reads = 4
+
+    monkeypatch.setattr(mcp_runtime, "build_server", fake_build_server)
+    monkeypatch.setattr(mcp_runtime.settings_module, "load_mcp", lambda: _Settings())
+    monkeypatch.setattr(mcp_runtime.LocalKeySet, "from_path", staticmethod(lambda _p: object()))
+    # Everything after `build_server` is Starlette's, and the line under test is
+    # the one before it. The stub returns an object with no routes, so whatever
+    # the framework does with it next is not the subject -- and is not silenced
+    # either: the reason is printed, and the assertions below fail if the lock
+    # was never recorded, whatever went wrong afterwards.
+    try:
+        mcp_runtime.create_mcp_app()
+    except Exception as stopped:
+        print(f"create_mcp_app stopped after build_server: {stopped!r}")
+
+    assert mcp_runtime.LOADED_LOCK is not None, (
+        "the runtime built a server from a lock and recorded none, so nothing "
+        "outside the process can say which lock it serves"
+    )
+    assert mcp_runtime.LOADED_LOCK is built["lock"], (
+        "the module-level lock is not the object the server was built with -- two "
+        "assignments that have to agree rather than one value"
+    )
+    assert mcp_runtime.LOADED_LOCK.tools_sha256 == document["tools_sha256"]
+    assert mcp_runtime.LOADED_LOCK.tool_count == document["tool_count"]
+
+    # And the loader is still the gate: a lock this runtime refuses records
+    # nothing, because the assignment sits after `load_lock` returns.
+    monkeypatch.setattr(mcp_runtime, "LOADED_LOCK", None)
+    broken = dict(document)
+    broken["tools_sha256"] = "0" * 64
+    _write_lock(tmp_path, broken, "broken.json")
+    _Settings.capability_lock_file = tmp_path / "broken.json"
+    with pytest.raises(mcp_lock.LockError):
+        mcp_runtime.create_mcp_app()
+    assert mcp_runtime.LOADED_LOCK is None, (
+        "a lock the loader refused was recorded anyway, so the plane would report "
+        "serving a document it rejected"
+    )

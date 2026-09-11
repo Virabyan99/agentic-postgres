@@ -19,6 +19,7 @@ because only one of them is the failure that ships.
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -511,7 +512,20 @@ def test_the_rendered_document_records_the_set_it_applied(
     block = document["migrations"]
     assert block["release_lock_sha256"]
     assert block["project_set"]["root"] == "projects/example"
-    assert block["project_set"]["count"] == 1
+
+    # The count is compared against the lock rather than written here as a
+    # literal. It was 1 until D1156's grant arrived as a second migration, and a
+    # literal has to be edited every time the worked example grows -- which is
+    # how a count quietly stops being checked. The floor below keeps the
+    # assertion from becoming "the document agrees with itself".
+    recorded = json.loads(
+        (EXAMPLE / "migrations" / "released.lock.json").read_text(encoding="utf-8")
+    )
+    assert block["project_set"]["count"] == len(recorded["migrations"])
+    assert block["project_set"]["count"] >= 2, (
+        "the example set has carried two migrations since D1156; a document that "
+        "reports fewer was rendered against a lock this checkout does not have"
+    )
 
     from hashlib import sha256
 
@@ -663,3 +677,61 @@ def test_a_project_set_that_publishes_nothing_is_caught_by_the_reader(
     real = migrations.MigrationSet(label="project", root=EXAMPLE / "migrations")
     real_surface = sql_surface.final_surface(real.load_manifest(), real.root)
     assert sql_surface.published_names(real_surface)
+
+
+def test_the_example_lock_records_two_migrations_in_order(
+    example: migrations.MigrationSet,
+) -> None:
+    """The set is fix-forward, so D1156's grant arrived as a second migration.
+
+    20260914120001 is frozen and applied on beta; a grant added by editing it
+    would be an amended applied migration (D912). So the lock must carry two
+    entries, in version order, both sorting after `follows_release_version` --
+    which dbmate needs, because it is handed one directory and orders the whole
+    of it by filename (D1098).
+
+    `follows_release_version` moved from 20260904120030 to 20260912120031 when
+    this set was re-frozen: `freeze-lock` recomputes it from the release lock's
+    newest, and migration 0031 (`api.create_task`, ADR 0196) shipped after this
+    set was first frozen. Both of this set's versions still sort after it, which
+    is the property the field exists for, and that is asserted below rather than
+    the literal (D1180).
+
+    Goes red if: the second migration is dropped or renamed, the two are frozen
+    out of order, a version is stamped before the release's newest, or a
+    template digest stops matching the file the manifest names.
+    """
+    lock = example.load_lock()
+    manifest = example.load_manifest()
+
+    versions = [entry["version"] for entry in lock["migrations"]]
+    assert versions == ["20260914120001", "20260914120002"], (
+        f"the example set's lock records {versions}; the grant migration D1156 needs "
+        "is a SECOND entry, because the first is frozen and applied"
+    )
+    assert versions == sorted(versions), "the lock records the set out of version order"
+    assert versions == [entry["version"] for entry in manifest["migrations"]], (
+        "the lock and the manifest disagree about which migrations this set has"
+    )
+
+    follows = lock["follows_release_version"]
+    assert min(versions) > follows, (
+        f"{min(versions)} sorts before the release's newest ({follows}), so dbmate "
+        "would apply this set's SQL before the release's on a fresh cluster and "
+        "refuse it with exit 2 on a deployed one (D1098)"
+    )
+
+    # The digest is what makes the entry a freeze rather than a note.
+    for entry in lock["migrations"]:
+        template = (example.root / entry["template"]).read_text(encoding="utf-8")
+        assert entry["template_sha256"] == hashlib.sha256(template.encode("utf-8")).hexdigest(), (
+            f"{entry['template']} does not digest to what the lock records for it"
+        )
+
+    # The control, in the same test: the release's own lock still records its
+    # own set and knows nothing about this one.
+    release = migrations.release_set().load_lock()
+    assert not {entry["version"] for entry in release["migrations"]} & set(versions), (
+        "a project version appears in the release lock, so `freeze-lock --project` "
+        "wrote the release's lock as well as the project's"
+    )

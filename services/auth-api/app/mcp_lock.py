@@ -245,6 +245,17 @@ class CapabilityLock:
     #: The deployment's scope classes (ADR 0200), present at lock schema
     #: version 4 and above and `None` below, where the field does not exist.
     vocabulary: dict[str, tuple[str, ...]] | None = None
+    #: The compiler's signature over the tool list, as the lock CARRIED it:
+    #: present at schema version 4 and above, `None` below, where the field does
+    #: not exist (ADR 0177). Verified against the tools at load like everything
+    #: else here, and kept afterwards for one reason: it is the only value by
+    #: which something outside this process can tell WHICH lock this plane
+    #: loaded. D1152 -- a deploy whose only change was the lock recreated no
+    #: container, and for eight minutes the deployed document said seven tools
+    #: while the plane served six, because the document read the FILE.
+    #: `tool_count` is a count and two different tool lists can share one; this
+    #: is the value that cannot (D1153).
+    tools_sha256: str | None = None
 
     def tool(self, name: str) -> Tool:
         for candidate in self.tools:
@@ -331,6 +342,7 @@ def load_lock(path: Path | str) -> CapabilityLock:
     # digest the compiler did not write. Below 4 there is no signature, which
     # is the state ADR 0127's fixed roster covered, and the field is forbidden
     # there so the version number is not decorative (ADR 0177).
+    digest: str | None = None
     if version >= TOOLS_DIGEST_FROM:
         digest = _require(document, "tools_sha256", str, "the lock")
         actual = hashlib.sha256(canonical_bytes(raw_tools)).hexdigest()
@@ -356,6 +368,7 @@ def load_lock(path: Path | str) -> CapabilityLock:
         tools=ordered,
         profile=_profile(document, ordered),
         vocabulary=_vocabulary(document, version),
+        tools_sha256=digest,
     )
 
 

@@ -174,17 +174,22 @@ def _apply_as_migration_user(
     )  # fmt: skip
 
 
-def test_every_released_migration_applies_as_the_migration_user(cluster: dict[str, Any]) -> None:
-    """The whole released set, in order, as the role dbmate connects with.
+def _apply_every_set(cluster: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Apply every set this project applies, as the migration user. `(applied, planned)`.
 
-    Goes red if: a migration's `RESET ROLE` moves above a statement that needs
-    ownership; a `GRANT` or `REVOKE` is added after the reset; or an object is
-    created outside the `SET LOCAL ROLE` and so ends up owned by the migration
-    user.
+    **A function rather than a fixture**, deliberately. An assertion that fails
+    inside a fixture is reported as an ERROR, and a reader that cannot tell an
+    ERROR from a FAILED reports a broken fixture as a kill (D386) -- for this
+    module, the one whose failure means a deploy would take a live project down
+    (D285), that distinction is the whole signal. Called from a test, a failure
+    here is a FAILED with the message the caller needs.
 
-    The bootstrap pre-state is applied where the deploy applies it -- after the
-    schema exists and before dbmate runs -- using the product's own
-    `build_statements`, so the grants under test are the deployed ones.
+    It exists because two tests need the schema applied and there must be ONE
+    applier (question 5: two paths to one state is the defect class this project
+    keeps producing). The second caller is the grant proof at the bottom of this
+    file, which applies nothing when the schema is already there -- so in a
+    whole-module run this runs exactly once, and in a node-id selection of
+    either test it runs for that test.
     """
     document = cluster["document"]
 
@@ -242,6 +247,22 @@ def test_every_released_migration_applies_as_the_migration_user(cluster: dict[st
         )
         applied.append(entry["name"])
 
+    return applied, [entry["name"] for entry, _, _ in planned]
+
+
+def test_every_released_migration_applies_as_the_migration_user(cluster: dict[str, Any]) -> None:
+    """The whole released set, in order, as the role dbmate connects with.
+
+    Goes red if: a migration's `RESET ROLE` moves above a statement that needs
+    ownership; a `GRANT` or `REVOKE` is added after the reset; or an object is
+    created outside the `SET LOCAL ROLE` and so ends up owned by the migration
+    user.
+
+    The bootstrap pre-state is applied where the deploy applies it -- after the
+    schema exists and before dbmate runs -- using the product's own
+    `build_statements`, so the grants under test are the deployed ones.
+    """
+    applied, planned = _apply_every_set(cluster)
     assert len(applied) == len(planned)
 
 
@@ -309,4 +330,89 @@ def test_a_superuser_is_not_what_the_host_uses(cluster: dict[str, Any]) -> None:
         f"is_scope_set is owned by {owner.stdout.strip()!r}; the defect this module "
         "catches depends on it being owned by the object owner and not by the migration "
         "user"
+    )
+
+
+def test_the_example_sets_grants_reach_the_agent_roles_and_not_anon(
+    cluster: dict[str, Any],
+) -> None:
+    """D1156: a tenant's tool is refused by the database until the tenant grants.
+
+    **It applies the sets if they are not applied**, through the same
+    `_apply_every_set` the proof above uses, and does nothing when they are. The
+    first version of this test read the state that proof left behind, and Run
+    2's battery killed it for the wrong reason: selecting the two node ids on
+    one command line put this one first, and it went red on a missing relation
+    rather than on a missing grant. The gate selects claim proofs by node id, so
+    that is not a hypothetical ordering -- it is how this test would have been
+    run (D1181).
+
+    What it proves. Session 21 put `note_embeddings:read` and
+    `note_embeddings:write` in the derived vocabulary and the compiled roster
+    (ADR 0200, ADR 0201), and the tool was served and then refused upstream: a
+    capability compiler reads a reviewed surface and a snapshot is captured as
+    `api_documentation`, so neither can see a GRANT. Migration 20260914120002
+    is the tenant's half. The release's own grants (`api.notes` to
+    `agent_reader`, migration 0004) are the control for "the mechanism works";
+    `anon` is the control for "the grant is to two named roles and not to the
+    world".
+
+    Goes red if: the second migration stops being applied, its two GRANT lines
+    lose a role, the placeholders stop resolving to the agent roles, or the view
+    or the function is republished without them.
+    """
+    roles = cluster["roles"]
+
+    def privilege(role: str, kind: str, target: str) -> str:
+        function = "has_table_privilege" if kind == "table" else "has_function_privilege"
+        access = "SELECT" if kind == "table" else "EXECUTE"
+        result = _docker(
+            "exec", "-i", cluster["name"], "psql", "-qtA", "-v", "ON_ERROR_STOP=1",
+            "-U", "postgres", "-d", cluster["database"], "-c",
+            f"SELECT {function}({migrations.quote_literal(role)}, "
+            f"{migrations.quote_literal(target)}, '{access}')::text",
+        )  # fmt: skip
+        assert result.returncode == 0, (
+            f"{function}({role}, {target}) could not be asked: {result.stderr.strip()[:300]}"
+        )
+        return result.stdout.strip()
+
+    def published() -> bool:
+        probe = _docker(
+            "exec", "-i", cluster["name"], "psql", "-qtA", "-v", "ON_ERROR_STOP=1",
+            "-U", "postgres", "-d", cluster["database"], "-c",
+            "SELECT to_regclass('api.note_embeddings') IS NOT NULL",
+        )  # fmt: skip
+        return probe.returncode == 0 and probe.stdout.strip() == "t"
+
+    if not published():
+        _apply_every_set(cluster)
+    assert published(), (
+        "api.note_embeddings does not exist after every set was applied, so this "
+        "cluster does not carry the project's own migrations at all and the grants "
+        "below would be measuring nothing"
+    )
+
+    assert privilege(roles["agent_reader"], "table", "api.note_embeddings") == "true"
+    assert privilege(roles["agent_writer"], "table", "api.note_embeddings") == "true"
+    assert (
+        privilege(
+            roles["agent_writer"],
+            "function",
+            "api.set_note_embedding(uuid, extensions.vector)",
+        )
+        == "true"
+    )
+
+    # The controls. `anon` is granted nothing by the set, and the release's own
+    # grant to the reader is what says the mechanism under test is privilege and
+    # not absence.
+    assert privilege(roles["anon"], "table", "api.note_embeddings") == "false", (
+        "anon can select the project's view. The set grants it to the two agent "
+        "roles, the authenticated role and the documentation role, and to nobody else"
+    )
+    assert privilege(roles["agent_reader"], "table", "api.notes") == "true", (
+        "the release's own grant of api.notes to the agent reader is absent, so the "
+        "assertions above would read 'true' for a reason that has nothing to do with "
+        "this project's migration"
     )

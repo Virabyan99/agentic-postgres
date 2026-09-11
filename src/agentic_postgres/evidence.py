@@ -25,7 +25,7 @@ from typing import Any
 
 import yaml
 
-from agentic_postgres import REPO_ROOT
+from agentic_postgres import REPO_ROOT, rendering
 from agentic_postgres.deployed_output import SCHEMA_VERSION as OUTPUTS_SCHEMA_VERSION
 
 EVIDENCE_SCHEMA_VERSION = 1
@@ -208,9 +208,24 @@ def load_rendered() -> dict[str, dict[str, Any]]:
         if directory.name.startswith(".") or not directory.is_dir():
             continue
         outputs = directory / "outputs.json"
-        if not outputs.is_file():
-            continue
-        document = json.loads(outputs.read_text(encoding="utf-8"))
+        # **A directory this user cannot traverse is NAMED, never relayed**
+        # (D1151). After a privileged render `.generated/<key>` is root-owned;
+        # `is_file()` and `read_text()` both raise, and the operator reads
+        # `[Errno 13] Permission denied` about a path whose parent they own. The
+        # owner and the `chown` are what they need -- the repair ADR 0199 made
+        # for the rendered-document resolver, in the other reader that crashed
+        # on the state D1154 recorded.
+        try:
+            if not outputs.is_file():
+                continue
+            document = json.loads(outputs.read_text(encoding="utf-8"))
+        except PermissionError as error:
+            me = rendering.current_user()
+            raise EvidenceError(
+                f"cannot read {outputs}: it is owned by {rendering.owner_of(outputs)} "
+                f"and this user is {me}. A privileged render left it behind; "
+                f"`sudo chown -R {me}:{me} {directory}` hands it back."
+            ) from error
         if document.get("schema_version") != OUTPUTS_SCHEMA_VERSION:
             stale[directory.name] = document.get("schema_version")
             continue

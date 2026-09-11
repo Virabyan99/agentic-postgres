@@ -53,6 +53,7 @@ import yaml
 
 from agentic_postgres import (
     CURRENT_SESSION,
+    agent_plane,
     api_surface,
     backup_report,
     config,
@@ -215,44 +216,21 @@ def _write_root_only(path: Path, payload: bytes) -> None:
         raise
 
 
-def _restore_checkout_ownership(path: Path) -> None:
-    """Give the operator back the files this render wrote into their checkout.
-
-    The render runs under sudo, so everything it writes into `.generated/` is
-    owned by root. The operator's own `bin/session-01-check.sh` then cannot read
-    its own rendered output, and six contract tests fail with `PermissionError`
-    on a host where nothing is actually wrong.
-
-    The authoritative copy is the root-owned one installed under
-    `/var/lib/agentic-postgres/rendered/`; this tree is a by-product of running
-    the renderer here, so handing it back costs nothing. Best-effort on purpose:
-    a deploy must not fail because it could not tidy up a scratch directory.
-
-    **The lock file counts.** `rendering.project_lock` opens
-    `.generated/.locks/<key>.lock` at mode 0600, and under sudo that file is
-    root's. It sits outside the rendered directory, so restoring only that
-    directory left the lock behind — and the *next* unprivileged render of that
-    project died with `PermissionError` on the lock, before it had validated
-    anything. Latent since Session 2: alpha-dev had been deployed under sudo and
-    nobody re-rendered it as the operator until Run 7 (D65).
-    """
-    uid, gid = os.environ.get("SUDO_UID"), os.environ.get("SUDO_GID")
-    if not (uid and gid):
-        return
-
-    targets = [path, *path.rglob("*")]
-    locks = rendering.LOCK_ROOT
-    if locks.is_dir():
-        targets += [locks, *locks.glob("*.lock")]
-
-    for target in targets:
-        try:
-            os.chown(target, int(uid), int(gid))
-        except OSError:
-            # Per target, not per run. One unreachable path must not stop the
-            # rest from being handed back -- which is what a single try around
-            # the whole loop did.
-            continue
+#: Give the operator back the files a render wrote into their checkout.
+#:
+#: **The body moved to `rendering.restore_checkout_ownership` in Session 22**
+#: (D1164), and `render_project` now calls it itself: a render is a render
+#: whoever invoked it, and this deploy was repaired for D1110 while the renderer
+#: was not -- so a root `--render-only` from a test fixture left
+#: `.generated/<key>` root-owned and two op-side readers crashed on it (D1151,
+#: D1154).
+#:
+#: The name is kept, and the call below with it, for two reasons: the deploy's
+#: own render goes through `render_project` but its ownership handback is a
+#: property this command has documented since Session 2, and
+#: `test_deploy_establishes_roots.py` reads this file for it. Same function,
+#: same behaviour, one definition.
+_restore_checkout_ownership = rendering.restore_checkout_ownership
 
 
 def _restore_git_index_ownership() -> None:
@@ -1562,15 +1540,36 @@ def observe_mcp(
     reported = agent_plane_constants(container)
     if reported is None:
         return "unavailable", block
-    revision, conformant, accepted = reported
+
+    # **Published only when the plane confirmed it.** D1153: everything else in
+    # this block is read from the file on disk, and the file is what the NEXT
+    # deploy will mount rather than what this process loaded -- a deploy whose
+    # only change is the lock recreates no container unless its mount digest
+    # moved (ADR 0155, D1152). `tool_count` is the one field a reader treats as
+    # a statement about what is being SERVED, so it is the one field that waits
+    # for the plane's own answer. Compared by signature and not by count: two
+    # different tool lists can share a count, and the signature cannot. ADR
+    # 0195 -- the third outcome is reported, never folded into one of the first
+    # two.
+    file_tools_sha256 = lock.get("tools_sha256")
+    confirmed = agent_plane.serves_lock(reported, file_tools_sha256)
+    tool_count = reported.tool_count if confirmed else None
+    if confirmed is None:
+        print("  the agent plane did not say which lock it loaded; tool_count unpublished")
+    elif not confirmed:
+        print(
+            f"  the plane serves lock {str(reported.tools_sha256)[:12]}…, "
+            f"the file is {str(file_tools_sha256)[:12]}…; tool_count unpublished"
+        )
+
     block = {
         "status": "ready",
-        "protocol_revision": revision,
-        "authorization_spec_conformant": conformant,
-        "accepted_token_use": accepted,
+        "protocol_revision": reported.protocol_revision,
+        "authorization_spec_conformant": reported.authorization_spec_conformant,
+        "accepted_token_use": reported.accepted_token_use,
         "capability_contract_sha256": lock.get("canonical_sha256"),
         "capability_lock_sha256": hashlib.sha256(lock_path.read_bytes()).hexdigest(),
-        "tool_count": lock.get("tool_count"),
+        "tool_count": tool_count,
         "project_capabilities": (
             None if project_capabilities is None else dict(project_capabilities)
         ),
@@ -1580,14 +1579,14 @@ def observe_mcp(
 
 #: What the agent plane is asked, inside its own container, to report about
 #: itself. One line, importing the runtime module that container is serving from.
-AGENT_PLANE_PROBE = (
-    "import json, app.mcp_runtime as m; "
-    "print(json.dumps([m.PROTOCOL_REVISION, m.AUTHORIZATION_SPEC_CONFORMANT, "
-    "m.ACCEPTED_TOKEN_USE]))"
-)
+#: The probe itself lives in `agentic_postgres.agent_plane`, because the doctor
+#: asks the same question for its capability-drift check and two copies of one
+#: question are two things to keep in step (D486). The name is kept here: it was
+#: the published one, and a reader grepping for it should land on the answer.
+AGENT_PLANE_PROBE = agent_plane.PROBE
 
 
-def agent_plane_constants(container: str) -> tuple[str, bool, str] | None:
+def agent_plane_constants(container: str) -> agent_plane.Report | None:
     """The runtime's own published constants, read from the RUNNING container.
 
     **Not from the release**, and the difference is not stylistic. `mcp_runtime`
@@ -1604,17 +1603,22 @@ def agent_plane_constants(container: str) -> tuple[str, bool, str] | None:
 
     `None` when the container cannot answer, so the caller leaves the block
     unpublished rather than filling it with a guess.
+
+    Since D1153 it also reports WHICH lock the process loaded -- the signature
+    over its tool list and the count that goes with it. `tool_count` used to be
+    taken from the file and published as what the deployment serves; a deploy
+    whose only change is the lock recreates no container unless its mount digest
+    moved (ADR 0155), so those are two different questions and on 2026-09-11
+    they had two different answers for eight minutes (D1152).
     """
     result = run("docker", "exec", "-i", container, "python", "-c", AGENT_PLANE_PROBE)
     if result.returncode != 0:
         print(f"  the agent plane could not report its constants: {result.stderr.strip()[:160]}")
         return None
-    try:
-        revision, conformant, accepted = json.loads(result.stdout)
-    except (ValueError, TypeError) as error:
-        print(f"  the agent plane's report is unreadable ({error})")
-        return None
-    return str(revision), bool(conformant), str(accepted)
+    report = agent_plane.parse_report(result.stdout)
+    if report is None:
+        print("  the agent plane's report is unreadable")
+    return report
 
 
 def mcp_container(project_key: str) -> str | None:
@@ -1624,13 +1628,11 @@ def mcp_container(project_key: str) -> str | None:
     the model deliberately does not enforce it with `container_name:` (D55).
     """
     result = run(
-        "docker", "ps",
-        "--filter", f"label=apg.project.key={project_key}",
-        "--filter", f"label=com.docker.compose.service={runtime_override.MCP_SERVICE}",
-        "--format", "{{.Names}}",
-    )  # fmt: skip
-    names = [line for line in result.stdout.splitlines() if line.strip()]
-    return names[0] if len(names) == 1 else None
+        "docker",
+        "ps",
+        *agent_plane.container_filters(project_key, runtime_override.MCP_SERVICE),
+    )
+    return agent_plane.sole_container(result.stdout)
 
 
 def observe_tls(host: dict[str, Any], domain: str) -> dict[str, Any]:

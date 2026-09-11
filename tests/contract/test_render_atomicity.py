@@ -259,3 +259,144 @@ def test_write_private_refuses_to_overwrite(tmp_path: Path) -> None:
     rendering.write_private(path, b"first\n")
     with pytest.raises(FileExistsError):
         rendering.write_private(path, b"second\n")
+
+
+# ---------------------------------------------------------------------------
+# The render hands the checkout back, and says who has it (D1164, D1151)
+# ---------------------------------------------------------------------------
+
+
+def test_a_render_under_sudo_hands_the_directory_and_the_lock_back(
+    sandbox: Path, manifest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1164: every render hands back, not only the deploy's.
+
+    `deploy-project.py` was repaired for D1110 and the RENDERER was not, so a
+    root `--render-only` from anywhere else left `.generated/<key>` root-owned.
+    `tests/deployment/test_session13_upgrade_plan.py`'s `candidate` fixture is
+    exactly that -- it renders a real project's installed manifest, as root,
+    during the live sweep, and removes what it published only if it created it
+    -- and two op-side readers then crashed on what it left (D1151, D1154).
+
+    `os.chown` is recorded rather than performed: the test runs unprivileged, so
+    a real `chown` to another uid would raise, and what is under test is which
+    paths the renderer decides to hand back.
+
+    The control is in the same test (D499): with `SUDO_UID` unset, nothing is
+    chowned at all. Without it, a function that chowned unconditionally would
+    satisfy every assertion above it.
+    """
+    chowned: list[tuple[Path, int, int]] = []
+
+    def record(path: object, uid: int, gid: int) -> None:
+        chowned.append((Path(str(path)), uid, gid))
+
+    monkeypatch.setattr(rendering.os, "chown", record)
+
+    monkeypatch.setenv("SUDO_UID", "1234")
+    monkeypatch.setenv("SUDO_GID", "5678")
+    directory = rendering.render_project(manifest, CAPABILITIES)
+
+    assert chowned, "a render under sudo handed nothing back"
+    assert all(uid == 1234 and gid == 5678 for _, uid, gid in chowned), chowned
+
+    handed = {path for path, _, _ in chowned}
+    assert directory in handed, "the rendered directory itself was not handed back"
+    assert any(path.name == "outputs.json" for path in handed), (
+        "the directory was handed back and the documents inside it were not"
+    )
+    assert any(path.suffix == ".lock" for path in handed), (
+        "the render lock was left root-owned, so the operator's NEXT render dies on "
+        "the lock before it has validated anything (D65)"
+    )
+
+    # The control. A render with no sudo in front of it has nobody to hand
+    # anything to, and must touch no ownership at all.
+    chowned.clear()
+    monkeypatch.delenv("SUDO_UID")
+    monkeypatch.delenv("SUDO_GID")
+    rendering.render_project(manifest, CAPABILITIES)
+    assert chowned == [], f"an unprivileged render chowned {chowned}"
+
+
+def test_publish_names_the_owner_and_the_remedy_when_it_cannot_replace(
+    sandbox: Path, manifest: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1151: `[Errno 13] Permission denied` is not a report an operator can act on.
+
+    The state is a `.generated/<key>` a privileged render left behind. What the
+    operator needs is who owns it, who they are, and the command that hands it
+    back -- ADR 0195's rule applied to the writer rather than the reader.
+
+    The control, in the same test: an `OSError` that is NOT a permission problem
+    keeps the old message, because "chown this" would be wrong advice for a full
+    disk.
+    """
+    directory = rendering.render_project(manifest, CAPABILITIES)
+
+    real_replace = os.replace
+    calls = {"n": 0}
+
+    def denied(src: object, dst: object) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:  # target -> backup, the first thing publish does
+            raise PermissionError(13, "Permission denied")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(rendering.os, "replace", denied)
+    with pytest.raises(rendering.RenderError) as raised:
+        rendering.render_project(manifest, CAPABILITIES)
+
+    message = str(raised.value)
+    assert "cannot replace" in message
+    assert str(directory) in message
+    assert "owned by" in message and "this user is" in message, message
+    assert "chown" in message, "the remedy is not named, so the operator has only the problem"
+
+    calls["n"] = 0
+
+    def out_of_space(src: object, dst: object) -> None:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError(28, "No space left on device")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(rendering.os, "replace", out_of_space)
+    with pytest.raises((rendering.RenderError, OSError)) as raised:
+        rendering.render_project(manifest, CAPABILITIES)
+    assert "chown" not in str(raised.value), (
+        "a full disk was reported as an ownership problem, which sends the operator to "
+        "the wrong remedy"
+    )
+
+
+def test_the_owner_is_resolved_upward_when_the_path_itself_cannot_answer(
+    tmp_path: Path,
+) -> None:
+    """`owner_of` walks up rather than reporting nothing.
+
+    A directory at mode 0000 refuses `stat` on everything inside it, so asking
+    about the document gives `PermissionError` and asking about the directory
+    gives the answer. Unprivileged only: root stats through 0000, so there is
+    nothing to walk up from and the branch cannot be entered.
+    """
+    directory = tmp_path / "shut"
+    directory.mkdir()
+    document = directory / "outputs.json"
+    document.write_text("{}", encoding="utf-8")
+
+    assert rendering.owner_of(document) == rendering.current_user()
+
+    directory.chmod(0o000)
+    try:
+        resolved = rendering.owner_of(document)
+    finally:
+        directory.chmod(0o755)
+
+    if os.geteuid() == 0:
+        pytest.skip("root stats through a 0000 directory, so nothing is walked up from")
+    assert resolved == rendering.current_user(), (
+        f"the owner of an unreachable document resolved to {resolved!r}; the nearest "
+        "ancestor that can answer is the point of walking upward"
+    )
+    assert rendering.owner_of(Path("/nonexistent/at/all")) in {"root", "unknown"}

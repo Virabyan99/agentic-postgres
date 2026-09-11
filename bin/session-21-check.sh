@@ -1012,11 +1012,19 @@ for document in (alpha, beta):
         sys.exit(f"{key}: /auth/login answered {status} to an empty body rather than a 4xx")
     print(f"issuer: {key} answers at {route['url']}")
 
+# D1153: `tool_count` is null when the deploy could not confirm that the
+# running plane had loaded the lock on disk. "None tools" would read as a
+# measurement; "unconfirmed" is what it is.
+def tools(document):
+    count = document["mcp"]["tool_count"]
+    return "an unconfirmed number of" if count is None else str(count)
+
+
 print(
     f"tenant surface: {beta['project']['key']} carries "
     f"{beta['mcp']['project_capabilities']['root']} "
-    f"({beta['mcp']['tool_count']} tools); {alpha['project']['key']} carries none "
-    f"({alpha['mcp']['tool_count']} tools)"
+    f"({tools(beta)} tools); {alpha['project']['key']} carries none "
+    f"({tools(alpha)} tools)"
 )
 PYTHON
 }
