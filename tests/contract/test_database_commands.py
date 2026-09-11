@@ -356,11 +356,39 @@ def test_identity_comparison_uses_only_immutable_fields(root_is_irrelevant) -> N
 
     Those change on every legitimate redeploy, and a check that fires on a
     valid volume is one operators learn to override.
+
+    Read as a VALUE rather than as a source-text substring (Session 22 Run 3).
+    The constant moved to `agentic_postgres.bootstrap_statements` and this went
+    red against a file that no longer holds it -- and the substring form was
+    weaker anyway: it asserted how the tuple is typeset, so reordering the same
+    four fields, or wrapping the line differently, would have failed it while a
+    fifth volatile field appended after a line break would have passed.
     """
-    helper = (REPO_ROOT / "bin" / "postgres-bootstrap.py").read_text(encoding="utf-8")
-    assert 'IDENTITY_FIELDS = ("project_key", "database_name", "compose_project_name",' in helper
+    from agentic_postgres import bootstrap_statements
+
+    assert bootstrap_statements.IDENTITY_FIELDS == (
+        "project_key",
+        "database_name",
+        "compose_project_name",
+        "instance_uuid",
+    )
     for volatile in ("source_commit", "manifest_sha256", "template_version"):
-        assert f'"{volatile}"' not in helper.split("IDENTITY_FIELDS", 1)[1].split(")", 1)[0]
+        assert volatile not in bootstrap_statements.IDENTITY_FIELDS
+
+    # The command still publishes it, because `assert_identity_matches` reads
+    # it there and several test modules load that file by path (ADR 0175).
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location(
+        "apg_bootstrap_identity_fields", REPO_ROOT / "bin" / "postgres-bootstrap.py"
+    )
+    assert specification and specification.loader
+    command = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(command)
+    assert command.IDENTITY_FIELDS is bootstrap_statements.IDENTITY_FIELDS, (
+        "the command no longer re-exports IDENTITY_FIELDS, so a reader that loads it "
+        "by path sees a name that vanished"
+    )
 
 
 # ---------------------------------------------------------------------------

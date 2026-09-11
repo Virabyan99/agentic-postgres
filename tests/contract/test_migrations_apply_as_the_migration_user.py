@@ -50,7 +50,12 @@ from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, migrations
+from agentic_postgres import (
+    REPO_ROOT,
+    bootstrap_statements,
+    dev_environment,
+    migrations,
+)
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0, pytest.mark.security]
 
@@ -121,17 +126,20 @@ def cluster() -> Any:
             time.sleep(1)
         assert rounds >= 2, "the cluster never became ready"
 
-        setup = [f'CREATE ROLE "{role}" NOLOGIN;' for role in sorted(set(roles.values()))]
-        setup += [
-            f"ALTER ROLE \"{roles['migration_user']}\" LOGIN PASSWORD '{password}';",
-            # The three options the bootstrap plane sets (D266). INHERIT FALSE
-            # is what makes `SET LOCAL ROLE` the only way the migration user
-            # reaches the owner's authority -- which is precisely the mechanism
-            # under test here.
-            f'GRANT "{roles["object_owner"]}" TO "{roles["migration_user"]}" '
-            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;",
-            f'CREATE DATABASE "{database}" OWNER "{roles["object_owner"]}";',
-        ]
+        # **The product's own statements, not this fixture's** (Session 22 Run
+        # 3, ADR 0203). `apg dev up` builds this same pre-state from the same
+        # three functions, so the cluster this module measures and the cluster a
+        # developer gets are established identically. That is what makes "the
+        # product path is the fixture path" a fact rather than a claim: if
+        # `activation_statements` ever activated a third role, or dropped
+        # `INHERIT FALSE` from the owner grant -- the option that makes `SET
+        # LOCAL ROLE` the only route to the owner's authority, and therefore the
+        # option D285's defect depends on -- this module would measure the
+        # weaker thing and say so.
+        setup = dev_environment.role_statements(document)
+        setup += dev_environment.activation_statements(document, password, password)
+        setup += dev_environment.owner_grant_statements(document)
+        setup += [f'CREATE DATABASE "{database}" OWNER "{roles["object_owner"]}";']
         result = _docker(
             "exec", "-i", name, "psql", "-qtA", "-v", "ON_ERROR_STOP=1", "-U", "postgres",
             stdin="\n".join(setup),
@@ -141,7 +149,7 @@ def cluster() -> Any:
         result = _docker(
             "exec", "-i", name, "psql", "-qtA", "-v", "ON_ERROR_STOP=1",
             "-U", "postgres", "-d", database,
-            "-c", f'CREATE SCHEMA extensions AUTHORIZATION "{roles["object_owner"]}"',
+            "-c", dev_environment.extensions_schema_statement(document),
         )  # fmt: skip
         assert result.returncode == 0, result.stderr
 
@@ -217,26 +225,47 @@ def _apply_every_set(cluster: dict[str, Any]) -> tuple[list[str], list[str]]:
         "(ADR 0198). Re-render the fixture from project.example.yaml."
     )
 
-    bootstrap = _bootstrap_module()
+    # The statements are imported from `agentic_postgres.bootstrap_statements`
+    # since Session 22 Run 3; `_bootstrap_module` stays because
+    # `test_a_superuser_is_not_what_the_host_uses` and the sibling modules load
+    # the COMMAND by path, and what they are checking is that the command still
+    # re-exports what it published (ADR 0175).
+    assert _bootstrap_module().build_statements is bootstrap_statements.build_statements, (
+        "bin/postgres-bootstrap.py no longer re-exports the statements it used to "
+        "define, so a reader that loads it by path sees a different function"
+    )
+
+    # **The bootstrap FIRST, which is where the deploy puts it** (Session 22
+    # Run 3, D1185). `bin/deploy-project.py` step 6 runs
+    # `postgres-bootstrap.sh --apply` and THEN `migrate.sh up`; this module used
+    # to apply it after the first migration, on the belief that it needed
+    # `app_private` to exist. Rig 22b measured the belief and it is false: the
+    # deploy's order applies 32 of 32, because the bootstrap's statements are
+    # written to be the first thing a fresh cluster sees -- which they have to
+    # be, since on a host they run before any migration has ever applied.
+    #
+    # The order became load-bearing here the moment each migration started
+    # carrying its own `schema_migrations` row, which is the row dbmate writes:
+    # the migration user cannot write into `app_private` until the bootstrap
+    # grants it, so at the old position every migration failed on its own row
+    # (0 of 32 in rig 22b's control). One order, and it is production's.
+    statements = bootstrap_statements.build_statements(document, str(uuid.uuid4()))
+    result = _docker(
+        "exec", "-i", cluster["name"], "psql", "-qtA", "-v", "ON_ERROR_STOP=1",
+        "-U", "postgres", "-d", cluster["database"],
+        stdin="\n".join(statements),
+    )  # fmt: skip
+    assert result.returncode == 0, (
+        f"the product's own bootstrap statements did not apply: {result.stderr[:400]}"
+    )
 
     applied: list[str] = []
-    for index, (entry, manifest, root) in enumerate(planned):
+    for entry, manifest, root in planned:
         payload = migrations.render_migration(entry, manifest, document, root)
-        body = payload.split("-- migrate:down", 1)[0].replace("-- migrate:up", "", 1)
-
-        # `postgres-bootstrap.py` runs between the schema existing and dbmate
-        # being invoked. Its statements are idempotent by construction, so they
-        # are applied once, after the first migration creates `app_private`.
-        if index == 1:
-            statements = bootstrap.build_statements(document, str(uuid.uuid4()))
-            result = _docker(
-                "exec", "-i", cluster["name"], "psql", "-qtA", "-v", "ON_ERROR_STOP=1",
-                "-U", "postgres", "-d", cluster["database"],
-                stdin="\n".join(statements),
-            )  # fmt: skip
-            assert result.returncode == 0, (
-                f"the product's own bootstrap statements did not apply: {result.stderr[:400]}"
-            )
+        # The product's own transformation, and the row it appends is what makes
+        # this cluster's `schema_migrations` the shape a deployment carries --
+        # the same function `apg dev up` sends (ADR 0203).
+        body = dev_environment.transaction_body(payload, entry["version"])
 
         result = _apply_as_migration_user(cluster, body)
         assert result.returncode == 0, (

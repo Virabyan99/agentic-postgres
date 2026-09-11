@@ -24,6 +24,7 @@ declared backend must be one that will authenticate it.
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import re
 from typing import Any
 
@@ -123,14 +124,27 @@ def test_every_credentialed_role_can_also_connect(bootstrap: Any) -> None:
     `REVOKE ALL ON DATABASE ... FROM PUBLIC` runs immediately above the grant, so
     a role absent from it cannot connect at all however correct its password is.
     """
-    source = BOOTSTRAP.read_text(encoding="utf-8")
+    # **Two files since Session 22 Run 3, and the pair is still the point.** The
+    # CONNECT grant is built by `build_statements`, which moved to
+    # `agentic_postgres.bootstrap_statements`; the `apply_credential` calls run
+    # `psql` and stayed in the command. The invariant is unchanged -- the two
+    # lists agree -- so each source is read where its half lives, through
+    # `inspect.getsource` for the one that moves. Both halves are asserted
+    # non-empty, so a source that stopped containing its half fails here rather
+    # than passing by matching nothing on both sides.
+    granting = inspect.getsource(bootstrap.build_statements)
+    crediting = BOOTSTRAP.read_text(encoding="utf-8")
 
-    grant = re.search(r"GRANT CONNECT ON DATABASE \{db\} TO \"?(.*?);", source, re.DOTALL)
-    assert grant, "the CONNECT grant could not be located in postgres-bootstrap.py"
+    grant = re.search(r"GRANT CONNECT ON DATABASE \{db\} TO \"?(.*?);", granting, re.DOTALL)
+    assert grant, (
+        "the CONNECT grant could not be located in build_statements, wherever it now "
+        "lives. Either the grant moved or its shape changed, and this test compares "
+        "two lists and has just lost one of them"
+    )
     connectable = set(re.findall(r"roles\['(\w+)'\]", grant.group(0)))
     assert connectable, "no roles were parsed out of the CONNECT grant"
 
-    credentialed = set(re.findall(r'apply_credential\((?:[^)]|\n)*?roles\["(\w+)"\]', source))
+    credentialed = set(re.findall(r'apply_credential\((?:[^)]|\n)*?roles\["(\w+)"\]', crediting))
     assert credentialed, "no roles were parsed out of the apply_credential calls"
 
     # `object_owner` is granted separately above and is NOLOGIN; `migration_user`

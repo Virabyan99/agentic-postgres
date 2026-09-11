@@ -64,6 +64,11 @@ SHELL_COMMANDS = (
     "bin/database-access.sh",
     "bin/database-ports.sh",
     "bin/db.sh",
+    # Session 22 (ADR 0203): the disposable local cluster. Listed here the
+    # run it landed (D1014) -- a command in bin/ and in neither list is a
+    # command none of this module's checks apply to, including the
+    # secret-argument scan.
+    "bin/dev.sh",
     "bin/dev-token.sh",
     "bin/dr-kit.sh",
     "bin/docs.sh",
@@ -120,6 +125,7 @@ PYTHON_COMMANDS = (
     "bin/database-ports.py",
     "bin/db-verify.py",
     "bin/deploy-project.py",
+    "bin/dev.py",
     "bin/dev-token.py",
     "bin/docs.py",
     "bin/doctor.py",

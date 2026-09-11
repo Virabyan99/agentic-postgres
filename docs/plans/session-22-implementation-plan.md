@@ -103,11 +103,13 @@ D1060, D1066, D1071, D1076, D1098, D1110, D1131.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1185**. Rows D1157–D1175
+Six columns, next free number after this table **D1189**. Rows D1157–D1175
 were measured at planning on 2026-09-11 at `90c1c19`; the runs add theirs
 below them as they go, each run's numbers named in its Done paragraph. Run 1
 added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`;
-Run 2 added **D1180–D1184**: three found by building, one by the battery, and one by a RED CI on its first push.
+Run 2 added **D1180–D1184**: three found by building, one by the battery, and
+one by a RED CI on its first push. Run 3 added **D1185–D1188**, three of them
+found by a test going red during the move it describes.
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -139,7 +141,10 @@ Run 2 added **D1180–D1184**: three found by building, one by the battery, and 
 | **D1182** | Run 2 step 2: *"add a module-level `LOADED_LOCK: dict | None = None` … `m.LOADED_LOCK["tools_sha256"]`, `m.LOADED_LOCK["tool_count"]`"*. | **`load_lock` returns a `CapabilityLock` dataclass, not a dict** (`services/auth-api/app/mcp_lock.py:226`), and that dataclass **did not carry `tools_sha256` at all**: the digest is read at `:346`, compared against a recomputation, and discarded. So there was no value to report — the runtime verified which lock it held and then forgot. `tool_count` is a field and was already there. | `CapabilityLock` gains `tools_sha256: str | None = None` — the value the lock CARRIED, not a recomputation, because a recomputed digest agrees with the tools by construction and says nothing about which document was read. `None` below lock schema 4, where the field does not exist (ADR 0177). `LOADED_LOCK` is typed `CapabilityLock | None`. Additive with a default, and both existing constructions are keyword-only, so no caller moves (ADR 0175). **Consequence stated:** a deployment whose lock is schema < 4 can never confirm a count, so `mcp.tool_count` is withheld there. Both live projects are at schema 4. | The plan priced a field that existed; what existed was a value the loader threw away. A dict would also have made the probe report whatever the runtime happened to hold rather than a named field. | — |
 | **D1183** | Run 2 step 2: *"three outcomes: `ok` (file = document = plane), `problem` (any two differ, naming which), `unknown` (the plane did not answer)"* — with no statement of what that does OFFLINE. | `diagnosis.capability_drift` gains a required `plane: bool \| None`, so its arity moves and every caller is updated (ADR 0175): two in `test_rehearsal.py`, one in `bin/doctor.py`. And the agreeing case is now **UNKNOWN in a checkout**, because there is no container to ask — which made `test_the_drift_probe_compares_digests_itself_and_hands_the_check_only_booleans` red on its first assertion. Evidence values must stay `True`/`False`/`null` (ADR 0159, asserted by that same test), so the plane's answer is a third BOOLEAN and never a word. | `probe_capability_drift` gains `plane_reader=`, injectable, defaulting to the real probe — so the OK branch is reachable offline and the redaction test checks BOTH the unreachable-plane case and the confirmed one. On the host the doctor's tenth check needs `docker`, which the command already requires (`doctor.sh` runs under sudo at a TTY). The verdict on a project whose plane is momentarily unreachable is UNKNOWN, which `exit_code` treats as 6 — deliberate, and this module's own stated rule: a check that could not run is not a healthy check. | A third reading that could not be exercised offline would be a branch only a trip can enter, which is how D1121 happened. The injection is what makes the OK branch reachable without a host. | — |
 | **D1184** | The appendix: *"a run that moves a definition greps every reader (`git grep -n <name> -- tests bin src services`) and runs every module found, whole."* Run 2 derived its list exactly that way — 29 modules, 1495 passed — and **CI was RED on the first push** (`565a176`). | The grep finds readers of the NAMES a run moves. It cannot find a guard that reads the SHAPE of a `bin/` command, and `test_container_selectors.py::test_no_operator_command_reads_a_key_the_deployed_document_does_not_have` is one: it walks every `document[...]` and `document.get(...)` in each operator command and checks the key against the outputs schema's `deployedDocument` — **by variable name, deliberately**, because following assignments would trade a precise guard for a vague one. `probe_plane_lock` parsed the capability lock into a local called `document` and asked it for `tools_sha256`, so the guard reported a member the command invents. One failure, both jobs, 5294 and 5263 otherwise green. | Renamed to `lock`, which is what it is, with the reason in the docstring so the next reader does not rename it back. **And the rule the grep was missing, stated:** in a `bin/` command the identifier `document` MEANS the deployed document; a run that adds any `.get`/subscript read in `bin/*.py` puts `test_container_selectors` in its targeted list, the way `test_cli_contract` goes in for a new command (D1014) and `test_acceptance_registry` for a renamed test (D1119). | A derived list is derived from what the run CHANGED, and this run changed a file's shape rather than a name. Three of the four Session 20 host gates went on things free to catch earlier; this one cost a red CI and five minutes, which is the price the rule is meant to keep it at. | — |
-
+| **D1185** | Run 3: *"the `cluster` fixture's setup statements become `dev_environment.activation_statements` and `bootstrap_statements.build_statements`"* — with the fixture's own bootstrap position left alone. | **The position could not be left alone.** `test_migrations_apply_as_the_migration_user` applied the bootstrap at index 1, *"after the first migration creates `app_private`"* (its own comment). Once each migration carried its own `schema_migrations` row — which is the row dbmate writes, and what makes a dev cluster's ledger production's shape — every migration failed there with *permission denied for schema app_private*: the migration user reaches that schema only after the bootstrap grants it. Rig 22b had already measured the pair (32 of 32 in the deploy's order, 0 of 32 in the fixture's); this is the same measurement arriving as a red test. | **The fixture moved to the deploy's order** — the bootstrap once, before the loop, where `bin/deploy-project.py` step 6 puts it. The belief it was written on is false: the bootstrap's statements are what a fresh cluster sees first on a host, where no migration has ever applied. Three tests green, and the battery's `f1`/`f2` (the statements not applied at all; applied to the wrong database) both kill the applying proof. | The fixture's order was an accident nobody had reason to question until something depended on it. One order now, and it is production's. | 0203 |
+| **D1186** | Run 3: move *"`build_statements`, `IDENTITY_FIELDS`, `AUTHENTICATOR_REQUEST_ROLES`, `BACKUP_SETTINGS_ROLE`, `BACKUP_FUNCTION_GRANTS` and whatever else `build_statements` reads"*. | Two of the five are not what the plan says. **`BACKUP_FUNCTION_GRANTS` is an ANNOTATED assignment** (`BACKUP_FUNCTION_GRANTS: tuple[str, ...] = (…)`), which an `ast.Assign`-only walk does not see — the first extraction scan reported four dependencies, moved them, and `ruff` found `F821 Undefined name`. **`IDENTITY_FIELDS` is not read by `build_statements` at all**; `assert_identity_matches` reads it, and that stays in the command. | The dependency set is derived by AST over `ast.Assign` **and** `ast.AnnAssign`, and the extraction asserts every moved block is still a verbatim substring of the file it came from — a move that reflowed a statement would be the second implementation this extraction exists to prevent (F-005). `IDENTITY_FIELDS` moves anyway, as pure data, with a re-export the command still reads. Two names the command no longer reads are re-exported and carry `# noqa: F401` with the reason: a name a released file published is a name a reader may already load. | A dependency list written by reading is a list; one derived by AST is the dependency set. The difference was one annotation. | — |
+| **D1187** | Run 3: *"`git grep -n \"build_statements\|…\" -- bin src tests` and run every module found, whole."* | The grep finds readers of the NAMES. **Three modules read the command's SOURCE TEXT for SQL that moved**: `test_bootstrap_statements::test_the_bootstrap_still_pairs_the_schema_with_the_extension` (searching for `CREATE SCHEMA IF NOT EXISTS extensions`), `test_database_commands::test_identity_comparison_uses_only_immutable_fields` (searching for the `IDENTITY_FIELDS = (…)` literal, and thereby asserting its typesetting), and `test_auth_service_database_access::test_every_credentialed_role_can_also_connect` (a regex for the `GRANT CONNECT` the moved function builds, compared against `apply_credential` calls that stayed). All three went red. | Each now follows its SUBJECT rather than a path: `inspect.getsource(bootstrap.build_statements)` for the two SQL scans — which follows the function if it moves again — and the identity fields read as a VALUE, with the command's re-export asserted to be the same object. The cross-list test reads each half where that half lives and asserts both non-empty, so a source that stopped containing its half fails rather than matching nothing on both sides. | This is D1184 one run later and one layer down: a grep over names cannot find a guard that reads text. The rule the appendix gained after D1184 wants a second clause — a run that MOVES a definition greps the moved SQL and the moved literals too, not only the moved names. | — |
+| **D1188** | Run 3 and the appendix: the targeted list is derived from the tree by grepping the names a run moves. | Run 3 added a `bin/` command, and `test_cli_contract::test_every_command_in_bin_is_covered_by_this_module` refused it: a command in `bin/` and in neither `SHELL_COMMANDS` nor `PYTHON_COMMANDS` is a command none of that module's checks apply to — **including the secret-argument scan**, which is the check a new command most needs. D1014 already states the rule and the plan already named the module; what the run learned is that registration is not bookkeeping. And `test_commands_are_executable_in_the_git_index` then refused both files until they were `git add`ed: the INDEX mode is the contract, not the working tree's. | Both entries added where they sort, each with the reason beside them; `git add` before the module is run, not at the commit. | A new command is not covered by the checks that exist until it is listed, and the check that would have caught a password in an argument vector is one of them. | — |
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -598,8 +603,12 @@ Run 6; until then the new tests exist unregistered and
 `test_no_new_requirement_goes_unreported_by_every_claim` is untouched),
 plus every module `git grep -l "postgres-bootstrap.py\|agent_plane_constants\|_restore_checkout_ownership" -- tests` names. **Push.** CI green expected.
 
-**Done.** 2026-09-11. Four repairs, five divergence rows (**D1180–D1184**),
-next free **D1185**. **CI was RED on the first push** (`565a176`) and green on
+**Done.** 2026-09-11, `565a176` + `c91efbb` on `session-22`. **CI GREEN** on
+`c91efbbcace6c64d554edd30cb3133ca3d9659ca` — run `34628469394`, workflow
+`contract`, `completed success`, all three jobs. Four repairs, five divergence
+rows (**D1180–D1184**), next free **D1185**. **CI was RED on the first push**
+(`565a176`, run `34627456639`: *Session 1 gate* and *Session 2 offline
+contract* both failed on one test, *P0 inventory* succeeded) and green on
 the repair: one guard,
 `test_container_selectors::test_no_operator_command_reads_a_key_the_deployed_document_does_not_have`,
 which reads the SHAPE of a `bin/` command rather than any name this run moved,
@@ -794,6 +803,64 @@ fails.
 `test_embedded_python`; `test_printed_commands`; `test_evidence_collisions`
 and `test_acceptance_registry`; and every module the two greps above named.
 **Push.** CI green expected; CI runs the cluster module (its job has Docker).
+
+**Done.** 2026-09-11. `apg dev up | status | down | reset` works end to end.
+Four divergence rows (**D1185–D1188**), next free **D1189**. `ruff format` and
+`ruff check` exit 0; `shellcheck bin/dev.sh` clean. **30 targeted modules,
+1436 passed, 2 skipped, 0 failed**, the list derived from two greps over every
+moved name. **Battery 7/7 killed**, every paired control green, every file
+restored by copy and verified with `cmp`.
+
+*The extraction.* `build_statements` and the three constants it reads moved to
+`src/agentic_postgres/bootstrap_statements.py` **by AST line span and asserted
+verbatim** — each moved block is still a literal substring of the file it came
+from, so nothing was reflowed on the way (F-005 is what a retyped second copy
+costs). `bin/postgres-bootstrap.py` re-exports all five names and `1498 → 1096`
+lines. Every module that loads that file by path was run whole: 816 without
+Docker, then `test_migrations_apply_as_the_migration_user` + the two service
+modules (18), `test_agent_audit_plane` + `test_storage_plane` (80) and
+`test_auth_endpoints` (89) — 1003 in all, 0 failed. **D1186** and **D1187** are
+what the move actually cost.
+
+*The two helpers.* `migrations.verify_rendered_directory` (the manifest's
+entries, in order, digests verified) and `migrations.ledger_insert_statement`
+(every set's lock, D1096's repair intact). `bin/migrate.py`'s two functions keep
+their names, arities and exit codes and delegate; `437 → 380` lines. Both
+imported lazily in the direction `rendering` already imports `migrations`, so
+no cycle. 592 passed across their readers.
+
+*The module and the command.* `dev_environment.py` is pure — no `subprocess`,
+no `docker` — and `bin/dev.py` does the daemon work behind `bin/dev.sh`, which
+is `bin/agent.sh`'s shape. `apg.sh --list` derives `dev` with no list to edit.
+Measured on this workstation, `project.example.yaml`: **`up` 15.9 s**, 33
+migrations applied as the migration user, `schema_migrations` 33,
+`migration_ledger` 33, one subject with 7 scopes, exactly two roles with
+`rolcanlogin` and `object_owner` not one of them; state directory `0700` and
+every file `0600`; networks `['bridge']`; one mount, the anonymous volume at
+`/var/lib/postgresql`; `HostIp 127.0.0.1`; `wal_level replica`; no generated
+password anywhere in what the command printed. `status` running → `down` →
+`down` again (exit 0, *"nothing to remove"*) → `status` absent (exit 4). Two
+defects found by running it rather than by reading it: the manifest field is
+`slug` and not `name` (`KeyError` on the first invocation), and
+`run_arguments` is the whole argument list so `docker("run", *arguments)`
+doubled the verb.
+
+*The fixture is the product path now.* `test_migrations_apply_as_the_migration_user`
+builds its pre-state from `dev_environment.role_statements`,
+`activation_statements`, `owner_grant_statements` and
+`extensions_schema_statement`, applies `bootstrap_statements.build_statements`,
+and sends `dev_environment.transaction_body`'s text — and moved to the deploy's
+ORDER to do it (**D1185**). Its two existing assertions are unchanged.
+
+*What the battery found in this run's own work.* The unreadable-state arm of
+`test_state_that_is_absent_unreadable_or_stale_are_three_different_answers`
+**did not exist**: the test asserted absent, half-written and unparseable, and a
+mutation making `read_state` answer `StateAbsent` on `PermissionError` survived
+it — the one branch its docstring is about was the one branch unexercised. It
+now constructs a `0000` directory and, under root, reads it as the checkout's
+owner (D1155's shape). One mutation was uninformative and was rewritten as two
+(D493), the same mistake as Run 2's first `c`.
+
 
 ### Run 4 — the subject's use, `psql`, and `seed`
 
@@ -1291,6 +1358,19 @@ whole; `src/agentic_postgres/evidence_claims.py` lines 1–120 and 740–810.
   `test_container_selectors` there (**D1184**, which cost Run 2 a red CI). In
   a `bin/` command the identifier `document` MEANS the deployed document; a
   lock, a manifest or a report parsed into a local is named for what it is.
+- **A run that MOVES a definition greps the moved TEXT as well as the moved
+  name** (**D1187**). Three modules read `bin/postgres-bootstrap.py` as a
+  string, searching for SQL that `build_statements` builds and for the
+  typesetting of a constant; none of them names either, so no grep over names
+  could have found them. Grep the distinctive literals a move carries — a SQL
+  fragment, an assignment's left-hand side — and repair each reader to follow
+  its SUBJECT (`inspect.getsource`, or the value itself) rather than a path.
+- **The targeted list is run ONCE, at the run's close, and it is scaled to the
+  change.** The modules a run touched, plus what the two greps above name —
+  not every module that could conceivably be affected. Re-running it after
+  each edit is minutes per edit for an answer the close will give anyway, and
+  CI is the full check (the operator has asked for this repeatedly). During a
+  run, run the one module under the hand.
 - **A targeted list is derived from the tree, never from the plan's text**
   (D1146, D1149): a run that moves a definition greps the whole tree for its
   readers (`git grep -n <name> -- tests bin src services`); a run that

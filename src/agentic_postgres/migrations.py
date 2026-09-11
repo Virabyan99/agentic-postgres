@@ -700,3 +700,127 @@ __all__ = [
     "sets_for",
     "verify_lock",
 ]
+# ---------------------------------------------------------------------------
+# The rendered set, read by whoever applies it (ADR 0028, ADR 0203)
+# ---------------------------------------------------------------------------
+
+
+def verify_rendered_directory(rendered_dir: Path) -> list[dict[str, Any]]:
+    """The migrations a rendered directory holds, verified against its manifest.
+
+    **The bodies dbmate will read are the payloads this release rendered.**
+    dbmate is handed a directory, not a list, so what it applies is whatever is
+    in that directory. Comparing each file's digest against the manifest written
+    beside it -- and the set of files against the set of migrations -- is what
+    makes "the rendered payload is the immutable unit" (ADR 0028) a property of
+    the thing that runs rather than of the thing that was committed.
+
+    Returns the manifest's entries **in manifest order**, which is the order
+    they are to be applied in; `bin/migrate.py::assert_rendered_files_match`
+    keeps its name and its `None` return and calls this, and `apg dev` applies
+    what it returns. One verification, two appliers -- because a dev cluster
+    built from a second reading of the same directory would be a second
+    verification nobody compares (ADR 0203 §4).
+
+    Raises `MigrationError` with the manifest's own vocabulary: no manifest at
+    all, a directory that does not match it, or a file whose digest moved.
+    """
+    # Lazily, and in the direction `rendering` already does it: that module
+    # imports this one inside its functions to keep the two from importing each
+    # other at module level, so this one returns the favour.
+    from agentic_postgres import rendering
+
+    directory = Path(rendered_dir) / "migrations"
+    manifest_path = directory / rendering.MIGRATION_MANIFEST_NAME
+    if not manifest_path.is_file():
+        raise MigrationError(
+            f"no rendered migration manifest at {manifest_path}; "
+            "this project was rendered by a release that did not write one."
+        )
+
+    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    entries = list(recorded["migrations"])
+    expected = {entry["file"]: entry["sha256"] for entry in entries}
+    found = {path.name for path in directory.glob("*.sql")}
+
+    if found != set(expected):
+        raise MigrationError(
+            f"the rendered migration directory does not match its manifest: "
+            f"unexpected {sorted(found - set(expected))}, missing {sorted(set(expected) - found)}"
+        )
+
+    for filename, sha in sorted(expected.items()):
+        actual = digest((directory / filename).read_text(encoding="utf-8"))
+        if actual != sha:
+            raise MigrationError(
+                f"{filename} does not match the payload that was rendered "
+                f"({actual[:16]} != {sha[:16]}); it was edited after rendering."
+            )
+
+    return entries
+
+
+def ledger_insert_statement(
+    document: dict[str, Any], rendered_dir: Path, repo_root: Path = REPO_ROOT
+) -> str:
+    """The statement that records WHICH BYTES ran, for every set this project applies.
+
+    `app_private.migration_ledger` is not `schema_migrations`. dbmate's table
+    records that a version ran; this records which bytes ran, and it is written
+    **as the superuser** rather than by the migration plane -- a migration role
+    that could write its own audit record could record bytes it did not execute.
+    `migration_user` has no privilege on this table at all, which is the
+    property that makes the row worth reading.
+
+    **Every set's lock, not the release's alone.** D1096: the caller used to
+    build its digests from the release lock and then index it by every RENDERED
+    entry's version, so the first deploy that rendered a project migration
+    raised `KeyError` *after dbmate had already applied it*. A cluster that has
+    moved and a record that has not is the worst order a failure can arrive in.
+
+    `ON CONFLICT (version) DO NOTHING`, so a re-run records nothing new and
+    changes no `applied_at`. That is what makes the second `up` of a convergence
+    check produce an identical ledger rather than a fresh set of timestamps.
+
+    The statement only; issuing it is the caller's, because the deploy issues it
+    over the container socket and `apg dev` issues it over its own (ADR 0203).
+    """
+    from agentic_postgres import rendering
+
+    templates: dict[str, dict[str, Any]] = {}
+    for migration_set in sets_for(document, repo_root):
+        set_manifest = migration_set.load_manifest()
+        follows = migration_set.load_lock().get("follows_release_version")
+        built = build_lock(set_manifest, migration_set.root, follows_release_version=follows)
+        for entry in built["migrations"]:
+            templates[entry["version"]] = entry
+
+    rendered = json.loads(
+        (Path(rendered_dir) / "migrations" / rendering.MIGRATION_MANIFEST_NAME).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    values = []
+    for entry in rendered["migrations"]:
+        template = templates[entry["version"]]
+        values.append(
+            "("
+            + ", ".join(
+                quote_literal(value)
+                for value in (
+                    entry["version"],
+                    entry["name"],
+                    template["template_sha256"],
+                    entry["sha256"],
+                )
+            )
+            + ")"
+        )
+
+    return (
+        "INSERT INTO app_private.migration_ledger "  # noqa: S608
+        "(version, name, template_sha256, rendered_sha256) VALUES "
+        + ", ".join(values)
+        + " ON CONFLICT (version) DO NOTHING;"
+    )

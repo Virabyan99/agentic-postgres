@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import inspect
 import json
 import re
 from typing import Any
@@ -785,11 +786,17 @@ def test_no_fixture_creates_the_extensions_schema_without_the_extension() -> Non
     )
 
 
-def test_the_bootstrap_still_pairs_the_schema_with_the_extension() -> None:
+def test_the_bootstrap_still_pairs_the_schema_with_the_extension(bootstrap: Any) -> None:
     """The paired control. The test above is only meaningful while the product
     itself establishes both in one place -- if `build_statements` stopped
     installing the extension, every fixture would be 'correct' and every
-    deployment broken."""
-    bootstrap = (REPO_ROOT / "bin" / "postgres-bootstrap.py").read_text(encoding="utf-8")
-    assert "CREATE SCHEMA IF NOT EXISTS extensions" in bootstrap
-    assert "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions" in bootstrap
+    deployment broken.
+
+    Read from the FUNCTION rather than from a path (Session 22 Run 3). The
+    statements moved to `agentic_postgres.bootstrap_statements` and this went
+    red against a file that no longer holds them; `inspect.getsource` follows
+    the subject wherever it lives, so the next move does not break it again.
+    """
+    source = inspect.getsource(bootstrap.build_statements)
+    assert "CREATE SCHEMA IF NOT EXISTS extensions" in source
+    assert "CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA extensions" in source

@@ -53,37 +53,18 @@ def render_set(document: dict) -> list[tuple[str, str, str]]:
 def assert_rendered_files_match(rendered_dir: str) -> None:
     """The files dbmate will read are the payloads this release rendered.
 
-    dbmate is handed a directory, not a list, so what it applies is whatever is
-    in that directory. Comparing each file's digest against the manifest written
-    beside it -- and the set of files against the set of migrations -- is what
-    makes "the rendered payload is the immutable unit" (ADR 0028) a property of
-    the thing that runs rather than of the thing that was committed.
+    **The body is `migrations.verify_rendered_directory`** since Session 22 Run
+    3, and the name, the argument and the `None` return are unchanged (ADR
+    0175). `apg dev` applies the same rendered payloads to a disposable cluster
+    and has to verify them the same way; a second reading of one directory
+    would be a second verification nobody compares (ADR 0203).
+
+    What this keeps is the SHAPE: a checker that raises, called for its effect.
+    What the library returns -- the manifest's entries, in order -- is what the
+    other caller needs, and is dropped here because dbmate is handed the
+    directory rather than a list.
     """
-    directory = Path(rendered_dir) / "migrations"
-    manifest_path = directory / rendering.MIGRATION_MANIFEST_NAME
-    if not manifest_path.is_file():
-        raise migrations.MigrationError(
-            f"no rendered migration manifest at {manifest_path}; "
-            "this project was rendered by a release that did not write one."
-        )
-
-    recorded = json.loads(manifest_path.read_text(encoding="utf-8"))
-    expected = {entry["file"]: entry["sha256"] for entry in recorded["migrations"]}
-    found = {path.name for path in directory.glob("*.sql")}
-
-    if found != set(expected):
-        raise migrations.MigrationError(
-            f"the rendered migration directory does not match its manifest: "
-            f"unexpected {sorted(found - set(expected))}, missing {sorted(set(expected) - found)}"
-        )
-
-    for filename, sha in sorted(expected.items()):
-        actual = migrations.digest((directory / filename).read_text(encoding="utf-8"))
-        if actual != sha:
-            raise migrations.MigrationError(
-                f"{filename} does not match the payload that was rendered "
-                f"({actual[:16]} != {sha[:16]}); it was edited after rendering."
-            )
+    migrations.verify_rendered_directory(Path(rendered_dir))
 
 
 def assert_installed_render_is_current(
@@ -200,61 +181,23 @@ def record_ledger(document: dict, rendered_dir: str) -> int:
     own audit record could record bytes it did not execute. migration_user has
     no privilege on this table at all, which is the property that makes the row
     worth reading.
+
+    **The statement is `migrations.ledger_insert_statement`** since Session 22
+    Run 3; this function keeps its name, its two arguments and its exit code,
+    and owns what it always owned -- issuing the statement over the container
+    socket, and turning a failure into `EXIT_CONTRACT` with the message an
+    operator reads. `apg dev` issues the same statement over its own socket
+    (ADR 0203), so the bytes recorded on a dev cluster and on a deployment are
+    built by one function.
+
+    D1096 is why that function reads EVERY set's lock: it used to build its
+    digests from the release lock alone and index them by every RENDERED
+    version, so the first deploy that rendered a project migration raised
+    `KeyError` **after dbmate had already applied it**. A cluster that has moved
+    and a record that has not is the worst order a failure can arrive in.
     """
-    # **Every set's lock, not the release's alone.** D1096: this used to build
-    # its digests from `build_lock(load_manifest())` -- the release lock -- and
-    # then index it by every RENDERED entry's version. A project migration's
-    # version is absent from that dictionary, so the first deploy that rendered
-    # one raised `KeyError` **after dbmate had already applied it**, from an
-    # unhandled exception that never reached the "the ledger could not be
-    # recorded" path below. A cluster that has moved and a record that has not
-    # is the worst order a failure can arrive in here.
-    #
-    # No column is added and no platform migration is spent: which set a row
-    # came from is recoverable from which lock holds its version.
-    #
-    # Found by reading the reader before changing the writer (D979).
-    templates: dict[str, dict] = {}
-    for migration_set in migrations.sets_for(document, REPO_ROOT):
-        set_manifest = migration_set.load_manifest()
-        follows = migration_set.load_lock().get("follows_release_version")
-        built = migrations.build_lock(
-            set_manifest, migration_set.root, follows_release_version=follows
-        )
-        for entry in built["migrations"]:
-            templates[entry["version"]] = entry
-    rendered = json.loads(
-        (Path(rendered_dir) / "migrations" / rendering.MIGRATION_MANIFEST_NAME).read_text(
-            encoding="utf-8"
-        )
-    )
-
-    values = []
-    for entry in rendered["migrations"]:
-        template = templates[entry["version"]]
-        values.append(
-            "("
-            + ", ".join(
-                migrations.quote_literal(value)
-                for value in (
-                    entry["version"],
-                    entry["name"],
-                    template["template_sha256"],
-                    entry["sha256"],
-                )
-            )
-            + ")"
-        )
-
-    # ON CONFLICT DO NOTHING, so a re-run records nothing new and changes no
-    # applied_at. That is what makes the second `up` of a convergence check
-    # produce an identical ledger rather than a fresh set of timestamps.
-    statement = (
-        "INSERT INTO app_private.migration_ledger "  # noqa: S608
-        "(version, name, template_sha256, rendered_sha256) VALUES "
-        + ", ".join(values)
-        + " ON CONFLICT (version) DO NOTHING;"
-    )
+    statement = migrations.ledger_insert_statement(document, Path(rendered_dir), REPO_ROOT)
+    recorded = statement.count("), (") + 1
 
     result = subprocess.run(
         [
@@ -286,7 +229,7 @@ def record_ledger(document: dict, rendered_dir: str) -> int:
         )
         return EXIT_CONTRACT
 
-    print(f"migrate: ledger recorded for {len(values)} migrations")
+    print(f"migrate: ledger recorded for {recorded} migrations")
     return 0
 
 
