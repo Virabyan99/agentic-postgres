@@ -1,6 +1,8 @@
 # Session 22 — `apg dev`, the local disposable environment
 
-**Status:** planned 2026-09-11 at `90c1c19`, Session 21's close. Not started.
+**Status:** planned 2026-09-11 at `90c1c19`, Session 21's close. **Run 1 done
+2026-09-11** on branch `session-22` (rigs 22a–22e, ADR 0202, ADR 0203,
+D1176–D1179); Runs 2–7 open.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 22*, and its rows D1066
 (the fixture path is the product), D1071 (`seed` is a reviewed file, never a
 capture), D1073 (CI is the PR environment), D1076 (isolation is proved by
@@ -101,9 +103,10 @@ D1060, D1066, D1071, D1076, D1098, D1110, D1131.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1176**. Rows D1157–D1175
+Six columns, next free number after this table **D1180**. Rows D1157–D1175
 were measured at planning on 2026-09-11 at `90c1c19`; the runs add theirs
-below them as they go, each run's numbers named in its Done paragraph.
+below them as they go, each run's numbers named in its Done paragraph. Run 1
+added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`.
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -126,6 +129,10 @@ below them as they go, each run's numbers named in its Done paragraph.
 | **D1173** | Stage plan §5 *Already true*: *"`--render-only` with no host and no root"*; CLAUDE.md §1: *"Anything that calls `render_project` must delete what it published under `.generated/<key>`; the gate compares every rendered project for collisions."* | `evidence.load_rendered` iterates `.generated/` and **skips dot-prefixed directories** (`evidence.py:206`); `.generated/*` is gitignored; `bin/session-01-check.sh` step 7 checks only the directories step 3 published (ADR 0014). | The environment's state lives at `.generated/.dev/<key>/` (`state.json`, two `0600` env files, `seeds-applied.json`), dir mode `0700`. It never enters the collision count and never dirties the tree; `up` **reads** `.generated/<key>/outputs.json` through `deployed_output.read_rendered_document(key, runtime=False)` (ADR 0199's three outcomes) and renders nothing itself — an unrendered project is refused with exit 4 naming the `--render-only` command. Proof: a fabricated `.generated/.dev/x/outputs.json` under a monkeypatched `REPO_ROOT` is invisible to `load_rendered`. | One renderer, one resolver; the environment is a consumer of the render, not a second one. | — |
 | **D1174** | Stage plan §5: *"`dev up | reset | down`"*, and *"reset-in-seconds"* from the spec. | A role survives `DROP DATABASE`; a reset that kept the container would carry role passwords, settings and the superuser's state across resets, and would be a second bring-up path with its own defects. | `reset` **is** `down` then `up`, byte for byte the same code, measured (rig 22d, ~the `up` figure plus a `rm -f -v`). No in-place variant. | Two paths to one state is the defect class this project keeps producing (question 5); one path measured twice is a number. | 0203 |
 | **D1175** | Stage plan §5 *Must not*: *"Set `wal_level = logical` anywhere."* | The image's default is `replica` (D1084); `compose.yaml` sets neither `wal_level` nor `max_wal_senders`. | `up` passes no `-c` at all; the isolation proof reads `SHOW wal_level` = `replica` on the environment. | A property asserted by a test is a property; one assumed from a default is D930's shape. | — |
+| **D1176** | D1171: *"`role_name` is the **full** derived role (the service's `_role_name(role_suffix)`, Run 2 reads it)"* — read as though something checks it. | `_role_name` returns the KEY of `role_suffixes`, i.e. the full derived role name (`services/auth-api/app/service.py:404`) — so the *reading* is right. But `_role_name` lives in the **auth service**, which `apg dev` does not run, and **nothing in the database refuses a `role_name` this deployment does not derive**: rig 22b-2 called `app_private.auth_create_user('dev-nobody', 'x', 'nobody', …)` and it returned a uuid, exit 0. `app_private.users`' constraints are the not-nulls and `users_authz_version_check`; there is no FK, no CHECK and no trigger over `role_name`. The verifier IS guarded — a `password_hash` of `'x'` is refused by `user_credentials_password_hash_check` (exit 3, measured). | **The derivation is the command's job and is asserted by the command's own proof**, not delegated to a downstream check that does not exist. `dev_environment` builds the subject statement from `document["database"]["roles"]["authenticated"]` and `test_the_subject_statement_names_the_authenticated_role_and_the_derived_vocabulary` reads the statement, not the cluster. The cluster proof (`test_exactly_one_subject_exists_and_its_rows_are_visible_only_with_it_asserted`) reads `app_private.users.role_name` back and compares it to the document. | A guard nobody wrote is not a guard, and half of D1171's premise was true in the reassuring direction. The half that IS enforced (the verifier) is the half this session was already going to satisfy. | 0203 |
+| **D1177** | D1160: the fixture *"hands it to `psql` through `docker exec -e PGPASSWORD=…` — which puts the value in the host's `docker` argument vector"*, read as though the password is what gets the fixture in. | The vector claim is exactly right. The **authentication** claim is not: the pinned image's `pg_hba.conf` is `local all all trust`, `host all all 127.0.0.1/32 trust`, `host all all ::1/128 trust`, and `host all all all scram-sha-256` only after those. Rig 22a: `docker exec … psql -U postgres -h 127.0.0.1` with **no password at all** returns a row, exit 0. So inside the container the password is decorative, and `_apply_as_migration_user`'s docstring reason — *"the socket … could quietly connect as a role this test has not established a password for"* — does not hold (`-U` decides the role either way; its conclusion, connect as the migration user, does hold). Rig 22a-3 found where it IS load-bearing: a client reaching the cluster from anywhere else — across the bridge, or over the published loopback port — is refused *"fe_sendauth: no password supplied"* without it and *"password authentication failed"* with a wrong one. | The two `0600` env files are kept and are **required**, because `apg dev psql` connects from OUTSIDE that trust boundary (the published `127.0.0.1` port), where scram is the matching line. The isolation proof does not assert that the in-container exec is authenticated, because it is not. `--env-file` is the mechanism on both `docker run` and `docker exec` (docker 29.5.2, measured); `-e NAME=VALUE` never appears in `bin/`. | A credential that is not load-bearing where it is used reads as a working authentication and is a proof of nothing. Naming the boundary is cheaper than discovering it from the first adopter who moves the command. | 0203 |
+| **D1178** | D1162: *"The 21 unclaimed requirements are enumerated in `UNCLAIMED_BY_HISTORY` (`:1081`)"*, in a sentence whose other citations are `bin/write-session-evidence.py`. | The constant is in **`tests/contract/test_evidence_claims.py:1031`**, not in the library and not in the writer (`git grep -n UNCLAIMED_BY_HISTORY -- src bin tests`). `evidence_claims.py:578` only mentions it in a comment. The three readers are all in that same test module: the orphan check, the stale check and the settled-debt check. | ADR 0202's clause about the 21 is enforced where it already is — **a contract test's constant** — and Run 5 adds nothing to `evidence_claims.py` for it. What Run 5 does add is `OFFLINE_CLAIMS`, in the library, beside `CLAIMS`; the two lists answer different questions and stay apart. | A guard's address decides which run owns it. Looking for it in the writer would have produced a second list that drifts from the first. | 0202 |
+| **D1179** | D1157: *"`apg dev psql` (the application role, `app.user_id` preset to the development subject through `PGOPTIONS`, measured in rig 22b)"*, with no statement of what that role may then ask. | `PGOPTIONS='-c app.user_id=<uuid>'` works and is the boundary: as `app_runtime`, `api.notes` returns **1** row with the subject set, **0** with none, **0** with a different subject (rig 22b-2). But the application role has **no USAGE on schema `app`** (migration 0006) — 22b's first probe, `SELECT app.current_user_id()`, died with *permission denied for schema app*, and the readable probe is `current_setting('app.user_id', true)` plus `api.*`. And the `authenticated` role **cannot connect at all**: *"FATAL: permission denied for database"* — it is a role PostgREST switches into, never one that logs in. | `psql` connects as **`app_runtime`** and never as `authenticated`; whatever banner or probe it prints reads `current_setting('app.user_id', true)` and `api.*` only. The cluster proof asserts the three-way RLS result above (with / without / another subject) as the boundary, because that is the property a developer is being handed. | A command that greets a developer with a query their role may not run fails on its first line, and the role that *looks* like the request role cannot open a connection. Both were one probe away. | 0203 |
 
 ---
 
@@ -327,6 +334,102 @@ index's last six rows; Session column 22, Status Accepted):
 
 **Targeted:** none (documentation). **Push.** CI is expected green (docs
 only). Record the run id. Mark Done with 22a–22e's numbers.
+
+**Done.** 2026-09-11, on `session-22` branched from `dd9e2be`. Seven rig
+scripts, five measurements, two ADRs (0202, 0203, both indexed), four new
+divergence rows (**D1176–D1179**); next free **D1180**. Docker 29.5.2, native
+engine in WSL2 (kernel 6.6.87.2-microsoft-standard-WSL2, 8 cores, 7,786 MB),
+image `pgvector/pgvector:pg18@sha256:69167330…` cached, 158,801,932 bytes.
+
+*22a — publication, the env file, the anonymous volume.* `-p 127.0.0.1:0:5432`
+→ `{"5432/tcp":[{"HostIp":"127.0.0.1","HostPort":"32768"}]}`, one entry;
+control `-p 0:5432` → **two**, `0.0.0.0` and `::`. `ss` is present and the
+daemon is native, so the `ss` clause **is** assertable here: arm A shows
+`LISTEN 127.0.0.1:32768`, the control `LISTEN *:32769` (D1172's arm decided —
+assert the Docker instruction everywhere, and assert the `ss` observation on a
+native daemon). `Networks` keys exactly `['bridge']`. `Mounts` is exactly one
+anonymous volume at `/var/lib/postgresql` — a *no mounts* assertion would be
+red on a correct environment (D1161 confirmed). `docker rm -f` left the volume
+(3431 → 3431); `docker rm -f -v` removed it (3432 → 3431). `SHOW wal_level` =
+`replica` with no `-c` passed (D1175). `docker exec --env-file` works. The
+rig's own **no-password control came out green**, which sent 22a-2 and 22a-3
+after it: the image's `pg_hba.conf` trusts the socket, `127.0.0.1/32` and
+`::1/128`, and applies `scram-sha-256` only beyond them — so the password is
+load-bearing from the bridge and from the published port, and decorative
+inside the container (**D1177**). 22a-2's own miss, recorded: `docker inspect
+-f '{{.NetworkSettings.IPAddress}}'` has no such key on docker 29.5.2 (*"map
+has no entry"*), `-h ""` fell back to the socket and all three arms failed
+identically; every reader in the tree already goes through
+`.NetworkSettings.Networks.<name>.IPAddress`, so no product defect — the rig
+was wrong, 22a-3 repaired it and got the three distinct refusals.
+
+*22b / 22b-2 — the order, the ledgers, the subject, `PGOPTIONS`.* Production
+order read from `bin/deploy-project.py` step 6 (`postgres-bootstrap.sh
+--apply`, then `migrate.sh up`). **Arm A applied 32 of 32 in 8.6 s**; control B
+(the fixture's order, bootstrap at index 1) applied **0 of 32** — *permission
+denied for schema app_private* on the first migration's own
+`schema_migrations` insert, because the migration user reaches that schema only
+after the bootstrap grants it. So a dev cluster that records what dbmate
+records is **obliged** to use the deploy's order. `schema_migrations` = 32 =
+the manifest's count. The `record_ledger` statement, built exactly as
+`migrate.py:191` builds it, applied clean: `migration_ledger` = 32 rows. The
+merged surface's vocabulary is **7 scopes**: `meta:read`,
+`note_embeddings:read/write`, `notes:read/write`, `tasks:read/write`.
+`auth_create_user('dev', …, 'apg_fixture_alpha_dev_authenticated',
+ARRAY[…7…], '$argon2id$v=19$m=65536,t=3,p=4$<22>$<43>')` returned a uuid;
+the control with a `'x'` verifier was refused by
+`user_credentials_password_hash_check`; **the control with `role_name`
+`'nobody'` was ACCEPTED** (D1176). `PGOPTIONS='-c app.user_id=<uuid>'` as
+`app_runtime`: `current_setting` returns the uuid, `api.notes` = **1** with
+it, **0** without, **0** with another subject; `app.current_user_id()` is
+*permission denied for schema app* and `authenticated` cannot connect at all
+(**D1179**). The seed shape — `set_config('app.user_id', …, true)`, `SET LOCAL
+ROLE <object_owner>`, `api.create_note`, `RESET ROLE`, one `-1` transaction as
+the migration user — wrote a row owned by the subject; the control without
+`set_config` raised **AP401** *no request identity for this transaction*.
+D1167's premise confirmed on the cluster: `has_table_privilege` for
+`agent_reader`/`agent_writer`/`anon` on `api.note_embeddings` is **false,
+false, false**, `has_function_privilege(agent_writer, set_note_embedding)`
+**false**, and the control `agent_reader` on `api.notes` (the release's grant)
+**true**. 22b's own two misses, recorded: `max(uuid)` does not exist in PG 18,
+which is why its `app.notes` line came back empty (the count is 1, read again
+in 22b-2); and its `PGOPTIONS` probe asked for a schema the role cannot reach,
+which is D1179's finding rather than a failure of the mechanism.
+
+*22c — the vector.* Both forms work on the pinned pgvector:
+`array_fill(0.1::real, ARRAY[768])::extensions.vector` exit 0, and the string
+literal `'[0.2,…]'::extensions.vector` exit 0. The control `ARRAY[767]` raised
+*expected 768 dimensions, not 767*. `app.note_embeddings` = 1 row (the second
+form updated the first through `ON CONFLICT`). The seed uses the `array_fill`
+form: it is one line and it is the form a developer can edit.
+
+*22d — the baseline and the churn.* `test_migrations_apply_as_the_migration_user.py
+-q --durations=0 -p no:randomly`, twice: **10.44 s** and **10.40 s** module
+wall (11.18 s / 10.99 s process wall), of which setup 4.51 s / 4.57 s and the
+migration call 5.05 s / 4.95 s. D1066's *~10 s* re-measured today and standing.
+The bring-up itself, twice: **9.50 s** and **9.49 s** total — container ready
+4.07 / 3.97 s, roles + bootstrap 0.63 / 0.65 s, 32 migrations 4.52 / 4.54 s,
+ledger 0.16 / 0.18 s, subject 0.12 / 0.14 s — with `down` (`docker rm -f -v`)
+0.43 / 0.39 s. Process wall 10.15 / 10.13 s. Image cached both times; the
+uncached case stays `UNMEASURED` (Run 6, D1168).
+
+*22e — the evidence model today.* `--mode offline` exits **2** on argparse's
+`invalid choice`, usage reading `--mode {host,external}`.
+`MODE_MARKERS = {'host': 'live_host', 'external': 'external'}` with its
+*"absent on purpose"* comment. `claim_mode` raises `ClaimError("claim {…} has
+no live proof: every test it names runs in a checkout, so no deployment is
+being measured.")`, and `CLAIMS` maps a name to a plain tuple of requirement
+ids — which is the shape the replacement tests monkeypatch.
+`claims_through_session(22)` = **108** claims today. `UNCLAIMED_BY_HISTORY` is
+in the **test** module, not the library (**D1178**). There is no `merge`
+subcommand: merging is the `--host-input` / `--external-input` path at
+`write-session-evidence.py:163`, and `MUST_AGREE` begins with `source_commit`.
+
+Rig scripts: `/tmp/r22a.sh`, `/tmp/r22a2.sh`, `/tmp/r22a3.sh`, `/tmp/r22b.py`,
+`/tmp/r22b2.py`, `/tmp/r22b2-timed.py`, `/tmp/r22d.sh`, `/tmp/r22e.py` in WSL,
+outputs beside them as `.txt`. Every container removed with `rm -f -v`; nothing
+published under `.generated/` (`fixture-alpha-dev` was already rendered and is
+untouched).
 
 ### Run 2 — the five left-overs
 
