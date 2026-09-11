@@ -2873,3 +2873,156 @@
     function decides the word, so the printed summary and the document agree;
     every reader of the status accepts the third word; and a healthy deployment
     carries none of them after a redeploy (ADR 0199, D1048, D1047).
+
+# ---------------------------------------------------------------------------
+# Session 21 -- the agent plane opened to a tenant's domain (ADR 0200, ADR 0201)
+# ---------------------------------------------------------------------------
+
+- id: AGT-VOCAB-001
+  priority: P0
+  target_session: 21
+  test_nodeids:
+    - tests/contract/test_scope_registry.py::test_the_data_class_is_derived_from_the_reviewed_surface_and_the_classes_still_partition
+    - tests/contract/test_scope_registry.py::test_a_tenant_scope_is_permitted_only_over_the_surface_that_derives_it
+    - tests/contract/test_scope_vocabulary.py::test_at_schema_4_a_scope_is_a_shape_and_at_3_it_is_the_enum
+    - tests/contract/test_scope_vocabulary.py::test_a_scope_the_merged_surface_derives_is_accepted_and_one_it_does_not_is_refused
+    - tests/contract/test_scope_vocabulary.py::test_a_relation_named_for_an_enumerated_class_is_refused_at_load_and_at_merge
+    - tests/contract/test_scope_vocabulary.py::test_the_issuers_ceiling_is_a_function_of_the_vocabulary
+    - tests/contract/test_scope_vocabulary.py::test_the_auth_service_mounts_the_same_lock_the_agent_plane_does
+    - tests/contract/test_scope_vocabulary.py::test_no_data_scope_literal_survives_outside_the_schema_and_the_example_manifest
+    - tests/contract/test_auth_endpoints.py::test_an_agent_is_granted_a_tenant_scope_only_where_the_lock_derives_it
+    - tests/deployment/test_session21_agent.py::test_an_agent_on_beta_is_issued_a_tenant_scope_and_the_same_grant_on_alpha_is_refused
+  description: >-
+    The data class of the scope vocabulary is derived from a reviewed surface
+    by one function -- `<relation>:read` and `<relation>:write` per published
+    relation, plus `meta:read` -- and the three classes partition the union for
+    every surface; a relation whose derived names would collide with the
+    storage or administrative class is refused at load and at merge; at
+    capability schema 4 a scope is a shape the compiler approves against the
+    surface, and below 4 the enum still applies; no data-scope literal exists
+    in `src/` or `services/`; the issuer's ceilings are computed from the
+    deployed lock's vocabulary, which the auth container mounts from the same
+    file the agent plane reads, so an agent may be granted a tenant's scope on
+    a deployment whose surface publishes the relation and on no other (ADR
+    0200, D1125, D1126, D1135).
+
+- id: AGT-ROSTER-001
+  priority: P0
+  target_session: 21
+  test_nodeids:
+    - tests/contract/test_lock_roster.py::test_a_five_tool_lock_loads_and_serves_five
+    - tests/contract/test_lock_roster.py::test_a_tenant_write_compiled_from_a_manifest_loads_and_is_served_through_the_pipeline
+    - tests/contract/test_lock_roster.py::test_a_tool_the_compiler_did_not_digest_is_refused
+    - tests/contract/test_lock_roster.py::test_the_runtime_digests_a_tool_list_exactly_as_the_compiler_does
+    - tests/contract/test_lock_roster.py::test_a_tenant_write_registered_from_the_lock_is_audited_before_its_scope_is_checked
+    - tests/contract/test_lock_roster.py::test_a_read_over_an_rpc_with_arguments_and_a_metadata_capability_outside_the_pair_are_refused
+    - tests/contract/test_mcp_tools.py::test_a_five_tool_lock_loads_and_serves_five
+    - tests/contract/test_mcp_tools.py::test_a_lock_missing_a_metadata_tool_is_refused
+    - tests/contract/test_mcp_tools.py::test_a_metadata_tool_by_another_name_is_refused
+    - tests/contract/test_mcp_tools.py::test_the_registered_roster_is_the_locks_roster
+    - tests/contract/test_api_migrations.py::test_retiring_the_task_tools_is_no_longer_blocked_by_the_roster
+    - tests/deployment/test_session21_agent.py::test_alpha_serves_six_beta_seven_and_a_reader_can_neither_see_nor_call_the_tenant_write
+  description: >-
+    The runtime registers its tools from the deployed lock by kind and shape,
+    never by name: the metadata pair is the runtime's own and required in every
+    lock; a read is a query over published relations or one argument-free RPC;
+    a write is the lock's argument list plus the two reserved parameters. A
+    lock with fewer tools than the release's contract loads (D933 closed); a
+    lock missing either metadata tool, carrying a metadata tool under another
+    name, a read over an RPC with arguments, or a `tools_sha256` the compiler
+    did not write is refused at startup; the call-time scope check and the
+    audit order (`begin` before the check, ADR 0141) hold for a tool the
+    runtime had never seen; and retiring the task tools is no longer blocked by
+    the roster (ADR 0200, D1124, D1129, D1130, D1140).
+
+- id: AGT-TENANT-001
+  priority: P0
+  target_session: 21
+  test_nodeids:
+    - tests/contract/test_project_agent_surface.py::test_a_projects_manifest_compiles_against_the_merged_surface_to_its_own_contract
+    - tests/contract/test_project_agent_surface.py::test_the_joint_contract_is_the_release_less_the_disabled_plus_the_projects
+    - tests/contract/test_project_agent_surface.py::test_a_lock_compiled_from_the_joint_contract_loads_with_the_merged_vocabulary
+    - tests/contract/test_project_agent_surface.py::test_a_disabled_release_capability_leaves_this_projects_lock_and_the_second_fixtures_keeps_it
+    - tests/contract/test_project_agent_surface.py::test_a_project_tool_named_for_a_release_tool_is_refused
+    - tests/contract/test_project_agent_surface.py::test_the_three_shapes_a_project_may_not_declare_are_refused
+    - tests/contract/test_project_agent_surface.py::test_the_render_records_the_committed_contract_and_null_for_a_project_without_one
+    - tests/contract/test_project_agent_surface.py::test_the_deployed_schema_couples_the_block_to_a_ready_plane
+    - tests/contract/test_agent_command.py::test_the_example_projects_manifest_compiles_to_its_committed_contract
+    - tests/contract/test_output_migrations.py::test_v17_to_v18_adds_the_project_capabilities_block_and_nothing_else
+    - tests/deployment/test_session12_isolation_matrix.py::test_every_leaf_is_classified
+    - tests/deployment/test_session21_agent.py::test_betas_lock_carries_the_tenant_write_the_plane_refuses_it_pending_approval_and_audits_it
+  description: >-
+    A project manifest at schema 6 may name a capability manifest under
+    `projects/<slug>/`, beside its migration set; it is compiled against the
+    merged surface and the project's own snapshot into the project's contract,
+    whose id derives from the project's surface; `mcp-contract.sh check
+    --project` compares the committed contract byte for byte and `lock` joins
+    the manifests -- the release's capabilities less `release.disabled`, plus
+    the project's -- into one contract the runtime loads with the merged
+    vocabulary; a capability or tool name the release declares, a metadata
+    capability, an agent-plane operation and a read over an RPC with arguments
+    are each refused by name; a release capability the project disables leaves
+    that project's lock and no other's; outputs v18 records the block on both
+    branches, null beside an unavailable plane, and a v17 document migrates by
+    gaining null and nothing else (ADR 0201, D1136, D1147).
+
+- id: AGT-INIT-001
+  priority: P0
+  target_session: 21
+  test_nodeids:
+    - tests/contract/test_agent_command.py::test_init_emits_an_entry_that_compiles_for_every_object_of_the_example_project
+    - tests/contract/test_agent_command.py::test_init_refuses_an_operation_the_merged_surface_does_not_name
+    - tests/contract/test_agent_command.py::test_init_refuses_the_shapes_the_compiler_or_the_join_would
+    - tests/contract/test_agent_command.py::test_init_needs_a_set_to_scaffold_from
+    - tests/contract/test_agent_command.py::test_the_example_manifest_is_what_the_scaffold_emits
+    - tests/contract/test_cli_contract.py::test_commands_are_executable_in_the_git_index
+    - tests/deployment/test_session21_agent.py::test_betas_deployed_lock_records_the_project_contract_the_scaffold_produced
+  description: >-
+    `bin/agent.sh init --project FILE --operation NAME [--relation NAME]`
+    streams one capability entry derived from the merged reviewed surface and
+    writes no file: a relation scaffolds a read grouped under `query_resource`
+    with the view's columns; an RPC scaffolds a write with every argument
+    redacted, approval required and the write scope of the relation the
+    reviewer names; the entry compiles under `check --project` unchanged; an
+    operation the merged surface does not name is refused with exit 2 naming
+    the ones it does, as is a release-owned object and an agent-plane one; the
+    example project's committed manifest is byte-identical to `init --head`
+    plus what the scaffold emits for its two operations, and the deployed lock
+    of a project that declares it records that contract's digest (ADR 0201,
+    D1137, D1138).
+
+- id: EVAL-HARNESS-002
+  priority: P0
+  target_session: 21
+  test_nodeids:
+    - tests/contract/test_evaluation_harness.py::test_cases_are_derived_for_a_projects_joint_contract
+    - tests/contract/test_evaluation_harness.py::test_a_projects_written_cases_leave_out_the_disabled_capability_by_name_and_no_other
+    - tests/contract/test_evaluation_harness.py::test_a_projects_report_is_current_and_carries_the_merged_digest
+    - tests/deployment/test_session21_agent.py::test_betas_deployed_contract_digest_is_the_one_its_own_report_carries
+  description: >-
+    For every project that declares capabilities, the harness derives cases
+    from the joint contract, one adversarial case per frozen field and a
+    positive per capability except where the contract itself declares approval
+    (D870, D1148); the release's written cases are read beside the project's
+    own, less those for a capability the project disabled, by name;
+    `render-evaluation-report.py --project FILE` renders that project's report
+    beside its contract and refuses a capability without cases; and the digest
+    the deployed lock and the deployed document publish on such a project is
+    the one its own report carries (ADR 0201, ADR 0184).
+
+- id: REC-KIT-003
+  priority: P0
+  target_session: 21
+  test_nodeids:
+    - tests/contract/test_disaster_kit.py::test_verify_reads_a_kit_whose_deployed_document_predates_this_release
+    - tests/contract/test_disaster_kit.py::test_a_document_this_release_cannot_read_is_reported_as_such_and_not_as_invalid
+    - tests/deployment/test_session21_agent.py::test_the_kit_exported_before_this_release_verifies_at_it
+  description: >-
+    `dr-kit.sh verify` reads a stored deployed document version-aware: the
+    current version against the full schema; an older version the kit format
+    has carried since outputs v16 by kind, key and the absence of every
+    sensitive block; and a version this release cannot read -- above the
+    current one, or below the first the kit carried -- reported as a third
+    outcome rather than folded into "invalid". A kit exported at an earlier
+    outputs version therefore verifies at a later release, which is when a kit
+    is read by construction (ADR 0195, D1122, D1141, D1142, D1143).

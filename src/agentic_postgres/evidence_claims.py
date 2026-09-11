@@ -93,6 +93,23 @@ MODE_MARKERS = {"host": "live_host", "external": "external"}
 #: session keeps proving an earlier one's guarantees, not that a later
 #: requirement withdraws one from the earlier session's evidence.
 CLAIMS: dict[str, tuple[str, ...]] = {
+    # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
+    # tenant's domain -- the vocabulary derived from the reviewed surface, the
+    # roster compiled from the lock, a project's own capability manifest joined
+    # into its lock -- and the scaffold that writes such a manifest. Each has
+    # exactly one live node id per requirement, on beta, with alpha as the
+    # control that declares nothing of its own and serves exactly the six.
+    # The plan had `EVAL-HARNESS-002` joining `evaluation_harness` and
+    # `REC-KIT-003` joining `disaster_kit`, and ADR 0089 refuses it: a claim's
+    # session is the MAX of its requirements' target sessions, so joining a
+    # Session 21 requirement re-dates a Session 16 and a Session 18 claim, and
+    # `test_a_claim_resolves_to_the_session_that_introduced_it` said so on the
+    # first run (D1150). Four claims, then: each requirement of this session
+    # in a claim dated 21, the two widenings named for what they widen.
+    "agent_tenant_surface": ("AGT-VOCAB-001", "AGT-ROSTER-001", "AGT-TENANT-001"),
+    "agent_scaffold": ("AGT-INIT-001",),
+    "project_evaluation_harness": ("EVAL-HARNESS-002",),
+    "kit_read_at_a_later_release": ("REC-KIT-003",),
     # Session 20 (ADR 0198, ADR 0199). Three claims: what an adopter can now
     # add, the task domain restored, and the two readers that had two outcomes
     # where they needed three. Each has exactly one live node id, which is what

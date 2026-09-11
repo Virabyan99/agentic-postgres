@@ -142,7 +142,23 @@ from pathlib import Path
 #: document migrates, and no operator must act on any of it before upgrading.
 #: A minor, and Run 7's `upgrade plan` on the host is what confirms it -- a
 #: `major` required there is a stop condition, not a number to write down.
-CURRENT_SESSION = 20
+#:
+#: **Session 21 moves it to 21, all-or-nothing again** (D690): six `AGT-*`,
+#: `EVAL-*` and `REC-*` requirements and two claims, every offline half written
+#: in the run that built its plane (Runs 1-5) and every live half here, gated
+#: on the roster variables the gate already exports. The agent plane is opened
+#: to a tenant's domain (ADR 0200, ADR 0201): the scope vocabulary is derived
+#: from the reviewed surface, the runtime registers its roster from the lock,
+#: and a project owns a capability manifest beside its migration set.
+#:
+#: `VERSION` moves to `1.2.0`, and ADR 0162 prices it: a project manifest
+#: field with a default (`mcp.capabilities`, schema 6), a capability manifest
+#: version whose scope is a shape rather than an enum (schema 4, older versions
+#: still load), a lock schema the runtime serves alongside 1-3 (4), and an
+#: outputs bump with a migrator (v18). Every one is ADDITIVE, and a project
+#: that declares nothing new serves exactly the six tools it served. A minor,
+#: proposed here and confirmed by Run 7's `upgrade plan` on the host.
+CURRENT_SESSION = 21
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

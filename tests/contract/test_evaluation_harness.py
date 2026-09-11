@@ -692,3 +692,55 @@ def test_the_report_command_refuses_a_project_that_declares_no_capabilities() ->
     )
     assert result.returncode == 2, result.stderr
     assert "declares no mcp.capabilities" in result.stderr
+
+
+def test_a_projects_report_is_current_and_carries_the_merged_digest() -> None:
+    """`EVAL-HARNESS-002`'s offline half on the shipped example: the report
+    beside the example project's contract is what the renderer writes today
+    (`--check` exits 0), and the digest it carries is the JOINT contract's --
+    the number the project's deployed lock records as `canonical_sha256` and
+    its deployed document publishes as `capability_contract_sha256`, which the
+    live half compares on the host."""
+    from agentic_postgres import capability_manifest, config
+
+    manifest_path = REPO_ROOT / "project.example.yaml"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "bin" / "render-evaluation-report.py"),
+            "--check",
+            "--project",
+            str(manifest_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    assert result.returncode == 0, result.stderr
+
+    manifest = config.load_project_manifest(manifest_path)
+    inputs = capability_manifest.project_inputs(manifest)
+    assert inputs is not None
+    release = config.load_capabilities_manifest(REPO_ROOT / "capabilities.example.yaml")
+    joint = capability_manifest.compile_joint_contract(release, inputs)
+    report = capability_manifest.project_report_path(inputs.root).read_text("utf-8")
+    assert f"digest `{harness.contract_digest(joint)}`" in report
+    assert f"Contract `{joint['contract_id']}`" in report
+    assert harness.contract_digest(joint) != harness.contract_digest(
+        json.loads(CONTRACT.read_text("utf-8"))
+    ), "the joint contract is not the release's; a report carrying the release digest is wrong"
+
+    # And the lock a deploy compiles from it records exactly that digest.
+    lock = capability_compiler.compile_lock(
+        canonical=joint,
+        project_key="fixture-alpha-dev",
+        upstream="https://fixture-alpha-dev.test/api/rest",
+        sources={
+            "capabilities_sha256": "a" * 64,
+            "api_surface_sha256": "b" * 64,
+            "canonical_openapi_sha256": "c" * 64,
+        },
+        vocabulary=scope_registry.vocabulary_block(inputs.surface),
+    )
+    assert lock["canonical_sha256"] == harness.contract_digest(joint)

@@ -979,6 +979,12 @@ CLAIM_INTRODUCED_IN = {
     "disaster_kit": 18,
     "replacement_host_restore": 18,
     "failure_rehearsal": 18,
+    # Session 21 (ADR 0200, ADR 0201). Four claims, two of them widenings the
+    # plan had joining older claims and ADR 0089 refuses (D1150).
+    "agent_tenant_surface": 21,
+    "agent_scaffold": 21,
+    "project_evaluation_harness": 21,
+    "kit_read_at_a_later_release": 21,
     # Session 20 (ADR 0198, ADR 0199). There is no session 19 here and never
     # will be: that session built no plane and registered no requirement, so
     # `CURRENT_SESSION` went 18 -> 20 while `VERSION` moved alone (D1063).

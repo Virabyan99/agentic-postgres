@@ -4,7 +4,20 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 20 implemented**, at `template_version` **1.1.0**.
+**Status: Session 21 implemented**, at `template_version` **1.2.0**.
+
+Session 21 opens the agent plane to a tenant's domain: the scope vocabulary is
+derived from the reviewed surface rather than enumerated, the runtime registers
+its tools from the deployed lock by kind and shape rather than by a written
+roster, and a project owns a capability manifest beside its migration set --
+scaffolded by `bin/agent.sh init`, compiled into its own contract and joined
+into that project's lock and no other's (ADR 0200, ADR 0201; see [Giving an
+agent your tables](#giving-an-agent-your-tables) and the
+[session plan](docs/plans/session-21-implementation-plan.md)). A minor: a
+manifest field with a default (schema 6), a capability manifest version whose
+scope is a shape (4), a lock schema served alongside the older three (4), and
+an outputs bump with a migrator (v18); a project that declares nothing new
+serves exactly the six tools it served.
 
 Session 20 is the tenant extension point: an application adds its own tables by
 writing a directory under `projects/<slug>/` and a key in its own manifest, and
@@ -24,7 +37,7 @@ application on 1.0.0, on a host that started empty (see
 [its plan](docs/plans/session-19-implementation-plan.md) and
 [scope closure](docs/scope-closure.md) §8) — and it moved `VERSION` alone, to
 `1.0.1`, the only time in this project's history the two numbers have come
-apart. **Adopt `1.1.0`.** Session 18's code is in this release — independent
+apart. **Adopt `1.2.0`.** Session 18's code is in this release — independent
 recovery: every backup repository mirrored to a second provider by a host unit
 the archiver never knows about (ADR 0188), a disaster kit that names every
 secret and holds none and a bootstrap that adopts a provider project by its
@@ -162,9 +175,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 20
+sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 21
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 20
+     --capabilities capabilities.yaml --through-session 21
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a

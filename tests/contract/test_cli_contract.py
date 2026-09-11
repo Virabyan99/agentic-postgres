@@ -99,6 +99,10 @@ SHELL_COMMANDS = (
     # its five declaration flags are removed, because every live half this
     # session adds reads a roster variable the gate already exports.
     "bin/session-20-check.sh",
+    # Session 21. Derived from 20's by diff; Session 18's five declaration
+    # flags are back (D1133): a gate carries every declaration a proof it RUNS
+    # can read, and claims_through_session(21) runs Session 18's.
+    "bin/session-21-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
     "bin/upgrade.sh",

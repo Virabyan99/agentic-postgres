@@ -86,10 +86,10 @@ account this session is written from.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1150**. Rows D1124–D1139
+Six columns, next free number after this table **D1151**. Rows D1124–D1139
 were measured at planning on 2026-09-11 at `5a43f12`; the runs add theirs
 below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's, D1145–D1146
-Run 3's, D1147 Run 4's, D1148–D1149 Run 5's).
+Run 3's, D1147 Run 4's, D1148–D1149 Run 5's, D1150 Run 6's).
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -119,6 +119,7 @@ Run 3's, D1147 Run 4's, D1148–D1149 Run 5's).
 | **D1147** | ADR 0201 §3 as written at planning: *"`compile_canonical` runs twice … and `compile_lock` joins the two canonicals: tools concatenated with the release's disabled ones removed."* | **A disabled capability behind a grouped tool cannot be removed from a compiled tool.** `query_notes` and `query_tasks` compile into ONE `query_resource` tool with two resources, two discovery scope sets and one merged bound per field; disabling `query_notes` at the contract level means recompiling the tool from the remaining capability, which is `compile_canonical`'s job and nobody else's. And a project's capabilities have no surface to be approved against, no snapshot to be checked against and no contract id to be named by except its reviewed surface's -- so `mcp.capabilities` without `migrations.set` is a manifest with nothing to open. | **The join is of MANIFESTS**: `capability_manifest.joined_capabilities(release, project)` -- the release's entries less `release.disabled` plus the project's -- compiled ONCE against the merged surface and the project's snapshot with the joint contract id; `lock` first proves both committed contracts are what their manifests compile to (exit 5 otherwise). `mcp.capabilities` requires `migrations.set` with a reviewed surface and a snapshot, each refused by name with the command that writes it. ADR 0201 §3 amended in place with the reason. The example project's manifest and the positive CLI arms are Run 5's, with the file the scaffold emits; this run's tests drive a hand-built manifest under `tmp_path` over the example project's committed surface and snapshot. | The plan's sentence described the result correctly and the mechanism wrongly, and the first grouped read would have found it on a host; an ADR amended before the build is cheaper than one amended after a trip (D1116's shape, avoided). | 0201 (amended) |
 | **D1148** | ADR 0184 / `EVAL-HARNESS-001`: *"every enabled capability needs a positive and an adversarial case of each origin"*, enforced by `evaluation_harness.coverage`; ADR 0201 §5: the scaffold emits `requires_approval: true`. | **The two rules had never met.** D870 reclassifies an approval-requiring write's derived positive as the `requires_approval` adversarial case, so such a capability has NO derived positive by construction -- and `coverage` refused it: `render-evaluation-report.py --write --project project.example.yaml` exited 5 on the first manifest the scaffold wrote (*"capability 'set_note_embedding' has no derived positive case"*). No committed contract had ever declared approval; the release's writes declare `false` and the second fixture's profile sets it at LOCK time, after the report is rendered. | `coverage` no longer requires a DERIVED positive of a capability whose contract declares `requires_approval` -- the reclassified case is that positive, and the report reads it in the `requires_approval` column -- and still requires the WRITTEN positive, which a person writes as the intended call with `expects: refused` (`projects/example/evaluation-cases.yaml` carries one). The release report is byte-identical (no release capability declares approval). | A guard that could never be satisfied by a shape an ADR prescribes is a contradiction, not a boundary; the exception is scoped to the one field whose semantics D870 already decided, and the report still shows the zero. | — |
 | **D1149** | Run 5's targeted list (the plan's, plus the modules "whose subjects moved"), and the appendix's rule that a run's targeted list holds every guard module whose subject the run touched. | **CI was RED on `7d632b6` on both jobs, on one test: `test_project_retire.py::test_the_provider_destroy_accepts_the_expired_manifest_a_retirement_hands_it`.** It downgrades a copy of `project.example.yaml` to version 3 and pops `migrations` (Session 20's key); Run 5 gave the example manifest `mcp.capabilities`, the version 6 gate refused the downgraded copy at the loader, and the test that measures *the loader does not refuse here* went red. `test_project_retire` was in Run 4's targeted list and not in Run 5's; the list was written from the plan's Run 5 text, which names the modules the run ADDS, not the readers of the fixture it CHANGES -- D1146's shape, one run later, on a fixture instead of a definition. `git grep -n project.example.yaml -- tests` finds sixteen modules; one of them lowers the version, and it is this one. | The downgrade pops both keys; the row recorded; **the rule sharpened again**: a run that changes a shipped fixture greps the whole tree for that fixture's readers and runs every module found, the same way a removed definition's readers are found (D1146). Repaired in Run 5's second commit, CI read. | The cheapest point again -- CI six minutes after the push, the repair one line -- and recorded because a rule that has now been missed twice in two runs is a rule the appendix states too weakly. | — |
+| **D1150** | Plan §2: *"`EVAL-HARNESS-002` joins `evaluation_harness`, and `REC-KIT-003` joins `disaster_kit`"*; Run 6's list item 2 repeats it. | **ADR 0089 refuses the join, and its guard said so on the first run**: `test_a_claim_resolves_to_the_session_that_introduced_it` -- *"a claim's session is the MAX of its requirements' target sessions"* -- reported `evaluation_harness` moving from 16 to 21 and `disaster_kit` from 18 to 21. Joining a Session 21 requirement into an older claim re-dates the claim, so `claims_through_session(16)` would stop answering for the harness and `claims_through_session(18)` for the kit, and both sessions' evidence documents would no longer describe the claims they recorded. `REC-KIT-003` also had no live half, which `claim_mode` refuses for a claim of its own. | **Four claims dated 21, not two**: `agent_tenant_surface`, `agent_scaffold`, `project_evaluation_harness` (`EVAL-HARNESS-002`) and `kit_read_at_a_later_release` (`REC-KIT-003`, with a live half added: the kit exported from the host BEFORE the deploy through this session, at outputs v17, verifies at this release -- `--kit-dir` admits it, which is the first thing D1133's restored flags buy). The older two claims keep their requirements and their sessions. 108 claims. | A claim is dated by what it names, and a widening of an older claim is a new claim about a new session -- the same reason Session 20's `honest_readers` was not folded into Session 12's `deployment_convergence`. | — |
 
 ---
 
@@ -975,6 +976,88 @@ refused).
 `test_evaluation_harness`, `test_mcp_catalog`.
 
 ### Run 6 — the bump
+
+**Done.** 2026-09-11, on the `session-21` branch. One divergence row (D1150),
+1010 targeted tests green across 13 modules, the live module collecting six
+proofs under `--setup-plan` with the roster variables set, and the Session 1
+gate run once on the clean tree before the push.
+
+**Built, as listed, with these differences from the list.** `CURRENT_SESSION`
+21 and `VERSION` 1.2.0, with ADR 0162's pricing in the constant's comment (four
+additive schema moves; a minor, confirmed or stopped by Run 7's `upgrade
+plan`). Six requirements registered with the node ids the runs actually wrote
+-- `test_scope_vocabulary`'s seven for `AGT-VOCAB-001` beside the two of
+`test_scope_registry`; `test_lock_roster`'s six for `AGT-ROSTER-001` beside
+`test_mcp_tools`' four; `test_project_agent_surface`'s eight, the example
+project's compile in `test_agent_command`, the v18 migrator and the matrix's
+classification for `AGT-TENANT-001`; `test_agent_command`'s five and the CLI
+roster for `AGT-INIT-001`; three harness tests for `EVAL-HARNESS-002`, one of
+them written here (`test_a_projects_report_is_current_and_carries_the_merged_
+digest`, the report's digest equal to the joint contract's and to the lock's);
+Run 1's two kit tests for `REC-KIT-003`. **Four claims, not two** (D1150):
+ADR 0089's guard refused the plan's joins, so `EVAL-HARNESS-002` and
+`REC-KIT-003` are `project_evaluation_harness` and `kit_read_at_a_later_
+release`, each dated 21, and the second gained the live half it lacked.
+
+**The live module.** `tests/deployment/test_session21_agent.py`, six proofs,
+gated on the three roster variables (the administrator's password is not a
+roster variable; `admin_session` skips by itself, as Session 16's module
+relies on). Two things the plan's text had wrong, both found by reading the
+product before writing the proof. First, **the tenant write is refused, on
+purpose**: the example manifest is what the scaffold wrote and the scaffold
+declares approval, so the proof named for a round trip is
+`test_betas_lock_carries_the_tenant_write_the_plane_refuses_it_pending_
+approval_and_audits_it` -- the write registered from beta's lock is reached
+over a note the owner holds, carrying rig 21d's 768-float string, refused
+pending approval, audited with that reason and the joint contract's hash, and
+the tenant row untouched. A proof that rewrote the manifest to make the write
+succeed would measure a manifest the release does not ship. Second, **agents
+are created through `auth_create_agent` on both projects, not through the
+admin endpoint**, because the admin session the suite holds is alpha's; the
+ceiling at CREATION is measured through alpha's endpoint (422 for the tenant
+scope, 201 for a release one), and the ceiling at ISSUE through
+`/auth/agent-token` on both -- beta issues, alpha refuses the same stored
+grant. Beta's owner is a subject registered on beta through `auth_create_user`
+and swept with its rows. The other four: six tools on alpha and seven on beta
+with a reader that can neither see nor call the tenant write and whose call
+is audited (ADR 0140 re-run); the deployed lock recording the scaffold's
+manifest and contract digests and beta's document the block, alpha's the
+null, both at v18; beta's document and lock publishing the digest the example
+project's report carries, alpha's the release report's; and the kit exported
+before the deploy verifying at this release.
+
+**The gate.** `bin/session-21-check.sh` derived from Session 20's by diff
+(`/tmp/s21-r6-gate-derive.py`, every substitution anchored once; header and
+usage rewritten whole, both halves read line by line). **Session 18's
+declarations are FIVE, not the four D1133 counted**: `--kit-dir`,
+`--replacement-host-outputs`, `--replacement-bootstrap-state`,
+`--restore-evidence-file`, `--rehearsal-evidence-dir`, parsed, pre-flighted
+(files as files, the two directories as directories) and exported exactly as
+Session 18's gate does. Host mode gains step 4c, `check_the_tenant_surface_is_
+deployed`: both documents at v18 with a ready plane, beta recording
+`projects/example` and alpha recording null, and `/auth/login` answering a
+4xx on both before the suite runs (a deploy through 21 recreates the issuer,
+ADR 0155). Offline step 6 checks the example project's report beside the
+release's; `check --project project.example.yaml` there now compares the
+project's committed contract too. `SHELL_COMMANDS` gains it; `test_gate_
+contract`'s typed-number scan passes on it.
+
+**Documents.** README's status paragraph at Session 21 and 1.2.0 (*Adopt
+1.2.0*); every `--through-session 20` and `--session 20` a reader is told to
+type moved to 21 (README, `docs/api-operations.md`, and
+`docs/pool-operations.md`, which the plan's grep pattern missed and
+`test_the_documented_path_passes_session_numbers_this_release_accepts`
+caught). `docs/new-team-member.md` carries no session number to re-derive.
+The matrix and the product contract regenerated (178 requirements before,
+184 after).
+
+**Targeted, all green:** `test_evidence_claims`, `test_acceptance_registry`,
+`test_cli_contract`, `test_session12_documented_path`,
+`test_repository_contract`, `test_gate_contract`, `test_evaluation_harness`,
+`test_documentation_index`, `test_compatibility`, `test_upgrade_plan`,
+`test_upgrade_command`, `test_session_eight_gate_modes`, `test_disaster_kit`;
+then `bin/session-01-check.sh` once on the clean tree, per the plan and the
+working agreement (a run close before a trip is one of the cases). CI read.
 
 1. `src/agentic_postgres/__init__.py`: `CURRENT_SESSION = 21`; `VERSION` →
    `1.2.0` with the ADR 0162 reasoning in the comment (four additive schema
