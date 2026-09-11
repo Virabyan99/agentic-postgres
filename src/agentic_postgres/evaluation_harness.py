@@ -195,6 +195,17 @@ def _sample_value(operator: str) -> Any:
     return "harness-value"
 
 
+def _selects_a_resource(resource: dict[str, Any]) -> bool:
+    """Whether a read takes the query shape -- a caller names the resource --
+    or runs one argument-free RPC with no caller input.
+
+    By SHAPE, from the resource's operation, and not by the tool's name (ADR
+    0200): `query_resource` was the name that meant "relation" while there was
+    one such tool, and a project's lock may carry another under its own name.
+    """
+    return resource["operation"]["method"] == "get"
+
+
 def _read_cases(name: str, tool: dict[str, Any], resource: dict[str, Any]) -> list[Case]:
     """A read capability's cases, one adversarial per frozen field."""
     tool_name = tool["name"]
@@ -216,7 +227,7 @@ def _read_cases(name: str, tool: dict[str, Any], resource: dict[str, Any]) -> li
 
     # The base call: the first permitted filter, the first ordering, the ceiling.
     call: dict[str, Any] = {"tool": tool_name}
-    if tool_name == "query_resource":
+    if _selects_a_resource(resource):
         call["resource"] = resource["name"]
         if filters:
             first = filters[0]
@@ -252,7 +263,7 @@ def _read_cases(name: str, tool: dict[str, Any], resource: dict[str, Any]) -> li
             )
         )
 
-    if tool_name == "query_resource":
+    if _selects_a_resource(resource):
         cases.append(
             case(
                 id=f"derived:{name}:resources",

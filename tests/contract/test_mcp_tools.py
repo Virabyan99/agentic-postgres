@@ -43,11 +43,8 @@ from app.mcp_errors import (
     AgentVisible,
 )
 from app.mcp_lock import (
-    EXPECTED_TOOL_NAMES,
     METADATA_TOOLS,
-    READ_TOOLS,
     SUPPORTED_SCHEMA_VERSIONS,
-    WRITE_TOOLS,
     CapabilityLock,
     LockError,
     Operation,
@@ -64,6 +61,16 @@ from app.mcp_query import (
 )
 from app.mcp_tools import ToolRefusal, describe_resource, list_resources, query_resource
 from app.mcp_upstream import AgentContext, UpstreamRefusal, execute_write
+
+#: The RELEASE's roster, as a fixture and no longer as the runtime's rule (ADR
+#: 0200). `mcp_lock` used to export these; since Session 21 the runtime
+#: registers whatever the compiler signed, and the only roster it keeps is the
+#: metadata pair. The six names stay here because every fixture in this module
+#: is the release's six-tool lock, and a test naming them is describing its
+#: fixture rather than asserting a bound.
+READ_TOOLS = ("query_resource", "run_report")
+WRITE_TOOLS = ("create_note", "update_task_status")
+EXPECTED_TOOL_NAMES = tuple(sorted((*METADATA_TOOLS, *READ_TOOLS, *WRITE_TOOLS)))
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -439,8 +446,8 @@ def test_a_metadata_tool_takes_no_slot_and_a_read_and_a_write_both_do(
     monkeypatch.setattr(mcp_tools, "audit_complete", lambda *_, **__: True)
 
     registry = _Registry()
-    assert mcp_tools.register(registry, lock, base_url=BASE, slots=slots) == mcp_tools.TOOL_NAMES
-    assert set(registry.tools) == set(mcp_tools.TOOL_NAMES)
+    assert mcp_tools.register(registry, lock, base_url=BASE, slots=slots) == EXPECTED_TOOL_NAMES
+    assert set(registry.tools) == set(EXPECTED_TOOL_NAMES)
 
     asyncio.run(registry.tools["list_resources"]())
     assert seen["meta"] == slots.limit, "a metadata tool must not queue behind a read"
@@ -623,28 +630,40 @@ def test_nothing_dials_the_locks_published_upstream() -> None:
 
 
 # ---------------------------------------------------------------------------
-# exactly six tools, from the lock (four until Session 9 Run 4 — D486)
+# the roster is the lock's (six until Session 21 -- D486, D933, ADR 0200)
 # ---------------------------------------------------------------------------
 
 
-def test_the_registered_roster_is_the_locks_roster_and_it_is_six() -> None:
-    """**The equality, restored (D486).**
-
-    Run 4 widened the lock's roster to six and left `register()` at four, and for
-    exactly one run this asserted the gap was EXACTLY `WRITE_TOOLS` — an exact
-    set, never a subset (D300). Run 5 registers the two writes, so the gap is
-    empty and the honest assertion is equality again.
-
-    **Two lists, not one read twice.** `mcp_tools.TOOL_NAMES` is written out in
-    that module rather than imported from `mcp_lock`; aliasing the constant would
-    make this line compare a value with itself, which is §6's *"a test comparing
-    two constants is not testing the thing between them"* with only one constant
-    left to compare.
+def test_the_registered_roster_is_the_locks_roster(monkeypatch: Any) -> None:
+    """**Replaces `test_the_registered_roster_is_the_locks_roster_and_it_is_six`**
+    under ADR 0200, and it is stricter: the old test compared two constants,
+    and this one registers two different locks and reads back what each one
+    produced. The release's six-tool fixture registers six; the same fixture
+    with a write removed registers five, which is D933 inverted -- the state
+    the runtime refused for five sessions -- and `test_lock_roster` proves the
+    same thing through the real compiler, loader and server.
     """
-    assert EXPECTED_TOOL_NAMES == tuple(sorted((*METADATA_TOOLS, *READ_TOOLS, *WRITE_TOOLS)))
-    assert len(EXPECTED_TOOL_NAMES) == 6
-    assert mcp_tools.TOOL_NAMES == EXPECTED_TOOL_NAMES
-    assert set(WRITE_TOOLS) <= set(mcp_tools.TOOL_NAMES)
+    _with_scopes(monkeypatch, "meta:read")
+    six = _lock(NOTES)
+    registry = _Registry()
+    assert mcp_tools.register(registry, six, base_url=BASE) == EXPECTED_TOOL_NAMES
+    assert set(registry.tools) == set(EXPECTED_TOOL_NAMES)
+
+    five = CapabilityLock(
+        contract_id=six.contract_id,
+        project_key=six.project_key,
+        upstream=six.upstream,
+        canonical_sha256=six.canonical_sha256,
+        tool_count=5,
+        capability_count=6,
+        tools=tuple(tool for tool in six.tools if tool.name != "create_note"),
+    )
+    registry = _Registry()
+    assert mcp_tools.register(registry, five, base_url=BASE) == tuple(
+        name for name in EXPECTED_TOOL_NAMES if name != "create_note"
+    )
+    assert "create_note" not in registry.tools
+    assert not hasattr(mcp_tools, "TOOL_NAMES"), "the runtime carries a roster of its own again"
 
 
 def _write_tool_entry(name: str) -> dict[str, Any]:
@@ -730,24 +749,54 @@ def test_a_valid_six_tool_lock_loads(tmp_path: Path) -> None:
     assert tuple(tool.name for tool in load_lock(path).tools) == EXPECTED_TOOL_NAMES
 
 
-def test_a_lock_with_a_seventh_tool_is_refused(tmp_path: Path) -> None:
-    """Offline, at load, rather than on a cluster — asserted AFTER the roster
-    widened, not only before (D486): the property is that the surface is
-    enumerated, and the number moving must not have loosened it."""
+def test_a_five_tool_lock_loads_and_serves_five(tmp_path: Path) -> None:
+    """**Replaces `test_a_lock_missing_one_of_the_six_is_refused`** under ADR
+    0200 -- D933 inverted. A lock without `create_note` was refused at startup
+    for five sessions (*"the lock serves [five], not [six]"*, rig 21b); it now
+    loads and serves five. What a lock may not lack is the metadata pair, which
+    the next test keeps."""
     path = tmp_path / "lock.json"
-    document = _lock_document(*EXPECTED_TOOL_NAMES, "delete_everything")
-    path.write_text(json.dumps(document), encoding="utf-8")
+    five = tuple(name for name in EXPECTED_TOOL_NAMES if name != "create_note")
+    path.write_text(json.dumps(_lock_document(*five)), encoding="utf-8")
 
-    with pytest.raises(LockError, match="delete_everything"):
+    assert tuple(tool.name for tool in load_lock(path).tools) == five
+
+
+@pytest.mark.parametrize("missing", METADATA_TOOLS)
+def test_a_lock_missing_a_metadata_tool_is_refused(tmp_path: Path, missing: str) -> None:
+    """**Replaces `test_a_lock_with_a_seventh_tool_is_refused`'s roster half**
+    under ADR 0200: the one roster the runtime keeps is the two tools it
+    answers itself. A lock without `list_resources` is a surface no caller can
+    discover; the seventh-tool half moved to `test_lock_roster`, where a tool
+    the compiler did not sign is refused by its digest."""
+    path = tmp_path / "lock.json"
+    names = tuple(name for name in EXPECTED_TOOL_NAMES if name != missing)
+    path.write_text(json.dumps(_lock_document(*names)), encoding="utf-8")
+
+    with pytest.raises(LockError, match="metadata tools"):
         load_lock(path)
 
 
-def test_a_lock_missing_one_of_the_six_is_refused(tmp_path: Path) -> None:
-    """The other direction: a subset is not the contract either."""
+def test_a_metadata_tool_by_another_name_is_refused(tmp_path: Path) -> None:
+    """The other direction of the same rule: a `metadata` tool the runtime does
+    not implement is a tool nothing answers."""
     path = tmp_path / "lock.json"
-    path.write_text(json.dumps(_lock_document(*EXPECTED_TOOL_NAMES[:5])), encoding="utf-8")
+    document = _lock_document(*EXPECTED_TOOL_NAMES)
+    document["tools"].append(
+        {
+            "name": "list_everything",
+            "kind": "metadata",
+            "source": "lock",
+            "timeout_ms": 1000,
+            "discovery_scope_sets": [["meta:read"]],
+            "descriptions": [],
+            "resources": [],
+        }
+    )
+    document["tool_count"] = 7
+    path.write_text(json.dumps(document), encoding="utf-8")
 
-    with pytest.raises(LockError):
+    with pytest.raises(LockError, match="list_everything"):
         load_lock(path)
 
 
@@ -838,14 +887,29 @@ def test_a_write_tool_naming_a_resource_is_refused(tmp_path: Path) -> None:
         _loaded(tmp_path, document)
 
 
-def test_a_tool_whose_kind_disagrees_with_the_roster_is_refused(tmp_path: Path) -> None:
-    """A reviewed name with a different kind is a different tool wearing it —
-    the lock cannot silently move a name between the dispatch paths."""
+def test_a_tool_whose_kind_disagrees_with_its_shape_is_refused(tmp_path: Path) -> None:
+    """**Replaces `test_a_tool_whose_kind_disagrees_with_the_roster_is_refused`**
+    under ADR 0200. There is no roster to disagree with; what a kind must
+    agree with is the SHAPE the entry carries. A write entry relabelled `read`
+    names no resource and carries a write's arguments, and both are refused;
+    a read entry relabelled `write` carries resources, and that is refused
+    too. The lock cannot silently move a tool between the dispatch paths."""
     document = _lock_document(*EXPECTED_TOOL_NAMES)
     create = next(tool for tool in document["tools"] if tool["name"] == "create_note")
     create["kind"] = "read"
+    with pytest.raises(LockError, match="names no resource"):
+        _loaded(tmp_path, document)
 
-    with pytest.raises(LockError, match="roster says"):
+    document = _lock_document(*EXPECTED_TOOL_NAMES)
+    query = next(tool for tool in document["tools"] if tool["name"] == "query_resource")
+    query["kind"] = "write"
+    with pytest.raises(LockError, match="must name no resource"):
+        _loaded(tmp_path, document)
+
+    document = _lock_document(*EXPECTED_TOOL_NAMES)
+    listing = next(tool for tool in document["tools"] if tool["name"] == "list_resources")
+    listing["kind"] = "read"
+    with pytest.raises(LockError, match="metadata tools are exactly"):
         _loaded(tmp_path, document)
 
 

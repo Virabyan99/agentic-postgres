@@ -26,22 +26,28 @@ deployment serves is in its lock.
 
 ## What a tool is, and what it is not
 
-**Six tools, and there are exactly six.** The runtime reads the deployed lock
-at startup and validates it strictly: a tool the roster does not name, or an
-unknown `schema_version`, fails the start rather than being ignored (ADR 0127).
-Two of the six are `metadata` and answer from the lock in memory — they reach no
-database and take no concurrency slot. Two are `read` and make exactly one
-upstream request each. Two are `write`, each one-to-one with a reviewed RPC: a
-write selects among nothing, projects nothing, and declares its side-effect
-bound, its idempotency and its audit redaction in the contract (D470). The
-bound is **1 affected row** on both, and that is the function's own shape —
-each RPC returns a single composite row, not a set — rather than a ceiling
-chosen to look safe (D487).
+**The tools are the lock's, and the lock is the compiler's** (ADR 0200). The
+runtime reads the deployed lock at startup and validates it strictly: an
+unknown `schema_version`, a tool list the compiler did not sign, or a lock
+missing either metadata tool fails the start rather than being ignored (ADR
+0127, kept as *compiled, not edited*). It registers what the lock carries by
+**kind and shape**, never by name. The two `metadata` tools are the runtime's
+own and every lock carries exactly them: they answer from the lock in memory,
+reach no database and take no concurrency slot. A `read` is either a query
+over published relations or one argument-free RPC, and makes exactly one
+upstream request. A `write` is one-to-one with a reviewed RPC: it selects
+among nothing, projects nothing, and declares its side-effect bound, its
+idempotency and its audit redaction in the contract (D470). The release's two
+writes bound **1 affected row**, and that is each function's own shape — a
+single composite row, not a set — rather than a ceiling chosen to look safe
+(D487). A project's own capabilities join this list in that project's lock
+(ADR 0201); the table below is the release's.
 
-**Six is what the deployment serves; it is not what any one caller sees.**
-`tools/list` is filtered by the caller's own scopes, so an agent holding
-`meta:read` and `notes:read` is shown three names and an agent holding both
-write scopes is shown six. The scope column below is what decides it, as a
+**The count is what the deployment serves; it is not what any one caller
+sees.** `tools/list` is filtered by the caller's own scopes, so an agent
+holding `meta:read` and `notes:read` is shown three names and an agent holding
+both release write scopes is shown all six below. The scope column is what
+decides it, as a
 disjunction of conjunctions — `query_resource` needs `notes:read` **or**
 `tasks:read`, `run_report` needs both (ADR 0140, D421). **Hiding a name is not
 the boundary**: a caller that knows a hidden name can still send it, and what

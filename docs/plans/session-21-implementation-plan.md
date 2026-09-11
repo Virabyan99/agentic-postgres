@@ -86,9 +86,9 @@ account this session is written from.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1145**. Rows D1124–D1139
+Six columns, next free number after this table **D1146**. Rows D1124–D1139
 were measured at planning on 2026-09-11 at `5a43f12`; the runs add theirs
-below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's).
+below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's, D1145 Run 3's).
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -113,6 +113,7 @@ below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's).
 | **D1142** | `deployed_output.validate_deployed_document` is called by five readers — `dr_kit.py` (export and verify), `fleet.py:96`, `bin/project-retire.py:93`, `write_deployed_document` — and by every command that loads a deployed document through it. | **Every one of them refuses a deployed document an earlier release wrote**, by the same `enum: [17]` D1141 measured, from the moment a newer release is checked out until that project is redeployed. On the trip that window is short; on a replacement host built from a kit it is the whole restore. Measured only through the kit's path; the others share the function and were not exercised. | **Recorded, not repaired.** The kit's verifier is the one reader whose whole purpose is that window, and it is version-aware now. Whether `fleet`, `doctor` and `project-retire` should read an older document (and what they may say about it) is a decision for the hardening session, §10. | D600's rule — every reader of the deployed document is guarded against the schema — was applied with a single-version schema, so "guarded" means "refuses the previous release's document". That was invisible while every read happened after a redeploy. | 0195 |
 | **D1143** | This plan §5 Run 1: *"the registry gains the requirement here (its proofs are offline and the constant does not move for it — `target_session: 21` is set in Run 6 with the rest)."* | **The registry refuses an entry whose `target_session` exceeds `CURRENT_SESSION`** (`test_acceptance_registry.py:131`: `1 <= target_session <= CURRENT_SESSION`), and every entry must carry one. An entry with no target session or a future one cannot be committed before the bump. | `REC-KIT-003`'s two proofs are written and green in Run 1 and **registered in Run 6** with the rest, exactly as `AGT-*` are. The plan text is corrected here rather than in place. | D690's rule seen from the registry's side: a session's requirements arrive with the constant, all of them, and a proof may exist before its requirement does but not the other way round. | — |
 | **D1144** | `deploy.sh --through-session N` is admitted for every N from 2 to `CURRENT_SESSION` (`bin/deploy-project.py:1894`, D59); the auth service exists from session 6 (`profiles: [session6]`). | **The lock is compiled only when `through_session >= AGENT_PLANE_SESSION` (8)** (`deploy-project.py:2159`), and since this run the issuer REQUIRES `APG_MCP_LOCK_FILE` (`settings.REQUIRED_VARIABLES`) and the override mounts the lock into `auth` unconditionally (D1126). A deploy through session 6 or 7 would therefore start an issuer whose mount source does not exist -- refused by the step 6b mount pre-flight, or by `settings.load` if it got that far. Nothing has deployed through a session below 8 since Session 8, and both production projects are through 20. | **Recorded, not repaired.** The honest floor for a deploy that starts the issuer is now 8, and lifting `deploy.sh`'s admitted minimum from 2 is a D59 change for Run 6 (the bump) or Session 25 to take with the operator; a conditional mount would be a lock-less issuer that starts, which is D381's shape. | ADR 0177's rule applied to a container rather than a field: a capability arriving at a version must be refused below it, not silently absent. The consequence was found by reading the deploy's order (the lock is written before step 6, so the mount is satisfied on every deploy that compiles one) rather than by a test, because no test deploys through 7. | 0200 |
+| **D1145** | D1124 counted the roster's writers: four places in the runtime and the compiler, plus two source-text guards. The stage plan's §11: *"for 21 every reader of `agent_scope` and `EXPECTED_TOOL_NAMES`"*. | **Two more readers keyed on a tool's NAME rather than its shape, outside the runtime, and neither imports the roster constant** -- so no grep for `EXPECTED_TOOL_NAMES` finds them. `evaluation_harness._read_cases` decided whether a read case names a resource with `if tool_name == "query_resource"` (twice), and `test_evaluation_harness`'s dispatcher chose `query_resource` versus `run_report` by the same literal and imported `WRITE_TOOLS` for the third branch. Under a tenant's lock the harness would have derived the report shape for every read whose tool was not called `query_resource`, and the dispatcher would have found no branch. | Both decide by shape: `_selects_a_resource(resource)` reads the resource's operation method (`get` selects, `post` runs one RPC), and the dispatcher reads `lock.tool(tool).read_shape` and `.kind`. The runtime's two read functions take the tool's name as a keyword whose default is the release's, so registration always passes the lock's. | Question 5 of the defect pattern, in the form D979 warned about: the second reader was not a caller of the definition but a string comparison against one of its values, which is invisible to every grep for the definition's name. The name `query_resource` meant "relation read" for exactly as long as there was one. | 0200 |
 
 ---
 
@@ -590,6 +591,101 @@ cannot be scoped, the control is the read path).
 `test_capability_compiler`, `test_capability_profile`, `test_mcp_catalog`,
 `test_api_migrations`, `test_evaluation_harness`, `test_repository_contract`,
 `test_documented_path`.
+
+**Done.** 2026-09-11, on the `session-21` branch. ADR 0200's second half is
+built; one divergence row (D1145); battery 5/5. **D933 is closed for both
+things it blocked.**
+
+**Built, as listed, with these differences from the list.** `mcp_lock` keeps
+exactly one roster, `METADATA_TOOLS`, and `KINDS`, `READ_SHAPES` and
+`TOOLS_DIGEST_FROM = 4`; `READ_TOOLS`, `WRITE_TOOLS`, `EXPECTED_TOOL_NAMES`
+and `EXPECTED_KINDS` are gone. `_tool` judges a kind by its shape: a read
+names resources and its resources reach one of `get` or `post`, never both; a
+write carries the write shape and no resource; a metadata tool is one of the
+pair and the pair is metadata; at version 4 a read DECLARES `reads` and the
+declaration must agree with what its resources reach, and below 4 the field
+is forbidden. `load_lock` requires the metadata pair, refuses a duplicated
+name, and at version 4 recomputes `tools_sha256` over the raw tool list with
+`canonical_bytes` -- the compiler's serialization reproduced with the standard
+library, and a test keeps the two byte-equal. `Tool.read_shape` is a derived
+property, so a v1 lock registers by the same rule as a v4 one.
+`mcp_tools.register` walks the lock sorted by name: the metadata pair as
+before; a relation read with the query shape; an rpc read with no caller
+input; a write with a closure whose `inspect.Signature` AND `__annotations__`
+are built from the lock's argument list plus `idempotency_key` and `dry_run`
+(rig 21a), which also refuses an undeclared or missing argument itself for a
+caller that reached it some other way. `query_resource` and `run_report` take
+the tool's name as a keyword; the default is the release's, for the callers
+that predate a lock with more than one such tool, and registration always
+passes the lock's. `TOOL_NAMES` is gone and `register` returns what it
+registered. The compiler keeps `METADATA_TOOL_NAMES`, refuses a metadata
+capability outside the pair, refuses a read over an RPC with arguments (the
+message names the two shapes and the remedy, D1129), writes `reads` on a read
+at version 4 and `tools_sha256` on a lock at 4 after the profile; `PLANNED_TOOLS`
+is gone. The catalog's hand-written prose no longer states a count, and
+README's *What is intentionally unavailable* paragraph says what closes the
+plane now and how a project opens it.
+
+**Tests replaced by stricter ones under ADR 0200**, each named in its
+docstring: `test_the_registered_roster_is_the_locks_roster_and_it_is_six` →
+`…is_the_locks_roster` (six registers six, the same fixture minus a write
+registers five); `test_a_lock_missing_one_of_the_six_is_refused` →
+`test_a_five_tool_lock_loads_and_serves_five`; `test_a_lock_with_a_seventh_tool_is_refused`
+→ `test_a_lock_missing_a_metadata_tool_is_refused` (parametrised over the
+pair) plus `test_a_metadata_tool_by_another_name_is_refused`, with the
+seventh-tool half moved to `test_lock_roster::test_a_tool_the_compiler_did_not_digest_is_refused`;
+`test_a_tool_whose_kind_disagrees_with_the_roster_is_refused` →
+`…with_its_shape_is_refused` (three arms); `test_the_compiled_tools_are_the_six_that_were_planned`
+→ `…are_the_manifests_enabled_capabilities_grouped_by_tool` (the manifest read
+through the product loader, independently of the compiler); the catalog's
+count test asserts the rendered line carries the contract's count and the
+prose states none; `test_retiring_the_task_tools_is_blocked_by_the_roster` →
+`…is_no_longer_blocked_by_the_roster`, which compiles the example manifest
+without `update_task_status` and LOADS the five-tool lock. `tests/contract/
+test_lock_roster.py` is new (6 tests): five loads and serves five through the
+real compiler and loader; a tenant write compiled from a manifest over the
+merged surface loads and is served through the assembled server's own
+`list_tools` -- ADR 0140's hidden-name half re-run against a roster of seven,
+with a reader seeing three names and a writer holding the tenant scope seeing
+four; a tool appended, edited or removed by hand refused by the digest and a
+v3 lock carrying one refused by version; the runtime's `canonical_bytes` equal
+to the compiler's; a tenant write's audit record opened before its scope is
+checked and closed `refused`, with the caller holding the scope reaching the
+work as the control; the two compiler refusals with the example manifest as
+the control.
+
+**What the run found.** D1145: two readers keyed on the NAME `query_resource`
+outside the runtime -- the harness's read-case builder and its test's
+dispatcher -- invisible to a grep for the roster constant; both decide by
+shape now. `test_capability_profile`'s forged-lock arms had to be RE-SIGNED
+after their mutation, because the digest now refuses a hand-edited list
+before the profile comparison runs; the profile check is defence in depth
+behind it and the test says so. The live proof `test_session8_agent_plane.py:314`
+asserts `tool_count == 6` against alpha's document and stays true on alpha; it
+belongs to Run 6 to compare against the lock's own count, since beta will
+publish seven after Run 7.
+
+**Measured.** The recompiled contract gains `reads` on the two read tools and
+nothing else; `mcp-contract.sh check` and `check --project` exit 0;
+`docs/mcp-tool-catalog.md` was already current (the renderer does not emit
+`reads`) and `docs/evaluation-report.md` moved by its digest.
+
+**Battery 5/5 killed, every control green** (`~/rig21/battery-r3.txt`): the
+digest check removed (kill in the not-digested test; control: five loads);
+the metadata-pair check removed (kill; control: the six-tool lock loads);
+registration by name restored for writes (kill in the pipeline test: the
+tenant write vanished from the writer's roster; control: five loads); the
+scope check moved before the audit record in the generic write (kill in the
+audit-order test; control: the release write with its scope held, which the
+mutation cannot reach); the RPC-with-arguments refusal removed (kill; control:
+the manifest-grouped compile). Anchors matched once; files restored by copy
+and byte-compared.
+
+**Targeted:** the list above plus `test_lock_roster`, `test_scope_vocabulary`,
+`test_scope_registry`, `test_capabilities_manifest`, `test_auth_endpoints`,
+`test_cli_contract` -- 1277 passed; ruff clean. `test_documented_path` does
+not exist under that name (D693's guard lives elsewhere) and was dropped from
+the list rather than substituted by association (D1104).
 
 ### Run 4 — a project's agent surface (ADR 0201)
 

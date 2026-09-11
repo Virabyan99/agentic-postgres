@@ -412,29 +412,25 @@ Not deferred — **outside the product**:
 - Automatic failover or multi-region replication
 - **Arbitrary SQL execution by an agent, under any authentication**
 
-**The agent plane serves this product's example domain, and not yours.** The
-six tools are the whole agent surface and they can only ever address `notes`
-and `tasks`. Two things close it, independently, and both are working as
-designed:
+**The agent plane addresses what the reviewed surface publishes, and nothing
+else** (ADR 0200). Until Session 21 it could only ever address `notes` and
+`tasks`: the runtime refused any lock that did not serve exactly six names,
+and the scope vocabulary was a closed enum of five. Both closures are gone,
+and what closes the plane now is the same thing that closes the REST surface:
 
-- The roster is enumerated rather than discovered (ADR 0127). `mcp_lock`
-  refuses any lock that does not serve exactly those six names, so a seventh
-  tool is refused at startup rather than ignored.
-- The scope vocabulary is a closed enum — `notes:read`, `notes:write`,
-  `tasks:read`, `tasks:write`, `meta:read`. There is no way to *declare* a
-  scope for an application's own data, and the schema says the closure is
-  deliberate: the data class is closed by ADR 0003 and grows only when that is
-  superseded. A capability that borrows `notes:read` to read something that is
-  not a note is representable, and a second gate catches it: the manifest no
-  longer compiles to the approved contract, and `bin/mcp-contract.sh` says so.
+- A scope is derived from a relation the reviewed surface publishes —
+  `<relation>:read` and `<relation>:write` — and the compiler refuses a
+  capability naming any other. A relation cannot be named for a storage or
+  administrative resource, so the derived class can never contain one.
+- The runtime registers what the deployed lock carries, by kind and shape,
+  and refuses a lock the compiler did not sign. A tool an agent can call is a
+  capability somebody reviewed, compiled from a manifest the checkout tracks.
 
-So an application built on this appliance gets a first-class REST surface, a
-first-class storage surface, and **no agent surface at all for its own tables**.
-Extending the vocabulary supersedes ADR 0003 and is not a configuration change.
-
-Related and open: `tasks` itself currently has no reviewed way to come into
-existence, so two of the six tools address a table nothing can populate
-(ADR 0196).
+A project opens the plane to its own tables by owning a capability manifest
+beside its migration set (ADR 0201; *Giving an agent your tables* below). A
+capability that borrows `notes:read` to read something that is not a note is
+still representable and still caught: the manifest no longer compiles to the
+approved contract, and `bin/mcp-contract.sh` says so.
 
 ## Repository map
 

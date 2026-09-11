@@ -34,21 +34,22 @@ from typing import Any
 from agentic_postgres import scope_registry
 from agentic_postgres.config import CapabilityContractError
 
-#: The MCP tool names the reviewed manifest compiles to, lexicographically. A
-#: constant rather than a derivation, and that is deliberate: `compile_canonical`
-#: derives the tool set from the manifest, so a test comparing the two would be
-#: comparing a function against itself. This is the reviewed answer, and
-#: `test_the_compiled_tools_are_the_six_that_were_planned` is where the two meet.
-#: Session 9 Run 3 added the two writes from docs/capability-plan.md; the
-#: runtime's own roster (`mcp_lock.EXPECTED_TOOL_NAMES`) catches up in Run 4.
-PLANNED_TOOLS = (
-    "create_note",
-    "describe_resource",
-    "list_resources",
-    "query_resource",
-    "run_report",
-    "update_task_status",
-)
+#: The two metadata tools, which the runtime implements itself and every lock
+#: must carry (ADR 0200, the one roster kept). A metadata capability under any
+#: other name would be a tool nothing answers, and is refused here.
+METADATA_TOOL_NAMES = ("describe_resource", "list_resources")
+
+#: The two shapes a read tool may take, and the field that declares one from
+#: schema version 4 (ADR 0200): a `relation` read selects among relations with
+#: the query shape, an `rpc` read runs one argument-free operation. A read over
+#: an RPC WITH arguments has no shape and is refused (D1129): an argument is a
+#: caller value in a request body, which is a write's shape.
+READ_SHAPES = ("relation", "rpc")
+
+#: The lock version at which the compiler signs the tool list it wrote
+#: (`tools_sha256`, over the canonical bytes after the profile) and declares
+#: each read's shape. Required at and above, forbidden below (ADR 0177).
+TOOLS_DIGEST_FROM = 4
 
 #: Sources a capability may name, and what each one means for compilation.
 #:
@@ -121,7 +122,7 @@ __all__ = [
     "BACKED_SOURCES",
     "COMPILED_SCHEMA_VERSIONS",
     "CONTRACT_ID",
-    "PLANNED_TOOLS",
+    "METADATA_TOOL_NAMES",
     "PROFILE_FIELDS",
     "RISK_ORDER",
     "UNBACKED_SOURCES",
@@ -418,7 +419,9 @@ def compile_canonical(
             {"capability": capability, "resolved": resolved}
         )
 
-    tools = [_compile_tool(name, backing) for name, backing in sorted(grouped.items())]
+    tools = [
+        _compile_tool(name, backing, manifest_version) for name, backing in sorted(grouped.items())
+    ]
 
     return {
         "schema_version": manifest_version,
@@ -429,7 +432,7 @@ def compile_canonical(
     }
 
 
-def _compile_tool(name: str, backing: list[dict[str, Any]]) -> dict[str, Any]:
+def _compile_tool(name: str, backing: list[dict[str, Any]], version: int) -> dict[str, Any]:
     """One tool, from the one or more capabilities behind it (ADR 0120)."""
     kinds = {entry["capability"]["kind"] for entry in backing}
     sources = {entry["resolved"]["source"] for entry in backing}
@@ -440,6 +443,37 @@ def _compile_tool(name: str, backing: list[dict[str, Any]]) -> dict[str, Any]:
             "one label"
         )
     kind = kinds.pop()
+
+    # **The one roster kept** (ADR 0200): the metadata pair is the runtime's own.
+    if (kind == "metadata") != (name in METADATA_TOOL_NAMES):
+        raise CompilerError(
+            f"tool {name!r} is {kind!r}; the metadata tools are exactly "
+            f"{list(METADATA_TOOL_NAMES)}, which the runtime answers itself, and a "
+            "capability under one of those names is metadata or nothing"
+        )
+
+    # **A read has one of two shapes, and an RPC with arguments is neither**
+    # (ADR 0200, D1129). Refused before anything else is checked about the
+    # read, so the message is about the shape and not about a column.
+    if kind == "read":
+        methods = {entry["resolved"]["backend"]["method"] for entry in backing}
+        if methods not in ({"get"}, {"post"}):
+            raise CompilerError(
+                f"tool {name!r} reads through {sorted(methods)}. A read selects among "
+                "relations (GET) or runs one argument-free RPC (POST), never both"
+            )
+        with_arguments = sorted(
+            entry["resolved"]["operation_id"]
+            for entry in backing
+            if entry["resolved"]["backend"]["arguments"]
+        )
+        if with_arguments:
+            raise CompilerError(
+                f"tool {name!r} reads through {with_arguments}, an RPC with arguments. A read "
+                "has two shapes: a query over a published relation, or one argument-free RPC. "
+                "An RPC argument is a caller value in a request body, which is a write's "
+                "shape (D486, D470). Publish the query as a view and read it as one"
+            )
 
     if len(backing) > 1 and kind != "read":
         raise CompilerError(
@@ -568,6 +602,9 @@ def _compile_tool(name: str, backing: list[dict[str, Any]]) -> dict[str, Any]:
     else:
         compiled["resources"] = [_compile_resource(entry) for entry in backing]
         compiled["max_rows"] = max(resource["max_rows"] for resource in compiled["resources"])
+        if version >= TOOLS_DIGEST_FROM:
+            methods = {entry["resolved"]["backend"]["method"] for entry in backing}
+            compiled["reads"] = "relation" if methods == {"get"} else "rpc"
     return compiled
 
 
@@ -822,6 +859,12 @@ def compile_lock(
         }
     if vocabulary is not None:
         lock["vocabulary"] = {name: list(vocabulary[name]) for name in sorted(vocabulary)}
+    if version >= TOOLS_DIGEST_FROM:
+        # **The compiler's signature on the list it wrote** (ADR 0200), after
+        # the profile, so the runtime recomputes it over exactly the tools it
+        # serves. A tool added, removed or edited by hand is a digest this
+        # compiler did not write, and the loader refuses it.
+        lock["tools_sha256"] = sha256(canonical_bytes(tools)).hexdigest()
     return lock
 
 

@@ -41,7 +41,7 @@ from agentic_postgres import evaluation_harness as harness
 from agentic_postgres.evaluation_harness import Case, HarnessError
 from app import mcp_errors, mcp_tools
 from app.mcp_errors import AgentVisible
-from app.mcp_lock import WRITE_TOOLS, CapabilityLock, load_lock
+from app.mcp_lock import CapabilityLock, load_lock
 from app.mcp_tools import ToolRefusal
 from app.mcp_upstream import AgentContext
 
@@ -151,26 +151,28 @@ def evaluate(case: Case, lock: CapabilityLock, monkeypatch: pytest.MonkeyPatch) 
             result = mcp_tools.describe_resource(
                 lock, tool=call["read_tool"], resource=call["resource"]
             )
-        elif tool == "query_resource":
+        elif lock.tool(tool).read_shape == "relation":
             result = mcp_tools.query_resource(
                 lock,
                 base_url=BASE,
                 token="t",  # noqa: S106 -- a fixture token
                 request_id=REQUEST_ID,
+                tool=tool,
                 resource=call["resource"],
                 columns=call.get("columns"),
                 filters=call.get("filters"),
                 order_by=call.get("order_by"),
                 limit=call.get("limit"),
             )
-        elif tool == "run_report":
+        elif lock.tool(tool).read_shape == "rpc":
             result = mcp_tools.run_report(
                 lock,
                 base_url=BASE,
                 token="t",  # noqa: S106
                 request_id=REQUEST_ID,
+                tool=tool,
             )
-        elif tool in WRITE_TOOLS:
+        elif lock.tool(tool).kind == "write":
             result = mcp_tools.invoke_write(
                 lock,
                 base_url=BASE,

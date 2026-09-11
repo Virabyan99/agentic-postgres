@@ -426,6 +426,15 @@ def test_the_runtime_loads_a_profiled_lock_and_refuses_one_that_disagrees(
     def load(mutate: Any) -> mcp_lock.CapabilityLock:
         copied = copy.deepcopy(document)
         mutate(copied)
+        # Re-signed after the mutation (ADR 0200): since Session 21 a tool list
+        # the compiler did not sign is refused by its digest BEFORE the profile
+        # is compared, and that refusal is `test_lock_roster`'s. What this test
+        # measures is the check behind it -- a lock whose profile block disagrees
+        # with its own tools -- so the forged list is signed as a compiler would
+        # sign it, and the profile comparison is the only thing left to refuse.
+        copied["tools_sha256"] = sha256(
+            capability_compiler.canonical_bytes(copied["tools"])
+        ).hexdigest()
         path = tmp_path / f"lock-{len(list(tmp_path.iterdir()))}.json"
         path.write_bytes(capability_compiler.canonical_bytes(copied))
         return mcp_lock.load_lock(path)

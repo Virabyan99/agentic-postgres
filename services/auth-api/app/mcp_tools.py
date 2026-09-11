@@ -1,10 +1,13 @@
-"""The six tools, and there are exactly six.
+"""The tools the deployed lock carries, registered by kind and shape (ADR 0200).
 
-`docs/capability-plan.md` has named them since Session 1: `list_resources`,
-`describe_resource`, `query_resource`, `run_report`, and — since Session 9 —
-`create_note` and `update_task_status`. This module registers them and nothing
-else. A seventh is refused by `mcp_lock` before registration is reached, and the
-registered names are asserted against the lock's roster.
+Until Session 21 this module registered six named tools and nothing else, and
+`mcp_lock` refused any lock that was not exactly those six. Now `register()`
+walks the lock: the two `metadata` tools are the runtime's own and every lock
+carries exactly them; a `read` is registered with the query shape when it
+selects among relations and with no caller input when it runs one RPC; a
+`write` is registered with the lock's own argument list. What keeps the surface
+reviewed is no longer a number: the compiler signs the tool list it wrote and
+`mcp_lock` refuses a list it did not sign.
 
 **Two of them reach nothing.** `list_resources` and `describe_resource` answer
 from the loaded lock: no OpenAPI request, no database, no upstream call at all
@@ -44,6 +47,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import json
 import re
 from typing import Any, Final
@@ -92,7 +96,7 @@ from app.mcp_upstream import UpstreamRefusal, execute, execute_write
 #: (`resource is None`) was carrying two ideas by ACCIDENT of representation,
 #: and they agreed only until the first tool separated them. Here the
 #: classification is the one the reviewed contract already makes -- it is the
-#: lock's own `kind`, checked against `EXPECTED_KINDS` at load -- and each
+#: lock's own `kind`, checked by shape at load (ADR 0200) -- and each
 #: consequence is written down beside its reason rather than inferred from a
 #: shape that happens to correlate.
 KIND_METADATA = "metadata"
@@ -114,24 +118,6 @@ AUDITED_KINDS = (KIND_READ, KIND_WRITE)
 #: read's availability to the audit table and add a mandatory round trip to a
 #: path that already pays one for its context.
 FAIL_CLOSED_KINDS = (KIND_WRITE,)
-
-#: The names `register()` registers, written out rather than imported from
-#: `mcp_lock`.
-#:
-#: **Two lists that must agree, not one list read twice** (D486). A test asserts
-#: `TOOL_NAMES == EXPECTED_TOOL_NAMES`; aliasing the constant would make that
-#: test compare a value with itself, which is the shape §6 names -- a test
-#: between two constants is not testing the thing between them. Run 4 widened the
-#: lock's roster to six and this list stayed at four for one run, with the gap
-#: asserted exactly; Run 5 registers the writes and restores the equality.
-TOOL_NAMES = (
-    "create_note",
-    "describe_resource",
-    "list_resources",
-    "query_resource",
-    "run_report",
-    "update_task_status",
-)
 
 #: The ceiling on one tool result, serialized, in bytes.
 #:
@@ -328,6 +314,10 @@ def query_resource(
     token: str,
     request_id: str,
     resource: str,
+    # The resource-selecting read this call goes through. Registration always
+    # passes the lock's name; the default is the release's, for the callers
+    # that predate a lock with more than one (ADR 0200).
+    tool: str = "query_resource",
     columns: list[str] | None = None,
     filters: list[dict[str, Any]] | None = None,
     order_by: int | None = None,
@@ -339,13 +329,13 @@ def query_resource(
     invalid call costs no upstream request and the refusal describes the input
     rather than the schema.
     """
-    found = _resource_for(lock, "query_resource", resource)
+    found = _resource_for(lock, tool, resource)
     parsed = [_filter(entry) for entry in filters or []]
 
     try:
         request = build_request(
             found,
-            timeout_ms=lock.tool("query_resource").timeout_ms,
+            timeout_ms=lock.tool(tool).timeout_ms,
             columns=columns,
             filters=parsed,
             order_by=order_by,
@@ -366,7 +356,7 @@ def query_resource(
     return _within_budget(
         result,
         found.max_rows,
-        _byte_ceiling(lock.tool("query_resource").max_response_bytes),
+        _byte_ceiling(lock.tool(tool).max_response_bytes),
     )
 
 
@@ -442,7 +432,13 @@ def _within_byte_budget(
 
 
 def run_report(
-    lock: CapabilityLock, *, base_url: str, token: str, request_id: str
+    lock: CapabilityLock,
+    *,
+    base_url: str,
+    token: str,
+    request_id: str,
+    # The rpc read this call goes through; the default is the release's (ADR 0200).
+    tool: str = "run_report",
 ) -> dict[str, Any]:
     """The caller's own activity, counted under the caller's own RLS.
 
@@ -454,13 +450,13 @@ def run_report(
     a count of rows, so an agent and its owner get identical numbers because they
     run the identical query under the identical claim.
     """
-    tool = lock.tool("run_report")
-    if len(tool.resources) != 1:
+    entry = lock.tool(tool)
+    if len(entry.resources) != 1:
         raise ToolRefusal(STRUCTURAL_REFUSAL, CONTRACT_DRIFT)
-    found = _resource_for(lock, "run_report", tool.resources[0].name)
+    found = _resource_for(lock, tool, entry.resources[0].name)
 
     try:
-        request = build_request(found, timeout_ms=tool.timeout_ms)
+        request = build_request(found, timeout_ms=entry.timeout_ms)
     except QueryRefusal as error:
         raise AgentVisible(INPUT_NOT_PERMITTED, str(error), NOT_IN_ALLOWLIST) from error
 
@@ -485,7 +481,7 @@ def run_report(
     # Not theoretical. Measured at 32,927 bytes for one row when each column
     # holds 4 KiB -- one row, so the row budget can never bind, which is exactly
     # the case a byte ceiling exists for.
-    return _within_byte_budget(rows[0], _byte_ceiling(tool.max_response_bytes))
+    return _within_byte_budget(rows[0], _byte_ceiling(entry.max_response_bytes))
 
 
 #: What a caller's idempotency key may look like, checked before it is sent.
@@ -663,11 +659,11 @@ def _filter(entry: Any) -> Filter:
 def register(
     server: Any, lock: CapabilityLock, *, base_url: str, slots: ReadSlots | None = None
 ) -> tuple[str, ...]:
-    """Register exactly the six tools and return their names.
+    """Register every tool the lock carries, by kind and shape, and return their names.
 
     The names are returned rather than assumed so a test can compare them with
-    the lock's, which is the check that a seventh tool -- or a renamed one --
-    fails offline rather than on a cluster.
+    the lock's -- which is now the definition rather than a check against one
+    (ADR 0200): a lock the compiler signed is what this deployment serves.
 
     Each closure reads the caller's token from the context resolved for this
     request. Nothing here holds a token between requests: `current_agent_context`
@@ -729,7 +725,7 @@ def register(
         -- `UPSTREAM_KINDS`, `AUDITED_KINDS` and `FAIL_CLOSED_KINDS`, each with
         its reason at the definition. D495's defect was an *accidental*
         correlation (`resource is None`); this is the lock's own classification,
-        already checked against `EXPECTED_KINDS` at load.
+        already checked by shape at load (ADR 0200).
 
         **The order is begin, then the work, then complete** -- and the scope
         check lives inside the work, deliberately. A call refused for a missing
@@ -928,199 +924,211 @@ def register(
         """
         return max(lock.tool(name).timeout_ms, 1) / 1000
 
-    # `name=` on every one. Without it the framework names a tool after its
-    # Python function, and these functions cannot be called `list_resources`
-    # because the module-level pure functions already are -- so the registered
-    # names would silently become `list_resources_tool` and the contract would
-    # be wrong in the one place a client reads it.
-    @server.tool(name="list_resources", timeout=seconds("list_resources"))
-    async def _list_resources() -> dict[str, Any]:
-        """The resources this deployment's agent surface can query, and the
-        scope each one needs. Read from the deployed lock; reaches no database."""
-        return await bounded(
-            "list_resources",
-            None,
-            lambda: list_resources(lock),
-            kind=KIND_METADATA,
-            arguments={},
-        )
-
-    @server.tool(name="describe_resource", timeout=seconds("describe_resource"))
-    async def _describe_resource(tool: str, resource: str) -> dict[str, Any]:
-        """One resource's frozen columns, permitted filters and permitted
-        ordering, exactly as the lock froze them. Read from the deployed lock."""
-        return await bounded(
-            "describe_resource",
-            None,
-            lambda: describe_resource(lock, tool=tool, resource=resource),
-            kind=KIND_METADATA,
-            arguments={"tool": tool, "resource": resource},
-        )
-
-    @server.tool(name="query_resource", timeout=seconds("query_resource"))
-    async def _query_resource(
-        resource: str,
-        columns: list[str] | None = None,
-        filters: list[dict[str, Any]] | None = None,
-        order_by: int | None = None,
-        limit: int | None = None,
-    ) -> dict[str, Any]:
-        """The caller's own rows, filtered and ordered within frozen bounds.
-
-        `order_by` is an INDEX into the orderings `describe_resource` returns,
-        not an order string: the permitted orderings are frozen, and choosing
-        one by index is not the same feature as writing one.
-        """
-        return await bounded(
-            "query_resource",
-            resource,
-            lambda: query_resource(
-                lock,
-                base_url=base_url,
-                token=current_token(),
-                request_id=current_request_id(),
-                resource=resource,
-                columns=columns,
-                filters=filters,
-                order_by=order_by,
-                limit=limit,
-            ),
-            kind=KIND_READ,
-            # **The audit record carries what telemetry deliberately does not**
-            # (ADR 0141): a filter operand is a caller value, forbidden in a
-            # telemetry line and exactly what a record-keeper needs. The two
-            # artefacts have different readers and different homes.
-            arguments={
-                "resource": resource,
-                "columns": columns,
-                "filters": filters,
-                "order_by": order_by,
-                "limit": limit,
-            },
-        )
-
-    @server.tool(name="run_report", timeout=seconds("run_report"))
-    async def _run_report() -> dict[str, Any]:
-        """The caller's own activity, counted under the caller's own RLS: notes
-        and tasks totals, tasks by status, and the two most recent update times."""
-        return await bounded(
-            "run_report",
-            "owner_activity_report",
-            lambda: run_report(
-                lock,
-                base_url=base_url,
-                token=current_token(),
-                request_id=current_request_id(),
-            ),
-            kind=KIND_READ,
-            arguments={},
-        )
-
-    # The two writes. **Their parameters are the lock's declared argument names**
-    # -- `p_title`, `p_task_id` -- rather than friendlier ones mapped here: the
-    # reviewed contract froze that list, `build_write_request` checks a caller's
-    # names against it in both directions, and a translation layer would be a
-    # second naming authority for one list. `docs/mcp-tool-catalog.md` publishes
-    # the same names from the same contract, so a caller can read them.
+    # **By kind and shape, never by name** (ADR 0200). `name=` on every one:
+    # without it the framework names a tool after its Python function, and
+    # the closures below are built from the lock's names precisely so the
+    # registered name is the reviewed one.
     #
-    # **Every argument is required**, including the one the SQL function
-    # defaults. A caller supplies a value for every declared argument (Run 4),
-    # because PostgREST resolves a function by the names supplied and a missing
-    # one is a `404 PGRST202` -- the same status as the product's own "no such
-    # row", with the opposite meaning (rig4, ADR 0139).
+    # Rig 21a measured how the pinned framework takes a tool whose parameters
+    # are DATA: a constructed `inspect.Signature` alone is refused at
+    # registration (pydantic reads `__annotations__`); with the annotations set
+    # as well, `tools/list` carries exactly the derived names, an undeclared
+    # argument is refused before the handler, a missing one too, and the
+    # per-tool timeout fires. A `FunctionTool` given an explicit `parameters`
+    # schema advertises the same shape and enforces none of it -- so nothing
+    # here builds a schema by hand (D1140).
 
-    # **`idempotency_key` is a tool parameter and NOT one of the lock's
-    # `arguments`** (ADR 0181). The lock's list is the database function's
-    # parameters in PostgreSQL order, and a name that is not one of them may not
-    # be supplied (D470) -- the key never enters the request body. It travels as
-    # a header, so both RPC signatures stay exactly where 0022 left them and the
-    # human REST surface is untouched.
-    #
-    # Required, not optional. An unconditional guarantee is worth more than one
-    # an agent has to remember to ask for, and it is also what lets the forwarded
-    # header rosters stay two exact sets rather than one loose one.
+    def described(entry: Any, closure: Any, name: str, sentence: str) -> Any:
+        """Name the closure for the framework and give it the lock's prose."""
+        closure.__name__ = name
+        closure.__qualname__ = name
+        closure.__doc__ = " ".join(part for part in (*entry.descriptions, sentence) if part)
+        return server.tool(name=name, timeout=seconds(name))(closure)
 
-    @server.tool(name="create_note", timeout=seconds("create_note"))
-    async def _create_note(
-        p_title: str, p_content: str, idempotency_key: str, dry_run: bool
-    ) -> dict[str, Any]:
-        """Create one note owned by the caller's owner, and return the created
-        row. Bounded to one row; the owner is the caller's, never an argument.
+    def register_metadata(entry: Any) -> None:
+        if entry.name == "list_resources":
 
-        `idempotency_key` is the caller's own token for this operation: send the
-        same one to retry safely, and a fresh one for a genuinely new note. The
-        same key with different arguments is refused rather than deduplicated.
-        """
-        return await bounded(
-            "create_note",
-            None,
-            lambda: invoke_write(
-                lock,
-                base_url=base_url,
-                token=current_token(),
-                request_id=current_request_id(),
-                tool="create_note",
-                arguments={"p_title": p_title, "p_content": p_content},
-                idempotency_key=idempotency_key,
-                dry_run=dry_run,
-            ),
-            kind=KIND_WRITE,
-            # `p_content` is redacted from the record by the lock's
-            # `audit_redact` (D479) -- the key stays, the value does not.
-            #
-            # The idempotency key is absent here on purpose. It is a caller
-            # value, and an agent record carries none (ADR 0130); where it
-            # legitimately lives is `app_private.agent_idempotency`, which is
-            # the dedupe state rather than an annotation of it.
-            arguments={"p_title": p_title, "p_content": p_content},
-        )
+            async def _list_resources() -> dict[str, Any]:
+                return await bounded(
+                    entry.name,
+                    None,
+                    lambda: list_resources(lock),
+                    kind=KIND_METADATA,
+                    arguments={},
+                )
 
-    @server.tool(name="update_task_status", timeout=seconds("update_task_status"))
-    async def _update_task_status(
-        p_task_id: str,
-        p_expected_status: str,
-        p_new_status: str,
-        idempotency_key: str,
-        dry_run: bool,
-    ) -> dict[str, Any]:
-        """Move one of the caller's owner's tasks from an expected status to a
-        new one.
+            described(entry, _list_resources, entry.name, "Reads the deployed lock.")
+            return
 
-        A compare-and-swap: the write is refused when the expected status no
-        longer holds, and that refusal reaches the caller as `write_conflict`
-        because its next move is to re-read and retry (ADR 0139).
+        async def _describe_resource(tool: str, resource: str) -> dict[str, Any]:
+            return await bounded(
+                entry.name,
+                None,
+                lambda: describe_resource(lock, tool=tool, resource=resource),
+                kind=KIND_METADATA,
+                arguments={"tool": tool, "resource": resource},
+            )
 
-        **A replay of this one is where a key earns its keep.** Without it, a
-        retried transition fails its own compare-and-swap -- the status it
-        expects is the status it already set -- and the caller reads
-        `write_conflict` for a write that had in fact succeeded. Migration
-        0029's claim runs before the swap for exactly that reason.
-        """
-        return await bounded(
-            "update_task_status",
-            None,
-            lambda: invoke_write(
-                lock,
-                base_url=base_url,
-                token=current_token(),
-                request_id=current_request_id(),
-                tool="update_task_status",
+        described(entry, _describe_resource, entry.name, "Reads the deployed lock.")
+
+    def register_relation_read(entry: Any) -> None:
+        """The query shape: the caller's own rows, filtered and ordered within
+        frozen bounds. `order_by` is an INDEX into the orderings
+        `describe_resource` returns, not an order string."""
+        name = entry.name
+
+        async def _query(
+            resource: str,
+            columns: list[str] | None = None,
+            filters: list[dict[str, Any]] | None = None,
+            order_by: int | None = None,
+            limit: int | None = None,
+        ) -> dict[str, Any]:
+            return await bounded(
+                name,
+                resource,
+                lambda: query_resource(
+                    lock,
+                    base_url=base_url,
+                    token=current_token(),
+                    request_id=current_request_id(),
+                    tool=name,
+                    resource=resource,
+                    columns=columns,
+                    filters=filters,
+                    order_by=order_by,
+                    limit=limit,
+                ),
+                kind=KIND_READ,
+                # **The audit record carries what telemetry deliberately does
+                # not** (ADR 0141): a filter operand is a caller value,
+                # forbidden in a telemetry line and exactly what a
+                # record-keeper needs.
                 arguments={
-                    "p_task_id": p_task_id,
-                    "p_expected_status": p_expected_status,
-                    "p_new_status": p_new_status,
+                    "resource": resource,
+                    "columns": columns,
+                    "filters": filters,
+                    "order_by": order_by,
+                    "limit": limit,
                 },
-                idempotency_key=idempotency_key,
-                dry_run=dry_run,
-            ),
-            kind=KIND_WRITE,
-            # Nothing redacted: a task id and two status literals are the
-            # transition itself, which is what the record is for.
-            arguments={
-                "p_task_id": p_task_id,
-                "p_expected_status": p_expected_status,
-                "p_new_status": p_new_status,
-            },
+            )
+
+        described(
+            entry,
+            _query,
+            name,
+            "`order_by` is an index into the orderings `describe_resource` returns.",
         )
 
-    return TOOL_NAMES
+    def register_rpc_read(entry: Any) -> None:
+        """The report shape: one named RPC, chosen from the lock, no caller input."""
+        name = entry.name
+        resource_name = entry.resources[0].name if entry.resources else None
+
+        async def _report() -> dict[str, Any]:
+            return await bounded(
+                name,
+                resource_name,
+                lambda: run_report(
+                    lock,
+                    base_url=base_url,
+                    token=current_token(),
+                    request_id=current_request_id(),
+                    tool=name,
+                ),
+                kind=KIND_READ,
+                arguments={},
+            )
+
+        described(entry, _report, name, "")
+
+    def register_write(entry: Any) -> None:
+        """A write's parameters are the lock's declared argument names --
+        the reviewed function's parameter names, in PostgreSQL order -- plus
+        `idempotency_key` and `dry_run`, and every one is required.
+
+        A caller supplies a value for every declared argument, because
+        PostgREST resolves a function by the names supplied and a missing one
+        is a `404 PGRST202` (ADR 0139). `idempotency_key` is a tool parameter
+        and NOT one of the lock's `arguments` (ADR 0181): it travels as a
+        header, never in the request body.
+        """
+        name = entry.name
+        arguments = tuple(entry.write.arguments)
+        extras = ("idempotency_key", "dry_run")
+
+        async def _write(**kwargs: Any) -> dict[str, Any]:
+            unknown = sorted(set(kwargs) - set(arguments) - set(extras))
+            missing = sorted(set(arguments) - set(kwargs)) + [e for e in extras if e not in kwargs]
+            if unknown or missing:
+                # The framework refuses both before this runs (rig 21a); this
+                # is the same refusal for a caller that reached the closure
+                # some other way, and it names the lock's list rather than the
+                # caller's.
+                raise as_tool_error(
+                    AgentVisible(
+                        INPUT_NOT_PERMITTED,
+                        f"this tool takes exactly {list(arguments)} plus {list(extras)}",
+                        INPUT_MALFORMED,
+                    )
+                )
+            values = {argument: kwargs[argument] for argument in arguments}
+            return await bounded(
+                name,
+                None,
+                lambda: invoke_write(
+                    lock,
+                    base_url=base_url,
+                    token=current_token(),
+                    request_id=current_request_id(),
+                    tool=name,
+                    arguments=values,
+                    idempotency_key=kwargs["idempotency_key"],
+                    dry_run=kwargs["dry_run"],
+                ),
+                kind=KIND_WRITE,
+                # The idempotency key is absent here on purpose. It is a caller
+                # value, and an agent record carries none (ADR 0130); where it
+                # legitimately lives is `app_private.agent_idempotency`.
+                arguments=values,
+            )
+
+        parameters = [
+            inspect.Parameter(argument, inspect.Parameter.KEYWORD_ONLY, annotation=str)
+            for argument in arguments
+        ]
+        parameters.append(
+            inspect.Parameter("idempotency_key", inspect.Parameter.KEYWORD_ONLY, annotation=str)
+        )
+        parameters.append(
+            inspect.Parameter("dry_run", inspect.Parameter.KEYWORD_ONLY, annotation=bool)
+        )
+        _write.__signature__ = inspect.Signature(parameters, return_annotation=dict[str, Any])  # type: ignore[attr-defined]
+        _write.__annotations__ = {
+            **{argument: str for argument in arguments},
+            "idempotency_key": str,
+            "dry_run": bool,
+            "return": dict[str, Any],
+        }
+        described(
+            entry,
+            _write,
+            name,
+            "Bounded to the lock's affected-row limit; the owner is the caller's, never an "
+            "argument. Send the same `idempotency_key` to retry safely and a fresh one for "
+            "a new operation; `dry_run: true` rehearses the write and rolls it back.",
+        )
+
+    registered: list[str] = []
+    for entry in sorted(lock.tools, key=lambda tool: tool.name):
+        if entry.kind == KIND_METADATA:
+            register_metadata(entry)
+        elif entry.kind == KIND_READ and entry.read_shape == "relation":
+            register_relation_read(entry)
+        elif entry.kind == KIND_READ:
+            register_rpc_read(entry)
+        else:
+            register_write(entry)
+        registered.append(entry.name)
+
+    return tuple(registered)

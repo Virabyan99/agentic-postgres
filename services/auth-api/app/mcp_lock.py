@@ -22,6 +22,7 @@ what a service happens to be exposing.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,30 +64,27 @@ VERSIONED_CAPABILITIES_FROM = 2
 #: and it takes no concurrency slot.
 BUDGETS_FROM = 3
 
-#: The two tools that answer from the lock, the two that read PostgREST, and
-#: the two that write it (Session 9 Run 4, D486). Named rather than inferred
-#: from `kind`, so that a lock which changed a tool's kind cannot silently move
-#: it between the paths -- and since Run 4 the declared kind must AGREE with
-#: the roster, so it cannot even say so.
+#: The two tools that answer from the lock itself. **The one roster this module
+#: keeps** (ADR 0200): these two are the runtime's own -- `list_resources` and
+#: `describe_resource` are implemented here, not compiled -- so every lock must
+#: carry exactly this pair, and a metadata tool by any other name is a tool the
+#: runtime cannot answer.
 METADATA_TOOLS = ("describe_resource", "list_resources")
-READ_TOOLS = ("query_resource", "run_report")
-WRITE_TOOLS = ("create_note", "update_task_status")
 
-#: Exactly six, and the names in lexicographic order (ADR 0127, amended by the
-#: capability plan's rows 5 and 6 arriving in Session 9). Asserted at load, so
-#: a lock with a seventh tool never reaches registration -- the number moved in
-#: Run 4 and the property did not: the surface is enumerated, not discovered.
-EXPECTED_TOOL_NAMES = tuple(sorted((*METADATA_TOOLS, *READ_TOOLS, *WRITE_TOOLS)))
+#: The three kinds a tool may be, and the two SHAPES a read may take. Since ADR
+#: 0200 the runtime registers from the lock by kind and shape, never by name:
+#: a `relation` read selects among frozen resources with the query shape, an
+#: `rpc` read is one argument-free operation with no caller input, and a write
+#: carries its own argument list. "Enumerated, not discovered" (ADR 0127) is
+#: kept as "compiled, not edited": at lock schema version 4 the compiler signs
+#: the tool list with `tools_sha256`, recomputed at load.
+KINDS = ("metadata", "read", "write")
+READ_SHAPES = ("relation", "rpc")
 
-#: What the roster says each tool's `kind` must be. A lock that names
-#: `create_note` with `kind: read` is describing a different tool wearing a
-#: reviewed name, and refusing it at load is cheaper than discovering it at
-#: dispatch.
-EXPECTED_KINDS = {
-    **{name: "metadata" for name in METADATA_TOOLS},
-    **{name: "read" for name in READ_TOOLS},
-    **{name: "write" for name in WRITE_TOOLS},
-}
+#: The lock version at which a read tool declares its `reads` shape and the
+#: list carries the compiler's digest (ADR 0200). Required at and above,
+#: forbidden below (ADR 0177).
+TOOLS_DIGEST_FROM = 4
 
 
 class LockError(Exception):
@@ -198,6 +196,20 @@ class Tool:
     supports_dry_run: bool | None = None
     requires_approval: bool | None = None
 
+    @property
+    def read_shape(self) -> str | None:
+        """`relation` or `rpc` for a read, from what its resources reach.
+
+        Derived from the operations rather than trusted from a field, so a lock
+        below version 4 -- which carries no `reads` -- registers by the same
+        rule as one that does, and a lock at 4 whose declared word disagrees is
+        refused at load (ADR 0200).
+        """
+        if self.kind != "read":
+            return None
+        methods = {resource.operation.method for resource in self.resources}
+        return "relation" if methods == {"get"} else "rpc"
+
     def discoverable_by(self, scopes: frozenset[str]) -> bool:
         """Whether a caller holding `scopes` may see this tool at all.
 
@@ -292,14 +304,46 @@ def load_lock(path: Path | str) -> CapabilityLock:
             f"{sorted(SUPPORTED_SCHEMA_VERSIONS)} and will not guess at the difference"
         )
 
-    tools = tuple(_tool(entry, version) for entry in _require(document, "tools", list, "the lock"))
-    names = tuple(sorted(tool.name for tool in tools))
-    if names != EXPECTED_TOOL_NAMES:
-        raise LockError(f"the lock serves {list(names)}, not {list(EXPECTED_TOOL_NAMES)}")
+    raw_tools = _require(document, "tools", list, "the lock")
+    tools = tuple(_tool(entry, version) for entry in raw_tools)
+    names = [tool.name for tool in tools]
+    if len(set(names)) != len(names):
+        raise LockError(f"the lock names a tool twice: {sorted(names)}")
+
+    # **The one roster kept** (ADR 0200): the metadata pair is the runtime's
+    # own and must be present -- a lock without `list_resources` is a surface
+    # no caller can discover -- and nothing else is required by name. What a
+    # lock may serve beyond the pair is decided by the compiler's digest below
+    # and by each tool's shape in `_tool`, never by a list written here.
+    metadata = {tool.name for tool in tools if tool.kind == "metadata"}
+    if metadata != set(METADATA_TOOLS):
+        raise LockError(
+            f"the lock carries the metadata tools {sorted(metadata)}; the runtime answers "
+            f"exactly {list(METADATA_TOOLS)} itself, and a lock must carry both"
+        )
 
     declared = _require(document, "tool_count", int, "the lock")
     if declared != len(tools):
         raise LockError(f"the lock says {declared} tools and carries {len(tools)}")
+
+    # **Compiled, not edited.** At version 4 the compiler signs the tool list
+    # it wrote, after the profile; a tool added, removed or edited by hand is a
+    # digest the compiler did not write. Below 4 there is no signature, which
+    # is the state ADR 0127's fixed roster covered, and the field is forbidden
+    # there so the version number is not decorative (ADR 0177).
+    if version >= TOOLS_DIGEST_FROM:
+        digest = _require(document, "tools_sha256", str, "the lock")
+        actual = hashlib.sha256(canonical_bytes(raw_tools)).hexdigest()
+        if digest != actual:
+            raise LockError(
+                "the lock's tools_sha256 does not match its tool list; this list was not "
+                "written by the compiler that signed it (ADR 0200)"
+            )
+    elif "tools_sha256" in document:
+        raise LockError(
+            f"the lock carries tools_sha256 at schema_version {version}; the signature "
+            f"arrives at {TOOLS_DIGEST_FROM} (ADR 0177)"
+        )
 
     ordered = tuple(sorted(tools, key=lambda tool: tool.name))
     return CapabilityLock(
@@ -425,23 +469,31 @@ def _tool(entry: Any, version: int) -> Tool:
         raise LockError(f"tool {name} declares no discovery_scope_sets")
     discovery = tuple(_strings(item, f"tool {name} scope set") for item in scope_sets)
 
-    expected_kind = EXPECTED_KINDS.get(name)
-    if expected_kind is not None and kind != expected_kind:
+    # **By kind and shape, never by name** (ADR 0200). The one name-bound rule
+    # is the metadata pair, which the runtime implements itself: a metadata
+    # tool must be one of the two, and one of the two must be metadata -- a
+    # reviewed name with a different kind is a different tool wearing it.
+    if kind not in KINDS:
+        raise LockError(f"tool {name} declares kind {kind!r}; the kinds are {list(KINDS)}")
+    if (name in METADATA_TOOLS) != (kind == "metadata"):
         raise LockError(
-            f"tool {name} declares kind {kind!r}; the roster says {expected_kind!r}. A "
-            "reviewed name with a different kind is a different tool wearing it"
+            f"tool {name} declares kind {kind!r}; the metadata tools are exactly "
+            f"{list(METADATA_TOOLS)} and they are the only metadata tools the runtime answers"
         )
 
     resources = tuple(_resource(item, name) for item in entry.get("resources", []) if True)
-    if name in READ_TOOLS and not resources:
+    if kind == "read" and not resources:
         raise LockError(f"tool {name} reads a backend and names no resource")
-    if name in METADATA_TOOLS and resources:
+    if kind == "metadata" and resources:
         raise LockError(f"tool {name} answers from the lock and must name no resource")
     # The third arm (D486): a write is one-to-one with its operation, so it
     # selects among no resources and must carry the write shape instead.
-    if name in WRITE_TOOLS and resources:
+    if kind == "write" and resources:
         raise LockError(f"tool {name} writes one operation and must name no resource")
-    write = _write(entry, name) if name in WRITE_TOOLS else None
+    write = _write(entry, name) if kind == "write" else None
+    if kind != "write" and any(key in entry for key in ("arguments", "max_affected_rows")):
+        raise LockError(f"tool {name} is a {kind} and carries a write's shape")
+    _read_shape(entry, name, kind, resources, version)
     risk, capabilities = _classification(entry, name, version)
     budgets = _budgets(entry, name, kind, version)
 
@@ -458,6 +510,54 @@ def _tool(entry: Any, version: int) -> Tool:
         risk=risk,
         capabilities=capabilities,
         **budgets,
+    )
+
+
+def _read_shape(
+    entry: Any, tool_name: str, kind: str, resources: tuple[Resource, ...], version: int
+) -> None:
+    """A read is a `relation` read or an `rpc` read, and never both (ADR 0200).
+
+    The shape is what the runtime registers by: a relation read takes the
+    query shape, an rpc read takes no caller input at all. Derived from the
+    resources' operations; at lock version 4 the compiler also DECLARES it, and
+    the two must agree -- and below 4 the field is forbidden (ADR 0177).
+    """
+    if kind == "read":
+        methods = {resource.operation.method for resource in resources}
+        if methods not in ({"get"}, {"post"}):
+            raise LockError(
+                f"tool {tool_name} reads through {sorted(methods)}; a read selects among "
+                "relations (GET) or runs one RPC (POST), never both"
+            )
+    if version < TOOLS_DIGEST_FROM:
+        if kind == "read" and "reads" in entry:
+            raise LockError(
+                f"tool {tool_name} declares reads at lock schema_version {version}; the "
+                f"field arrives at {TOOLS_DIGEST_FROM} (ADR 0177)"
+            )
+        return
+    if kind != "read":
+        return
+    declared = _require(entry, "reads", str, f"tool {tool_name}")
+    derived = "relation" if methods == {"get"} else "rpc"
+    if declared not in READ_SHAPES or declared != derived:
+        raise LockError(
+            f"tool {tool_name} declares reads {declared!r} and its resources reach "
+            f"{sorted(methods)}, which is {derived!r}"
+        )
+
+
+def canonical_bytes(document: Any) -> bytes:
+    """The compiler's serialization, reproduced with the standard library.
+
+    `capability_compiler.canonical_bytes`'s shape exactly -- two-space indent,
+    sorted keys, UTF-8, a trailing newline -- because `tools_sha256` is a digest
+    over these bytes and this runtime imports nothing from `agentic_postgres`
+    (ADR 0084). A contract test keeps the two equal (D486's arrangement).
+    """
+    return (
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False).encode("utf-8") + b"\n"
     )
 
 

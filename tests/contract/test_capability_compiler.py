@@ -141,23 +141,30 @@ def test_every_derived_id_resolves_against_the_reviewed_contract(
 # ---------------------------------------------------------------------------
 
 
-def test_the_compiled_tools_are_the_six_that_were_planned(canonical: dict[str, Any]) -> None:
-    """`docs/capability-plan.md` named all six in Session 1. This is where they meet.
-
-    Four since Session 8; Session 9 Run 3 added the two writes the plan's rows
-    5 and 6 had reserved for it. The counts moved with them: seven capabilities
-    behind six tools.
-
-    `PLANNED_TOOLS` is a constant rather than a derivation on purpose: the
-    compiler derives the tool set from the manifest, so a test comparing the two
-    derivations would be comparing a function against itself -- the shape Session
-    7 Run 7's M8 records, where both constants held the same number.
+def test_the_compiled_tools_are_the_manifests_enabled_capabilities_grouped_by_tool(
+    canonical: dict[str, Any],
+) -> None:
+    """**Replaces `test_the_compiled_tools_are_the_six_that_were_planned`**
+    under ADR 0200. `PLANNED_TOOLS` was the reviewed answer the compiled set
+    was compared against; the reviewed answer is now the manifest itself, read
+    here INDEPENDENTLY of the compiler -- every enabled capability, grouped by
+    its `tool` or its own name -- so the comparison is between the manifest and
+    the compiler rather than between the compiler and a constant it could have
+    been written from. The counts are derived the same way.
     """
+    manifest = config.load_capabilities_manifest(MANIFEST)
+    enabled = [entry for entry in manifest["capabilities"] if entry["enabled"]]
+    expected = tuple(sorted({entry.get("tool") or entry["name"] for entry in enabled}))
+
     names = tuple(tool["name"] for tool in canonical["tools"])
-    assert names == capability_compiler.PLANNED_TOOLS
+    assert names == expected
     assert names == tuple(sorted(names)), "the tools are not lexicographic"
-    assert canonical["tool_count"] == 6
-    assert canonical["capability_count"] == 7
+    assert canonical["tool_count"] == len(expected)
+    assert canonical["capability_count"] == len(enabled)
+    # The release's shape, stated so a change to the example manifest is a
+    # change somebody sees here: seven capabilities behind six tools.
+    assert (canonical["tool_count"], canonical["capability_count"]) == (6, 7)
+    assert set(capability_compiler.METADATA_TOOL_NAMES) <= set(names)
 
 
 def test_one_tool_carries_two_resources_with_a_scope_each(canonical: dict[str, Any]) -> None:
@@ -289,7 +296,7 @@ def test_audit_redaction_reaches_every_tool_and_one_list_is_non_empty(
     redaction mechanism that does not exist.
     """
     redactions = {tool["name"]: tool["audit_redact"] for tool in canonical["tools"]}
-    assert set(redactions) == set(capability_compiler.PLANNED_TOOLS), (
+    assert len(redactions) == canonical["tool_count"], (
         "a tool compiled without its redaction list; the runtime would have nothing to obey"
     )
     assert redactions["create_note"] == ["p_content"]

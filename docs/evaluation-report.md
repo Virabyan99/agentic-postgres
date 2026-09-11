@@ -60,7 +60,7 @@ field it targets.
 
 <!-- BEGIN GENERATED: evaluation-report -->
 
-Contract `notes-tasks-agent-v1` at schema version 4, digest `8f80f219e55872691b1cc20cc839ee0aa9df203bef4c76c1bea02887e9faf879`.
+Contract `notes-tasks-agent-v1` at schema version 4, digest `80a41ab0b986fbf0477b13c20d2582fcb9e1ffed0beeea64b42447f3d3eb03b4`.
 
 **47 derived cases and 15 written cases** over 7 capabilities. Derived cases are generated from the contract, one adversarial case per frozen field; written cases are hand-authored and bound to the capability version they were written against (ADR 0184).
 

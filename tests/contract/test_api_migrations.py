@@ -1324,26 +1324,63 @@ def test_a_published_operation_creates_a_task() -> None:
     assert "SET search_path = pg_catalog, pg_temp" in body
 
 
-def test_retiring_the_task_tools_is_blocked_by_the_roster() -> None:
-    """The asymmetry that decided ADR 0196, asserted rather than argued.
+def test_retiring_the_task_tools_is_no_longer_blocked_by_the_roster() -> None:
+    """**Replaces `test_retiring_the_task_tools_is_blocked_by_the_roster`**
+    under ADR 0200, which is the ADR that test's failure message asked for.
 
-    Dropping the `query_tasks` capability would be free -- the roster stays six,
-    because `query_notes` and `query_tasks` are two capabilities behind one
-    tool. `update_task_status` IS a tool, so removing it leaves five, and the
-    lock loader refuses at startup. That is D933, still open, and it is the
-    reason retirement costs restoration's work plus D933's.
+    The asymmetry that decided ADR 0196 -- `update_task_status` IS a tool, so
+    removing it left five and the lock loader refused at startup (D933) -- is
+    historical. The example manifest without `update_task_status` compiles to
+    five tools, locks, and LOADS. The restoration stands on its own reason:
+    two of six tools addressed a table nothing could populate, which was true
+    whatever the roster said. The old test read the runtime's source text for
+    the words "exactly six"; this one runs the compiler and the loader.
     """
+    import importlib.util
+
+    from agentic_postgres import capability_compiler, scope_registry, service_source
+
+    spec = importlib.util.spec_from_file_location(
+        "apg_mcp_contract", REPO_ROOT / "bin" / "mcp-contract.py"
+    )
+    assert spec and spec.loader
+    contract = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(contract)
+    manifest, surface, published = contract._inputs(REPO_ROOT / "capabilities.example.yaml")
+    for entry in manifest["capabilities"]:
+        if entry["name"] == "update_task_status":
+            entry["enabled"] = False
+
+    canonical = capability_compiler.compile_canonical(
+        capabilities=manifest, surface=surface, published_objects=published
+    )
+    assert canonical["tool_count"] == 5
+    lock = capability_compiler.compile_lock(
+        canonical=canonical,
+        project_key="fixture-alpha-dev",
+        upstream="https://alpha.example.test/api/rest",
+        sources={
+            "capabilities_sha256": "0" * 64,
+            "api_surface_sha256": "0" * 64,
+            "canonical_openapi_sha256": "0" * 64,
+        },
+        vocabulary=scope_registry.vocabulary_block(),
+    )
+    path = REPO_ROOT / ".generated" / "test-retirement-lock.json"
+    path.write_bytes(capability_compiler.canonical_bytes(lock))
+    try:
+        loaded = service_source.load("mcp_lock").load_lock(path)
+    finally:
+        path.unlink()
+    assert [tool.name for tool in loaded.tools] == [
+        "create_note",
+        "describe_resource",
+        "list_resources",
+        "query_resource",
+        "run_report",
+    ]
+
     tools = (REPO_ROOT / "services" / "auth-api" / "app" / "mcp_tools.py").read_text(
         encoding="utf-8"
     )
-    assert "there are exactly six" in tools, (
-        "the roster's own statement of itself has changed; re-read ADR 0127 and D933 "
-        "before trusting ADR 0196's asymmetry argument"
-    )
-
-    lock = (REPO_ROOT / "services" / "auth-api" / "app" / "mcp_lock.py").read_text(encoding="utf-8")
-    assert "EXPECTED_TOOL_NAMES" in lock
-    assert "names != EXPECTED_TOOL_NAMES" in lock, (
-        "the lock no longer refuses a roster that is not exactly the expected one; "
-        "if that is deliberate, D933 may be closed and ADR 0196 revisited"
-    )
+    assert "there are exactly six" not in tools, "the runtime states a roster of its own again"

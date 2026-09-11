@@ -291,20 +291,21 @@ def test_the_renderer_distinguishes_the_two_shapes_directly() -> None:
 def test_the_prose_and_the_contract_agree_on_how_many_tools_there_are(
     catalog: str, contract: dict
 ) -> None:
-    """ "Six tools, and there are exactly six" is a claim, so it is checked.
+    """The prose states no count, and the rendered line states the contract's.
 
-    The generated table is derived and cannot disagree. The sentence above it is
-    written by hand, and a seventh tool arriving would leave it saying six while
-    the table said seven -- with the contradiction inside one document. This
-    tripwire fired exactly as designed when Session 9 Run 3 took the contract
-    from four to six, and the prose was rewritten rather than regenerated.
+    **Replaced under ADR 0200.** This asserted *"exactly six"* in the
+    hand-written prose, and that tripwire fired exactly as designed when
+    Session 9 Run 3 took the contract from four to six. Since ADR 0200 a
+    project's lock may carry more tools than the release's (ADR 0201), so a
+    number written by hand would be right for exactly one deployment: the
+    rendered line carries the count, and the prose is checked NOT to.
     """
     prose = catalog[: catalog.index(BEGIN)]
-    assert contract["tool_count"] == 6, (
-        f"the contract now carries {contract['tool_count']} tools; the catalog's prose "
-        "says six and has to be rewritten rather than regenerated"
-    )
-    assert "exactly six" in prose
+    generated = catalog[catalog.index(BEGIN) :]
+    assert f"**{contract['tool_count']} tools**" in generated
+    assert contract["tool_count"] == len(contract["tools"])
+    for claim in ("exactly six", "Six tools", "six tools"):
+        assert claim not in prose, f"the prose states a count by hand: {claim!r}"
 
 
 def test_the_catalog_says_what_the_surface_deliberately_lacks(catalog: str) -> None:

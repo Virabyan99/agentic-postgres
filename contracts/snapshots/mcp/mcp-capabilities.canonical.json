@@ -145,6 +145,7 @@
       "max_response_bytes": 1048576,
       "max_rows": 200,
       "name": "query_resource",
+      "reads": "relation",
       "resources": [
         {
           "capability": "query_notes",
@@ -334,6 +335,7 @@
       "max_response_bytes": 65536,
       "max_rows": 1,
       "name": "run_report",
+      "reads": "rpc",
       "resources": [
         {
           "capability": "run_report",
