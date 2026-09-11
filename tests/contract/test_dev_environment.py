@@ -669,3 +669,265 @@ def test_the_command_reads_no_facility_gated_secret_and_no_deployed_document() -
     assert "runtime=False" in source, (
         "the command reads the runtime document rather than the render"
     )
+
+
+# ---------------------------------------------------------------------------
+# DEV-SEED-001 -- the door (D1170)
+# ---------------------------------------------------------------------------
+
+EXAMPLE_ROOT = Path("projects/example")
+
+
+@pytest.fixture
+def seeds(tmp_path: Path) -> Path:
+    """A writable copy of the example project's seeds. The committed one is never
+    edited."""
+    source = REPO_ROOT / EXAMPLE_ROOT / dev_environment.SEEDS_DIRECTORY
+    if not source.is_dir():
+        pytest.skip("the example project declares no seeds")
+    root = tmp_path / "projects" / "example"
+    (root / dev_environment.SEEDS_DIRECTORY).mkdir(parents=True)
+    for path in source.iterdir():
+        (root / dev_environment.SEEDS_DIRECTORY / path.name).write_bytes(path.read_bytes())
+    return tmp_path
+
+
+def write_manifest(root: Path, seeds_entry: dict[str, Any]) -> None:
+    path = root / EXAMPLE_ROOT / dev_environment.SEEDS_DIRECTORY / dev_environment.SEEDS_MANIFEST
+    path.write_text(
+        json.dumps({"schema_version": 1, "seeds": [seeds_entry]}, indent=2), encoding="utf-8"
+    )
+
+
+def test_the_seed_manifest_refuses_a_path_a_traversal_and_a_bad_digest(seeds: Path) -> None:
+    """`bin/db.sh sql`'s door, and the same reason it is a NAME.
+
+    Every shape below is refused for what it SAYS, before any name is joined to
+    a path -- so `../../etc/passwd` is refused as not a seed name rather than
+    resolved and then rejected. The committed manifest is asserted to load in
+    the same test, or "the manifest refuses things" would be true of a loader
+    that refuses everything.
+    """
+    real = dev_environment.load_seeds_manifest(EXAMPLE_ROOT)
+    assert [entry["name"] for entry in real["seeds"]] == ["example"]
+
+    good = dict(real["seeds"][0])
+    for broken, fragment in (
+        ({**good, "file": "../../etc/passwd"}, "never a path"),
+        ({**good, "file": "sub/example.sql"}, "never a path"),
+        ({**good, "file": ".example.sql"}, "never a path"),
+        ({**good, "file": "example.txt"}, "never a path"),
+        ({**good, "name": "../example"}, "not a seed name"),
+        ({**good, "name": "Example"}, "not a seed name"),
+        ({**good, "sha256": good["sha256"][:63]}, "64 lowercase hex"),
+        ({**good, "sha256": good["sha256"].upper()}, "64 lowercase hex"),
+        ({**good, "description": ""}, "no description"),
+    ):
+        write_manifest(seeds, broken)
+        with pytest.raises(dev_environment.DevEnvironmentError, match=fragment):
+            dev_environment.load_seeds_manifest(EXAMPLE_ROOT, seeds)
+
+    # A duplicate name needs two entries, so it is written directly.
+    path = seeds / EXAMPLE_ROOT / dev_environment.SEEDS_DIRECTORY / dev_environment.SEEDS_MANIFEST
+    path.write_text(
+        json.dumps({"schema_version": 1, "seeds": [good, good]}, indent=2), encoding="utf-8"
+    )
+    with pytest.raises(dev_environment.DevEnvironmentError, match="declared twice"):
+        dev_environment.load_seeds_manifest(EXAMPLE_ROOT, seeds)
+
+    # And a schema version this release does not read.
+    path.write_text(json.dumps({"schema_version": 2, "seeds": [good]}), encoding="utf-8")
+    with pytest.raises(dev_environment.DevEnvironmentError, match="will not guess"):
+        dev_environment.load_seeds_manifest(EXAMPLE_ROOT, seeds)
+
+
+def test_an_undeclared_name_is_refused_with_the_names_there_are() -> None:
+    """The refusal an operator can act on: which seeds this project HAS."""
+    manifest = dev_environment.load_seeds_manifest(EXAMPLE_ROOT)
+    assert dev_environment.seed_entry(manifest, "example")["file"] == "example.sql"
+
+    with pytest.raises(dev_environment.DevEnvironmentError, match="This project declares: example"):
+        dev_environment.seed_entry(manifest, "nosuchseed")
+    # A traversal never becomes a path on the way here; it is simply not declared.
+    with pytest.raises(dev_environment.DevEnvironmentError, match="not a declared seed"):
+        dev_environment.seed_entry(manifest, "../../etc/passwd")
+
+
+def test_a_seed_whose_digest_moved_is_refused_whole(seeds: Path) -> None:
+    """A file edited after it was reviewed is not the file that was reviewed.
+
+    **The first version of this docstring was wrong and Run 4's battery said
+    so.** It claimed a prefix comparison "would accept a file whose first bytes
+    are unchanged" -- which is not how a digest works: SHA-256 over different
+    content differs everywhere, so a prefix comparison catches an edit made
+    anywhere. The battery's `verify_seed`-compares-8-characters mutation
+    survived for exactly that reason, and the survivor was the mutation being
+    uninformative rather than this test being weak (D493).
+
+    What this asserts is the property that matters: the file named by the
+    manifest must digest to what the manifest recorded, and an edit -- wherever
+    it lands -- is refused with a message that says why. The control is in the
+    same test: the unedited copy verifies, so a `verify_seed` that raised
+    unconditionally would not pass.
+    """
+    manifest = dev_environment.load_seeds_manifest(EXAMPLE_ROOT, seeds)
+    entry = dev_environment.seed_entry(manifest, "example")
+    assert dev_environment.verify_seed(EXAMPLE_ROOT, entry, seeds).startswith("--")
+
+    path = seeds / EXAMPLE_ROOT / dev_environment.SEEDS_DIRECTORY / "example.sql"
+    path.write_text(
+        path.read_text(encoding="utf-8") + "\nSELECT api.create_note('extra', 'row');\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(dev_environment.DevEnvironmentError, match="edited after it was reviewed"):
+        dev_environment.verify_seed(EXAMPLE_ROOT, entry, seeds)
+
+
+def test_the_seed_lint_refuses_ddl_and_app_private_and_accepts_the_example_seed() -> None:
+    """A seed writes ROWS. Everything else belongs in the migration set.
+
+    The committed seed is the control and is checked FIRST: a lint that refused
+    everything would satisfy every refusal below and be useless, and one that
+    refused nothing would satisfy none of them. Both directions, because only
+    one of them is the failure that ships.
+    """
+    committed = (
+        REPO_ROOT / EXAMPLE_ROOT / dev_environment.SEEDS_DIRECTORY / "example.sql"
+    ).read_text(encoding="utf-8")
+    dev_environment.lint_seed(committed)
+
+    preamble = migrations.PROJECT_ROLE_PREAMBLE
+    for body, fragment in (
+        (f"{preamble};\nCREATE TABLE app.x ();", "writes ROWS"),
+        (f"{preamble};\nGRANT SELECT ON api.notes TO x;", "writes ROWS"),
+        (f"{preamble};\nDROP VIEW api.notes;", "writes ROWS"),
+        (f"{preamble};\nTRUNCATE app.notes;", "writes ROWS"),
+        (f"{preamble};\nSELECT * FROM app_private.users;", "app_private"),
+        (f"{preamble};\nCREATE ROLE x;", "creates or alters a role"),
+        ("SET ROLE postgres;\nSELECT 1;", "other than the owner preamble"),
+        (f"SELECT api.create_note('a', 'b');\n{preamble};", "not the owner preamble"),
+    ):
+        with pytest.raises(dev_environment.DevEnvironmentError, match=fragment):
+            dev_environment.lint_seed(body)
+
+    # A seed with no role preamble at all is permitted: it then runs as the
+    # migration user, which owns nothing, and PostgreSQL refuses it. The lint
+    # has no opinion about SQL that cannot work.
+    dev_environment.lint_seed("SELECT 1;")
+
+
+def test_the_lint_reads_statements_and_not_comments() -> None:
+    """D277's class, and `sql_only` is the answer the rest of this repository uses.
+
+    The committed seed's own comments explain that it creates nothing and name
+    `app_private` while doing it. A lint reading the prose would refuse the seed
+    for documenting the rule it obeys.
+    """
+    body = (
+        f"-- This seed does not CREATE TABLE and never names app_private.\n"
+        f"{migrations.PROJECT_ROLE_PREAMBLE};\n"
+        "SELECT api.create_note('a', 'b');\n"
+    )
+    dev_environment.lint_seed(body)
+
+    # The control: the same words, in a statement rather than a comment.
+    with pytest.raises(dev_environment.DevEnvironmentError):
+        dev_environment.lint_seed(body.replace("-- This seed does not ", ""))
+
+
+def test_a_seed_is_rendered_with_the_sets_placeholders_and_nothing_else(
+    document: dict[str, Any],
+) -> None:
+    """The set's own allowlist, and an unresolved marker is a hard failure.
+
+    A seed may name the request roles and its own database -- the six sources
+    `PROJECT_PLACEHOLDER_SOURCES` admits -- and none of the platform's other
+    identities. The renderer is the migration renderer, so what a seed can say
+    is exactly what a migration in the same set can say.
+    """
+    set_manifest = migrations.project_set_from(document).load_manifest()
+    committed = (
+        REPO_ROOT / EXAMPLE_ROOT / dev_environment.SEEDS_DIRECTORY / "example.sql"
+    ).read_text(encoding="utf-8")
+
+    rendered = dev_environment.render_seed(committed, set_manifest, document)
+    assert "{{" not in rendered and "}}" not in rendered
+    assert document["database"]["roles"]["object_owner"] in rendered
+    assert migrations.PROJECT_ROLE_PREAMBLE not in rendered
+
+    with pytest.raises(migrations.MigrationError):
+        dev_environment.render_seed(committed + "\nSELECT {{nonsense}};", set_manifest, document)
+
+
+def test_the_seed_transaction_asserts_the_subject_before_anything_runs(
+    document: dict[str, Any],
+) -> None:
+    """D1171: the identity is what makes the rows anybody's.
+
+    `set_config(..., true)` is transaction-local, so it cannot outlive the
+    transaction. Without it every owner-scoped write raises `AP401: no request
+    identity for this transaction` -- measured in rig 22b -- because the tables'
+    policies read `app.user_id` and nothing has set it.
+    """
+    subject = "ce8abf4f-3501-477c-834d-e12209a2ab02"
+    transaction = dev_environment.seed_transaction("SELECT api.create_note('a', 'b');\n", subject)
+
+    first = transaction.splitlines()[0]
+    assert first == f"SELECT set_config('app.user_id', '{subject}', true);", first
+    assert "true)" in first, "the setting is not transaction-local"
+    assert transaction.endswith("SELECT api.create_note('a', 'b');\n")
+
+    # A subject that could change the statement's shape cannot reach it.
+    quoted = dev_environment.seed_transaction("SELECT 1;", "a'b")
+    assert "'a''b'" in quoted
+
+
+# ---------------------------------------------------------------------------
+# psql's argv (D1157, D1179)
+# ---------------------------------------------------------------------------
+
+
+def test_the_psql_arguments_carry_the_subject_the_loopback_and_no_password() -> None:
+    """What `apg dev psql` execs, asserted where it is built.
+
+    The application role by default, because that is the loop: measured in rig
+    22b-2, it reaches `api.*` and its rows are the subject's. `authenticated` is
+    not offered at all -- it cannot open a connection ("permission denied for
+    database"), because PostgREST switches into it and never logs in (D1179).
+    """
+    environment = dev_environment.Environment(
+        project_key="fixture-x-dev",
+        container="apg-dev-fixture-x-dev",
+        database="fixture_x_dev",
+        roles={"app_runtime": "apg_x_app_runtime", "migration_user": "apg_x_migration_user"},
+        port=32768,
+        subject_id="ce8abf4f-3501-477c-834d-e12209a2ab02",
+        image="img@sha256:aa",
+        release_commit="abc",
+        started_at="t",
+        rendered_dir="r",
+    )
+    directory = Path("/state")
+
+    argv = dev_environment.psql_arguments(environment, "app-runtime", directory)
+    assert argv[:2] == ["exec", "-it"]
+    assert "--env-file" in argv
+    assert argv[argv.index("--env-file") + 1].endswith(dev_environment.APP_RUNTIME_ENV)
+    assert f"PGOPTIONS=-c app.user_id={environment.subject_id}" in argv
+    assert "-h" in argv and argv[argv.index("-h") + 1] == "127.0.0.1"
+    assert argv[argv.index("-U") + 1] == "apg_x_app_runtime"
+    assert not any("PASSWORD" in argument for argument in argv), argv
+
+    migration = dev_environment.psql_arguments(environment, "migration-user", directory)
+    assert migration[migration.index("-U") + 1] == "apg_x_migration_user"
+    assert migration[migration.index("--env-file") + 1].endswith(dev_environment.MIGRATION_USER_ENV)
+
+    # Arguments after `--` are psql's own, forwarded unread and last.
+    forwarded = dev_environment.psql_arguments(
+        environment, "app-runtime", directory, ["-c", "\\dt"]
+    )
+    assert forwarded[-2:] == ["-c", "\\dt"]
+
+    for refused in ("authenticated", "postgres", "object-owner", ""):
+        with pytest.raises(dev_environment.DevEnvironmentError, match="not a role"):
+            dev_environment.psql_arguments(environment, refused, directory)

@@ -36,6 +36,7 @@ Exit codes (runbook §2 convention):
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -508,16 +509,167 @@ def reset(arguments: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# seed
+# ---------------------------------------------------------------------------
+
+
+def running_environment(key: str) -> dev_environment.Environment:
+    """The environment, or the reason this verb cannot act on it.
+
+    Three outcomes, and the exits are `status`'s: a verb that reported "no
+    environment" about one this user merely cannot read would send a developer
+    to create a second (D1060, ADR 0195).
+    """
+    try:
+        environment = dev_environment.read_state(key)
+    except dev_environment.StateAbsent as error:
+        fail(dev_environment.EXIT_NOT_RENDERED, f"{error}")
+    except dev_environment.StateUnreadable as error:
+        fail(dev_environment.EXIT_PREREQUISITE, str(error))
+    except dev_environment.DevEnvironmentError as error:
+        fail(dev_environment.EXIT_CONTRACT, str(error))
+
+    if container_state(environment.container) != "running":
+        fail(
+            dev_environment.EXIT_CONTRACT,
+            f"{environment.container} is not running; `apg dev up` or `apg dev reset` builds it",
+        )
+    return environment
+
+
+def project_set_root(document: dict, key: str) -> str:
+    """The project root the rendered document names, or a refusal.
+
+    Read from the DOCUMENT and not the manifest, for ADR 0002's reason: the
+    document is the one authority for what this project applies, and a second
+    reader of the manifest would be a second derivation path.
+    """
+    block = (document.get("migrations") or {}).get("project_set")
+    if not block:
+        fail(
+            dev_environment.EXIT_PREREQUISITE,
+            f"{key} declares no migrations.set, so it has no seeds directory. A seed "
+            "lives beside a project's own migration set, under projects/<slug>/seeds/ "
+            "(ADR 0198, ADR 0203)",
+        )
+    return str(block["root"])
+
+
+def seed(arguments: argparse.Namespace) -> int:
+    project_path = Path(arguments.project)
+    key = project_key_of(project_path)
+    _rendered, document = rendered_document(key, project_path, arguments.capabilities)
+    require_daemon()
+    environment = running_environment(key)
+
+    root = Path(project_set_root(document, key))
+    try:
+        manifest = dev_environment.load_seeds_manifest(root)
+        entry = dev_environment.seed_entry(manifest, arguments.name)
+    except dev_environment.DevEnvironmentError as error:
+        fail(dev_environment.EXIT_INPUT, str(error))
+
+    # Applied once. A second application would write the rows twice, and the
+    # cluster a developer then reasons about is one no sequence of commands
+    # produces -- `reset` is the way back, and it is one line.
+    applied = dev_environment.read_applied_seeds(key)
+    if arguments.name in applied:
+        fail(
+            dev_environment.EXIT_INPUT,
+            f"{arguments.name!r} has already been applied to this environment; "
+            "`apg dev reset` rebuilds it and applies nothing",
+        )
+
+    try:
+        text = dev_environment.verify_seed(root, entry)
+        dev_environment.lint_seed(text)
+        set_manifest = migrations.project_set_from(document).load_manifest()
+        rendered = dev_environment.render_seed(text, set_manifest, document)
+    except (dev_environment.DevEnvironmentError, migrations.MigrationError) as error:
+        fail(dev_environment.EXIT_CONTRACT, str(error))
+
+    if not environment.subject_id:
+        fail(
+            dev_environment.EXIT_CONTRACT,
+            "this environment records no development subject, so a seed's rows would "
+            "belong to nobody and every write would raise AP401; `apg dev reset`",
+        )
+
+    result = as_migration_user(
+        environment,
+        dev_environment.state_dir(key) / dev_environment.MIGRATION_USER_ENV,
+        dev_environment.seed_transaction(rendered, environment.subject_id),
+    )
+    if result.returncode != 0:
+        fail(
+            dev_environment.EXIT_CONTRACT,
+            f"{arguments.name} did not apply:\n{result.stderr.strip()[-600:]}",
+        )
+
+    dev_environment.write_applied_seeds(key, [*applied, arguments.name])
+    print(f"dev: applied seed {arguments.name} as {environment.roles['migration_user']}")
+    print(f"     {entry['description']}")
+    print(f"     rows belong to subject {environment.subject_id}")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# psql
+# ---------------------------------------------------------------------------
+
+
+def psql(arguments: argparse.Namespace) -> int:
+    """An interactive session, as the developer's own role, with the subject set.
+
+    `os.execvp`, not a subprocess: the exit code a developer sees is `psql`'s
+    own, and a wrapper that captured it would be a second thing to interpret.
+    Everything before the exec is the refusal surface.
+    """
+    key = project_key_of(Path(arguments.project))
+    require_daemon()
+    environment = running_environment(key)
+
+    try:
+        argv = dev_environment.psql_arguments(
+            environment, arguments.role, dev_environment.state_dir(key), arguments.rest
+        )
+    except dev_environment.DevEnvironmentError as error:
+        fail(dev_environment.EXIT_INPUT, str(error))
+
+    print(
+        f"dev: {environment.container} as "
+        f"{environment.roles[dev_environment.PSQL_ROLES[arguments.role]]}, "
+        f"subject {environment.subject_id}",
+        file=sys.stderr,
+    )
+    os.execvp("docker", ["docker", *argv])  # noqa: S606 -- a fixed argv, no shell
+    raise AssertionError("unreachable")
+
+
+# ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="bin/dev.sh", add_help=False)
-    parser.add_argument("verb", choices=("up", "status", "down", "reset"))
+    parser.add_argument("verb", choices=("up", "status", "down", "reset", "seed", "psql"))
     parser.add_argument("--project", required=True)
     parser.add_argument("--capabilities", default="capabilities.example.yaml")
+    parser.add_argument("--name", default=None)
+    parser.add_argument("--as", dest="role", default="app-runtime")
+    parser.add_argument("rest", nargs="*")
     arguments = parser.parse_args(argv)
 
-    verbs = {"up": up, "status": status, "down": down, "reset": reset}
+    if arguments.verb == "seed" and not arguments.name:
+        parser.error("seed requires a seed NAME")
+
+    verbs = {
+        "up": up,
+        "status": status,
+        "down": down,
+        "reset": reset,
+        "seed": seed,
+        "psql": psql,
+    }
     try:
         return verbs[arguments.verb](arguments)
     except dev_environment.StateUnreadable as error:

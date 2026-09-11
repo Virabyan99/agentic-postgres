@@ -445,3 +445,40 @@ def test_the_example_sets_grants_reach_the_agent_roles_and_not_anon(
         "assertions above would read 'true' for a reason that has nothing to do with "
         "this project's migration"
     )
+
+    # **And the TABLE the view reads** (D1189). `api.note_embeddings` is
+    # declared `security_invoker = true`, so PostgreSQL checks the CALLER's
+    # privileges on `app.note_embeddings` -- and 20260914120001 granted only the
+    # view. Every caller was refused with `permission denied for table
+    # note_embeddings`: not the view it had been granted, the table underneath.
+    # Granting the view and asserting only the view is how that survived two
+    # sessions, so the reading below is what this test now ends on.
+    for role_key in ("authenticated", "agent_reader", "agent_writer", "api_documentation"):
+        assert privilege(roles[role_key], "table", "app.note_embeddings") == "true", (
+            f"{role_key} may select the VIEW api.note_embeddings and not the TABLE it "
+            "reads. A security_invoker view checks the caller against what it reads, so "
+            "this is a grant that grants nothing (D1189)"
+        )
+    assert privilege(roles["anon"], "table", "app.note_embeddings") == "false"
+
+    # The reading itself, as the request role a signed-in caller becomes. A
+    # privilege bit is what the catalog says; this is what PostgreSQL does.
+    read = _docker(
+        "exec", "-i", cluster["name"], "psql", "-qtA", "-v", "ON_ERROR_STOP=1",
+        "-U", "postgres", "-d", cluster["database"], "-c",
+        f'SET ROLE "{roles["authenticated"]}"; '
+        "SELECT count(*)::text FROM api.note_embeddings",
+    )  # fmt: skip
+    assert read.returncode == 0, (
+        f"a signed-in caller cannot read this project's own view: "
+        f"{read.stderr.strip()[:300]}. The grant is the point of the migration under test"
+    )
+
+    # The control, in the same test: the release's own view reads the same way,
+    # so a failure above is this project's grant and not the schema's shape.
+    control = _docker(
+        "exec", "-i", cluster["name"], "psql", "-qtA", "-v", "ON_ERROR_STOP=1",
+        "-U", "postgres", "-d", cluster["database"], "-c",
+        f'SET ROLE "{roles["authenticated"]}"; SELECT count(*)::text FROM api.notes',
+    )  # fmt: skip
+    assert control.returncode == 0, control.stderr

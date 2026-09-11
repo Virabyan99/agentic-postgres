@@ -643,18 +643,25 @@ def test_a_project_set_that_publishes_nothing_is_caught_by_the_reader(
     cut = applied.index("CREATE VIEW api.note_embeddings")
     path.write_text(applied[:cut] + "RESET ROLE;\n" + marker + down, encoding="utf-8")
 
-    # The two request-role placeholders go with the objects they granted on.
+    # The request-role placeholders go with the objects they granted on, and
+    # **so does the second migration**: `20260914120002` grants on the view
+    # `20260914120001` publishes, so a set whose first migration stops
+    # publishing it cannot keep a second that grants on it. Dropping both is
+    # what an adopter making this change would have to do, which is the point --
+    # the arm has to be a set that could EXIST, or it measures the manifest
+    # rules rather than the reader.
+    #
     # `load_manifest` refuses a declaration whose template never uses it, and
     # that refusal is right: a stale placeholder reads to the next person as
-    # evidence that the value still reaches the migration. Trimming it here is
-    # what an adopter making this change would have to do, which is the point --
-    # the arm has to be a set that could exist, or it measures the manifest
-    # rules rather than the reader.
+    # evidence that the value still reaches the migration.
     manifest_path = copied / MANIFEST
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for entry in manifest["migrations"][1:]:
+        (copied / "migrations" / entry["template"]).unlink()
+    manifest["migrations"] = manifest["migrations"][:1]
     manifest["migrations"][0]["placeholders"] = ["object_owner"]
-    for name in ("authenticated", "api_documentation"):
-        manifest["placeholders"].pop(name)
+    for name in ("authenticated", "api_documentation", "agent_reader", "agent_writer"):
+        manifest["placeholders"].pop(name, None)
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
     migration_set = migrations.MigrationSet(label="project", root=copied / "migrations")

@@ -27,12 +27,37 @@ GRANT SELECT ON api.note_embeddings TO {{agent_reader}}, {{agent_writer}};
 GRANT EXECUTE ON FUNCTION api.set_note_embedding(uuid, extensions.vector)
   TO {{agent_writer}};
 
--- The reader is not granted EXECUTE on the write function, and neither role is
--- granted anything on the underlying table. `api.note_embeddings` is a
--- security_invoker view over a FORCE row-level-security table, so a grant here
--- widens who may ask and never whose rows come back: an agent reads its own
--- caller's rows or none, by the same policy a signed-in request reads them
--- under.
+-- **And the TABLE, which 20260914120001 did not grant to anybody** (D1189).
+--
+-- `api.note_embeddings` is declared `security_invoker = true`, so PostgreSQL
+-- checks the CALLER's privileges on what the view reads -- and what it reads is
+-- `app.note_embeddings`. The first migration granted the view to
+-- {{authenticated}} and the documentation role and stopped there, so every
+-- caller was refused with `permission denied for table note_embeddings`: not
+-- the view it had been granted, the table underneath it. The release does both
+-- halves for its own objects in one line (migration 0004: `GRANT SELECT ON
+-- app.notes, app.tasks TO {{authenticated}}, {{agent_reader}},
+-- {{agent_writer}}`), and this set had only half of the pattern.
+--
+-- Measured in rig 22f: granted the view and not the table, `SET ROLE
+-- {{authenticated}}` reads `api.notes` (2 rows) and is refused on
+-- `api.note_embeddings`; the agent roles are refused the same way, which is
+-- why Run 2's grant alone would not have made the live tenant read pass.
+--
+-- **This widens who may ASK and never whose rows come back.** The table keeps
+-- FORCE row level security and its owner-scoped policy, so a caller reads its
+-- own rows or none -- which is the property the view exists to preserve and the
+-- one this grant cannot weaken.
+GRANT SELECT ON app.note_embeddings
+  TO {{authenticated}}, {{agent_reader}}, {{agent_writer}};
+
+-- The documentation role reads the surface under `openapi-mode =
+-- follow-privileges`, so it needs the same pair for the view to appear in the
+-- generated document at all (F-007, migration 0009's rule).
+GRANT SELECT ON app.note_embeddings TO {{api_documentation}};
+
+-- The reader is not granted EXECUTE on the write function: a read scope and a
+-- write scope are two decisions, and the compiler treats them as two.
 
 RESET ROLE;
 

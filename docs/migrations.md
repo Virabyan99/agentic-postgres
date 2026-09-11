@@ -177,6 +177,66 @@ which holds a row per migration from either set.
 `projects/example/` is a worked one — a pgvector column beside each note, a
 `security_invoker` view, and one `SECURITY DEFINER` write function.
 
+**A `security_invoker` view needs two grants, not one.** The view answers with
+the CALLER's privileges on what it reads, so granting `api.<name>` and stopping
+there refuses every caller — with `permission denied for table <name>`, naming
+the table underneath rather than the view they were granted. The release does
+both halves in one line for its own objects (`0004`: `GRANT SELECT ON app.notes,
+app.tasks TO {{authenticated}}, {{agent_reader}}, {{agent_writer}}`), and the
+example project's first migration did not, so for two sessions its view was
+readable by nobody (D1189). Grant the view and the table it reads, to every role
+that may ask. Neither grant touches whose rows come back: the table keeps FORCE
+row level security and its owner-scoped policy.
+
+## Seeds
+
+A project may also ship **seeds** — rows, for a development cluster, applied by
+`bin/apg.sh dev seed`:
+
+```
+projects/<slug>/seeds/manifest.json
+projects/<slug>/seeds/<name>.sql
+```
+
+```bash
+bin/apg.sh dev seed --project project.yaml example
+```
+
+The manifest is an allowlist, and the verb takes a **NAME**:
+
+```json
+{
+  "schema_version": 1,
+  "seeds": [
+    {
+      "name": "example",
+      "file": "example.sql",
+      "sha256": "<the file's digest>",
+      "description": "What this seed writes."
+    }
+  ]
+}
+```
+
+Never a path — the same door `bin/db.sh sql` has, for the same reason: a name
+with a separator is refused for *being* one, before anything is joined to a
+path, so `../../etc/anything` is answered "not a declared seed" rather than
+resolved and then rejected. The digest must match, or the file was edited after
+it was reviewed.
+
+**A seed writes rows and creates nothing.** No table, no view, no function, no
+grant: a seed that created an object would be an unversioned migration running
+on one developer's cluster and on no deployment. It is linted against the same
+table its set's migrations are (`app_private`, roles, schemas, extensions), plus
+that one rule, and it may set exactly the owner preamble and must set it first.
+
+It is applied as the **migration user**, in one transaction, with `app.user_id`
+set to the environment's development subject — so the rows are the subject's,
+which is what makes them visible through `apg dev psql`. Without that identity
+every owner-scoped write raises `AP401: no request identity for this
+transaction`. A seed is applied once per environment; `apg dev reset` is the way
+back.
+
 ## Two things that bit, and are now grants rather than surprises
 
 - **`CREATE TABLE IF NOT EXISTS` checks `CREATE` on the schema *before* the

@@ -402,6 +402,147 @@ def test_the_environment_can_reach_no_backup_plane_and_the_rendered_model_can(
     )
 
 
+# ---------------------------------------------------------------------------
+# DEV-SEED-001 on the cluster
+# ---------------------------------------------------------------------------
+
+
+def test_the_example_seed_applies_once_as_the_subject_and_is_refused_twice(
+    environment: dict[str, Any],
+) -> None:
+    """The seed's rows are the subject's, and a second application is refused.
+
+    Applied through the product's own command, not by piping the file: what is
+    under test is `apg dev seed`, including the digest it verifies, the lint it
+    runs and the identity it asserts.
+
+    A second application would write the rows twice, and the cluster a developer
+    then reasons about is one no sequence of commands produces. `reset` is the
+    way back and the refusal says so.
+
+    This test runs before the status test below, which takes the environment
+    down; it leaves the rows in place for nothing else to read, because the
+    fixture is module-scoped and removed in `finally`.
+    """
+    state = environment["state"]
+    before = as_superuser(state, "SELECT count(*)::text FROM app.notes")
+
+    applied = apg("dev", "seed", "example", "--project", PROJECT)
+    assert applied.returncode == 0, applied.stdout + applied.stderr
+    assert "applied seed example" in applied.stdout, applied.stdout
+    assert state["subject_id"] in applied.stdout, "the command does not say whose rows it wrote"
+
+    counts = as_superuser(
+        state,
+        "SELECT (SELECT count(*) FROM app.notes)::text || '|' "
+        "|| (SELECT count(*) FROM app.note_embeddings)::text || '|' "
+        "|| (SELECT count(DISTINCT owner_id) FROM app.notes)::text || '|' "
+        "|| (SELECT max(owner_id::text) FROM app.notes)",
+    )
+    notes, embeddings, owners, owner = counts.split("|")
+    assert int(notes) == int(before) + 2, f"the seed wrote {notes} notes, not two more"
+    assert embeddings == "1", f"the seed wrote {embeddings} embeddings, not one"
+    assert owners == "1" and owner == state["subject_id"], (
+        f"the seeded rows belong to {owner}, not to the development subject "
+        f"{state['subject_id']}. Without `set_config('app.user_id', ...)` every write "
+        "raises AP401; with the wrong one the rows are nobody's"
+    )
+
+    recorded = json.loads(
+        (dev_environment.state_dir("fixture-alpha-dev") / dev_environment.SEEDS_FILE).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert recorded == ["example"], recorded
+
+    again = apg("dev", "seed", "example", "--project", PROJECT)
+    assert again.returncode == dev_environment.EXIT_INPUT, again.stdout + again.stderr
+    assert "already been applied" in again.stderr and "reset" in again.stderr, again.stderr
+
+    unchanged = as_superuser(state, "SELECT count(*)::text FROM app.notes")
+    assert unchanged == notes, (
+        f"the refused second application changed the row count from {notes} to {unchanged}"
+    )
+
+    # And the control: a name the manifest does not declare is refused with the
+    # names it does, without touching the cluster.
+    unknown = apg("dev", "seed", "nosuchseed", "--project", PROJECT)
+    assert unknown.returncode == dev_environment.EXIT_INPUT, unknown.stderr
+    assert "This project declares: example" in unknown.stderr, unknown.stderr
+    assert as_superuser(state, "SELECT count(*)::text FROM app.notes") == notes
+
+
+def test_the_seeded_rows_are_visible_to_the_application_role_only_with_the_subject(
+    environment: dict[str, Any],
+) -> None:
+    """The loop the environment exists to give a developer.
+
+    `apg dev psql` connects as the application role with `app.user_id` preset;
+    this makes the same connection with and without it. Two rows with the
+    subject, none without it, none as another subject -- row-level security
+    doing its work on a cluster a developer can break.
+
+    It depends on the seed above having run, and applies it if it has not, so
+    either test can be selected alone by node id (D1181's lesson, applied here
+    rather than learned again).
+    """
+    state = environment["state"]
+    if as_superuser(state, "SELECT count(*)::text FROM app.notes") == "0":
+        assert apg("dev", "seed", "example", "--project", PROJECT).returncode == 0
+
+    directory = dev_environment.state_dir("fixture-alpha-dev")
+
+    def as_application(subject: str | None) -> str:
+        argv = ["exec", "-i", "--env-file", str(directory / dev_environment.APP_RUNTIME_ENV)]
+        if subject:
+            argv += ["-e", f"PGOPTIONS=-c app.user_id={subject}"]
+        argv += [
+            state["container"], "psql", "-U", state["roles"]["app_runtime"],
+            "-h", "127.0.0.1", "-d", state["database"], "-qtA", "-v", "ON_ERROR_STOP=1",
+            "-c", "SELECT count(*)::text FROM api.notes",
+        ]  # fmt: skip
+        result = docker(*argv)
+        assert result.returncode == 0, result.stderr
+        return result.stdout.strip()
+
+    # **Exactly the subject's rows, whatever their number.** Compared against
+    # what the superuser counts for that owner rather than against a literal:
+    # an earlier test in this module writes a canary note as the same subject,
+    # so a hardcoded 2 was wrong the moment both tests ran together -- and the
+    # property was never "two rows", it was "the rows that are the subject's".
+    owned = as_superuser(
+        state, f"SELECT count(*)::text FROM app.notes WHERE owner_id = '{state['subject_id']}'"
+    )
+    assert int(owned) >= 2, (
+        f"the subject owns {owned} notes; the seed writes two, so this cluster does not "
+        "carry what the test above applied"
+    )
+    assert as_application(state["subject_id"]) == owned, (
+        f"the application role sees {as_application(state['subject_id'])} notes and the "
+        f"subject owns {owned}. It must see its own rows and exactly those"
+    )
+    assert as_application(None) == "0", (
+        "a session with no subject asserted read the seeded rows, so row-level security "
+        "is not deciding this"
+    )
+    assert as_application("00000000-0000-4000-8000-000000000001") == "0"
+
+    # The embedding too, through the project's own view -- the tenant surface a
+    # developer is actually building on.
+    argv = [
+        "exec", "-i", "--env-file", str(directory / dev_environment.APP_RUNTIME_ENV),
+        "-e", f"PGOPTIONS=-c app.user_id={state['subject_id']}",
+        state["container"], "psql", "-U", state["roles"]["app_runtime"],
+        "-h", "127.0.0.1", "-d", state["database"], "-qtA", "-v", "ON_ERROR_STOP=1",
+        "-c", "SELECT count(*)::text FROM api.note_embeddings",
+    ]  # fmt: skip
+    result = docker(*argv)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "1", (
+        "the seeded embedding is not visible through the project's own view"
+    )
+
+
 def test_status_reports_three_outcomes_and_down_is_idempotent(
     environment: dict[str, Any],
 ) -> None:

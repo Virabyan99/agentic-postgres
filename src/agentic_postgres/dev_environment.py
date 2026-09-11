@@ -44,12 +44,19 @@ import base64
 import json
 import os
 import pwd
+import re
 import secrets
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from agentic_postgres import REPO_ROOT, api_surface, migrations, scope_registry
+from agentic_postgres import (
+    REPO_ROOT,
+    api_surface,
+    migrations,
+    scope_registry,
+    sql_surface,
+)
 
 #: Where an environment keeps what it knows about itself.
 #:
@@ -538,14 +545,313 @@ def status_of(
     )
 
 
+# ---------------------------------------------------------------------------
+# The seed door (D1170, ADR 0203 §7)
+# ---------------------------------------------------------------------------
+
+#: Where a project keeps its seeds, beside its migration set.
+SEEDS_DIRECTORY = "seeds"
+SEEDS_MANIFEST = "manifest.json"
+
+#: A seed's name. Lowercase, hyphenated, bounded -- and, decisively, a name that
+#: cannot be a path: no separator, no dot, no `..`. `bin/db.sh sql` takes a NAME
+#: checked against an allowlist "before anything touches the filesystem, so
+#: `../../etc/anything` is refused as not allowlisted rather than resolved and
+#: then rejected". This is the same door and the same reason (D1170).
+SEED_NAME = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+
+#: A seed's file: a basename under the seeds directory, ending `.sql`.
+SEED_FILE = re.compile(r"^[a-z][a-z0-9-]{0,39}\.sql$")
+
+SEED_MANIFEST_SCHEMA_VERSION = 1
+
+#: What a SEED may not do that a migration may: create anything at all.
+#:
+#: A seed writes ROWS. Everything a schema change needs -- a table, a view, a
+#: function, a grant -- belongs in the project's migration set, where it is
+#: frozen under a lock, version-ordered, and applied by a deploy. A seed that
+#: could create an object would be an unversioned migration that runs on a
+#: developer's cluster and on no deployment, which is the shape of every
+#: "works on my machine" schema this product exists to make impossible.
+SEED_DDL = re.compile(
+    r"\b(CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE|COMMENT|VACUUM|ANALYZE)\b", re.IGNORECASE
+)
+
+
+def seeds_root(project_root: Path, repo_root: Path = REPO_ROOT) -> Path:
+    """`projects/<slug>/seeds/`, from the project root the document names."""
+    return repo_root / project_root / SEEDS_DIRECTORY
+
+
+def load_seeds_manifest(project_root: Path, repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """The seed manifest, validated as the allowlist it is.
+
+    Every refusal here is a boundary rather than a style rule, and the shapes
+    are checked BEFORE any name is joined to a path: a manifest naming
+    `../../etc/passwd` is refused for naming it, not for where it resolves.
+    """
+    path = seeds_root(project_root, repo_root) / SEEDS_MANIFEST
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as error:
+        raise DevEnvironmentError(
+            f"{path} does not exist, so this project declares no seeds. A seed is a "
+            f"reviewed file in {seeds_root(project_root, repo_root)} named by that manifest."
+        ) from error
+    except ValueError as error:
+        raise DevEnvironmentError(f"{path} is not readable JSON: {error}") from error
+
+    version = document.get("schema_version")
+    if version != SEED_MANIFEST_SCHEMA_VERSION:
+        raise DevEnvironmentError(
+            f"{path} declares schema_version {version!r}; this release reads "
+            f"{SEED_MANIFEST_SCHEMA_VERSION} and will not guess at the difference"
+        )
+
+    seeds = document.get("seeds")
+    if not isinstance(seeds, list) or not seeds:
+        raise DevEnvironmentError(f"{path} declares no seeds")
+
+    seen: set[str] = set()
+    for entry in seeds:
+        name = entry.get("name")
+        if not isinstance(name, str) or not SEED_NAME.fullmatch(name):
+            raise DevEnvironmentError(
+                f"{path}: {name!r} is not a seed name. Lowercase letters, digits and "
+                "hyphens, starting with a letter -- a name that cannot be a path"
+            )
+        if name in seen:
+            raise DevEnvironmentError(f"{path}: {name!r} is declared twice")
+        seen.add(name)
+
+        file = entry.get("file")
+        if not isinstance(file, str) or not SEED_FILE.fullmatch(file):
+            raise DevEnvironmentError(
+                f"{path}: {name!r} names file {file!r}. A basename ending .sql, inside "
+                f"{SEEDS_DIRECTORY}/ -- never a path, a traversal or a dotfile"
+            )
+
+        checksum = entry.get("sha256")
+        if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum):
+            raise DevEnvironmentError(
+                f"{path}: {name!r} records sha256 {checksum!r}, which is not 64 lowercase "
+                "hex characters. The digest is what makes the file reviewed rather than "
+                "merely present"
+            )
+        if not isinstance(entry.get("description"), str) or not entry["description"].strip():
+            raise DevEnvironmentError(
+                f"{path}: {name!r} carries no description. A seed writes rows into a "
+                "developer's cluster and the manifest is where they read what it does"
+            )
+    return document
+
+
+def seed_entry(manifest: dict[str, Any], name: str) -> dict[str, Any]:
+    """One seed by name, or a refusal naming the ones there are.
+
+    The name is never joined to a path on the way here. A caller that passed
+    `../../etc/passwd` is told it is not a declared seed, which is the answer
+    `bin/db.sh sql` gives for the same input and for the same reason.
+    """
+    for entry in manifest["seeds"]:
+        if entry["name"] == name:
+            return entry
+    declared = ", ".join(sorted(entry["name"] for entry in manifest["seeds"]))
+    raise DevEnvironmentError(f"{name!r} is not a declared seed. This project declares: {declared}")
+
+
+def verify_seed(project_root: Path, entry: dict[str, Any], repo_root: Path = REPO_ROOT) -> str:
+    """The seed's text, or a refusal because its digest moved.
+
+    The whole digest, compared whole. A prefix comparison would accept a file
+    whose first bytes are unchanged, which is every edit made to the end of a
+    file -- and the end of a seed is where the rows are.
+    """
+    path = seeds_root(project_root, repo_root) / entry["file"]
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError as error:
+        raise DevEnvironmentError(
+            f"{path} is named by the seed manifest and does not exist"
+        ) from error
+
+    actual = migrations.digest(text)
+    if actual != entry["sha256"]:
+        raise DevEnvironmentError(
+            f"{path} does not match the digest the manifest records "
+            f"({actual[:16]} != {entry['sha256'][:16]}); it was edited after it was "
+            "reviewed. Re-review it and record the new digest"
+        )
+    return text
+
+
+def lint_seed(text: str) -> None:
+    """What a seed may contain. Every refusal is a boundary.
+
+    Two rules, and the second is a seed's own. The first is the project set's
+    whole table -- `migrations.FORBIDDEN_STATEMENTS`, because a seed runs
+    through the same plane, as the same `migration_user`, under the same `SET
+    LOCAL ROLE`, so the platform's state is no more addressable from a seed than
+    from a migration. The second is that a seed **creates nothing**: it writes
+    rows, and everything else belongs in the migration set where it is frozen,
+    ordered and applied by a deploy.
+
+    The role preamble is the set's, and it must come FIRST: a statement above it
+    would run as the migration user, which owns nothing, and the failure would
+    name a privilege rather than an ordering.
+    """
+    applied = sql_surface.sql_only(text)
+
+    for pattern, description in migrations.FORBIDDEN_STATEMENTS:
+        match = pattern.search(applied)
+        if match is not None:
+            raise DevEnvironmentError(
+                f"this seed {description}: {match.group(0).strip()!r}. A seed runs as the "
+                "object owner through the platform's own migration plane; the platform's "
+                "state is not addressable from it"
+            )
+
+    ddl = SEED_DDL.search(applied)
+    if ddl is not None:
+        raise DevEnvironmentError(
+            f"this seed contains {ddl.group(0).strip()!r}. A seed writes ROWS: a table, a "
+            "view, a function or a grant belongs in the project's migration set, where it "
+            "is frozen under a lock and applied by a deploy -- a seed that created an "
+            "object would be an unversioned migration running on one developer's cluster"
+        )
+
+    roles = migrations.SET_ROLE.findall(applied)
+    for statement in roles:
+        if statement.strip() != migrations.PROJECT_ROLE_PREAMBLE:
+            raise DevEnvironmentError(
+                f"this seed sets a role other than the owner preamble: "
+                f"{statement.strip()!r}. The only permitted form is "
+                f"{migrations.PROJECT_ROLE_PREAMBLE!r}"
+            )
+    if roles:
+        first = next(
+            line.strip()
+            for line in applied.splitlines()
+            if line.strip() and not line.strip().startswith("--")
+        )
+        if not first.startswith(migrations.PROJECT_ROLE_PREAMBLE):
+            raise DevEnvironmentError(
+                f"this seed's first statement is {first[:60]!r}, not the owner preamble. "
+                "A statement above it runs as the migration user, which owns nothing, and "
+                "the failure names a privilege rather than an ordering"
+            )
+
+
+def render_seed(text: str, set_manifest: dict[str, Any], document: dict[str, Any]) -> str:
+    """The seed, with the SET's declared placeholders resolved and nothing else.
+
+    The same renderer and the same allowlist a migration gets
+    (`PROJECT_PLACEHOLDER_SOURCES`), so a seed can name the request roles and
+    its own database and none of the platform's other identities. An unresolved
+    `{{x}}` is a hard failure, as it is everywhere else -- a capable template
+    engine's failure mode is a plausible wrong answer (ADR 0028).
+    """
+    declared = list(set_manifest["placeholders"])
+    values = migrations.resolve_placeholders(set_manifest, document, declared)
+    return migrations.render(text, values)
+
+
+def seed_transaction(rendered: str, subject_id: str) -> str:
+    """The seed, with the development subject asserted before it runs.
+
+    `set_config(..., true)` -- transaction-local, so the identity cannot outlive
+    the transaction the seed is applied in. Without it every owner-scoped write
+    raises `AP401 no request identity for this transaction` (measured in rig
+    22b), because the tables' policies read `app.user_id` and nothing has set
+    it. This is what makes the seeded rows the subject's, which is what makes
+    them visible to `apg dev psql`.
+    """
+    return (
+        f"SELECT set_config('app.user_id', {migrations.quote_literal(subject_id)}, true);\n"
+        + rendered
+    )
+
+
+# ---------------------------------------------------------------------------
+# psql (D1157, D1179)
+# ---------------------------------------------------------------------------
+
+#: The two roles `apg dev psql` will connect as, and what each is for.
+#:
+#: `app_runtime` is the default and is what a developer wants: it reaches
+#: `api.*` and its rows are the subject's, which is the loop the environment
+#: exists to give them. `migration_user` is for applying SQL the way a migration
+#: would, reaching the owner through `SET LOCAL ROLE`.
+#:
+#: `authenticated` is deliberately not offered: it cannot open a connection at
+#: all ("permission denied for database"), because PostgREST switches into it
+#: and never logs in (D1179, rig 22b-2).
+PSQL_ROLES = {"app-runtime": "app_runtime", "migration-user": "migration_user"}
+
+PSQL_ENV_FILES = {"app_runtime": APP_RUNTIME_ENV, "migration_user": MIGRATION_USER_ENV}
+
+
+def psql_arguments(
+    environment: Environment,
+    role_key: str,
+    state_directory: Path,
+    extra: list[str] | None = None,
+) -> list[str]:
+    """The whole `docker exec` for an interactive session. No password in it.
+
+    `--env-file` again, for D1160's reason, and `-it` so the session is a
+    terminal. `PGOPTIONS` carries the development subject: measured in rig
+    22b-2, `api.notes` returns the subject's row with it, nothing without it,
+    and nothing with another subject's id -- which is row-level security doing
+    its work on a cluster a developer can break.
+
+    The subject is asserted for BOTH roles. As the application role a developer
+    sees the subject's rows; as the migration user they apply SQL the way a
+    migration would, and a migration with no request identity raises `AP401`.
+    """
+    if role_key not in PSQL_ROLES:
+        raise DevEnvironmentError(
+            f"{role_key!r} is not a role this command connects as. "
+            f"Choose one of: {', '.join(sorted(PSQL_ROLES))}"
+        )
+    role_suffix = PSQL_ROLES[role_key]
+    arguments = [
+        "exec",
+        "-it",
+        "--env-file",
+        str(state_directory / PSQL_ENV_FILES[role_suffix]),
+    ]
+    if environment.subject_id:
+        arguments += ["-e", f"PGOPTIONS=-c app.user_id={environment.subject_id}"]
+    arguments += [
+        environment.container,
+        "psql",
+        "-U",
+        environment.roles[role_suffix],
+        "-h",
+        "127.0.0.1",
+        "-d",
+        environment.database,
+    ]
+    return arguments + list(extra or [])
+
+
 __all__ = [
     "ABSENT",
     "ACTIVATED_ROLES",
     "APP_RUNTIME_ENV",
     "CONTAINER_PREFIX",
     "MIGRATION_USER_ENV",
+    "PSQL_ENV_FILES",
+    "PSQL_ROLES",
     "RUNNING",
+    "SEEDS_DIRECTORY",
     "SEEDS_FILE",
+    "SEEDS_MANIFEST",
+    "SEED_DDL",
+    "SEED_FILE",
+    "SEED_MANIFEST_SCHEMA_VERSION",
+    "SEED_NAME",
     "STATE_DIR_MODE",
     "STATE_FILE",
     "STATE_FILE_MODE",
@@ -563,21 +869,29 @@ __all__ = [
     "container_name",
     "extensions_schema_statement",
     "generated_password",
+    "lint_seed",
+    "load_seeds_manifest",
     "locked_image",
     "migration_transaction",
     "owner_grant_statements",
     "password_env_content",
     "placeholder_verifier",
     "planned_migrations",
+    "psql_arguments",
     "read_applied_seeds",
     "read_state",
+    "render_seed",
     "role_statements",
     "run_arguments",
+    "seed_entry",
+    "seed_transaction",
+    "seeds_root",
     "state_dir",
     "status_of",
     "subject_statement",
     "subject_vocabulary",
     "superuser_env_content",
+    "verify_seed",
     "write_applied_seeds",
     "write_state",
 ]

@@ -11,6 +11,11 @@
 #   down      Remove the container, its anonymous volume and the state
 #             directory. Idempotent, and says which of the two it did.
 #   reset     `down` then `up`, the same two functions and no third path.
+#   seed      Apply one reviewed, hash-verified seed from the project's own
+#             seeds/ directory, as the migration user, in one transaction,
+#             with the development subject asserted.
+#   psql      An interactive session as the application role (or the
+#             migration user), with the subject asserted.
 #
 # The environment is the DATABASE. There is no PostgREST here, no auth service
 # and no token: a token alone reads no owner's rows, so a REST loop would be
@@ -43,6 +48,8 @@ readonly ROOT_DIR
 usage() {
   cat <<'USAGE'
 Usage: bin/dev.sh up|status|down|reset --project FILE [--capabilities FILE]
+       bin/dev.sh seed NAME --project FILE
+       bin/dev.sh psql --project FILE [--as app-runtime|migration-user] [-- ARGS]
 
   up                 Build the environment: the locked image, the bootstrap
                      statements, every rendered migration as the migration
@@ -53,6 +60,16 @@ Usage: bin/dev.sh up|status|down|reset --project FILE [--capabilities FILE]
   down               Remove the container, its anonymous volume and the state.
                      Exits 0 when there was nothing to remove, and says so.
   reset              down, then up.
+  seed NAME          Apply one seed the project declares in
+                     projects/<slug>/seeds/manifest.json: verified against
+                     its recorded digest, linted, rendered with the set's
+                     placeholders, and applied in one transaction as the
+                     migration user with the development subject asserted.
+                     A NAME, never a path. Applied once per environment.
+  psql               An interactive session. Defaults to the application
+                     role, whose rows are the subject's; --as
+                     migration-user applies SQL the way a migration would.
+                     Arguments after -- are psql's own.
   --project FILE     The project manifest. Its derived key names the
                      environment, the container and the state directory.
   --capabilities FILE  Only used to spell out the --render-only command when a
@@ -92,10 +109,11 @@ python_bin() {
 main() {
   if [ "$#" -eq 0 ]; then
     usage >&2
-    die 2 "a verb is required: up, status, down or reset."
+    die 2 "a verb is required: up, status, down, reset, seed or psql."
   fi
 
   local command=""
+  local name=""
   local -a arguments=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -103,10 +121,30 @@ main() {
         usage
         exit 0
         ;;
-      up|status|down|reset)
+      up|status|down|reset|psql)
         [ -z "${command}" ] || die 2 "only one verb at a time."
         command="$1"
         shift
+        ;;
+      seed)
+        [ -z "${command}" ] || die 2 "only one verb at a time."
+        command="$1"
+        shift
+        ;;
+      --as)
+        [ "$#" -ge 2 ] || die 2 "$1 requires a value."
+        case "$2" in
+          app-runtime|migration-user) : ;;
+          *) die 2 "--as takes app-runtime or migration-user, not '$2'." ;;
+        esac
+        arguments+=("$1" "$2")
+        shift 2
+        ;;
+      --)
+        # Everything after `--` is psql's own, forwarded unread.
+        shift
+        arguments+=("$@")
+        break
         ;;
       --project|--capabilities)
         [ "$#" -ge 2 ] || die 2 "$1 requires a value."
@@ -116,14 +154,36 @@ main() {
         arguments+=("$1" "$2")
         shift 2
         ;;
-      *)
+      -*)
         usage >&2
         die 2 "unknown argument: $1"
+        ;;
+      *)
+        # The one positional this command has: a seed's NAME. Taken wherever
+        # the developer typed it -- `seed example --project x` and `seed
+        # --project x example` are the same instruction -- and never joined to
+        # a path, here or in the Python. A name with a separator is refused by
+        # the manifest lookup as "not a declared seed", which is the answer
+        # `bin/db.sh sql` gives for the same input and for the same reason
+        # (D1170); it is refused HERE too, so nothing downstream has to.
+        [ -z "${name}" ] || die 2 "only one seed name at a time."
+        case "$1" in
+          */*|.*) die 2 "'$1' is not a seed name: a name, never a path." ;;
+        esac
+        name="$1"
+        shift
         ;;
     esac
   done
 
-  [ -n "${command}" ] || die 2 "a verb is required: up, status, down or reset."
+  [ -n "${command}" ] || die 2 "a verb is required: up, status, down, reset, seed or psql."
+
+  if [ "${command}" = "seed" ]; then
+    [ -n "${name}" ] || die 2 "seed requires the name of a declared seed."
+    arguments+=("--name" "${name}")
+  elif [ -n "${name}" ]; then
+    die 2 "${command} takes no positional argument, and got '${name}'."
+  fi
 
   exec "$(python_bin)" "${ROOT_DIR}/bin/dev.py" "${command}" "${arguments[@]+"${arguments[@]}"}"
 }

@@ -24,7 +24,7 @@
     "agent_writer": {
       "type": "identifier",
       "source": "database.roles.agent_writer",
-      "description": "The role an agent's write is executed as. It is granted SELECT on the view and EXECUTE on the write function, and nothing on the underlying table, which stays under FORCE row level security and decides whose rows come back."
+      "description": "The role an agent write is executed as. It is granted SELECT on the view and on the table the view reads, and EXECUTE on the write function. The table keeps FORCE row level security and its owner-scoped policy, so the grant widens who may ask and never whose rows come back."
     }
   },
   "migrations": [
@@ -32,15 +32,25 @@
       "version": "20260914120001",
       "name": "note_embeddings",
       "template": "templates/0001-note-embeddings.sql",
-      "placeholders": ["object_owner", "authenticated", "api_documentation"],
+      "placeholders": [
+        "object_owner",
+        "authenticated",
+        "api_documentation"
+      ],
       "description": "The example project's own domain, and the product's demonstration of what a tenant's migration set is: a pgvector column beside each of the caller's notes, owned per row, under FORCE row level security, published through a security_invoker view and one SECURITY DEFINER write function in migration 0031's shape. Nothing in it is part of the release -- the release's reviewed contract names no object here, its lock does not cover this template, and its anti-vacuity guard never sees these names, which is what lets that guard keep its equality rather than being loosened to a containment check (D1089). The version stamp is later than the release lock's newest at the moment this set was frozen, recorded in this set's own lock as follows_release_version: dbmate applies one directory in filename order, and rig 20a measured that `up --strict` refuses an out-of-order pending migration with exit 2 on a deployed cluster while a fresh cluster applies the same pair silently -- one set, two schemas (D1098, ADR 0198). This is also the pgvector example D698 and D714 recorded as never registered, arriving as what it always was."
     },
     {
       "version": "20260914120002",
       "name": "agent_grants",
       "template": "templates/0002-agent-grants.sql",
-      "placeholders": ["object_owner", "agent_reader", "agent_writer"],
-      "description": "The grant that makes this project's tool answer rather than refuse upstream (D1156). Session 21 put note_embeddings:read and note_embeddings:write in the vocabulary and the roster; neither the capability compiler nor the project's snapshot can see a GRANT, and neither should -- a grant is an authorization decision and PostgreSQL is the authority that takes it. So an agent holding the scope was served the tool and refused by the database. The release grants api.notes and api.tasks to the two agent roles in migrations 0004 and 0007; this set is the worked example of a tenant's, so it carries the same two lines for its own view and write function. Fix forward rather than an edit to 20260914120001, which is frozen and applied (D912), and sorted after it. The writer alone gets EXECUTE on the write function, and neither role is granted anything on app.note_embeddings: the view is security_invoker over a FORCE row-level-security table, so this widens who may ask and never whose rows come back."
+      "placeholders": [
+        "object_owner",
+        "authenticated",
+        "api_documentation",
+        "agent_reader",
+        "agent_writer"
+      ],
+      "description": "The grant that makes this project tool answer rather than refuse upstream (D1156), and the grant 20260914120001 omitted (D1189). Session 21 put note_embeddings:read and note_embeddings:write in the vocabulary and the roster; neither the capability compiler nor the project snapshot can see a GRANT, and neither should -- a grant is an authorization decision and PostgreSQL is the authority that takes it. So an agent holding the scope was served the tool and refused by the database. This migration grants the view to the two agent roles AND grants the underlying table to every role that may read it: api.note_embeddings is declared security_invoker, so PostgreSQL checks the caller privileges on app.note_embeddings, and the first migration granted only the view -- which refused every caller, including the authenticated role it did grant, with permission denied for table note_embeddings. The release does both halves in one line for its own objects (migration 0004). Fix forward rather than an edit to 20260914120001, which is frozen and applied (D912), and sorted after it."
     }
   ]
 }

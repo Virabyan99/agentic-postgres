@@ -103,13 +103,15 @@ D1060, D1066, D1071, D1076, D1098, D1110, D1131.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1189**. Rows D1157–D1175
+Six columns, next free number after this table **D1192**. Rows D1157–D1175
 were measured at planning on 2026-09-11 at `90c1c19`; the runs add theirs
 below them as they go, each run's numbers named in its Done paragraph. Run 1
 added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`;
 Run 2 added **D1180–D1184**: three found by building, one by the battery, and
 one by a RED CI on its first push. Run 3 added **D1185–D1188**, three of them
-found by a test going red during the move it describes.
+found by a test going red during the move it describes. Run 4 added
+**D1189–D1191**, the first of them a defect two sessions old that only a
+proof trying to READ could find.
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -145,6 +147,9 @@ found by a test going red during the move it describes.
 | **D1186** | Run 3: move *"`build_statements`, `IDENTITY_FIELDS`, `AUTHENTICATOR_REQUEST_ROLES`, `BACKUP_SETTINGS_ROLE`, `BACKUP_FUNCTION_GRANTS` and whatever else `build_statements` reads"*. | Two of the five are not what the plan says. **`BACKUP_FUNCTION_GRANTS` is an ANNOTATED assignment** (`BACKUP_FUNCTION_GRANTS: tuple[str, ...] = (…)`), which an `ast.Assign`-only walk does not see — the first extraction scan reported four dependencies, moved them, and `ruff` found `F821 Undefined name`. **`IDENTITY_FIELDS` is not read by `build_statements` at all**; `assert_identity_matches` reads it, and that stays in the command. | The dependency set is derived by AST over `ast.Assign` **and** `ast.AnnAssign`, and the extraction asserts every moved block is still a verbatim substring of the file it came from — a move that reflowed a statement would be the second implementation this extraction exists to prevent (F-005). `IDENTITY_FIELDS` moves anyway, as pure data, with a re-export the command still reads. Two names the command no longer reads are re-exported and carry `# noqa: F401` with the reason: a name a released file published is a name a reader may already load. | A dependency list written by reading is a list; one derived by AST is the dependency set. The difference was one annotation. | — |
 | **D1187** | Run 3: *"`git grep -n \"build_statements\|…\" -- bin src tests` and run every module found, whole."* | The grep finds readers of the NAMES. **Three modules read the command's SOURCE TEXT for SQL that moved**: `test_bootstrap_statements::test_the_bootstrap_still_pairs_the_schema_with_the_extension` (searching for `CREATE SCHEMA IF NOT EXISTS extensions`), `test_database_commands::test_identity_comparison_uses_only_immutable_fields` (searching for the `IDENTITY_FIELDS = (…)` literal, and thereby asserting its typesetting), and `test_auth_service_database_access::test_every_credentialed_role_can_also_connect` (a regex for the `GRANT CONNECT` the moved function builds, compared against `apply_credential` calls that stayed). All three went red. | Each now follows its SUBJECT rather than a path: `inspect.getsource(bootstrap.build_statements)` for the two SQL scans — which follows the function if it moves again — and the identity fields read as a VALUE, with the command's re-export asserted to be the same object. The cross-list test reads each half where that half lives and asserts both non-empty, so a source that stopped containing its half fails rather than matching nothing on both sides. | This is D1184 one run later and one layer down: a grep over names cannot find a guard that reads text. The rule the appendix gained after D1184 wants a second clause — a run that MOVES a definition greps the moved SQL and the moved literals too, not only the moved names. | — |
 | **D1188** | Run 3 and the appendix: the targeted list is derived from the tree by grepping the names a run moves. | Run 3 added a `bin/` command, and `test_cli_contract::test_every_command_in_bin_is_covered_by_this_module` refused it: a command in `bin/` and in neither `SHELL_COMMANDS` nor `PYTHON_COMMANDS` is a command none of that module's checks apply to — **including the secret-argument scan**, which is the check a new command most needs. D1014 already states the rule and the plan already named the module; what the run learned is that registration is not bookkeeping. And `test_commands_are_executable_in_the_git_index` then refused both files until they were `git add`ed: the INDEX mode is the contract, not the working tree's. | Both entries added where they sort, each with the reason beside them; `git add` before the module is run, not at the commit. | A new command is not covered by the checks that exist until it is listed, and the check that would have caught a password in an argument vector is one of them. | — |
+| **D1189** | Run 4: *"`test_exactly_one_subject_exists_and_its_rows_are_visible_only_with_it_asserted` (after `seed example`: … as `app_runtime` with `PGOPTIONS` set, `SELECT count(*) FROM api.notes` = 2)"* — and D1156/Run 2, which read the tenant refusal as a missing grant on the VIEW. | **The example set granted the view and never the table it reads, so nobody could read it — including the roles it did grant.** `api.note_embeddings` is declared `security_invoker = true` (`0001:66`), so PostgreSQL checks the CALLER's privileges on `app.note_embeddings`; `20260914120001` grants `api.note_embeddings` to `{{authenticated}}` and `{{api_documentation}}` and grants the table to nobody. Measured in rig 22f: `SET ROLE <authenticated>` reads `api.notes` (2 rows) and is refused on `api.note_embeddings` with *permission denied for table note_embeddings* — the TABLE, not the view it holds. The release does both halves in one line for its own objects (`0004:53`: `GRANT SELECT ON app.notes, app.tasks TO {{authenticated}}, {{agent_reader}}, {{agent_writer}}`). **Run 2's repair was therefore incomplete**: it granted the agent roles the view, and the live tenant read at Session 24's trip would still have failed. | `0002-agent-grants.sql` grants `app.note_embeddings` to `{{authenticated}}`, `{{agent_reader}}`, `{{agent_writer}}` and `{{api_documentation}}` beside the view, the set re-frozen and both fixtures re-rendered. The grant proof now **ends on a reading** — `SET ROLE <authenticated>; SELECT count(*) FROM api.note_embeddings` must succeed, with `api.notes` as the control — because a privilege bit is what the catalog says and this is what PostgreSQL does. Neither grant touches whose rows come back: the table keeps FORCE RLS and its owner-scoped policy. `docs/migrations.md` gains the rule. | The two-session survival is the lesson: the first migration granted a view and a test asserted the view was granted, so both agreed and neither was the question. It took a proof that tried to READ to find it, which is ADR 0065/0066 in the smallest possible instance. | — |
+| **D1190** | Run 4: *"`bin/dev.sh psql --project FILE [--as app-runtime|migration-user]` … as the application the developer sees the subject's rows"*. | True, and true for a reason the plan does not state: `app_runtime` **inherits `authenticated`** (measured in rig 22f — `pg_auth_members` records exactly that one membership). So what a developer sees through `apg dev psql` is what the `authenticated` request role may see, and a project that grants its objects to `{{authenticated}}` — which is the only request role a project's placeholder allowlist admits for this purpose — reaches the developer's session by inheritance. Without D1189's table grant, `app_runtime` read `api.notes` (2) and was refused `api.note_embeddings`; with it, both. | Recorded, and the cluster proof asserts the mechanism rather than a count: the application role must see **exactly** the rows the subject owns, compared against what the superuser counts for that owner — not a literal, which was wrong the moment a second test in the module wrote a canary note as the same subject. | A developer loop that works by inheritance works until someone reads the allowlist and concludes a project cannot reach it. The measurement is one line of `pg_auth_members` and it decides whether `psql` is useful at all. | — |
+| **D1191** | Run 4's battery, item (b): *"`verify_seed` compares a prefix of the digest → the bad-digest test fails"*. | **It survived, and it was right to.** SHA-256 over different content differs everywhere, so a prefix comparison catches an edit made anywhere — the mutation removed no observable behaviour. The test's own docstring had the same false reasoning in it (*"a prefix comparison would accept a file whose first bytes are unchanged, which is every edit made to the END of a file"*), which is not how a digest works. | The mutation is rewritten as the one that removes the check (`actual[:0] != sha[:0]`, always false) and kills; the docstring is corrected to state the property that is actually asserted. Second uninformative mutation this session, after Run 2's first `(c)` and Run 3's first `(f)` (D493). | A battery is only evidence if a survivor is read. Twice now the survivor has been the mutation being wrong, and once it was a real gap — which is the ratio that makes reading them worth the minute. | — |
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -804,7 +809,10 @@ fails.
 and `test_acceptance_registry`; and every module the two greps above named.
 **Push.** CI green expected; CI runs the cluster module (its job has Docker).
 
-**Done.** 2026-09-11. `apg dev up | status | down | reset` works end to end.
+**Done.** 2026-09-11, `03c3f1b` on `session-22`. **CI GREEN** — run
+`34640459071`, workflow `contract`, `completed success` on
+`03c3f1be3325d6768c0a8066d85c770127364899`, all three jobs, first push.
+`apg dev up | status | down | reset` works end to end.
 Four divergence rows (**D1185–D1188**), next free **D1189**. `ruff format` and
 `ruff check` exit 0; `shellcheck bin/dev.sh` clean. **30 targeted modules,
 1436 passed, 2 skipped, 0 failed**, the list derived from two greps over every
@@ -956,6 +964,56 @@ the manifest accepts `sub/x.sql` → the traversal test fails.
 `test_documentation_index` (no new page yet — the doc paragraph is in an
 existing page), `test_cli_contract`, `test_root_script_policy`,
 `test_printed_commands`, `test_operator_commands_run_on_the_host`. **Push.**
+
+**Done.** 2026-09-12. `apg dev seed` and `apg dev psql` work, and Run 4 found
+the defect that would have made Run 2's live proof fail. Three divergence rows
+(**D1189–D1191**), next free **D1192**. `ruff format`, `ruff check` and
+`shellcheck bin/dev.sh` all clean. **Battery 6/6 killed**, every paired control
+green, every file restored by copy and verified with `cmp`.
+
+*The defect.* **D1189**: the example set granted `api.note_embeddings` and never
+`app.note_embeddings`, and the view is `security_invoker` — so PostgreSQL
+checked every caller against the table underneath, and refused all of them,
+including the `{{authenticated}}` role the migration did grant. It has been that
+way since Session 20. Session 21 read the tenant refusal as *upstream refused*;
+Run 2 read it as a missing grant on the view and granted the view to the agent
+roles; neither was wrong about what it saw and neither was the whole cause.
+`0002-agent-grants.sql` now grants the table to the four roles that may read it,
+the set is re-frozen, both fixtures re-rendered, and the grant proof ends on a
+`SET ROLE <authenticated>; SELECT count(*) FROM api.note_embeddings` with
+`api.notes` as the control. Measured after the repair: the read returns 1.
+
+*Measured, on `project.example.yaml`.* `seed example` applies 2 notes and 1
+embedding, every row owned by the development subject; a second `seed example`
+exits 2 with *"already applied; reset first"* and the counts are unchanged; an
+undeclared name exits 2 naming the one seed there is; `../../etc/passwd` and
+`.hidden` are refused at the wrapper for being paths rather than names. Through
+`apg dev psql`'s own argv as `app_runtime`: `api.notes` = 2 with the subject
+asserted, **0** without it, **0** as another subject; `api.note_embeddings` = 1.
+The argv carries `-h 127.0.0.1`, `--env-file` and no password.
+
+*D1190.* The loop works because `app_runtime` inherits `authenticated` — one
+membership in `pg_auth_members`, measured in rig 22f. A project's placeholder
+allowlist admits `{{authenticated}}` and not `app_runtime`, so that inheritance
+is the whole reason a developer's session can see a project's own domain.
+
+*The seed door.* A NAME checked against the project's manifest before anything
+is joined to a path (`bin/db.sh sql`'s rule); the digest compared whole; the
+text linted against the set's own forbidden table plus the rule a seed has and a
+migration does not — a seed **creates nothing**; rendered with the set's
+declared placeholders; applied in one transaction as the migration user with
+`app.user_id` set to the subject. Recorded in `seeds-applied.json`, once per
+environment.
+
+*What the battery found in this run's own work.* **D1191**: the plan's
+prefix-digest mutation survived because a prefix comparison catches an edit
+anywhere, and the test's docstring carried the same false reasoning. Both
+corrected. The seed-name-positional refusal was found by running the command
+rather than reading it: the wrapper demanded the NAME immediately after `seed`,
+so `seed --project x example` — the order the plan's own `bin/dev.py` line uses
+— was refused as *"seed requires the name of a declared seed"*, which is a lie
+about what was typed. The name is now the one positional, wherever it falls.
+
 
 ### Run 5 — the offline claim (ADR 0202)
 

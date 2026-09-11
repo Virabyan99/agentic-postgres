@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "seeds": [
+    {
+      "name": "example",
+      "file": "example.sql",
+      "sha256": "4bc9532d212bf1647e06be00e5dd2980d538cbef1a9890b0de3ed5b02b592c9a",
+      "description": "Two notes and one embedding for the development subject, written through the project API."
+    }
+  ]
+}

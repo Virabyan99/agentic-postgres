@@ -166,3 +166,75 @@ def test_the_wrapper_documents_its_exit_codes_and_refuses_before_the_python() ->
         "the wrapper execs the Python before it refuses bad input, so an argument error "
         "would arrive after an import and a daemon probe"
     )
+
+
+# ---------------------------------------------------------------------------
+# seed and psql: refused at the wrapper, before docker (D1170)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("arguments", "reason"),
+    [
+        (("seed", "--project", PROJECT), "a seed with no name"),
+        (("seed", "example"), "a name with no --project"),
+        (("seed", "a/b", "--project", PROJECT), "a name that is a path"),
+        (("seed", "../../etc/passwd", "--project", PROJECT), "a traversal"),
+        (("seed", ".hidden", "--project", PROJECT), "a dotfile"),
+        (("seed", "one", "two", "--project", PROJECT), "two names"),
+        (("psql", "--project", PROJECT, "--as", "postgres"), "a role this command will not be"),
+        (("psql", "--project", PROJECT, "--as"), "--as with no value"),
+        (("up", "stray", "--project", PROJECT), "a positional on a verb that takes none"),
+    ],
+)
+def test_seed_takes_a_name_and_never_a_path(arguments: tuple[str, ...], reason: str) -> None:
+    """Every one of these is decided by the shell wrapper, before the Python.
+
+    D1170: the name is a NAME. A separator or a leading dot is refused for what
+    it says, so nothing downstream ever joins it to a path -- `bin/db.sh sql`'s
+    rule, which refuses `../../etc/anything` as "not allowlisted" rather than
+    resolving it and then rejecting it.
+
+    Refused at the wrapper means these exit 2 on a machine with no docker at
+    all, which is what makes them an argument contract rather than a runtime
+    one.
+    """
+    result = dev(*arguments)
+    assert result.returncode == 2, (
+        f"{reason} exited {result.returncode}, not 2.\n{result.stdout}\n{result.stderr}"
+    )
+    assert result.stderr.strip(), f"{reason} was refused without saying why"
+    assert "Traceback" not in result.stderr, f"{reason} produced a traceback"
+
+
+def test_a_seed_name_is_accepted_in_either_position() -> None:
+    """`seed example --project x` and `seed --project x example` are one instruction.
+
+    Both get past the wrapper and fail later, on the environment rather than on
+    the argument -- which is the difference this asserts. A wrapper that took
+    the name only in one position would refuse the other spelling with "seed
+    requires the name of a declared seed", which is a lie about what was typed.
+    """
+    for arguments in (
+        ("seed", "example", "--project", PROJECT),
+        ("seed", "--project", PROJECT, "example"),
+    ):
+        result = dev(*arguments)
+        assert result.returncode != 2 or "requires the name" not in result.stderr, (
+            f"{arguments} was refused as if no name was given: {result.stderr}"
+        )
+
+
+def test_the_wrapper_forwards_psql_arguments_after_a_double_dash_unread() -> None:
+    """Everything after `--` is psql's own.
+
+    Asserted on the wrapper's source rather than by running psql: the forwarding
+    is the property, and running it needs a terminal this test does not have.
+    """
+    source = DEV.read_text(encoding="utf-8")
+    assert 'arguments+=("$@")' in source, "the wrapper does not forward the rest"
+    body = source.split("main() {", 1)[1]
+    assert body.index("--)") < body.index('die 2 "unknown argument'), (
+        "`--` is handled after the unknown-argument refusal, so psql's own flags would "
+        "be refused as this command's"
+    )

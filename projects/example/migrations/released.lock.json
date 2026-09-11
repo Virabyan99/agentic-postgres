@@ -14,15 +14,17 @@
       "version": "20260914120001"
     },
     {
-      "canonical_render_sha256": "472afdb4edfbe878ea584ebcc8543e421b273fbc91199efc07d78ec6a72887ad",
+      "canonical_render_sha256": "11b298ce4709529ea14849d331a6e0980c9d8c48134b34d6502bf9f553ced138",
       "name": "agent_grants",
       "placeholders": [
         "agent_reader",
         "agent_writer",
+        "api_documentation",
+        "authenticated",
         "object_owner"
       ],
       "template": "templates/0002-agent-grants.sql",
-      "template_sha256": "10e1a9d7e2f49ecf0469d0bef074fb5e7fe78e0c10f47df49ad6267ddb2b8c52",
+      "template_sha256": "019d2d0cca65d75c6ea3bb80710b0d6f92b3b6d12c807f7f1378b98ab87d0c3d",
       "version": "20260914120002"
     }
   ],

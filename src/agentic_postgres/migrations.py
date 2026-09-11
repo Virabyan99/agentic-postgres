@@ -109,8 +109,16 @@ PROJECT_ROLE_PREAMBLE = "SET LOCAL ROLE {{object_owner}}"
 #: a tenant's table on a host.
 PROJECT_DOWN_SENTINEL = "AP900"
 
-_SET_ROLE = re.compile(r"\bSET\s+(?:LOCAL\s+)?ROLE\b[^;]*", re.IGNORECASE)
-_FORBIDDEN_STATEMENTS = (
+SET_ROLE = re.compile(r"\bSET\s+(?:LOCAL\s+)?ROLE\b[^;]*", re.IGNORECASE)
+
+#: What a project's SQL may not contain, and why, for each pattern.
+#:
+#: **Public since Session 22** (ADR 0203), because a project's SEED runs through
+#: the same plane as its migrations, as the same `migration_user`, under the same
+#: `SET LOCAL ROLE` -- so the boundary is the same boundary and there is one
+#: table of it. `dev_environment.lint_seed` reads this and adds the rule a seed
+#: has and a migration does not: a seed creates nothing at all.
+FORBIDDEN_STATEMENTS = (
     (re.compile(r"\bapp_private\b", re.IGNORECASE), "names the app_private schema"),
     (re.compile(r"\b(CREATE|ALTER|DROP)\s+ROLE\b", re.IGNORECASE), "creates or alters a role"),
     (re.compile(r"\b(CREATE|ALTER|DROP)\s+SCHEMA\b", re.IGNORECASE), "creates or alters a schema"),
@@ -609,7 +617,7 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
         applied = sql_surface.statements(template)
         where = f"{project.root}: {entry['version']} ({entry['template']})"
 
-        for pattern, description in _FORBIDDEN_STATEMENTS:
+        for pattern, description in FORBIDDEN_STATEMENTS:
             match = pattern.search(applied)
             if match is not None:
                 raise ProjectSetError(
@@ -618,7 +626,7 @@ def lint_project_set(project: MigrationSet, release: MigrationSet | None = None)
                     "state is not addressable from it."
                 )
 
-        for statement in _SET_ROLE.findall(applied):
+        for statement in SET_ROLE.findall(applied):
             if statement.strip() != PROJECT_ROLE_PREAMBLE:
                 raise ProjectSetError(
                     f"{where} sets a role other than the owner preamble: "
