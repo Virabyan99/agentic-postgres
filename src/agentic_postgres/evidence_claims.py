@@ -42,10 +42,42 @@ from agentic_postgres import REPO_ROOT
 TESTS_ROOT = REPO_ROOT / "tests"
 REGISTRY_PATH = TESTS_ROOT / "acceptance-registry.yaml"
 
-#: Gate mode -> the pytest marker its suite selects. ``offline`` is absent on
-#: purpose: a claim proved only by tests that need no environment is a claim
-#: about a checkout, and Session 2's are about a running deployment.
+#: Gate mode -> the pytest marker its suite selects.
+#:
+#: The two LIVE modes, and only those: a marker is how a deployment mode picks
+#: its proofs out of the suite. ``offline`` has no marker and is not here --
+#: what identifies an offline claim is that it is DECLARED (`OFFLINE_CLAIMS`),
+#: never that a marker is missing (ADR 0202). Iterate `ALL_MODES` when the
+#: question is "which modes exist" and this when it is "what does a live mode
+#: select".
 MODE_MARKERS = {"host": "live_host", "external": "external"}
+
+#: The third mode: a claim about a CHECKOUT rather than about a deployment.
+#:
+#: ADR 0202. Session 22's `apg dev` claims are the first of them -- there is no
+#: host on which a disposable local cluster could be measured differently, so a
+#: session whose work is a developer's own command has claims no deployment can
+#: answer.
+OFFLINE_MODE = "offline"
+
+#: Every mode an evidence half can be written in.
+ALL_MODES = (*MODE_MARKERS, OFFLINE_MODE)
+
+#: Claims measured in a checkout, DECLARED here and nowhere else (ADR 0202).
+#:
+#: **Membership is the whole definition.** A claim with no live proof that is
+#: not named here is still refused with the sentence it has always been refused
+#: with -- so the twenty-one requirements `docs/scope-closure.md` §4 lists
+#: become reportable one declaration at a time, each a decision, and never by
+#: inference (D696).
+#:
+#: Inferring the mode from a missing marker is the cheap version of this and it
+#: is wrong twice: it would make those twenty-one reportable without anyone
+#: deciding to, and it would turn a claim whose live proofs stopped being
+#: collected -- a marker removed, a module renamed, a gate variable unset --
+#: into a green claim answered from a checkout. That is ADR 0195's substitution
+#: in the most expensive place it could happen.
+OFFLINE_CLAIMS: frozenset[str] = frozenset()
 
 #: Claim name -> the acceptance requirements whose tests prove it.
 #:
@@ -757,10 +789,27 @@ def claim_mode(claim: str) -> str:
     """
     markers = {marker for nodeid in claim_nodeids(claim) for marker in environment_markers(nodeid)}
     modes = sorted(mode for mode, marker in MODE_MARKERS.items() if marker in markers)
+
+    # **Declared, and the declaration is checked against the proofs** (ADR
+    # 0202). A claim named in `OFFLINE_CLAIMS` whose proofs carry a live marker
+    # is a claim whose declaration is now wrong -- somebody added a live half to
+    # something declared to have none -- and the refusal says so rather than
+    # choosing one of the two answers. No claim with a live half can be reported
+    # through the offline half, by construction and then again in `write_half`.
+    if claim in OFFLINE_CLAIMS:
+        if modes:
+            raise ClaimError(
+                f"claim {claim!r} is declared offline and carries {modes}: a claim with a "
+                "live half may not be reported through the offline half. Either remove it "
+                "from OFFLINE_CLAIMS or remove the marker from its proofs."
+            )
+        return OFFLINE_MODE
+
     if not modes:
         raise ClaimError(
             f"claim {claim!r} has no live proof: every test it names runs in a checkout, "
-            "so no deployment is being measured."
+            "so no deployment is being measured. A claim that measures a checkout is "
+            "declared in OFFLINE_CLAIMS, which is a decision per claim (ADR 0202)."
         )
     if len(modes) > 1:
         raise ClaimError(
@@ -777,8 +826,8 @@ def claims_for_mode(mode: str, session: int) -> tuple[str, ...]:
     place that knows which session is current, and the one thing every caller
     here does know is which session's gate it is.
     """
-    if mode not in MODE_MARKERS:
-        raise ClaimError(f"unknown mode: {mode}. Expected one of {sorted(MODE_MARKERS)}.")
+    if mode not in ALL_MODES:
+        raise ClaimError(f"unknown mode: {mode}. Expected one of {sorted(ALL_MODES)}.")
     return tuple(claim for claim in claims_through_session(session) if claim_mode(claim) == mode)
 
 
@@ -789,6 +838,12 @@ def static_nodeids_for_mode(mode: str, session: int) -> tuple[str, ...]:
     selector does not collect them, and a claim that needed them would come out
     ``not_run`` forever. The gate runs these explicitly rather than widening the
     selector, which would drag the whole contract suite into a deployment run.
+
+    **For ``offline`` this is every proof the mode's claims name**, and the body
+    below already says so without a special case: an offline claim carries no
+    marker on any of its proofs -- `claim_mode` refuses it otherwise -- so the
+    filter admits all of them. That is the property, not a coincidence, and it
+    is why the offline gate needs no selector of its own.
 
     Empty is a legitimate answer, and means this mode carries no claim. The
     caller must not read it as "run everything": ``pytest`` with no node IDs

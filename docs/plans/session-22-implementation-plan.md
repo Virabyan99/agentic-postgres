@@ -103,7 +103,7 @@ D1060, D1066, D1071, D1076, D1098, D1110, D1131.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1192**. Rows D1157–D1175
+Six columns, next free number after this table **D1194**. Rows D1157–D1175
 were measured at planning on 2026-09-11 at `90c1c19`; the runs add theirs
 below them as they go, each run's numbers named in its Done paragraph. Run 1
 added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`;
@@ -111,7 +111,9 @@ Run 2 added **D1180–D1184**: three found by building, one by the battery, and
 one by a RED CI on its first push. Run 3 added **D1185–D1188**, three of them
 found by a test going red during the move it describes. Run 4 added
 **D1189–D1191**, the first of them a defect two sessions old that only a
-proof trying to READ could find.
+proof trying to READ could find. Run 5 added **D1192–D1193**, one a guard that
+could not be observed where it was being asserted and one a rig that reverted
+its own run's work.
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -150,6 +152,8 @@ proof trying to READ could find.
 | **D1189** | Run 4: *"`test_exactly_one_subject_exists_and_its_rows_are_visible_only_with_it_asserted` (after `seed example`: … as `app_runtime` with `PGOPTIONS` set, `SELECT count(*) FROM api.notes` = 2)"* — and D1156/Run 2, which read the tenant refusal as a missing grant on the VIEW. | **The example set granted the view and never the table it reads, so nobody could read it — including the roles it did grant.** `api.note_embeddings` is declared `security_invoker = true` (`0001:66`), so PostgreSQL checks the CALLER's privileges on `app.note_embeddings`; `20260914120001` grants `api.note_embeddings` to `{{authenticated}}` and `{{api_documentation}}` and grants the table to nobody. Measured in rig 22f: `SET ROLE <authenticated>` reads `api.notes` (2 rows) and is refused on `api.note_embeddings` with *permission denied for table note_embeddings* — the TABLE, not the view it holds. The release does both halves in one line for its own objects (`0004:53`: `GRANT SELECT ON app.notes, app.tasks TO {{authenticated}}, {{agent_reader}}, {{agent_writer}}`). **Run 2's repair was therefore incomplete**: it granted the agent roles the view, and the live tenant read at Session 24's trip would still have failed. | `0002-agent-grants.sql` grants `app.note_embeddings` to `{{authenticated}}`, `{{agent_reader}}`, `{{agent_writer}}` and `{{api_documentation}}` beside the view, the set re-frozen and both fixtures re-rendered. The grant proof now **ends on a reading** — `SET ROLE <authenticated>; SELECT count(*) FROM api.note_embeddings` must succeed, with `api.notes` as the control — because a privilege bit is what the catalog says and this is what PostgreSQL does. Neither grant touches whose rows come back: the table keeps FORCE RLS and its owner-scoped policy. `docs/migrations.md` gains the rule. | The two-session survival is the lesson: the first migration granted a view and a test asserted the view was granted, so both agreed and neither was the question. It took a proof that tried to READ to find it, which is ADR 0065/0066 in the smallest possible instance. | — |
 | **D1190** | Run 4: *"`bin/dev.sh psql --project FILE [--as app-runtime|migration-user]` … as the application the developer sees the subject's rows"*. | True, and true for a reason the plan does not state: `app_runtime` **inherits `authenticated`** (measured in rig 22f — `pg_auth_members` records exactly that one membership). So what a developer sees through `apg dev psql` is what the `authenticated` request role may see, and a project that grants its objects to `{{authenticated}}` — which is the only request role a project's placeholder allowlist admits for this purpose — reaches the developer's session by inheritance. Without D1189's table grant, `app_runtime` read `api.notes` (2) and was refused `api.note_embeddings`; with it, both. | Recorded, and the cluster proof asserts the mechanism rather than a count: the application role must see **exactly** the rows the subject owns, compared against what the superuser counts for that owner — not a literal, which was wrong the moment a second test in the module wrote a canary note as the same subject. | A developer loop that works by inheritance works until someone reads the allowlist and concludes a project cannot reach it. The measurement is one line of `pg_auth_members` and it decides whether `psql` is useful at all. | — |
 | **D1191** | Run 4's battery, item (b): *"`verify_seed` compares a prefix of the digest → the bad-digest test fails"*. | **It survived, and it was right to.** SHA-256 over different content differs everywhere, so a prefix comparison catches an edit made anywhere — the mutation removed no observable behaviour. The test's own docstring had the same false reasoning in it (*"a prefix comparison would accept a file whose first bytes are unchanged, which is every edit made to the END of a file"*), which is not how a digest works. | The mutation is rewritten as the one that removes the check (`actual[:0] != sha[:0]`, always false) and kills; the docstring is corrected to state the property that is actually asserted. Second uninformative mutation this session, after Run 2's first `(c)` and Run 3's first `(f)` (D493). | A battery is only evidence if a survivor is read. Twice now the survivor has been the mutation being wrong, and once it was a real gap — which is the ratio that makes reading them worth the minute. | — |
+| **D1192** | Run 5's battery, item (b): *"`write_half` offline drops the marker guard → the live-node test fails"*, and ADR 0202 §2's *"a second check in `write_half`"*. | **The second guard is unreachable while the first one works, so the test written for it measured the first one twice.** `results_for_mode` calls `claim_mode`, which refuses a declared claim carrying a live marker before `write_half` reaches its own check — so the mutation deleting `write_half`'s guard SURVIVED, and the exit 5 the test asserted had been coming from `claim_mode` all along. ADR 0202 already says why the second exists (*"the two can only disagree if one of them is broken"*); what the plan did not say is that "one of them is broken" is the only state it can be observed in. | The fixture gains `break_claim_mode=True`, which writes a module whose FIRST guard is neutralised — the battery's own mutation (a), applied deliberately and only in that one test — and the test asserts the second guard still refuses, writes nothing, and names the offending proofs. Its control, in the same test, is the same declaration with the first guard intact: refused earlier, with a different message. Both refusals exist, and the pair is what says so. | A belt-and-braces check is testable only by undoing the belt. Asserting the outcome without undoing it measures the belt and reports the braces — which is how a guard with no scenario survives (the same shape as `test_a_project_set_that_publishes_nothing`, whose docstring records the last instance). | 0202 |
+| **D1193** | CLAUDE.md §1: *"Never `git checkout --` to restore; the files under test are uncommitted. Snapshot to `/tmp`, restore by copy, `cmp` each file back."* | Read, and then done anyway. Run 5's first exercising rig ended with `git checkout -- src/agentic_postgres/evidence_claims.py` to undo a throwaway claim declaration — and reverted **Run 5's own uncommitted library change** with it. The next run failed with `AttributeError: module has no attribute 'ALL_MODES'`, which reads as a defect in the code and was a defect in the rig. Recovered from a `cp` taken before the first run, restored byte for byte and verified with `cmp`. | Every rig and every fixture in this run snapshots to `/tmp` and restores by copy under a `trap`/`finally`, with the restoration asserted — the battery, the exercising rig, and `test_evidence_claims`' `declared_offline`, which edits the library the subprocess imports. The rule was already written; what this adds is that it applies to a rig editing the file the RUN is changing, which is the case where `git checkout --` looks safest and is not. | The rule exists because the working tree is the only copy of an unfinished run. Ten recorded instances were about content in a heredoc; this is the eleventh and the first about a restore. | — |
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -965,7 +969,10 @@ the manifest accepts `sub/x.sql` → the traversal test fails.
 existing page), `test_cli_contract`, `test_root_script_policy`,
 `test_printed_commands`, `test_operator_commands_run_on_the_host`. **Push.**
 
-**Done.** 2026-09-12. `apg dev seed` and `apg dev psql` work, and Run 4 found
+**Done.** 2026-09-12, `aed4f82` on `session-22`. **CI GREEN** — run
+`34643275270`, workflow `contract`, `completed success` on
+`aed4f82bf442528f77d2d3412e7a051c4ac4dc95`, all three jobs, first push.
+`apg dev seed` and `apg dev psql` work, and Run 4 found
 the defect that would have made Run 2's live proof fail. Three divergence rows
 (**D1189–D1191**), next free **D1192**. `ruff format`, `ruff check` and
 `shellcheck bin/dev.sh` all clean. **Battery 6/6 killed**, every paired control
@@ -1084,6 +1091,55 @@ other (both arms in one test, D499); (d) the differing-commits print removed
 **Targeted:** `test_evidence_claims`, `test_acceptance_registry`,
 `test_gate_contract`, every `test_session_*_gate_modes` module, `test_session_eight_gate_modes`,
 `test_cli_contract`. **Push.**
+
+**Done.** 2026-09-12. The evidence model has a third mode, declared and never
+inferred. Two divergence rows (**D1192**, **D1193**), next free **D1194**.
+`ruff format` and `ruff check` exit 0. **Battery 6/6 killed**, every paired
+control green, every file restored by copy and verified with `cmp`.
+
+*The library.* `OFFLINE_MODE`, `ALL_MODES = (*MODE_MARKERS, OFFLINE_MODE)` and
+`OFFLINE_CLAIMS: frozenset[str] = frozenset()` — empty until Run 6 fills it with
+the four. `claim_mode` has the three behaviours ADR 0202 specifies, and
+`MODE_MARKERS` keeps its two entries with its comment rewritten to say what it
+is now for: a marker is how a LIVE mode selects its proofs, and the offline mode
+has none because what identifies it is the declaration. `claims_for_mode`
+accepts the third mode; `static_nodeids_for_mode` needed no special case, and
+its docstring now says why — an offline claim carries no marker on any proof, so
+the existing filter admits all of them.
+
+*The writer.* `--mode offline` refuses `--project-a-outputs` (exit 2, *"an
+offline half measures a checkout, not a deployment"*), reads no deployed
+document, and records `checkout_commit` — never `source_commit`, which every
+existing reader understands as the release a deployment is running. `merge`
+takes `--offline-input`, required exactly when the session has offline claims
+and refused when it does not, and records `offline_checkout_commit` beside
+`source_commit`. `MUST_AGREE` is untouched and now carries the reason: the two
+halves measure different things and may legitimately name different commits, so
+the difference is PRINTED rather than required or hidden.
+
+*Measured, at session 21 with a throwaway declaration.* `--mode offline` with a
+deployed document exits 2; with a JUnit over the declared claim's proofs it
+writes `mode: offline`, `source_commit: null`, `project_keys: []`,
+`routes: null`, `certificate_sha256: null`, and `checkout_commit:
+aed4f82bf442528f77d2d3412e7a051c4ac4dc95` — which is `git rev-parse HEAD`. A
+declared claim whose proofs carry a marker is refused by name; an UNDECLARED
+markerless claim is refused with the sentence it has always been refused with,
+so the twenty-one in `docs/scope-closure.md` §4 are exactly where they were.
+
+*The contract test ADR 0202 authorises replacing.*
+`test_a_claim_with_no_live_proof_is_refused` →
+`test_an_undeclared_claim_with_no_live_proof_is_still_refused`, same body, plus
+an assertion that its subject is undeclared — so the test cannot quietly become
+vacuous if somebody declares `checkout_only` later. Its pair,
+`test_a_declared_offline_claim_resolves_to_the_offline_mode`, is the same claim
+over the same requirement differing in one thing. `grep -n "no_live_proof"
+tests/acceptance-registry.yaml` was empty at planning and is empty now, so no
+registry line moved; `test_acceptance_registry` ran anyway (D1119).
+
+*Three mode-iterating tests moved from `MODE_MARKERS` to `ALL_MODES`*, which is
+the question they were asking. 53 in `test_evidence_claims`, 608 across the six
+gate-mode guards, the registry and `test_cli_contract` — 0 failed.
+
 
 ### Run 6 — the bump
 

@@ -183,7 +183,9 @@ def test_every_claim_node_id_names_a_real_test() -> None:
 
 def test_every_claim_resolves_to_exactly_one_mode() -> None:
     modes = {claim: claims.claim_mode(claim) for claim in claims.CLAIMS}
-    assert set(modes.values()) <= set(claims.MODE_MARKERS)
+    assert set(modes.values()) <= set(claims.ALL_MODES), (
+        f"a claim resolved to a mode no half is written in: {sorted(set(modes.values()))}"
+    )
 
 
 def test_at_least_one_environment_carries_a_claim() -> None:
@@ -195,7 +197,7 @@ def test_at_least_one_environment_carries_a_claim() -> None:
     network with no IPv6 transit, and a claim that cannot pass is an invented
     blocker rather than a measurement.
     """
-    measured = {mode: claims.claims_for_mode(mode, CURRENT_SESSION) for mode in claims.MODE_MARKERS}
+    measured = {mode: claims.claims_for_mode(mode, CURRENT_SESSION) for mode in claims.ALL_MODES}
     assert any(measured.values()), f"no claim is measured anywhere: {measured}"
 
 
@@ -238,7 +240,7 @@ def test_a_mode_that_carries_no_claim_resolves_no_proofs() -> None:
     universal, and the condition is a real branch — Session 2's external mode
     carried no claim, and Session 4's does.
     """
-    for mode in claims.MODE_MARKERS:
+    for mode in claims.ALL_MODES:
         if not claims.claims_for_mode(mode, CURRENT_SESSION):
             static = claims.static_nodeids_for_mode(mode, CURRENT_SESSION)
             assert not static, f"{mode} carries no claim but resolved proofs {static}"
@@ -251,11 +253,77 @@ def test_a_claim_spanning_both_environments_is_refused(monkeypatch: pytest.Monke
         claims.claim_mode("spanning")
 
 
-def test_a_claim_with_no_live_proof_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
-    """CFG-001 is proved entirely in a checkout, so it measures no deployment."""
+def test_an_undeclared_claim_with_no_live_proof_is_still_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CFG-001 is proved entirely in a checkout, so it measures no deployment.
+
+    **This test was `test_a_claim_with_no_live_proof_is_refused` and ADR 0202
+    renamed it, which is the only change.** The property it pinned is unchanged
+    and is the one that matters most: a claim with no live proof that is NOT
+    declared offline is refused exactly as it always was. Without it, the
+    twenty-one requirements `docs/scope-closure.md` §4 lists would become
+    reportable the moment a third mode existed -- by inference, with nobody
+    deciding (D696).
+
+    What ADR 0202 added is the declaration, and
+    `test_a_declared_offline_claim_resolves_to_the_offline_mode` is its half.
+    The two together say: membership in `OFFLINE_CLAIMS` is the whole
+    difference, and the absence of a marker is not.
+    """
     monkeypatch.setitem(claims.CLAIMS, "checkout_only", ("CFG-001",))
+    assert "checkout_only" not in claims.OFFLINE_CLAIMS, (
+        "this test's subject is an UNDECLARED claim; declaring it would make the "
+        "refusal below measure nothing"
+    )
     with pytest.raises(claims.ClaimError, match="no live proof"):
         claims.claim_mode("checkout_only")
+
+
+def test_a_declared_offline_claim_resolves_to_the_offline_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR 0202: declared, and the declaration is the whole difference.
+
+    The same claim over the same requirement as the test above, differing in one
+    thing -- membership in `OFFLINE_CLAIMS` -- resolves instead of raising. A
+    pair rather than two separate tests, because what is being asserted is that
+    the declaration and nothing else decides it.
+    """
+    monkeypatch.setitem(claims.CLAIMS, "checkout_only", ("CFG-001",))
+    monkeypatch.setattr(claims, "OFFLINE_CLAIMS", frozenset({"checkout_only"}))
+
+    assert claims.claim_mode("checkout_only") == claims.OFFLINE_MODE
+    assert claims.OFFLINE_MODE in claims.ALL_MODES
+    assert claims.OFFLINE_MODE not in claims.MODE_MARKERS, (
+        "the offline mode acquired a pytest marker, which would make it selectable by "
+        "absence again -- what identifies it is the declaration (ADR 0202)"
+    )
+
+
+def test_a_declared_offline_claim_that_carries_a_marker_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A declaration that has gone wrong is said, not silently preferred.
+
+    Somebody has given a live half to something declared to have none. Either
+    answer -- reporting it offline, or ignoring the declaration and reporting it
+    live -- would be the model choosing which of two contradictory statements to
+    believe. It refuses instead, and the message names both remedies (ADR 0195).
+    """
+    monkeypatch.setitem(claims.CLAIMS, "declared_but_live", ("DEP-ISO-002",))
+    monkeypatch.setattr(claims, "OFFLINE_CLAIMS", frozenset({"declared_but_live"}))
+
+    with pytest.raises(claims.ClaimError, match="declared offline and carries") as raised:
+        claims.claim_mode("declared_but_live")
+    assert "OFFLINE_CLAIMS" in str(raised.value), (
+        "the refusal does not name the declaration it is about, so a reader has the "
+        "diagnosis and not the remedy"
+    )
+
+    # The control, in the same test: undeclared, the same claim resolves live.
+    monkeypatch.setattr(claims, "OFFLINE_CLAIMS", frozenset())
+    assert claims.claim_mode("declared_but_live") == "host"
 
 
 def test_an_unregistered_requirement_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1237,3 +1305,274 @@ def test_no_requirement_is_named_by_two_claims() -> None:
         "function of the other's, and when the claims belong to different sessions it "
         "also gives one requirement ID two guarantees (ADR 0089)."
     )
+
+
+# ---------------------------------------------------------------------------
+# The offline half (ADR 0202)
+# ---------------------------------------------------------------------------
+
+
+def write_offline_half(
+    tmp_path: Path,
+    output: Path,
+    *,
+    session: int = HALF_SESSION,
+    requirement: str = "CFG-001",
+) -> subprocess.CompletedProcess[str]:
+    """One offline half, over a JUnit recording the declared claim's proofs.
+
+    The declaration is made in the LIBRARY the subprocess imports, not in this
+    process: `run_writer` is a subprocess, so a `monkeypatch` here would not
+    reach it. The file is edited, used, and restored by COPY in the caller --
+    never by `git checkout --`, because the file is uncommitted during a run
+    that changes it (CLAUDE.md §1, and Run 5's own rig reverted this module's
+    change that way once).
+    """
+    # Resolved from the REQUIREMENT and not from `claims.CLAIMS`: the
+    # declaration is written into the module file for the SUBPROCESS to
+    # import, and this process imported that module before the fixture
+    # edited it. Asking the in-process table for a claim it has never seen
+    # raises `unknown claim`, which is a fixture defect wearing the costume
+    # of the refusal under test.
+    outcomes = dict.fromkeys(claims.requirement_nodeids(requirement), "passed")
+    artifact = write_junit(tmp_path / "offline-tests.xml", outcomes)
+    return run_writer(
+        "--session", str(session),
+        "--mode", "offline",
+        "--junit", str(artifact),
+        "--output", str(output),
+    )  # fmt: skip
+
+
+@pytest.fixture
+def declared_offline(tmp_path: Path):
+    """Declare one offline claim in the library, and put it back afterwards.
+
+    Restored by copy and asserted with `cmp`-equivalent bytes: the subprocess
+    under test imports the real module, so the declaration has to be real for
+    the length of the test.
+    """
+    path = REPO_ROOT / "src" / "agentic_postgres" / "evidence_claims.py"
+    original = path.read_bytes()
+
+    def declare(
+        claim: str, requirements: tuple[str, ...], *, break_claim_mode: bool = False
+    ) -> None:
+        text = original.decode("utf-8")
+        text = text.replace(
+            "OFFLINE_CLAIMS: frozenset[str] = frozenset()",
+            f'OFFLINE_CLAIMS: frozenset[str] = frozenset({{"{claim}"}})',
+            1,
+        )
+        text = text.replace(
+            "CLAIMS: dict[str, tuple[str, ...]] = {",
+            f'CLAIMS: dict[str, tuple[str, ...]] = {{\n    "{claim}": {requirements!r},',
+            1,
+        )
+        assert claim in text, "the declaration did not take"
+
+        if break_claim_mode:
+            # **The first guard, neutralised on purpose.** `write_half`'s
+            # marker check is reachable only when `claim_mode` has stopped
+            # refusing -- which is the state ADR 0202 §2 says it exists for:
+            # "the two can only disagree if one of them is broken, and the cheap
+            # place to find that out is before a file exists". Measuring it any
+            # other way measures the first guard twice (D1192).
+            anchor = "    if claim in OFFLINE_CLAIMS:\n        if modes:"
+            assert text.count(anchor) == 1, "claim_mode's first guard moved"
+            text = text.replace(anchor, "    if claim in OFFLINE_CLAIMS:\n        if False:", 1)
+
+        path.write_text(text, encoding="utf-8")
+
+    try:
+        yield declare
+    finally:
+        path.write_bytes(original)
+        assert path.read_bytes() == original, "evidence_claims.py was not restored"
+
+
+def test_the_offline_half_is_written_from_a_checkout_and_records_its_commit(
+    tmp_path: Path, declared_offline
+) -> None:
+    """It reads no deployed document, and says which COMMIT it measured.
+
+    `checkout_commit` and not `source_commit`: every existing reader understands
+    that field as the release a deployment is running, and a checkout's SHA
+    sitting in it would be read as one (ADR 0202 §2). The deployment fields are
+    null rather than absent, so a reader that asks gets an answer.
+    """
+    declared_offline("checkout_only", ("CFG-001",))
+    output = tmp_path / "offline.json"
+    result = write_offline_half(tmp_path, output)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    document = json.loads(output.read_text(encoding="utf-8"))
+    assert document["mode"] == "offline"
+    assert document["tests"] == {"checkout_only": "passed"}
+    assert (
+        document["checkout_commit"]
+        == subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, check=True, cwd=REPO_ROOT
+        ).stdout.strip()
+    )
+    for field in ("source_commit", "routes", "certificate_sha256"):
+        assert document[field] is None, f"{field} is {document[field]!r} in an offline half"
+    assert document["project_keys"] == []
+
+    # And it refuses a deployed document, which is a caller who has mistaken
+    # which kind of half this is -- every field above would then be filled from
+    # a system this half did not measure.
+    refused = run_writer(
+        "--session", str(HALF_SESSION),
+        "--mode", "offline",
+        "--junit", str(tmp_path / "offline-tests.xml"),
+        "--project-a-outputs", str(deployed(tmp_path, "alpha-dev")),
+        "--output", str(tmp_path / "never.json"),
+    )  # fmt: skip
+    assert refused.returncode == 2, refused.stdout + refused.stderr
+    assert "measures a checkout" in refused.stderr
+    assert not (tmp_path / "never.json").exists()
+
+
+def test_the_offline_half_refuses_a_claim_with_a_live_node_id(
+    tmp_path: Path, declared_offline
+) -> None:
+    """The SECOND guard, measured in the only state it is reachable in.
+
+    ADR 0202 asks for two checks over one property: `claim_mode` refuses a
+    declared claim that carries a live marker, and `write_half` refuses one
+    again before it writes anything. The second exists because "the two can only
+    disagree if one of them is broken, and the cheap place to find that out is
+    before a file exists" -- so when everything works, the first refuses and the
+    second never runs.
+
+    **Run 5's battery found that out.** The first version of this test declared
+    a claim whose requirement has a live half and asserted exit 5; the mutation
+    that deleted `write_half`'s guard SURVIVED, because the exit 5 was coming
+    from `claim_mode` all along and this was the first guard measured twice
+    (D1192). So the fixture neutralises the first guard here -- deliberately,
+    and only here -- and what is asserted is that the second one still refuses,
+    still writes nothing, and says which proofs are the problem.
+
+    The control is below: with the first guard intact, the same declaration is
+    refused earlier, which is what makes the neutralised arm a second check
+    rather than the only one.
+    """
+    declared_offline("declared_but_live", ("DEP-ISO-002",), break_claim_mode=True)
+    output = tmp_path / "offline.json"
+    result = write_offline_half(tmp_path, output, requirement="DEP-ISO-002")
+
+    assert result.returncode == 5, result.stdout + result.stderr
+    assert not output.exists(), "a document was written for a claim with a live half"
+    assert "environment marker" in result.stderr, (
+        f"the second guard did not name what it refused: {result.stderr}"
+    )
+    assert "no evidence file was written" in result.stderr
+
+    # The control: first guard intact, the same declaration, refused earlier and
+    # for a different reason. Both refusals exist, and this is what says so.
+    declared_offline("declared_but_live", ("DEP-ISO-002",))
+    earlier = write_offline_half(tmp_path, output, requirement="DEP-ISO-002")
+    assert earlier.returncode == 5, earlier.stdout + earlier.stderr
+    assert "declared offline and carries" in earlier.stderr, earlier.stderr
+    assert not output.exists()
+
+
+def test_merge_requires_the_offline_input_exactly_when_offline_claims_exist(
+    tmp_path: Path, declared_offline
+) -> None:
+    """Required iff, and both arms are here (D499).
+
+    An input that may be absent is an input a run forgets, and the session whose
+    claims it carries is the session that cannot tell. The `external` sentence's
+    twin, and its mirror: an offline input for a session with no offline claim
+    describes nothing the merge can report, and is refused too.
+    """
+    host = write_host_half(tmp_path, tmp_path / "host.json")
+    external = write_external_half(tmp_path, tmp_path / "external.json")
+
+    # Arm one: no offline claim, no offline input -- merges.
+    merged = tmp_path / "merged.json"
+    fine = run_writer(
+        "--session", str(HALF_SESSION),
+        "--host-input", str(host), "--external-input", str(external),
+        "--output", str(merged),
+    )  # fmt: skip
+    assert fine.returncode == 0, fine.stdout + fine.stderr
+
+    # Arm two: no offline claim, an offline input -- refused as describing
+    # nothing, so the flag cannot be passed out of habit.
+    stray = run_writer(
+        "--session", str(HALF_SESSION),
+        "--host-input", str(host), "--external-input", str(external),
+        "--offline-input", str(host), "--output", str(tmp_path / "stray.json"),
+    )  # fmt: skip
+    assert stray.returncode == 2, stray.stdout + stray.stderr
+    assert "no offline claim" in stray.stderr
+
+    # Arm three: an offline claim and no offline input -- refused, naming it.
+    declared_offline("checkout_only", ("CFG-001",))
+    missing = run_writer(
+        "--session", str(HALF_SESSION),
+        "--host-input", str(host), "--external-input", str(external),
+        "--output", str(tmp_path / "missing.json"),
+    )  # fmt: skip
+    assert missing.returncode == 2, missing.stdout + missing.stderr
+    assert "checkout_only" in missing.stderr and "--offline-input is required" in missing.stderr
+    assert not (tmp_path / "missing.json").exists()
+
+
+def test_the_merged_document_carries_both_commits_and_says_when_they_differ(
+    tmp_path: Path, declared_offline
+) -> None:
+    """Two commits, beside each other, and the difference is PRINTED.
+
+    `MUST_AGREE` does not cover `checkout_commit` on purpose: the halves measure
+    different things and may legitimately name different commits -- Session 22
+    closes on an offline half at a commit no deployment has run. Requiring
+    agreement would refuse the honest case; saying nothing would hide it (ADR
+    0195: reported, never folded).
+    """
+    declared_offline("checkout_only", ("CFG-001",))
+    host = write_host_half(tmp_path, tmp_path / "host.json")
+    external = write_external_half(tmp_path, tmp_path / "external.json")
+    offline = tmp_path / "offline.json"
+    assert write_offline_half(tmp_path, offline).returncode == 0
+
+    merged = tmp_path / "merged.json"
+    result = run_writer(
+        "--session", str(HALF_SESSION),
+        "--host-input", str(host), "--external-input", str(external),
+        "--offline-input", str(offline), "--output", str(merged),
+    )  # fmt: skip
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    document = json.loads(merged.read_text(encoding="utf-8"))
+    assert document["tests"]["checkout_only"] == "passed", (
+        "the offline half's claim is not in the merged document"
+    )
+    assert document["offline_checkout_commit"], "the merged document records no checkout commit"
+    assert document["source_commit"], "the merged document records no deployed commit"
+    assert "checkout_commit" not in claims_writer_must_agree(), (
+        "checkout_commit is in MUST_AGREE, so a legitimate difference between a checkout "
+        "claim and a deployment claim would refuse the merge (ADR 0202 §3)"
+    )
+
+    # The two differ here -- the fixture's deployed document names a synthetic
+    # commit and the offline half names this checkout's -- so the line must be
+    # printed. A merge that agreed silently would be the substitution.
+    assert document["offline_checkout_commit"] != document["source_commit"]
+    assert "a checkout claim and a deployment claim about different commits" in result.stderr, (
+        f"the difference was not reported: {result.stderr}"
+    )
+
+
+def claims_writer_must_agree() -> tuple[str, ...]:
+    """`MUST_AGREE`, read from the writer rather than restated here."""
+    import importlib.util
+
+    specification = importlib.util.spec_from_file_location("apg_evidence_writer", WRITER)
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return tuple(module.MUST_AGREE)

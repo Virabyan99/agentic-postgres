@@ -44,6 +44,13 @@ from agentic_postgres.naming import canonical_json  # noqa: E402
 #: Fields that must agree between the host-side and external-side evidence.
 #: Each one identifies *which* deployment was measured; a difference means the
 #: two runs did not see the same system.
+#:
+#: **`checkout_commit` is deliberately not here** (ADR 0202). An offline half
+#: measures a checkout and the live halves measure a deployment, and those are
+#: legitimately different commits -- Session 22 closes on an offline half at a
+#: commit no deployment has ever run. Requiring them to agree would refuse the
+#: honest case; saying nothing would hide it, so `merge` PRINTS the difference
+#: instead (ADR 0195: reported, never folded).
 MUST_AGREE = (
     "source_commit",
     "project_keys",
@@ -99,17 +106,33 @@ def write_half(
     would make an asymmetric-but-correct pair of runs look like two different
     systems to ``MUST_AGREE``.
     """
-    if project_a_outputs is None:
-        print("write-session-evidence: --mode requires --project-a-outputs", file=sys.stderr)
-        return 2
     if not junit:
         print("write-session-evidence: --mode requires at least one --junit", file=sys.stderr)
         return 2
 
-    deployed = read_json(project_a_outputs)
-    keys = [deployed.get("project", {}).get("key")]
-    if project_b_outputs is not None:
-        keys.append(read_json(project_b_outputs).get("project", {}).get("key"))
+    # **An offline half measures a CHECKOUT** (ADR 0202), so it reads no
+    # deployed document -- and refuses one, because a caller passing it has
+    # mistaken which kind of half this is and every deployment field below
+    # would be filled from a system this half did not measure.
+    offline = mode == evidence_claims.OFFLINE_MODE
+    if offline:
+        if project_a_outputs is not None or project_b_outputs is not None:
+            print(
+                "write-session-evidence: an offline half measures a checkout, not a "
+                "deployment; --project-a-outputs and --project-b-outputs do not apply.",
+                file=sys.stderr,
+            )
+            return 2
+        deployed: dict = {}
+        keys: list = []
+    else:
+        if project_a_outputs is None:
+            print("write-session-evidence: --mode requires --project-a-outputs", file=sys.stderr)
+            return 2
+        deployed = read_json(project_a_outputs)
+        keys = [deployed.get("project", {}).get("key")]
+        if project_b_outputs is not None:
+            keys.append(read_json(project_b_outputs).get("project", {}).get("key"))
 
     try:
         claims = evidence_claims.results_for_mode(mode, session, junit)
@@ -138,6 +161,31 @@ def write_half(
         "tests": {claim: result["status"] for claim, result in claims.items()},
     }
 
+    if offline:
+        # **The second guard**, and it is second on purpose. `claim_mode`
+        # already refuses a declared claim that carries a live marker, so the
+        # two can only disagree if one of them is broken -- and the cheap place
+        # to find that out is before a file exists (ADR 0202 §2).
+        live = sorted(
+            nodeid
+            for claim in claims
+            for nodeid in evidence_claims.claim_nodeids(claim)
+            if evidence_claims.environment_markers(nodeid)
+        )
+        if live:
+            print(
+                f"write-session-evidence: these proofs carry an environment marker and "
+                f"cannot be reported by an offline half: {live}",
+                file=sys.stderr,
+            )
+            print("write-session-evidence: no evidence file was written.", file=sys.stderr)
+            return 5
+
+        # `checkout_commit`, and NOT `source_commit`: every existing reader
+        # understands that field as the release a deployment is running, and a
+        # checkout's SHA sitting in it would be read as one (ADR 0202 §2).
+        document["checkout_commit"] = evidence_module.git_output("rev-parse", "HEAD")
+
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(canonical_json(document))
     print(f"write-session-evidence: wrote {output}")
@@ -160,7 +208,13 @@ def write_half(
     return 0
 
 
-def merge(session: int, host_input: Path, external_input: Path | None, output: Path) -> int:
+def merge(
+    session: int,
+    host_input: Path,
+    external_input: Path | None,
+    output: Path,
+    offline_input: Path | None = None,
+) -> int:
     """Combine the halves, refusing to paper over a mismatch.
 
     ``external_input`` is optional, and optional under one condition only: no
@@ -188,6 +242,31 @@ def merge(session: int, host_input: Path, external_input: Path | None, output: P
     else:
         external = read_json(external_input)
 
+    # **The offline half, required exactly when the session has offline claims**
+    # -- the external sentence's twin, and for the same reason (ADR 0202 §3). An
+    # input that may be absent is an input a run forgets, and the session whose
+    # claims it carries is the session that cannot tell.
+    offline_claims = evidence_claims.claims_for_mode(evidence_claims.OFFLINE_MODE, session)
+    if offline_input is None:
+        if offline_claims:
+            print(
+                "write-session-evidence: session "
+                f"{session} carries offline claims {sorted(offline_claims)}, which are "
+                "measured in a checkout; --offline-input is required.",
+                file=sys.stderr,
+            )
+            return 2
+        offline: dict = {}
+    else:
+        if not offline_claims:
+            print(
+                f"write-session-evidence: session {session} carries no offline claim, so "
+                "--offline-input describes nothing this merge can report.",
+                file=sys.stderr,
+            )
+            return 2
+        offline = read_json(offline_input)
+
     disagreements = [
         f"{field}: host={host.get(field)!r} external={external.get(field)!r}"
         for field in MUST_AGREE
@@ -208,9 +287,37 @@ def merge(session: int, host_input: Path, external_input: Path | None, output: P
         return 5
 
     merged = {**host, **external, "session": session, "mode": "merged"}
-    merged["tests"] = {**(host.get("tests") or {}), **(external.get("tests") or {})}
-    merged["claims"] = {**(host.get("claims") or {}), **(external.get("claims") or {})}
-    merged["suites"] = {**(host.get("suites") or {}), **(external.get("suites") or {})}
+    merged["tests"] = {
+        **(host.get("tests") or {}),
+        **(external.get("tests") or {}),
+        **(offline.get("tests") or {}),
+    }
+    merged["claims"] = {
+        **(host.get("claims") or {}),
+        **(external.get("claims") or {}),
+        **(offline.get("claims") or {}),
+    }
+    merged["suites"] = {
+        **(host.get("suites") or {}),
+        **(external.get("suites") or {}),
+        **(offline.get("suites") or {}),
+    }
+
+    # **Beside `source_commit`, never in it.** The two halves measure different
+    # things and may legitimately name different commits, so this is recorded
+    # and the difference is PRINTED -- not folded into agreement, and not left
+    # silent (ADR 0195, ADR 0202 §3).
+    if offline:
+        merged["offline_checkout_commit"] = offline.get("checkout_commit")
+        deployed_commit = merged.get("source_commit")
+        checkout_commit = merged["offline_checkout_commit"]
+        if deployed_commit and checkout_commit and deployed_commit != checkout_commit:
+            print(
+                f"write-session-evidence: the offline half measured checkout "
+                f"{checkout_commit[:12]}; the deployment is release {deployed_commit[:12]} "
+                "-- a checkout claim and a deployment claim about different commits.",
+                file=sys.stderr,
+            )
 
     # A claim neither half recorded is the failure mode this whole mechanism
     # exists to make loud: the merged document would otherwise be silent about
@@ -285,11 +392,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--host-input", type=Path, help="Host-side evidence to merge.")
     parser.add_argument("--external-input", type=Path, help="External-side evidence to merge.")
+    parser.add_argument(
+        "--offline-input",
+        type=Path,
+        help="Offline (checkout) evidence to merge. Required exactly when the session "
+        "carries a claim declared in OFFLINE_CLAIMS.",
+    )
     parser.add_argument("--output", type=Path, help="Where to write merged evidence.")
     parser.add_argument(
         "--mode",
-        choices=["host", "external"],
-        help="Write one half of a multi-environment session's evidence.",
+        choices=list(evidence_claims.ALL_MODES),
+        help="Write one half of a session's evidence. `offline` measures a checkout and "
+        "takes no deployed document (ADR 0202).",
     )
     parser.add_argument("--project-a-outputs", type=Path, help="Deployed document for project A.")
     parser.add_argument("--project-b-outputs", type=Path, help="Deployed document for project B.")
@@ -310,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     if not 1 <= args.session <= CURRENT_SESSION:
         parser.error(f"--session must be between 1 and {CURRENT_SESSION}")
 
-    if args.host_input or args.external_input:
+    if args.host_input or args.external_input or args.offline_input:
         # --external-input is optional; --host-input is not. Every session that
         # writes halves has a host half, because a claim with no live proof is
         # refused at resolution time. A session with no external claim (Session
@@ -318,7 +432,13 @@ def main(argv: list[str] | None = None) -> int:
         # session that does carry one.
         if not (args.host_input and args.output):
             parser.error("merging requires --host-input and --output")
-        return merge(args.session, args.host_input, args.external_input, args.output)
+        return merge(
+            args.session,
+            args.host_input,
+            args.external_input,
+            args.output,
+            args.offline_input,
+        )
 
     if args.mode:
         if not args.output:
