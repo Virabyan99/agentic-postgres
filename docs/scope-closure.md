@@ -328,3 +328,25 @@ D1098–D1121. This section is only what stays open.
 `documented_path` (ADR 0197, §8), `replacement_host_restore` (D1028, by
 decision), `bootstrap_identity` (a rotation performed, D860), and the five
 claims D478 names.
+
+## 10. What Session 21 left open
+
+Session 21 opened the agent plane to a tenant's domain (ADR 0200, ADR 0201)
+and closed D1121's live half, D1122 and D1123 above. Its divergence table is
+`docs/plans/session-21-implementation-plan.md` §1, rows D1124–D1155; its
+evidence is 108 claims, 99 passed, 9 not_run, 0 failed at `f61f716`. This
+section is only what stays open.
+
+| Item | Why it is open |
+|---|---|
+| **D1153** — the deployed document's `mcp.tool_count` and the doctor's *capability drift* read the lock file, not the plane | For eight minutes on 2026-09-11 both said seven while beta's plane served six (D1152). The container already answers a one-line probe for its protocol constants; the same probe can report the loaded lock's `tools_sha256`, and `observe_mcp` can refuse to publish a count the container did not confirm. A run's change. |
+| **D1155** — `honest_readers`' offline half skips under root | The live half was repaired (D1131) and passed; the two offline proofs carry `skipif(geteuid() == 0)` and the gate runs its static claim proofs as root, so the claim reads `not_run` in one sweep for the other half. D1131's shape applied to the two proofs, or the gate's static proofs run as the checkout owner. |
+| **D1151 / D1154** — the gate sweep leaves `.generated/alpha-dev` root-owned, and two readers crash on it | The sudo deploy hands the directory back (D1110, read on the day); the sweep does not (mtime 12:27, its first minute). `rendering.publish` and `evidence.load_rendered` then fail with a traceback rather than naming the owner and the chown — ADR 0195's class in two more readers. |
+| **D1156** — the example set grants its view and RPC to no agent role | Measured in the round trip: an agent holding `note_embeddings:read` is listed the resource and `query_resource` over it is refused upstream (PostgREST as the agent role, audit reason `upstream_refused`). The compiler and the snapshot cannot see grants. Fix forward: a second migration in the example set granting the two agent roles, a README sentence that the grant is the adopter's, and a live proof that READS through a tenant tool. Session 22's first item. |
+| **D1150** — the plan's claim joins | Recorded: a Session 21 requirement joined into a Session 16 or 18 claim re-dates the claim (ADR 0089), so `EVAL-HARNESS-002` and `REC-KIT-003` are claims of their own. Not a defect; a rule the next plan should apply when it writes §2. |
+| **Beta has no recorded administrator password** | `/root` holds `alpha-dev-administrator` only. Every proof and reading on beta creates its agents through `auth_create_agent`; the ceiling at creation is measured on alpha through the endpoint. Recording one is an operator decision (`bin/auth-admin.sh`), not a run. |
+
+**Still open from earlier sessions**, unchanged by this one: `fresh_host`,
+`documented_path`, `replacement_host_restore`, `bootstrap_identity`, and the
+five claims D478 names. D1099 and D1105 above: D1105 closed in Run 4
+(`carry_to_current`, D1134); D1099 stands.

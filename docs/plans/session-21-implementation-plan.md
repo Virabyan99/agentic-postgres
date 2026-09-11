@@ -86,10 +86,10 @@ account this session is written from.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1154**. Rows D1124–D1139
+Six columns, next free number after this table **D1157**. Rows D1124–D1139
 were measured at planning on 2026-09-11 at `5a43f12`; the runs add theirs
 below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's, D1145–D1146
-Run 3's, D1147 Run 4's, D1148–D1149 Run 5's, D1150 Run 6's, D1151–D1153 Run 7's).
+Run 3's, D1147 Run 4's, D1148–D1149 Run 5's, D1150 Run 6's, D1151–D1156 Run 7's).
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -123,6 +123,9 @@ Run 3's, D1147 Run 4's, D1148–D1149 Run 5's, D1150 Run 6's, D1151–D1153 Run 
 | **D1151** | D1110: *"a `sudo` deploy hands `.generated/<key>` BACK ... `sudo chown -R op:op .generated` is the remedy when the state is there."* | **`.generated/alpha-dev` was root-owned on the host at the trip's start (mtime 07:27, the Session 18 gate and the kit export run as root that morning), and two readers met it with a traceback rather than a sentence**: `deploy.sh --render-only` as op died in `rendering.publish` on `os.replace` with `PermissionError`, and `bin/session-01-check.sh` as op passed 5018 contract tests and then died in step 8, `evidence.load_rendered`, on `outputs.is_file()` with the same error. Neither named the owner or the remedy. ADR 0195's class: an unreadable directory is a third outcome, not a crash. | `sudo chown -R op:op .generated/alpha-dev` on the day; both readers left as found and **recorded for the next run**: `publish` and `load_rendered` should each say "cannot replace/read a directory this user does not own; chown it" (D1060's repair, applied to two more readers). | The chown remedy is documented; the readers that need it are not, and a traceback from a documented condition is a runbook the reader has to already know. | — |
 | **D1152** | ADR 0155 / D591: *"a deploy recreates a container whose mounted content changed"*, via `apg.mounted.sha256` rendered by `bin/render-mount-digests.py` "immediately before `up`". Run 2's comment on the auth mount: *"ADR 0155 does the rest: a lock whose bytes changed recreates this container too."* | **It does not, for the late artefacts.** `project-runtime.sh up --defer` renders the digests at step 5 of a deploy, when `install_rendered` has just replaced the rendered directory with the checkout's copy -- which holds no capability lock and no key set; the deploy writes both between step 5 and 6b, and 6b's `resume` renders no digests. So `auth` and `mcp` are labelled with `<absent>` for the lock on every deploy, the label never changes, and a redeploy whose only change is the lock recreates neither. **Measured on beta**: the manifest-move deploy wrote the joint lock at 12:25 and reported `tool_count 7`; the three `AGT-*` live proofs then ran against containers still holding the release lock (`the stored record grants ['note_embeddings:read', ...], which a agent_writer token may not carry`) and failed; at 12:34 the Session 4 restart-matrix proof's `project-runtime up` rendered the digests with the lock present and recreated both, and `s21-diag.sh` at 12:5x found the joint lock in both containers, created 12:34. The document's `tool_count` and the doctor's *capability drift* both read the lock FILE, so both said 7 while the plane served 6. | `resume` re-renders the mount digests immediately before its `up` (`bin/project-runtime.sh`), guarded by `test_mount_digests::test_resume_rerenders_the_mount_digests_after_the_late_artefacts_exist` (the script's shape: the renderer inside the `resume)` branch, before its `up`). Transported and deployed on the day; the proofs re-run in one sweep. The file-reading readers are a second row: | ADR 0155's mechanism was proved for the artefacts that existed when it was written (D591: `pgbackrest.conf`, the secret grant) and never for the ones a deploy derives after starting the data plane; the first lock that changed between two deploys of one release found it. | — |
 | **D1153** | Outputs schema: `mcp.tool_count` *"what the deployment SERVES, read from the compiled lock"*; the doctor's tenth check, *"capability drift -- the lock on disk is the one the deployed document recorded"* (ADR 0193). | **Both read the file, neither reads the container.** `observe_mcp` takes `tool_count` from the lock on disk and asks the container only for its protocol constants; the doctor compares disk to document. For eight minutes on 2026-09-11 both said 7 while beta's plane served 6 (D1152), and nothing the product prints could have said so. A report that reads the file and speaks of the plane is ADR 0195's substitution. | Recorded, not repaired: `agent_plane_constants` already asks the running container one line of Python; the same probe can report the loaded lock's `tools_sha256`, and `observe_mcp` can refuse to publish a count the container did not confirm. A run's change, with the doctor's check reading the same probe. | The doctor's check was built to catch a lock edited on disk (ADR 0193) and does; the case it cannot see is the one where the disk is right and the plane is behind it. | — |
+| **D1154** | D1110: a `sudo` deploy hands `.generated/<key>` back to the checkout owner; D1131's proof *"constructs AND restores the root-owned precondition itself"*. | **The sudo deploys did hand the directory back** (`op op` at 13:05 and 13:06 after each deploy, read as op) **and the gate sweep left it root-owned** (`root root`, mtime 12:27 -- the sweep's first minute -- and again at 07:27 that morning after the Session 20 and 18 gates). The proof restores the owner it recorded BEFORE it ran, so it is faithful; something earlier in the sweep, running as root, renders or replaces `.generated/alpha-dev` and does not hand it back -- the Session 1 gate's own render of the fixtures runs as root in host mode, and `alpha-dev` is not a fixture. Which step it is was not isolated on the day. | The chown before each op render (D1151's remedy, twice on the day); recorded for the next run: read the sweep's steps for the root render of a non-fixture key, and make the gate hand every `.generated/<key>` it touches back on exit, as the deploy does. | A gate that leaves the checkout in a state its own next run cannot render from is D1110's defect moved from the deploy to the gate; the deploy was repaired and the gate was not. | — |
+| **D1155** | D1131: `honest_readers`' live half *"makes its reading as the unprivileged checkout owner"*; the claim was expected to pass on this trip for the first time. | **The live half passed and the claim reads `not_run` for the OTHER half**: the two offline proofs `test_honest_readers.py::test_an_unreadable_document_is_unreadable_and_never_absent` and `::test_the_resolver_exits_three_when_it_cannot_traverse` skip under root (*"root traverses a 0000 directory"*), and the gate's step 6 runs the static claim proofs as root, so a skip in the sweep's own static half outvotes the live pass (D1123's rule, inside one sweep). Session 20 repaired the live half to drop privilege (D1131) and left the offline half's skip as it was. | Recorded, not repaired on the day: the two offline proofs take D1131's shape (`sudo -u` the checkout owner when `geteuid() == 0`), or the gate runs its static claim proofs as the checkout owner. The claim stays `not_run` in `evidence/session-21.json`, honestly. | The same claim, the same reason, the other half: a proof that skips under the identity the gate runs as is a proof the gate can never record (D1121). | — |
+| **D1156** | README §*Giving an agent your tables*: an agent is granted `<view>:read` and `<view>:write` and reads the view; ADR 0201: a project's capabilities are approved against the reviewed surface and checked against the snapshot. | **The example set grants its view to `{{authenticated}}` and `{{api_documentation}}` only** (`projects/example/migrations/templates/…:115,125`); the release grants `api.notes`/`api.tasks` to `{{agent_reader}}` and `{{agent_writer}}` as well (0004:34, 0007:151). **Measured on beta in the round trip**: `s21-writer` holding `note_embeddings:read` is listed the resource by `list_resources`, and `query_resource` over `note_embeddings` is REFUSED with the audit reason `upstream_refused` -- PostgREST answered a 4xx as the agent role. The compiler resolves operations against the reviewed surface and the snapshot, which is captured as the documentation role and cannot see a grant; the harness's derived positive case passes offline against a recorded upstream; the gate's live half listed the tool and called the WRITE (refused for approval before it reached PostgREST) and never read. A tool that is served and refused upstream is exactly what AGT-DRIFT-001 and the snapshot check exist to prevent, one grant further down. | Fix forward, a Session 22 first item: a second migration in the example set granting `SELECT ON api.note_embeddings` and `EXECUTE ON api.set_note_embedding` to the two agent roles, frozen under the set's lock and deployed; the README section says the grant is the adopter's; and a live proof that READS through a tenant tool, because the round trip is what found this and a claim's live half did not. Whether the scaffold or `check --project` can refuse a capability over an object the agent roles cannot reach needs the grants read from a cluster, which is a deploy-time observation (D1118's shape) -- a decision for the plan. | The tenant surface was proved by discovery and by a refusal, and a refusal proves the boundary, not the door: the first positive read through a tenant tool was made by hand at the end of the day, and it did not open. | — |
 
 ---
 
@@ -1105,6 +1108,105 @@ with the four variables set to the fixture documents (D671, D676).
 **Push.** CI is expected **green**. Record the run id.
 
 ### Run 7 — the trip
+
+**Done.** 2026-09-11, the same afternoon as Runs 4–6, in two commits on the
+branch (`f61f716` the repair, transported and deployed; this one the record,
+documentation only). **Session 21 is complete.** `evidence/session-21.json`
+(gitignored, on this workstation): **108 claims, 99 passed, 9 not_run, 0
+failed**, release `f61f716` on both projects, host checkout `f61f716`. The
+nine: the eight expected (the five D478 names, `fresh_host` and
+`documented_path` per ADR 0197, `replacement_host_restore` by D1028) and
+`honest_readers`, whose live half PASSED for the first time (D1131) and whose
+offline half now skips under root (D1155). The four D1123 claims
+(`disaster_kit`, `failure_rehearsal`, `independent_repository`,
+`project_removal`) passed in this session's own sweep, which is what the five
+restored declarations were for (D1133). The four Session 21 claims passed on
+first live execution after one repair. Six divergence rows (D1151–D1156).
+
+**The day, in order.** The kit copied on 09-11 (v17, release `90b3b446`)
+verifies from the v18 checkout: exit 0, ten artefacts (REC-KIT-003 read as a
+reading before the gate read it as a claim). Bundle `4dde0e5`, FETCH_HEAD
+confirmed, checked out as op, `uv pip sync`; Session 21 offline mode PASSED on
+the host; the Session 1 gate as op passed 5018/0 and then died in its
+evidence step on a root-owned `.generated/alpha-dev` (D1151) -- chown, 5018/0,
+exit 0. `upgrade check` and `plan`: **minor** proposed, **minor** required,
+verdict OK on both (`capability_added`, three leaves: `capabilities.project`,
+`schema_version` 17→18, `template_version`), confirming 1.2.0. Alpha deployed
+through 21 (12:19): lock schema 4, six tools, `tools_sha256`, the release
+vocabulary, outputs v18 with `project_capabilities: null`, every route ready,
+doctor 10/10, `/auth/login` 400 to an empty body. Beta twice (D1107): the
+release move at 12:23 (six tools, the same lock digest as alpha's -- the
+control), the manifest edited as op to schema 6 naming `projects/example`
+for both keys (backup `project.beta.yaml.pre-session-21`, render-only first),
+the manifest move at 12:26: **seven tools, contract
+`notes-tasks-agent-v1+example-note-embeddings-agent-v1`, `note_embeddings:
+read/write` in the vocabulary, `compiled_from` gaining
+`project_capabilities_sha256` and `project_contract_sha256`,
+`mcp.project_capabilities.root` `projects/example`, `canonical_sha256`
+`8483a687…` = the digest the example project's committed report carries**,
+doctor 10/10.
+
+**The gate found the day's defect.** The first host sweep (947/3, 15 min)
+failed the three `AGT-*` live proofs on `the stored record grants
+['note_embeddings:read', …], which a agent_writer token may not carry`: beta's
+`auth` and `mcp` containers still held the RELEASE lock after the manifest
+move. `s21-diag.sh` then found both holding the JOINT lock, created at
+12:34 -- mid-sweep, recreated by the restart-matrix proof's `project-runtime
+up`. The mechanism, read from the tree: the mount digests (ADR 0155) are
+rendered by `up --defer` at step 5, when the freshly installed rendered
+directory holds no lock and no key set; both are written before 6b; `resume`
+rendered none -- so the deferred services were labelled with `<absent>` on
+every deploy and a lock-only change recreated nothing (D1152). The document's
+`tool_count` and the doctor's drift check read the FILE and said seven while
+the plane served six (D1153). Repaired in `f61f716` (`resume` re-renders the
+digests before its `up`; guard + one-mutation battery, kill with controls
+green), CI green, transported, both projects deployed again: `auth` and
+`mcp` recreated on both at 13:06/13:07, seconds after each lock. Second host
+sweep: **947 passed, 0 failed, 13 skipped**, exit 5 for the nine not_run
+above. External mode from the workstation: 25 passed, 8 skipped (no IPv6),
+five claims. Merged.
+
+**The round trips by hand** (`s21-roundtrip.py`, as root; beta has NO
+recorded administrator password on the host, `/root` holds alpha's only, so
+beta's agent was made through `auth_create_agent` owned by beta's
+administrator, and the ceiling at creation was measured on alpha). On beta:
+the tenant scopes ISSUED (200) by the issuer from beta's lock; `tools/list`
+for the writer: `describe_resource, list_resources, query_resource,
+set_note_embedding` (the three release tools its scopes do not reach hidden,
+ADR 0140); `list_resources` naming `note_embeddings` with `note_embeddings:
+read` and `max_rows 100`; `set_note_embedding` with `dry_run` true and false
+both REFUSED `approval_required: this capability requires an approval this
+deployment cannot grant`, both audited with that reason, zero rows written --
+the shipped manifest's declaration, measured; **`query_resource` over
+`note_embeddings` REFUSED, audit reason `upstream_refused`** -- the example
+set grants its view to no agent role (D1156). On alpha: `POST /admin/agents`
+with the tenant scopes **422**, the message naming the ceiling
+(`['meta:read', 'notes:read', 'notes:write', 'tasks:read', 'tasks:write']`);
+the same with release scopes 201; `update_task_status` THROUGH THE AGENT
+PLANE against a real task row: `pending→in_progress` served and committed
+(`row_count 1`), `pending→completed` refused `write_conflict` and audited
+`write_rejected` -- the compare-and-swap's first agent-plane run on real
+data. Both agents revoked; the revoked secret exchanged again → 401. The
+audit rows stay.
+
+**What the trip cost, read before the next one.** One real defect only a
+trip could find (D1152), found by the gate's first sweep and diagnosed by
+reading the tree and one measurement; one defect the round trip found and no
+claim did (D1156: a positive READ through a tenant tool had never been made
+-- every proof discovered the tool or called the write); two gate hygiene
+rows (D1151/D1154: the sweep leaves a render directory root-owned and two
+readers crash on it) and the other half of D1121 (D1155). Two sweeps, not
+one, because the first found the defect; no full suite and no gate beyond
+what the plan names. The five Session 18 declarations, back in the gate, cost
+one line each and paid four claims. The scripts that survive: under `/home/op`
+on the host (`s21-*.sh`, `g21-*.sh`, `s21-roundtrip.py`) and `/tmp/r7-external-21.sh`
+in WSL; the sentinel derivation is still `/tmp/g20-sentinel.py` on the host.
+
+**Not done, by decision or for want of a day:** D1156's migration (fix
+forward, Session 22's first item); D1153's container-confirmed count; D1155's
+offline half; D1151/D1154's two readers and the sweep's chown; the second
+walk (Session 25's). `CLAUDE.md` §2, the ledger's §10 and the memory carry
+all of it.
 
 Before the day: `grep -n "goes wrong" -A20` in the Session 11, 17, 18 and 20
 guides and plans (D977); Session 20's §5 Run 7 Done paragraph and D1116–D1120
