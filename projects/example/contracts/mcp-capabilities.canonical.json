@@ -1,0 +1,110 @@
+{
+  "capability_count": 2,
+  "contract_id": "example-note-embeddings-agent-v1",
+  "schema_version": 4,
+  "tool_count": 2,
+  "tools": [
+    {
+      "audit_redact": [],
+      "capabilities": [
+        {
+          "lifecycle": "active",
+          "max_concurrent_calls": 1,
+          "max_response_bytes": 262144,
+          "name": "query_note_embeddings",
+          "risk": "low",
+          "version": "1.0.0"
+        }
+      ],
+      "descriptions": [
+        "The caller's own rows of note_embeddings, filtered and ordered within frozen bounds. Scaffolded by `bin/agent.sh init`; add the filters and orderings a caller may use, and nothing the view does not publish."
+      ],
+      "discovery_scope_sets": [
+        [
+          "note_embeddings:read"
+        ]
+      ],
+      "kind": "read",
+      "max_concurrent_calls": 1,
+      "max_response_bytes": 262144,
+      "max_rows": 100,
+      "name": "query_resource",
+      "reads": "relation",
+      "resources": [
+        {
+          "capability": "query_note_embeddings",
+          "columns": [
+            "note_id",
+            "owner_id",
+            "embedding",
+            "updated_at"
+          ],
+          "filters": [],
+          "max_rows": 100,
+          "name": "note_embeddings",
+          "operation": {
+            "method": "get",
+            "operation_id": "note_embeddings.get",
+            "path": "/note_embeddings"
+          },
+          "order_by": [],
+          "required_scopes": [
+            "note_embeddings:read"
+          ]
+        }
+      ],
+      "risk": "low",
+      "source": "postgrest",
+      "timeout_ms": 5000
+    },
+    {
+      "arguments": [
+        "p_note_id",
+        "p_embedding"
+      ],
+      "audit_redact": [
+        "p_embedding",
+        "p_note_id"
+      ],
+      "capabilities": [
+        {
+          "lifecycle": "active",
+          "max_concurrent_calls": 1,
+          "max_response_bytes": 65536,
+          "name": "set_note_embedding",
+          "requires_approval": true,
+          "risk": "moderate",
+          "supports_dry_run": true,
+          "version": "1.0.0"
+        }
+      ],
+      "descriptions": [
+        "One reviewed write, set_note_embedding, over the caller's own rows. Scaffolded by `bin/agent.sh init` at the conservative end of every bound: a rehearsal is supported, approval is required, every argument is redacted."
+      ],
+      "discovery_scope_sets": [
+        [
+          "note_embeddings:write"
+        ]
+      ],
+      "idempotent": false,
+      "kind": "write",
+      "max_affected_rows": 1,
+      "max_concurrent_calls": 1,
+      "max_response_bytes": 65536,
+      "name": "set_note_embedding",
+      "operation": {
+        "method": "post",
+        "operation_id": "rpc.set_note_embedding.post",
+        "path": "/rpc/set_note_embedding"
+      },
+      "required_scopes": [
+        "note_embeddings:write"
+      ],
+      "requires_approval": true,
+      "risk": "moderate",
+      "source": "postgrest",
+      "supports_dry_run": true,
+      "timeout_ms": 5000
+    }
+  ]
+}

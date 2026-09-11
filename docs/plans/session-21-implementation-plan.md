@@ -86,10 +86,10 @@ account this session is written from.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1148**. Rows D1124–D1139
+Six columns, next free number after this table **D1149**. Rows D1124–D1139
 were measured at planning on 2026-09-11 at `5a43f12`; the runs add theirs
 below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's, D1145–D1146
-Run 3's, D1147 Run 4's).
+Run 3's, D1147 Run 4's, D1148 Run 5's).
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -117,6 +117,7 @@ Run 3's, D1147 Run 4's).
 | **D1145** | D1124 counted the roster's writers: four places in the runtime and the compiler, plus two source-text guards. The stage plan's §11: *"for 21 every reader of `agent_scope` and `EXPECTED_TOOL_NAMES`"*. | **Two more readers keyed on a tool's NAME rather than its shape, outside the runtime, and neither imports the roster constant** -- so no grep for `EXPECTED_TOOL_NAMES` finds them. `evaluation_harness._read_cases` decided whether a read case names a resource with `if tool_name == "query_resource"` (twice), and `test_evaluation_harness`'s dispatcher chose `query_resource` versus `run_report` by the same literal and imported `WRITE_TOOLS` for the third branch. Under a tenant's lock the harness would have derived the report shape for every read whose tool was not called `query_resource`, and the dispatcher would have found no branch. | Both decide by shape: `_selects_a_resource(resource)` reads the resource's operation method (`get` selects, `post` runs one RPC), and the dispatcher reads `lock.tool(tool).read_shape` and `.kind`. The runtime's two read functions take the tool's name as a keyword whose default is the release's, so registration always passes the lock's. | Question 5 of the defect pattern, in the form D979 warned about: the second reader was not a caller of the definition but a string comparison against one of its values, which is invisible to every grep for the definition's name. The name `query_resource` meant "relation read" for exactly as long as there was one. | 0200 |
 | **D1146** | Run 3's reader enumeration: a grep for the roster constants over a NAMED list of test modules, and the appendix's rule that a run's targeted list holds every guard module whose subject it touched. | **`tests/contract/test_metrics_surface.py:40` imported `TOOL_NAMES` from the runtime and was in neither list.** CI was RED on `4555645` on all three jobs -- every one collects the module -- and the local gate reproduced it in ten seconds: *ImportError: cannot import name 'TOOL_NAMES'*. A second grep, over the whole of `tests/`, `bin/`, `src/` and `services/`, found it and nothing else. The first grep's file list was written from the modules I could think of, which is D1104's error in the other direction: not a module named and dropped, but a module never named. | The import replaced by a fixture roster with a comment; the row recorded; **the rule sharpened**: a grep for a removed definition's readers runs over the whole tree, never over a list, and `git grep -n <name> -- tests bin src services` is the form. Repaired in Run 3's second commit, CI read. | Question 5 again, at the cheapest possible point -- found by CI six minutes after the push, reproduced by the gate in ten seconds -- and recorded because the plan's own appendix says a commit's CI verdict is read every time (D1120), and it was. | — |
 | **D1147** | ADR 0201 §3 as written at planning: *"`compile_canonical` runs twice … and `compile_lock` joins the two canonicals: tools concatenated with the release's disabled ones removed."* | **A disabled capability behind a grouped tool cannot be removed from a compiled tool.** `query_notes` and `query_tasks` compile into ONE `query_resource` tool with two resources, two discovery scope sets and one merged bound per field; disabling `query_notes` at the contract level means recompiling the tool from the remaining capability, which is `compile_canonical`'s job and nobody else's. And a project's capabilities have no surface to be approved against, no snapshot to be checked against and no contract id to be named by except its reviewed surface's -- so `mcp.capabilities` without `migrations.set` is a manifest with nothing to open. | **The join is of MANIFESTS**: `capability_manifest.joined_capabilities(release, project)` -- the release's entries less `release.disabled` plus the project's -- compiled ONCE against the merged surface and the project's snapshot with the joint contract id; `lock` first proves both committed contracts are what their manifests compile to (exit 5 otherwise). `mcp.capabilities` requires `migrations.set` with a reviewed surface and a snapshot, each refused by name with the command that writes it. ADR 0201 §3 amended in place with the reason. The example project's manifest and the positive CLI arms are Run 5's, with the file the scaffold emits; this run's tests drive a hand-built manifest under `tmp_path` over the example project's committed surface and snapshot. | The plan's sentence described the result correctly and the mechanism wrongly, and the first grouped read would have found it on a host; an ADR amended before the build is cheaper than one amended after a trip (D1116's shape, avoided). | 0201 (amended) |
+| **D1148** | ADR 0184 / `EVAL-HARNESS-001`: *"every enabled capability needs a positive and an adversarial case of each origin"*, enforced by `evaluation_harness.coverage`; ADR 0201 §5: the scaffold emits `requires_approval: true`. | **The two rules had never met.** D870 reclassifies an approval-requiring write's derived positive as the `requires_approval` adversarial case, so such a capability has NO derived positive by construction -- and `coverage` refused it: `render-evaluation-report.py --write --project project.example.yaml` exited 5 on the first manifest the scaffold wrote (*"capability 'set_note_embedding' has no derived positive case"*). No committed contract had ever declared approval; the release's writes declare `false` and the second fixture's profile sets it at LOCK time, after the report is rendered. | `coverage` no longer requires a DERIVED positive of a capability whose contract declares `requires_approval` -- the reclassified case is that positive, and the report reads it in the `requires_approval` column -- and still requires the WRITTEN positive, which a person writes as the intended call with `expects: refused` (`projects/example/evaluation-cases.yaml` carries one). The release report is byte-identical (no release capability declares approval). | A guard that could never be satisfied by a shape an ADR prescribes is a contradiction, not a boundary; the exception is scoped to the one field whose semantics D870 already decided, and the report still shows the zero. | — |
 
 ---
 
@@ -847,6 +848,84 @@ each checked for existence individually), `test_session12_isolation_matrix`
 `test_cli_contract`.
 
 ### Run 5 — `apg agent init`, the example project's manifest, the documents
+
+**Done.** 2026-09-11, on the `session-21` branch. One divergence row (D1148),
+battery 2/2 with paired controls green, 1370 targeted tests green across 18
+modules. The example project's capability manifest is **what the scaffold
+wrote**, byte for byte, and a test keeps it so.
+
+**Built, as listed, with these differences from the list.** `bin/agent.sh` /
+`bin/agent.py`, one verb: `init --project FILE --operation NAME [--relation
+NAME] [--kind read|write]` and `init --head`. Two things the list did not
+say. First, **a write's scope is taken, not guessed**: `--relation NAME` names
+the relation whose `:write` scope the entry requires (ADR 0201 §5's "the
+relation the reviewer names"), refused on a read, required on a write, and
+refused for a relation the merged surface does not publish -- so every entry
+the scaffold emits compiles unchanged, which is `AGT-INIT-001`'s second clause.
+Second, `init --head` prints the manifest's fixed head (the
+`yaml-language-server` modeline, D1138; `schema_version: 4`; `capabilities:`),
+so the committed example is provably `head + read + write` and nothing typed.
+`--kind` may only confirm the kind the object derives (a read over an RPC has
+one shape and is written by hand from `run_report`). Refused with exit 2, each
+naming what the surface does publish: an operation the merged surface does not
+name; a release-owned object (its capabilities are the release's, narrowed by
+the profile or disabled by `release.disabled`); an agent-plane operation.
+Exit 3 without a set. Order matters and the README says so: the file exists
+before the manifest names it, because the semantic check refuses a manifest
+naming a directory without one (Run 4's rule, met from the other side).
+`bin/mcp-contract.sh` stopped refusing `compile --project` (the wrapper
+predated the project form; the Python command already took it), and its usage
+names the project form for all three verbs. `rendering._project_capabilities_
+block` refuses an unreadable contract by name rather than with a traceback
+(found when an empty file was left by a failed compile).
+
+**The example project.** `projects/example/capabilities.yaml` (the scaffold's
+two entries: `query_note_embeddings` grouped under `query_resource` over the
+view's four columns, no filters, no orderings; `set_note_embedding` with both
+arguments redacted and approval required), `contracts/mcp-capabilities.
+canonical.json` (`example-note-embeddings-agent-v1`, 2 tools), `evaluation-
+cases.yaml` (four written cases, one per kind per capability), and
+`contracts/evaluation-report.md` over the joint contract
+`notes-tasks-agent-v1+example-note-embeddings-agent-v1` (9 capabilities, 62
+derived and 19 written cases). `project.example.yaml` names
+`mcp.capabilities: projects/example`; both fixtures re-rendered -- alpha's
+`capabilities.project` is the block, alpine's the explicit null.
+
+**D1148.** The first contract ever to declare `requires_approval` met
+`EVAL-HARNESS-001`'s coverage rule, which required a derived positive that
+D870 had already reclassified as the approval refusal. `coverage` now exempts
+exactly that cell for exactly that declaration; the written positive is still
+required, and the example's says the intended call is refused today.
+
+**Documents.** README §*Giving an agent your tables* (the order, the three
+commands, the manifest key, the scopes and where they are granted, what a
+project may not declare, the `$schema` line stated as a reading and not a
+guarantee); `docs/mcp-tool-catalog.md` says a project's tools are beside its
+contract; `docs/capability-plan.md` opens by saying it is historical and the
+roster is the contract's.
+
+**Tests.** `tests/contract/test_agent_command.py` (11: every object of the
+example project scaffolds an entry that compiles through `project_inputs`;
+no file written; the head; the refusals parametrised; the set requirement;
+byte identity with the committed manifest and `check --project` reporting the
+joint; and `AGT-TENANT-001`'s example-based node, named
+`test_the_example_projects_manifest_compiles_to_its_committed_contract` --
+shorter than §2 proposed, for the line length -- with `compile --project`
+streaming the committed bytes). Run 4's three control tests moved to their
+positive arms; `test_cli_contract` rosters gain both commands.
+
+**Battery** (`/tmp/s21-r5-battery.py`, 2/2): the scaffold emitting
+`requires_approval: false` (kill, the byte-identity test); the operation
+lookup reading the release surface (kill, two tests). Controls: the set
+requirement and the release-object refusal, green under both.
+
+**Targeted, all green:** the plan's list, with `test_session12_documented_path`
+where the plan wrote `test_documented_path`, plus `test_capability_profile`,
+`test_lock_roster`, `test_scope_vocabulary`, `test_capabilities_manifest`,
+`test_project_migration_sets`, `test_output_migrations`,
+`test_render_isolation`, `test_api_contract_command`,
+`test_documentation_index` and `test_acceptance_registry`, because their
+subjects moved. No full suite and no gate, by the user's instruction.
 
 **Builds.**
 

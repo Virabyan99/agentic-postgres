@@ -1,0 +1,68 @@
+# yaml-language-server: $schema=../../schemas/capabilities.schema.json
+#
+# This project's own capability manifest (ADR 0201): the tools an agent may
+# call over this project's tables, beside the migration set that creates them.
+# Each entry below was written by `bin/agent.sh init`, then reviewed; it is
+# compiled against the MERGED reviewed surface and this project's snapshot by
+# `bin/mcp-contract.sh compile --project <manifest>` into
+# contracts/mcp-capabilities.canonical.json, and `check --project` refuses a
+# manifest that no longer compiles to the committed contract.
+#
+# A project may also leave release capabilities out of ITS lock:
+#
+#   release:
+#     disabled: [create_note]
+#
+# What a project may not declare is refused by name: a metadata capability,
+# an agent-plane operation, a read over an RPC with arguments, a name the
+# release already serves.
+schema_version: 4
+capabilities:
+  - name: query_note_embeddings
+    tool: query_resource
+    description: >-
+      The caller's own rows of note_embeddings, filtered and ordered within frozen
+      bounds. Scaffolded by `bin/agent.sh init`; add the filters and orderings
+      a caller may use, and nothing the view does not publish.
+    kind: read
+    version: 1.0.0
+    lifecycle: active
+    risk: low
+    max_response_bytes: 262144
+    max_concurrent_calls: 1
+    enabled: true
+    required_scopes: [note_embeddings:read]
+    operation:
+      source: postgrest
+      operation_id: note_embeddings.get
+    resource: note_embeddings
+    columns: [note_id, owner_id, embedding, updated_at]
+    filters: []
+    order_by: []
+    max_rows: 100
+    timeout_ms: 5000
+    audit:
+      redact: []
+  - name: set_note_embedding
+    description: >-
+      One reviewed write, set_note_embedding, over the caller's own rows. Scaffolded by
+      `bin/agent.sh init` at the conservative end of every bound: a rehearsal
+      is supported, approval is required, every argument is redacted.
+    kind: write
+    version: 1.0.0
+    lifecycle: active
+    risk: moderate
+    max_response_bytes: 65536
+    max_concurrent_calls: 1
+    supports_dry_run: true
+    requires_approval: true
+    enabled: true
+    required_scopes: [note_embeddings:write]
+    operation:
+      source: postgrest
+      operation_id: rpc.set_note_embedding.post
+    max_affected_rows: 1
+    idempotent: false
+    timeout_ms: 5000
+    audit:
+      redact: [p_note_id, p_embedding]

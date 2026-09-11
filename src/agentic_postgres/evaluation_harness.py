@@ -737,11 +737,20 @@ def coverage(
             **counts,
             "fields": fields,
         }
+        # A capability whose CONTRACT declares approval has no derived positive
+        # by D870: its positive call is refused, so the derived positive is the
+        # `requires_approval` adversarial case, and the report reads it there.
+        # The first contract to declare approval was a project's, scaffolded at
+        # the conservative end (ADR 0201 §5), and this is where the two rules
+        # met (D1148). The WRITTEN positive is still required: a person says
+        # what the intended call is, and the evaluation records its refusal.
+        approval = bool(entry["tool"].get("requires_approval"))
         short = [
             f"{origin} {kind}"
             for origin in ORIGINS
             for kind in KINDS
             if counts[f"{origin}_{kind}"] == 0
+            and not (approval and origin == "derived" and kind == "positive")
         ]
         if short:
             raise HarnessError(

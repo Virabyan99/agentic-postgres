@@ -2,6 +2,16 @@
 
 Planned agent tools and their owning sessions. **Nothing here is active.**
 
+**This plan is historical** (Session 21, ADR 0200 and ADR 0201). Every tool
+below shipped, and the roster is no longer a list anybody keeps: it is the
+compiled contract's -- `contracts/snapshots/mcp/mcp-capabilities.canonical.json`
+for the release, and `projects/<slug>/contracts/mcp-capabilities.canonical.json`
+for a project that declares capabilities of its own, joined into that
+project's lock at deploy. The runtime registers what the lock carries, by kind
+and shape, and refuses a lock the compiler did not sign. A new tool is a
+capability entry (`bin/agent.sh init` scaffolds one), reviewed and compiled;
+it is never a row here.
+
 This file exists so that `capabilities.yaml` can stay empty and still not lose
 the plan. Putting planned tools in the active manifest — even disabled — invites
 someone to flip a flag, and the manifest is the thing that decides what an agent

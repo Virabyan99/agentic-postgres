@@ -22,6 +22,13 @@ profile it was compiled under, and the runtime refuses a lock whose tools
 disagree with it. What this catalog describes is the ceiling; what one
 deployment serves is in its lock.
 
+**A project's own tools are not in this table** (ADR 0201). A project that
+declares `mcp.capabilities` compiles its own contract beside its migration set,
+`projects/<slug>/contracts/mcp-capabilities.canonical.json`, and its
+evaluation report is rendered beside that contract by
+`bin/render-evaluation-report.py --project project.yaml`; its deployed lock is
+this catalog's tools, less any the project disables, joined with its own.
+
 ---
 
 ## What a tool is, and what it is not

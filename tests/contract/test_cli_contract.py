@@ -38,6 +38,10 @@ pytestmark = [pytest.mark.contract, pytest.mark.p0]
 #: directory the first time somebody forgets and says nothing when it does.
 SHELL_COMMANDS = (
     "deploy.sh",
+    # Session 21 (ADR 0201, D1137): one verb, `init`, scaffolding a project's
+    # capability entry from the merged reviewed surface. Listed here the run it
+    # landed (D1014).
+    "bin/agent.sh",
     "bin/apg.sh",
     "bin/apg-diag.sh",
     "bin/api.sh",
@@ -101,6 +105,7 @@ SHELL_COMMANDS = (
 )
 
 PYTHON_COMMANDS = (
+    "bin/agent.py",
     "bin/api.py",
     "bin/api-contract.py",
     "bin/app-contract.py",

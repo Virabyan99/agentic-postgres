@@ -428,6 +428,9 @@ def test_the_render_records_the_committed_contract_and_null_for_a_project_withou
     declared some (ADR 0195)."""
     monkeypatch.setattr(rendering, "REPO_ROOT", checkout)
     contract_path = capability_manifest.project_contract_path(inputs.root)
+    # The copy carries the example's committed contract (Run 5); the refusal
+    # is for a project whose contract was never compiled, so remove it first.
+    contract_path.unlink()
     with pytest.raises(ManifestError, match="compile --project"):
         rendering._project_capabilities_block(manifest)
 
@@ -448,12 +451,6 @@ def test_the_render_records_the_committed_contract_and_null_for_a_project_withou
 
     second = yaml.safe_load((REPO_ROOT / "project.second.example.yaml").read_text("utf-8"))
     assert rendering._project_capabilities_block(second) is None
-    assert (
-        rendering._project_capabilities_block(
-            config.load_project_manifest(REPO_ROOT / "project.example.yaml")
-        )
-        is None
-    ), "the shipped example names none yet (Run 5)"
 
 
 def test_the_deployed_schema_couples_the_block_to_a_ready_plane() -> None:
@@ -527,21 +524,26 @@ def test_the_command_refuses_a_project_contract_for_a_manifest_that_names_none()
     assert "declares no mcp.capabilities" in result.stderr
     assert result.stdout == ""
 
-    # And the paths a manifest without the key took before, it still takes.
-    checked = contract_cli("check", "--project", "project.example.yaml")
+    # And the paths a manifest without the key took before, it still takes;
+    # the example's, which names one since Run 5, reports the joint as well.
+    checked = contract_cli("check", "--project", "project.second.example.yaml")
     assert checked.returncode == 0, checked.stderr
     assert "narrows the approved contract" in checked.stdout
     assert "joint contract" not in checked.stdout
+    example = contract_cli("check", "--project", "project.example.yaml")
+    assert example.returncode == 0, example.stderr
+    assert "joint contract" in example.stdout
 
 
-def test_the_shipped_fixtures_are_at_six_and_name_no_capabilities_yet() -> None:
-    """Version 6 without the key on both, so every proof above about a
-    manifest that names one is read against the shipped control -- and Run 5
-    is where the example project's manifest arrives with the scaffold."""
-    for name in ("project.example.yaml", "project.second.example.yaml"):
-        document = config.load_project_manifest(REPO_ROOT / name)
-        assert document["schema_version"] == 6
-        assert config.project_capabilities(document) is None
+def test_the_shipped_fixtures_are_at_six_and_only_the_example_names_capabilities() -> None:
+    """Version 6 on both; the example names its manifest (Run 5, written by
+    the scaffold) and the second does not, so every proof above about a
+    manifest that names one has a shipped control at the same version."""
+    example = config.load_project_manifest(REPO_ROOT / "project.example.yaml")
+    second = config.load_project_manifest(REPO_ROOT / "project.second.example.yaml")
+    assert example["schema_version"] == second["schema_version"] == 6
+    assert config.project_capabilities(example) == "projects/example"
+    assert config.project_capabilities(second) is None
     assert capability_manifest.PROJECT_SCHEMA_FROM == capability_compiler.VOCABULARY_FROM
 
 

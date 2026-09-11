@@ -9,13 +9,12 @@
 # project.second.example.yaml they also exercise the collision contract --
 # "fixture-alpha" and "fixture-alpine" share a 12-character prefix.
 
-# Schema version 6 (ADR 0201): `mcp.capabilities` may name this project's OWN
+# Schema version 6 (ADR 0201): `mcp.capabilities` names this project's OWN
 # capability manifest, `projects/<slug>/capabilities.yaml`, beside its
 # migration set -- the tools an agent may call over the project's tables.
-# Optional at 6 and forbidden below it. Not named here yet: the example
-# project's manifest is written by `apg agent init` and arrives with the
-# scaffold (Session 21 Run 5), and until then this fixture at version 6
-# without the key is the control for every proof about one.
+# Optional at 6 and forbidden below it; `project.second.example.yaml` is
+# version 6 without it and is the control for every proof about one. See the
+# `mcp` block.
 #
 # Version 5 (ADR 0198): `migrations.set` names this project's OWN migration
 # set, tracked in the release checkout under `projects/<slug>/`. Optional at 5
@@ -94,6 +93,14 @@ api:
 
 mcp:
   public_base_path: /mcp
+  # This project's OWN capability manifest (ADR 0201), beside its migration
+  # set: the same directory `migrations.set` names, holding
+  # `capabilities.yaml` -- written by `bin/agent.sh init` and reviewed -- and
+  # its compiled contract under `contracts/`. The deployed lock is the
+  # release's capabilities, less any that manifest disables, joined with the
+  # project's own, compiled against the merged reviewed surface; the deployed
+  # document records it as `mcp.project_capabilities`.
+  capabilities: projects/example
   # This project's narrowing of the approved capability contract, keyed by tool
   # (ADR 0183). **A profile may only narrow** (D867): every value here is
   # compared against what the approved contract compiles for that tool when the

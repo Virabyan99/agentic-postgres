@@ -39,7 +39,7 @@ readonly ROOT_DIR
 usage() {
   cat <<'USAGE'
 Usage: bin/mcp-contract.sh check [--capabilities FILE] [--project FILE]
-       bin/mcp-contract.sh compile [--capabilities FILE] > candidate.json
+       bin/mcp-contract.sh compile [--capabilities FILE] [--project FILE] > candidate.json
        bin/mcp-contract.sh lock --outputs FILE --project FILE [--capabilities FILE] > lock.json
 
   check              Compare. Never writes. Compiles the manifest against the
@@ -48,12 +48,18 @@ Usage: bin/mcp-contract.sh check [--capabilities FILE] [--project FILE]
                      --project, also applies that project's mcp.profile to the
                      approved contract and exits 5 if it would widen any bound
                      (ADR 0183): a profile is refused here, at compile time.
+                     A project that names mcp.capabilities also has its own
+                     committed contract compared byte for byte (ADR 0201).
   compile            Compile a candidate and stream it to standard output.
-                     Writes no file; redirect it yourself, as yourself.
+                     Writes no file; redirect it yourself, as yourself. With
+                     --project, the PROJECT's own contract, compiled against
+                     the merged surface and the project's snapshot.
   lock               Resolve the approved contract for one project and stream
                      the deployed lock to standard output. The project's
                      mcp.profile narrows it; a version 1 manifest declares none
-                     and compiles the lock it always did.
+                     and compiles the lock it always did. A project naming
+                     mcp.capabilities gets the JOINT contract: the release's
+                     less what it disables, plus its own.
   --capabilities FILE
                      The capability manifest. Defaults to
                      capabilities.example.yaml, which is the reviewed set; a
@@ -145,9 +151,8 @@ main() {
   if [ "${command}" = "lock" ] && [ -z "${project}" ]; then
     die 2 "lock requires --project: the project's mcp.profile narrows the lock."
   fi
-  if [ "${command}" = "compile" ] && [ -n "${project}" ]; then
-    die 2 "compile takes no --project: the canonical contract is project-neutral."
-  fi
+  # `compile --project` streams the PROJECT's own contract (ADR 0201); without
+  # --project it streams the release's, which is project-neutral.
 
   local -a arguments=()
   if [ -n "${capabilities}" ]; then

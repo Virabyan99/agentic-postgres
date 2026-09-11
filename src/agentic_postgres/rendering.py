@@ -555,7 +555,14 @@ def _project_capabilities_block(project: dict[str, Any]) -> dict[str, Any] | Non
             "before it is rendered: `bin/mcp-contract.sh compile --project <manifest> > "
             f"{contract_path.relative_to(REPO_ROOT)}` (ADR 0201)."
         )
-    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    try:
+        contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    except ValueError as error:
+        raise config.ManifestError(
+            f"{contract_path.relative_to(REPO_ROOT)} is not a JSON document ({error}). A "
+            "project's capability contract is what `bin/mcp-contract.sh compile --project` "
+            "streams, committed unchanged; re-compile it and READ it (ADR 0201)."
+        ) from error
     return {
         "root": named,
         "contract_sha256": sha256(contract_path.read_bytes()).hexdigest(),

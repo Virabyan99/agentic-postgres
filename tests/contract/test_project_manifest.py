@@ -755,7 +755,7 @@ def test_version_six_admits_a_capability_manifest_and_lower_versions_forbid_it(
     name a set, because a project's capabilities are over its reviewed
     surface (ADR 0201)."""
     assert config.PROJECT_CAPABILITIES_FROM == 6
-    assert config.project_capabilities(base) is None, "the example names none yet (Run 5)"
+    assert config.project_capabilities(base) == "projects/example"
 
     # A checkout under tmp_path: the example set copied, plus the one file the
     # key names. `repo_root` is the semantic check's own parameter, added for

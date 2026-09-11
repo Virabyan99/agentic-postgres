@@ -1,0 +1,90 @@
+# The example project's hand-written evaluation cases (ADR 0201, EVAL-HARNESS-002).
+#
+# `tests/evaluation-cases.yaml`'s shape and rules, for the capabilities THIS
+# project declares in `capabilities.yaml`. The release's written cases are read
+# beside these when the project's report is rendered
+# (`bin/render-evaluation-report.py --project project.yaml`), less any for a
+# release capability this project disables. The derived cases -- one
+# adversarial case per frozen field -- are generated from the joint contract
+# and never listed here.
+#
+# Every case is bound to the capability version it was written against; a
+# capability whose version moves without its cases fails the render, the gate
+# and CI (EVAL-HARNESS-001's rule, unchanged for a project).
+
+# --- query_note_embeddings -----------------------------------------------------
+
+- id: written:query_note_embeddings:the-scaffolds-read-takes-the-ceiling
+  capability: query_note_embeddings
+  capability_version: 1.0.0
+  kind: positive
+  field: max_rows
+  expects: permitted
+  scopes: [note_embeddings:read]
+  call:
+    tool: query_resource
+    resource: note_embeddings
+    limit: 100
+  upstream: {rows: 3}
+  note: >-
+    The scaffold freezes no filter and no ordering, so the whole positive
+    surface of this read is the resource and the row ceiling; a caller asks for
+    exactly the ceiling and gets it.
+
+- id: written:query_note_embeddings:a-filter-on-an-unfrozen-column-is-refused
+  capability: query_note_embeddings
+  capability_version: 1.0.0
+  kind: adversarial
+  field: filters
+  expects: refused
+  scopes: [note_embeddings:read]
+  call:
+    tool: query_resource
+    resource: note_embeddings
+    filters:
+      - {column: owner_id, operator: eq, value: "00000000-0000-4000-8000-000000000001"}
+  note: >-
+    The view publishes owner_id and the manifest freezes no filter on it, so
+    a filter that would read as "somebody else's rows" is refused by the frozen
+    set before RLS ever sees it.
+
+# --- set_note_embedding --------------------------------------------------------
+
+- id: written:set_note_embedding:a-rehearsal-is-refused-while-approval-is-required
+  capability: set_note_embedding
+  capability_version: 1.0.0
+  kind: positive
+  field: requires_approval
+  expects: refused
+  scopes: [note_embeddings:write]
+  call:
+    tool: set_note_embedding
+    arguments: {p_note_id: "00000000-0000-4000-8000-000000000001", p_embedding: "[0.1, 0.2]"}
+    idempotency_key: written-set-note-embedding-dry-run-0001
+    dry_run: true
+  note: >-
+    The scaffold declares approval, and approval is a refusal (ADR 0182): the
+    positive call of this write, rehearsal included, is refused until a
+    reviewer withdraws the declaration. Written as the capability's positive
+    case so the report says what an agent can do today -- nothing -- rather
+    than what the shape would permit.
+
+- id: written:set_note_embedding:an-argument-the-function-does-not-take
+  capability: set_note_embedding
+  capability_version: 1.0.0
+  kind: adversarial
+  field: arguments
+  expects: refused
+  scopes: [note_embeddings:write]
+  call:
+    tool: set_note_embedding
+    arguments:
+      p_note_id: "00000000-0000-4000-8000-000000000001"
+      p_embedding: "[0.1, 0.2]"
+      p_owner_id: "00000000-0000-4000-8000-000000000002"
+    idempotency_key: written-set-note-embedding-owner-0001
+    dry_run: false
+  note: >-
+    The function takes no owner argument, and that absence is the security
+    property of the example set: ownership is derived from the caller. A caller
+    supplying one is refused by the argument contract, not by the database.

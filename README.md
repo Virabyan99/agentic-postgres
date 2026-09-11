@@ -318,8 +318,74 @@ Two rules that are not negotiable and will refuse you rather than warn you:
   `project.<name>.yaml` are covered by `.gitignore`; the gate fails on any
   untracked file and a dirty release makes a deploy refuse outright (D971).
 
-**What your tables do not get: an agent.** See *What is intentionally
-unavailable*.
+**What your tables get next: an agent**, and only through the section below.
+
+## Giving an agent your tables
+
+**An agent reaches your tables through a capability manifest you own**,
+beside your migration set, and through nothing else (ADR 0201). The release's
+own tools stay as they are; yours join them in your deployment's lock, and in
+no other project's. The order matters, because the manifest is refused until
+the file it names exists:
+
+```bash
+bin/agent.sh init --head > projects/<slug>/capabilities.yaml
+bin/agent.sh init --project project.yaml --operation <view> >> projects/<slug>/capabilities.yaml
+bin/agent.sh init --project project.yaml --operation <rpc> --relation <view> \
+  >> projects/<slug>/capabilities.yaml
+```
+
+`init` scaffolds **one entry** from your reviewed surface and writes no file:
+a view becomes a read grouped under `query_resource` with the view's columns
+and no filters; an RPC becomes a write with every argument redacted and
+approval required. A write's scope is a review decision, so `--relation` names
+the view whose `:write` scope it takes rather than the scaffold guessing one.
+An operation your surface does not publish is refused with the ones it does,
+and so is anything the release already serves. Read what it wrote, then point
+your manifest at it, at schema version 6:
+
+```yaml
+schema_version: 6
+migrations:
+  set: projects/<slug>
+mcp:
+  capabilities: projects/<slug>
+```
+
+Then compile, review and commit the contract, and render the report:
+
+```bash
+bin/mcp-contract.sh compile --project project.yaml \
+  > projects/<slug>/contracts/mcp-capabilities.canonical.json
+bin/mcp-contract.sh check --project project.yaml          # refuses a drift, exit 5
+bin/render-evaluation-report.py --write --project project.yaml
+```
+
+`check --project` is `validate`; `render-evaluation-report.py --check
+--project` is `test`, and it refuses a capability without cases -- yours go in
+`projects/<slug>/evaluation-cases.yaml`, beside the manifest; a dry run is the
+runtime's own, per call (ADR 0182). The deploy compiles your lock from the
+release's capabilities, less any you list under `release: {disabled: [...]}`,
+joined with yours, and the deployed document records it as
+`mcp.project_capabilities`.
+
+An agent is then granted your scopes -- `<view>:read`, `<view>:write` -- through
+`bin/auth-admin.sh` as any other, and **only on this deployment**: the issuer's
+ceiling is read from the deployed lock, so the same grant on a project whose
+surface does not publish the view is refused at agent creation (ADR 0200).
+
+**What a project may not declare**, each refused by name at compile time: a
+`kind: metadata` capability (the pair is the runtime's own); an agent-plane
+operation; a read over an RPC that takes arguments; a capability or tool name
+the release already serves. The first line of the scaffolded file is
+`# yaml-language-server: $schema=../../schemas/capabilities.schema.json`, so an
+editor that embeds the YAML language server checks the file's shape as you
+type; approval against the reviewed surface is `check --project`'s, and only
+that is a guarantee (D1138).
+
+`projects/example/` carries all of it: the manifest the scaffold wrote for
+`note_embeddings` and `set_note_embedding`, byte for byte, its contract, its
+cases and its report.
 
 ## Checks
 
