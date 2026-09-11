@@ -37,9 +37,22 @@ import pytest
 
 from agentic_postgres import host_config, naming, rendering, runtime_override
 from app import mcp_metrics, mcp_telemetry
-from app.mcp_tools import TOOL_NAMES
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
+#: The release's roster, as a fixture (ADR 0200). `mcp_tools.TOOL_NAMES` was
+#: the runtime's own list until Session 21 Run 3; the runtime now registers
+#: whatever the lock carries and hands `mcp_metrics.configure` the names it
+#: registered, so the label allowlist under test is whatever a deployment's
+#: lock says -- these six are one such deployment's.
+TOOL_NAMES = (
+    "create_note",
+    "describe_resource",
+    "list_resources",
+    "query_resource",
+    "run_report",
+    "update_task_status",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
