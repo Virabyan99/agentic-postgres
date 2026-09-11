@@ -86,9 +86,9 @@ account this session is written from.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1140**. Rows D1124–D1139
+Six columns, next free number after this table **D1144**. Rows D1124–D1139
 were measured at planning on 2026-09-11 at `5a43f12`; the runs add theirs
-below them as they go.
+below them as they go (D1140–D1143 are Run 1's).
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -108,6 +108,10 @@ below them as they go.
 | **D1137** | Stage 3 plan D1070: *"`init` is Session 21's last run … `validate`, `dry-run` and `test` get their `apg` names for free."* | `bin/apg.sh` resolves `apg agent init` to `bin/agent.sh init` by construction (a verb IS a script, ADR 0002); no `bin/agent.sh` exists. `validate` is `bin/mcp-contract.sh check --project FILE`, `test` is `bin/render-evaluation-report.py --check` over the harness, `dry-run` is the runtime's (ADR 0182). | **`bin/agent.sh` with one verb, `init`**, and a usage that names where the other three live rather than wrapping them (D707: renaming a surface buys nothing). `init --project FILE --operation NAME [--kind read\|write]` streams one capability entry to stdout, derived from the merged surface: a relation → a read with the view's column list, no filters, no ordering, `max_rows` 100; an RPC → a write with the reviewed argument list, `supports_dry_run: true`, `requires_approval: true`, `idempotent: false`, every argument redacted; scopes derived; `version 1.0.0`, `lifecycle active`, `risk` `low` for a read and `moderate` for a write. It writes no file. `SHELL_COMMANDS` gains it (D1014). Run 5. | A scaffold cannot express what the compiler cannot emit because it is written from the same operations table the compiler resolves against; the defaults are the conservative end of every bound a profile could narrow (ADR 0183's polarity, D925). | 0201 |
 | **D1138** | Stage 3 plan D1072: *"one documented line associating the schema, in Session 21's documentation beside `init`."* | The convention is the YAML language server's modeline, `# yaml-language-server: $schema=<path>`, read by the Red Hat YAML extension and by every editor that embeds that server; a `yaml.schemas` setting is the other form. **Nothing in CI can measure an editor**, and the schema at version 4 must admit a tenant scope by *shape* (D1125) for the editor's validation to accept one — the approval half is `mcp-contract.sh check --project`, which is D1072's point. | The line is written into `projects/example/capabilities.yaml` and documented in README §*Giving an agent your tables*; **recorded as documentation and not as a proof**. The operator's reading of it in an editor is a reading, pasted into Run 5's Done paragraph if made. | Never write a measurement you did not run (D267), and never call a documented line a guarantee. | — |
 | **D1139** | ADR 0183 §*what a profile cannot do*: *"Remove a tool. The runtime refuses a lock with fewer than six (ADR 0127)"*, and D933's row: *"whether a disabled capability leaves the lock … or the runtime's roster becomes the manifest's is an ADR-shaped decision."* | The reason was the runtime's refusal, which D1124 removes. What ADR 0183 was protecting — that a profile is a monotone restriction in a vocabulary of seven bounds the runtime reads — is untouched by where a capability is disabled. | **The profile still cannot remove a tool**; a project removes a release tool in its own capability manifest (D1127), where the compiler compiles it out. ADR 0201 amends 0183's sentence to say where removal lives and why it is not the profile: a profile narrows *values* on tools that exist, and the roster is a *set*, decided one level up. | Keeping the two levels apart is what keeps `apply_profile`'s seven-field vocabulary the whole of what a profile can say. | 0201 |
+| **D1140** | This plan §5 Run 1, rig 21a: *"a closure whose `__signature__` is an `inspect.Signature` assembled from a lock-derived parameter list"*; arm B *"`server.add_tool(Tool(...))` with an explicit `parameters` JSON schema"*. | **A `Signature` alone is refused at registration, and an explicit schema is advertised without being enforced.** Rig 21a on the pinned FastMCP 3.4.0, through the in-memory client: the closure with a constructed `__signature__` and nothing else raised `KeyError: 'p_note_id'` from pydantic's `_arguments_schema` — it reads `get_type_hints()`, i.e. `__annotations__`, and never consults the signature for types. With `__annotations__` set as well: `tools/list` carries exactly the derived names with `additionalProperties: false`, an undeclared argument is refused (*unexpected keyword argument*), a missing one is refused (*missing required keyword only argument*), and `timeout=0.1` fires around a 2 s sleep — identical to the control's static function. `FunctionTool(name=, parameters=<schema>, fn=)` via `add_tool` **advertises** the same shape and **enforces none of it**: an undeclared argument and a missing one both reached the handler. | **Run 3 registers by constructed signature AND annotations, never by an explicit schema.** The rig's output is `~/rig21/rig21a.txt` (rig at `/tmp/rig21/rig21a.py`). | The fourth arm is exactly the shape §7 warns about: a bound that looks enforced to every client and enforces nothing. Found because the rig asked the two negative questions of every arm rather than the positive one. | 0200 |
+| **D1141** | D1122, and this plan's D1132: `dr-kit.sh verify` *"must migrate a stored deployed document to the current schema BEFORE validating it"*; *"`migrate_v16_to_v17` is exactly the function that would make the stored document readable."* | **The named repair cannot be built without reversing a standing decision, and the function named does not do what the row says.** `migrate_v16_to_v17` — every step in the chain — calls `require_kind(document, "rendered")`; `test_a_deployed_document_is_not_migrated` asserts the refusal under ADR 0012 (*"an observation republished under a version that never measured it"*); `migrate_rendered` takes eighteen rendered-branch parameters a deployed document does not have. There is no deployed-branch migrator anywhere. And `outputs.schema.json` admits exactly **one** `schema_version` on both branches — `enum: [17]` — so every reader that validates a deployed document refuses any document an earlier release wrote. Measured at `7fae1ae`: the v16 kit at `~/dr-kits/dr-kit-1.0.1` exits 5 on both documents (*not valid under any of the given schemas*); the v17 kit copied off the host today exits 0. | **`verify` checks a stored document by the version it declares, three ways** (`dr_kit.verify_deployed_document`, `KIT_FIRST_OUTPUTS_VERSION = 16`): the current version validates against the full schema exactly as before; a version between the facility's first and the current one is checked for what a kit is FOR — `document_kind: deployed`, this project's key, no sensitive key anywhere — because a restore reads identity and provider ids from it and nothing else; a version above the current one, or below 16, is reported as a document *this release cannot read*, never as *does not validate* (ADR 0195's third outcome). `REC-KIT-003`'s two proofs; the v16 kit is the arm, the v17 kit and a corrupted copy the controls. | Question 6 of the defect pattern asked of a plan row: D1122's author and the plan both believed a migrator existed for the document because one exists for the other branch with the same version numbers. The rule that stopped it — a deployed document is an observation and is never rewritten — is the right rule, and the kit's reader had to be made version-aware rather than the document made current. | 0189, 0195 |
+| **D1142** | `deployed_output.validate_deployed_document` is called by five readers — `dr_kit.py` (export and verify), `fleet.py:96`, `bin/project-retire.py:93`, `write_deployed_document` — and by every command that loads a deployed document through it. | **Every one of them refuses a deployed document an earlier release wrote**, by the same `enum: [17]` D1141 measured, from the moment a newer release is checked out until that project is redeployed. On the trip that window is short; on a replacement host built from a kit it is the whole restore. Measured only through the kit's path; the others share the function and were not exercised. | **Recorded, not repaired.** The kit's verifier is the one reader whose whole purpose is that window, and it is version-aware now. Whether `fleet`, `doctor` and `project-retire` should read an older document (and what they may say about it) is a decision for the hardening session, §10. | D600's rule — every reader of the deployed document is guarded against the schema — was applied with a single-version schema, so "guarded" means "refuses the previous release's document". That was invisible while every read happened after a redeploy. | 0195 |
+| **D1143** | This plan §5 Run 1: *"the registry gains the requirement here (its proofs are offline and the constant does not move for it — `target_session: 21` is set in Run 6 with the rest)."* | **The registry refuses an entry whose `target_session` exceeds `CURRENT_SESSION`** (`test_acceptance_registry.py:131`: `1 <= target_session <= CURRENT_SESSION`), and every entry must carry one. An entry with no target session or a future one cannot be committed before the bump. | `REC-KIT-003`'s two proofs are written and green in Run 1 and **registered in Run 6** with the rest, exactly as `AGT-*` are. The plan text is corrected here rather than in place. | D690's rule seen from the registry's side: a session's requirements arrive with the constant, all of them, and a proof may exist before its requirement does but not the other way round. | — |
 
 ---
 
@@ -217,7 +221,7 @@ expected red (unlike D1093). A red CI on the branch is a stop condition.
 1. **D1131** — `test_session20_tenant.py::test_render_as_the_operator_…`
    rewritten as D1121 names: `sudo -u` the checkout owner when root,
    construct and restore the state, assert the restore. Renamed
-   `test_render_as_the_checkout_owner_against_a_root_owned_directory_says_unreadable_not_never_deployed`;
+   `test_render_as_the_checkout_owner_of_a_root_owned_directory_says_unreadable_not_absent`;
    registry updated; `test_acceptance_registry` targeted (D1119). Offline it
    still skips (no `.generated/alpha-dev`), and the skip message says which
    host state it needs.
@@ -258,6 +262,102 @@ expected red (unlike D1093). A red CI on the branch is a stop condition.
 with the three variables set; it skips offline), `test_acceptance_registry`,
 `test_evidence_claims`. **Commit:** the two ADRs, the index, D1131's and
 D1132's repairs, this table.
+
+**Done.** 2026-09-11, on the `session-21` branch. Four rigs, four divergence
+rows (D1140–D1143), two ADRs (0200, 0201), two repairs, the kit copied off the
+host. Scripts and outputs are at `~/rig21/` in WSL. No stop condition was met.
+
+**Run 7 step 1, done first.** `/home/op/kit-2026-09-11` copied to
+`~/dr-kits/kit-2026-09-11` (10 artifacts, alpha-dev and beta-dev, exported
+2026-09-11T07:27:23Z from `90b3b446`); `bin/dr-kit.sh verify` exit 0 at
+`7fae1ae`. The v16 kit at `~/dr-kits/dr-kit-1.0.1` in the same checkout: exit
+5 on both documents, *"is not valid under any of the given schemas"* — D1122
+reproduced on the workstation, and D1132's arm.
+
+**Rig 21a — FastMCP 3.4.0 registration from data** (`rig21a.py`, `rig21a.txt`;
+D1140). First run: a closure with an `inspect.Signature` built from a name list
+and nothing else was refused at registration, `KeyError: 'p_note_id'` from
+pydantic's `_arguments_schema` — it reads `__annotations__`, not the signature.
+Second run, with both set, through the in-memory client:
+
+| Arm | `tools/list` | undeclared argument | missing argument | timeout |
+|---|---|---|---|---|
+| control (static typed function) | the four names, `additionalProperties: false` | refused, *unexpected keyword argument* | refused, *missing argument* | — |
+| **A**: signature + annotations from a list | the four derived names, `additionalProperties: false` | **refused**, *unexpected keyword argument* | **refused**, *missing required keyword only argument* | `timeout=0.1` fires around a 2 s sleep |
+| **B**: `FunctionTool(parameters=<schema>)` via `add_tool` | the four names, `additionalProperties: false` | **reached the handler** | **reached the handler** | — |
+
+Run 3 registers by constructed signature and annotations; an explicit schema
+is advertised and not enforced.
+
+**Rig 21b — the loader at `5a43f12`** (`rig21b.py`, `rig21b.txt`; D933
+reproduced as Run 3's control). The example manifest compiled and locked:
+control six tools, accepted; `create_note` disabled → five, **refused** (*"the
+lock serves [five], not [six]"*); `query_tasks` disabled → still six (two
+capabilities behind `query_resource`), accepted; `update_task_status` disabled →
+five, **refused**. ADR 0196's asymmetry, measured.
+
+**Rig 21c — the issue path at `5a43f12`** (`rig21c.py`, a throwaway test module
+importing `test_auth_endpoints`' fixtures, run once and deleted; `rig21c.txt`;
+D1125 confirmed). In the in-process auth service on the pinned cluster: an
+`agent_writer` created with `note_embeddings:write` → **422**, *"a agent_writer
+may not hold ['note_embeddings:write']; the ceiling is [...]"*; the control
+(`notes:read, tasks:read`) → 201; the control's **record** forced to
+`{meta:read, note_embeddings:write}` by superuser `UPDATE` (accepted:
+`is_scope_set` wants sorted and deduplicated, nothing more; `authz_version`
+1), then the token exchange → **422**, *"the stored record grants
+['note_embeddings:write'], which a agent_reader token may not carry"*; the
+pre-request hook with hand-made claims carrying that scope, matching the
+record → **rc 0**, `app.user_id` established; the hook with claims not
+matching → rc 1, `AP401`. The ceiling is the only vocabulary gate on the issue
+path, and it lives in the container that has no lock (D1126).
+
+**Rig 21d — a vector argument through PostgREST** (`rig21d.py`, `rig21d.txt`).
+Rig 20c's route: the pinned `pgvector:pg18` and `postgrest:v14.16`, all 32
+rendered fixture migrations (release + `projects/example`) applied as
+`migration_user`, a throwaway `api.rig_vec(vector) RETURNS vector(768)` granted
+to the anon role. Request body for 768 floats as a JSON **string**: 4927 bytes.
+
+| Arm | Result |
+|---|---|
+| a JSON string of 768 floats | **200**, response 4908 bytes |
+| 767 floats | 400, SQLSTATE `22000` *"expected 768 dimensions, not 767"* |
+| `"not a vector"` | 400, `22P02` *"invalid input syntax for type vector"* |
+| a JSON **array** of 768 floats | 200, the same 4908 bytes — PostgREST casts either |
+| plus an undeclared argument | 404, `PGRST202` (ADR 0139's shape; the runtime refuses earlier, D470) |
+
+So the trip's write is well under `max_response_bytes` 65536 and every wrong
+shape is a SQLSTATE the runtime relays as a refusal, never a row.
+
+**D1131 repaired.** The proof is now
+`test_render_as_the_checkout_owner_of_a_root_owned_directory_says_unreadable_not_absent`
+(renamed; the first name was 104 characters): under root it reads
+`REPO_ROOT`'s owner, makes `.generated/<key>` root-owned and 0700, runs
+`migrate.sh render` as `sudo -u '#<uid>' -g '#<gid>'`, restores owner, group
+and mode in `finally` and asserts the restore by `stat`; unprivileged it runs
+as-is and skips only when the directory is readable. `--setup-plan` with the
+three variables set to the fixtures collects it; the registry and
+`docs/acceptance-matrix.md` name the new id; `test_acceptance_registry` 21
+passed (D1119). It cannot run offline and was not pretended to.
+
+**D1132 repaired, as D1141 rather than as named.** `dr_kit.verify_deployed_document`
+and `KIT_FIRST_OUTPUTS_VERSION = 16`; `_verify_project` reads JSON and hands the
+document over. The v16 kit: **exit 0**, *"verifies: 10 artifacts ... from
+release b8bab017"*; the v17 kit: exit 0 (control). Two proofs in
+`test_disaster_kit.py`, registered in Run 6 (D1143). **Battery 3/3 killed,
+the control green every time**: the later-release branch removed (kill in the
+cannot-read proof), the sensitive-key check skipped for an older document
+(kill in the older-kit proof's leaky arm), the below-facility branch folded
+into the structural check (kill); `test_a_kit_verifies_whole_and_refuses_a_missing_or_altered_artifact`
+is the control none of the three can reach, because it exercises the
+current-version path. Anchors matched once each; the file restored by copy
+and byte-compared.
+
+**D1133 recorded**; the four flags return in Run 6's gate.
+
+**Targeted:** `test_disaster_kit`, `test_acceptance_registry`,
+`test_evidence_claims`, `test_repository_contract` — 319 passed; ruff clean.
+**Committed:** ADR 0200, ADR 0201, the index, the two repairs, the registry
+and matrix, D1140–D1143 and this paragraph.
 
 ### Run 2 — the vocabulary derived (ADR 0200's first half)
 

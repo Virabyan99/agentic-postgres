@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 from typing import Any
 
@@ -446,54 +447,92 @@ def test_a_task_created_through_the_enumerated_operation_is_the_row_update_task_
 # ---------------------------------------------------------------------------
 
 
-def test_render_as_the_operator_after_a_root_deploy_says_unreadable_not_never_deployed(
+def test_render_as_the_checkout_owner_of_a_root_owned_directory_says_unreadable_not_absent(
     project_a: dict[str, Any],
 ) -> None:
-    """D1060's live site, and the reading Session 19 could not make.
+    """D1060's live site, read the way D1121 says it has to be read.
 
     A privileged command can leave `.generated/<key>` root-owned. Before ADR
     0199 every reader answered *"the project was never deployed here"* -- false
     about a project deployed minutes earlier, and it sent an operator looking
     for a deploy that did happen.
 
-    **Not every root deploy leaves that state, which is why this SKIPS more
-    often than it runs** (D1110). `deploy-project.py::_restore_checkout_
-    ownership` chowns the directory and the lock files back whenever `SUDO_UID`
-    is set, so `sudo ./deploy.sh` -- the documented invocation -- hands them
-    over and leaves nothing to read. What does not: a deploy from a real root
-    login, a `sudo pytest` run, a root `--render-only`. The state this measures
-    has to be arrived at rather than assumed, and the skip below says so.
+    **The first version of this proof could never run** (D1121). Its docstring
+    said *"run as the gate's own user, unprivileged"*, and the gate is invoked
+    under `sudo`: `os.access` is unconditionally true for root, so it took its
+    own skip branch on every host run, and past that branch a render as root
+    would have exited 0 rather than 3. It also depended on a state a `sudo`
+    deploy undoes (D1110: `_restore_checkout_ownership` hands the directory
+    back), so the state had to be CONSTRUCTED on the trip to be read at all.
 
-    Run as the GATE'S OWN USER against the checkout, unprivileged, which is
-    exactly the position `op` is in after the deploy. If the directory is
-    op-owned when this runs -- because somebody already ran the `chown` the
-    runbook now prints -- there is nothing to observe, and that is a SKIP rather
-    than a pass: a reading of a state that is not there is not a reading.
+    So, both halves, because either alone still measures the wrong thing:
+
+    * **The reading is made as the checkout's owner**, never as whoever invoked
+      the gate. Under root, `sudo -u '#<uid>'` to `REPO_ROOT`'s owner -- the
+      position `op` is in after a deploy. Unprivileged, the command runs as-is.
+    * **The precondition is constructed and restored by the proof itself.**
+      Under root the directory is made root-owned and mode 0700 for the
+      duration, and put back to the recorded owner, group and mode in
+      `finally`, with the restore asserted by `stat` -- a proof that changes
+      the host puts the host back, or the next proof in the sweep inherits it.
+
+    Unprivileged and the directory readable, there is nothing to observe and
+    that is a SKIP rather than a pass: a reading of a state that is not there
+    is not a reading.
     """
     key = _key(project_a)
     generated = REPO_ROOT / ".generated" / key
     if not generated.exists():
         pytest.skip(f"no {generated} on this host; the render was never published here")
 
-    readable = os.access(generated, os.R_OK | os.X_OK)
-    if readable:
-        pytest.skip(
-            f"{generated} is readable by this user, so the root-owned state D1060 "
-            "describes is not present -- run this before `sudo chown -R op:op .generated`"
-        )
+    command = [
+        str(REPO_ROOT / "bin" / "migrate.sh"),
+        "--project",
+        os.environ.get("APG_PROJECT_A_MANIFEST", "project.alpha.yaml"),
+        "render",
+    ]
 
-    result = subprocess.run(
-        [
-            str(REPO_ROOT / "bin" / "migrate.sh"),
-            "--project",
-            os.environ.get("APG_PROJECT_A_MANIFEST", "project.alpha.yaml"),
-            "render",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=REPO_ROOT,
-    )
+    if os.geteuid() == 0:
+        owner = REPO_ROOT.stat()
+        if owner.st_uid == 0:
+            pytest.skip(
+                f"{REPO_ROOT} is root-owned, so there is no unprivileged checkout owner "
+                "to make the reading as (D1121); chown the checkout to the operator first"
+            )
+        before = generated.stat()
+        os.chown(generated, 0, 0)
+        os.chmod(generated, 0o700)
+        try:
+            result = subprocess.run(
+                ["sudo", "-u", f"#{owner.st_uid}", "-g", f"#{owner.st_gid}", *command],
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=REPO_ROOT,
+            )
+        finally:
+            os.chown(generated, before.st_uid, before.st_gid)
+            os.chmod(generated, stat.S_IMODE(before.st_mode))
+        after = generated.stat()
+        assert (after.st_uid, after.st_gid, stat.S_IMODE(after.st_mode)) == (
+            before.st_uid,
+            before.st_gid,
+            stat.S_IMODE(before.st_mode),
+        ), f"{generated} was not restored to its recorded owner, group and mode"
+    else:
+        readable = os.access(generated, os.R_OK | os.X_OK)
+        if readable:
+            pytest.skip(
+                f"{generated} is readable by this user, so the root-owned state D1060 "
+                "describes is not present; as root this proof constructs it"
+            )
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=REPO_ROOT,
+        )
     message = result.stdout + result.stderr
 
     assert result.returncode == 3, (

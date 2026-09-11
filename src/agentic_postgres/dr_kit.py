@@ -36,6 +36,7 @@ __all__ = [
     "CAPABILITIES_MANIFEST",
     "DEPLOYED_DOCUMENT",
     "HOST_MANIFEST",
+    "KIT_FIRST_OUTPUTS_VERSION",
     "KIT_KIND",
     "KIT_MANIFEST",
     "PROJECT_ARTIFACTS",
@@ -46,6 +47,7 @@ __all__ = [
     "kit_manifest",
     "plan_export",
     "secrets_listing",
+    "verify_deployed_document",
     "verify_kit",
 ]
 
@@ -207,6 +209,85 @@ def kit_manifest(
     }
 
 
+#: The outputs version at which the kit facility shipped (ADR 0189, Session 18).
+#: No export ever wrote a kit holding a document older than this, so one below
+#: it did not come from this facility -- and one above the reading release's
+#: own version came from a later one. Both are reported as documents THIS
+#: release cannot read, which is a statement about the reader (ADR 0195).
+KIT_FIRST_OUTPUTS_VERSION = 16
+
+
+def verify_deployed_document(document: Any, key: str) -> list[str]:
+    """Problems with one stored deployed document, read at THIS release.
+
+    **A kit is by construction read at a later release than the one that wrote
+    it** (D1122): the scenario it exists for is rebuilding a lost host from a
+    current checkout. `outputs.schema.json` admits exactly one version -- the
+    current one -- so validating a stored document against it fails in exactly
+    that scenario. Measured on the host on 2026-09-11: the kit exported at
+    version 16 exited 5 against a version 17 checkout, twice, *"is not valid
+    under any of the given schemas"*, and it was the kit that turned
+    `disaster_kit` red.
+
+    The document cannot be carried forward first, either. The migrator refuses
+    a deployed document by decision -- ADR 0012, and
+    `test_a_deployed_document_is_not_migrated`: an observation republished
+    under a version that never measured it -- and there is no deployed-branch
+    migrator to call (D1141). So the check is by version, three ways:
+
+    * the **current** version validates against the full schema, exactly as
+      before, so nothing is weakened for a kit read at the release that wrote
+      it;
+    * a version **between** the facility's first and the current one is
+      checked for what a kit is FOR -- a deployed document, this project's,
+      with no sensitive key anywhere in it -- because a restore reads its
+      identity and its provider ids from it and nothing else;
+    * a version **above** the current one, or **below** the facility's first,
+      is a document this release cannot read. That is reported as such and
+      never as *does not validate*: the first sends an operator to a newer
+      checkout, the second to audit a document that is whole.
+    """
+    if not isinstance(document, dict):
+        return [f"{key}: the deployed document is not a JSON object"]
+    version = document.get("schema_version")
+    if not isinstance(version, int) or isinstance(version, bool):
+        return [f"{key}: the deployed document declares no integer schema_version"]
+    current = deployed_output.SCHEMA_VERSION
+    if version > current:
+        return [
+            f"{key}: the deployed document is outputs version {version} and this release "
+            f"reads up to {current}; verify the kit from a checkout at least as new as the "
+            "one that exported it. This says nothing about whether the kit is whole."
+        ]
+    if version < KIT_FIRST_OUTPUTS_VERSION:
+        return [
+            f"{key}: the deployed document is outputs version {version}, below "
+            f"{KIT_FIRST_OUTPUTS_VERSION}, the first version the kit facility ever exported; "
+            "this file was not written by an export. This says nothing about whether the "
+            "kit is otherwise whole."
+        ]
+
+    problems: list[str] = []
+    if version == current:
+        try:
+            deployed_output.validate_deployed_document(document)
+        except ManifestError as problem:
+            problems.append(f"{key}: the deployed document does not validate: {problem}")
+    else:
+        if document.get("document_kind") != "deployed":
+            problems.append(
+                f"{key}: the stored document is not a deployed one "
+                f"(document_kind {document.get('document_kind')!r})"
+            )
+        try:
+            config.assert_no_sensitive_keys(document)
+        except ManifestError as problem:
+            problems.append(f"{key}: the deployed document carries a sensitive key: {problem}")
+    if (document.get("project") or {}).get("key") != key:
+        problems.append(f"{key}: the deployed document describes another project")
+    return problems
+
+
 def verify_kit(kit_dir: Path) -> list[str]:
     """Every problem with a kit, or an empty list. Raises nothing itself.
 
@@ -322,11 +403,10 @@ def _verify_project(directory: Path, key: str) -> list[str]:
     if document_path.is_file():
         try:
             document = json.loads(document_path.read_text(encoding="utf-8"))
-            deployed_output.validate_deployed_document(document)
-            if (document.get("project") or {}).get("key") != key:
-                problems.append(f"{key}: the deployed document describes another project")
-        except (OSError, ValueError, ManifestError) as problem:
-            problems.append(f"{key}: the deployed document does not validate: {problem}")
+        except (OSError, ValueError) as problem:
+            problems.append(f"{key}: the deployed document is not readable as JSON: {problem}")
+        else:
+            problems += verify_deployed_document(document, key)
     listing = directory / SECRETS_LISTING
     if listing.is_file():
         lines = [

@@ -705,3 +705,100 @@ def test_the_export_hands_the_kit_to_the_operator_it_instructs() -> None:
     assert "os.chown" in handover
     assert "chmod" not in handover, "the handover changes modes; only ownership may move"
     assert "os.geteuid() != 0" in handover, "a non-root export must not attempt a chown"
+
+
+# ---------------------------------------------------------------------------
+# REC-KIT-003 -- a kit is read at a later release than the one that wrote it
+# (D1122, D1141)
+# ---------------------------------------------------------------------------
+
+
+def _kit_with_document(
+    host: dict[str, Path], contract: dict[str, Any], document: dict[str, Any], directory: Path
+) -> Path:
+    """The fixture kit with its deployed document REPLACED before the digests
+    are computed, so `verify` reads a whole kit whose document is the one under
+    test rather than a tampered one."""
+    entries = [
+        dr_kit.KitEntry(entry.relative, json.dumps(document).encode("utf-8"), entry.source)
+        if entry.relative.endswith(dr_kit.DEPLOYED_DOCUMENT)
+        else entry
+        for entry in export(host, contract)
+    ]
+    return write_kit(entries, directory)
+
+
+def _previous_version(rendered: dict[str, Any]) -> dict[str, Any]:
+    """A deployed document at the version BEFORE the current one, by subtracting
+    what the current version added -- Session 20's fixture-by-subtraction
+    shape, so this document is the one an older release actually wrote.
+
+    **This helper moves with the outputs version.** At 17 the subtraction is
+    the `migrations` block; when a run bumps the version it must subtract that
+    version's block instead, and the assertion below is what says so.
+    """
+    document = deployed_document(rendered)
+    assert deployed_output.SCHEMA_VERSION == 17, (
+        "the outputs version moved; teach this helper what the new version added"
+    )
+    del document["migrations"]
+    document["schema_version"] = 16
+    return document
+
+
+def test_verify_reads_a_kit_whose_deployed_document_predates_this_release(
+    host: dict[str, Path], contract: dict[str, Any], rendered: dict[str, Any], tmp_path: Path
+) -> None:
+    """D1122. The kit exported at outputs version 16 exited 5 against the
+    version 17 checkout on 2026-09-11, twice, *"is not valid under any of the
+    given schemas"* -- in the one scenario a kit exists for, rebuilding a lost
+    host from a CURRENT checkout. The schema admits exactly one version, and the
+    migrator refuses a deployed document by decision (ADR 0012), so the reader
+    is the thing that has to know about versions (D1141).
+
+    The arm is a document one version behind; the two controls are what the
+    version-aware path must still refuse -- another project's document, and
+    one carrying a sensitive key -- because a reader that accepted every older
+    document would satisfy the first assertion and verify nothing.
+    """
+    older = _previous_version(rendered)
+    assert dr_kit.verify_kit(_kit_with_document(host, contract, older, tmp_path / "older")) == []
+
+    foreign = json.loads(json.dumps(older))
+    foreign["project"]["key"] = "fixture-beta-dev"
+    problems = dr_kit.verify_kit(_kit_with_document(host, contract, foreign, tmp_path / "foreign"))
+    assert any("describes another project" in p for p in problems), problems
+
+    leaky = json.loads(json.dumps(older))
+    leaky["secrets"]["password"] = "not-a-real-value"  # noqa: S105 -- a key name is the subject
+    problems = dr_kit.verify_kit(_kit_with_document(host, contract, leaky, tmp_path / "leaky"))
+    assert any("sensitive key" in p and "password" in p for p in problems), problems
+
+
+def test_a_document_this_release_cannot_read_is_reported_as_such_and_not_as_invalid(
+    host: dict[str, Path], contract: dict[str, Any], rendered: dict[str, Any], tmp_path: Path
+) -> None:
+    """ADR 0195's third outcome. A document from a LATER release, or one older
+    than any kit the facility ever exported, is a fact about the reader and is
+    said to be; *"does not validate"* would send an operator to audit a kit
+    that is whole. The control is a current-version document with a real
+    defect, which must still be reported as invalid -- otherwise every problem
+    could hide behind "cannot read"."""
+    future = deployed_document(rendered)
+    future["schema_version"] = deployed_output.SCHEMA_VERSION + 1
+    problems = dr_kit.verify_kit(_kit_with_document(host, contract, future, tmp_path / "future"))
+    assert len(problems) == 1, problems
+    assert "this release reads up to" in problems[0] and "nothing about whether" in problems[0]
+    assert "does not validate" not in problems[0]
+
+    ancient = deployed_document(rendered)
+    ancient["schema_version"] = dr_kit.KIT_FIRST_OUTPUTS_VERSION - 1
+    problems = dr_kit.verify_kit(_kit_with_document(host, contract, ancient, tmp_path / "ancient"))
+    assert len(problems) == 1, problems
+    assert "not written by an export" in problems[0]
+    assert "does not validate" not in problems[0]
+
+    broken = deployed_document(rendered)
+    broken["routes"]["rest"]["status"] = "nonsense"
+    problems = dr_kit.verify_kit(_kit_with_document(host, contract, broken, tmp_path / "broken"))
+    assert any("does not validate" in p for p in problems), problems

@@ -2837,7 +2837,7 @@
     - tests/contract/test_honest_readers.py::test_no_shell_derives_a_rendered_documents_path_for_itself
     - tests/contract/test_honest_readers.py::test_the_three_repaired_shells_call_the_resolver
     - tests/contract/test_honest_readers.py::test_upgrade_already_distinguished_the_two_and_still_does
-    - tests/deployment/test_session20_tenant.py::test_render_as_the_operator_after_a_root_deploy_says_unreadable_not_never_deployed
+    - tests/deployment/test_session20_tenant.py::test_render_as_the_checkout_owner_of_a_root_owned_directory_says_unreadable_not_absent
   description: >-
     A rendered document that exists and cannot be read is reported as
     unreadable (exit 3, naming the path, its owner and the remedy) and never as
