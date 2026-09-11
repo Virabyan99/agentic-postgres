@@ -451,10 +451,18 @@ def test_render_as_the_operator_after_a_root_deploy_says_unreadable_not_never_de
 ) -> None:
     """D1060's live site, and the reading Session 19 could not make.
 
-    A root deploy leaves `.generated/<key>` root-owned. Before ADR 0199 every
-    reader answered *"the project was never deployed here"* -- false about a
-    project deployed minutes earlier, and it sent an operator looking for a
-    deploy that did happen.
+    A privileged command can leave `.generated/<key>` root-owned. Before ADR
+    0199 every reader answered *"the project was never deployed here"* -- false
+    about a project deployed minutes earlier, and it sent an operator looking
+    for a deploy that did happen.
+
+    **Not every root deploy leaves that state, which is why this SKIPS more
+    often than it runs** (D1110). `deploy-project.py::_restore_checkout_
+    ownership` chowns the directory and the lock files back whenever `SUDO_UID`
+    is set, so `sudo ./deploy.sh` -- the documented invocation -- hands them
+    over and leaves nothing to read. What does not: a deploy from a real root
+    login, a `sudo pytest` run, a root `--render-only`. The state this measures
+    has to be arrived at rather than assumed, and the skip below says so.
 
     Run as the GATE'S OWN USER against the checkout, unprivileged, which is
     exactly the position `op` is in after the deploy. If the directory is

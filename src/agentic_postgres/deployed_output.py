@@ -247,11 +247,22 @@ class RenderedDocumentUnreadable(ManifestError):
     """A rendered document exists and this user cannot read it. Exit 3.
 
     **The distinction from :class:`RenderedDocumentAbsent` is the whole point**
-    (ADR 0199, D1060). After a root deploy `.generated/<key>` is root-owned, so
-    `op` cannot traverse it -- and every reader in this repository answered
-    *"the project was never deployed here"*, which is false about a project
-    deployed forty minutes earlier. Measured on the host on 2026-09-10 with beta
-    as the control.
+    (ADR 0199, D1060). A privileged command can leave `.generated/<key>`
+    root-owned, so `op` cannot traverse it -- and every reader in this
+    repository answered *"the project was never deployed here"*, which is false
+    about a project deployed forty minutes earlier. Measured on the host on
+    2026-09-10 with beta as the control.
+
+    **Which privileged command is NOT knowable from here, and the message no
+    longer guesses.** `sudo ./deploy.sh` hands the directory back:
+    `deploy-project.py::_restore_checkout_ownership` chowns it and the lock
+    files to SUDO_UID/SUDO_GID after every render. What does not hand it back is
+    a deploy from a real root login (no SUDO_UID), a `sudo pytest` run, or a
+    root `--render-only` -- so "a root deploy left it this way", which this
+    message used to assert, is wrong about the deploy an operator has almost
+    certainly run. ADR 0195 again, one level in: a reader that correctly reports
+    *I could not determine it* must not then volunteer a cause it also could not
+    determine. The remedy is stated; the history is not.
 
     ADR 0195's rule: a reader has three outcomes, not two -- the answer, the
     other answer, and *I could not determine it*. This is the third, and it
@@ -265,9 +276,8 @@ class RenderedDocumentUnreadable(ManifestError):
         described = f"owned by {owner}" if owner else "owned by another user"
         super().__init__(
             f"cannot read {path}: it exists and is {described}. "
-            "Run as root, or `sudo chown -R op:op .generated` -- a root deploy leaves "
-            "the rendered directory root-owned. This is NOT the same as the project "
-            "never having been deployed here."
+            "Run as root, or `sudo chown -R op:op .generated`. This is NOT the same "
+            "as the project never having been deployed here."
         )
 
 

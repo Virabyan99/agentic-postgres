@@ -40,8 +40,14 @@ readonly ROOT_DIR
 
 usage() {
   cat <<'USAGE'
-Usage: bin/upgrade.sh <verb> --project KEY [--installed FILE] [--candidate FILE]
-                      [--json] [--help]
+Usage: bin/upgrade.sh check  --project KEY [--installed FILE] [--json]
+       bin/upgrade.sh plan   --project KEY --candidate FILE [--installed FILE] [--json]
+       bin/upgrade.sh verify --project KEY --candidate FILE [--installed FILE] [--json]
+       bin/upgrade.sh --help
+
+One line per verb, because --candidate is REQUIRED by `plan` and `verify` and
+meaningless to `check`. A single synopsis bracketing it read as optional to all
+three, and the refusal only arrives after the operator has typed the command.
 
 Verbs:
   check      Can a comparison be made at all? Reports what is installed, what
@@ -49,20 +55,25 @@ Verbs:
              unreadable installed document is `undetermined`, which blocks --
              it is not "no changes detected" (ADR 0162).
 
-  plan       The full comparison: every leaf that differs, the change classes
+  plan       Requires --candidate. The full comparison: every leaf that differs,
+             the change classes
              they establish, the bump this release proposes, the bump those
              changes require, and whether the first covers the second. Refuses
              before any mutation; performs none itself.
 
-  verify     After `deploy.sh --through-session`: whether the release installed
-             for this project is the one this checkout would render.
+  verify     Requires --candidate. After `deploy.sh --through-session`: whether
+             the release installed for this project is the one this checkout
+             would render.
 
 Options:
   --project KEY     The project to plan for. Required.
   --installed FILE  Read the installed rendered document from here instead of
                     the project state root. For a checkout, and for rehearsal.
-  --candidate FILE  Read the candidate rendered document from here instead of
-                    rendering one. For a checkout, and for rehearsal.
+  --candidate FILE  The candidate rendered document. REQUIRED by `plan` and
+                    `verify`: this command renders nothing, because it writes
+                    nothing. Run ./deploy.sh --project ... --render-only
+                    first; it prints the document to pass here. Not read by
+                    `check`.
   --json            Machine-readable output on stdout. Human-readable otherwise.
 
 Reads only. To perform an upgrade, run ./deploy.sh --through-session N after
