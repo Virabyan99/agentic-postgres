@@ -227,3 +227,34 @@ def test_compose_loads_the_override_the_renderer_writes() -> None:
     assert "render-mount-digests.py" in runtime, (
         "nothing writes the override before `up`, so it describes a previous start"
     )
+
+
+def test_resume_rerenders_the_mount_digests_after_the_late_artefacts_exist() -> None:
+    """D1152, Session 21's trip. `up --defer` renders the digests at step 5 of a
+    deploy, when the freshly installed rendered directory holds no capability
+    lock and no key set; both are written between `up` and `resume`. A digest
+    taken then records the ABSENCE of every late artefact, is identical on
+    every deploy, and recreates nothing when only the lock changes -- which is
+    how beta served the release's six tools and refused the tenant scope for
+    eight minutes after a deploy whose document said seven, until an
+    unrelated proof's `project-runtime up` recreated the containers.
+
+    So `resume` renders them again, immediately before its own `up`, and this
+    reads the script's shape to say so: the renderer is invoked inside the
+    `resume)` branch, before that branch's `compose ... up`.
+    """
+    runtime = (REPO_ROOT / "bin" / "project-runtime.sh").read_text(encoding="utf-8")
+    start = runtime.index("\n    resume)")
+    end = runtime.index("\n    down)", start)
+    resume = runtime[start:end]
+    assert "render-mount-digests.py" in resume, (
+        "resume does not re-render the mount digests, so the deferred services are "
+        "labelled with the absence of the artefacts they mount (D1152)"
+    )
+    assert resume.index("render-mount-digests.py") < resume.index("up -d --build --wait"), (
+        "the digests are rendered after resume's up, which describes the previous start"
+    )
+    # And the control: the `up` branch still renders them too, before its up.
+    up_start = runtime.index("\n    up)")
+    up_branch = runtime[up_start:start]
+    assert up_branch.index("render-mount-digests.py") < up_branch.index("up -d --build --wait")

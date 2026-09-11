@@ -321,11 +321,26 @@ main() {
     resume)
       rendered="$(resolved_directory "${PROJECT_RENDERED_ROOT}/${PROJECT_KEY}" "rendered output")"
 
-      # No materialization and no override render, deliberately. `up` writes a
-      # new generation and repoints the project at it; doing that again here
-      # would mount a generation the bootstrap plane did not set a password
-      # from, which is the failure this whole ordering exists to prevent
-      # (ADR 0063).
+      # No materialization and no SECRET override render, deliberately. `up`
+      # writes a new generation and repoints the project at it; doing that
+      # again here would mount a generation the bootstrap plane did not set a
+      # password from, which is the failure this whole ordering exists to
+      # prevent (ADR 0063).
+      #
+      # The MOUNT digests are re-rendered, and that is the repair Session 21's
+      # trip paid for (D1152). `up --defer` rendered them at step 5, when the
+      # freshly installed rendered directory held no capability lock and no
+      # key set yet -- the deploy writes both between `up` and `resume` -- so
+      # every service that mounts a late artefact was labelled with its
+      # ABSENCE, the label was identical on every deploy, and a redeploy whose
+      # only change was the lock recreated neither `auth` nor `mcp` (D591's
+      # class, ADR 0155's promise broken for exactly the files it mattered
+      # most for). Rendered here, the label digests the files the deferred
+      # containers are about to mount.
+      "$(python_bin)" "${ROOT_DIR}/bin/render-mount-digests.py" \
+        --rendered-dir "${rendered}" \
+        || die 8 "the mount digests could not be rendered for ${PROJECT_KEY}."
+
       local -a profiles=()
       mapfile -t profiles < <(session_profiles "${THROUGH_SESSION}")
 
