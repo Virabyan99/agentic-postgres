@@ -612,12 +612,20 @@ def probe_plane_lock(project_key: str, lock_bytes: bytes) -> bool | None:
     `tools_sha256` is what the compiler signed over the tool list, and it is the
     value the plane reports. A digest of the whole file is a different question
     and one the plane cannot answer.
+
+    **The local is `lock`, and the name is load-bearing.** In a `bin/` command
+    the name `document` means the DEPLOYED document, and
+    `test_container_selectors.py::test_no_operator_command_reads_a_key_the_deployed_document_does_not_have`
+    reads every `document[...]` and `document.get(...)` in this file against the
+    outputs schema -- by name, deliberately, because following assignments would
+    trade a precise guard for a vague one. Calling this one `document` made that
+    guard report `tools_sha256` as a member this command invents (D1184).
     """
     try:
-        document = json.loads(lock_bytes)
+        lock = json.loads(lock_bytes)
     except ValueError:
         return None
-    signature = document.get("tools_sha256") if isinstance(document, dict) else None
+    signature = lock.get("tools_sha256") if isinstance(lock, dict) else None
     if not isinstance(signature, str) or not signature:
         return None
 
