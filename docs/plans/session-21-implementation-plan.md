@@ -86,10 +86,10 @@ account this session is written from.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1149**. Rows D1124–D1139
+Six columns, next free number after this table **D1150**. Rows D1124–D1139
 were measured at planning on 2026-09-11 at `5a43f12`; the runs add theirs
 below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's, D1145–D1146
-Run 3's, D1147 Run 4's, D1148 Run 5's).
+Run 3's, D1147 Run 4's, D1148–D1149 Run 5's).
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -118,6 +118,7 @@ Run 3's, D1147 Run 4's, D1148 Run 5's).
 | **D1146** | Run 3's reader enumeration: a grep for the roster constants over a NAMED list of test modules, and the appendix's rule that a run's targeted list holds every guard module whose subject it touched. | **`tests/contract/test_metrics_surface.py:40` imported `TOOL_NAMES` from the runtime and was in neither list.** CI was RED on `4555645` on all three jobs -- every one collects the module -- and the local gate reproduced it in ten seconds: *ImportError: cannot import name 'TOOL_NAMES'*. A second grep, over the whole of `tests/`, `bin/`, `src/` and `services/`, found it and nothing else. The first grep's file list was written from the modules I could think of, which is D1104's error in the other direction: not a module named and dropped, but a module never named. | The import replaced by a fixture roster with a comment; the row recorded; **the rule sharpened**: a grep for a removed definition's readers runs over the whole tree, never over a list, and `git grep -n <name> -- tests bin src services` is the form. Repaired in Run 3's second commit, CI read. | Question 5 again, at the cheapest possible point -- found by CI six minutes after the push, reproduced by the gate in ten seconds -- and recorded because the plan's own appendix says a commit's CI verdict is read every time (D1120), and it was. | — |
 | **D1147** | ADR 0201 §3 as written at planning: *"`compile_canonical` runs twice … and `compile_lock` joins the two canonicals: tools concatenated with the release's disabled ones removed."* | **A disabled capability behind a grouped tool cannot be removed from a compiled tool.** `query_notes` and `query_tasks` compile into ONE `query_resource` tool with two resources, two discovery scope sets and one merged bound per field; disabling `query_notes` at the contract level means recompiling the tool from the remaining capability, which is `compile_canonical`'s job and nobody else's. And a project's capabilities have no surface to be approved against, no snapshot to be checked against and no contract id to be named by except its reviewed surface's -- so `mcp.capabilities` without `migrations.set` is a manifest with nothing to open. | **The join is of MANIFESTS**: `capability_manifest.joined_capabilities(release, project)` -- the release's entries less `release.disabled` plus the project's -- compiled ONCE against the merged surface and the project's snapshot with the joint contract id; `lock` first proves both committed contracts are what their manifests compile to (exit 5 otherwise). `mcp.capabilities` requires `migrations.set` with a reviewed surface and a snapshot, each refused by name with the command that writes it. ADR 0201 §3 amended in place with the reason. The example project's manifest and the positive CLI arms are Run 5's, with the file the scaffold emits; this run's tests drive a hand-built manifest under `tmp_path` over the example project's committed surface and snapshot. | The plan's sentence described the result correctly and the mechanism wrongly, and the first grouped read would have found it on a host; an ADR amended before the build is cheaper than one amended after a trip (D1116's shape, avoided). | 0201 (amended) |
 | **D1148** | ADR 0184 / `EVAL-HARNESS-001`: *"every enabled capability needs a positive and an adversarial case of each origin"*, enforced by `evaluation_harness.coverage`; ADR 0201 §5: the scaffold emits `requires_approval: true`. | **The two rules had never met.** D870 reclassifies an approval-requiring write's derived positive as the `requires_approval` adversarial case, so such a capability has NO derived positive by construction -- and `coverage` refused it: `render-evaluation-report.py --write --project project.example.yaml` exited 5 on the first manifest the scaffold wrote (*"capability 'set_note_embedding' has no derived positive case"*). No committed contract had ever declared approval; the release's writes declare `false` and the second fixture's profile sets it at LOCK time, after the report is rendered. | `coverage` no longer requires a DERIVED positive of a capability whose contract declares `requires_approval` -- the reclassified case is that positive, and the report reads it in the `requires_approval` column -- and still requires the WRITTEN positive, which a person writes as the intended call with `expects: refused` (`projects/example/evaluation-cases.yaml` carries one). The release report is byte-identical (no release capability declares approval). | A guard that could never be satisfied by a shape an ADR prescribes is a contradiction, not a boundary; the exception is scoped to the one field whose semantics D870 already decided, and the report still shows the zero. | — |
+| **D1149** | Run 5's targeted list (the plan's, plus the modules "whose subjects moved"), and the appendix's rule that a run's targeted list holds every guard module whose subject the run touched. | **CI was RED on `7d632b6` on both jobs, on one test: `test_project_retire.py::test_the_provider_destroy_accepts_the_expired_manifest_a_retirement_hands_it`.** It downgrades a copy of `project.example.yaml` to version 3 and pops `migrations` (Session 20's key); Run 5 gave the example manifest `mcp.capabilities`, the version 6 gate refused the downgraded copy at the loader, and the test that measures *the loader does not refuse here* went red. `test_project_retire` was in Run 4's targeted list and not in Run 5's; the list was written from the plan's Run 5 text, which names the modules the run ADDS, not the readers of the fixture it CHANGES -- D1146's shape, one run later, on a fixture instead of a definition. `git grep -n project.example.yaml -- tests` finds sixteen modules; one of them lowers the version, and it is this one. | The downgrade pops both keys; the row recorded; **the rule sharpened again**: a run that changes a shipped fixture greps the whole tree for that fixture's readers and runs every module found, the same way a removed definition's readers are found (D1146). Repaired in Run 5's second commit, CI read. | The cheapest point again -- CI six minutes after the push, the repair one line -- and recorded because a rule that has now been missed twice in two runs is a rule the appendix states too weakly. | — |
 
 ---
 
@@ -849,9 +850,13 @@ each checked for existence individually), `test_session12_isolation_matrix`
 
 ### Run 5 — `apg agent init`, the example project's manifest, the documents
 
-**Done.** 2026-09-11, on the `session-21` branch. One divergence row (D1148),
-battery 2/2 with paired controls green, 1370 targeted tests green across 18
-modules. The example project's capability manifest is **what the scaffold
+**Done.** 2026-09-11, on the `session-21` branch, in two commits. Two
+divergence rows (D1148, D1149), battery 2/2 with paired controls green,
+1370 targeted tests green across 18 modules in the first commit -- and CI
+RED on it (`7d632b6`), on one test in a module the list omitted: the retire
+proof downgrades a copy of the example manifest and now has a second key to
+pop (D1149). The second commit pops it and runs every module that reads the
+example manifest, 34 of them, 2023 tests green; CI read. The example project's capability manifest is **what the scaffold
 wrote**, byte for byte, and a test keeps it so.
 
 **Built, as listed, with these differences from the list.** `bin/agent.sh` /
@@ -1203,6 +1208,13 @@ F-025; `docs/session-11-operator-guide.md` §2 before Run 7.
 - A run that renames, removes or adds a test function puts
   `test_acceptance_registry` in its targeted list (D1119); one that adds or
   removes a `bin/` command puts `test_cli_contract` there (D1014).
+- **A targeted list is derived from the tree, never from the plan's text**
+  (D1146, D1149 -- missed in two consecutive runs). A run that removes a
+  definition greps the whole tree for its readers (`git grep -n <name> --
+  tests bin src services`); a run that changes a shipped fixture greps for
+  the fixture's readers (`git grep -l project.example.yaml -- tests`) and
+  runs every module found, whole. The plan's list names what a run ADDS;
+  the grep names what it CHANGES, and CI has caught the difference twice.
 - Documentation-only commits run nothing before push. Code runs the targeted
   modules; CI is the full check. The gate (`bin/session-01-check.sh`) runs on
   a clean tree at Run 6's close and before the trip, never at a run's close.
