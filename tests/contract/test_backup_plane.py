@@ -17,6 +17,7 @@ import json
 from typing import Any
 
 import pytest
+from outputs_chain import carry_to_current
 
 from agentic_postgres import (
     REPO_ROOT,
@@ -379,22 +380,10 @@ def test_the_v12_step_reaches_a_document_that_validates(v12: dict[str, Any]) -> 
     # moment the current version is 14 -- which is the schema saying a
     # superseded document is not one this release writes, rather than a
     # regression. The claim above is unchanged: the v12 step produced a v13.
-    current = output_migrations.migrate_v13_to_v14(
-        migrated, metrics_url="https://fixture-alpha-dev.test/metrics"
-    )
-    # And the v15 step (ADR 0186): the tenth hand-chain, one module over from
-    # the nine D965 records, found by CI rather than by the grep (D965).
-    #
-    # And the v17 step (ADR 0198), found by CI again -- the comment above
-    # recorded the trap and the next version walked into it anyway, because a
-    # grep for `migrate_v15_to_v16` finds this line and a grep for "the hand
-    # chains" finds nothing. Eleven sites now. What would stop the twelfth is a
-    # helper that carries a document to the current version and is the only
-    # thing these tests call; that is a change to eleven modules and it is
-    # recorded here rather than made in a run that is already large.
-    current = output_migrations.migrate_v14_to_v15(current)
-    current = output_migrations.migrate_v15_to_v16(current)
-    current = output_migrations.migrate_v16_to_v17(current)
+    # The twelfth hand-chain would have been this line (D1105, D1134): the
+    # helper carries the document to whatever the current version is, and a
+    # new version is one entry in `outputs_chain.STEPS` rather than an edit here.
+    current = carry_to_current(migrated, metrics_url="https://fixture-alpha-dev.test/metrics")
     assert current["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(current, "outputs.schema.json")
 

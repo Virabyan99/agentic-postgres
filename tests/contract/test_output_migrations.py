@@ -50,6 +50,7 @@ from hashlib import sha256
 from typing import Any
 
 import pytest
+from outputs_chain import carry_to_current
 
 from agentic_postgres import REPO_ROOT, config, naming, output_migrations
 from agentic_postgres.output_migrations import MigrationError
@@ -542,10 +543,7 @@ def test_the_committed_v2_fixture_migrates_and_validates(v2_fixture: dict[str, A
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -960,10 +958,7 @@ def test_the_committed_v3_fixture_migrates_and_validates(v3_fixture: dict[str, A
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1160,10 +1155,7 @@ def test_the_committed_v4_fixture_migrates_and_validates(v4_fixture: dict[str, A
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1304,10 +1296,7 @@ def test_the_committed_v5_fixture_migrates_and_validates(v5_fixture: dict[str, A
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1459,10 +1448,7 @@ def test_the_v7_step_produces_a_document_that_validates(v6_document: dict[str, A
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1805,10 +1791,7 @@ def test_the_v8_fixture_is_a_real_render_at_version_8(v8_fixture: dict[str, Any]
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -1992,10 +1975,7 @@ def test_a_version_9_document_without_the_documentation_route_is_refused(
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2060,10 +2040,7 @@ def test_the_v9_fixture_is_a_real_render_at_version_9(v9_fixture: dict[str, Any]
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2200,10 +2177,7 @@ def test_the_v10_fixture_is_a_real_render_at_version_10(v10_fixture: dict[str, A
         backup_network=backup_network_for(migrated),
     )
     assert migrated["schema_version"] == 13
-    migrated = output_migrations.migrate_v13_to_v14(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
-    migrated = output_migrations.migrate_v14_to_v15(migrated)
-    migrated = output_migrations.migrate_v15_to_v16(migrated)
-    migrated = output_migrations.migrate_v16_to_v17(migrated)
+    migrated = carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION)
     assert migrated["schema_version"] == output_migrations.CURRENT_VERSION
     config.validate_against_schema(migrated, "outputs.schema.json")
 
@@ -2411,7 +2385,7 @@ def test_v15_adds_the_lifecycle_and_nothing_else(v14: dict[str, Any]) -> None:
     # one step further before it is validated; what version 15 added is
     # asserted on the version 15 document itself, above.
     config.validate_against_schema(
-        output_migrations.migrate_v16_to_v17(output_migrations.migrate_v15_to_v16(migrated)),
+        carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION),
         "outputs.schema.json",
     )
 
@@ -2490,7 +2464,7 @@ def test_v16_adds_the_mirror_and_nothing_else(v15: dict[str, Any]) -> None:
     # one step further before it is validated; what version 16 added is
     # asserted on the version 16 document itself, above.
     config.validate_against_schema(
-        output_migrations.migrate_v16_to_v17(migrated), "outputs.schema.json"
+        carry_to_current(migrated, metrics_url=METRICS_URL_FOR_MIGRATION), "outputs.schema.json"
     )
 
     stripped = json.loads(json.dumps(migrated))
