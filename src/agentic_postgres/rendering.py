@@ -506,7 +506,12 @@ def build_outputs(
         "capabilities": {
             "enabled": sorted(
                 entry["name"] for entry in capabilities.get("capabilities", []) if entry["enabled"]
-            )
+            ),
+            # Version 18 (ADR 0201). The project's OWN capability manifest,
+            # digested by its committed contract, or null. Read from the
+            # project manifest here and from THIS document downstream --
+            # `_migrations_block`'s rule (ADR 0002).
+            "project": _project_capabilities_block(project),
         },
         "template_version": template_version(),
         # Version 17 (ADR 0198). Which sets this project applies, identified by
@@ -519,6 +524,43 @@ def build_outputs(
         # THIS document -- ADR 0002's rule, so a second reader of the manifest
         # never becomes a second derivation path.
         "migrations": _migrations_block(project),
+    }
+
+
+def _project_capabilities_block(project: dict[str, Any]) -> dict[str, Any] | None:
+    """`capabilities.project` for the rendered document. Version 18, ADR 0201.
+
+    Null unless the manifest names a capability manifest of its own, and then
+    the directory, the digest of its COMMITTED compiled contract (the bytes
+    `bin/mcp-contract.sh check --project` compares, so this says "the surface
+    somebody reviewed"), and what that contract compiles to. The joint lock's
+    own digest is the deployed branch's, written by the observer.
+
+    A manifest that names a directory whose contract was never compiled and
+    committed is refused here, with the command that writes it: a render that
+    recorded null for it would report "no capabilities of its own" about a
+    project that declared some (ADR 0195).
+    """
+    from agentic_postgres import capability_manifest
+
+    named = config.project_capabilities(project)
+    if named is None:
+        return None
+    root = REPO_ROOT / named
+    contract_path = capability_manifest.project_contract_path(root)
+    if not contract_path.is_file():
+        raise config.ManifestError(
+            f"mcp.capabilities names {named!r}, and {contract_path.relative_to(REPO_ROOT)} does "
+            "not exist. A project's capability contract is compiled, READ and committed "
+            "before it is rendered: `bin/mcp-contract.sh compile --project <manifest> > "
+            f"{contract_path.relative_to(REPO_ROOT)}` (ADR 0201)."
+        )
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    return {
+        "root": named,
+        "contract_sha256": sha256(contract_path.read_bytes()).hexdigest(),
+        "tool_count": contract["tool_count"],
+        "capability_count": contract["capability_count"],
     }
 
 

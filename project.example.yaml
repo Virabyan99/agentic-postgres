@@ -9,11 +9,19 @@
 # project.second.example.yaml they also exercise the collision contract --
 # "fixture-alpha" and "fixture-alpine" share a 12-character prefix.
 
-# Schema version 5 (ADR 0198): `migrations.set` names this project's OWN
-# migration set, tracked in the release checkout under `projects/<slug>/`.
-# Optional at 5 and forbidden below it, because a set is a facility a project
-# may or may not have -- `project.second.example.yaml` is version 5 with no set
-# and is the control for every proof about one.
+# Schema version 6 (ADR 0201): `mcp.capabilities` may name this project's OWN
+# capability manifest, `projects/<slug>/capabilities.yaml`, beside its
+# migration set -- the tools an agent may call over the project's tables.
+# Optional at 6 and forbidden below it. Not named here yet: the example
+# project's manifest is written by `apg agent init` and arrives with the
+# scaffold (Session 21 Run 5), and until then this fixture at version 6
+# without the key is the control for every proof about one.
+#
+# Version 5 (ADR 0198): `migrations.set` names this project's OWN migration
+# set, tracked in the release checkout under `projects/<slug>/`. Optional at 5
+# and forbidden below it, because a set is a facility a project may or may not
+# have -- `project.second.example.yaml` has no set and is the control for every
+# proof about one.
 #
 # Version 4 (ADR 0188): `backup.mirror` may name a copy of the backup
 # repository at a second provider, optional and omitted here -- see the
@@ -23,7 +31,7 @@
 # read (D929), with `mcp.profile`. Versions 1 to 4 still load -- both host
 # manifests are version 1 -- and render as permanent, unmirrored projects with
 # no set of their own, which is what they always were.
-schema_version: 5
+schema_version: 6
 
 # This project's own migrations, and the whole of what an adopter adds. The
 # directory is tracked in this checkout: a release is exactly the commit it is

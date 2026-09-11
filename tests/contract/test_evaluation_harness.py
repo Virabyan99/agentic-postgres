@@ -26,6 +26,7 @@ from __future__ import annotations
 import copy
 import inspect
 import json
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -36,7 +37,7 @@ from typing import Any
 import pytest
 import yaml
 
-from agentic_postgres import REPO_ROOT, capability_compiler, scope_registry
+from agentic_postgres import REPO_ROOT, capability_compiler, config, scope_registry
 from agentic_postgres import evaluation_harness as harness
 from agentic_postgres.evaluation_harness import Case, HarnessError
 from app import mcp_errors, mcp_tools
@@ -547,3 +548,147 @@ def test_the_bound_check_can_tell_a_clamped_request_from_an_honoured_one(
     assert _bound_holds(listing, lock, unfiltered) is not None, "an unfiltered listing passed"
     empty = Outcome("permitted", None, None, None, {"resources": []}, {})
     assert _bound_holds(listing, lock, empty) is None
+
+
+# ---------------------------------------------------------------------------
+# EVAL-HARNESS-002: a project's joint contract (ADR 0201, Session 21 Run 4)
+# ---------------------------------------------------------------------------
+
+
+def _joint_contract(tmp_path: Path) -> tuple[dict[str, Any], frozenset[str]]:
+    """The joint contract of a hand-built project manifest over the example
+    project's committed surface and snapshot -- `test_project_agent_surface`'s
+    fixture, rebuilt here so this module reads nothing of that one's."""
+    from agentic_postgres import capability_manifest
+
+    root = tmp_path / "checkout"
+    shutil.copytree(REPO_ROOT / "projects" / "example", root / "projects" / "example")
+    document = {
+        "schema_version": 4,
+        "release": {"disabled": ["create_note"]},
+        "capabilities": [
+            {
+                "name": "query_note_embeddings",
+                "tool": "query_resource",
+                "description": "Which notes carry an embedding.",
+                "kind": "read",
+                "version": "1.0.0",
+                "lifecycle": "active",
+                "risk": "low",
+                "max_response_bytes": 262144,
+                "max_concurrent_calls": 1,
+                "enabled": True,
+                "required_scopes": ["note_embeddings:read"],
+                "operation": {"source": "postgrest", "operation_id": "note_embeddings.get"},
+                "resource": "note_embeddings",
+                "columns": ["note_id", "owner_id", "updated_at"],
+                "filters": [{"column": "note_id", "operators": ["eq", "in"]}],
+                "order_by": [{"column": "updated_at", "direction": "desc"}],
+                "max_rows": 100,
+                "timeout_ms": 5000,
+                "audit": {"redact": []},
+            },
+            {
+                "name": "set_note_embedding",
+                "description": "Store one note's embedding.",
+                "kind": "write",
+                "version": "1.0.0",
+                "lifecycle": "active",
+                "risk": "moderate",
+                "max_response_bytes": 65536,
+                "max_concurrent_calls": 1,
+                "supports_dry_run": True,
+                "requires_approval": True,
+                "enabled": True,
+                "required_scopes": ["note_embeddings:write"],
+                "operation": {"source": "postgrest", "operation_id": "rpc.set_note_embedding.post"},
+                "max_affected_rows": 1,
+                "idempotent": False,
+                "timeout_ms": 5000,
+                "audit": {"redact": ["p_embedding"]},
+            },
+        ],
+    }
+    (root / "projects" / "example" / "capabilities.yaml").write_text(
+        yaml.safe_dump(document, sort_keys=False), encoding="utf-8"
+    )
+    manifest = yaml.safe_load((REPO_ROOT / "project.example.yaml").read_text("utf-8"))
+    manifest["schema_version"] = 6
+    manifest["mcp"]["capabilities"] = "projects/example"
+    inputs = capability_manifest.project_inputs(manifest, repo_root=root)
+    assert inputs is not None
+    release = config.load_capabilities_manifest(REPO_ROOT / "capabilities.example.yaml")
+    return capability_manifest.compile_joint_contract(release, inputs), frozenset({"create_note"})
+
+
+def test_cases_are_derived_for_a_projects_joint_contract(tmp_path: Path) -> None:
+    """The derivation is generic over a contract (ADR 0184): every capability
+    of the joint contract -- the project's own included -- gets a positive case
+    and one adversarial case per frozen field, and the capability the project
+    disabled gets none because it is not there."""
+    joint, _ = _joint_contract(tmp_path)
+    derived = harness.derive_cases(joint)
+    by_capability: dict[str, list[Case]] = {}
+    for case in derived:
+        by_capability.setdefault(case.capability, []).append(case)
+    assert set(by_capability) == set(harness.capabilities_of(joint))
+    assert "create_note" not in by_capability
+    kinds = {case.kind for case in by_capability["query_note_embeddings"]}
+    assert kinds == set(harness.KINDS), f"the read lacks {set(harness.KINDS) - kinds}"
+    # The project's write declares approval, so its derived positive is an
+    # adversarial case of `requires_approval` (D870) -- the same rule the
+    # release's `update_task_status` gets under the second fixture's profile.
+    write = by_capability["set_note_embedding"]
+    assert {c.kind for c in write} == {"adversarial"}
+    # The response-side bounds are not derived for a write that refuses its
+    # own call: there is no response to bound (the harness's rule, unchanged).
+    assert {c.field for c in write} >= {"arguments", "requires_approval"}
+    assert "max_affected_rows" not in {c.field for c in write}
+    assert all(c.tool == "set_note_embedding" for c in by_capability["set_note_embedding"])
+    assert all(c.tool == "query_resource" for c in by_capability["query_note_embeddings"])
+
+
+def test_a_projects_written_cases_leave_out_the_disabled_capability_by_name_and_no_other(
+    tmp_path: Path,
+) -> None:
+    """The release's written cases, read against the joint contract: the ones
+    for `create_note` are left out because the project disabled it, by name;
+    without the name the same file is refused (the control), and a case naming
+    a capability nobody disabled is still refused with the name given."""
+    joint, disabled = _joint_contract(tmp_path)
+    with pytest.raises(HarnessError, match="'create_note'"):
+        harness.load_written_cases(joint)
+    kept = harness.load_written_cases(joint, disabled=disabled)
+    assert {c.capability for c in kept} == {
+        c.capability for c in harness.load_written_cases(json.loads(CONTRACT.read_text("utf-8")))
+    } - {"create_note"}
+
+    document = yaml.safe_load(harness.WRITTEN_CASES_PATH.read_text("utf-8"))
+    document[0]["capability"] = "delete_everything"
+    path = tmp_path / "cases.yaml"
+    path.write_text(yaml.safe_dump(document), encoding="utf-8")
+    with pytest.raises(HarnessError, match="'delete_everything'"):
+        harness.load_written_cases(joint, path, disabled=disabled)
+
+    # And the report refuses the joint contract until the project's own
+    # capabilities have written cases -- EVAL-HARNESS-001's rule, unchanged.
+    with pytest.raises(HarnessError, match="query_note_embeddings"):
+        harness.coverage(joint, harness.derive_cases(joint), kept)
+
+
+def test_the_report_command_refuses_a_project_that_declares_no_capabilities() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "bin" / "render-evaluation-report.py"),
+            "--check",
+            "--project",
+            str(REPO_ROOT / "project.second.example.yaml"),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+    )
+    assert result.returncode == 2, result.stderr
+    assert "declares no mcp.capabilities" in result.stderr

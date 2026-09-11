@@ -616,7 +616,10 @@ def derive_cases(contract: dict[str, Any]) -> tuple[Case, ...]:
 
 
 def load_written_cases(
-    contract: dict[str, Any], path: Path = WRITTEN_CASES_PATH
+    contract: dict[str, Any],
+    path: Path = WRITTEN_CASES_PATH,
+    *,
+    disabled: frozenset[str] = frozenset(),
 ) -> tuple[Case, ...]:
     """The hand-written cases, validated against the contract they were written for.
 
@@ -626,6 +629,12 @@ def load_written_cases(
     its cases fails the gate. At contract version 1 no capability declares a
     version, and a written case then carries `null` and is accepted as such
     (D600: absent, not defaulted).
+
+    `disabled` names the release capabilities a PROJECT left out of its joint
+    contract (ADR 0201): a release case for one of those is not that project's
+    case and is left out, by name. Any other capability the contract does not
+    compile is still refused -- the parameter is the list of what a project
+    disabled, never permission to skip what nobody can explain.
     """
     document = yaml.safe_load(path.read_text(encoding="utf-8")) or []
     if not isinstance(document, list):
@@ -637,6 +646,8 @@ def load_written_cases(
         where = f"{path.name}[{index}]"
         if not isinstance(entry, dict):
             raise HarnessError(f"{where} is not a mapping")
+        if entry.get("capability") in disabled and entry["capability"] not in known:
+            continue
         required = {
             "id",
             "capability",

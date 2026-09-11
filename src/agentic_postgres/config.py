@@ -61,8 +61,14 @@ MAX_MANIFEST_BYTES = 65_536
 #: `project.lifecycle`. Versions 1 and 2 still load and render as permanent
 #: projects, because both host manifests are version 1 and no commit can edit
 #: them.
-SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5})
+SUPPORTED_PROJECT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6})
 SUPPORTED_CAPABILITIES_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4})
+
+#: The project manifest version at which `mcp.capabilities` exists (ADR 0201):
+#: optional at 6, forbidden below. A manifest below 6 declares no capability
+#: manifest of its own, and the deployed document records
+#: `mcp.project_capabilities: null` for it (outputs version 18).
+PROJECT_CAPABILITIES_FROM = 6
 
 #: The project manifest version at which `backup.mirror` exists (ADR 0188):
 #: optional at 4, forbidden below. A manifest below 4 has no mirror, and the
@@ -999,6 +1005,13 @@ def project_migration_set(document: dict[str, Any]) -> str | None:
     return None if not block else block["set"]
 
 
+def project_capabilities(document: dict[str, Any]) -> str | None:
+    """The repository-relative directory holding this project's capability
+    manifest, or None (ADR 0201). One reader, for `project_migration_set`'s
+    reason."""
+    return document["mcp"].get("capabilities")
+
+
 def validate_project_semantics(
     document: dict[str, Any],
     *,
@@ -1083,6 +1096,29 @@ def validate_project_semantics(
                 f"migrations.set names {set_path!r}, which has no "
                 f"migrations/manifest.json ({manifest_path}). A set is a manifest, its "
                 "templates and its own lock."
+            )
+
+    # ADR 0201, the same rule for a project's capability manifest: the schema
+    # constrains the path's shape and only the filesystem can say whether the
+    # file is there. Refused here rather than at the lock's compile, which
+    # happens on a host during a deploy with a human waiting.
+    capabilities_path = project_capabilities(document)
+    if capabilities_path is not None:
+        if set_path is None:
+            raise ManifestError(
+                f"mcp.capabilities names {capabilities_path!r} and the manifest declares no "
+                "migrations.set. A project's capabilities are compiled against its reviewed "
+                "surface and checked against its snapshot, and both live beside its migration "
+                "set (ADR 0198); a project with no relations of its own has nothing to open "
+                "(ADR 0201)."
+            )
+        root = (repo_root if repo_root is not None else REPO_ROOT) / capabilities_path
+        if not (root / "capabilities.yaml").is_file():
+            raise ManifestError(
+                f"mcp.capabilities names {capabilities_path!r}, which has no capabilities.yaml "
+                f"({root / 'capabilities.yaml'}). A project's capability manifest is tracked "
+                "in the release checkout beside its migration set (ADR 0201); it is not "
+                "fetched, and it is not read from the host."
             )
 
     database = document["database"]

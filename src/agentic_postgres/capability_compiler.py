@@ -133,6 +133,8 @@ __all__ = [
     "compile_canonical",
     "compile_lock",
     "derive_operation_id",
+    "joint_contract_id",
+    "project_contract_id",
     "surface_operations",
 ]
 
@@ -358,11 +360,35 @@ def _check_against_snapshot(
         )
 
 
+def project_contract_id(surface_contract_id: str) -> str:
+    """A project's compiled contract id, from its reviewed surface's (ADR 0201).
+
+    `notes-tasks-v1` names the release surface and `notes-tasks-agent-v1` its
+    agent contract; the same rule for a project: `example-note-embeddings-v1`
+    -> `example-note-embeddings-agent-v1`. The `-vN` suffix is required, which
+    the surface schema already enforces for the release's and a project's.
+    """
+    stem, separator, version = surface_contract_id.rpartition("-v")
+    if not separator or not version.isdigit():
+        raise CompilerError(
+            f"the surface contract id {surface_contract_id!r} does not end in -v<N>, so no "
+            "agent contract id can be derived from it"
+        )
+    return f"{stem}-agent-v{version}"
+
+
+def joint_contract_id(release_id: str, project_id: str) -> str:
+    """The deployed lock's contract id for a project that declares capabilities:
+    Session 20's shape for the merged surface, `<release>+<project>`."""
+    return f"{release_id}+{project_id}"
+
+
 def compile_canonical(
     *,
     capabilities: dict[str, Any],
     surface: dict[str, Any],
     published_objects: set[str],
+    contract_id: str = CONTRACT_ID,
 ) -> dict[str, Any]:
     """The project-neutral capability contract.
 
@@ -425,7 +451,9 @@ def compile_canonical(
 
     return {
         "schema_version": manifest_version,
-        "contract_id": CONTRACT_ID,
+        # The release's by default; a project's own (`project_contract_id`) or
+        # the joint (`joint_contract_id`) when the caller says so (ADR 0201).
+        "contract_id": contract_id,
         "tool_count": len(tools),
         "capability_count": len(entries),
         "tools": tools,

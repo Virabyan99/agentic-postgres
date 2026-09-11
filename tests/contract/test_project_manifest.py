@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -90,6 +91,7 @@ def downgrade_to_two(document: dict[str, Any]) -> dict[str, Any]:
     document["schema_version"] = 2
     document["project"].pop("lifecycle", None)
     document.pop("migrations", None)
+    document["mcp"].pop("capabilities", None)
     return document
 
 
@@ -719,14 +721,77 @@ MIRROR = {
 }
 
 
+def downgrade_to_five(document: dict[str, Any]) -> dict[str, Any]:
+    """The same manifest at schema version 5 (ADR 0201): the capability
+    manifest out, which is what a version 5 manifest says and means -- this
+    project serves exactly the release's agent surface. Popped rather than
+    assumed absent (D1104's lesson): a version 5 document carrying the key is
+    exactly the state the version 6 gate refuses."""
+    document = copy.deepcopy(document)
+    document["schema_version"] = 5
+    document["mcp"].pop("capabilities", None)
+    return document
+
+
 def downgrade_to_four(document: dict[str, Any]) -> dict[str, Any]:
     """The same manifest at schema version 4 (ADR 0198): the migration set out,
     which is what a version 4 manifest says and means -- this project applies
-    the release's migrations and nothing else."""
-    document = copy.deepcopy(document)
+    the release's migrations and nothing else. Chained through
+    `downgrade_to_five`, so the downgrades cannot disagree about what each
+    version carries."""
+    document = downgrade_to_five(document)
     document["schema_version"] = 4
     document.pop("migrations", None)
     return document
+
+
+def test_version_six_admits_a_capability_manifest_and_lower_versions_forbid_it(
+    tmp_path: Path, base: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR 0177's rule a fifth time, with ADR 0198's difference: the field is
+    OPTIONAL at 6, because a capability manifest is a facility a project may
+    not have. Below 6 a manifest says nothing and has none; at 6 it may say
+    so -- and then the directory must hold the file, and the manifest must
+    name a set, because a project's capabilities are over its reviewed
+    surface (ADR 0201)."""
+    assert config.PROJECT_CAPABILITIES_FROM == 6
+    assert config.project_capabilities(base) is None, "the example names none yet (Run 5)"
+
+    # A checkout under tmp_path: the example set copied, plus the one file the
+    # key names. `repo_root` is the semantic check's own parameter, added for
+    # exactly this (D1104).
+    root = tmp_path / "checkout"
+    shutil.copytree(REPO_ROOT / "projects" / "example", root / "projects" / "example")
+    (root / "projects" / "example" / "capabilities.yaml").write_text(
+        "schema_version: 4\ncapabilities: []\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(config, "REPO_ROOT", root)
+
+    named = copy.deepcopy(base)
+    named["mcp"]["capabilities"] = "projects/example"
+    loaded = check(tmp_path, named)
+    assert config.project_capabilities(loaded) == "projects/example"
+
+    # The gate: the same document one version lower is refused for the key,
+    # and the downgrade itself loads (the control).
+    five = downgrade_to_five(named)
+    assert check(tmp_path, copy.deepcopy(five))["schema_version"] == 5
+    five["mcp"]["capabilities"] = "projects/example"
+    with pytest.raises(config.ManifestError):
+        check(tmp_path, five)
+
+    # The two semantic refusals, each naming its reason.
+    without_set = copy.deepcopy(named)
+    del without_set["migrations"]
+    with pytest.raises(config.ManifestError, match=r"declares no migrations.set"):
+        check(tmp_path, without_set)
+    (root / "projects" / "example" / "capabilities.yaml").unlink()
+    with pytest.raises(config.ManifestError, match=r"has no capabilities.yaml"):
+        check(tmp_path, named)
+
+    # And every reading below the version resolves to none.
+    assert config.project_capabilities(downgrade_to_five(named)) is None
+    assert config.project_capabilities(downgrade(named)) is None
 
 
 def downgrade_to_three(document: dict[str, Any]) -> dict[str, Any]:

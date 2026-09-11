@@ -90,26 +90,48 @@ A project may **not** declare:
 
 ### 3. The lock
 
-`compile_canonical` runs twice — the release's manifest against the release
-surface and snapshot, as today; the project's against the merged surface and
-the project's snapshot — and `compile_lock` **joins** the two canonicals:
-contract id `<release>+<project>` (Session 20's shape for the merged surface),
-tools concatenated with the release's disabled ones removed, `tools_sha256`
-over the joint list, then the profile (ADR 0183, unchanged), then the
-vocabulary from the merged surface (ADR 0200). `mcp-contract.sh check --project
-FILE` compiles the project's contract and compares it byte for byte with the
-committed one; `compile --project` streams it; `lock` reads `mcp.capabilities`
+*Amended in Run 4 (D1147): the join is of the two MANIFESTS, not of two
+compiled contracts.* As planned, `compile_lock` was to join two canonicals —
+tools concatenated, the release's disabled ones removed. A disabled
+capability behind a **grouped** tool (`query_notes` under `query_resource`)
+cannot be removed from a compiled tool without recompiling it, so the join
+happens one level up: `capability_manifest.joined_capabilities` takes the
+release's manifest less the disabled entries plus the project's, and ONE
+`compile_canonical` runs over that against the merged surface and the
+project's snapshot, with contract id `<release>+<project>` (Session 20's shape
+for the merged surface). `tools_sha256`, the profile (ADR 0183, unchanged) and
+the vocabulary from the merged surface (ADR 0200) follow as `compile_lock`
+always did. The project's OWN contract is still compiled alone, against the
+same surface and snapshot, and that is the file the project commits.
+
+A lock is compiled from approved parts only: `lock` first proves the
+release's committed contract and the project's are each what their manifests
+compile to, and refuses (exit 5) when either is not. `mcp-contract.sh check
+--project FILE` compiles the project's contract and compares it byte for byte
+with the committed one, then applies the profile to the JOINT contract;
+`compile --project` streams the project's; `lock` reads `mcp.capabilities`
 from the manifest it is already given, so the deploy's call at
 `deploy-project.py:2151` does not change shape.
+
+A project's capabilities presuppose its reviewed surface: the contract id
+derives from the surface's, the merged surface is what the scopes are
+approved against, and the project's snapshot is what the operations are
+checked against — so `mcp.capabilities` without `migrations.set` is refused at
+load, and a set without its surface or snapshot is refused with the command
+that writes each.
 
 `canonical_sha256` in the lock digests the canonical the lock was compiled
 from — the joint one for a project that declares capabilities — and the
 deployed document's `capability_contract_sha256` keeps its name and records
-that. **Outputs v18** adds `mcp.project_capabilities: null | {root,
-contract_sha256, tool_count, capability_count}` on both branches; the migrator
-adds `null` and touches nothing else; the isolation matrix and the doctor's
-redaction map classify the prefix **and** the bare leaf (D1111), with a
-project without capabilities rendering the explicit null as the control.
+that. **Outputs v18** adds `capabilities.project` on the rendered branch and
+`mcp.project_capabilities` on the deployed one, each `null | {root,
+contract_sha256, tool_count, capability_count}`, where `contract_sha256`
+digests the project's COMMITTED contract (the bytes `check --project`
+compares); the deployed member is null beside `status: unavailable` like every
+other member of the block. The migrator adds `null` and touches nothing else;
+the isolation matrix's `mcp.` prefix and the doctor's `mcp` sensitive block
+already cover the new leaf (checked, not assumed — D1111), with a project
+without capabilities rendering the explicit null as the control.
 
 ### 4. A profile still cannot remove a tool
 

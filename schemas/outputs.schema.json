@@ -36,7 +36,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            17
+            18
           ]
         },
         "document_kind": {
@@ -268,7 +268,8 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "enabled"
+            "enabled",
+            "project"
           ],
           "properties": {
             "enabled": {
@@ -278,6 +279,9 @@
                 "type": "string",
                 "pattern": "^[a-z][a-z0-9_]{2,47}$"
               }
+            },
+            "project": {
+              "$ref": "#/$defs/projectCapabilities"
             }
           }
         },
@@ -323,7 +327,7 @@
         "schema_version": {
           "type": "integer",
           "enum": [
-            17
+            18
           ]
         },
         "document_kind": {
@@ -1298,7 +1302,8 @@
         "accepted_token_use",
         "capability_contract_sha256",
         "capability_lock_sha256",
-        "tool_count"
+        "tool_count",
+        "project_capabilities"
       ],
       "description": "What the published agent plane actually serves, version 12. Deliberately `deployedApi`'s shape rather than a new one: a status that forces every other member null, checksums that name the two artefacts a reader would otherwise have to guess were the same one, and no direct service address -- the MCP runtime's container port is a runtime detail and a published one is a way around the edge. What is NOT here is a connection budget, and its absence is the record: the MCP runtime holds no database credential, so it takes no share of ADR 0099's division (D407). A considered zero is written down the same way a cost is, because otherwise the next reader cannot tell it from an oversight -- which is what D309 was. Nothing here is a bound the runtime enforces: rows, elapsed time and affected rows are per-capability fields of the capability lock, whose identity is `capability_lock_sha256`, and publishing a second copy of them here would be two authorities for one number.",
       "properties": {
@@ -1373,6 +1378,9 @@
           "minimum": 0,
           "maximum": 64,
           "description": "How many tools the deployed lock registers. Published rather than left to the lock's digest because a digest says two things differ and never says how: a lock that grew a fifth tool and a lock whose description was reworded are the same event to a checksum. The bound is not the count Session 8 expects -- that is a contract test's business -- it is the range beyond which a number is a bug rather than a surface."
+        },
+        "project_capabilities": {
+          "$ref": "#/$defs/projectCapabilities"
         }
       },
       "if": {
@@ -1403,6 +1411,9 @@
             "type": "null"
           },
           "tool_count": {
+            "type": "null"
+          },
+          "project_capabilities": {
             "type": "null"
           }
         }
@@ -2300,6 +2311,43 @@
           "description": "Null for a project that declares no set of its own -- which is every project below manifest schema version 5, and any version 5 project that omits the key."
         }
       }
+    },
+    "projectCapabilities": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "root",
+            "contract_sha256",
+            "tool_count",
+            "capability_count"
+          ],
+          "properties": {
+            "root": {
+              "type": "string",
+              "pattern": "^projects/[a-z][a-z0-9-]{2,30}$",
+              "description": "The directory the project manifest's `mcp.capabilities` names."
+            },
+            "contract_sha256": {
+              "$ref": "#/$defs/sha256",
+              "description": "sha256 of the project's COMMITTED compiled contract, `projects/<slug>/contracts/mcp-capabilities.canonical.json`, as bytes."
+            },
+            "tool_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "capability_count": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Version 18 (ADR 0201). Whether this project declares a capability manifest of its own, where it lives, what its committed contract digests to and what it compiles to. Null and not an empty object when the manifest names none (D600): an empty object would say a manifest with nothing in it. Rendered as `capabilities.project` from the manifest; carried to the deployed document as `mcp.project_capabilities`, where the lock's `capability_contract_sha256` beside it is the digest of the JOINT contract the lock was compiled from."
     }
   }
 }

@@ -2788,7 +2788,7 @@
   test_nodeids:
     - tests/contract/test_output_migrations.py::test_v17_adds_the_migrations_block_and_nothing_else
     - tests/contract/test_output_migrations.py::test_v17_leaves_every_recorded_route_word_alone
-    - tests/contract/test_output_migrations.py::test_the_chain_ends_at_version_17_permanent_unmirrored_and_setless
+    - tests/contract/test_output_migrations.py::test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own
     - tests/contract/test_project_migration_sets.py::test_the_rendered_document_records_the_set_it_applied
     - tests/contract/test_project_migration_sets.py::test_project_set_from_reads_the_document_and_not_the_manifest
     - tests/deployment/test_session20_tenant.py::test_both_deployed_documents_are_v17_and_the_doctor_reads_the_sets

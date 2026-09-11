@@ -101,7 +101,12 @@ _V5_REQUIRED = _V4_REQUIRED
 #: The current output schema version. Everything else in this module is written
 #: in terms of it so that adding v6 means adding one function and moving one
 #: constant, not auditing a scattering of literals.
-CURRENT_VERSION = 17
+CURRENT_VERSION = 18
+
+#: What a project with no capability manifest of its own records at version 18
+#: (ADR 0201), on both branches: `capabilities.project` rendered and
+#: `mcp.project_capabilities` deployed. `None` for `NO_PROJECT_SET`'s reason.
+NO_PROJECT_CAPABILITIES: None = None
 
 #: What a document below version 16 means by carrying no mirror (ADR 0188):
 #: none. Like `PERMANENT_LIFECYCLE`, a constant with one possible value
@@ -259,8 +264,8 @@ def migrate_rendered(
         raise MigrationError(
             f"document is already version {CURRENT_VERSION}; migration would be a no-op"
         )
-    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}:
-        raise MigrationError(f"only versions 1 through 16 can be migrated, got {version}")
+    if version not in {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17}:
+        raise MigrationError(f"only versions 1 through 17 can be migrated, got {version}")
 
     if version == 1:
         document = migrate_v1_to_v2(document, secrets_contract_sha256=secrets_contract_sha256)
@@ -319,7 +324,10 @@ def migrate_rendered(
     if detect_version(document) == 15:
         document = migrate_v15_to_v16(document)
 
-    return migrate_v16_to_v17(document)
+    if detect_version(document) == 16:
+        document = migrate_v16_to_v17(document)
+
+    return migrate_v17_to_v18(document)
 
 
 def migrate_v1_to_v2(document: dict[str, Any], *, secrets_contract_sha256: str) -> dict[str, Any]:
@@ -1327,6 +1335,42 @@ def migrate_v16_to_v17(document: dict[str, Any]) -> dict[str, Any]:
     return migrated
 
 
+def migrate_v17_to_v18(document: dict[str, Any]) -> dict[str, Any]:
+    """Return a version 18 ``rendered`` document derived from a version 17 one.
+
+    Version 18 adds `capabilities.project` (ADR 0201): whether the project
+    declares a capability manifest of its own, and what its committed contract
+    digests to. No document below 18 could name one -- the manifest key
+    arrives at project schema 6 with this version -- so the step writes the
+    one value the version means for an archived document, `null`, and takes
+    no argument. Everything else, every route word included, is left exactly
+    as it was found (ADR 0199's rule, restated for the third version running).
+
+    The deployed branch's `mcp.project_capabilities` is not this migrator's:
+    the migrator refuses deployed documents (ADR 0012), and the one reader of
+    an archived deployed document at an older version, the DR kit verifier,
+    reads it version-aware (D1141).
+    """
+    version = detect_version(document)
+    if version == 18:
+        raise MigrationError("document is already version 18; migration would be a no-op")
+    if version != 17:
+        raise MigrationError(f"only version 17 can be migrated to 18, got {version}")
+
+    require_kind(document, "rendered")
+
+    if "project" in document.get("capabilities", {}):
+        raise MigrationError(
+            "the document's capabilities block already carries `project`; this is not a "
+            "version 17 document"
+        )
+
+    migrated = {key: _copy(value) for key, value in document.items()}
+    migrated["capabilities"]["project"] = NO_PROJECT_CAPABILITIES
+    migrated["schema_version"] = 18
+    return migrated
+
+
 def _copy(value: Any) -> Any:
     if isinstance(value, dict):
         return {key: _copy(item) for key, item in value.items()}
@@ -1342,6 +1386,7 @@ __all__ = [
     "CURRENT_VERSION",
     "HEALTH_ROUTE_PATH",
     "NO_MIRROR",
+    "NO_PROJECT_CAPABILITIES",
     "NO_PROJECT_SET",
     "PERMANENT_LIFECYCLE",
     "MigrationError",
@@ -1364,5 +1409,6 @@ __all__ = [
     "migrate_v14_to_v15",
     "migrate_v15_to_v16",
     "migrate_v16_to_v17",
+    "migrate_v17_to_v18",
     "require_kind",
 ]

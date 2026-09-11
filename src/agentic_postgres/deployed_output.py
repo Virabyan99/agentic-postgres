@@ -37,7 +37,7 @@ from typing import Any
 from agentic_postgres import REPO_ROOT, access_policy, backup_report, config
 from agentic_postgres.config import ManifestError
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 #: Which declared secret backs each access profile. Derived from the broker's
 #: own mapping rather than restated: the broker reads that mapping to decide
@@ -127,6 +127,11 @@ MCP_NOT_PUBLISHED: dict[str, Any] = {
     "capability_contract_sha256": None,
     "capability_lock_sha256": None,
     "tool_count": None,
+    # Version 18 (ADR 0201). Null here for `NOT_OBSERVED`'s reason -- an
+    # unpublished plane reports nothing -- and null on a READY plane too when
+    # the project declares no capabilities of its own (D600: absent, not an
+    # empty object). The observer copies it from the rendered document.
+    "project_capabilities": None,
 }
 
 #: A route that this deployment does not publish. `health` is deliberately not

@@ -733,16 +733,17 @@ def _previous_version(rendered: dict[str, Any]) -> dict[str, Any]:
     what the current version added -- Session 20's fixture-by-subtraction
     shape, so this document is the one an older release actually wrote.
 
-    **This helper moves with the outputs version.** At 17 the subtraction is
-    the `migrations` block; when a run bumps the version it must subtract that
-    version's block instead, and the assertion below is what says so.
+    **This helper moves with the outputs version.** At 18 the subtraction is
+    `mcp.project_capabilities` (ADR 0201; at 17 it was the `migrations`
+    block); when a run bumps the version it must subtract that version's
+    addition instead, and the assertion below is what says so.
     """
     document = deployed_document(rendered)
-    assert deployed_output.SCHEMA_VERSION == 17, (
+    assert deployed_output.SCHEMA_VERSION == 18, (
         "the outputs version moved; teach this helper what the new version added"
     )
-    del document["migrations"]
-    document["schema_version"] = 16
+    del document["mcp"]["project_capabilities"]
+    document["schema_version"] = 17
     return document
 
 

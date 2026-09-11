@@ -86,10 +86,10 @@ account this session is written from.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1147**. Rows D1124–D1139
+Six columns, next free number after this table **D1148**. Rows D1124–D1139
 were measured at planning on 2026-09-11 at `5a43f12`; the runs add theirs
 below them as they go (D1140–D1143 are Run 1's, D1144 Run 2's, D1145–D1146
-Run 3's).
+Run 3's, D1147 Run 4's).
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -116,6 +116,7 @@ Run 3's).
 | **D1144** | `deploy.sh --through-session N` is admitted for every N from 2 to `CURRENT_SESSION` (`bin/deploy-project.py:1894`, D59); the auth service exists from session 6 (`profiles: [session6]`). | **The lock is compiled only when `through_session >= AGENT_PLANE_SESSION` (8)** (`deploy-project.py:2159`), and since this run the issuer REQUIRES `APG_MCP_LOCK_FILE` (`settings.REQUIRED_VARIABLES`) and the override mounts the lock into `auth` unconditionally (D1126). A deploy through session 6 or 7 would therefore start an issuer whose mount source does not exist -- refused by the step 6b mount pre-flight, or by `settings.load` if it got that far. Nothing has deployed through a session below 8 since Session 8, and both production projects are through 20. | **Recorded, not repaired.** The honest floor for a deploy that starts the issuer is now 8, and lifting `deploy.sh`'s admitted minimum from 2 is a D59 change for Run 6 (the bump) or Session 25 to take with the operator; a conditional mount would be a lock-less issuer that starts, which is D381's shape. | ADR 0177's rule applied to a container rather than a field: a capability arriving at a version must be refused below it, not silently absent. The consequence was found by reading the deploy's order (the lock is written before step 6, so the mount is satisfied on every deploy that compiles one) rather than by a test, because no test deploys through 7. | 0200 |
 | **D1145** | D1124 counted the roster's writers: four places in the runtime and the compiler, plus two source-text guards. The stage plan's §11: *"for 21 every reader of `agent_scope` and `EXPECTED_TOOL_NAMES`"*. | **Two more readers keyed on a tool's NAME rather than its shape, outside the runtime, and neither imports the roster constant** -- so no grep for `EXPECTED_TOOL_NAMES` finds them. `evaluation_harness._read_cases` decided whether a read case names a resource with `if tool_name == "query_resource"` (twice), and `test_evaluation_harness`'s dispatcher chose `query_resource` versus `run_report` by the same literal and imported `WRITE_TOOLS` for the third branch. Under a tenant's lock the harness would have derived the report shape for every read whose tool was not called `query_resource`, and the dispatcher would have found no branch. | Both decide by shape: `_selects_a_resource(resource)` reads the resource's operation method (`get` selects, `post` runs one RPC), and the dispatcher reads `lock.tool(tool).read_shape` and `.kind`. The runtime's two read functions take the tool's name as a keyword whose default is the release's, so registration always passes the lock's. | Question 5 of the defect pattern, in the form D979 warned about: the second reader was not a caller of the definition but a string comparison against one of its values, which is invisible to every grep for the definition's name. The name `query_resource` meant "relation read" for exactly as long as there was one. | 0200 |
 | **D1146** | Run 3's reader enumeration: a grep for the roster constants over a NAMED list of test modules, and the appendix's rule that a run's targeted list holds every guard module whose subject it touched. | **`tests/contract/test_metrics_surface.py:40` imported `TOOL_NAMES` from the runtime and was in neither list.** CI was RED on `4555645` on all three jobs -- every one collects the module -- and the local gate reproduced it in ten seconds: *ImportError: cannot import name 'TOOL_NAMES'*. A second grep, over the whole of `tests/`, `bin/`, `src/` and `services/`, found it and nothing else. The first grep's file list was written from the modules I could think of, which is D1104's error in the other direction: not a module named and dropped, but a module never named. | The import replaced by a fixture roster with a comment; the row recorded; **the rule sharpened**: a grep for a removed definition's readers runs over the whole tree, never over a list, and `git grep -n <name> -- tests bin src services` is the form. Repaired in Run 3's second commit, CI read. | Question 5 again, at the cheapest possible point -- found by CI six minutes after the push, reproduced by the gate in ten seconds -- and recorded because the plan's own appendix says a commit's CI verdict is read every time (D1120), and it was. | — |
+| **D1147** | ADR 0201 §3 as written at planning: *"`compile_canonical` runs twice … and `compile_lock` joins the two canonicals: tools concatenated with the release's disabled ones removed."* | **A disabled capability behind a grouped tool cannot be removed from a compiled tool.** `query_notes` and `query_tasks` compile into ONE `query_resource` tool with two resources, two discovery scope sets and one merged bound per field; disabling `query_notes` at the contract level means recompiling the tool from the remaining capability, which is `compile_canonical`'s job and nobody else's. And a project's capabilities have no surface to be approved against, no snapshot to be checked against and no contract id to be named by except its reviewed surface's -- so `mcp.capabilities` without `migrations.set` is a manifest with nothing to open. | **The join is of MANIFESTS**: `capability_manifest.joined_capabilities(release, project)` -- the release's entries less `release.disabled` plus the project's -- compiled ONCE against the merged surface and the project's snapshot with the joint contract id; `lock` first proves both committed contracts are what their manifests compile to (exit 5 otherwise). `mcp.capabilities` requires `migrations.set` with a reviewed surface and a snapshot, each refused by name with the command that writes it. ADR 0201 §3 amended in place with the reason. The example project's manifest and the positive CLI arms are Run 5's, with the file the scaffold emits; this run's tests drive a hand-built manifest under `tmp_path` over the example project's committed surface and snapshot. | The plan's sentence described the result correctly and the mechanism wrongly, and the first grouped read would have found it on a host; an ADR amended before the build is cheaper than one amended after a trip (D1116's shape, avoided). | 0201 (amended) |
 
 ---
 
@@ -690,6 +691,86 @@ not exist under that name (D693's guard lives elsewhere) and was dropped from
 the list rather than substituted by association (D1104).
 
 ### Run 4 — a project's agent surface (ADR 0201)
+
+**Done.** 2026-09-11, on the `session-21` branch, in two commits. Commit (a)
+`6de49e3`, CI GREEN: `tests/contract/outputs_chain.py::carry_to_current`
+replacing the eleven hand-chained sites (D1134), battery 2/2. Commit (b),
+this one: ADR 0201 built, one divergence row (D1147, and the ADR's §3
+amended in place), battery 4/4 with paired controls green, 1372 targeted
+tests green across 24 modules.
+
+**Built, as listed, with these differences from the list.** The join is of
+manifests, not of compiled contracts (D1147): `capability_manifest.py` holds
+`load_project_capabilities` (refuses a manifest below 4, a `kind: metadata`
+entry and a disabled metadata tool), `joined_capabilities` (refuses a
+capability name the release declares, a NEW tool under a release tool's name,
+and a disabled name the release lacks), `project_inputs` (the merged surface,
+the project's snapshot and both contract ids from the manifest; requires
+`migrations.set`, its surface and its snapshot, each refused with the command
+that writes it), `compile_project_contract` and `compile_joint_contract`
+(both refusing an `agent_rpcs` operation by name). `capability_compiler`
+gained `contract_id=` on `compile_canonical`, `project_contract_id` (the
+surface's id with `-agent` before `-vN`; the release's own id follows the
+rule) and `joint_contract_id`. `bin/mcp-contract.py`: `compile --project`
+streams the project's contract (exit 2 for a manifest naming none); `check
+--project` compares the committed project contract byte for byte and applies
+the profile to the joint; `lock` proves both committed contracts current,
+compiles the joint, records `project_capabilities_sha256` and
+`project_contract_sha256` beside the four digests, and writes the vocabulary
+from the MERGED surface. Project schema 6 (`mcp.capabilities`, optional at 6,
+forbidden below; the semantic check requires the set and the file);
+capability schema 4's project form (`release.disabled`, forbidden below 4);
+outputs v18 (`capabilities.project` rendered from the committed contract's
+bytes, `mcp.project_capabilities` deployed -- required, null beside
+`unavailable`, null or the object beside `ready`; `MCP_NOT_PUBLISHED` gains
+it; `observe_mcp` takes it by keyword from the rendered document);
+`migrate_v17_to_v18` (null, nothing else, no argument); `outputs_chain._steps`
+gains 17. `bin/render-evaluation-report.py --project FILE` renders
+`projects/<slug>/contracts/evaluation-report.md` from the joint contract,
+creating the file with a short head on `--write` and refusing on `--check`
+when it is absent; `load_written_cases(..., disabled=)` leaves out a release
+case for a capability the project disabled, by name, and refuses every other
+unknown. Both example manifests are at 6 WITHOUT the key -- the example
+project's `capabilities.yaml` is the scaffold's (Run 5), and until then the
+shipped fixtures are the control. The isolation matrix's `mcp.` prefix and
+the doctor's `mcp` sensitive block already cover the new leaf; both were read,
+neither was edited.
+
+**Tests.** `tests/contract/test_project_agent_surface.py` (15, driving a
+hand-built manifest under `tmp_path` over the example project's committed
+surface and snapshot: the project contract, its id, the joint, a lock through
+`load_lock` with the merged vocabulary, the disabled write absent from this
+project's lock and present in the second fixture's, the tool-name refusals,
+the three shapes parametrised, the render block and its refusal, the deployed
+schema's coupling, the observer's source, the CLI's negative arms);
+`test_output_migrations` (v17 fixture, chain-end renamed to
+`test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own` -- registry
+and matrix regenerated -- and five v18 tests); `test_project_manifest`
+(`downgrade_to_five`, the version 6 gate with both semantic refusals);
+`test_evaluation_harness` (three: the joint derivation, the disabled-by-name
+rule, the command's refusal); `test_disaster_kit._previous_version` at 18.
+The plan's `test_the_example_projects_manifest_compiles_…` and
+`test_a_projects_report_is_current_and_carries_the_merged_digest` need the
+example project's manifest and report and are Run 5's, under the names §2
+proposes.
+
+**Battery** (`/tmp/s21-r4-battery.py`, 4/4): the collision refusal removed
+(kill, `…named_for_a_release_tool_is_refused`); `release.disabled` ignored by
+the join (kill, two tests); the migrator writing `{}` for null (kill, two
+tests); the merged surface replaced by the release's (kill, two tests). Paired
+controls `…contract_id_is_derived_from_its_surfaces` and
+`…deployed_schema_couples_the_block_to_a_ready_plane` green under every
+mutation; restore by copy + cmp.
+
+**Targeted, all green:** the plan's list, with `test_rendered_migrations`
+where the plan wrote `test_rendering` (no such module) and
+`test_capability_profile`, `test_scope_vocabulary`, `test_lock_roster`,
+`test_acceptance_registry`, `test_project_migration_sets`, `test_upgrade_plan`,
+`test_render_isolation` and `test_session12_isolation_matrix` (offline) added
+because their subjects moved. `bin/mcp-contract.sh check`, `app-contract.sh
+--check`, `render-mcp-catalog.py --check`, `render-evaluation-report.py
+--check` and the bounds doc all current. No full suite and no gate, by the
+user's instruction; CI is the full check.
 
 **Builds.**
 

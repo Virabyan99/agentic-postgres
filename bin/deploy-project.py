@@ -1497,7 +1497,13 @@ def observe_storage(url: str, *, credentialed: bool) -> str:
     return word
 
 
-def observe_mcp(url: str, *, lock_path: Path, project_key: str) -> tuple[str, dict[str, Any]]:
+def observe_mcp(
+    url: str,
+    *,
+    lock_path: Path,
+    project_key: str,
+    project_capabilities: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any]]:
     """`ready` when the agent plane **refuses** an unauthenticated caller.
 
     `observe_storage`'s shape and D326's: a status field, `unavailable` until the
@@ -1516,6 +1522,11 @@ def observe_mcp(url: str, *, lock_path: Path, project_key: str) -> tuple[str, di
     never from this file: `protocol_revision` is the framework's (ADR 0123), and
     the two checksums identify the artefacts a reader would otherwise have to
     guess were the same one.
+
+    `project_capabilities` is the rendered document's `capabilities.project`
+    (version 18, ADR 0201), carried across as `mcp.project_capabilities` on a
+    READY plane only: beside `status: unavailable` every member is null, the
+    same rule as the rest of the block.
     """
     block = dict(deployed_output.MCP_NOT_PUBLISHED)
 
@@ -1560,6 +1571,9 @@ def observe_mcp(url: str, *, lock_path: Path, project_key: str) -> tuple[str, di
         "capability_contract_sha256": lock.get("canonical_sha256"),
         "capability_lock_sha256": hashlib.sha256(lock_path.read_bytes()).hexdigest(),
         "tool_count": lock.get("tool_count"),
+        "project_capabilities": (
+            None if project_capabilities is None else dict(project_capabilities)
+        ),
     }
     return "ready", block
 
@@ -2552,6 +2566,7 @@ def main(argv: list[str] | None = None) -> int:
                 rendered["routes"]["mcp"],
                 lock_path=(deployed_output.rendered_path(key) / runtime_override.MCP_LOCK_FILENAME),
                 project_key=key,
+                project_capabilities=rendered["capabilities"]["project"],
             ),
             lambda observed: observed[0] == "ready",
         )

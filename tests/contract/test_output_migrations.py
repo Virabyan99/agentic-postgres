@@ -703,7 +703,7 @@ def test_a_current_version_document_is_not_migrated_again(
     is refused -- now asserted through the chaining entry point as well as the
     single step, which the previous version did not cover.
     """
-    with pytest.raises(MigrationError, match="already version 17"):
+    with pytest.raises(MigrationError, match="already version 18"):
         output_migrations.migrate_rendered(
             chained,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -736,7 +736,7 @@ def test_a_v2_document_is_still_refused_by_the_v1_step(v2_fixture: dict[str, Any
 
 def test_an_unknown_version_is_refused(v1: dict[str, Any]) -> None:
     v1["schema_version"] = 99
-    with pytest.raises(MigrationError, match="only versions 1 through 16"):
+    with pytest.raises(MigrationError, match="only versions 1 through 17"):
         output_migrations.migrate_rendered(
             v1,
             secrets_contract_sha256=CONTRACT_DIGEST,
@@ -2360,13 +2360,13 @@ def v14(v15: dict[str, Any]) -> dict[str, Any]:
     return document
 
 
-def test_the_chain_ends_at_version_17_permanent_unmirrored_and_setless(
+def test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own(
     chained: dict[str, Any],
 ) -> None:
-    """The premise of the `v14`, `v15` and `v16` fixtures, as a test rather than
+    """The premise of the `v14` to `v17` fixtures, as a test rather than
     inside a fixture (D386): a mutation that made the chain end elsewhere must
     FAIL an assertion, not ERROR every test that shares the fixture."""
-    assert chained["schema_version"] == 17
+    assert chained["schema_version"] == 18
     assert chained["project"]["lifecycle"] == output_migrations.PERMANENT_LIFECYCLE
     assert chained["backup"]["mirror"] == output_migrations.NO_MIRROR
     # Version 17, ADR 0198. A migrated document has no project set -- no
@@ -2375,6 +2375,11 @@ def test_the_chain_ends_at_version_17_permanent_unmirrored_and_setless(
     # document, and writing the current one into an archived document would
     # claim that deployment applied a set it has never seen.
     assert chained["migrations"] == {"release_lock_sha256": None, "project_set": None}
+    # Version 18, ADR 0201. No document below 18 could name a capability
+    # manifest of its own, so the migrated one records NULL -- and null, not
+    # an empty object, which would say "a manifest with nothing in it".
+    assert "project" in chained["capabilities"]
+    assert chained["capabilities"]["project"] is None
 
 
 def test_v15_adds_the_lifecycle_and_nothing_else(v14: dict[str, Any]) -> None:
@@ -2426,12 +2431,23 @@ def test_v15_refuses_a_document_already_at_15(v14: dict[str, Any]) -> None:
 
 
 @pytest.fixture
-def v16(chained: dict[str, Any]) -> dict[str, Any]:
-    """A version 16 document, derived from the chain's current one by removing
-    what version 17 added. Its premise is asserted by
-    `test_the_chain_ends_at_version_17_permanent_unmirrored_and_setless`
+def v17(chained: dict[str, Any]) -> dict[str, Any]:
+    """A version 17 document, derived from the chain's current one by removing
+    what version 18 added (ADR 0201). Its premise is asserted by
+    `test_the_chain_ends_at_version_18_with_nothing_of_a_projects_own`
     (D386)."""
     document = json.loads(json.dumps(chained))
+    document["capabilities"].pop("project", None)
+    document["schema_version"] = 17
+    return document
+
+
+@pytest.fixture
+def v16(v17: dict[str, Any]) -> dict[str, Any]:
+    """A version 16 document, derived from the version 17 one by removing
+    what version 17 added -- chained through `v17` so the two subtractions
+    cannot disagree about what each version carries."""
+    document = json.loads(json.dumps(v17))
     document.pop("migrations", None)
     document["schema_version"] = 16
     return document
@@ -2506,10 +2522,58 @@ def test_v16_refuses_a_current_document(v16: dict[str, Any]) -> None:
         output_migrations.migrate_v15_to_v16(v16)
 
 
-def test_v17_refuses_a_current_document(chained: dict[str, Any]) -> None:
-    """The same property for the step this session adds."""
+def test_v17_refuses_its_own_output(v17: dict[str, Any]) -> None:
+    """The same property for Session 20's step. Takes `v17` rather than
+    `chained`, which is version 18 since ADR 0201, for the reason the version
+    16 test above gives."""
     with pytest.raises(MigrationError, match="already version 17"):
-        output_migrations.migrate_v16_to_v17(chained)
+        output_migrations.migrate_v16_to_v17(v17)
+
+
+def test_v18_refuses_a_current_document(chained: dict[str, Any]) -> None:
+    """The same property for the step this session adds."""
+    with pytest.raises(MigrationError, match="already version 18"):
+        output_migrations.migrate_v17_to_v18(chained)
+
+
+def test_v17_to_v18_adds_the_project_capabilities_block_and_nothing_else(
+    v17: dict[str, Any],
+) -> None:
+    """ADR 0201. The block is `capabilities.project`, and its migrated value is
+    NULL: no document below 18 could name a capability manifest of its own,
+    and an empty object would say "a manifest with nothing in it", which is a
+    state a project can also be in (D600). Every other member, every route
+    word included, is left exactly as it was found (ADR 0199's rule)."""
+    migrated = output_migrations.migrate_v17_to_v18(v17)
+    assert migrated["schema_version"] == 18
+    assert "project" in migrated["capabilities"]
+    assert migrated["capabilities"]["project"] is None
+    assert migrated["capabilities"]["project"] == output_migrations.NO_PROJECT_CAPABILITIES
+
+    stripped = json.loads(json.dumps(migrated))
+    del stripped["capabilities"]["project"]
+    stripped["schema_version"] = 17
+    assert stripped == v17, "the step changed something other than what version 18 adds"
+
+    # And the result is the current schema's: the chain's end validates.
+    config.validate_against_schema(migrated, "outputs.schema.json")
+
+
+def test_v18_refuses_a_document_that_already_carries_the_block(v17: dict[str, Any]) -> None:
+    v17["capabilities"]["project"] = None
+    with pytest.raises(MigrationError, match="already carries `project`"):
+        output_migrations.migrate_v17_to_v18(v17)
+
+
+def test_v18_takes_no_argument_because_the_value_is_what_the_version_means() -> None:
+    """`migrate_v14_to_v15`'s property, for the same reason: every project
+    archived below 18 had no capability manifest of its own, and an argument
+    with one possible value is a constant with a signature."""
+    import inspect
+
+    parameters = inspect.signature(output_migrations.migrate_v17_to_v18).parameters
+    assert list(parameters) == ["document"]
+    assert output_migrations.NO_PROJECT_CAPABILITIES is None
 
 
 def test_v17_adds_the_migrations_block_and_nothing_else(v16: dict[str, Any]) -> None:

@@ -20,6 +20,18 @@
              the lock. ``--project`` is required, so a deploy cannot compile a
              lock that ignores one. Also stdout-only.
 
+**A project's own capabilities** (ADR 0201, Session 21). A project manifest at
+schema 6 may name ``mcp.capabilities: projects/<slug>``, a capability manifest
+of the project's own beside its migration set. Then ``compile --project FILE``
+streams THAT project's contract, compiled against the merged surface and the
+project's snapshot; ``check --project FILE`` compares it byte for byte with the
+committed ``projects/<slug>/contracts/mcp-capabilities.canonical.json`` (and
+still applies the profile, to the joint contract); and ``lock`` compiles the
+JOINT contract -- the release's capabilities less the ones the project
+disables, plus the project's own -- after proving both committed contracts
+are what their manifests compile to. A manifest that names no capability
+manifest takes every path it took before.
+
 **The compiler reads OpenAPI and never enumerates from it.** Every question it
 asks starts from a declared capability; nothing iterates the served document
 looking for things to expose. That asymmetry is `AGT-DRIFT-001`, and
@@ -46,6 +58,7 @@ from agentic_postgres import (
     REPO_ROOT,
     api_surface,
     capability_compiler,
+    capability_manifest,
     config,
     openapi_normalize,
     scope_registry,
@@ -90,19 +103,48 @@ def compile_candidate(capabilities_path: Path) -> bytes:
     return capability_compiler.canonical_bytes(canonical)
 
 
-def _profile(project_path: Path) -> dict | None:
+def _manifest(project_path: Path) -> dict:
+    if not project_path.is_file():
+        raise FileNotFoundError(project_path)
+    return config.load_project_manifest(project_path)
+
+
+def _profile(manifest: dict) -> dict | None:
     """The project's narrowing, or None for a version 1 manifest (ADR 0183).
 
     Loaded through `config.load_project_manifest`, so the schema has already
     refused a profile on a version 1 document and required one on a version 2
     -- the None here is a manifest that predates profiles, not one that forgot.
     """
-    if not project_path.is_file():
-        raise FileNotFoundError(project_path)
-    manifest = config.load_project_manifest(project_path)
     if manifest["schema_version"] < config.PROJECT_PROFILE_FROM:
         return None
     return manifest["mcp"]["profile"]
+
+
+def _project_contract(inputs: capability_manifest.ProjectInputs) -> bytes:
+    """The project's own contract, as the bytes its committed file must hold."""
+    return capability_compiler.canonical_bytes(capability_manifest.compile_project_contract(inputs))
+
+
+def _require_project_contract_current(inputs: capability_manifest.ProjectInputs) -> int | None:
+    """Exit 5 unless the committed project contract is what its manifest compiles to."""
+    path = capability_manifest.project_contract_path(inputs.root)
+    if not path.is_file():
+        return fail(
+            EXIT_CONTRACT,
+            f"no approved capability contract at {path.relative_to(REPO_ROOT)}. Compile it "
+            "with `bin/mcp-contract.sh compile --project <manifest> > <that path>`, READ it, "
+            "and commit it (ADR 0201)",
+        )
+    if _project_contract(inputs) != path.read_bytes():
+        return fail(
+            EXIT_CONTRACT,
+            f"{inputs.root.relative_to(REPO_ROOT)}/capabilities.yaml no longer compiles to "
+            f"{path.relative_to(REPO_ROOT)}. Either the project's manifest changed and its "
+            "contract was not re-approved, or the merged surface or the project's snapshot "
+            "moved underneath it. Re-compile, READ the difference, then commit",
+        )
+    return None
 
 
 def _report_profile(canonical: dict, profile: dict | None) -> None:
@@ -127,7 +169,18 @@ def _report_profile(canonical: dict, profile: dict | None) -> None:
 
 def command_compile(arguments: argparse.Namespace) -> int:
     try:
-        sys.stdout.write(compile_candidate(arguments.capabilities).decode("utf-8"))
+        if arguments.project is None:
+            candidate = compile_candidate(arguments.capabilities)
+        else:
+            inputs = capability_manifest.project_inputs(_manifest(arguments.project))
+            if inputs is None:
+                return fail(
+                    EXIT_INPUT,
+                    f"{arguments.project} declares no mcp.capabilities, so it has no contract "
+                    "of its own to compile; `compile` without --project is the release's",
+                )
+            candidate = _project_contract(inputs)
+        sys.stdout.write(candidate.decode("utf-8"))
     except FileNotFoundError as exc:
         return fail(EXIT_PREREQUISITE, f"missing input: {exc}")
     except config.ManifestError as exc:
@@ -178,13 +231,31 @@ def command_check(arguments: argparse.Namespace) -> int:
     # is computed and discarded.
     if arguments.project is not None:
         try:
-            profile = _profile(arguments.project)
+            manifest = _manifest(arguments.project)
+            profile = _profile(manifest)
+            # A project's OWN contract, compared byte for byte with the one it
+            # committed (ADR 0201) -- the same comparison as the release's,
+            # against the merged surface and the project's snapshot. The
+            # profile is then applied to the JOINT contract, because a profile
+            # may name a project tool as readily as a release one.
+            inputs = capability_manifest.project_inputs(manifest)
+            if inputs is not None:
+                problem = _require_project_contract_current(inputs)
+                if problem is not None:
+                    return problem
+                capabilities = config.load_capabilities_manifest(arguments.capabilities)
+                document = capability_manifest.compile_joint_contract(capabilities, inputs)
+                print(
+                    f"mcp-contract: {inputs.root.relative_to(REPO_ROOT)}/capabilities.yaml "
+                    f"compiles to its approved contract; the joint contract "
+                    f"{document['contract_id']} carries {document['tool_count']} tools"
+                )
             if profile is not None:
                 capability_compiler.apply_profile(document, profile)
         except FileNotFoundError as exc:
             return fail(EXIT_PREREQUISITE, f"missing input: {exc}")
         except config.ManifestError as exc:
-            return fail(EXIT_CONTRACT, f"the project profile is refused: {exc}")
+            return fail(EXIT_CONTRACT, f"the project is refused: {exc}")
         _report_profile(document, profile)
     return EXIT_OK
 
@@ -221,13 +292,53 @@ def command_lock(arguments: argparse.Namespace) -> int:
     # profile is None for a version 1 manifest, and the lock is then
     # byte-identical to the one this command compiled before profiles existed.
     try:
-        profile = _profile(arguments.project)
+        manifest = _manifest(arguments.project)
+        profile = _profile(manifest)
+        inputs = capability_manifest.project_inputs(manifest)
     except FileNotFoundError as exc:
         return fail(EXIT_PREREQUISITE, f"missing input: {exc}")
     except config.ManifestError as exc:
         return fail(EXIT_CONTRACT, f"cannot read the project manifest: {exc}")
 
     canonical = json.loads(CANONICAL_PATH.read_text(encoding="utf-8"))
+    surface = None
+    sources: dict[str, str] = {}
+    if inputs is not None:
+        # **The joint contract, and only from approved parts** (ADR 0201,
+        # D1147). The release's committed contract and the project's are each
+        # proved to be what their manifests compile to, and the lock is then
+        # compiled from the two manifests JOINED -- the release's capabilities
+        # less the ones this project disables, plus the project's own --
+        # against the merged surface and the project's snapshot. Joined as
+        # manifests rather than as compiled contracts, because a disabled
+        # capability behind a grouped tool cannot be removed from a compiled
+        # tool without recompiling it.
+        try:
+            if compile_candidate(arguments.capabilities) != CANONICAL_PATH.read_bytes():
+                return fail(
+                    EXIT_CONTRACT,
+                    "the release's capability manifest no longer compiles to the approved "
+                    "contract; run `bin/mcp-contract.sh check` and re-approve it before "
+                    "compiling a lock that joins it",
+                )
+            problem = _require_project_contract_current(inputs)
+            if problem is not None:
+                return problem
+            capabilities = config.load_capabilities_manifest(arguments.capabilities)
+            canonical = capability_manifest.compile_joint_contract(capabilities, inputs)
+        except FileNotFoundError as exc:
+            return fail(EXIT_PREREQUISITE, f"missing input: {exc}")
+        except config.ManifestError as exc:
+            return fail(EXIT_CONTRACT, f"cannot compile the joint contract: {exc}")
+        surface = inputs.surface
+        project_contract = capability_manifest.project_contract_path(inputs.root)
+        sources = {
+            "project_capabilities_sha256": sha256(
+                capability_manifest.project_capabilities_path(inputs.root).read_bytes()
+            ).hexdigest(),
+            "project_contract_sha256": sha256(project_contract.read_bytes()).hexdigest(),
+        }
+
     try:
         lock = capability_compiler.compile_lock(
             canonical=canonical,
@@ -245,12 +356,18 @@ def command_lock(arguments: argparse.Namespace) -> int:
                 "api_surface_sha256": api_surface.contract_digest(),
                 "canonical_openapi_sha256": sha256(SNAPSHOT_PATH.read_bytes()).hexdigest(),
                 "project_manifest_sha256": sha256(arguments.project.read_bytes()).hexdigest(),
+                # And the project's two, when it declares capabilities: a
+                # lock whose inputs cannot be identified is a surface nobody
+                # can prove was reviewed.
+                **sources,
             },
             profile=profile,
             # The deployment's scope classes, for the issuer (ADR 0200). Over
-            # the RELEASE surface here: a project's own relations join it when
-            # a project declares capabilities (ADR 0201, Session 21 Run 4).
-            vocabulary=scope_registry.vocabulary_block(),
+            # the RELEASE surface for a project without capabilities of its
+            # own, and over the MERGED one when it declares some (ADR 0201):
+            # that is where a tenant's scope becomes issuable on one
+            # deployment and on no other.
+            vocabulary=scope_registry.vocabulary_block(surface),
         )
     except (KeyError, config.ManifestError) as exc:
         return fail(EXIT_CONTRACT, f"cannot compile the lock: {exc}")
@@ -268,14 +385,23 @@ def main(argv: list[str] | None = None) -> int:
         help="the capability manifest to compile (default: capabilities.example.yaml)",
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("compile", help="compile a candidate contract to stdout")
+    compile_ = commands.add_parser("compile", help="compile a candidate contract to stdout")
+    compile_.add_argument(
+        "--project",
+        type=Path,
+        default=None,
+        help="a project manifest naming mcp.capabilities; streams THAT project's contract, "
+        "compiled against the merged surface and its snapshot (ADR 0201)",
+    )
     check = commands.add_parser("check", help="compare; never write")
     check.add_argument(
         "--project",
         type=Path,
         default=None,
         help="a project manifest whose mcp.profile is applied to the approved contract and "
-        "refused if it would widen any bound (ADR 0183)",
+        "refused if it would widen any bound (ADR 0183); when it names mcp.capabilities, "
+        "the project's committed contract is compared with what its manifest compiles to "
+        "(ADR 0201)",
     )
     lock = commands.add_parser("lock", help="resolve the approved contract for one project")
     lock.add_argument("--outputs", type=Path, required=True, help="a rendered outputs.json")

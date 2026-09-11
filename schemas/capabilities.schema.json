@@ -27,6 +27,25 @@
         "$ref": "#/$defs/capability"
       },
       "description": "Enabled agent tools. An entry may exist while disabled; enabling one requires a live backing API contract."
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "disabled"
+      ],
+      "properties": {
+        "disabled": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9_]{2,47}$"
+          },
+          "description": "Release capabilities this PROJECT leaves out of its own lock, by capability name. Compiled out entirely, never emitted with a flag (ADR 0183's rule for a disabled capability). A name the release does not declare is refused, and so is a metadata tool: the runtime requires the pair."
+        }
+      },
+      "description": "Schema version 4, the PROJECT form (ADR 0201). Present only in a project's own `projects/<slug>/capabilities.yaml`; the release's manifest never carries it. This is where D933's first thing closes: a project that must not expose a release write names it here, per project, in the narrowing direction, at compile time."
     }
   },
   "allOf": [
@@ -201,6 +220,11 @@
               }
             }
           }
+        },
+        "not": {
+          "required": [
+            "release"
+          ]
         }
       },
       "description": "The v4 gate (ADR 0200), and it runs the other way from the two above: it NARROWS the versions below it rather than requiring a field at and above. A manifest at schema version 3 or below names only $defs/agent_scope's five, which is the vocabulary it was written against; at 4 the shape applies and the compiler approves each name against the derived vocabulary. Every older version still loads, because `capabilities.yaml` is a gitignored operator input that exists only on the host."
