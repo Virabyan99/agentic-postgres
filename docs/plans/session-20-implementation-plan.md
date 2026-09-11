@@ -73,7 +73,7 @@ F-004 to F-008 and F-021 to F-023 in the launch folder.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1121**. Rows D1087–D1097
+Six columns, next free number after this table **D1124**. Rows D1087–D1097
 were measured at planning on 2026-09-10 at `95ea0be`; the runs add theirs
 below them as they go.
 
@@ -113,6 +113,9 @@ below them as they go.
 | **D1118** | This plan §5 Run 7's deploy steps, and `test_the_deployed_document_records_the_checksums_it_serves`. | **A correct deployment fails it, once.** The test compares `api.canonical_openapi_sha256` in the deployed document against this checkout's snapshot. The document records what the deploy computed, and at deploy time that was the OLD snapshot; the new one is then captured FROM that deployment and committed, so the document and the checkout disagree until the next deploy. | The cycle is **capture -> commit -> redeploy**, and both projects were redeployed before the gate was re-run. Recorded because Run 7's steps do not say it. | Not a defect -- a step the runbook owes. A snapshot captured from a deployment is behind the deployment that produced it by construction, which is D1039's *unsatisfiable rather than unsatisfied* seen from the deploy's side rather than the test's. | 0050 |
 | **D1119** | `671bb048` renamed `test_the_retired_write_rpc_is_gone` to `test_the_restored_write_rpc_is_published` (D1113), and its targeted list named the modules whose *subject* had changed. | **A test's name is the acceptance registry's subject too.** `tests/acceptance-registry.yaml` still named the old node id, so `bin/session-20-check.sh --mode host` died at **step 6**, after its 13-minute suite had passed 290/0, with `ClaimError: ... names no test function in tests/. The acceptance registry and the suite have drifted apart.` Measured afterwards by putting the stale id back: `test_acceptance_registry::test_every_registered_node_id_is_collectible` **and** `::test_acceptance_matrix_is_generated_from_the_registry` both fail offline, in 44 seconds. The guard exists and works; nothing ran it. | Registry corrected, `docs/acceptance-matrix.md` regenerated. **The rule stated where D1014's is**: a run that renames, removes or adds a test function puts `tests/contract/test_acceptance_registry.py` in its targeted list, exactly as a run that adds or removes a `bin/` command puts `test_cli_contract.py` there. All 649 node ids named by the 104 claims through Session 20 were then resolved on the workstation, the way step 6 resolves them -- no other drift. | D1104's class, with the cheap check available and not run. The cost is the asymmetry: 44 seconds on a workstation against 13 minutes on a host, at the end of a trip, after everything it measures has already passed. | — |
 | **D1120** | `CLAUDE.md` §5: *"commit → push → **read that commit's CI verdict**"*, and *"CI is the full check"*. | **CI was RED on `671bb048` and RED on `f3f2058`, and neither verdict was read.** Both failed `Session 1 gate` and `Session 2 offline contract`, which is D1119's drift: the Session 1 gate runs the contract suite and `test_acceptance_registry` is in it. So the repository's own full check had reported this defect twice, in minutes, before the host gate spent 13 minutes rediscovering it. | Both verdicts read, the cause repaired, and the discipline re-applied for the rest of the run: `bin/session-01-check.sh` locally on a clean tree before the transport, then CI's verdict on the pushed commit, then the host. | **The same shape as D1116, one layer out.** D1116 is a commit message asserting what the diff did not contain; this is a run asserting a process it did not perform. Both were invisible for the same reason -- nothing compares the claim against the artefact -- and both cost a host gate. The rule was not missing, unclear or new: it is in the file this session loads at every start. | — |
+| **D1121** | This session's own `OPS-READ-001` live half, `test_session20_tenant::test_render_as_the_operator_after_a_root_deploy_says_unreadable_not_never_deployed`, whose docstring states: *"Run as the GATE'S OWN USER against the checkout, unprivileged, which is exactly the position `op` is in after the deploy."* | **The gate's own user is root, so the proof can never run.** `bin/session-20-check.sh --mode host` is invoked under `sudo`; `os.access(generated, R_OK\|X_OK)` is unconditionally true for root, so the test takes its own skip branch on every host run -- and past that branch `migrate.sh render` as root would traverse the directory and exit 0 rather than 3, so the assertion could not hold either. The same root is visible twice more in the same gate: step 6 skips `test_honest_readers.py:100` and `:165` with *"root traverses a 0000 directory"*. **Consequence:** `honest_readers` -- one of this session's three claims, 16 offline node ids green and 2 live -- can never reach `passed` through the gate that exists to admit it, and a skip is not a pass. Measured on the host 2026-09-11 at `90b3b446`: 878 passed, 0 failed, `honest_readers not_run`. | **Recorded, not repaired, by the operator's decision** -- and the repair is named so Session 21 does not rediscover it. The proof must make its reading AS the unprivileged checkout owner rather than as whoever invoked the gate (`sudo -u "$(stat -c %U "${REPO_ROOT}")"` when `geteuid()` is 0), and it must construct and restore the root-owned precondition itself instead of depending on an operator step that D1110 has just shown a `sudo` deploy undoes. Both halves are needed: privilege alone still finds an op-owned directory, and the state alone is still read by root. **Session 21 item**; `honest_readers` stays `not_run` in `evidence/session-20.json`. | **The class this repository produces most, inside the session whose subject IS that class.** Question 2 of the defect pattern -- has it run at all, in this environment, since the thing it measures last changed -- answered "no, and it never could". Written in Run 5, first executed on the trip, which is the eleventh-plus instance of a never-executed proof failing on a host. The tell was in the docstring all along: it names the user it needs, and nothing checked that the gate supplies one. It is also D1110's twin -- that row corrects a message for claiming a cause it could not know; this one corrects a proof for claiming a user it does not have. | 0195, 0199 |
+| **D1122** | `bin/dr-kit.sh verify DIR`, and ADR 0189's premise that the kit is what an operator holds when the host is gone. `docs/node-loss-runbook.md` is the order it is used in. | **A kit stops verifying the moment the outputs schema version moves — which is precisely when it is needed.** The kit exported on 2026-09-06 holds deployed documents at `schema_version: 16`, `template_version: 1.0.0`, `source_commit: 054f54e`, `deployed_through_session: 18`. Run against this checkout, `verify` exits 5 twice — *"alpha-dev: the deployed document does not validate: outputs.schema.json: `<root>`: {...} is not valid under any of the given schemas"*, and the same for beta — because v17's schema does not admit a v16 document. **The migrator chain exists and the reader does not use it**: `migrate_v16_to_v17` is exactly the function that would make the stored document readable. Measured on the host 2026-09-11 at `90b3b446`; it is what turned `disaster_kit` red in Session 18's gate. | **Two things, and they are separate.** (1) The kit was **re-exported from the current deployments** — a kit describing a session-18/v16 deployment that no longer exists is the wrong artefact to restore from regardless of whether `verify` can read it, so this is an operational repair the trip owed anyway. (2) The reader's defect is **recorded, not repaired**, and is a **Session 21 item**: `verify` must validate a stored document against the version the document DECLARES — migrate then validate — rather than against the version the reading checkout happens to be at. | **A disaster-recovery artefact is by construction read at a LATER release than the one that wrote it**, so validating it against the current schema is the one rule that guarantees failure in the only scenario the kit exists for. Nobody saw it because the kit had only ever been verified on the day it was exported, at the same release, by the session that built it — question 2 of the defect pattern, where "since the thing it measures last changed" means the schema and not the kit. D1105's family seen from the other end: there the migrator is hand-chained in eleven test sites, here a shipped reader does not chain it at all. | 0189, 0195 |
+| **D1123** | `bin/write-session-evidence.py --junit` is *"repeatable; claims are resolved from all of them"*, which Run 7 used to admit Session 18's DR claims into Session 20's half without re-adding the flags Run 6 removed (D1021). | **A SKIP in one JUnit beats a PASS in another.** Both sweeps collect the same node ids; `session-18-host-tests.xml` records `test_removing_one_project_leaves_the_other_whole` as passed (no child element) and `session-20-host-tests.xml` records it `skipped`, and the merged half reports `project_removal` as `not_run`. The same for `disaster_kit`, `failure_rehearsal` and `independent_repository`. Measured 2026-09-11 by reading both XMLs directly after the merge disagreed with the gate that produced them. | **Recorded, not repaired.** The conservative resolution is the RIGHT default -- a skip is not a pass (ADR 0163), and a reader that let a pass anywhere outvote a skip somewhere would report claims proved by a sweep that never ran them. What it means is narrower: **repeatable `--junit` cannot LIFT a claim that skipped in a sibling sweep**, so a session whose evidence needs Session 18's declarations needs ONE gate run carrying all the flags, not two runs merged. Session 21 decides which: re-add the four declaration flags to the session gate (reversing D1021 on the grounds that claims are cumulative), or document that the older session's gate is the one that writes the half. | The two rules collide and neither is wrong: D1021 says a gate must not carry flags its own proofs never read, and the evidence model says claims are cumulative. Run 7 assumed `--junit` bridged them because its help says claims are resolved from all the files -- true, and not the same as saying the best status wins. **Four claims that were measured passing on this host on this day are recorded `not_run`**, which is the honest output of the resolver and an understatement of what was measured; the distinction is stated here so the next reader does not take it for a regression. | 0163 |
 
 ---
 
@@ -835,6 +838,52 @@ the output; the agent reads, never redirects a deploy (D972):
    file the walk touched is a D row and a Session 25 item.
 10. D rows for what the day found, this run **Done.**, `CLAUDE.md` §2 and
     §9, memory, commit, push, CI.
+
+---
+
+**Done.** 2026-09-10/11, the trip and the merge. Both projects deployed through
+session 20 at outputs v17 / template 1.1.0; alpha ledger 31, beta 32 (31 + the
+project set's `20260914120001`); `app.note_embeddings` served on beta and absent
+on alpha, which is the boundary alpha exists to prove. Beta's upgrade was split
+into two deploys because the guard refuses one that moves the release and the
+manifest together (D1107). Captures reviewed, committed and then REDEPLOYED,
+because a snapshot captured from a deployment is behind it until the next deploy
+(D1118).
+
+**Evidence**: `evidence/session-20.json`, 104 claims, **91 passed, 13 not_run, 0
+failed**, deployed release `671bb048` on both projects, host checkout
+`90b3b446`. `tenant_extension_point` and `task_domain` -- two of this session's
+three claims -- passed on their first live execution. Host suite 878 passed / 0
+failed / 27 skipped; external 25 passed / 0 failed / 8 skipped (IPv6 absent,
+D688); Session 1 gate 5173 passed / 0 failed / 3 skipped; CI green on
+`90b3b446`.
+
+**Of the thirteen `not_run`, eight are expected** -- the five D478 names, plus
+`fresh_host` and `documented_path` (ADR 0197) and `replacement_host_restore`
+(D1028, by decision). **Four more were measured PASSING on this host on
+2026-09-11** -- `disaster_kit`, `failure_rehearsal`, `independent_repository`,
+`project_removal`, in Session 18's gate at 303 passed / 0 failed -- and are
+recorded `not_run` because a skip in a sibling sweep outvotes a pass (D1123).
+That is an understatement of what was measured, not a regression, and Session 21
+decides how to close it. **The thirteenth, `honest_readers`, is this session's
+own and could never have passed**: its live half reads as whoever invoked the
+gate and the gate runs as root (D1121). Recorded and deferred by the operator's
+decision.
+
+**What the trip cost, and why it is worth reading before the next one.** Four
+host gates were spent on things that were free to catch earlier: a commit whose
+message described six repairs and whose diff contained five (D1116); two CI
+verdicts that were RED and unread (D1120), both failing on a registry drift that
+`test_acceptance_registry` catches offline in 44 seconds (D1119). Against that,
+the trip found four real defects that only a trip could find: `--check
+--project` could never exit 0 for a project with a set (D1117), a DR kit stops
+verifying when the outputs schema moves (D1122), `honest_readers`' live half
+cannot run under its own gate (D1121), and the served-document proof had been
+measuring the anonymous view (D1114). Three of the four were found by making a
+proof call the product's own command instead of hand-rolling the request.
+
+**NOT DONE**: step 9's second-walk rehearsal (a reading, not a claim move,
+D1091). Left for Session 25's walk, which is where the claim actually lives.
 
 ---
 

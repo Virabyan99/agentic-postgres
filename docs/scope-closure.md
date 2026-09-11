@@ -282,12 +282,9 @@ rows. This section is only what stays open.
 | Item | Why it is open |
 |---|---|
 | **D1045** — the provider's error message is discarded | The body is withheld deliberately: *"on identity endpoints it can echo the request, and this message reaches a log."* Relaxing "no bodies" to "no raw bodies" is a security decision in a credential path. It cost 25 minutes of API archaeology to recover a sentence the server had already sent. |
-| **D1055's migration** — a reviewed `api.create_task` | Decided in ADR 0196 and specified there. It cannot be written offline: a new published object needs a snapshot recaptured from a *deployed* document, so it belongs to one sitting that ends in a deploy. Until then the plane publishes `tasks` and `update_task_status` against a table nothing can populate. |
-| **D1038, D1054** — the example domain is the suite's whole surface, and the project-neutral contract's control is one project's capture | Both are the tenant extension point seen from different angles. Loosening either to a containment check is what the non-negotiables call weakening, and the ADR each would need has Stage 3's question as its real subject. |
-| **D1048's document half** — `unavailable` for a route that was merely unobserved | `routes.*.status` is a schema enum with `const` couplings forcing a null URL. A third member is an outputs version with a migrator and a guarded reader for every consumer (D600). The printed line carries the distinction meanwhile. |
 | **D1058** — `0003`'s comment has been false since `0006` | Not repairable in place. A released template's bytes are the unit `verify-lock` checks, so editing even a comment changes a recorded digest. |
 | **D1059** — a cancelled CI run is not a failed one | `concurrency: cancel-in-progress: true` means a superseded run concludes `cancelled`, and a reader bucketing everything that is not `success` as failure reports a verdict the run never reached. Observed on this session's own push. |
-| **D1060** — a project that is deployed is reported as never deployed | `.generated/<key>` is root-owned after a root deploy, so `migrate.sh render` as `op` cannot traverse it and says *"the project was never deployed here"* rather than *"I could not read it"*. Measured on the production host on 2026-09-10, with beta as the control. ADR 0195's class, third live site, found after 1.0.1 was tagged. |
+| **D1060** — repaired in code; the LIVE reading is what stays open | Session 20 built the three-outcome readers (ADR 0199): `RenderedDocumentAbsent` exit 4, `RenderedDocumentUnreadable` exit 3, one resolver in `bin/rendered-document.py`, sixteen offline node ids green. **The live half has never executed and could not** — see D1121: it reads as whoever invoked the gate, and the gate runs as root. `honest_readers` is `not_run` in `evidence/session-20.json` for that reason and not because the readers are wrong. |
 | **D933** now blocks two things | It blocked a project disabling a write capability (ADR 0183). It now also blocks retiring the task tools, which is why ADR 0196 chose restoration. That asymmetry is the argument for repairing it in Stage 3, beside D1056's closed scope vocabulary. |
 
 **What the session says about the two claims that have been open since Session
@@ -309,3 +306,25 @@ to choose between — and ADR 0195 states the rule. Six *more* instances were
 found during the repair itself, four of them in guards written that day. The
 class is a trap rather than carelessness, and the cheapest defence is the one
 `bin/backup.sh` already had: say that you did not get an answer.
+
+---
+
+## 9. What Session 20 left open
+
+Session 20 built the tenant extension point (ADR 0198), the third route word
+(ADR 0199) and ADR 0196's `api.create_task`, and closed four rows above. Its
+divergence table is `docs/plans/session-20-implementation-plan.md` §1, rows
+D1098–D1121. This section is only what stays open.
+
+| Item | Why it is open |
+|---|---|
+| **D1121** — `honest_readers`' live half cannot run under the gate that admits it | The proof's docstring says *"Run as the GATE'S OWN USER against the checkout, unprivileged"*; the gate is invoked under `sudo`, so its user is root, `os.access` is unconditionally true and the test takes its own skip branch on every host run. Past the skip, `migrate.sh render` as root would exit 0 rather than 3. Two offline siblings skip in the same run with *"root traverses a 0000 directory"*. **The repair is named and is Session 21's**: make the reading as the unprivileged checkout owner (`sudo -u` the owner of `REPO_ROOT` when `geteuid()` is 0) AND have the proof construct and restore the root-owned precondition itself, because D1110 shows a `sudo` deploy undoes it. Both halves are needed; either alone still measures the wrong thing. |
+| **D1122** — a DR kit stops verifying when the outputs schema moves | `bin/dr-kit.sh verify` validates a stored deployed document against the READING checkout's `outputs.schema.json`, so the kit exported at v16 exits 5 against a v17 checkout — in the one scenario a kit exists for, rebuilding a lost host from a current checkout. The migrator that would make it readable (`migrate_v16_to_v17`) exists and the reader does not call it. **Session 21**: migrate, then validate. The kit itself was re-exported on 2026-09-11, which was owed anyway — the old one described a session-18/v16 deployment that no longer exists. |
+| **D1105** — eleven test sites chain the outputs migrator by hand | Every version bump edits all of them and every instance is found by CI at the end of a run. The repair is one helper that carries a document to the current version, and a change to eleven modules deserves a battery of its own. |
+| **D1099** — `migrate.sh status` exits 0 on an out-of-order pending migration | dbmate reports it as an ordinary `Pending: 1`, and the condition that will refuse the very next `up` is nowhere in the verb an operator reads first. Third-party, so ADR 0195's rule cannot be applied to it; `follows_release_version` refuses at freeze instead, from the other end. |
+| **D1119/D1120** — the cheap checks existed and were not run | Renaming a test drifted the acceptance registry, which `test_acceptance_registry` catches offline in 44 seconds, and CI reported it red twice before a host gate spent thirteen minutes rediscovering it. Not a product defect; a discipline one, recorded so the rules it produced (`test_acceptance_registry` belongs in the targeted list of any run that renames a test) survive the session that learned them. |
+
+**Still open from earlier sessions**, unchanged by this one: `fresh_host` and
+`documented_path` (ADR 0197, §8), `replacement_host_restore` (D1028, by
+decision), `bootstrap_identity` (a rotation performed, D860), and the five
+claims D478 names.
