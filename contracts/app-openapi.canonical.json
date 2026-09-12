@@ -753,7 +753,7 @@
     },
     "/admin/audit": {
       "get": {
-        "description": "Requires the `admin_audit:read` scope, which is in `project_admin`'s ceiling and in no other -- an agent cannot be authorized to read the record that attributes it. Rows come back most recent first. Each carries a `source`: `agent_plane` is what an agent ATTEMPTED, including calls refused for a missing scope that never reached the database, and `database` is what actually CHANGED, including a write that reached PostgREST without going near the agent plane. The two answer different questions and a single agent write produces one of each. A repeated query parameter is refused rather than resolved to its last value.",
+        "description": "Requires the `admin_audit:read` scope, which is in `project_admin`'s ceiling and in no other -- an agent cannot be authorized to read the record that attributes it. Rows come back most recent first. Each carries a `source`: `agent_plane` is what an agent ATTEMPTED, including calls refused for a missing scope that never reached the database, and `database` is what actually CHANGED, including a write that reached PostgREST without going near the agent plane. The two answer different questions and a single agent write produces one of each. A refused row carries the `denial_reason` that refused it -- a member of the reviewed taxonomy, non-null exactly on `refused` rows (ADR 0178) -- except on a refusal recorded before that column existed, which carries null. A repeated query parameter is refused rather than resolved to its last value.",
         "operationId": "list_agent_audit_admin_audit_get",
         "parameters": [
           {

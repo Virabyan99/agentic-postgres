@@ -147,6 +147,54 @@ def test_every_down_block_refuses(manifest: dict[str, Any]) -> None:
         assert "DROP" not in down.upper(), f"{entry['version']}: down block drops something"
 
 
+def test_0032_reissues_the_reader_grant(manifest: dict[str, Any]) -> None:
+    """A DROP takes its grants with it, so 0032 has to give them back.
+
+    **A text scan, and named as one** (D464). What the cluster ends up with is
+    `test_agent_audit_plane.py`'s question and it asks it by calling the function
+    as the auth service; this asks the cheaper one that a text scan can answer
+    and that a reviewer would otherwise have to hold in their head: the file that
+    drops the reader also re-grants it, and re-grants it AFTER the CREATE.
+
+    Measured in rig 24c before the file was written: between the CREATE and the
+    GRANT, `auth_service` is answered `permission denied for function
+    auth_list_agent_audit`. The migration that forgot this line would apply
+    cleanly, pass every structural proof in this module, and leave `GET
+    /admin/audit` returning 500 on the first request after the deploy.
+
+    The REVOKE is asserted too, for the reason 0020 gives: a newly created
+    function is EXECUTABLE BY PUBLIC the moment it exists (D57, D262), so a
+    DROP-and-CREATE without it publishes the audit record to every role.
+    """
+    entry = next(
+        (item for item in manifest["migrations"] if item["name"] == "agent_audit_reader_boundary"),
+        None,
+    )
+    assert entry is not None, (
+        "the released manifest has no agent_audit_reader_boundary migration. This test names "
+        "the migration by its manifest name rather than its number so a renumbering cannot "
+        "silently make it vacuous"
+    )
+    text = (migrations.MIGRATIONS_ROOT / entry["template"]).read_text(encoding="utf-8")
+    up = text.split("-- migrate:down", 1)[0]
+
+    signature = "app_private.auth_list_agent_audit(uuid, uuid, integer)"
+    dropped = up.index(f"DROP FUNCTION {signature}")
+    created = up.index("CREATE FUNCTION app_private.auth_list_agent_audit(")
+    granted = up.index(f"GRANT EXECUTE ON FUNCTION\n  {signature} TO {{{{auth_service}}}}")
+    revoked = up.index(f"REVOKE ALL ON FUNCTION\n  {signature} FROM PUBLIC")
+
+    assert dropped < created < revoked < granted, (
+        "0032 does not drop, create, revoke and grant in that order. A grant issued before "
+        f"the CREATE names the function being dropped: drop {dropped}, create {created}, "
+        f"revoke {revoked}, grant {granted}"
+    )
+
+    assert "denial_reason app_private.agent_denial_reason" in up, (
+        "0032's RETURNS TABLE does not carry denial_reason, which is the whole migration"
+    )
+
+
 def test_every_up_block_assumes_and_returns_the_owner_role(manifest: dict[str, Any]) -> None:
     """ADR 0026: objects are owned by object_owner, versions stamped by migration_user.
 

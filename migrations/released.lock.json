@@ -362,6 +362,17 @@
       "template": "templates/0031-create-task.sql",
       "template_sha256": "46d9b4e3915a7de504061d511128fae2b61c2c2c976bc30cb41e27748c9ca8a8",
       "version": "20260912120031"
+    },
+    {
+      "canonical_render_sha256": "f2b9f9bc57f60a56ffc5f5aa58a86287fa4d91c5a600902e257ec85cfb79355d",
+      "name": "agent_audit_reader_boundary",
+      "placeholders": [
+        "auth_service",
+        "object_owner"
+      ],
+      "template": "templates/0032-agent-audit-reader-boundary.sql",
+      "template_sha256": "859b9031e6d814e37ec1355a743e242355535e752b4afaf1019507f28eaa325d",
+      "version": "20260912120032"
     }
   ],
   "schema_version": 1

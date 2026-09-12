@@ -1,10 +1,10 @@
 # Session 24 — Studio, and the trip two sessions owe
 
 **Status:** **PLANNED 2026-09-12** at `035192d`, Session 23's close, on
-`main`. **Run 1 is Done** (2026-09-12, on branch `session-24`); Runs 2–7 are
-ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
+`main`. **Runs 1 and 2 are Done** (2026-09-12, on branch `session-24`); Runs
+3–7 are ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
 and Run 1 added **D1259–D1262** and rewrote four with their numbers; the
-runs add theirs below, so **next free is D1264**.
+runs add theirs below, so **next free is D1268**.
 ADR **0205** is this session's (written in Run 1); next free after it 0206.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 24 — Studio* whole (Builds
 / Already true / Must not / Measures / Closes), its rows D1069 (one Studio, a
@@ -176,7 +176,7 @@ and by which sweep).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1264** (Run 1 added D1259–D1263). Rows D1243–D1258
+Six columns, next free number after this table **D1268** (Run 1 added D1259–D1263; Run 2 added D1264–D1267). Rows D1243–D1258
 were read from the tree on 2026-09-12 at `035192d`; where a row's *Repository
 does* column says *measure*, Run 1 owns the measurement and the row is
 rewritten with the numbers.
@@ -204,6 +204,10 @@ rewritten with the numbers.
 | **D1261** | D1254: the rig writes a deployed document naming loopback URLs, and Studio verifies the served surface against it. | **`normalize` refuses a document whose `schemes` is `['http']`** — *"A document offering http tells every generated client that cleartext is a supported way to reach this API"*. A rig whose `PGRST_OPENAPI_SERVER_PROXY_URI` is `http://127.0.0.1:<port>/api/rest` therefore serves a document Studio can only answer `unreadable` about (measured, arm B), even though the route is correct and reachable. | **The rig's proxy URI names the loopback host with the `https` scheme** — `https://127.0.0.1:<edge port>/api/rest` — while the deployed document's `routes.rest.url` stays `http://127.0.0.1:<edge port>/api/rest` and the transport stays cleartext loopback. Measured, arm C: `host` `127.0.0.1:32923`, `schemes` `['https']`, normalized fingerprint `808ac715c09aeebc…`, **equal** to the snapshot. The fixture's docstring says which value is the rig's and why (ADR 0065/0066). | The alternative is widening `normalize` to accept `http` for a loopback host, which would relax a released contract test so a rig could pass — the exact inversion runbook §6 forbids. The rig configures around it and says so. | 0050, 0065, 0066 |
 | **D1262** | D1243 and §5 Run 1: record PostgREST's CORS header verbatim, *"it does by default in every version this project has measured"*. | **It does not.** Measured in rig 24b at the pinned image: `GET /notes` with `Origin: http://127.0.0.1:1` and a valid bearer answers **200** with `Connection, Content-Length, Content-Location, Content-Range, Content-Type, Date, Server` — **no `Access-Control-*` header of any kind**. | The threat model's *Studio* entry records what was measured, not what was expected: the upstream sends no CORS header, so a page that held a token could not read the answer it provoked anyway — and Studio's design makes the question moot for a second, independent reason (the page holds no token). Both sentences, because the second is the one that stays true when the first changes. | A premise wrong in the reassuring direction survives longest (D930); this one was wrong in the alarming direction, and repeating it would have put a measured falsehood in the threat model. | — |
 | **D1263** | Run 1's close: *"`test_documentation_index` (the ADR index), then push. CI green expected (documentation only; the ADR index is generated content, so `bin/session-01-check.sh` alone is the rule — run it once, on the clean tree)"*. | **The ADR index is not generated content.** No generator writes `docs/decisions/README.md`: `git grep -ln "decisions/README" -- bin src tests` names three CONTRACT TESTS and no renderer (`test_documentation_index`, `test_acceptance_registry`, `test_repository_contract`). It is hand-maintained prose with three proofs over it, which is the *Documentation only* row of `CLAUDE.md` §5's table, not the *generated artefacts* one. And the gate could not have answered anyway: **WSL has lost outbound HTTPS again**, re-measured at this step rather than recalled — `urllib` to `pypi.org` fails immediately with `[Errno 101] Network is unreachable` (D1239 recorded a 20 s timeout; the same fact, a different failure mode), and `bin/lock-dev-deps.sh --check` resolves against PyPI by construction. | **The targeted list is the three modules that read the index**, derived from the tree and not from the plan's sentence (D1146, D1149): `test_documentation_index` 19 passed, `test_acceptance_registry` + `test_repository_contract` 256 passed, 40 s. No gate is run at this run's close. `bin/session-01-check.sh` is still owed at Run 6's close, where D1239's container workaround is the shape — and where there is code for it to check. | A gate run for a reason that turns out to be false is the same defect as a proof that never ran: nobody afterwards can say which question it answered. The grep names what the run CHANGES; the plan's list names what it ADDS. | — |
+| **D1264** | Run 2 step 1: *“`test_migration_contract` green; a new proof in it, `test_0032_reissues_the_reader_grant`”*, and §2 lists the node id under `test_migration_contract.py`. | **There is no `test_migration_contract.py`.** The migration contract is `tests/contract/test_migrations.py` (480 lines: both dbmate blocks, no non-transactional apply, every down block refuses, every up block assumes and returns the owner role, the lock verifies, every granted function has a caller). The neighbours are `test_migration_ledger`, `test_rendered_migrations`, `test_api_migrations`, `test_output_migrations`, `test_project_migration_sets`. | `test_0032_reissues_the_reader_grant` is in **`test_migrations.py`**, beside the structural rules it belongs with, and §2's node id is written there when Run 6 reads the ids out of the tree (D1236). | A node id proposed against a module that does not exist is the registry defect D1236 is about, one file earlier. | — |
+| **D1265** | Run 2 step 2: *“`openapi_docs.py`: the response schema gains `denial_reason` (nullable string…)”*, and *“the canonical document moves by exactly that member”*. Also: *“extend `ADMIN_SCOPES` in that module — grep every reader of that constant first”*. | **There is no response schema to widen.** `RESP_LIST_AUDIT`'s 200 is `openapi_docs.ok("Audit rows, most recent first.")` with no model, and the captured document carries `"schema": {}` for it — which is this file's shape for every LIST endpoint (`/admin/users`, `/admin/agents`, `/auth/jwks.json`); the four that declare a model are the single-object responses. **And the grep the plan asked for says not to touch `ADMIN_SCOPES`**: `test_the_audit_endpoint_needs_its_own_scope_not_the_agent_roster_one` asserts `"admin_audit:read" not in ADMIN_SCOPES`, so widening it would delete that proof to make a new one convenient. | The route serialises `denial_reason`; **the document moves by the endpoint's own description**, which now says a refused row carries the boundary and that a refusal recorded before the column existed carries null. Measured: `app-contract.sh --update` moves exactly one line of `app-openapi.canonical.json` and `--check` exits 0. No response model is invented — that is a layer for every list endpoint at once and this session did not price it. The new proof uses the module's own `_auditor`, and `ADMIN_SCOPES` is untouched. | A schema for one endpoint, added because a session needed a member documented, is a second shape in a file whose shape is a decision. The prose is where this document already says what a row carries. | 0050, 0142 |
+| **D1266** | §9's stop condition: *“`classify_changes` returns nothing for the regenerated client while the app digest moved: a divergence row and a decision about the version rule, never a silent `1.0.0`”*. | **It happened, and it is correct behaviour.** `bin/apg.sh generate` printed *version 1.0.0 (no contract change)* while `app_openapi_sha256` moved `f21bf4a8…` → `e477fd23…`. `classify_changes` compares the **IR** — relations, RPCs, tools, enums, filter operators, auth — member by member (D1219), and not the digests; the IR did not move, because a description string is not an interface. ADR 0162's own class for it is `implementation`, which is a PATCH and which nothing feeds into the generator. | **The version rule stands, and the cost is named rather than fixed.** `clientVersion` is a claim about the client's INTERFACE, and `app_openapi_sha256` is provenance compared to nothing served (D1209, ADR 0204). The consequence, written down: two clients at the same `clientVersion` can carry different app provenance digests. Adding a digest term to `classify_changes` would bump every client for every prose edit to the application document, and is a change to a released rule that wants its own ADR and a session that is about the client. | The stop condition did its job: the answer was reached by reading `classify_changes` and `CHANGE_CLASSES` rather than by accepting a number. D1219 is the other half — the grain of this comparison has already been wrong once, in the permissive direction, and the repair was to make it finer rather than to add inputs. | 0162, 0204 |
+| **D1267** | Run 2 step 5: `request_checks(*, host, bound, cookie, expected_cookie, origin, own_origin, method, custom_header) -> int | None`. | **Two of the five checks are about which path is being asked for**: `/open/<key>` is the one path that may arrive without the launch cookie (it is where the cookie is issued), and the custom header is required of `/__apg/` and of nothing else. The signature as written cannot express either, so the handler would have to decide which checks apply — which puts the policy back above the pure function and out of the battery's reach, the exact thing the split exists to prevent. | **`path` is a parameter.** The function takes `method, path, host, bound, cookie, expected_cookie, origin, own_origin, custom_header` and returns 405 / 421 / 403 / 401 / 403 or `None`. Fourteen inputs prove it, five refusals and five controls that differ by one field, plus a cookie parsed rather than substring-matched and an absent `Origin` served. Battery M3 and M4 killed. | The plan's signature was written before rig 24a measured which fields a handler actually sees; the rig's stub had the path in it from the first line. | **0205** |
 
 ---
 
@@ -608,8 +612,79 @@ with a `bin/` driver: the layout `studio.py` copies).
 `git grep -ln "auth_list_agent_audit\|ADMIN_SCOPES\|list_agent_audit" -- tests
 src services bin` names. Push; read CI.
 
-**Done.** *(the run: the CREATE OR REPLACE error text; the client's version
-class; the two cluster proofs' numbers; the battery's table.)*
+**Done.** 2026-09-12 at `4af67ca`'s child. Migration `0032` released, the
+boundary served, and Studio's pure core with 25 proofs over it. Targeted list
+run once at the close: **427 passed in 135 s**, no failures and no skips, over
+`test_studio_core`, `test_migrations`, `test_agent_audit_plane`,
+`test_auth_endpoints`, `test_database_function_signatures` (by name — D1240's
+unswept module, and 0032 moves a function signature), `test_denial_taxonomy`,
+`test_mcp_tools`, `test_fleet`, `test_app_contract_aggregate`,
+`test_client_typescript`, `test_generate_command`, `test_client_ir` and
+`test_acceptance_registry`. The list is the grep's, not the plan's: every
+offline module `git grep -ln "auth_list_agent_audit\|list_agent_audit\|
+denial_reason" -- tests src services bin` names (D1146, D1149).
+
+**Migration 0032.** `20260912120032`, placeholders `object_owner` and
+`auth_service`, `freeze-lock` clean at 32 migrations. DROP + CREATE, because
+`CREATE OR REPLACE` is refused by PostgreSQL 18.4 with *cannot change return
+type of existing function* — rig 24c's measurement, pasted into the file's
+header. `pronargs` 3 before and after, so ADR 0175's guard and
+`repository.py`'s three-parameter call are untouched. The grant is re-issued
+because a DROP takes it: measured, *permission denied for function
+auth_list_agent_audit* between the CREATE and the GRANT.
+
+**The service.** `routes.py` serialises `denial_reason` on every row, with the
+comment that it is non-null exactly on refusals by 0027's CHECK and null on a
+refusal recorded before that column existed (D940's NOT VALID). The app
+contract moved by **exactly one line** — the endpoint's description — and not
+by a member, because the 200 carries no schema (D1265). `app-contract.sh
+--check` exit 0.
+
+**The client** (D1238): regenerated in the same commit; `app_openapi_sha256`
+`f21bf4a8…` → `e477fd23…`, `clientVersion` unchanged at 1.0.0 and
+`classify_changes` returning nothing. That is §9's stop condition and it was
+read rather than accepted: D1266 records why the version rule is right and
+what it costs.
+
+**Studio's core.** `src/agentic_postgres/studio.py`, 12 public functions and 11
+constants, stdlib + `agentic_postgres` only, `__all__` compared against the
+module's own AST so a name added later is a decision. Two signatures differ
+from the plan's and each has a row: `surface_answer` takes the expected address
+(D1260) and `request_checks` takes the path (D1267). The operator wire table is
+a second copy of `app.mcp_query.OPERATORS` with the comparison test beside it
+(D486), because an operator command may not import the service.
+
+**The battery: 14 mutations, 14 killed**, each with a paired control the
+mutation cannot reach, run in the same invocation, every anchor pre-flighted to
+match exactly once, restored by copy and `cmp`ed back. Eleven over `studio.py`
+against `test_studio_core`, one over `routes.py` against `test_auth_endpoints`,
+two over the migration.
+
+**Two of them first came back ERROR on the target AND the control, and that
+reading is the run's find** (D386). Neither was a survivor; both were
+mutations that never reached an assertion:
+
+* dropping the GRANT gives `MigrationError: 20260912120032: declares
+  placeholders its template never uses: ['auth_service']` — **the product
+  refuses it one level above the scan**, when the manifest loads. So the scan
+  is a second guard rather than the only one, which is worth knowing: the
+  representative mutation drops the placeholder too, and then the scan is what
+  fails (killed).
+* dropping `denial_reason` from the `RETURNS TABLE` leaves the previous line's
+  trailing comma and the migration never applies (`syntax error at or near
+  ")"`). The representative mutation drops it from the `SELECT` list as well,
+  and the cluster proof is what fails (killed).
+
+A migration is digested by `released.lock.json`, so both re-freeze the lock
+while mutated and restore it with everything else.
+
+**Numbers read by the new proofs.** The cluster proof: `create_note|refused|
+scope_not_held` and `list_resources|served|NULL` through the function as the
+auth service, `pronargs` 3. The endpoint proof: the refused row's
+`denial_reason` is `scope_not_held` and the served row's key is present and
+null. Both had never run before this run; both passed on first execution, which
+is the first time in this project that thirteen-for-thirteen streak has not
+grown.
 
 ### Run 3 — the process: `apg studio`, login, the surface check, the forwarder
 

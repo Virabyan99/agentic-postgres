@@ -329,7 +329,10 @@ DOC_LIST_AUDIT = openapi_docs.described(
         "agent ATTEMPTED, including calls refused for a missing scope that never reached the "
         "database, and `database` is what actually CHANGED, including a write that reached "
         "PostgREST without going near the agent plane. The two answer different questions and "
-        "a single agent write produces one of each. A repeated query parameter is refused "
+        "a single agent write produces one of each. A refused row carries the "
+        "`denial_reason` that refused it -- a member of the reviewed taxonomy, non-null "
+        "exactly on `refused` rows (ADR 0178) -- except on a refusal recorded before that "
+        "column existed, which carries null. A repeated query parameter is refused "
         "rather than resolved to its last value."
     ),
     query_parameters=[
@@ -1040,6 +1043,20 @@ async def list_agent_audit(request: Request) -> Response:
                         "completed_at": (
                             None if row["completed_at"] is None else row["completed_at"].isoformat()
                         ),
+                        # Which boundary refused (ADR 0178), served since
+                        # migration 0032 widened 0020's reader. **Non-null
+                        # exactly on `refused` rows**, and that is 0027's CHECK
+                        # rather than a habit of this serializer -- with one
+                        # documented exception the constraint itself names: a
+                        # refusal written BEFORE 0027 existed carries NULL,
+                        # because the check is NOT VALID and never re-examined
+                        # the rows the deployment already had (D940).
+                        #
+                        # Rendered as a key on every row rather than only on
+                        # refusals, for `request_id`'s reason three lines up: an
+                        # absent key and a null one read the same to a client
+                        # and only one of them is honest.
+                        "denial_reason": row["denial_reason"],
                     }
                     for row in rows
                 ],

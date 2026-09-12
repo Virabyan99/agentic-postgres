@@ -1436,6 +1436,36 @@ def _seed_audit_row(cluster: dict[str, Any], agent_id: str, owner_id: str, tool:
     )
 
 
+def _seed_completed_audit_row(
+    cluster: dict[str, Any],
+    agent_id: str,
+    owner_id: str,
+    tool: str,
+    outcome: str,
+    denial_reason: str | None,
+) -> None:
+    """One row that FINISHED, with or without a boundary (migration 0032).
+
+    `_seed_audit_row` above opens a record and leaves it `started`, which is the
+    right shape for every proof about what the endpoint returns for a call in
+    flight -- and the wrong one here, because `denial_reason` is non-null exactly
+    on a `refused` row and a row that never finished is neither.
+
+    Both statements in one `-c` for `_seed_audit_row`'s reason: `set_config(...,
+    true)` is transaction-local, and `agent_audit_complete` is scoped to the
+    calling agent's own rows, so a second session would close nothing.
+    """
+    reason = "NULL" if denial_reason is None else f"'{denial_reason}'"
+    cluster["cluster"].psql(
+        f'SET ROLE "{cluster["roles"]["agent_reader"]}"; '
+        f"SELECT set_config('app.agent_id', '{agent_id}', true); "
+        f"SELECT set_config('app.user_id', '{owner_id}', true); "
+        f"SELECT api.agent_audit_complete("
+        f"api.agent_audit_begin('{tool}', NULL, NULL, NULL, NULL), "
+        f"'{outcome}', 7, 1, {reason})"
+    )
+
+
 def _auditor(drive: Any, admin: str, username: str) -> str:
     """A second administrator holding `admin_audit:read`, created THROUGH THE PRODUCT.
 
@@ -1523,6 +1553,60 @@ def test_an_administrator_holding_the_scope_reads_the_record(
     # D500, rendered rather than omitted. An absent key and a null one read the
     # same to a client and only one of them is honest about the gap.
     assert "request_id" in row
+
+
+def test_admin_audit_serialises_the_denial_boundary(drive: Any, cluster: dict[str, Any]) -> None:
+    """`AGT-AUDIT-002` at the endpoint: migration 0032 reaches the response.
+
+    The database half is `test_agent_audit_plane.py`'s -- the reader returns the
+    column, granted to the auth service, arity unmoved. This is the other half
+    and it is a separate question: `repository.py` sends `SELECT *`, so the
+    column arrives in the row mapping whether or not anybody serialises it, and
+    for the whole of 0027's life the route did not. A declared field with no
+    reader (D816, D929) is invisible to every proof that stops at the database.
+
+    **Both rows in one assertion, and the served one is not decoration.** ADR
+    0178 promises an equivalence, not a column: a boundary exactly on a refusal.
+    A route that hard-coded a reason would satisfy the refused half.
+
+    The auditor is `_auditor`'s, not `ada`: `ADMIN_SCOPES` deliberately excludes
+    `admin_audit:read` and a test above asserts that it does, so widening it to
+    reach this endpoint would delete that proof to make this one convenient.
+    """
+    admin = _login(drive).json()["access_token"]
+    auditor = _auditor(drive, admin, "auditor-reads-boundaries")
+
+    owner = str(uuid_module.uuid4())
+    served_agent = str(uuid_module.uuid4())
+    refused_agent = str(uuid_module.uuid4())
+    _seed_completed_audit_row(cluster, served_agent, owner, "list_resources", "served", None)
+    _seed_completed_audit_row(
+        cluster, refused_agent, owner, "create_note", "refused", "scope_not_held"
+    )
+
+    response = drive("GET", "/admin/audit", headers={"Authorization": f"Bearer {auditor}"})
+    assert response.status_code == 200, response.text
+    rows = {entry["agent_id"]: entry for entry in response.json()["audit"]}
+
+    refused = rows[refused_agent]
+    assert refused["outcome"] == "refused"
+    assert refused["denial_reason"] == "scope_not_held", (
+        "the endpoint served a refusal without the boundary that refused it, which is the "
+        f"whole of migration 0032 and of ADR 0178: {refused}"
+    )
+
+    served = rows[served_agent]
+    assert served["outcome"] == "served"
+    assert "denial_reason" in served, (
+        "the key is absent on a served row. Rendered on every row rather than only on "
+        "refusals, for request_id's reason: an absent key and a null one read the same to "
+        "a client and only one of them is honest"
+    )
+    assert served["denial_reason"] is None, (
+        f"a served row carries a denial reason: {served}. 0027's CHECK makes that an "
+        "equivalence rather than a habit, and a route that invented one would pass a "
+        "proof that only read the refusal"
+    )
 
 
 def test_the_audit_endpoint_returns_no_secret_material(drive: Any, cluster: dict[str, Any]) -> None:

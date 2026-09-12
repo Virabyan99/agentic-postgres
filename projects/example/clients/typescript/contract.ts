@@ -20,6 +20,6 @@ export const CONTRACT = {
   clientVersion: "1.0.0",
   mergedSurfaceSha256: "4e10c7cc597057c08af690fb7e76394cbd9cf8a0e9e9d5098931714a880fdd40",
   restOpenapiSha256: "808ac715c09aeebc382dd5afc886c1680fe2ea9870e729b9d34a623dee8d18de",
-  appOpenapiSha256: "f21bf4a8da906b8dd5a0a58e71f98469a99bbcf6bb4276f70025af64d95d8641",
+  appOpenapiSha256: "e477fd239291380e4ec0e181dfcc66906fa2a359df3a57522afd437a4ae8b070",
   toolsSha256: "24ac100bcea5f4cf5350c0aa894ec858822c0230d43fe3815d90e17290db3f24",
 } as const;

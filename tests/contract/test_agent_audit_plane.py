@@ -1013,6 +1013,77 @@ def test_the_reader_returns_the_most_recent_first_and_breaks_ties_by_id(
     )
 
 
+def test_the_audit_read_returns_the_boundary_exactly_on_refused_rows(
+    cluster: dict[str, Any],
+) -> None:
+    """`AGT-AUDIT-002`'s offline half: migration 0032, against a real cluster.
+
+    0027 records WHICH BOUNDARY refused in `agent_audit.denial_reason` and 0020's
+    reader -- written before the column existed -- returned twelve columns that
+    were not it, so the one read path to the record (ADR 0142) showed that a call
+    was refused and not what refused it. That is a declared field with no reader,
+    D816's shape at the endpoint, and it is what a viewer finds first because a
+    viewer is the first reader that shows a whole row to a person (D1247).
+
+    **Both rows, not just the refused one.** A reader that returned the column
+    would satisfy half of ADR 0178; what the taxonomy actually promises is an
+    equivalence -- a reason exactly on a refusal -- and a served row carrying one
+    is as wrong as a refused row without one. 0027's CHECK is what holds it at
+    the table; this is what holds it at the read.
+
+    **The control is the arity, in the same invocation** (ADR 0175). The widening
+    had one alternative that would have broken every caller -- a fourth parameter
+    -- and `pronargs` is what tells the two apart. `repository.py` sends
+    `auth_list_agent_audit(%s, %s, %s)` and nothing in this session edits it, so a
+    reader with four arguments would fail at run time on a deployment while every
+    offline proof of the column passed.
+    """
+    agent = str(uuid.uuid4())
+    owner = str(uuid.uuid4())
+
+    for tool, outcome, reason in (
+        ("list_resources", "served", "NULL"),
+        ("create_note", "refused", "'scope_not_held'"),
+    ):
+        written = as_agent(
+            cluster,
+            "agent_reader",
+            agent,
+            owner,
+            f"SELECT api.agent_audit_complete("
+            f"api.agent_audit_begin('{tool}', NULL, NULL, NULL, NULL), "
+            f"'{outcome}', 7, 1, {reason});",
+        )
+        assert written.returncode == 0, f"{outcome} row: {written.stderr[:300]}"
+
+    read = as_role(
+        cluster,
+        "auth_service",
+        "SELECT tool || '|' || outcome || '|' || coalesce(denial_reason::text, 'NULL') "
+        f"FROM app_private.{READER}('{agent}', NULL, 10) ORDER BY tool",
+    )
+    assert read.returncode == 0, (
+        "auth_service cannot read denial_reason through the reader, which is the whole of "
+        f"migration 0032: {read.stderr[:300]}"
+    )
+    rows = [line for line in read.stdout.strip().splitlines() if line]
+    assert rows == ["create_note|refused|scope_not_held", "list_resources|served|NULL"], (
+        f"the reader did not return the boundary exactly on the refusal: {rows}"
+    )
+
+    arity = su(
+        cluster,
+        "SELECT pronargs FROM pg_proc p "
+        "JOIN pg_namespace n ON n.oid = p.pronamespace AND n.nspname = 'app_private' "
+        f"WHERE p.proname = '{READER}';",
+    )
+    assert arity.stdout.strip() == "3", (
+        f"the reader takes {arity.stdout.strip()} arguments, not 3. Migration 0032 widens a "
+        "RESULT and must not move the signature: repository.py sends three parameters and "
+        "nothing in this session edits it (ADR 0175, D857)"
+    )
+
+
 def test_the_reader_filters_narrow_and_do_not_authorize(cluster: dict[str, Any]) -> None:
     """Both filters optional, and the unfiltered read is the widest one.
 
