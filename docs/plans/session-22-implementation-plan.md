@@ -1386,6 +1386,26 @@ The suite after it: **5362 passed, 0 failed, 3 skipped**, and
 `passed` — which is Run 7's step 1, confirmed before the push rather than
 discovered by a red CI run.
 
+**CI GREEN** — run `34679195048`, workflow `contract`, `completed success` on
+`6026ae7b79f16a5e533f6489c7487e73f6889c27`, all three jobs, first push (the
+earlier commit `f2a87a5` was superseded by the same push). The gate job's new
+step wrote `evidence/session-22-offline.json` with `dev_churn`,
+`dev_environment`, `dev_isolation` and `offline_evidence` all `passed` — **the
+first offline evidence half this project has produced, and it was produced by
+CI before it was produced here.**
+
+*The envelope's second commit*, which is what step 3 planned for. The round-trip
+step's two numbers, read from that run's log rather than from anything this
+session predicted: **`apg dev up` 14.46 s with the image NOT cached, `apg dev
+reset` 6.19 s seconds later with it cached**, on a GitHub-hosted `ubuntu-latest`
+runner, 33 migrations. Two readings. The gap between them is dominated by the
+pull, which is the cold cost a developer pays once and the workstation cannot
+measure; and the runner's `reset` is FASTER than the development machine's
+(10.07 s, 10.28 s), which is the whole argument for `MACHINE` rows published
+side by side instead of averaged. `test_the_envelope_carries_the_environments_
+churn_with_its_machine_and_cache_state` now requires both machines by name for
+both verbs, which it could not do until the second machine had rows.
+
 
 ### Run 7 — the close (no trip)
 

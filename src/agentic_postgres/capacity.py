@@ -292,6 +292,53 @@ ENVELOPE: tuple[Measurement, ...] = (
             "afternoon, and that is the decision this row is for."
         ),
     ),
+    # ---- and the machine nobody prepared (Session 22, D1169) -------------
+    #
+    # Read from the log of CI run 34679195048, the push that added the
+    # round-trip step, rather than copied from a plan. A fresh `ubuntu-latest`
+    # runner has cached nothing, which is the first-run case the workstation
+    # cannot measure without evicting the image the whole contract suite
+    # shares -- so this is the only place in the envelope where the cold cost
+    # of `apg dev up` appears at all.
+    Measurement(
+        subject="apg dev up on a CI runner: the first run, image pulled",
+        value="14.46 s",
+        kind=MACHINE,
+        conditions=(
+            "a GitHub-hosted CI runner, ubuntu-latest, runner 2.337.0",
+            "the locked postgres image NOT CACHED -- pulled inside the measurement",
+            "33 migrations, the same as the workstation rows",
+            "one sample: the step runs once per push and is not repeated",
+        ),
+        note=(
+            "**One sample, and it is said rather than hidden.** A number "
+            "quoted from a single run of a shared machine carries whatever "
+            "that machine was doing; what makes it worth publishing anyway is "
+            "that it is the only measurement of the cold path. Set beside the "
+            "`reset` row below -- 6.19 s on the SAME runner, in the same step, "
+            "seconds later with the image now local -- the gap is dominated by "
+            "the pull. That is the number a developer feels once and never "
+            "again."
+        ),
+    ),
+    Measurement(
+        subject="apg dev reset on a CI runner",
+        value="6.19 s",
+        kind=MACHINE,
+        conditions=(
+            "the same CI runner, ubuntu-latest, in the same step seconds later",
+            "the locked postgres image cached by the `up` above it",
+            "an environment that was running, seeded, with its 33 migrations applied",
+            "one sample",
+        ),
+        note=(
+            "Faster than the same verb on the development machine (10.07 s, "
+            "10.28 s), which is what a `MACHINE` measurement is for: neither "
+            "number is the product's, both are their machine's, and the "
+            "envelope publishes them side by side rather than averaging them "
+            "into a figure about nothing."
+        ),
+    ),
 )
 
 

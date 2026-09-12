@@ -165,6 +165,36 @@ Sampled under:
 
 `reset` is `down` then `up`, and the numbers say so: the teardown disappears into the sampling spread, which is the property worth publishing. A developer deciding whether to reset rather than debug a dirty database is choosing between ten seconds and an afternoon, and that is the decision this row is for.
 
+### apg dev up on a CI runner: the first run, image pulled
+
+**14.46 s**
+
+Sampled under:
+
+- a GitHub-hosted CI runner, ubuntu-latest, runner 2.337.0
+- the locked postgres image NOT CACHED -- pulled inside the measurement
+- 33 migrations, the same as the workstation rows
+- one sample: the step runs once per push and is not repeated
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+**One sample, and it is said rather than hidden.** A number quoted from a single run of a shared machine carries whatever that machine was doing; what makes it worth publishing anyway is that it is the only measurement of the cold path. Set beside the `reset` row below -- 6.19 s on the SAME runner, in the same step, seconds later with the image now local -- the gap is dominated by the pull. That is the number a developer feels once and never again.
+
+### apg dev reset on a CI runner
+
+**6.19 s**
+
+Sampled under:
+
+- the same CI runner, ubuntu-latest, in the same step seconds later
+- the locked postgres image cached by the `up` above it
+- an environment that was running, seeded, with its 33 migrations applied
+- one sample
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+Faster than the same verb on the development machine (10.07 s, 10.28 s), which is what a `MACHINE` measurement is for: neither number is the product's, both are their machine's, and the envelope publishes them side by side rather than averaging them into a figure about nothing.
+
 ---
 
 ## What was not measured, and why

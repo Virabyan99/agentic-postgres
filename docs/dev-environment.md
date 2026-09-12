@@ -169,17 +169,26 @@ it.
 
 ## 5. What it costs
 
-| | This workstation, image cached | A fresh CI runner, image pulled |
+| | A development machine, image cached | A fresh CI runner, image pulled |
 |---|---|---|
-| `apg dev up` | 10.98 s, 9.89 s | see the run's log |
-| `apg dev reset` | 10.07 s, 10.28 s | see the run's log |
+| `apg dev up` | 10.98 s, 9.89 s | **14.46 s** |
+| `apg dev reset` | 10.07 s, 10.28 s | 6.19 s |
 
-33 migrations — the 31 released plus the example project's set of two — on an
-8 GB development machine under WSL2 with Docker server 29.5.2. These are
-`MACHINE` numbers: they describe the machine they were sampled on and do not
-transfer, which is why they are published with their conditions and why the
-image-cache state is one of them. The first `up` you ever run pulls the image,
-and that is most of what you will wait for.
+33 migrations either way — the 31 released plus the example project's set of
+two. The left column is an 8 GB development machine under WSL2 with Docker
+server 29.5.2, two samples each; the right is one sample from a GitHub-hosted
+`ubuntu-latest` runner, read from the log of the push that added the round trip.
+
+These are `MACHINE` numbers: they describe the machine they were sampled on and
+do not transfer, which is why they are published with their conditions rather
+than averaged into one figure. Two things are worth reading out of them.
+
+**The first run is the expensive one, and only once.** The runner's `up` pulls
+the image; its `reset`, seconds later in the same step with the image now local,
+is 6.19 s. The gap between the two is dominated by that pull.
+
+**A faster machine is faster.** The runner beats the development machine on the
+cached path by a good margin. Neither number is the product's.
 
 [The capacity envelope](capacity-envelope.md) is where they live, beside the
 numbers that *do* transfer and the list of what nobody has measured.

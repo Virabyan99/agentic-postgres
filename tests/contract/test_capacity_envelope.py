@@ -324,14 +324,30 @@ def test_the_envelope_carries_the_environments_churn_with_its_machine_and_cache_
     conditions); or the unmeasured first-run case is quietly deleted.
     """
     churn = {
-        verb: [m for m in capacity.ENVELOPE if m.subject.startswith(f"apg dev {verb}:")]
+        verb: [m for m in capacity.ENVELOPE if m.subject.startswith(f"apg dev {verb}")]
         for verb in ("up", "reset")
     }
     for verb, rows in churn.items():
-        assert len(rows) >= 1, (
-            f"the envelope carries no `apg dev {verb}` number. The session that "
-            "built the command measured it; a document that publishes one verb "
-            "and not the other is read as the other being free"
+        assert len(rows) >= 2, (
+            f"the envelope carries {len(rows)} `apg dev {verb}` numbers. Two "
+            "machines measured it -- a development machine with the image cached "
+            "and a CI runner without -- and one of them alone is read as the "
+            "cost of the command rather than as one machine's answer"
+        )
+        # Both machines, by name. The cold path exists only on the runner: the
+        # workstation cannot measure it without evicting the image the whole
+        # contract suite shares, which is why the uncached row below is
+        # UNMEASURED there and a row here.
+        machines = {
+            machine
+            for row in rows
+            for condition in row.conditions
+            for machine in MACHINES
+            if machine in condition
+        }
+        assert {"development machine", "CI runner"} <= machines, (
+            f"`apg dev {verb}` is measured on {sorted(machines)}. A figure from "
+            "one machine is the one a reader quotes for theirs"
         )
         for row in rows:
             assert row.kind == capacity.MACHINE, (
