@@ -35,6 +35,14 @@ all flags or steps lost to retyping the previous session's page.
 | [Session 10](session-10-operator-guide.md) | Backups, WAL archiving, the restore drill |
 | [Session 11](session-11-operator-guide.md) | The preflight, the deployed doctor, the request id, the rotation windows |
 
+## Developer loop
+
+Before a deployment exists, and on a machine that is not one.
+
+| Page | Answers |
+|---|---|
+| [The developer loop](dev-environment.md) | `apg dev`: a disposable local cluster built from the render and the release, the six verbs, the seed door, what it costs, and what to do when a migration fails as the migration user |
+
 ## Running a deployment
 
 | Page | Answers |

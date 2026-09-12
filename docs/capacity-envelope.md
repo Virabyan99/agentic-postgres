@@ -135,6 +135,36 @@ Sampled under:
 
 Checked because a limit that leaves wreckage is a different property from a limit that sheds load. This one sheds.
 
+### apg dev up: a disposable cluster, migrated, from nothing
+
+**10.98 s and 9.89 s (two samples)**
+
+Sampled under:
+
+- an 8 GB development machine, WSL2, kernel 6.6.87.2-microsoft-standard-WSL2
+- Docker server 29.5.2, the locked postgres image ALREADY CACHED
+- 33 migrations: the 31 released, plus the example project's set of two
+- no container of this project running and no state directory present
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The whole verb: `docker run` on the pinned image, the bootstrap statements as the superuser, 33 rendered migrations applied one transaction each as the migration user, both ledgers written, two roles activated and one subject registered. **The comparison worth making is against a restore**, which the Session 18 trip measured at 247 s -- on a different machine, so the ratio is not a number either, but the two are answers to the same question and one of them is a coffee break. The image being cached is a condition and not a detail: the uncached case is a first-run cost this machine cannot measure without evicting the image the whole suite shares, and it is listed as unmeasured below.
+
+### apg dev reset: down, then up
+
+**10.07 s and 10.28 s (two samples)**
+
+Sampled under:
+
+- the same 8 GB development machine, WSL2, Docker server 29.5.2
+- the locked postgres image already cached
+- an environment that was running, with its 33 migrations applied
+- the anonymous volume and the state directory removed, then 33 re-applied
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+`reset` is `down` then `up`, and the numbers say so: the teardown disappears into the sampling spread, which is the property worth publishing. A developer deciding whether to reset rather than debug a dirty database is choosing between ten seconds and an afternoon, and that is the decision this row is for.
+
 ---
 
 ## What was not measured, and why
@@ -167,3 +197,9 @@ It needs the pgBackRest repository, which is an R2 bucket reached with a credent
 The plan asks for tuning after the load scenarios. **Nothing is tuned here, deliberately**: every number above was measured off-host, and changing `pool_size` or `query_wait_timeout` on the strength of a development machine's latency would be tuning the deployment to a measurement that is not about it. `ALERT_ERROR_RATIO` (Run 5) is waiting on the same evidence.
 
 *Unblocked by: the Run 8 host trip, and a second envelope taken there.*
+
+### apg dev up on this workstation with the image NOT cached
+
+The first `apg dev up` a developer ever runs pulls the locked postgres image, and that pull is most of what they will wait for. Measuring it here means `docker rmi` of the image **the whole contract suite shares** -- six cluster fixtures and the round trip -- so the measurement would cost every later test in the session a pull, and the number obtained would be this machine's link speed rather than anything about the product. CI measures the case instead: a fresh `ubuntu-latest` runner has cached nothing, and the round-trip step times the same two verbs there (D1168, D1169).
+
+*Unblocked by: nothing that should be run mid-session; the CI row is the measurement, and a developer wanting their own first-run number can time `docker pull` from versions.env.*

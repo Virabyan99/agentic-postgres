@@ -108,6 +108,12 @@ SHELL_COMMANDS = (
     # flags are back (D1133): a gate carries every declaration a proof it RUNS
     # can read, and claims_through_session(21) runs Session 18's.
     "bin/session-21-check.sh",
+    # Session 22. Derived from 21's by diff, and the first gate whose OFFLINE
+    # mode writes an evidence half (ADR 0202): four of this session's claims
+    # are about a command a developer runs on their own machine. It is also the
+    # first offline mode that requires docker, and says so as a prerequisite
+    # rather than letting the cluster proofs skip into a `not_run` claim.
+    "bin/session-22-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
     "bin/upgrade.sh",

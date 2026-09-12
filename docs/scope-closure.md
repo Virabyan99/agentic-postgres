@@ -15,12 +15,12 @@ decision.
 
 | | Count | Note |
 |---|---|---|
-| Requirements in the acceptance registry | **171** | 163 P0, 8 P1, **0 P2** — fifteen `REC-*`/`OPS-REHEARSE-*` added in Session 18 |
-| Claims in the evidence model | **101** | 97 at Session 17's close; four added in Session 18 Run 5 |
-| Requirements a claim reports on | **147** | 24 belong to no claim (D697); see §4 |
-| Migrations released | **30** | fix-forward only; Session 18 adds none |
-| Architecture decisions recorded | **197** | 0188–0194 are Session 18's; 0195–0197 are Session 19's |
-| Divergences measured | **D1–D1060** | D984–D1032 are Session 18's; **D1033–D1059 are Session 19's**, and twenty-four of them come from an adopter's account of building on 1.0.0 rather than from this project's own work |
+| Requirements in the acceptance registry | **193** | 185 P0, 8 P1, **0 P2** — nine added in Session 22: six `DEV-*`, one `EVD-*`, and one each widening `OPS-*` and `AGT-*` |
+| Claims in the evidence model | **114** | six added in Session 22, and **four of them are the first offline claims this project has had** (ADR 0202) |
+| Requirements a claim reports on | **169** | 24 belong to no claim (D697), unchanged in number; see §4 |
+| Migrations released | **31** | fix-forward only. Session 22 adds none — its one migration is in the *example project's own set*, which is not a release migration |
+| Architecture decisions recorded | **203** | 0198–0199 are Session 20's, 0200–0201 Session 21's, **0202–0203 Session 22's** |
+| Divergences measured | **D1–D1194** | D1087–D1123 are Session 20's, D1124–D1155 Session 21's, **D1157–D1194 Session 22's** |
 
 ---
 
@@ -350,3 +350,22 @@ section is only what stays open.
 `documented_path`, `replacement_host_restore`, `bootstrap_identity`, and the
 five claims D478 names. D1099 and D1105 above: D1105 closed in Run 4
 (`carry_to_current`, D1134); D1099 stands.
+
+---
+
+## 11. What Session 22 left open
+
+Session 22 built `apg dev` and gave the evidence model a third mode. It made no
+host trip, deliberately (D1163): four of its six claims are about a command a
+developer runs on their own machine, and the session closes on the first offline
+evidence half this project has written.
+
+| Item | Position |
+|---|---|
+| **Two claims are `not_run` and Session 24's trip collects them** | `plane_confirmed_count` (`OPS-PLANE-001`) and `agent_tenant_read` (`AGT-TENANT-002`). Both are about a RUNNING plane — whether the deployed document's tool count is the one the container confirmed, and whether an agent reads a tenant's rows — and a checkout cannot answer either. They were deliberately **not** declared offline: a checkout answering the first would have reported beta green through the eight minutes it served the wrong lock (D1152). Their offline halves are written and pass; what is owed is the live half. |
+| **What Session 24's trip owes this session** | A deploy `--through-session 22` on both projects (which applies the example set's second migration on beta and nothing on alpha), `bin/session-22-check.sh --mode host` and `--mode external`, and a **three-half merge** — `--offline-input evidence/session-22-offline.json` is REQUIRED, because the session has offline claims. Run the merge from a checkout at the commit the offline half measured, or the writer prints the difference. |
+| **D1189 shipped broken for two sessions and only a proof that READ could find it** | The example set granted `api.note_embeddings` and never `app.note_embeddings`, and the view is `security_invoker` — so every caller was refused on the table, including the role the migration did grant. Repaired in `0002-agent-grants.sql`. The lesson is registered rather than left in a divergence row: a grant proof that stops at `has_table_privilege` measures the catalog; one that ends in `SET ROLE …; SELECT` measures the answer. |
+| **`test_honest_readers`' `sudo -u` prefix has still never run** | D1165 replaced a `skipif` with a re-entry as the checkout's owner, and that branch runs only under root. `sudo -n` is refused on this workstation, so everything about it except the prefix is exercised (`test_the_reading_the_root_branch_makes_gives_the_same_answer`) and the prefix itself waits for a gate that runs as root. `honest_readers` is expected to pass in both halves at the next sweep, for the first time. |
+| **The uncached first run is measured in CI and nowhere else** | `apg dev up` with the image not cached is the run a new developer actually has, and measuring it on this workstation means evicting the image the whole contract suite shares. It is named in the envelope's `UNMEASURED` list with that reason, and CI's round-trip step times the same two verbs on a fresh runner. |
+| **Nothing prunes a development environment nobody took down** | `down` removes the container, its anonymous volume and the state directory, and `status` reports a stale state — but a developer who renames a project or deletes its manifest leaves `.generated/.dev/<key>/` behind with two `0600` password files in it. They are passwords to a container that no longer exists, which is why this is a tidiness item rather than a security one. A `dev prune` verb, or nothing. |
+| **The seed lint is a statement scan, not a parser** | `SEED_DDL` is a word-boundary regular expression over statements with comments stripped. It refuses what a seed should never contain and it is not a SQL grammar; a sufficiently determined seed could express DDL it does not match. That is the same judgement D464 records elsewhere in this tree — a text scan standing in for a construct — and it is deliberate here because the alternative is a parser nobody would maintain. The seed is reviewed and digested; the lint is the second lock, not the first. |

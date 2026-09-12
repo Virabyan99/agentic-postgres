@@ -2838,6 +2838,11 @@
     - tests/contract/test_honest_readers.py::test_no_shell_derives_a_rendered_documents_path_for_itself
     - tests/contract/test_honest_readers.py::test_the_three_repaired_shells_call_the_resolver
     - tests/contract/test_honest_readers.py::test_upgrade_already_distinguished_the_two_and_still_does
+    - tests/contract/test_honest_readers.py::test_the_reading_the_root_branch_makes_gives_the_same_answer
+    - tests/contract/test_honest_readers.py::test_publish_and_load_rendered_name_the_owner_and_the_remedy
+    - tests/contract/test_render_atomicity.py::test_a_render_under_sudo_hands_the_directory_and_the_lock_back
+    - tests/contract/test_render_atomicity.py::test_publish_names_the_owner_and_the_remedy_when_it_cannot_replace
+    - tests/contract/test_render_atomicity.py::test_the_owner_is_resolved_upward_when_the_path_itself_cannot_answer
     - tests/deployment/test_session20_tenant.py::test_render_as_the_checkout_owner_of_a_root_owned_directory_says_unreadable_not_absent
   description: >-
     A rendered document that exists and cannot be read is reported as
@@ -2850,6 +2855,16 @@
     still does. The requirement names four readers of a document and not six:
     measured in Run 4, `bin/doctor.py` reads the DEPLOYED document and is
     already honest, and `bin/project-retire.py` reads none (ADR 0199, D1060).
+    Session 22 widened it without moving its id or its session, because the
+    guarantee is the same one two more readers now keep (D1151, D1154, D1165):
+    `rendering.publish` and `evidence.load_rendered` name the owner and the
+    `chown` when a directory cannot be replaced or read, resolving the owner
+    upward when the path itself cannot answer, instead of crashing on a
+    `PermissionError`; `render_project` hands a `sudo` render's directory and
+    lock back to the invoking user itself, rather than leaving that to the one
+    caller that remembered; and the out-of-process reading is exercised as far
+    as an unprivileged workstation can take it, so what stays unmeasured until
+    a gate runs as root is the `sudo -u` prefix alone.
 
 - id: OPS-READ-002
   priority: P0
@@ -3027,3 +3042,202 @@
     outcome rather than folded into "invalid". A kit exported at an earlier
     outputs version therefore verifies at a later release, which is when a kit
     is read by construction (ADR 0195, D1122, D1141, D1142, D1143).
+
+- id: DEV-ENV-001
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_dev_environment.py::test_the_run_arguments_name_the_locked_image_by_digest_and_nothing_else
+    - tests/contract/test_dev_environment.py::test_the_state_directory_is_dot_prefixed_and_invisible_to_the_evidence_reader
+    - tests/contract/test_dev_environment.py::test_planned_migrations_are_the_rendered_files_in_manifest_order_and_a_moved_digest_is_refused
+    - tests/contract/test_dev_environment.py::test_the_migration_transaction_carries_the_up_half_and_its_own_ledger_row
+    - tests/contract/test_dev_environment.py::test_the_activation_statements_quote_the_role_and_the_password
+    - tests/contract/test_dev_environment.py::test_status_has_four_answers_and_unknown_is_one_of_them
+    - tests/contract/test_dev_environment.py::test_state_that_is_absent_unreadable_or_stale_are_three_different_answers
+    - tests/contract/test_dev_command.py::test_an_unrendered_project_is_refused_with_exit_four_and_the_render_command
+    - tests/contract/test_dev_command.py::test_argument_errors_exit_two_before_docker_is_asked_anything
+    - tests/contract/test_dev_command.py::test_dev_is_a_verb_of_the_dispatcher
+    - tests/contract/test_dev_command.py::test_help_exits_zero_and_documents_every_verb
+    - tests/contract/test_dev_command.py::test_down_on_nothing_exits_zero_and_says_there_was_nothing
+    - tests/contract/test_dev_environment_cluster.py::test_up_applies_every_planned_migration_as_the_migration_user_and_records_both_ledgers
+    - tests/contract/test_dev_environment_cluster.py::test_exactly_two_roles_can_log_in_and_the_object_owner_is_not_one
+    - tests/contract/test_dev_environment_cluster.py::test_status_reports_three_outcomes_and_down_is_idempotent
+    - tests/contract/test_dev_environment_cluster.py::test_nothing_the_command_prints_is_a_password
+    - tests/contract/test_migrations_apply_as_the_migration_user.py::test_every_released_migration_applies_as_the_migration_user
+    - tests/contract/test_cli_contract.py::test_commands_are_executable_in_the_git_index
+  description: >-
+    `bin/dev.sh up --project FILE` builds a disposable local environment from
+    the project's RENDERED document and the release alone: the locked postgres
+    image by digest; `build_statements()` applied as the superuser, which is
+    the deploy's own bootstrap and never a second implementation (F-005); every
+    rendered migration payload verified against `rendered-manifest.json` and
+    applied as the migration user in manifest order, each in its own
+    transaction carrying its `schema_migrations` row; `migration_ledger`
+    written as the deploy writes it; two roles activated with generated
+    passwords in `0600` files; `status` answering running, stopped, absent or
+    unknown with a reason rather than two outcomes (ADR 0195); `down` removing
+    the container, its anonymous volume and the state directory, idempotent and
+    saying so; `reset` being `down` then `up`; a project this checkout has not
+    rendered refused with exit 4 naming the render command; and no password on
+    any argument list or any line the command prints (ADR 0203, D1158, D1185).
+
+- id: DEV-SUBJECT-001
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_dev_environment.py::test_the_subject_statement_names_the_authenticated_role_and_the_derived_vocabulary
+    - tests/contract/test_dev_environment.py::test_the_placeholder_verifier_satisfies_the_check_and_encodes_no_password
+    - tests/contract/test_dev_environment.py::test_a_project_with_no_set_gets_the_release_vocabulary_alone
+    - tests/contract/test_dev_environment_cluster.py::test_exactly_one_subject_exists_and_its_rows_are_visible_only_with_it_asserted
+    - tests/contract/test_dev_environment_cluster.py::test_the_seeded_rows_are_visible_to_the_application_role_only_with_the_subject
+  description: >-
+    `up` registers exactly one development subject through
+    `app_private.auth_create_user`, with the project's `authenticated` role as
+    `role_name`, the merged surface's derived vocabulary as `scopes` (the
+    release's alone for a project that declares no set), and a verifier that
+    satisfies the column's check and encodes no password. The subject's id is
+    recorded in the state and is what `seed` and `psql` assert through
+    `app.user_id`; rows are visible with it asserted and invisible without it.
+    The environment accepts no login: nothing issues a token and no verifier
+    here verifies one (ADR 0203, D1190).
+
+- id: DEV-SEED-001
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_dev_environment.py::test_the_seed_manifest_refuses_a_path_a_traversal_and_a_bad_digest
+    - tests/contract/test_dev_environment.py::test_an_undeclared_name_is_refused_with_the_names_there_are
+    - tests/contract/test_dev_environment.py::test_a_seed_whose_digest_moved_is_refused_whole
+    - tests/contract/test_dev_environment.py::test_the_seed_lint_refuses_ddl_and_app_private_and_accepts_the_example_seed
+    - tests/contract/test_dev_environment.py::test_the_lint_reads_statements_and_not_comments
+    - tests/contract/test_dev_environment.py::test_a_seed_is_rendered_with_the_sets_placeholders_and_nothing_else
+    - tests/contract/test_dev_environment.py::test_the_seed_transaction_asserts_the_subject_before_anything_runs
+    - tests/contract/test_dev_command.py::test_seed_takes_a_name_and_never_a_path
+    - tests/contract/test_dev_command.py::test_a_seed_name_is_accepted_in_either_position
+    - tests/contract/test_dev_environment_cluster.py::test_the_example_seed_applies_once_as_the_subject_and_is_refused_twice
+  description: >-
+    `seed NAME` applies one file named in
+    `projects/<slug>/seeds/manifest.json` and nothing else: a path, a traversal
+    and a name the manifest lacks are refused with exit 2, a digest that has
+    moved with exit 5, and a seed carrying DDL, `app_private` or a role change
+    other than the owner preamble with exit 5 -- the lint reading statements
+    rather than comments. The text is rendered with the migration set's
+    placeholders and applied in one transaction as the migration user with
+    `app.user_id` set to the development subject, asserted before anything
+    runs. A seed already applied is refused until `reset`, and the example
+    project's `example` seed applies once, its rows being the subject's
+    (ADR 0203).
+
+- id: DEV-ISO-001
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_dev_environment.py::test_the_run_arguments_carry_no_network_no_mount_and_no_server_option
+    - tests/contract/test_dev_environment.py::test_no_password_is_ever_an_argument
+    - tests/contract/test_dev_environment.py::test_the_state_root_and_the_document_root_are_the_checkouts_and_never_the_hosts
+    - tests/contract/test_dev_environment.py::test_no_secret_name_the_contract_declares_reaches_the_environment
+    - tests/contract/test_dev_environment.py::test_the_command_reads_no_facility_gated_secret_and_no_deployed_document
+    - tests/contract/test_dev_environment_cluster.py::test_the_environment_can_reach_no_backup_plane_and_the_rendered_model_can
+  description: >-
+    The environment's container joins no network but the default bridge, has no
+    bind mount and no mount naming `pgbackrest`, holds no name the secrets
+    contract declares in its environment or its state directory, runs
+    `wal_level` `replica`, publishes its port on `127.0.0.1` only, and derives
+    from `.generated/<key>` and the release -- never from `/var/lib`, `/etc`, a
+    provider, a repository or a cipher pass. The control is in the same test:
+    the rendered project's own Compose model, read beside it, joins `backup`
+    and mounts `pgbackrest.conf`, so the assertion is about this container
+    rather than about a model that happens to declare nothing (ADR 0203,
+    D1161).
+
+- id: DEV-CHURN-001
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_capacity_envelope.py::test_the_envelope_carries_the_environments_churn_with_its_machine_and_cache_state
+    - tests/contract/test_capacity_envelope.py::test_the_envelope_is_current
+    - tests/contract/test_capacity_envelope.py::test_a_machine_measurement_names_the_machine_it_describes
+    - tests/contract/test_capacity_envelope.py::test_the_envelope_still_says_what_it_did_not_measure
+  description: >-
+    The capacity envelope carries `apg dev up` and `apg dev reset` wall times
+    as `MACHINE` measurements -- numbers that describe the machine they were
+    sampled on and are said not to transfer -- each naming its machine and the
+    state of the image cache among its conditions, and the uncached workstation
+    case is named in `UNMEASURED` with what would unblock it rather than
+    omitted. The rendered document is current against the images the envelope
+    is pinned to (D593, D1066, D1168).
+
+- id: DEV-CI-001
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_dev_environment.py::test_ci_runs_the_round_trip_in_order_and_writes_the_offline_half
+  description: >-
+    CI stands the local environment up, reads its status, seeds it, resets it
+    and takes it down on every push, in that order, and writes the current
+    session's OFFLINE evidence half from the gate job's own JUnit -- with the
+    session derived from the release rather than typed (ADR 0014) and the half
+    uploaded with the other evidence. A fresh runner has not cached the image,
+    which is the condition the workstation cannot measure, so the round trip is
+    also where the uncached number comes from (D1073, D1169).
+
+- id: EVD-OFFLINE-001
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_evidence_claims.py::test_a_declared_offline_claim_resolves_to_the_offline_mode
+    - tests/contract/test_evidence_claims.py::test_an_undeclared_claim_with_no_live_proof_is_still_refused
+    - tests/contract/test_evidence_claims.py::test_a_declared_offline_claim_that_carries_a_marker_is_refused
+    - tests/contract/test_evidence_claims.py::test_the_offline_half_is_written_from_a_checkout_and_records_its_commit
+    - tests/contract/test_evidence_claims.py::test_the_offline_half_refuses_a_claim_with_a_live_node_id
+    - tests/contract/test_evidence_claims.py::test_merge_requires_the_offline_input_exactly_when_offline_claims_exist
+    - tests/contract/test_evidence_claims.py::test_the_merged_document_carries_both_commits_and_says_when_they_differ
+    - tests/contract/test_session_twenty_two_gate_modes.py::test_offline_mode_writes_the_offline_half
+  description: >-
+    A claim is measured offline only when it is DECLARED in `OFFLINE_CLAIMS`: a
+    declared claim carrying a live marker is refused naming both remedies, and
+    an undeclared claim with no live proof is still refused with the sentence
+    it has always been refused with, so no requirement becomes reportable by
+    inference (ADR 0202, D696). The offline half is written from a checkout,
+    reads no deployed document, records `checkout_commit` rather than
+    `source_commit`, and refuses a claim that resolves to any live node id.
+    `merge` requires `--offline-input` exactly when the session has offline
+    claims, records `offline_checkout_commit` beside `source_commit`, and
+    PRINTS the difference rather than requiring or hiding it (ADR 0195). The
+    gate's offline mode writes the half and names the file.
+
+- id: OPS-PLANE-001
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_deploy_command.py::test_tool_count_is_published_only_when_the_plane_confirms_the_lock
+    - tests/contract/test_deploy_command.py::test_a_plane_serving_another_lock_publishes_null_and_names_both_digests
+    - tests/contract/test_diagnosis.py::test_capability_drift_reads_the_plane_and_reports_unknown_when_it_cannot
+    - tests/deployment/test_session22_plane.py::test_the_documents_tool_count_is_the_one_the_plane_serves_on_both_projects
+    - tests/deployment/test_session22_plane.py::test_the_plane_serves_the_lock_the_deploy_mounted
+  description: >-
+    The deployed document publishes `mcp.tool_count` only when the running
+    plane confirmed, through its own probe, that the lock it loaded is the lock
+    on disk (`tools_sha256`); otherwise the field is null and a line names both
+    digests. The doctor's capability-drift check reads the plane's digest and
+    reports a third outcome when the plane cannot answer, rather than calling a
+    plane it could not reach undrifted. Session 21's trip is what this is for:
+    beta served six tools and refused a tenant scope for eight minutes while
+    the document read from the FILE said seven (ADR 0195, D1152, D1153).
+
+- id: AGT-TENANT-002
+  priority: P0
+  target_session: 22
+  test_nodeids:
+    - tests/contract/test_migrations_apply_as_the_migration_user.py::test_the_example_sets_grants_reach_the_agent_roles_and_not_anon
+    - tests/contract/test_project_migration_sets.py::test_the_example_lock_records_two_migrations_in_order
+    - tests/deployment/test_session22_plane.py::test_an_agent_reads_rows_through_a_tenant_tool_on_beta
+  description: >-
+    The example project's migration set grants its view and its write function
+    to the two agent roles in a second frozen migration, and `anon` holds
+    neither after both migrations apply. The view is `security_invoker`, so the
+    grant must reach the TABLE the view reads and not the view alone -- which
+    is what the first migration missed, refusing every caller including the one
+    role it did grant, on a released set, for two sessions (D1189). A read
+    through a tenant tool returns the caller's rows on a deployment that has
+    applied it.

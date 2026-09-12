@@ -4,7 +4,33 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 21 implemented**, at `template_version` **1.2.0**.
+**Status: Session 22 implemented**, at `template_version` **1.3.0**.
+
+Session 22 gives a developer a database of their own. `apg dev up` builds a
+disposable local PostgreSQL cluster from a project's rendered document and the
+release alone — the locked image, the deploy's own bootstrap statements, every
+released migration *and the project's own set*, applied as the role that will
+apply them on the deployment, in about ten seconds — then `apg dev psql` opens a
+session as the application role with a development subject asserted, `apg dev
+seed` loads a reviewed seed, `apg dev reset` throws the whole thing away and
+builds it again, and `apg dev down` leaves nothing behind (ADR 0203; see
+[A local environment](#a-local-environment) and
+[the guide](docs/dev-environment.md)). It is a database and nothing else: no
+REST, no auth service, no token, no durability and no path to any production
+secret. What it replaces is restoring a backup, which the Session 18 trip
+measured at 247 s on the deployment host.
+
+It also gives the evidence model a third mode. Until now a claim was measured
+against a deployment or it was not a claim; a claim about a command a developer
+runs on their own machine can only be measured in a checkout, and four of this
+session's six are. They are offline because they are **declared** so, never
+because a live proof was missing (ADR 0202) — the inference would have made
+twenty-one unclaimed requirements reportable without anyone deciding to, and
+would have turned a claim whose live proofs stopped being collected into a green
+one answered from a checkout. A minor: a new command, an optional `seeds/`
+directory a project may or may not have, one additive migration in the example
+project's own set, and the third mode. No manifest, outputs, capability, lock or
+secret schema moves, and no released migration.
 
 Session 21 opens the agent plane to a tenant's domain: the scope vocabulary is
 derived from the reviewed surface rather than enumerated, the runtime registers
@@ -37,7 +63,7 @@ application on 1.0.0, on a host that started empty (see
 [its plan](docs/plans/session-19-implementation-plan.md) and
 [scope closure](docs/scope-closure.md) §8) — and it moved `VERSION` alone, to
 `1.0.1`, the only time in this project's history the two numbers have come
-apart. **Adopt `1.2.0`.** Session 18's code is in this release — independent
+apart. **Adopt `1.3.0`.** Session 18's code is in this release — independent
 recovery: every backup repository mirrored to a second provider by a host unit
 the archiver never knows about (ADR 0188), a disaster kit that names every
 secret and holds none and a bootstrap that adopts a provider project by its
@@ -158,6 +184,70 @@ Output is byte-identical across renders with identical inputs.
 `pgbackrest.conf` is `0444`, because it carries no credential by construction and
 the database container reads it as uid 999.
 
+## A local environment
+
+`apg dev` builds a disposable PostgreSQL cluster on your own machine from the
+project you just rendered and nothing else. It runs the locked postgres image by
+digest, applies the deploy's own bootstrap statements as the superuser, then
+applies every rendered migration — the release's and your project's set, in
+manifest order, each in its own transaction with its `schema_migrations` row —
+**as the migration user**, which is the role that will apply them on the
+deployment. It writes both ledgers the way a deploy writes them, activates the
+two roles that can log in, and registers one development subject. About ten
+seconds on a developer machine with the image cached; the
+[capacity envelope](docs/capacity-envelope.md) carries the numbers with the
+conditions they were sampled under.
+
+```bash
+./deploy.sh --project project.yaml --capabilities capabilities.yaml --render-only
+bin/apg.sh dev up --project project.yaml
+bin/apg.sh dev psql --project project.yaml
+```
+
+| Verb | What it does |
+|---|---|
+| `up` | Builds the environment. Refuses a project this checkout has not rendered, and names the command that renders it. |
+| `status` | `running`, `stopped`, `absent` or `unknown`, each with its reason and its own exit code. Not two outcomes with a guess (ADR 0195). |
+| `psql` | An interactive session as the application role, with the development subject asserted — so what you see is what that subject sees under RLS. `--as migration-user` applies SQL the way a migration would. Arguments after `--` are psql's own. |
+| `seed NAME` | Applies one reviewed seed the project declares. A name, never a path. |
+| `reset` | `down`, then `up`. Ten seconds, and the reason to stop debugging a database you have made a mess of. |
+| `down` | Removes the container, its anonymous volume and the state directory. Exits 0 when there was nothing to remove, and says so. |
+
+State lives in `.generated/.dev/<project-key>/` — dot-prefixed so the evidence
+reader skips it — at mode `0700`, holding the two role passwords in `0600` env
+files that reach the container through `--env-file`. **Nothing the command
+prints is a password, and no password is ever an argument**, which is asserted
+rather than intended.
+
+**A seed is a door with a lock on it.** `apg dev seed NAME` applies a file named
+in `projects/<slug>/seeds/manifest.json` and nothing else: a path is refused, a
+name the manifest does not carry is refused, a digest that has moved is refused,
+and a seed carrying DDL, `app_private`, or a role change other than the owner
+preamble is refused. What survives is rendered with your migration set's
+placeholders and applied in one transaction as the migration user with the
+development subject asserted. Seeds are development data, and the lock is there
+so they cannot quietly become a second migration path.
+
+**What this is not**, because each of these is a thing a local database is
+often assumed to be:
+
+* **It is not a deployment.** There is no REST, no auth service, no storage, no
+  agent plane, no token and no login — a verifier is registered for the subject
+  that verifies no password, because nothing here authenticates anybody. It is
+  the database.
+* **It is not a branch.** No parent, no promotion, no durability: `down` and
+  `reset` destroy the data, the volume is anonymous, and nothing is backed up.
+  If you want to keep what is in it, write a seed.
+* **It is not near production.** It reads `.generated/<key>` and the release,
+  and never `/var/lib/agentic-postgres`, `/etc/agentic-postgres`, a provider, a
+  backup repository or a cipher pass. The container joins no network but the
+  default bridge and publishes its port on `127.0.0.1` only.
+
+[The developer loop](docs/dev-environment.md) is the longer form, including what
+to do when Docker is absent, when the state is stale, when a seed is refused,
+and when a migration fails as the migration user — which is the case the
+environment exists to surface before a deploy does.
+
 ## Deploying
 
 **Deploying is an ordered sequence, and no step makes its own preconditions.** A
@@ -175,9 +265,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 21
+sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 22
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 21
+     --capabilities capabilities.yaml --through-session 22
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a
@@ -281,6 +371,7 @@ Then, in order:
 |---|---|---|
 | 1 | `projects/<slug>/migrations/templates/0001-*.sql` — your table, its FORCE-RLS policies, its `api` view, its `SECURITY DEFINER` RPCs | yes |
 | 2 | `projects/<slug>/migrations/manifest.json` — the entry, then `bin/migrate.sh --project project.yaml freeze-lock` | yes |
+| 2b | `bin/apg.sh dev up --project project.yaml` — your set applies as the role that will apply it, before any deploy exists to apply it to. A migration that fails here fails in ten seconds rather than in a convergence | **yes** |
 | 3 | `projects/<slug>/contracts/postgrest-api-surface.yaml` — your reviewed surface, merged with the release's for every comparison | yes |
 | 4 | `projects/<slug>/contracts/postgrest-openapi.canonical.json` — captured from a **running deployment** and refuses a hand edit | **no** |
 

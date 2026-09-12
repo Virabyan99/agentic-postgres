@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from agentic_postgres import (
     CURRENT_SESSION,
@@ -931,3 +932,109 @@ def test_the_psql_arguments_carry_the_subject_the_loopback_and_no_password() -> 
     for refused in ("authenticated", "postgres", "object-owner", ""):
         with pytest.raises(dev_environment.DevEnvironmentError, match="not a role"):
             dev_environment.psql_arguments(environment, refused, directory)
+
+
+# ---------------------------------------------------------------------------
+# DEV-CI-001 -- the round trip, and the half CI writes
+# ---------------------------------------------------------------------------
+
+
+def test_ci_runs_the_round_trip_in_order_and_writes_the_offline_half() -> None:
+    """`DEV-CI-001`. The workflow, read as YAML rather than grepped (D1169).
+
+    Two things are asserted and they are different in kind.
+
+    **The round trip** is the only place the command is exercised end to end on
+    a machine nobody prepared. A developer's workstation has the image cached,
+    a rendered fixture lying about and often a container still up from the last
+    run; a fresh runner has none of that, which is why this step catches what
+    the cluster module cannot. The ORDER is the assertion, not the presence:
+    `seed` after `up` because there is nothing to seed before it, `reset`
+    after `seed` because what a reset must survive is a database with rows in
+    it, and `down` last because a step that leaves a container running passes
+    by leaking. A workflow listing all five in any order proves only that five
+    commands exit zero.
+
+    **The offline half** is written from the gate's own JUnit, and the reason
+    that matters is the reason the evidence model exists: a verdict is computed
+    from the results of exactly the node ids the registry lists, so a half
+    written from a second, differently-selected pytest run is a verdict about a
+    different collection. The session is derived from the release rather than
+    typed (ADR 0014, and D719's repair to this very writer).
+
+    Read as YAML because the alternative is a text scan, and a text scan over a
+    workflow answers "does this string appear somewhere in the file" -- which a
+    comment satisfies (D277). The steps are found by job and by name, and the
+    verbs are read out of the step that claims to run them.
+
+    Goes red if: a verb is dropped or reordered; the round trip is moved before
+    the render (`up` refuses an unrendered project, so it would fail anyway --
+    but it would fail as an unexplained exit 4); the half stops being written;
+    the session is typed as a literal; or the half stops being uploaded, which
+    is the quiet one, because the step would still be green.
+    """
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+
+    def step_named(job: str, fragment: str) -> dict[str, Any]:
+        steps = workflow["jobs"][job]["steps"]
+        found = [s for s in steps if fragment.lower() in str(s.get("name", "")).lower()]
+        assert len(found) == 1, (
+            f"{job!r} has {len(found)} steps naming {fragment!r}; "
+            f"it has {[s.get('name') for s in steps]}"
+        )
+        return found[0]
+
+    # -- the round trip ----------------------------------------------------
+    job = "session-2-contract"
+    steps = [str(s.get("name", "")) for s in workflow["jobs"][job]["steps"]]
+    round_trip = step_named(job, "local environment stands up")
+    render = step_named(job, "Compose models resolve")
+    assert steps.index(str(round_trip["name"])) > steps.index(str(render["name"])), (
+        "the round trip runs before the render; `apg dev up` refuses a project "
+        "this checkout has not rendered, and the refusal is correct"
+    )
+
+    run = round_trip["run"]
+    positions = []
+    for verb in ("up", "status", "seed", "reset", "down"):
+        needle = f"bin/apg.sh dev {verb}"
+        assert run.count(needle) == 1, (
+            f"the round trip invokes `{needle}` {run.count(needle)} times; "
+            "each verb is run exactly once, in order"
+        )
+        positions.append(run.index(needle))
+    assert positions == sorted(positions), (
+        "the round trip's verbs are out of order. up, status, seed, reset, down: "
+        "there is nothing to seed before `up`, and what a reset must survive is a "
+        "database with rows in it"
+    )
+    assert "project.example.yaml" in run
+
+    # -- the offline half --------------------------------------------------
+    half = step_named("gate", "offline evidence half")
+    gate_steps = [str(s.get("name", "")) for s in workflow["jobs"]["gate"]["steps"]]
+    gate = step_named("gate", "Run the Session 1 gate")
+    assert gate_steps.index(str(half["name"])) > gate_steps.index(str(gate["name"])), (
+        "the half is written before the gate ran; there would be no JUnit to read"
+    )
+
+    written = half["run"]
+    assert "--mode offline" in written, written
+    assert "bin/write-session-evidence.py" in written, written
+    assert ".generated/session-01/contract-tests.xml" in written, (
+        "the half is written from some other JUnit than the gate's own. A verdict "
+        "computed from a differently-selected run is a verdict about a different "
+        "collection of tests"
+    )
+    assert "CURRENT_SESSION" in written and f"--session {CURRENT_SESSION}" not in written, (
+        "the session is typed rather than derived (ADR 0014). D719 is the same "
+        "defect in the same writer: a literal that is correct until it is not"
+    )
+
+    upload = step_named("gate", "Upload generated artifacts")
+    assert "offline.json" in upload["with"]["path"], (
+        "the half is written and not uploaded, which is the failure mode that "
+        "stays green: the step passes and the evidence never leaves the runner"
+    )

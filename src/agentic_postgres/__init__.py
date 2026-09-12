@@ -158,7 +158,40 @@ from pathlib import Path
 #: outputs bump with a migrator (v18). Every one is ADDITIVE, and a project
 #: that declares nothing new serves exactly the six tools it served. A minor,
 #: proposed here and confirmed by Run 7's `upgrade plan` on the host.
-CURRENT_SESSION = 21
+#:
+#: **Session 22 moves it to 22, all-or-nothing again** (D690): nine `DEV-*`,
+#: `EVD-*`, `OPS-*` and `AGT-*` requirements and six claims, every offline half
+#: written in the run that built its plane (Runs 2-5) and every live half
+#: written there too -- there is no trip this session, so the two host claims
+#: are collected by Session 24's (D1163). `apg dev` is the session's work: a
+#: disposable local PostgreSQL cluster built from the rendered document and the
+#: release, applying the project's own migration set as the role that will
+#: apply it, before any deploy exists to apply it to (ADR 0203).
+#:
+#: **This arms no Compose profile and starts no service.** The environment is
+#: `docker run` on the locked image and nothing else -- it is not a deployment,
+#: not a branch, and not a thing the fleet knows about.
+#:
+#: **What it does arm is a third EVIDENCE MODE** (ADR 0202), and that is the
+#: one an operator reading this should notice. Until now a claim was measured
+#: against a deployment or it was not a claim; four of this session's six are
+#: measured against a CHECKOUT, and they are offline because
+#: `evidence_claims.OFFLINE_CLAIMS` names them -- never because a marker was
+#: missing. A session whose work is a developer's own command has claims no
+#: host can answer, and the declaration is what keeps that from becoming a way
+#: for a live claim to go green while its live proofs stopped being collected.
+#:
+#: `VERSION` moves to `1.3.0`, and ADR 0162 prices it. The session adds a new
+#: operator command (`apg dev`), an optional `projects/<slug>/seeds/` directory
+#: a project may or may not have, one additive migration in the example
+#: project's own set (`20260914120002`, two `GRANT`s), and a third evidence
+#: mode. **No manifest, outputs, capability, lock or secret schema moves**, and
+#: no released migration is added -- a project that adopts this release and
+#: never types `apg dev` renders byte-identical artefacts. A minor, proposed
+#: here; Session 24's `upgrade plan` on the host is what confirms it, and a
+#: `major` required there is a stop condition rather than a number to write
+#: down.
+CURRENT_SESSION = 22
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

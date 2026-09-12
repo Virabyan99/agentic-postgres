@@ -42,7 +42,13 @@ ID_PATTERN = re.compile(
     # prefix rather than more `DEP` or `CFG` because the question it answers
     # is whose the thing is, and that is the distinction this session exists
     # to make.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN)-[A-Z0-9]+(-\d+)?$"
+    # `DEV` and `EVD` are Session 22. `DEV` is the developer's own machine --
+    # `apg dev`, which is neither a deployment nor anything the fleet knows
+    # about, so neither `DEP` nor `OPS` names it. `EVD` is the evidence model
+    # itself: ADR 0202's third mode is a property of how a claim is REPORTED
+    # rather than of anything the product deploys, and filing it under `OPS`
+    # would put a rule about reading evidence in the family that supplies it.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD)-[A-Z0-9]+(-\d+)?$"
 )
 
 

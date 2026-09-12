@@ -36,6 +36,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCUMENT = REPO_ROOT / "docs" / "capacity-envelope.md"
 RENDERER = REPO_ROOT / "bin" / "render-capacity-envelope.py"
 
+#: The machines this envelope has numbers from. A `MACHINE` measurement must
+#: name one among its conditions and a `CONFIGURATION` one must name none.
+#:
+#: **Enumerated, and widened only to a machine actually measured on** (D1195).
+#: Session 22 added the third: `apg dev` runs on a developer's own machine and
+#: on a CI runner, and a fresh runner is the only place the uncached first-run
+#: cost can be measured at all -- so the list grew by one name with two rows
+#: behind it, rather than becoming a check that some machine is mentioned.
+MACHINES = ("development machine", "deployment host", "CI runner")
+
 
 # ---------------------------------------------------------------------------
 # A number carries its conditions
@@ -108,7 +118,7 @@ def test_a_machine_measurement_names_the_machine_it_describes() -> None:
     """
     for measurement in capacity.ENVELOPE:
         names_a_machine = any(
-            "development machine" in condition or "deployment host" in condition
+            any(machine in condition for machine in MACHINES)
             for condition in measurement.conditions
         )
         if measurement.kind == capacity.MACHINE:
@@ -282,6 +292,76 @@ def test_the_unmeasured_list_names_the_scenarios_the_plan_asked_for() -> None:
     )
     for subject in ("mcp", "backup"):
         assert subject in absent, f"{subject} was not measured and is not declared absent"
+
+
+def test_the_envelope_carries_the_environments_churn_with_its_machine_and_cache_state() -> None:
+    """`DEV-CHURN-001`. The two numbers `apg dev` is judged on, read correctly.
+
+    The stage plan priced this session against *"~10 s measured vs 247 s
+    restore"*, and a figure like that is the most quotable thing a document
+    can hold — which is exactly why it is the one most likely to be quoted for
+    a machine it is not about. So three properties, not one:
+
+    * both verbs are present. A document with `up` and without `reset` invites
+      the reader to assume the reset is free, and it is not — it is another
+      `up`;
+    * each is a `MACHINE` measurement. `test_a_machine_measurement_names_the_
+      machine_it_describes` then forces it to name its machine, so this test
+      does not repeat that assertion; what it adds is that the KIND is right,
+      because a churn number filed as `CONFIGURATION` would be published as
+      transferring and read as a promise;
+    * each names the state of the image cache. **This is the condition that
+      changes the number most and is invisible in it** — the same command on
+      the same machine is ten seconds or a pull, and a reader who does not
+      know which was sampled cannot use the figure at all.
+
+    And the uncached workstation case is declared absent by name rather than
+    left out, because the first run is the one a new developer experiences.
+
+    Goes red if: a verb's row is dropped or renamed; a row is refiled as
+    `CONFIGURATION`; the cache condition is dropped when a number is re-sampled
+    (the likely one — a re-measurement rewrites `value` and inherits the old
+    conditions); or the unmeasured first-run case is quietly deleted.
+    """
+    churn = {
+        verb: [m for m in capacity.ENVELOPE if m.subject.startswith(f"apg dev {verb}:")]
+        for verb in ("up", "reset")
+    }
+    for verb, rows in churn.items():
+        assert len(rows) >= 1, (
+            f"the envelope carries no `apg dev {verb}` number. The session that "
+            "built the command measured it; a document that publishes one verb "
+            "and not the other is read as the other being free"
+        )
+        for row in rows:
+            assert row.kind == capacity.MACHINE, (
+                f"{row.subject!r} is filed as {row.kind!r}. A wall time is about "
+                "the machine it was sampled on; publishing one as transferring "
+                "is a promise to every reader's laptop"
+            )
+            assert any("cach" in condition.lower() for condition in row.conditions), (
+                f"{row.subject!r} does not say whether the image was cached. That "
+                "is the difference between ten seconds and a pull, and it cannot "
+                "be recovered from the number"
+            )
+
+    # ONE row has to carry both words, not the concatenation of all of them.
+    # The first version joined every subject and reason into a single blob, so
+    # "cach" from the pooled-clients row and "apg dev" from anywhere else would
+    # have satisfied it between them -- a scan over a document rather than an
+    # assertion about a row (D464's shape).
+    first_run = [
+        item
+        for item in capacity.UNMEASURED
+        if "apg dev" in (item.subject + " " + item.reason).lower()
+        and "cach" in (item.subject + " " + item.reason).lower()
+    ]
+    assert first_run, (
+        "the uncached first run is not declared unmeasured. It is the run a new "
+        "developer actually has, and omitting it makes the cached number read as "
+        "the cost of the command"
+    )
+    assert all(item.unblocked_by.strip() for item in first_run)
 
 
 def test_nothing_was_tuned_on_an_off_host_measurement() -> None:

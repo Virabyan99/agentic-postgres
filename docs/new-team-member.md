@@ -87,6 +87,27 @@ keys at any depth.
 `--render-only` is mandatory. Without it the command exits `10` and tells you
 deployment begins in Session 2. It does not partially deploy.
 
+### 8a. Build a local database — *available now*
+
+```bash
+bin/apg.sh dev up --project project.yaml
+bin/apg.sh dev psql --project project.yaml
+```
+
+About ten seconds, and it is the first thing in this guide that gives you
+something to type SQL at. It builds a disposable PostgreSQL cluster from what
+you just rendered: the locked image, the deploy's own bootstrap, and every
+migration applied **as the migration user** — the role that will apply them on
+a deployment. `psql` puts you in the application role with a development
+subject asserted, so what you see is what that subject sees under row-level
+security.
+
+`bin/apg.sh dev down --project project.yaml` removes the container, its volume
+and its state; `reset` does both. Nothing here is durable, nothing is backed up,
+and nothing reaches a provider — see [the developer loop](dev-environment.md).
+
+It needs Docker, which step 2 installed and step 4 confirmed.
+
 ### 9. Inspect the output — *available now*
 
 ```bash

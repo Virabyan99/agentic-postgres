@@ -103,7 +103,7 @@ D1060, D1066, D1071, D1076, D1098, D1110, D1131.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1194**. Rows D1157–D1175
+Six columns, next free number after this table **D1198**. Rows D1157–D1175
 were measured at planning on 2026-09-11 at `90c1c19`; the runs add theirs
 below them as they go, each run's numbers named in its Done paragraph. Run 1
 added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`;
@@ -113,7 +113,10 @@ found by a test going red during the move it describes. Run 4 added
 **D1189–D1191**, the first of them a defect two sessions old that only a
 proof trying to READ could find. Run 5 added **D1192–D1193**, one a guard that
 could not be observed where it was being asserted and one a rig that reverted
-its own run's work.
+its own run's work. Run 6 added **D1194–D1197**, and every one of the four is a
+GUARD rather than a product defect — an anchor that stopped matching, an
+allowlist one machine short, a scan that asked a dispatcher about a flag it
+delegates, and an assertion that two different mutations walked through.
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -154,6 +157,10 @@ its own run's work.
 | **D1191** | Run 4's battery, item (b): *"`verify_seed` compares a prefix of the digest → the bad-digest test fails"*. | **It survived, and it was right to.** SHA-256 over different content differs everywhere, so a prefix comparison catches an edit made anywhere — the mutation removed no observable behaviour. The test's own docstring had the same false reasoning in it (*"a prefix comparison would accept a file whose first bytes are unchanged, which is every edit made to the END of a file"*), which is not how a digest works. | The mutation is rewritten as the one that removes the check (`actual[:0] != sha[:0]`, always false) and kills; the docstring is corrected to state the property that is actually asserted. Second uninformative mutation this session, after Run 2's first `(c)` and Run 3's first `(f)` (D493). | A battery is only evidence if a survivor is read. Twice now the survivor has been the mutation being wrong, and once it was a real gap — which is the ratio that makes reading them worth the minute. | — |
 | **D1192** | Run 5's battery, item (b): *"`write_half` offline drops the marker guard → the live-node test fails"*, and ADR 0202 §2's *"a second check in `write_half`"*. | **The second guard is unreachable while the first one works, so the test written for it measured the first one twice.** `results_for_mode` calls `claim_mode`, which refuses a declared claim carrying a live marker before `write_half` reaches its own check — so the mutation deleting `write_half`'s guard SURVIVED, and the exit 5 the test asserted had been coming from `claim_mode` all along. ADR 0202 already says why the second exists (*"the two can only disagree if one of them is broken"*); what the plan did not say is that "one of them is broken" is the only state it can be observed in. | The fixture gains `break_claim_mode=True`, which writes a module whose FIRST guard is neutralised — the battery's own mutation (a), applied deliberately and only in that one test — and the test asserts the second guard still refuses, writes nothing, and names the offending proofs. Its control, in the same test, is the same declaration with the first guard intact: refused earlier, with a different message. Both refusals exist, and the pair is what says so. | A belt-and-braces check is testable only by undoing the belt. Asserting the outcome without undoing it measures the belt and reports the braces — which is how a guard with no scenario survives (the same shape as `test_a_project_set_that_publishes_nothing`, whose docstring records the last instance). | 0202 |
 | **D1193** | CLAUDE.md §1: *"Never `git checkout --` to restore; the files under test are uncommitted. Snapshot to `/tmp`, restore by copy, `cmp` each file back."* | Read, and then done anyway. Run 5's first exercising rig ended with `git checkout -- src/agentic_postgres/evidence_claims.py` to undo a throwaway claim declaration — and reverted **Run 5's own uncommitted library change** with it. The next run failed with `AttributeError: module has no attribute 'ALL_MODES'`, which reads as a defect in the code and was a defect in the rig. Recovered from a `cp` taken before the first run, restored byte for byte and verified with `cmp`. | Every rig and every fixture in this run snapshots to `/tmp` and restores by copy under a `trap`/`finally`, with the restoration asserted — the battery, the exercising rig, and `test_evidence_claims`' `declared_offline`, which edits the library the subprocess imports. The rule was already written; what this adds is that it applies to a rig editing the file the RUN is changing, which is the case where `git checkout --` looks safest and is not. | The rule exists because the working tree is the only copy of an unfinished run. Ten recorded instances were about content in a heredoc; this is the eleventh and the first about a restore. | — |
+| **D1194** | `tests/contract/test_evidence_claims.py`'s `declared_offline` fixture, written in Run 5: `text.replace("OFFLINE_CLAIMS: frozenset[str] = frozenset()", …)`, guarded by `assert claim in text, "the declaration did not take"`. | **The anchor stopped matching the moment this run declared the four real claims, and the guard said nothing.** `frozenset()` is not `frozenset(\n    {…})`, so the replacement was a no-op — and `assert claim in text` passed anyway, because the SECOND replacement (into `CLAIMS`) also writes the claim's name. Four tests then failed as though `write-session-evidence.py` were refusing a legitimate declaration, and the refusal they printed was the correct refusal of a claim nobody had declared. D269's rule with the failure inverted: the anchor was not pre-flighted, the assertion was satisfied by a different edit, and the fixture reported a declaration it had not made. | The fixture ADDS to the declaration instead of replacing it — `"OFFLINE_CLAIMS: frozenset[str] = frozenset(\n    {"` with `count(...) == 1` asserted, and the same for `CLAIMS`'s opening line, each a fatal miss. The final assertion counts the claim's name **twice**, so one replacement landing and the other not is caught. Battery arm (q) restores the old anchor and the fixture now fails by name. | A fixture that edits the module under test is a mutation, and it needs a mutation's discipline: pre-flight the anchor, make a miss fatal, and never let a second edit satisfy the first one's check. The cheap version of this check is a substring of the whole file, and a whole file usually contains it. | — |
+| **D1195** | `test_capacity_envelope.py::test_a_machine_measurement_names_the_machine_it_describes`: *"a `MACHINE` measurement must name its machine among its conditions"*, implemented as `"development machine" in condition or "deployment host" in condition`. | The envelope has had exactly two machines for eight sessions, so the allowlist and the world coincided. `apg dev` is measured on a **third** — a CI runner is where the uncached first run can be measured at all, because measuring it on the workstation means evicting the image the whole contract suite shares (D1168, D1169). The rule was right and its enumeration was one short. | `MACHINES = ("development machine", "deployment host", "CI runner")`, a named constant with its own comment, and the widening is to a machine the envelope actually has rows from. Non-negotiable §2's distinction applies exactly: **widening an allowlist to a measured set is not weakening**; loosening it to *"names some machine"* would be. | An enumerated allowlist is the right instrument and it has a maintenance cost, which is the point — a rule that accepted any capitalised noun would have accepted a typo as a new machine (ADR 0006's reason, in a second place). | — |
+| **D1196** | `test_documentation_index.py::test_every_flag_the_readme_shows_appears_in_that_commands_usage`: every `--flag` on a README command line appears in that command's `--help`. | `bin/apg.sh` is a **dispatcher**. Its `--help` lists verbs; `--project` is documented by `bin/dev.sh --help`, which is what `apg.sh dev` execs. So the first README line this session added — the one a reader is most likely to copy — was reported as an invented flag, and every future line through the front door would have been too. The guard has been correct since Session 7 because no README line had gone through a dispatcher before. | The scan resolves the verb: a line whose command is `bin/apg.sh` and whose next token is a bare word is checked against `bin/apg.sh <verb> --help`. **Resolved rather than exempted** — an exemption for `apg.sh` would have made every flag it dispatches unscanned, which is the opposite of what the test is for. A flag nobody documents anywhere is still caught, and battery arm (p) proves it by inventing `--detach`. | The front door was added in Session 13 and the README only started routing readers through it now. A guard that reads a command's help has to know what the command IS; *"ask the binary"* is right until the binary's job is to delegate. | — |
+| **D1197** | Run 6's own battery, arm (k): *"the gate checks for docker after the suite has skipped past it"* — and the guard `assert "docker version" in offline_mode`. | **The same mutation survived two versions of the test.** `true # docker version` leaves the words in the file. The first version scanned the function including its comments, and this gate explains at length what each step does, so the sentence *describing* the check satisfied the assertion that the check exists — D277 exactly. The second version stripped comment LINES, and a trailing comment is not a comment line. Both read a substring where the question was "does this script RUN this". | `code()` strips comment lines for every source-reading test in the module, and the docker assertion goes further: it finds a LINE that begins with `docker version`, and derives the ordering check and the message scan from that line's index. A mention, an argument and a commented-out command are all excluded by construction. | Two attempts at the same assertion, killed by the same mutation, is the argument for batteries rather than an argument about this test. Neither version was obviously weak; what made them weak was the subject being a file whose comments are unusually good. | — |
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1092,8 +1099,11 @@ other (both arms in one test, D499); (d) the differing-commits print removed
 `test_gate_contract`, every `test_session_*_gate_modes` module, `test_session_eight_gate_modes`,
 `test_cli_contract`. **Push.**
 
-**Done.** 2026-09-12. The evidence model has a third mode, declared and never
-inferred. Two divergence rows (**D1192**, **D1193**), next free **D1194**.
+**Done.** 2026-09-12, `4763fe7` on `session-22`. **CI GREEN** — run
+`34645332605`, workflow `contract`, `completed success` on
+`4763fe7cfebc1d143cd4d7ebffca9ec8d4ae2faf`, all three jobs, first push.
+The evidence model has a third mode, declared and never inferred. Two
+divergence rows (**D1192**, **D1193**), next free **D1194**.
 `ruff format` and `ruff check` exit 0. **Battery 6/6 killed**, every paired
 control green, every file restored by copy and verified with `cmp`.
 
@@ -1261,6 +1271,101 @@ gate-mode guards, the registry and `test_cli_contract` — 0 failed.
 the cases the working agreement allows). **Push.** CI green expected; read
 the round-trip step's two numbers from the log and write them into the
 envelope (step 3's second commit). Record both run ids.
+
+**Done.** 2026-09-12. `CURRENT_SESSION` 22, `VERSION` 1.3.0, nine requirements,
+six claims, **four of them the first offline claims this project has had**.
+Four divergence rows (**D1194**–**D1197**), next free **D1198**. `ruff format`
+and `ruff check` exit 0. **Battery 17/17 killed**, every paired control green,
+every file restored by copy and byte-compared — and two of the seventeen took
+three attempts, which is recorded below rather than smoothed over.
+
+*The two numbers.* `CURRENT_SESSION` 22 and `VERSION` 1.3.0, with ADR 0162's
+pricing in the constant's comment: a new operator command, an optional
+`seeds/` directory a project may or may not have, one additive migration in
+the example project's own set, and a third evidence mode. **No manifest,
+outputs, capability, lock or secret schema moves and no released migration** —
+a project that adopts this release and never types `apg dev` renders
+byte-identical artefacts. Session 24's `upgrade plan` confirms the minor.
+
+*The registry and the claims.* Nine requirements: `DEV-ENV-001`,
+`DEV-SUBJECT-001`, `DEV-SEED-001`, `DEV-ISO-001`, `DEV-CHURN-001`,
+`DEV-CI-001`, `EVD-OFFLINE-001`, `OPS-PLANE-001`, `AGT-TENANT-002`, plus
+`OPS-READ-001` widened without moving its id or its session. `DEV` and `EVD`
+joined `ID_PATTERN` with their reasons. Six claims, and **the split is the
+session's point**: `dev_environment`, `dev_isolation`, `dev_churn` and
+`offline_evidence` are declared in `OFFLINE_CLAIMS`; `plane_confirmed_count`
+and `agent_tenant_read` are host claims and are deliberately **not**, because
+a checkout answering the first would have reported beta green through the
+eight minutes it served the wrong lock (D1152). `OPS-READ-001` gained five
+node ids rather than the four the plan named — `test_render_atomicity` wrote
+three, not one — and `OPS-PLANE-001` carries three live proofs rather than
+two, because `test_the_plane_serves_the_lock_the_deploy_mounted` proves the
+same requirement and an unregistered proof proves nothing.
+
+*The churn, measured* (`/tmp/r6-churn.sh`, this workstation, WSL2 kernel
+6.6.87.2, Docker server 29.5.2, image cached, 33 migrations): **`apg dev up`
+10.98 s and 9.89 s; `apg dev reset` 10.07 s and 10.28 s**, two samples each.
+`reset`'s teardown disappears into the sampling spread, which is the property
+worth publishing. Both are `MACHINE` rows naming the machine and the cache
+state; the uncached workstation case is in `UNMEASURED` with its reason —
+measuring it means `docker rmi` of the image the whole contract suite shares.
+The comparison the stage plan asked for stands: **~10 s against the 247 s
+restore** the Session 18 trip measured, on a different machine, so the ratio
+is not a number either.
+
+*CI.* The `session-2-contract` job stands the environment up, reads its
+status, seeds it, resets it and takes it down, after the render — because `up`
+refuses an unrendered project — and times `up` and `reset` with `python`
+rather than `bc`, which the plan offered as the alternative and which is one
+fewer assumption about the runner image. The `gate` job writes
+`evidence/session-22-offline.json` from the gate's own JUnit, with the session
+DERIVED (ADR 0014), and the upload carries it. `DEV-CI-001`'s proof reads the
+workflow as YAML and asserts the five verbs' ORDER, not their presence.
+
+*The gate.* `bin/session-22-check.sh`, derived from Session 21's by a script
+under `/tmp` whose seven substitutions are each anchored to match exactly once
+and whose header and usage were rewritten whole; a final scan refuses any
+surviving `session-21-check` outside the provenance line. **Offline mode now
+requires docker and writes a half** — the first in this project's history.
+Docker is a prerequisite (exit 3) rather than a skip, and the message says
+why: the cluster proofs would skip, a skip is not a pass, and the half would
+be written with `dev_environment` reading `not_run`. Step 3 keeps its JUnit,
+step 8 runs the five verbs (starting with `down`, so a re-run starts where the
+first run did, D20), step 9 writes the half. `write_evidence` gained an
+offline branch that SUBTRACTS `--project-a-outputs` rather than adding
+anything, and all three modes now say their half is one of three.
+`tests/contract/test_session_twenty_two_gate_modes.py` is new — there was no
+Session 21 guard to derive from, so it comes from Session 8's, keeping what
+generalises and dropping everything about Session 8's own flags.
+
+*What the battery found, and it was not in the product.* Seventeen mutations,
+and **three of them needed the test repaired before they died**:
+
+- (q) restores the fixture's old anchor — **D1194**, and the reason four tests
+  in this run looked like a product defect for twenty minutes;
+- (g) survived once as an uninformative mutation (D493) and revealed a real
+  weakness beside it: the unmeasured check joined every row into one blob, so
+  "cached" from one row and "apg dev" from another would have satisfied it
+  between them. Per-row now;
+- (k) survived **twice**, killing two versions of the same assertion — the
+  comment-inclusive scan and then the comment-line-stripped one, because
+  `true # docker version` is neither a comment line nor a check. **D1197.**
+
+*Documents.* README: a new *A local environment* section between *Rendering a
+project* and *Deploying*, the status paragraph at Session 22 and 1.3.0, *Adopt
+`1.3.0`*, row 2b in the tenant table, and every `--through-session 21` a
+reader types moved to 22 (three files). `docs/dev-environment.md` is new,
+indexed under a *Developer loop* heading in `docs/README.md`.
+`docs/new-team-member.md` gains step 8a. `docs/scope-closure.md` §1's six
+numbers were **four sessions stale** and are now counted rather than recalled
+(193 requirements, 114 claims, 169 covered, 31 migrations, 203 ADRs,
+D1–D1194); §11 records what this session leaves open, including what Session
+24's trip owes it.
+
+*Collected, not asserted.* `pytest --setup-plan
+tests/deployment/test_session22_plane.py` with `APG_LIVE_HOST=1` and both
+outputs paths set: all three proofs collected, none deselected (D671, D676).
+
 
 ### Run 7 — the close (no trip)
 

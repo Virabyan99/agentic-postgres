@@ -77,7 +77,16 @@ ALL_MODES = (*MODE_MARKERS, OFFLINE_MODE)
 #: collected -- a marker removed, a module renamed, a gate variable unset --
 #: into a green claim answered from a checkout. That is ADR 0195's substitution
 #: in the most expensive place it could happen.
-OFFLINE_CLAIMS: frozenset[str] = frozenset()
+#:
+#: **Session 22 declares the first four**, and they are the shape ADR 0202 was
+#: written for: `apg dev` is a command a developer runs on their own machine,
+#: and there is no host on which a disposable local cluster could be measured
+#: differently. `dev_churn` includes `DEV-CI-001`, whose proof reads the
+#: workflow file -- CI runs the round trip, and the assertion is that the
+#: workflow says so, which is a property of this checkout.
+OFFLINE_CLAIMS: frozenset[str] = frozenset(
+    {"dev_environment", "dev_isolation", "dev_churn", "offline_evidence"}
+)
 
 #: Claim name -> the acceptance requirements whose tests prove it.
 #:
@@ -125,6 +134,33 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset()
 #: session keeps proving an earlier one's guarantees, not that a later
 #: requirement withdraws one from the earlier session's evidence.
 CLAIMS: dict[str, tuple[str, ...]] = {
+    # Session 22 (ADR 0202, ADR 0203). Six claims, and they do not all resolve
+    # the same way -- which is the session's point rather than an accident.
+    #
+    # The first four are OFFLINE, declared in `OFFLINE_CLAIMS` above. `apg dev`
+    # is a command a developer runs on their own machine; there is no host on
+    # which a disposable local cluster could be measured differently, so a
+    # claim about it that waited for a deployment would wait forever. Under ADR
+    # 0202 that makes them offline only because they are NAMED, and a mistake
+    # in either direction is caught: a marker on any of their proofs is
+    # refused, and a fifth claim with no live proof that nobody declared is
+    # still refused exactly as it always was.
+    #
+    # The last two are HOST claims and are deliberately NOT declared offline,
+    # even though this session has no trip. Both are about a running plane --
+    # whether the document's tool count is the one the container serves, and
+    # whether an agent can read a tenant's rows -- and a checkout cannot answer
+    # either. They are `not_run` at this session's close, and Session 24's trip
+    # collects them (D1163). That is the honest verdict and the reason the
+    # offline mode is a declaration rather than an inference: making these two
+    # offline would take eight minutes of beta serving the wrong lock (D1152)
+    # and report it green.
+    "dev_environment": ("DEV-ENV-001", "DEV-SUBJECT-001", "DEV-SEED-001"),
+    "dev_isolation": ("DEV-ISO-001",),
+    "dev_churn": ("DEV-CHURN-001", "DEV-CI-001"),
+    "offline_evidence": ("EVD-OFFLINE-001",),
+    "plane_confirmed_count": ("OPS-PLANE-001",),
+    "agent_tenant_read": ("AGT-TENANT-002",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

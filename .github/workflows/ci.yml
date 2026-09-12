@@ -103,6 +103,25 @@ jobs:
           . .venv/bin/activate
           bin/session-01-check.sh
 
+      # Session 22 (ADR 0202): the current session's OFFLINE evidence half,
+      # written from the gate's own JUnit rather than from a second run -- the
+      # two would be different measurements of different collections, and the
+      # evidence model's whole rule is that a claim's verdict is computed from
+      # the results of exactly the node ids the registry lists.
+      #
+      # The session is DERIVED and never typed (ADR 0014), which is the same
+      # repair D719 made to the writer's own bounds. A claim this checkout
+      # cannot prove makes this step red, and that is the point of putting it
+      # here: an offline claim that stops being provable is a defect a push
+      # should surface, not something a session close discovers.
+      - name: Write the offline evidence half
+        run: |
+          . .venv/bin/activate
+          session="$(PYTHONPATH=src python -c 'from agentic_postgres import CURRENT_SESSION as s; print(s)')"
+          python bin/write-session-evidence.py --session "${session}" --mode offline \
+            --junit .generated/session-01/contract-tests.xml \
+            --output "evidence/session-$(printf '%02d' "${session}")-offline.json"
+
       # Short-lived, and safe to publish: the gate has already asserted that
       # generated output contains no credential, no secret-bearing key, and no
       # credential-carrying URL.
@@ -114,6 +133,7 @@ jobs:
           path: |
             .generated/session-01/
             evidence/session-01.json
+            evidence/session-*-offline.json
           retention-days: 7
           if-no-files-found: warn
 
@@ -190,6 +210,32 @@ jobs:
             --capabilities capabilities.example.yaml --render-only >/dev/null
           bin/compose.sh .generated/fixture-alpha-dev --profile contract config >/dev/null
           bin/compose.sh --edge --host host.example.yaml config >/dev/null
+
+      # Session 22 (D1073, D1169): the product's own local environment is what
+      # a pull request's environment is here. It runs after the render above
+      # because `up` refuses a project this checkout has not rendered, which is
+      # the same order `bin/session-01-check.sh` takes.
+      #
+      # Timed, because the capacity envelope reads these numbers (D1168). A
+      # fresh runner has NOT cached the postgres image, and that is the case
+      # the workstation cannot measure without evicting the image the whole
+      # contract suite shares -- so the uncached first run is measured here and
+      # nowhere else. Arithmetic in python rather than `bc`: the venv is
+      # already active and one fewer assumption about the runner image.
+      - name: The local environment stands up, seeds, resets and comes down
+        run: |
+          . .venv/bin/activate
+          now() { python -c 'import time; print(f"{time.time():.3f}")'; }
+          t0=$(now)
+          bin/apg.sh dev up --project project.example.yaml
+          t1=$(now)
+          bin/apg.sh dev status --project project.example.yaml
+          bin/apg.sh dev seed --project project.example.yaml example
+          t2=$(now)
+          bin/apg.sh dev reset --project project.example.yaml
+          t3=$(now)
+          bin/apg.sh dev down --project project.example.yaml
+          python -c "print(f'dev up: {$t1 - $t0:.2f} s (image not cached)'); print(f'dev reset: {$t3 - $t2:.2f} s')"
 
       - name: Offline Session 2 contract suite
         run: |

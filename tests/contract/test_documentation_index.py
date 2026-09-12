@@ -118,6 +118,15 @@ def test_every_flag_the_readme_shows_appears_in_that_commands_usage() -> None:
     command does not have. What it cannot catch is the **omitted** required flag,
     because an absence is not a token to scan for. That half is Run 8's
     rehearsal, and it is said here so nobody reads this test as covering both.
+
+    **The dispatcher is asked its VERB's usage** (D1196). `bin/apg.sh` is a
+    front door: `apg.sh dev up --project FILE` documents `--project` in
+    `bin/dev.sh --help`, and the dispatcher's own help lists verbs rather than
+    flags. Asking the front door about a flag it delegates reports every README
+    line that goes through it as invented, which is what made this test red the
+    first time the README showed one. Resolved rather than exempted -- the line
+    is checked against the verb's usage, so a flag nobody documents anywhere is
+    still caught.
     """
     text = README.read_text(encoding="utf-8")
     problems: list[str] = []
@@ -132,8 +141,13 @@ def test_every_flag_the_readme_shows_appears_in_that_commands_usage() -> None:
         if not path.is_file():
             continue
 
+        arguments = ["--help"]
+        rest = match.group(2).split()
+        if relative == "bin/apg.sh" and rest and re.fullmatch(r"[a-z][a-z-]+", rest[0]):
+            arguments = [rest[0], "--help"]
+
         usage = subprocess.run(
-            [str(path), "--help"], capture_output=True, text=True, check=False, timeout=60
+            [str(path), *arguments], capture_output=True, text=True, check=False, timeout=60
         )
         documented = usage.stdout + usage.stderr
         # The comment half of a line is prose, not an invocation.

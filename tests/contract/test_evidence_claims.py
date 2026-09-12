@@ -1047,6 +1047,18 @@ CLAIM_INTRODUCED_IN = {
     "disaster_kit": 18,
     "replacement_host_restore": 18,
     "failure_rehearsal": 18,
+    # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
+    # (D690), and the first four are the first OFFLINE claims this project has
+    # had: `apg dev` is a developer's own machine, and no deployment can answer
+    # a question about it. The last two are host claims with no trip -- they
+    # are `not_run` at this session's close and Session 24's trip collects
+    # them (D1163), which is what the third mode being a DECLARATION buys.
+    "dev_environment": 22,
+    "dev_isolation": 22,
+    "dev_churn": 22,
+    "offline_evidence": 22,
+    "plane_confirmed_count": 22,
+    "agent_tenant_read": 22,
     # Session 21 (ADR 0200, ADR 0201). Four claims, two of them widenings the
     # plan had joining older claims and ADR 0089 refuses (D1150).
     "agent_tenant_surface": 21,
@@ -1359,17 +1371,28 @@ def declared_offline(tmp_path: Path):
         claim: str, requirements: tuple[str, ...], *, break_claim_mode: bool = False
     ) -> None:
         text = original.decode("utf-8")
-        text = text.replace(
-            "OFFLINE_CLAIMS: frozenset[str] = frozenset()",
-            f'OFFLINE_CLAIMS: frozenset[str] = frozenset({{"{claim}"}})',
-            1,
+        # **Added to the declaration rather than replacing it** (D1194). The
+        # first version matched `frozenset()` -- true while the set was empty,
+        # and silently false the moment Run 6 declared the four real claims in
+        # it. `assert claim in text` still passed, because the CLAIMS
+        # replacement below also writes the name, so the fixture reported a
+        # declaration it had not made and four tests failed as if the product
+        # were wrong. Anchored and counted now, D269's rule: a miss is fatal.
+        offline = "OFFLINE_CLAIMS: frozenset[str] = frozenset(\n    {"
+        assert text.count(offline) == 1, (
+            f"OFFLINE_CLAIMS' declaration moved; the fixture anchors on it "
+            f"and matched {text.count(offline)} times"
         )
-        text = text.replace(
-            "CLAIMS: dict[str, tuple[str, ...]] = {",
-            f'CLAIMS: dict[str, tuple[str, ...]] = {{\n    "{claim}": {requirements!r},',
-            1,
+        text = text.replace(offline, f'{offline}"{claim}", ', 1)
+
+        table = "CLAIMS: dict[str, tuple[str, ...]] = {"
+        assert text.count(table) == 1, "CLAIMS' declaration moved"
+        text = text.replace(table, f'{table}\n    "{claim}": {requirements!r},', 1)
+
+        assert text.count(f'"{claim}"') >= 2, (
+            "the declaration did not take in BOTH places -- one of them is what "
+            "the test under it is about"
         )
-        assert claim in text, "the declaration did not take"
 
         if break_claim_mode:
             # **The first guard, neutralised on purpose.** `write_half`'s

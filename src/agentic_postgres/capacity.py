@@ -242,6 +242,56 @@ ENVELOPE: tuple[Measurement, ...] = (
             "property from a limit that sheds load. This one sheds."
         ),
     ),
+    # ---- the developer's own machine (Session 22, D1066, D1168) -----------
+    #
+    # `apg dev` exists because the alternative to a local cluster is a restore,
+    # and the Session 18 trip measured that at 247 s on the deployment host.
+    # These two numbers are what the command actually costs, and they are
+    # MACHINE numbers in the strictest sense: a developer reading them wants to
+    # know what THEIR machine will do, and the only honest thing this document
+    # can say is what one machine did under stated conditions.
+    Measurement(
+        subject="apg dev up: a disposable cluster, migrated, from nothing",
+        value="10.98 s and 9.89 s (two samples)",
+        kind=MACHINE,
+        conditions=(
+            "an 8 GB development machine, WSL2, kernel 6.6.87.2-microsoft-standard-WSL2",
+            "Docker server 29.5.2, the locked postgres image ALREADY CACHED",
+            "33 migrations: the 31 released, plus the example project's set of two",
+            "no container of this project running and no state directory present",
+        ),
+        note=(
+            "The whole verb: `docker run` on the pinned image, the bootstrap "
+            "statements as the superuser, 33 rendered migrations applied one "
+            "transaction each as the migration user, both ledgers written, two "
+            "roles activated and one subject registered. **The comparison "
+            "worth making is against a restore**, which the Session 18 trip "
+            "measured at 247 s -- on a different machine, so the ratio is not "
+            "a number either, but the two are answers to the same question and "
+            "one of them is a coffee break. The image being cached is a "
+            "condition and not a detail: the uncached case is a first-run cost "
+            "this machine cannot measure without evicting the image the whole "
+            "suite shares, and it is listed as unmeasured below."
+        ),
+    ),
+    Measurement(
+        subject="apg dev reset: down, then up",
+        value="10.07 s and 10.28 s (two samples)",
+        kind=MACHINE,
+        conditions=(
+            "the same 8 GB development machine, WSL2, Docker server 29.5.2",
+            "the locked postgres image already cached",
+            "an environment that was running, with its 33 migrations applied",
+            "the anonymous volume and the state directory removed, then 33 re-applied",
+        ),
+        note=(
+            "`reset` is `down` then `up`, and the numbers say so: the teardown "
+            "disappears into the sampling spread, which is the property worth "
+            "publishing. A developer deciding whether to reset rather than "
+            "debug a dirty database is choosing between ten seconds and an "
+            "afternoon, and that is the decision this row is for."
+        ),
+    ),
 )
 
 
@@ -296,6 +346,25 @@ UNMEASURED: tuple[Unmeasured, ...] = (
             "waiting on the same evidence."
         ),
         unblocked_by="the Run 8 host trip, and a second envelope taken there",
+    ),
+    Unmeasured(
+        subject="apg dev up on this workstation with the image NOT cached",
+        reason=(
+            "The first `apg dev up` a developer ever runs pulls the locked postgres "
+            "image, and that pull is most of what they will wait for. Measuring it "
+            "here means `docker rmi` of the image **the whole contract suite shares** "
+            "-- six cluster fixtures and the round trip -- so the measurement would "
+            "cost every later test in the session a pull, and the number obtained "
+            "would be this machine's link speed rather than anything about the "
+            "product. CI measures the case instead: a fresh `ubuntu-latest` runner "
+            "has cached nothing, and the round-trip step times the same two verbs "
+            "there (D1168, D1169)."
+        ),
+        unblocked_by=(
+            "nothing that should be run mid-session; the CI row is the measurement, "
+            "and a developer wanting their own first-run number can time "
+            "`docker pull` from versions.env"
+        ),
     ),
 )
 
