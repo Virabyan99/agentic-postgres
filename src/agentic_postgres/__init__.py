@@ -191,7 +191,42 @@ from pathlib import Path
 #: here; Session 24's `upgrade plan` on the host is what confirms it, and a
 #: `major` required there is a stop condition rather than a number to write
 #: down.
-CURRENT_SESSION = 22
+#:
+#: **Session 23 moves it to 23, all-or-nothing again** (D690): nine `GEN-*` and
+#: `AGT-*` requirements and four claims, with every offline half written in the
+#: run that built its plane and the two live halves here, gated on the trip's
+#: declarations -- D938's rule, applied deliberately for the third session
+#: running after D1020 recorded Session 18 missing it.
+#:
+#: What it ships is a GENERATED ARTEFACT, which is a kind of thing this
+#: repository had not produced before. `apg generate` writes a typed TypeScript
+#: client over the surface a project publishes, and ADR 0204's sentence is what
+#: makes it more than a convenience: **a generated client is a claim about the
+#: surface it was generated from**. The claim is a digest in the package, and
+#: `init()` is where a caller checks it against the document the deployment
+#: actually serves -- as the caller, through the route a caller uses, because
+#: PostgREST serves a different document to every role.
+#:
+#: Two of this session's four claims are OFFLINE (ADR 0202's third mode, used
+#: here for the second time): the IR, the emitter, the version rule, the
+#: command and the toolchain are all answerable in a checkout with Docker. The
+#: other two are HOST claims and are deliberately not declared offline, because
+#: a checkout cannot say whether a deployment serves the surface a client was
+#: generated for, nor which lock a running plane loaded. They are `not_run` at
+#: this session's close and Session 24's trip collects them.
+#:
+#: `VERSION` moves to `1.4.0`, and ADR 0162 prices it. The session adds a new
+#: operator command (`apg generate`), an optional `projects/<slug>/clients/`
+#: directory a project may or may not have, **one additive member in a metadata
+#: tool's result** (`list_resources` gains `lock` beside `resources`; every
+#: existing key unchanged), and a new fixture image nothing deployed runs.
+#: **No manifest, outputs, capability, lock or secret schema moves**, and no
+#: released migration is added -- a project that adopts this release and never
+#: types `apg generate` renders byte-identical artefacts and deploys the same
+#: containers. A minor, proposed here; Session 24's `upgrade plan` on the host
+#: is what confirms it, and a `major` required there is a stop condition rather
+#: than a number to write down.
+CURRENT_SESSION = 23
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

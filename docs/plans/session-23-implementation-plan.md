@@ -3,8 +3,8 @@
 **Status:** **PLANNED 2026-09-12** at `d6f6e94`, Session 22's close, on `main`.
 No run has started. §1 is D1200–D1211 (planning rows, every one measured
 today in a rig or read from the tree at `d6f6e94`); Run 1 added **D1212–D1215**,
-measured at the branch point, Run 2 added **D1216-D1223**, Run 3 **D1224-D1228**, Run 4 **D1229-D1233** and Run 5
-**D1234-D1235**, so next free is **D1236**. ADR
+measured at the branch point, Run 2 added **D1216-D1223**, Run 3 **D1224-D1228**, Run 4 **D1229-D1233**, Run 5
+**D1234-D1235** and Run 6 **D1236-D1238**, so next free is **D1239**. ADR
 **0204** is this session's; the runs add theirs below the planning rows.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 23* and its rows D1067
 (the `generate` hook after a project migration), D1068 (one session, the IR
@@ -162,7 +162,7 @@ executed).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1236**. Rows D1200–D1211
+Six columns, next free number after this table **D1239**. Rows D1200–D1211
 were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's** and
 **D1216–D1223 Run 2's**, each measured while the run that names it was built.
 The runs add theirs below them as they go, each run's numbers named in its Done
@@ -206,6 +206,9 @@ paragraph.
 | **D1233** | Run 4's rig wrote the authenticator's pgpass at `0600` under `tmp_path` and bind-mounted it into PostgREST. Seven proofs green on this workstation. | **CI RED on the first push.** `fe_sendauth: no password supplied`, surfacing 90 seconds later as *"PostgREST never loaded its schema cache"*. The cause: the PostgREST image declares `User=1000` (`docker inspect --format '{{.Config.User}}'`), and libpq **ignores a passfile looser than 0600** — so the file must be `0600` **and** owned by uid 1000. On this workstation the author's uid is *also* 1000, so it was readable **by coincidence**; the CI runner is uid **1001** and the container could not open it. Reproduced locally with a control: the same file at uid 1000 reads, at uid 1001 gives `Permission denied`. | The uid is read from the image (`image_user`) rather than assumed, and the file is given that owner through a **root container** on a pinned image — a test process cannot `chown` to an arbitrary uid, and the looser mode that would avoid the question is the one libpq refuses. And the fixture now **reads the file as that user before waiting on anything**, so the failure names a permission rather than timing out on a schema cache. | **D1228, two runs earlier, was the same fact in the same session**: a file the author can read and the container's user cannot. That one was a directory at `0700` and this one a file at `0600`; both were found by a container refusing to see something that was plainly there, and the first did not generalise into a habit. The tell both times was a message about the *content* — "no client here", "no password supplied" — where the truth was about *access*. **A rig that passes because the author's uid happens to match the image's is a value that looks measured and is not** (§7), and the only thing that distinguishes it from a correct one is a machine nobody has run it on yet. | 0204 |
 | **D1234** | Run 5's envelope rows were to be *"`apg generate` wall time for the release contract (5 objects, 6 tools) and for the example project's (7 objects, 8 tools)"*. | The example project's contract compiles to **7 tools, not 8** — measured by generating both in rig 23g and counting the IR: release `relations=2 rpcs=3 tools=6` (5 objects), example `relations=3 rpcs=4 tools=7` (7 objects). The release's six plus the project's one (`set_note_embedding`) is seven, which is also the number beta serves live and has since Session 21. | The rows name what was counted. The second row's subject reads *"a project's contract, 7 objects and 7 tools"* and its conditions carry the relation, RPC and tool counts and the emitted byte count, so a re-measurement that changes the shape cannot inherit a stale size. | A number in a plan is a guess until a run counts it, and this one was about to be written into a **published capacity document** — the class of artefact §7 calls most at risk of being reported dishonestly, because a document goes green by existing. The counting cost one line of the rig. | 0204 |
 | **D1235** | Run 5 step 1: *"`test_printed_commands` scans the new prints"*. | **It could not have.** `tests/contract/test_printed_commands.py` read exactly one file — `bin/deploy-project.py` — and D975's rule has been enforced on that driver alone since Session 17. The two commands that gained a printed command in this run are `bin/api-contract.py` and `bin/mcp-contract.py`, and a placeholder in either would have been invisible to the guard the plan named as its reader. | The scan is widened to a `PRINTING_DRIVERS` map of the three drivers that actually print a command, with the rule and every assertion unchanged — a widening to a measured set, which the non-negotiables distinguish from loosening a check to a subset. A second proof asserts the shape the scan cannot: that `--project` is followed by an interpolation and not a literal, in each of the two. The battery applied the placeholder mutation against both, separately, and both killed. | The plan named a guard as the reader of a new print without checking what that guard reads — question 5's shape (*when a decision is implemented, which of its callers got it?*) turned around: **when a rule is relied on, which files does it actually cover?** A rule enforced on one file for six sessions reads, from a plan, as a rule about the repository. | — |
+| **D1236** | §2's `GEN-EMIT-001` states that *"the emitted `RestError` union is the PT-code vocabulary and the `AgentRefusal` union is the seven tokens"* and that *"a write wrapper requires `idempotency_key` and `dry_run`"*. | **Nothing asserted either.** `grep -n 'AgentRefusal\|PtCode' tests/contract/test_client_typescript.py` and the same for `idempotency_key` each returned zero lines. The emitter does both correctly — measured in the committed `types.ts` and `agent.ts` — and the proofs that existed (`test_the_caller_facing_tokens_match_the_runtimes`, `test_the_reserved_write_parameters_match_the_harnesss`) are about what the **IR** carries. Between the IR and the file is an emitter, and a union written from a hard-coded list would satisfy every IR-side proof. | Two proofs written BEFORE the requirement was registered: `test_the_error_unions_are_the_pt_codes_and_the_seven_tokens` asserts exact equality in both directions (a superset is the failure, and a containment check passes on one), and `test_a_write_wrapper_requires_the_two_reserved_parameters` reads the roster from the IR and refuses an optional `?` on either parameter. | **D816/D929 one level up.** A declared field with no reader is an unverified field; a registered requirement CLAUSE with no proof is an unverified claim, and it goes into an acceptance matrix and a verdict. The cost of finding it was one grep, run because Run 6's own instruction is to write *what the runs actually wrote* rather than what the plan proposed — and four of the nine requirements' node ids had drifted from the plan's guesses, which is what made reading each one necessary. | 0204 |
+| **D1237** | The plan's targeted list says `test_session_twenty_two_gate_modes` *"must still pass"* unchanged. | **It could not.** Its `test_exactly_the_four_declared_claims_are_offline` asserts `set(claims.OFFLINE_CLAIMS) == set(SESSION_TWENTY_TWO_CLAIMS["offline"])` — an equality against the WHOLE declared set. That was correct while Session 22's four were the only offline claims in the project, and on the day a second session declared any it became a rule that **no later session may ever have an offline claim**. It failed at the earliest moment it could, which is a whole session after it was written. | Narrowed in both modules to what each is about. Session 22's asserts its own four are declared and neither of its host claims is; Session 23's asserts, by SUBTRACTION against `CLAIM_INTRODUCED_IN`, that `OFFLINE_CLAIMS` less every earlier session's claims is exactly this session's two — so a third arriving without anybody deciding to still fails. Neither assertion was weakened: both got stricter about their own scope. | **A scope too wide reads as correct for exactly as long as nothing else exists.** The assertion was not wrong about Session 22; it was stated one level up from the property it was about, and nothing in the tree could tell the difference until a second instance existed. The same shape as §7's *a premise wrong in the reassuring direction survives longest* — and the thing that found it was not a review but a second session simply happening. | 0202 |
+| **D1238** | Run 6 step 1 moves `VERSION` 1.3.0 → 1.4.0. The plan's step 1 lists what the bump prices and stops there. | **The bump breaks `apg generate --check`.** `contract.ts` carries `templateVersion`, so the committed example client stopped being what its contract generates the instant the constant moved — exit 5, on a file nobody had touched, with the gate's step 6 and CI's new step both refusing it. | The client is regenerated in the same commit as the bump. The version rule behaved **correctly** and that is the part worth recording: `generate` reported *no contract change*, so `clientVersion` stayed `1.0.0` and all four digests are byte-identical — only the provenance line moved. D1224's rule earns its keep here, because the naive rule would have published `1.0.1` and told every adopter the contract had moved. | **Every release bump from now on owes a regeneration in the same commit**, and this is the first session in which a release constant reaches a committed ARTEFACT rather than only a rendered document. Recorded in the ledger's §12 rather than only here, because the next person to move `VERSION` is not reading this plan. | 0162 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1395,7 +1398,77 @@ must still pass), `test_compatibility`, `test_upgrade_plan`,
 `test_upgrade_command`, `test_deployment_suite_shape`, `test_client_typescript`,
 then the gate. **Push.** CI green expected; record the run id.
 
-**Done.** *(the run writes this)*
+**Done.** The bump (2026-09-12).
+
+`CURRENT_SESSION` **23**, `template_version` **1.4.0**, with ADR 0162's pricing
+in the constant's comment: a new operator command, an optional
+`projects/<slug>/clients/` directory, one additive member in a metadata tool's
+result, and a new fixture image. No manifest, outputs, capability, lock or
+secret schema moves and no released migration is added — **a project that
+adopts 1.4.0 and never types `apg generate` renders byte-identical artefacts
+and deploys the same containers.** A minor, proposed; Session 24's `upgrade
+plan` confirms it.
+
+**Nine requirements and four claims.** `GEN-*` joins `ID_PATTERN` with its
+reason — *a GENERATED ARTEFACT: what the product writes for a developer to
+hold, as opposed to what it serves*; neither `DX` (a documented path a person
+walks) nor `DEV` (a developer's own machine) names it. The node ids are **what
+the runs actually wrote, read out of the tree**, and four of the nine
+requirements' lists differed from the plan's proposals. `generated_client` and
+`generated_client_toolchain` are in `OFFLINE_CLAIMS`;
+`generated_client_hash` and `agent_lock_reported` are deliberately not, with
+the reason beside them.
+
+**The live module** `tests/deployment/test_session23_client.py`: the committed
+client run in the toolchain image against beta (`ok`, and a typed read back)
+and against alpha (`stale_contract` naming both digests — the control that says
+`init()` discriminates), and `list_resources` on beta compared three ways
+against the plane's own probe and the digest in `contract.ts`, with alpha
+differing. `--setup-plan` with the three variables SET collects both and
+deselects neither; the same command with them unset skips both cleanly, which
+is the control (D671, D676).
+
+**CI** gains *The generated example client is current and typechecks*, after
+the `apg dev` round trip, guarded by a proof that reads the workflow as YAML
+and asserts `--check` runs BEFORE the container — a stale client is usually
+still perfectly valid TypeScript.
+
+**The gate** `bin/session-23-check.sh`, derived from 22's by diff: twelve
+anchored substitutions, each required to match exactly once, **and the run that
+matters is the line-by-line read afterwards**. It found two lines no
+substitution could have — `claims_through_session(22)` in the declarations
+paragraph, and step 9's comment still calling itself *the first gate whose
+offline mode writes a half*. Exercising it found two more: shellcheck refuses a
+directive with prose after it on the same line and fails the WHOLE FILE with an
+error pointing four hundred lines away; and the usage named this session's two
+host claims only in prose, where an operator reading a `not_run` verdict cannot
+find them. Step 8b reads **one** locked value with `sed` rather than sourcing
+`versions.env`, because `set -a; . ./versions.env` exports forty names into the
+rest of the process — including into step 9, where evidence is written.
+`shellcheck` exit 0, `--help` exit 0 at 173 lines, an unknown mode exit 2.
+
+**Three rows, and two of them are about assertions rather than code.**
+**D1236**: two clauses of `GEN-EMIT-001` had no proof at all — the emitted
+refusal unions and a write wrapper's required `idempotency_key`/`dry_run`. The
+emitter does both; nothing asserted either, because the proofs that existed
+were about the IR. Found only because this run's instruction is to write what
+the runs *actually wrote*. **D1237**: Session 22's offline-claims test asserted
+a global equality for a session-scoped property, which made it a rule that no
+later session may declare an offline claim — it failed at the earliest moment
+it could. **D1238**: the bump moved `templateVersion` in the committed client
+and `generate --check` exited 5 on a file nobody had touched; the version rule
+itself behaved correctly, keeping `clientVersion` at `1.0.0` because no digest
+moved.
+
+**Battery:** 12 mutations, 12 killed, 12 controls green.
+
+**Targeted:** `test_evidence_claims`, `test_acceptance_registry`,
+`test_cli_contract`, `test_capacity_envelope`, `test_documentation_index`,
+`test_session12_documented_path`, `test_repository_contract`,
+`test_gate_contract`, `test_session_twenty_three_gate_modes`,
+`test_session_twenty_two_gate_modes`, `test_compatibility`, `test_upgrade_plan`,
+`test_upgrade_command`, `test_deployment_suite_shape`, `test_client_typescript`,
+`test_generate_command`, `test_mcp_tools`, then `bin/session-01-check.sh`.
 
 ### Run 7 — the close (no trip)
 

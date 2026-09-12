@@ -120,6 +120,12 @@ SHELL_COMMANDS = (
     # first offline mode that requires docker, and says so as a prerequisite
     # rather than letting the cluster proofs skip into a `not_run` claim.
     "bin/session-22-check.sh",
+    # Session 23. Derived from 22's by diff. Its offline mode writes a half
+    # too, and the two claims it reports are about a GENERATED ARTEFACT and
+    # its generator -- settled by four committed files and a container. The
+    # two that need a deployment are separate host claims rather than folded
+    # in, which is the line ADR 0202 exists to let a session draw.
+    "bin/session-23-check.sh",
     "bin/smoke-test.sh",
     "bin/storage-admin.sh",
     "bin/upgrade.sh",

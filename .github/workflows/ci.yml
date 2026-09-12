@@ -237,6 +237,23 @@ jobs:
           bin/apg.sh dev down --project project.example.yaml
           python -c "print(f'dev up: {$t1 - $t0:.2f} s (image not cached)'); print(f'dev reset: {$t3 - $t2:.2f} s')"
 
+      # Session 23 (ADR 0204): the committed example client is what the emitter
+      # produces, it typechecks under --strict on the pinned toolchain, and
+      # `generate --check` refuses a stale one. `--network none` is the runner's
+      # own default, and it matters here: `npx tsc` resolves from the working
+      # directory and would FETCH (D1225), inside a claim declared offline. The
+      # runtime smoke against a real served surface runs in the suite below
+      # (test_generated_client_runtime).
+      - name: The generated example client is current and typechecks
+        run: |
+          . .venv/bin/activate
+          bin/apg.sh generate --check --project project.example.yaml
+          set -a; . ./versions.env; set +a
+          docker build -q --build-arg "BASE_IMAGE=${NODE_RUNTIME_IMAGE}" \
+            -t apg-client-typescript services/clients/typescript
+          docker run --rm -v "$PWD/projects/example/clients/typescript:/work:ro" \
+            apg-client-typescript
+
       - name: Offline Session 2 contract suite
         run: |
           . .venv/bin/activate

@@ -1056,6 +1056,18 @@ CLAIM_INTRODUCED_IN = {
     "disaster_kit": 18,
     "replacement_host_restore": 18,
     "failure_rehearsal": 18,
+    # Session 23 (ADR 0204). Four claims, landing with the constant (D690),
+    # split two OFFLINE and two HOST. The split is the session's own argument:
+    # what the IR reads, what the emitter writes, how a version is derived and
+    # whether the emitted JavaScript computes Python's fingerprint are all
+    # settled by committed files and a container -- but whether a DEPLOYMENT
+    # serves the surface a client claims, and which lock a RUNNING plane
+    # loaded, are not. The second pair is `not_run` at this session's close and
+    # Session 24's trip collects them.
+    "generated_client": 23,
+    "generated_client_toolchain": 23,
+    "generated_client_hash": 23,
+    "agent_lock_reported": 23,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

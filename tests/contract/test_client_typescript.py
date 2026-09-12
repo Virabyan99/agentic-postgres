@@ -308,6 +308,180 @@ def test_init_reports_three_outcomes_and_never_folds_unreachable_into_stale(
     )
 
 
+def test_the_error_unions_are_the_pt_codes_and_the_seven_tokens(
+    emitted: dict[str, str],
+    project_ir: client_ir.IR,  # noqa: F811
+) -> None:
+    """**GEN-EMIT-001.** The two refusal vocabularies, as EMITTED.
+
+    `test_the_caller_facing_tokens_match_the_runtimes` and
+    `test_the_pt_codes_are_scanned_from_the_release_and_the_set` already prove
+    the IR carries the right names. **That is not this.** Between the IR and
+    the file is an emitter that writes the unions out, and a union emitted from
+    a hard-coded list would satisfy every IR-side proof while shipping a
+    vocabulary that drifts the next time either set moves.
+
+    Both halves matter, for different reasons:
+
+    * `PtCode` is what a caller **branches on**. A code the release raises and
+      the union omits lands in the `string` arm of `PtCode | string` and gets
+      handled as an unknown — the failure is silent and reads as a caller bug.
+    * `AgentRefusal` is what an agent may be **told**: the closed set in
+      `mcp_errors.CALLER_FACING_TOKENS`, which exists because nothing upstream
+      of the plane is relayed to a caller (D433). A union that gained a member
+      would be a client typed to receive something the runtime must never send.
+
+    Exact equality in both directions, not containment — a superset is the
+    failure this is for, and a containment check would pass on one.
+
+    Goes red if: either union is emitted from a literal that stops tracking its
+    source; a code or token is added to the product and not to the emitter; or
+    the emitter starts widening `AgentRefusal` to `string`.
+    """
+    types = emitted["types.ts"]
+
+    for name, expected in (
+        ("PtCode", project_ir.pt_codes),
+        ("AgentRefusal", project_ir.caller_facing_tokens),
+    ):
+        declaration = re.search(rf"export type {name} = ([^;]+);", types)
+        assert declaration, f"no {name} union was emitted"
+        members = tuple(sorted(re.findall(r'"([^"]+)"', declaration.group(1))))
+        assert members == tuple(sorted(expected)), (
+            f"the emitted {name} union is {members} and the contract's is "
+            f"{tuple(sorted(expected))}. A union that is not exactly the vocabulary "
+            "is a caller typed for a set the product does not use"
+        )
+
+
+def test_a_write_wrapper_requires_the_two_reserved_parameters(
+    emitted: dict[str, str],
+    project_ir: client_ir.IR,  # noqa: F811
+) -> None:
+    """**GEN-EMIT-001**, ADR 0181 and ADR 0182 at the client.
+
+    Every write tool the lock carries takes `idempotency_key` and `dry_run`,
+    and the generated wrapper declares both **required**. Optional is the
+    failure worth naming: TypeScript's `?` would let a caller omit the key, the
+    runtime would then have no claim to make in the write's own transaction,
+    and a retried write would commit twice. `idempotency_key?: string` is easy
+    to write and nearly invisible in a review.
+
+    `dry_run` likewise: a rehearsal that costs what the write costs less the
+    commit is only a rehearsal if the caller had to ask for it (ADR 0182).
+
+    The roster is read from the IR rather than listed here, because a hand-
+    listed roster stays right about the tools it names while a new one ships
+    unguarded.
+
+    Goes red if: either parameter is emitted optional or dropped; a write tool
+    gains a wrapper that does not carry both; or the emitter starts treating
+    the reserved pair as ordinary arguments.
+    """
+    agent = emitted["agent.ts"]
+    writes = tuple(tool for tool in project_ir.tools if tool.kind == "write")
+    assert writes, "the example contract carries no write tool; this would prove nothing"
+
+    signatures = dict(re.findall(r"async (\w+)\(args: \{([^}]*)\}\): Promise<AgentOutcome>", agent))
+    carrying = {
+        name: parameters
+        for name, parameters in signatures.items()
+        if "idempotency_key" in parameters or "dry_run" in parameters
+    }
+    assert len(carrying) == len(writes), (
+        f"the contract carries {len(writes)} write tools and the emitter wrote "
+        f"{len(carrying)} wrappers taking a reserved parameter: {sorted(carrying)}"
+    )
+    for name, parameters in carrying.items():
+        for reserved in ("idempotency_key", "dry_run"):
+            assert reserved in parameters, f"{name} does not take {reserved}"
+            assert f"{reserved}?" not in parameters, (
+                f"{name} declares {reserved} OPTIONAL. A caller may then omit it: "
+                "without the key the write has no claim to make in its own "
+                "transaction, and a retry commits twice (ADR 0181)"
+            )
+
+
+def test_ci_typechecks_and_smokes_the_example_client() -> None:
+    """**GEN-TOOLCHAIN-001**'s CI clause. The workflow, read as YAML (D1169).
+
+    A generated artefact that is committed has exactly one failure mode worth
+    a gate: it stops being what the generator produces. `generate --check`
+    catches that in a fifth of a second, and the typecheck catches the case
+    `--check` cannot -- a client that IS a fresh generation and does not
+    compile, which is what shipped on the emitter's first run (D1223).
+
+    Three properties, and the ORDER of the first two is the assertion:
+
+    * `generate --check` runs BEFORE the container. A committed client that
+      has drifted would otherwise be typechecked -- successfully, because a
+      stale client is usually still valid TypeScript -- and the step would go
+      green on the wrong artefact;
+    * the image is built from `services/clients/typescript` with the pinned
+      `BASE_IMAGE`, not from whatever `node:22-alpine` resolves to on the
+      runner;
+    * the step sits AFTER the `apg dev` round trip, so a runner that never got
+      as far as a working checkout fails on the cheaper thing first.
+
+    Read as YAML rather than grepped, because a text scan over a workflow
+    answers *does this string appear somewhere in the file*, which a comment
+    satisfies (D277) -- and this workflow's comment names `generate --check`.
+
+    Goes red if: the step is deleted or renamed; `--check` is dropped, leaving
+    a typecheck of an artefact nobody compared; the build stops passing
+    `BASE_IMAGE`; or the step is moved ahead of the round trip that produces
+    the render it needs.
+    """
+    import yaml
+
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    )
+    steps = workflow["jobs"]["session-2-contract"]["steps"]
+    names = [str(step.get("name", "")) for step in steps]
+
+    matching = [
+        index for index, name in enumerate(names) if "generated example client" in name.lower()
+    ]
+    assert len(matching) == 1, (
+        f"{len(matching)} steps name the generated client; the job has {names}"
+    )
+    index = matching[0]
+
+    round_trip = [
+        i for i, name in enumerate(names) if "local environment stands up" in name.lower()
+    ]
+    assert round_trip and index > round_trip[0], (
+        "the client step runs before the `apg dev` round trip. It needs the render that "
+        "step's job has already done, and a runner with a broken checkout should fail on "
+        "the cheaper thing first"
+    )
+
+    script = str(steps[index]["run"])
+    # Comments are what a text scan over a workflow accepts (D277), and this
+    # step HAS a comment naming `generate --check`. Read the commands.
+    commands = "\n".join(line for line in script.splitlines() if not line.lstrip().startswith("#"))
+
+    checked = commands.find("generate --check --project project.example.yaml")
+    ran = commands.find("docker run")
+    assert checked >= 0, f"the step does not run `generate --check`:\n{commands}"
+    assert ran >= 0, f"the step does not run the toolchain image:\n{commands}"
+    assert checked < ran, (
+        "the step typechecks before it checks for drift. A stale client is usually still "
+        "valid TypeScript, so the container would go green on an artefact nobody compared"
+    )
+    assert "services/clients/typescript" in commands, (
+        "the step does not build the image from its own directory"
+    )
+    assert "BASE_IMAGE=${NODE_RUNTIME_IMAGE}" in commands, (
+        "the image is built without the pinned base, so it carries whatever the runner's "
+        "`node:22-alpine` resolves to today"
+    )
+    assert "projects/example/clients/typescript:/work:ro" in commands, (
+        "the committed client is not mounted read-only into the check"
+    )
+
+
 def test_the_example_client_is_the_emitters_output_byte_for_byte() -> None:
     """**GEN-EMIT-001.** The committed client has not drifted from its contract.
 

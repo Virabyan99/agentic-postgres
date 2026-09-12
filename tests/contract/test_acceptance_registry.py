@@ -48,7 +48,15 @@ ID_PATTERN = re.compile(
     # itself: ADR 0202's third mode is a property of how a claim is REPORTED
     # rather than of anything the product deploys, and filing it under `OPS`
     # would put a rule about reading evidence in the family that supplies it.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD)-[A-Z0-9]+(-\d+)?$"
+    # `GEN` is Session 23 (ADR 0204): a GENERATED ARTEFACT -- what the product
+    # WRITES for a developer to hold, as opposed to what it serves. Neither
+    # `DX` nor `DEV` names it: `DX` is the documented path a person walks and
+    # `DEV` is the developer's own machine, while this is a file the product
+    # emits, carries a digest in, and later refuses at runtime if the surface
+    # it was emitted from has moved. A family of its own because the question
+    # it answers -- is this artefact still a true claim about that surface --
+    # is asked of nothing else here.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN)-[A-Z0-9]+(-\d+)?$"
 )
 
 

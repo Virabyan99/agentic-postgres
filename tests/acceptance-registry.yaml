@@ -3241,3 +3241,223 @@
     role it did grant, on a released set, for two sessions (D1189). A read
     through a tenant tool returns the caller's rows on a deployment that has
     applied it.
+
+- id: GEN-IR-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_client_ir.py::test_the_ir_is_built_from_the_four_inputs_and_nothing_else
+    - tests/contract/test_client_ir.py::test_relations_carry_the_surfaces_columns_and_the_snapshots_types
+    - tests/contract/test_client_ir.py::test_rpcs_carry_the_snapshots_argument_schema_in_parameter_order
+    - tests/contract/test_client_ir.py::test_the_lock_tools_carry_arguments_scopes_and_the_reserved_write_parameters
+    - tests/contract/test_client_ir.py::test_the_three_authentication_operations_are_read_from_the_app_snapshot
+    - tests/contract/test_client_ir.py::test_a_snapshot_object_the_surface_does_not_name_is_refused_and_vice_versa
+    - tests/contract/test_client_ir.py::test_an_unknown_column_format_is_refused_and_never_typed_any
+    - tests/contract/test_client_ir.py::test_every_format_the_committed_snapshots_serve_has_a_typescript_type
+    - tests/contract/test_client_ir.py::test_the_pt_codes_are_scanned_from_the_release_and_the_set
+    - tests/contract/test_client_ir.py::test_the_caller_facing_tokens_match_the_runtimes
+    - tests/contract/test_client_ir.py::test_the_reserved_write_parameters_match_the_harnesss
+    - tests/contract/test_client_ir.py::test_the_ir_carries_four_digests_and_the_rest_one_is_the_snapshots_fingerprint
+    - tests/contract/test_client_ir.py::test_two_builds_are_equal
+  description: >-
+    `client_ir.build(...)` reads exactly four committed inputs -- the merged
+    reviewed surface, the project's (or the release's) PostgREST snapshot, the
+    application snapshot and the project's compiled lock -- and nothing else,
+    and no live address reaches it. It carries every relation with the
+    surface's columns and the snapshot's types, every reviewed RPC with its
+    argument schema in parameter order, the three authentication operations,
+    every tool of the lock with its arguments and scopes, the enum vocabulary,
+    the capability schema's filter operators, the PT codes the release AND the
+    project's own set raise, the seven caller-facing tokens, and four digests.
+    A snapshot object the surface does not name is refused and so is a surface
+    object the snapshot does not publish; an unknown column format is refused
+    rather than typed `any`. Two builds of one contract are equal (ADR 0204,
+    ADR 0158).
+
+- id: GEN-EMIT-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_client_typescript.py::test_the_emitter_reads_the_ir_and_nothing_else
+    - tests/contract/test_client_typescript.py::test_every_emitted_file_carries_the_generated_banner
+    - tests/contract/test_client_typescript.py::test_no_emitted_file_carries_a_credential_a_token_or_a_url_with_userinfo
+    - tests/contract/test_client_typescript.py::test_the_digests_live_in_one_file_and_the_app_one_is_never_compared
+    - tests/contract/test_client_typescript.py::test_the_package_declares_no_runtime_dependency
+    - tests/contract/test_client_typescript.py::test_nothing_the_client_emits_prints_or_retries
+    - tests/contract/test_client_typescript.py::test_init_reports_three_outcomes_and_never_folds_unreachable_into_stale
+    - tests/contract/test_client_typescript.py::test_the_error_unions_are_the_pt_codes_and_the_seven_tokens
+    - tests/contract/test_client_typescript.py::test_a_write_wrapper_requires_the_two_reserved_parameters
+    - tests/contract/test_client_typescript.py::test_the_example_client_is_the_emitters_output_byte_for_byte
+  description: >-
+    The TypeScript emitter reads the intermediate representation and nothing
+    else -- asserted over its own syntax tree, which admits `client_ir` and the
+    standard library and no path under `contracts/` or `projects/`. Every
+    emitted file carries the generated banner; the four digests live in one
+    file; no emitted file carries a credential, a token, a password, a signing
+    key or a URL with userinfo; the package declares no runtime dependency; the
+    client prints nothing and retries nothing. `init()` answers `unreachable`
+    separately from `stale_contract` and `listResources()` has a third answer
+    for a plane that cannot say which lock it loaded (ADR 0195). The emitted
+    `PtCode` union is exactly the contract's PT vocabulary and `AgentRefusal`
+    exactly the seven tokens an agent may be told -- equality in both
+    directions, because a superset is the failure (D433). Every write wrapper
+    declares `idempotency_key` and `dry_run` REQUIRED, so a caller cannot omit
+    the claim the write makes in its own transaction (ADR 0181, ADR 0182). The
+    committed example client is the emitter's output byte for byte, asked by
+    running the product's own `--check` (D1114).
+
+- id: GEN-HASH-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_generated_client_runtime.py::test_init_accepts_the_served_surface_it_was_generated_from
+    - tests/contract/test_generated_client_runtime.py::test_init_refuses_a_surface_with_another_fingerprint_naming_both
+    - tests/contract/test_generated_client_runtime.py::test_init_separates_unreachable_from_a_document_it_cannot_read
+    - tests/contract/test_generated_client_toolchain.py::test_the_smoke_reports_unreachable_rather_than_a_stale_contract
+    - tests/deployment/test_session23_client.py::test_the_example_client_initialises_on_beta_and_refuses_alpha
+  description: >-
+    `init()` fetches the REST service's OpenAPI document AS THE CALLER,
+    normalizes it the way the capture does -- basePath asserted, host and
+    schemes substituted, residue refused -- fingerprints it in the JavaScript
+    canonical form and compares it to the digest embedded in the package. A
+    mismatch refuses every later call as `stale_contract` NAMING BOTH DIGESTS;
+    a service that did not answer is `unreachable` and is never reported as a
+    stale contract, because a client that could not reach a service knows
+    nothing about its surface (ADR 0195). On a deployment, the generated
+    example client accepts the project it was generated for and refuses the
+    other project, whose surface is the release's alone -- the control that
+    says the check discriminates rather than merely passes (ADR 0204, D1114).
+
+- id: GEN-TYPES-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_generated_client_runtime.py::test_a_typed_read_returns_rows_of_the_declared_shape
+    - tests/contract/test_generated_client_runtime.py::test_a_refused_write_arrives_as_the_pt_code_the_database_raised
+    - tests/contract/test_generated_client_runtime.py::test_a_filter_value_is_a_value_and_never_query_syntax
+    - tests/contract/test_client_typescript.py::test_a_request_names_only_reviewed_columns_operators_and_arguments
+  description: >-
+    Through the generated client against a surface a real PostgREST is serving:
+    a typed relation read returns rows of the declared shape; a write the
+    product refuses arrives as a refusal carrying the PT code the DATABASE
+    raised, never as a thrown transport error; and a filter value that looks
+    like query syntax stays a value, judged by what PostgREST answers rather
+    than by a string this repository wrote (ADR 0127). A request the client
+    cannot express cannot be sent: no `select` outside a relation's reviewed
+    columns, no operator outside the capability schema's set, no argument the
+    contract does not name.
+
+- id: GEN-VERSION-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_client_ir.py::test_classify_changes_returns_only_compatibilitys_own_classes
+    - tests/contract/test_client_ir.py::test_an_added_relation_or_tool_is_minor_and_a_removed_one_is_major
+    - tests/contract/test_client_ir.py::test_a_retyped_column_or_a_moved_argument_list_is_major
+    - tests/contract/test_client_ir.py::test_next_version_bumps_the_artefacts_own_number
+    - tests/contract/test_generate_command.py::test_check_agrees_with_the_committed_client_and_writes_nothing
+    - tests/contract/test_generate_command.py::test_check_names_the_first_file_that_differs_and_still_writes_nothing
+    - tests/contract/test_generate_command.py::test_a_missing_generated_file_is_reported_as_missing_not_as_drift
+  description: >-
+    The generated package's version is derived from an IR diff and never
+    typed. `classify_changes` returns only names `compatibility.CHANGE_CLASSES`
+    already carries -- never a second scheme: an added relation or tool is
+    additive and prices a minor, a removed one a major, a retyped column or a
+    moved argument list a major, and an unchanged contract classifies as
+    nothing at all and KEEPS ITS NUMBER (D1224: bumping the patch on every
+    regeneration made the first `--check` ever run fail on a client the command
+    had just written). `generate --check` writes nothing and names the FIRST
+    file that differs; a file that is absent is reported as absent rather than
+    as drift (ADR 0162, ADR 0204).
+
+- id: GEN-TOOLCHAIN-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_generated_client_toolchain.py::test_the_image_pins_node_and_typescript_and_the_lock_carries_integrity_hashes
+    - tests/contract/test_generated_client_toolchain.py::test_the_entrypoint_addresses_the_compiler_by_path_and_never_through_npx
+    - tests/contract/test_generated_client_toolchain.py::test_the_toolchain_typechecks_with_no_network_at_all
+    - tests/contract/test_generated_client_toolchain.py::test_the_example_client_typechecks_strict
+    - tests/contract/test_generated_client_toolchain.py::test_a_type_error_in_a_generated_client_fails_the_toolchain
+    - tests/contract/test_generated_client_toolchain.py::test_an_unreadable_mount_is_reported_as_unreadable_and_never_as_absent
+    - tests/contract/test_generated_client_toolchain.py::test_canonical_ts_reproduces_pythons_fingerprint_for_every_committed_snapshot
+    - tests/contract/test_client_ir.py::test_js_reproducible_refuses_a_float_and_a_big_integer_and_accepts_every_rest_snapshot
+    - tests/contract/test_client_ir.py::test_the_build_refuses_a_snapshot_javascript_cannot_reproduce
+    - tests/contract/test_client_typescript.py::test_ci_typechecks_and_smokes_the_example_client
+  description: >-
+    The toolchain image builds from the pinned Node image with `typescript` and
+    `@types/node` pinned by a `package-lock.json` every entry of which carries
+    an integrity hash, installed with `npm ci --ignore-scripts` at the versions
+    `versions.env` records. The compiler is addressed BY PATH, never through
+    `npx`, which resolves from the working directory and would fetch from the
+    registry inside a claim that is declared offline (D1225); the runner's
+    default is `--network none`. The emitted `canonical.ts` reproduces, for
+    every committed REST and MCP snapshot in the tree, the digest
+    `openapi_normalize.fingerprint` produces, and the build refuses a document
+    JavaScript cannot reproduce byte for byte rather than emitting a client
+    that would compute a different fingerprint. The example client typechecks
+    under `--strict`, a type error fails the toolchain, an unreadable mount is
+    reported as unreadable and never as absent (ADR 0195, D1228), and CI
+    typechecks and smokes the committed client on every push.
+
+- id: GEN-CMD-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_generate_command.py::test_generate_is_a_verb_of_the_dispatcher
+    - tests/contract/test_generate_command.py::test_every_argument_error_exits_two
+    - tests/contract/test_generate_command.py::test_help_exits_zero_and_describes_the_four_init_answers
+    - tests/contract/test_generate_command.py::test_an_unrendered_project_is_refused_with_the_command_that_renders_it
+    - tests/contract/test_generate_command.py::test_an_out_outside_the_checkout_is_refused
+    - tests/contract/test_generate_command.py::test_a_project_declaring_no_set_generates_the_releases_client
+    - tests/contract/test_generate_command.py::test_the_capture_and_the_compile_print_the_next_step
+    - tests/contract/test_generate_command.py::test_nothing_the_command_prints_is_a_credential
+    - tests/contract/test_printed_commands.py::test_the_generate_hook_prints_the_path_the_process_was_given
+    - tests/contract/test_cli_contract.py::test_commands_are_executable_in_the_git_index
+  description: >-
+    `bin/generate.sh` is reached as `apg generate`, a verb of the dispatcher's
+    own derivation, and is executable in the git index. Every argument error
+    exits 2 in the shell wrapper before Python reads a file, so a malformed
+    invocation cannot leave a half-written directory; a project this checkout
+    has not rendered is refused with the command that renders it; an `--out`
+    outside the checkout is refused; a project declaring no migration set
+    generates the release's client. Nothing the command prints is a credential.
+    The capture and the compile each end by printing the generate command with
+    THE PATH THE PROCESS HOLDS, never a placeholder -- which is a shell
+    redirection when pasted (D975, D1208).
+
+- id: GEN-ENV-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_capacity_envelope.py::test_the_envelope_carries_generation_time_per_contract_size
+    - tests/contract/test_capacity_envelope.py::test_the_envelope_is_current
+    - tests/contract/test_capacity_envelope.py::test_a_machine_measurement_names_the_machine_it_describes
+  description: >-
+    The capacity envelope carries the generator's wall time for the release
+    contract and for a project's, and the toolchain typecheck of the committed
+    client, as `MACHINE` measurements -- numbers that describe the machine they
+    were sampled on and are said not to transfer. Each names its machine, each
+    generation row names the CONTRACT SIZE it was sampled at, because a wall
+    time without its size is not a point on a slope, and each says the
+    typecheck is outside the number. The typecheck row names the state of the
+    image cache. The rendered document is current (D593, D1079).
+
+- id: AGT-META-001
+  priority: P0
+  target_session: 23
+  test_nodeids:
+    - tests/contract/test_mcp_tools.py::test_list_resources_reports_the_loaded_locks_digest_and_count
+    - tests/contract/test_mcp_tools.py::test_list_resources_reports_null_for_a_lock_below_schema_four
+    - tests/deployment/test_session23_client.py::test_list_resources_on_beta_reports_the_lock_the_plane_confirmed
+  description: >-
+    `list_resources` reports, beside the roster, the digest and count of the
+    lock THE RUNNING PROCESS LOADED -- the digest the lock carried, carried
+    through, never recomputed from the roster, and `null` below lock schema 4,
+    where the honest answer is that the plane cannot say. A process cannot be
+    wrong about which lock it loaded, and the file on disk can be ahead of it:
+    Session 21's trip had beta serving six tools and refusing a tenant scope
+    for eight minutes while the document read from the file said seven (D1152,
+    D1153). On a deployment the reported digest is the one the plane's own
+    probe reports and the one the generated client was built from, with the
+    other project as the control.

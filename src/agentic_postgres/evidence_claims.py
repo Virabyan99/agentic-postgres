@@ -84,8 +84,26 @@ ALL_MODES = (*MODE_MARKERS, OFFLINE_MODE)
 #: differently. `dev_churn` includes `DEV-CI-001`, whose proof reads the
 #: workflow file -- CI runs the round trip, and the assertion is that the
 #: workflow says so, which is a property of this checkout.
+#:
+#: **Session 23 declares two more**, and they are a different shape from
+#: Session 22's. `apg dev` had no host on which it could be measured
+#: differently; `apg generate` does -- a deployment is exactly where a client
+#: meets the surface it claims. What makes these two offline is narrower and
+#: is worth stating: the IR, the emitter, the version rule, the command and
+#: the toolchain are all properties OF THE ARTEFACT AND ITS GENERATOR, and
+#: every one of them is settled by four committed files and a container. The
+#: properties that need a deployment were split out into two separate HOST
+#: claims rather than folded in, which is the line ADR 0202 exists to make
+#: drawable at all.
 OFFLINE_CLAIMS: frozenset[str] = frozenset(
-    {"dev_environment", "dev_isolation", "dev_churn", "offline_evidence"}
+    {
+        "dev_environment",
+        "dev_isolation",
+        "dev_churn",
+        "offline_evidence",
+        "generated_client",
+        "generated_client_toolchain",
+    }
 )
 
 #: Claim name -> the acceptance requirements whose tests prove it.
@@ -161,6 +179,37 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "offline_evidence": ("EVD-OFFLINE-001",),
     "plane_confirmed_count": ("OPS-PLANE-001",),
     "agent_tenant_read": ("AGT-TENANT-002",),
+    # Session 23 (ADR 0204). Four claims, split two and two along the line
+    # ADR 0202 exists to make drawable.
+    #
+    # `generated_client` and `generated_client_toolchain` are OFFLINE. Every
+    # proof under them is about the artefact and its generator -- what the IR
+    # reads, what the emitter writes, how the version is derived, what the
+    # command refuses, and whether the emitted JavaScript computes the same
+    # fingerprint Python does -- and each is settled by four committed files
+    # and a container. Docker is required and a skip is not a pass: the gate
+    # refuses an absent daemon exactly as Session 22's does.
+    #
+    # `generated_client_hash` and `agent_lock_reported` are HOST claims, and
+    # the reason they are not declared offline is the whole point of the
+    # session. A checkout cannot answer whether a deployment SERVES the
+    # surface a client was generated for -- PostgREST serves a different
+    # document to every role, so the question is about a running service and
+    # a caller's identity, not about a file. Nor can it answer which lock a
+    # running plane LOADED, which is the fact Session 21's trip spent eight
+    # minutes not knowing (D1152). Each has one live proof on beta with alpha
+    # as the control. They are `not_run` at this session's close, by design,
+    # and Session 24's trip collects them.
+    "generated_client": (
+        "GEN-IR-001",
+        "GEN-EMIT-001",
+        "GEN-TYPES-001",
+        "GEN-VERSION-001",
+        "GEN-CMD-001",
+    ),
+    "generated_client_toolchain": ("GEN-TOOLCHAIN-001", "GEN-ENV-001"),
+    "generated_client_hash": ("GEN-HASH-001",),
+    "agent_lock_reported": ("AGT-META-001",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

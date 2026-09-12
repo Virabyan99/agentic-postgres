@@ -1,31 +1,35 @@
-"""The Session 22 gate, and the first offline mode that produces evidence.
+"""The Session 23 gate: a generated artefact, checked current and compiled.
 
-**Derived from `test_session_eight_gate_modes.py`**, which is the most recent
-module of this family -- Sessions 20 and 21 added gates and no guard of their
-own, and `grep -l "session-21-check" tests/contract` named only
-`test_cli_contract.py`. What is carried over is the shape that generalises: a
-gate is executable in the index, answers all three modes, refuses an unknown
-one, names its OWN session's claims rather than an inherited one (D459), and
-deploys nothing. What is dropped is everything about Session 8's flags, which
-`test_session_eight_gate_modes.py` still guards on the file that has them.
+**Derived from `test_session_twenty_two_gate_modes.py` by diff**, which is the
+module of this family that Session 22's gate brought with it. What is carried
+over is the shape that generalises: a gate is executable in the index, answers
+all three modes, refuses an unknown one, names its OWN session's claims rather
+than an inherited one (D459), writes its offline half from the run that
+selected everything, passes no deployed document for it, refuses a workstation
+with no docker, and deploys nothing.
 
-**What is new here is the whole reason the module exists.** Session 22's gate
-is the first whose offline mode writes a half, and three things follow from
-that, each of which could go wrong quietly:
+**What is new is what an offline claim about a GENERATED ARTEFACT needs, and it
+is two steps in two different places.** Both could be dropped without any other
+test noticing:
 
-* the half must be written from the run that selected everything, not from a
-  second differently-selected one;
-* the half must pass NO deployed document, because it measures a checkout --
-  the writer refuses one, and a gate that passed one would be describing a
-  deployment it never read;
-* and the offline mode must REFUSE when docker is absent rather than let the
-  cluster proofs skip. A skip is not a pass: the half would be written, the
-  claim would be `not_run`, and the gate would exit 5 having produced a
-  document that looks like evidence of a command nobody ran.
+* `generate --check`, in step 6 beside the contract checks, asks whether the
+  committed client is CURRENT. It belongs there and not with the typecheck,
+  because a stale client is usually still perfectly valid TypeScript -- so a
+  gate that only compiled would go green on an artefact nobody compared;
+* step 8b builds the hash-locked toolchain image and RUNS the client in it.
+  The compiler is the only total check a generator's output has, and the first
+  emitted package passed every structural proof and did not compile (D1223).
 
-The source-reading tests read `bin/session-22-check.sh` as text, which is the
+**And the offline/host split is this session's own argument**, which is why
+this module asserts it rather than deriving it. Two claims are declared
+offline because they are about the artefact and its generator; two are not,
+because a checkout cannot say what a deployment serves or which lock a running
+plane loaded. A later session that folded the second pair in would be reporting
+eight minutes of beta serving the wrong lock as green (D1152).
+
+The source-reading tests read `bin/session-23-check.sh` as text, which is the
 right instrument for a shell script's structure and the wrong one for its
-behaviour -- so the two argument tests below actually RUN it.
+behaviour -- so the argument tests below actually RUN it.
 """
 
 from __future__ import annotations
@@ -39,21 +43,31 @@ from agentic_postgres import evidence_claims as claims
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
-SCRIPT = REPO_ROOT / "bin" / "session-22-check.sh"
-SESSION_PREVIOUS = REPO_ROOT / "bin" / "session-21-check.sh"
+SCRIPT = REPO_ROOT / "bin" / "session-23-check.sh"
+SESSION_PREVIOUS = REPO_ROOT / "bin" / "session-22-check.sh"
 
-SESSION = 22
+SESSION = 23
 
-#: The claims Session 22 introduced, by mode. Written out rather than derived
+#: The claims Session 23 introduced, by mode. Written out rather than derived
 #: from `claims_for_mode`, which would be the mechanism checking itself and
 #: would pass for every possible claim table (D260's second mutation).
 #:
-#: `external` is absent and that is the assertion: a disposable cluster on a
-#: developer's own machine publishes on 127.0.0.1, and inventing an external
-#: claim to make the shape symmetric is what ADR 0065 refuses.
-SESSION_TWENTY_TWO_CLAIMS = {
-    "offline": ("dev_environment", "dev_isolation", "dev_churn", "offline_evidence"),
-    "host": ("plane_confirmed_count", "agent_tenant_read"),
+#: **The split across the two modes is the assertion**, not an accident of how
+#: the session ran. `generated_client` and `generated_client_toolchain` are
+#: about the artefact and its generator, and four committed files and a
+#: container settle every one of their proofs. `generated_client_hash` and
+#: `agent_lock_reported` are about a running deployment -- what surface it
+#: serves to a caller, and which lock its plane loaded -- and no checkout can
+#: answer either. A later session that moved one of the second pair into the
+#: first would make this table disagree with `claims_for_mode`, which is
+#: exactly the day somebody should have to think about it.
+#:
+#: `external` is absent and that is also an assertion: a generated client is a
+#: file an adopter holds, and inventing an external claim to make the shape
+#: symmetric is what ADR 0065 refuses.
+SESSION_TWENTY_THREE_CLAIMS = {
+    "offline": ("generated_client", "generated_client_toolchain"),
+    "host": ("generated_client_hash", "agent_lock_reported"),
 }
 
 
@@ -97,7 +111,7 @@ def test_the_gate_exists_and_is_executable_in_the_git_index() -> None:
     """Asserted against the index: writing through the \\\\wsl$ share strips the
     bit, and a gate nobody can execute fails in a way that reads as a bad path."""
     result = subprocess.run(
-        ["git", "ls-files", "--stage", "--", "bin/session-22-check.sh"],
+        ["git", "ls-files", "--stage", "--", "bin/session-23-check.sh"],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,
@@ -133,7 +147,7 @@ def test_the_gate_resolves_claims_for_its_own_session(source: str) -> None:
     survived one diff, in the usage block an operator copies and in every
     message the gate prints about itself.
     """
-    assert "readonly SESSION=22" in source
+    assert f"readonly SESSION={SESSION}" in source
     provenance = "**Derived from bin/session-21-check.sh by diff, not retyped**"
     stale = [
         line
@@ -149,7 +163,7 @@ def test_the_gate_resolves_claims_for_its_own_session(source: str) -> None:
 
 def test_the_previous_gate_still_names_its_own_session() -> None:
     """Deriving a gate must not edit the one it was derived from."""
-    assert "readonly SESSION=21" in SESSION_PREVIOUS.read_text(encoding="utf-8")
+    assert f"readonly SESSION={SESSION - 1}" in SESSION_PREVIOUS.read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -163,8 +177,8 @@ def test_offline_mode_writes_the_offline_half(source: str) -> None:
     Four properties, and each is a way this could be wrong while looking right.
 
     **It is written.** Every earlier gate's offline mode ends by printing
-    PASSED, and a Session 22 gate that did the same would close a session whose
-    four own claims nothing had recorded.
+    PASSED, and a Session 23 gate that did the same would close a session whose
+    two offline claims nothing had recorded.
 
     **From step 3's JUnit**, which is the run that selected everything. A half
     written from a second, narrower run is a verdict about a different
@@ -186,7 +200,7 @@ def test_offline_mode_writes_the_offline_half(source: str) -> None:
     """
     stripped = code(source)
     assert 'step "9. Offline evidence"' in stripped, (
-        "offline mode writes no evidence half. Session 22's own claims are "
+        "offline mode writes no evidence half. Session 23's own offline claims are "
         "measured in a checkout or nowhere"
     )
     assert "write_evidence offline" in stripped
@@ -292,6 +306,94 @@ def test_offline_mode_runs_the_round_trip_in_order(source: str) -> None:
     assert "project.example.yaml" in round_trip
 
 
+def test_offline_mode_checks_the_committed_client_is_current(source: str) -> None:
+    """`GEN-VERSION-001` in the gate. The drift check, and WHERE it sits.
+
+    A generated artefact that is committed has one failure mode worth a gate:
+    it stops being what the generator produces. `generate --check` is the whole
+    of that question, and it belongs with the contract checks in step 6 rather
+    than with the typecheck in step 8b -- because **a stale client is usually
+    still perfectly valid TypeScript**, so a gate that only compiled would go
+    green on an artefact nobody had compared.
+
+    The ORDER is what is asserted, not merely the presence: the check runs
+    before the image is built, so an operator who has forgotten to regenerate
+    learns it in a fifth of a second rather than after a docker build.
+
+    Found as a command in the comment-stripped text (D1197): this gate explains
+    at length what each step does, and its own comment beside this line
+    contains the words `generate --check`.
+
+    Goes red if: the check is dropped; it moves after the typecheck; or it
+    stops naming the project, in which case it would check the release's client
+    -- a different artefact, which is not committed.
+    """
+    offline_mode = body_of(source, "mode_offline")
+    lines = offline_mode.splitlines()
+    checks = [
+        index
+        for index, line in enumerate(lines)
+        if line.strip().startswith("bin/apg.sh generate --check")
+    ]
+    assert checks, (
+        "offline mode does not run `generate --check`. The committed example "
+        "client could then be anything, and the typecheck below would pass on it"
+    )
+    assert "project.example.yaml" in lines[checks[0]], (
+        "the drift check names no project, so it checks the release's client -- "
+        "which is a different artefact and is not committed"
+    )
+
+    builds = [index for index, line in enumerate(lines) if line.strip().startswith("docker build")]
+    assert builds and checks[0] < builds[0], (
+        "the client is typechecked before it is checked for drift. A stale client "
+        "is usually still valid TypeScript, so the container would go green"
+    )
+
+
+def test_offline_mode_compiles_and_runs_the_generated_client(source: str) -> None:
+    """`GEN-TOOLCHAIN-001` in the gate. Step 8b, and why it RUNS the package.
+
+    **The compiler is the only total check a generator's output has**, and not
+    running it declines it: the first emitted package satisfied eight green
+    structural proofs and did not compile (D1223). The second typechecked at
+    exit 0 and could not be executed at all, because its import specifiers
+    named `.js` files a package that is never compiled does not have (D1226).
+    So the step compiles AND runs, and both halves are asserted here.
+
+    The base image is passed explicitly. An image built without it carries
+    whatever `node:22-alpine` resolves to on the day, and the whole point of a
+    hash-locked toolchain is that the compiler is the one `versions.env`
+    records.
+
+    The client is mounted READ-ONLY. A typecheck that could write into the
+    artefact it is checking is a typecheck that can make itself pass.
+
+    Goes red if: the step is dropped; the image stops being built from this
+    checkout; `BASE_IMAGE` stops being passed; the mount loses `:ro`; or the
+    run stops asking for the smoke, leaving a package that compiles and has
+    never been executed.
+    """
+    offline_mode = body_of(source, "mode_offline")
+    assert 'step "8b.' in offline_mode, "there is no step 8b"
+
+    step = offline_mode[offline_mode.index('step "8b.') :]
+    step = step[: step.index('step "9.')] if 'step "9.' in step else step
+
+    assert "docker build" in step and "services/clients/typescript" in step, (
+        "step 8b does not build the toolchain image from its own directory"
+    )
+    assert "BASE_IMAGE=" in step, (
+        "the image is built without the pinned base, so the compiler in it is "
+        "whatever the day's `node:22-alpine` carries"
+    )
+    assert "versions.env" in step, "the base image is not read from the lock"
+    assert "projects/example/clients/typescript:/work:ro" in step, (
+        "the committed client is not mounted read-only; a typecheck that can write "
+        "into what it checks can make itself pass"
+    )
+
+
 def test_the_help_documents_the_three_half_merge(source: str) -> None:
     """The merge an operator copies, and the flag that is now required.
 
@@ -303,13 +405,13 @@ def test_the_help_documents_the_three_half_merge(source: str) -> None:
     """
     result = run("--help")
     assert result.returncode == 0
-    assert "--offline-input evidence/session-22-offline.json" in result.stdout, (
+    assert "--offline-input evidence/session-23-offline.json" in result.stdout, (
         "the merge command omits the offline half. `merge` REQUIRES it exactly "
         "when the session has offline claims, so the documented command would "
         "exit 2 for the operator who copied it"
     )
-    assert "--host-input evidence/session-22-host.json" in result.stdout
-    assert "--external-input evidence/session-22-external.json" in result.stdout
+    assert "--host-input evidence/session-23-host.json" in result.stdout
+    assert "--external-input evidence/session-23-external.json" in result.stdout
     assert "session-21" not in result.stdout, (
         "the previous session's evidence filenames are in the command an "
         "operator copies; running it would overwrite that session's document"
@@ -329,11 +431,11 @@ def test_each_environment_carries_a_claim_this_session_introduced() -> None:
     rather than derived from `claims_for_mode`, which would be the mechanism
     checking itself.
     """
-    for mode, expected in SESSION_TWENTY_TWO_CLAIMS.items():
+    for mode, expected in SESSION_TWENTY_THREE_CLAIMS.items():
         resolved = set(claims.claims_for_mode(mode, SESSION))
         missing = sorted(set(expected) - resolved)
         assert not missing, (
-            f"{mode} mode does not carry Session 22's own claims {missing}. The "
+            f"{mode} mode does not carry Session 23's own claims {missing}. The "
             "gate would write a half that is silent about them, and the merge "
             "would refuse"
         )
@@ -346,7 +448,7 @@ def test_the_expectation_table_names_every_claim_this_session_introduced() -> No
     `CLAIM_INTRODUCED_IN`, closed the same way: the table and the claim set have
     to name the same things.
     """
-    declared = {claim for group in SESSION_TWENTY_TWO_CLAIMS.values() for claim in group}
+    declared = {claim for group in SESSION_TWENTY_THREE_CLAIMS.values() for claim in group}
     introduced = {claim for claim in claims.CLAIMS if claims.claim_session(claim) == SESSION}
     assert declared == introduced, (
         "the expectation table and the claims introduced in this session "
@@ -355,57 +457,60 @@ def test_the_expectation_table_names_every_claim_this_session_introduced() -> No
     )
 
 
-def test_every_session_twenty_two_claim_belongs_to_session_twenty_two() -> None:
+def test_every_session_twenty_three_claim_belongs_to_session_twenty_three() -> None:
     """ADR 0089. A claim built from an earlier session's id moves, silently.
 
     `claim_session` is a `max()`, so one older requirement id mixed into a
-    Session 22 claim either drags it into an earlier gate's evidence -- turning
+    Session 23 claim either drags it into an earlier gate's evidence -- turning
     that session's document red -- or hides it from this one entirely. D1150 is
     the live instance: the plan had two Session 21 requirements joining Session
     16 and Session 18 claims, and the guard caught it on the first run.
     """
-    for expected in SESSION_TWENTY_TWO_CLAIMS.values():
+    for expected in SESSION_TWENTY_THREE_CLAIMS.values():
         for claim in expected:
             assert claims.claim_session(claim) == SESSION, (
                 f"{claim} resolves to session {claims.claim_session(claim)}, not {SESSION}"
             )
 
 
-def test_exactly_the_four_declared_claims_are_offline() -> None:
+def test_exactly_the_six_declared_claims_are_offline() -> None:
     """The declaration is the whole definition (ADR 0202), so it is asserted.
 
-    Not "the offline mode carries some claims": the four THIS session decided
-    to measure in a checkout, and no fifth of its own. A claim that became
-    offline without anybody deciding to is the failure the declaration exists
-    to prevent, and it would be invisible in a test that only checked
-    membership one way.
+    **Session 22's version of this test asserted an EQUALITY against the whole
+    of `OFFLINE_CLAIMS`**, which was right while that session's four were all
+    there were, and became a rule that no later session may declare an offline
+    claim the moment this one did. It failed on the second offline session --
+    which is the earliest it could have, and late enough that the assertion had
+    read as correct for a whole session (D1237).
 
-    **This was an equality against the whole of `OFFLINE_CLAIMS` until Session
-    23** (D1237), which was correct while these four were the only declared
-    claims in the project and became, on the day a second session declared any,
-    a rule that no later session may ever have an offline claim. The assertion
-    was not wrong about Session 22; it was stated one scope too wide, and a
-    scope too wide reads as correct for exactly as long as nothing else exists.
-
-    Narrowed to what this module is about, in both directions: every claim this
-    session declared is in `OFFLINE_CLAIMS`, and no claim this session
-    introduced is in it by accident. Session 23's module asserts the same of
-    Session 23's two, by subtraction.
+    So the property is stated at the level it is actually about. This session
+    owns two names and asserts them exactly, by SUBTRACTION: `OFFLINE_CLAIMS`
+    less every claim an earlier session introduced must be precisely the two
+    this session declared -- neither fewer nor a third that arrived without
+    anybody deciding to, which is the failure the declaration exists to
+    prevent. The earlier sessions' own names are checked by their own modules,
+    where they belong.
     """
-    declared = set(claims.OFFLINE_CLAIMS)
-    mine = set(SESSION_TWENTY_TWO_CLAIMS["offline"])
-    assert mine <= declared, (
-        "a claim this session measured in a checkout is not declared offline: "
-        f"{sorted(mine - declared)}. Under ADR 0202 it is not an offline claim at "
-        "all, and the half that reports it would be refused"
+    from tests.contract.test_evidence_claims import CLAIM_INTRODUCED_IN
+
+    earlier = {name for name, session in CLAIM_INTRODUCED_IN.items() if session < SESSION}
+    mine = set(claims.OFFLINE_CLAIMS) - earlier
+    assert mine == set(SESSION_TWENTY_THREE_CLAIMS["offline"]), (
+        "the offline claims this session introduced and the ones it declared "
+        f"disagree: {sorted(mine ^ set(SESSION_TWENTY_THREE_CLAIMS['offline']))}"
     )
-    for claim in SESSION_TWENTY_TWO_CLAIMS["host"]:
-        assert claim not in declared, (
-            f"{claim} is declared offline. Both of this session's host claims are "
-            "about a running plane, and a checkout answering either would report "
-            "D1152's eight minutes as green"
+
+    # And none of this session's HOST claims drifted into the declaration. That
+    # is the direction with a consequence: a host claim declared offline goes
+    # green on a checkout that never saw the deployment it is about.
+    for claim in SESSION_TWENTY_THREE_CLAIMS["host"]:
+        assert claim not in claims.OFFLINE_CLAIMS, (
+            f"{claim} is declared offline. It is about a running deployment -- what "
+            "surface it serves a caller, or which lock its plane loaded -- and a "
+            "checkout answering it would report eight minutes of beta serving the "
+            "wrong lock as green (D1152)"
         )
-    for claim in SESSION_TWENTY_TWO_CLAIMS["host"]:
+    for claim in SESSION_TWENTY_THREE_CLAIMS["host"]:
         assert claim not in claims.OFFLINE_CLAIMS, (
             f"{claim} is declared offline. It is about a RUNNING plane, and a "
             "checkout answering it would have reported beta green through the "

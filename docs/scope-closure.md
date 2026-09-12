@@ -15,12 +15,12 @@ decision.
 
 | | Count | Note |
 |---|---|---|
-| Requirements in the acceptance registry | **193** | 185 P0, 8 P1, **0 P2** — nine added in Session 22: six `DEV-*`, one `EVD-*`, and one each widening `OPS-*` and `AGT-*` |
-| Claims in the evidence model | **114** | six added in Session 22, and **four of them are the first offline claims this project has had** (ADR 0202) |
-| Requirements a claim reports on | **169** | 24 belong to no claim (D697), unchanged in number; see §4 |
-| Migrations released | **31** | fix-forward only. Session 22 adds none — its one migration is in the *example project's own set*, which is not a release migration |
-| Architecture decisions recorded | **203** | 0198–0199 are Session 20's, 0200–0201 Session 21's, **0202–0203 Session 22's** |
-| Divergences measured | **D1–D1194** | D1087–D1123 are Session 20's, D1124–D1155 Session 21's, **D1157–D1194 Session 22's** |
+| Requirements in the acceptance registry | **202** | 194 P0, 8 P1, **0 P2** — nine added in Session 23: eight `GEN-*` and one `AGT-*` |
+| Claims in the evidence model | **118** | four added in Session 23 — **two declared offline and two deliberately not**, which is the line ADR 0202 exists to let a session draw |
+| Requirements a claim reports on | **178** | 24 belong to no claim (D697), unchanged in number; see §4 |
+| Migrations released | **31** | fix-forward only. Session 23 adds none, released or project — it ships no SQL at all |
+| Architecture decisions recorded | **204** | 0200–0201 are Session 21's, 0202–0203 Session 22's, **0204 Session 23's** |
+| Divergences measured | **D1–D1238** | D1124–D1155 are Session 21's, D1157–D1199 Session 22's, **D1200–D1238 Session 23's** |
 
 ---
 
@@ -369,3 +369,29 @@ evidence half this project has written.
 | **The uncached first run is measured in CI and nowhere else** | `apg dev up` with the image not cached is the run a new developer actually has, and measuring it on this workstation means evicting the image the whole contract suite shares. It is named in the envelope's `UNMEASURED` list with that reason, and CI's round-trip step times the same two verbs on a fresh runner. |
 | **Nothing prunes a development environment nobody took down** | `down` removes the container, its anonymous volume and the state directory, and `status` reports a stale state — but a developer who renames a project or deletes its manifest leaves `.generated/.dev/<key>/` behind with two `0600` password files in it. They are passwords to a container that no longer exists, which is why this is a tidiness item rather than a security one. A `dev prune` verb, or nothing. |
 | **The seed lint is a statement scan, not a parser** | `SEED_DDL` is a word-boundary regular expression over statements with comments stripped. It refuses what a seed should never contain and it is not a SQL grammar; a sufficiently determined seed could express DDL it does not match. That is the same judgement D464 records elsewhere in this tree — a text scan standing in for a construct — and it is deliberate here because the alternative is a parser nobody would maintain. The seed is reviewed and digested; the lint is the second lock, not the first. |
+
+---
+
+## 12. What Session 23 left open
+
+Session 23 built `apg generate` — a typed TypeScript client over the surface a
+project publishes, and the claim such a client makes about it (ADR 0204). It
+made no host trip, and it is the second session to close on an offline evidence
+half. The split is what is worth reading: **two of its four claims are declared
+offline and two deliberately are not**, and unlike Session 22 that was a choice
+rather than a necessity. A generated client meets a deployment; the reason the
+second pair stayed host claims is that a checkout cannot answer what a
+deployment serves a caller, nor which lock a running plane loaded.
+
+| Item | Position |
+|---|---|
+| **Two claims are `not_run` and Session 24's trip collects them** | `generated_client_hash` (`GEN-HASH-001`) and `agent_lock_reported` (`AGT-META-001`). The first runs the committed example client in the toolchain image against beta (`ok`) and against alpha (`stale_contract` naming both digests — alpha publishes the release surface alone, which is the control that says `init()` discriminates rather than merely passes). The second calls `list_resources` on beta and compares the reported `lock.tools_sha256` with what the plane's own probe reports AND with the digest compiled into the client. Both offline halves are written and pass; what is owed is the live half, and `tests/deployment/test_session23_client.py` **has never executed** — the thirteenth never-executed proof this project has carried to a host. |
+| **What Session 24's trip owes this session** | A deploy `--through-session 23` on both projects. It applies no migration — this session ships no SQL — but it **recreates the auth/mcp container**, whose mounted lock digest moved, and that is what makes `list_resources` answer with its `lock` member at all (ADR 0155, D1152/D1153: read the container, never the file). Then `bin/session-23-check.sh --mode host` and `--mode external`, and a **three-half merge** with `--offline-input evidence/session-23-offline.json`. Session 22's own three halves are still owed and are a separate merge. |
+| **The bump moves a committed generated artefact, and nothing said so** | `contract.ts` carries `templateVersion`, so `VERSION` 1.3.0 → 1.4.0 made `apg generate --check` exit 5 on a client nobody had touched (D1238). The version rule behaved correctly — `clientVersion` stayed `1.0.0` because no digest moved, which is exactly what "an unchanged contract keeps its number" means — but **every release bump from now on owes a regeneration in the same commit**, and the gate and CI both refuse one that forgets. |
+| **A registered requirement can outrun its proofs** | Two clauses of `GEN-EMIT-001` as the plan wrote it — the emitted `PtCode`/`AgentRefusal` unions, and a write wrapper's required `idempotency_key` and `dry_run` — had **no proof at all** (D1236). The emitter did all of it; nothing asserted any of it, because the proofs that existed were about what the *IR* carries. Both were written before the requirement was registered. The shape is D816/D929 one level up: an unverified field is bad, and an unverified requirement CLAUSE goes into an acceptance matrix and a claim's verdict. |
+| **A session-scoped assertion written as a global equality** | Session 22's `test_exactly_the_four_declared_claims_are_offline` asserted `OFFLINE_CLAIMS` equals its own four. Correct while it was the only offline session; on the day a second session declared any, it became a rule that no later session may ever have an offline claim (D1237). Narrowed in both modules to what each is about. Worth carrying because the assertion was not wrong about Session 22 — it was stated one scope too wide, and a scope too wide reads as correct for exactly as long as nothing else exists. |
+| **No Python client, and this one is not a browser client** | D1205: the intermediate representation is language-neutral and a second emitter is one module over it; building one to be deleted is not a decision this session took. And `canonical.ts` uses `node:crypto` — a browser build needs Web Crypto's asynchronous `subtle.digest` and a bundler nobody has pinned. Both boundaries are recorded rather than hidden, in `docs/generated-clients.md` §7. |
+| **`app-openapi.canonical.json`'s canonical form is not `openapi_normalize`'s** | D1203. `bin/app-contract.py` writes it with `ensure_ascii=True` and Pydantic's float literals; two serializers agree today only because the document is ASCII. The day it is not, `app-contract.sh --check` and a reader using `canonical_bytes` disagree about the same file. The client never compares that digest, which is why this is a decision for a session that versions that snapshot rather than a defect now. |
+| **Nothing regenerates a client automatically, by decision** | D1208. The capture and the compile each print the command, and the gate refuses a stale committed client. An adopter who ignores both holds a client whose `init()` will refuse — which is the designed outcome and not a gap. |
+| **PostgREST beside `apg dev` is a rig, not a verb** | D1211. Session 23's runtime proof stands up a cluster, a PostgREST configured from `compose.yaml`'s own block and the pinned Traefik, and takes ~150 s to do it — the most expensive module in the suite. If Session 24's Studio wants a served surface on a workstation, that is the session to decide whether ADR 0203's boundary moves, with this rig as the measured cost. |
+| **The filter-operator set is the capability schema's, for humans too** | D1210. A human wanting `ilike` through the generated client is a reviewed widening of the capability schema, which then reaches agents. The coupling is deliberate and is written down so it is not undone by accident. |

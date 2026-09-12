@@ -4,9 +4,26 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 22 implemented**, at `template_version` **1.3.0**.
+**Status: Session 23 implemented**, at `template_version` **1.4.0**.
 
-Session 22 gives a developer a database of their own. `apg dev up` builds a
+Session 23 gives a developer a typed client over their own surface. `apg generate`
+writes a TypeScript package from four committed artefacts — the merged reviewed
+surface, the project's OpenAPI snapshot, the application snapshot and the compiled
+lock — with one method per published object, one per agent tool, and the digests
+that say which surface and which lock they came from. **A generated client is a
+claim about the surface it was generated from** (ADR 0204), and `init()` is where
+the claim is checked: it fetches the document the deployment serves *as the
+caller*, normalizes it the way this repository's own capture does, and compares
+the fingerprint. It has four answers and the differences between them are the
+point — `ok`, `stale_contract` naming both digests, `unreachable` when the
+service did not answer, and `unparsable`. An unreachable service is never
+reported as a stale contract. The package holds a URL and a token you passed it
+and nothing else; the version moves by ADR 0162's change classes over a contract
+diff rather than by anybody typing one (see
+[A generated client](#a-generated-client) and
+[the guide](docs/generated-clients.md)).
+
+Session 22 gave a developer a database of their own. `apg dev up` builds a
 disposable local PostgreSQL cluster from a project's rendered document and the
 release alone — the locked image, the deploy's own bootstrap statements, every
 released migration *and the project's own set*, applied as the role that will
@@ -63,7 +80,7 @@ application on 1.0.0, on a host that started empty (see
 [its plan](docs/plans/session-19-implementation-plan.md) and
 [scope closure](docs/scope-closure.md) §8) — and it moved `VERSION` alone, to
 `1.0.1`, the only time in this project's history the two numbers have come
-apart. **Adopt `1.3.0`.** Session 18's code is in this release — independent
+apart. **Adopt `1.4.0`.** Session 18's code is in this release — independent
 recovery: every backup repository mirrored to a second provider by a host unit
 the archiver never knows about (ADR 0188), a disaster kit that names every
 secret and holds none and a bootstrap that adopts a provider project by its
@@ -308,9 +325,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 22
+sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 23
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 22
+     --capabilities capabilities.yaml --through-session 23
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a
