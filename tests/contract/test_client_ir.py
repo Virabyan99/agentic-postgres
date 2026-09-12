@@ -41,6 +41,18 @@ from agentic_postgres import (
     service_source,
 )
 
+# `GEN-IR-001` and `GEN-VERSION-001`: every proof here reads committed
+# files and needs no daemon.
+#
+# **Marked, and the marks are load-bearing** (D1240). Without them no
+# marker-selected sweep collects this module at all -- not the Session 1
+# gate's `contract and not future`, not CI's `p0 and not future and not
+# live_host and not external` -- so every proof here passes only when
+# somebody names the file. The registry's node ids stayed COLLECTIBLE the
+# whole time, which is exactly why `test_acceptance_registry` could not
+# see it: collectible and collected are different questions.
+pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
 APP_SNAPSHOT = REPO_ROOT / "contracts" / "app-openapi.canonical.json"
 RELEASE_SNAPSHOT = REPO_ROOT / "contracts" / "postgrest-openapi.canonical.json"
 CANONICAL_MCP = REPO_ROOT / "contracts" / "snapshots" / "mcp" / "mcp-capabilities.canonical.json"

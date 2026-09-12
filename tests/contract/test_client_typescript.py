@@ -34,6 +34,18 @@ from tests.contract.test_client_ir import (  # the four inputs, assembled once
 
 from agentic_postgres import REPO_ROOT, client_ir, client_typescript, openapi_normalize
 
+# `GEN-EMIT-001`, and `GEN-CMD-001`'s drift half: the emitted text, and
+# the product's own `--check`.
+#
+# **Marked, and the marks are load-bearing** (D1240). Without them no
+# marker-selected sweep collects this module at all -- not the Session 1
+# gate's `contract and not future`, not CI's `p0 and not future and not
+# live_host and not external` -- so every proof here passes only when
+# somebody names the file. The registry's node ids stayed COLLECTIBLE the
+# whole time, which is exactly why `test_acceptance_registry` could not
+# see it: collectible and collected are different questions.
+pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
 TYPESCRIPT_VERSION = "7.0.2"
 TYPES_NODE_VERSION = "22.20.2"
 

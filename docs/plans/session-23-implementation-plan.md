@@ -4,7 +4,7 @@
 No run has started. §1 is D1200–D1211 (planning rows, every one measured
 today in a rig or read from the tree at `d6f6e94`); Run 1 added **D1212–D1215**,
 measured at the branch point, Run 2 added **D1216-D1223**, Run 3 **D1224-D1228**, Run 4 **D1229-D1233**, Run 5
-**D1234-D1235** and Run 6 **D1236-D1238**, so next free is **D1239**. ADR
+**D1234-D1235** and Run 6 **D1236-D1240**, so next free is **D1241**. ADR
 **0204** is this session's; the runs add theirs below the planning rows.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 23* and its rows D1067
 (the `generate` hook after a project migration), D1068 (one session, the IR
@@ -162,7 +162,7 @@ executed).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1239**. Rows D1200–D1211
+Six columns, next free number after this table **D1241**. Rows D1200–D1211
 were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's** and
 **D1216–D1223 Run 2's**, each measured while the run that names it was built.
 The runs add theirs below them as they go, each run's numbers named in its Done
@@ -209,6 +209,8 @@ paragraph.
 | **D1236** | §2's `GEN-EMIT-001` states that *"the emitted `RestError` union is the PT-code vocabulary and the `AgentRefusal` union is the seven tokens"* and that *"a write wrapper requires `idempotency_key` and `dry_run`"*. | **Nothing asserted either.** `grep -n 'AgentRefusal\|PtCode' tests/contract/test_client_typescript.py` and the same for `idempotency_key` each returned zero lines. The emitter does both correctly — measured in the committed `types.ts` and `agent.ts` — and the proofs that existed (`test_the_caller_facing_tokens_match_the_runtimes`, `test_the_reserved_write_parameters_match_the_harnesss`) are about what the **IR** carries. Between the IR and the file is an emitter, and a union written from a hard-coded list would satisfy every IR-side proof. | Two proofs written BEFORE the requirement was registered: `test_the_error_unions_are_the_pt_codes_and_the_seven_tokens` asserts exact equality in both directions (a superset is the failure, and a containment check passes on one), and `test_a_write_wrapper_requires_the_two_reserved_parameters` reads the roster from the IR and refuses an optional `?` on either parameter. | **D816/D929 one level up.** A declared field with no reader is an unverified field; a registered requirement CLAUSE with no proof is an unverified claim, and it goes into an acceptance matrix and a verdict. The cost of finding it was one grep, run because Run 6's own instruction is to write *what the runs actually wrote* rather than what the plan proposed — and four of the nine requirements' node ids had drifted from the plan's guesses, which is what made reading each one necessary. | 0204 |
 | **D1237** | The plan's targeted list says `test_session_twenty_two_gate_modes` *"must still pass"* unchanged. | **It could not.** Its `test_exactly_the_four_declared_claims_are_offline` asserts `set(claims.OFFLINE_CLAIMS) == set(SESSION_TWENTY_TWO_CLAIMS["offline"])` — an equality against the WHOLE declared set. That was correct while Session 22's four were the only offline claims in the project, and on the day a second session declared any it became a rule that **no later session may ever have an offline claim**. It failed at the earliest moment it could, which is a whole session after it was written. | Narrowed in both modules to what each is about. Session 22's asserts its own four are declared and neither of its host claims is; Session 23's asserts, by SUBTRACTION against `CLAIM_INTRODUCED_IN`, that `OFFLINE_CLAIMS` less every earlier session's claims is exactly this session's two — so a third arriving without anybody deciding to still fails. Neither assertion was weakened: both got stricter about their own scope. | **A scope too wide reads as correct for exactly as long as nothing else exists.** The assertion was not wrong about Session 22; it was stated one level up from the property it was about, and nothing in the tree could tell the difference until a second instance existed. The same shape as §7's *a premise wrong in the reassuring direction survives longest* — and the thing that found it was not a review but a second session simply happening. | 0202 |
 | **D1238** | Run 6 step 1 moves `VERSION` 1.3.0 → 1.4.0. The plan's step 1 lists what the bump prices and stops there. | **The bump breaks `apg generate --check`.** `contract.ts` carries `templateVersion`, so the committed example client stopped being what its contract generates the instant the constant moved — exit 5, on a file nobody had touched, with the gate's step 6 and CI's new step both refusing it. | The client is regenerated in the same commit as the bump. The version rule behaved **correctly** and that is the part worth recording: `generate` reported *no contract change*, so `clientVersion` stayed `1.0.0` and all four digests are byte-identical — only the provenance line moved. D1224's rule earns its keep here, because the naive rule would have published `1.0.1` and told every adopter the contract had moved. | **Every release bump from now on owes a regeneration in the same commit**, and this is the first session in which a release constant reaches a committed ARTEFACT rather than only a rendered document. Recorded in the ledger's §12 rather than only here, because the next person to move `VERSION` is not reading this plan. | 0162 |
+| **D1239** | Run 6 step 7: *"`bin/session-01-check.sh` once on the clean tree (a session close is one of the cases the working agreement allows)"*. | **It cannot complete on this workstation.** Step 2 runs `bin/lock-dev-deps.sh --check`, which resolves `requirements-dev.in` against PyPI, and **WSL here has no outbound HTTPS** — measured again at this step, not recalled: `getent` resolves `pypi.org` to `151.101.64.223`, `curl -m 20` exits **28** after 20.00 s, and the *same request from a container* answers **http 200 in 2.8 s**. The gate died at step 2 with exit 2, having passed step 1 clean and shellcheck and ruff inside step 2. | The one question the gate could not ask was asked **with the gate's own command**, in the pinned `PYTHON_RUNTIME_IMAGE` with the checkout mounted — Run 3's workaround for the same fact. First attempt exit **3**: *"uv version mismatch: found 0.12.13, this repository pins 0.12.1"*, which is the command being right rather than a failure. With `uv==0.12.1` installed: *"requirements-dev.txt is current at cutoff 2026-09-03T15:16:21Z"*, **exit 0**. Everything else the gate would have run was run directly: `ruff check` exit 0, `shellcheck` exit 0 on the new gate, and 1099 targeted proofs across 17 modules. **CI is the full check** (`CLAUDE.md` §2) and runs on a machine with network. | The gate cannot be run here, and **the session close needs it** — which is a Run 7 problem and not a Run 6 one, because `bin/session-23-check.sh --mode offline` runs `bin/lock-versions.sh --check` and NOT `lock-dev-deps`, and that one is offline by construction (no registry, no credentials). So the close is not blocked; only this step is. What is worth carrying is the shape of the answer: **a command that cannot run in one environment is still the command, and running it somewhere it can is not the same as running something else.** The alternative — invoking the gate's individual steps by hand and calling that a gate — is the route D1114/D1117 refuses. | — |
+| **D1240** | Runs 2, 3 and 5 wrote `test_client_ir.py`, `test_client_typescript.py`, `test_generate_command.py` and `test_generated_client_toolchain.py`, ran them targeted, and read each commit's CI verdict green. | **None of those four modules carried a `pytestmark` at all**, so no marker-selected sweep has ever collected one of them. CI went RED the first time this run registered their requirements: `write-session-evidence: these claims are not proved by this run: ['generated_client', 'generated_client_toolchain']`, with **no result recorded** for all forty-odd node ids. Measured with a control before repairing: `--collect-only -m "contract and not future"` (the Session 1 gate's own selector) and `-m "p0 and not future and not live_host and not external"` (CI's Session 2 job) each collect **0** from the four, while collecting **7** from `test_generated_client_runtime`, which is marked. ~50 proofs, green on four commits, run only when a person named the file. | Each module gains `pytestmark = [pytest.mark.contract, pytest.mark.p0]` with the reason beside it. And the class is guarded: `test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it` collects with the gate's OWN selector and asserts every registered proof of a DECLARED OFFLINE claim is in it. Battery: the mark removed from each of two modules, both killed, and **the control both times is `test_every_registered_node_id_is_collectible`, which stayed green** — the test that was green through the entire defect. | **Collectible and collected are different questions, and this repository had only ever asked the first.** `test_acceptance_registry` verified every node id exists — a real property, which catches a renamed or mistyped test — and a verdict is computed from the JUnit of a run that SELECTED BY MARKER. An unmarked module satisfies the first and is invisible to the second. It is §7's second question (*has it run at all, in this environment?*) with a new answer: `--setup-plan` says whether a proof WILL run **given a selection**, and nothing asked whether the selection reaches it. Also note what did NOT find this: four CI runs, five mutation batteries whose own `-k` named the files, and a registry guard written for exactly this family. **What found it was registering the requirement** — the evidence writer is the only reader in the tree that consumes a marker-selected JUnit and says which ids are missing from it. Four more modules have the same shape and are NOT this session's: `test_database_function_signatures`, `test_storage_client`, `test_storage_endpoint`, `test_storage_endpoints`, each collecting 0 by the same selector, measured. None belongs to a declared offline claim, so the new guard is silent about them; they are recorded in the ledger's §12 for a session that owns them. | — |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1460,7 +1462,46 @@ and `generate --check` exited 5 on a file nobody had touched; the version rule
 itself behaved correctly, keeping `clientVersion` at `1.0.0` because no digest
 moved.
 
-**Battery:** 12 mutations, 12 killed, 12 controls green.
+**Battery: 13 mutations, 13 killed, 13 controls green.** The first version of
+mutation 1 SURVIVED and was read before it was reported: it added a dead type
+alias beside the real union rather than changing the union, so nothing in the
+tree claimed anything about it — an **uninformative mutation** (D493), not a
+weak test. Replaced with one that widens `AgentRefusal` to `string`; killed.
+
+**CI WAS RED ON THE FIRST PUSH, AND THE CAUSE IS THE SESSION'S MOST
+CONSEQUENTIAL FIND** (D1240). `write-session-evidence` reported *"these claims
+are not proved by this run: ['generated_client', 'generated_client_toolchain']"*
+with **no result recorded** for all forty-odd node ids. Not a failing proof — an
+absent one. Four modules written in Runs 2, 3 and 5 carried **no `pytestmark` at
+all**, so `-m "contract and not future"` and `-m "p0 and not future and not
+live_host and not external"` each collect **0** tests from them (measured, with
+`test_generated_client_runtime` at 7 as the control). About fifty proofs had
+been green on four commits and had never run in any sweep — only when a person
+named the file.
+
+**Collectible and collected are different questions, and this repository had
+only ever asked the first.** `test_acceptance_registry` checks every node id
+exists, which catches a renamed test and cannot catch this. Repaired by marking
+the four, and the class is now guarded by
+`test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it`, which
+collects with the gate's own selector. Battery: the mark removed from each of
+two modules, both killed, **with the collectibility test green both times** —
+the control is the test that was green through the whole defect. Nothing else
+found it: not four CI runs, not five batteries whose `-k` named the files, not a
+registry guard written for this family. **Registering the requirement found
+it**, because the evidence writer is the only reader that consumes a
+marker-selected JUnit and names what is missing from it.
+
+**Step 7's gate could not run here (D1239).** `bin/session-01-check.sh` step 2
+is `bin/lock-dev-deps.sh --check`, which resolves against PyPI, and this WSL
+has no outbound HTTPS — measured at the step: `curl -m 20` exit 28, the same
+request from a container http 200 in 2.8 s. The one question the gate could not
+ask was asked with **the gate's own command** inside the pinned image:
+`requirements-dev.txt is current at cutoff 2026-09-03T15:16:21Z`, exit 0 (and
+exit 3 first, refusing the container's `uv` 0.12.13 against the pinned 0.12.1 —
+the command being right). Run 7's close is **not** blocked: `session-23-check.sh
+--mode offline` runs `lock-versions.sh --check`, which is offline by
+construction.
 
 **Targeted:** `test_evidence_claims`, `test_acceptance_registry`,
 `test_cli_contract`, `test_capacity_envelope`, `test_documentation_index`,

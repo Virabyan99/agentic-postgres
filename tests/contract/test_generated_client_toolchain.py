@@ -32,6 +32,17 @@ from tests.contract.test_image_contracts import requires_docker
 
 from agentic_postgres import REPO_ROOT, client_ir, openapi_normalize
 
+# `GEN-TOOLCHAIN-001`: the hash-locked image, the compiler and the runtime.
+#
+# **Marked, and the marks are load-bearing** (D1240). Without them no
+# marker-selected sweep collects this module at all -- not the Session 1
+# gate's `contract and not future`, not CI's `p0 and not future and not
+# live_host and not external` -- so every proof here passes only when
+# somebody names the file. The registry's node ids stayed COLLECTIBLE the
+# whole time, which is exactly why `test_acceptance_registry` could not
+# see it: collectible and collected are different questions.
+pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
 TOOLCHAIN = REPO_ROOT / "services" / "clients" / "typescript"
 EXAMPLE_CLIENT = REPO_ROOT / "projects" / "example" / "clients" / "typescript"
 APP_SNAPSHOT = REPO_ROOT / "contracts" / "app-openapi.canonical.json"

@@ -23,6 +23,7 @@ import pytest
 import yaml
 
 from agentic_postgres import CURRENT_SESSION, REPO_ROOT
+from agentic_postgres import evidence_claims as claims
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
 
@@ -179,6 +180,100 @@ def test_every_registered_node_id_is_collectible(
         if node_id not in collected
     ]
     assert not missing, f"registry references tests pytest cannot collect: {missing}"
+
+
+@pytest.fixture(scope="module")
+def swept_by_the_gate() -> set[str]:
+    """Node IDs the Session 1 gate's own selector actually collects.
+
+    `-m "contract and not future"`, copied from `bin/session-01-check.sh` step
+    4, which is the run whose JUnit step 8 computes every claim's verdict from.
+    A second collection costs what one costs and is the only way to ask the
+    question this module could not previously ask.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "--no-header",
+            "-m",
+            "contract and not future",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "APG_ACCEPTANCE_SESSION": str(CURRENT_SESSION)},
+    )
+    assert result.returncode == 0, f"collection failed:\n{result.stdout}\n{result.stderr}"
+    return {
+        strip_parameters(line.strip())
+        for line in result.stdout.splitlines()
+        if line.strip().startswith("tests/") and "::" in line
+    }
+
+
+def test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it(
+    registry: list[dict[str, Any]], swept_by_the_gate: set[str]
+) -> None:
+    """**D1240. Collectible and collected are different questions.**
+
+    Every other test in this module asks whether a registered node id EXISTS --
+    `pytest --collect-only` with no selector finds it, so the id is not a typo
+    and the test was not renamed out from under the registry. That is worth
+    asking and it is not this.
+
+    A claim's verdict is computed from the JUnit of a run that SELECTED BY
+    MARKER. `bin/session-01-check.sh` step 4 runs `-m "contract and not
+    future"`; CI's Session 2 job runs `-m "p0 and not future and not live_host
+    and not external"`. A module carrying no marker at all is collectible by
+    name and invisible to both -- so its proofs pass whenever a person names
+    the file and are absent from every sweep that reports on them.
+
+    That is what happened. Four modules written in Session 23's Runs 2, 3 and 5
+    carried no `pytestmark`, and `write-session-evidence` said so the first time
+    their requirements were registered: *"these claims are not proved by this
+    run"*, with **no result recorded** for all forty-odd node ids. CI had been
+    green on every one of those runs, because nothing selected them.
+
+    Scoped to the claims that are DECLARED OFFLINE, because those are the ones
+    an offline gate's JUnit has to carry -- a live claim's proofs are selected
+    by their own mode's marker and are checked where that mode runs.
+
+    Goes red if: a module loses its marks, or a new one is written without any;
+    or a registered offline proof moves into a module the gate's selector does
+    not reach. It cannot be satisfied by renaming a test, which is the failure
+    the collectibility tests already cover.
+    """
+    offline = {
+        requirement for claim in claims.OFFLINE_CLAIMS for requirement in claims.CLAIMS[claim]
+    }
+    entries = [entry for entry in registry if entry["id"] in offline]
+    assert entries, "no registered requirement belongs to a declared offline claim"
+
+    unswept: dict[str, list[str]] = {}
+    for entry in entries:
+        missing = [
+            node_id
+            for node_id in entry["test_nodeids"]
+            # A live half of a requirement that also has an offline half is
+            # selected by its own mode's marker, not by this one.
+            if node_id.startswith("tests/contract/")
+            and strip_parameters(node_id) not in swept_by_the_gate
+        ]
+        if missing:
+            unswept[entry["id"]] = missing
+
+    assert not unswept, (
+        "these offline-claim proofs are registered and are NOT collected by "
+        f"`-m 'contract and not future'`: {unswept}. They are collectible by "
+        "name, which is why the tests above pass; what reports their claim is a "
+        "marker-selected sweep, and it does not see them. The usual cause is a "
+        "module with no `pytestmark` at all (D1240)"
+    )
 
 
 def test_every_future_placeholder_is_registered(
