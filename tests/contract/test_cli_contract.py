@@ -127,7 +127,12 @@ SHELL_COMMANDS = (
     # in, which is the line ADR 0202 exists to let a session draw.
     "bin/session-23-check.sh",
     "bin/smoke-test.sh",
+    # Session 24 (ADR 0205). A loopback client of a deployment's own
+    # surfaces, holding the human's token in one process and handing the
+    # browser a launch cookie instead. Listed here the run it landed
+    # (D1014), and `git add`ed before this file was run (D1188).
     "bin/storage-admin.sh",
+    "bin/studio.sh",
     "bin/upgrade.sh",
 )
 
@@ -175,6 +180,7 @@ PYTHON_COMMANDS = (
     "bin/rotate-secret.py",
     "bin/rotate-signing-key.py",
     "bin/storage-admin.py",
+    "bin/studio.py",
     "bin/upgrade.py",
     "bin/write-session-evidence.py",
 )

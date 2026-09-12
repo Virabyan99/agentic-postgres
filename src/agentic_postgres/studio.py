@@ -34,10 +34,11 @@ import urllib.parse
 from dataclasses import dataclass
 from typing import Any
 
-from agentic_postgres import openapi_normalize
+from agentic_postgres import REPO_ROOT, openapi_normalize
 from agentic_postgres.client_ir import IR
 
 __all__ = [
+    "ASSET_ROOT",
     "AUDIT_PAGE_LIMIT",
     "BIND_ADDRESS",
     "CONTENT_SECURITY_POLICY",
@@ -69,6 +70,21 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Constants that are decisions
 # ---------------------------------------------------------------------------
+
+#: The three first-party files the page is made of, and the one place their
+#: directory is named.
+#:
+#: Here rather than in `bin/studio.py` for a guard's reason and a rule's. The
+#: guard: `test_no_operator_command_puts_a_service_directory_on_the_path` flags
+#: any `bin/*.py` holding both `"services"` and `sys.path`, which is the shape
+#: `bin/auth-admin.py` had when it made an image-only package importable in a
+#: checkout and nowhere else (D292) -- and a command that merely READS three
+#: files from `services/` is not that, but the scan cannot tell and should not
+#: have to. The rule: a derived path is derived once (ADR 0002).
+#:
+#: `services/studio/` is not a service. It builds no image and no deploy runs
+#: it; it is three files an operator command hands to a browser on loopback.
+ASSET_ROOT = REPO_ROOT / "services" / "studio"
 
 #: The only address Studio binds, and there is deliberately no flag for another
 #: one (ADR 0205, D1245). Binding elsewhere would need TLS that the edge cannot

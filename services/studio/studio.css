@@ -1,0 +1,135 @@
+/* apg studio, the whole stylesheet. No font is fetched and no rule names an
+   external resource: the Content-Security-Policy this page is served under is
+   `default-src 'none'` with `style-src 'self'`, so a URL here would be refused
+   by the browser rather than by a reviewer -- and there is nothing to fetch,
+   because the system font stack is what a tool that runs on somebody's own
+   machine should look like. */
+
+:root {
+  color-scheme: light dark;
+  --ink: #17181c;
+  --paper: #fbfbfa;
+  --muted: #5d6068;
+  --rule: #d8d8d4;
+  --ok: #1d6b3f;
+  --stale: #8a5a00;
+  --bad: #97231f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #e8e8e4;
+    --paper: #16171a;
+    --muted: #9a9da5;
+    --rule: #2e3036;
+    --ok: #6fbf8b;
+    --stale: #d6a24a;
+    --bad: #e08a86;
+  }
+}
+
+body {
+  margin: 0;
+  padding: 1.5rem clamp(1rem, 4vw, 3rem);
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+h1 {
+  font-size: 1.25rem;
+  margin: 0 0 0.25rem;
+  letter-spacing: 0.01em;
+}
+
+h2 {
+  font-size: 1rem;
+  margin: 2rem 0 0.5rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+h3 {
+  font-size: 0.95rem;
+  margin: 1.25rem 0 0.35rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+p {
+  margin: 0.35rem 0;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.875rem;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+/* The surface line is the first thing a person reads and the four answers are
+   visually distinct, because `stale_contract` is not an error and `unreachable`
+   is not a disagreement. */
+.surface {
+  font-weight: 600;
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--rule);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.surface.ok {
+  border-left-color: var(--ok);
+  color: var(--ok);
+}
+
+.surface.stale_contract {
+  border-left-color: var(--stale);
+  color: var(--stale);
+}
+
+.surface.unreachable,
+.surface.unreadable {
+  border-left-color: var(--bad);
+  color: var(--bad);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 60rem;
+  margin: 0.5rem 0 1rem;
+  font-size: 0.875rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.3rem 0.6rem 0.3rem 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+}
+
+th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+}
+
+td {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+footer {
+  margin-top: 3rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--rule);
+  max-width: 60rem;
+}
+
+[hidden] {
+  display: none;
+}

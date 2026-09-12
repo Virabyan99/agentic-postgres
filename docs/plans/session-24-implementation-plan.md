@@ -1,10 +1,10 @@
 # Session 24 — Studio, and the trip two sessions owe
 
 **Status:** **PLANNED 2026-09-12** at `035192d`, Session 23's close, on
-`main`. **Runs 1 and 2 are Done** (2026-09-12, on branch `session-24`); Runs
-3–7 are ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
+`main`. **Runs 1, 2 and 3 are Done** (2026-09-12, on branch `session-24`);
+Runs 4–7 are ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
 and Run 1 added **D1259–D1262** and rewrote four with their numbers; the
-runs add theirs below, so **next free is D1268**.
+runs add theirs below, so **next free is D1273**.
 ADR **0205** is this session's (written in Run 1); next free after it 0206.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 24 — Studio* whole (Builds
 / Already true / Must not / Measures / Closes), its rows D1069 (one Studio, a
@@ -176,7 +176,7 @@ and by which sweep).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1268** (Run 1 added D1259–D1263; Run 2 added D1264–D1267). Rows D1243–D1258
+Six columns, next free number after this table **D1273** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1272). Rows D1243–D1258
 were read from the tree on 2026-09-12 at `035192d`; where a row's *Repository
 does* column says *measure*, Run 1 owns the measurement and the row is
 rewritten with the numbers.
@@ -208,6 +208,11 @@ rewritten with the numbers.
 | **D1265** | Run 2 step 2: *“`openapi_docs.py`: the response schema gains `denial_reason` (nullable string…)”*, and *“the canonical document moves by exactly that member”*. Also: *“extend `ADMIN_SCOPES` in that module — grep every reader of that constant first”*. | **There is no response schema to widen.** `RESP_LIST_AUDIT`'s 200 is `openapi_docs.ok("Audit rows, most recent first.")` with no model, and the captured document carries `"schema": {}` for it — which is this file's shape for every LIST endpoint (`/admin/users`, `/admin/agents`, `/auth/jwks.json`); the four that declare a model are the single-object responses. **And the grep the plan asked for says not to touch `ADMIN_SCOPES`**: `test_the_audit_endpoint_needs_its_own_scope_not_the_agent_roster_one` asserts `"admin_audit:read" not in ADMIN_SCOPES`, so widening it would delete that proof to make a new one convenient. | The route serialises `denial_reason`; **the document moves by the endpoint's own description**, which now says a refused row carries the boundary and that a refusal recorded before the column existed carries null. Measured: `app-contract.sh --update` moves exactly one line of `app-openapi.canonical.json` and `--check` exits 0. No response model is invented — that is a layer for every list endpoint at once and this session did not price it. The new proof uses the module's own `_auditor`, and `ADMIN_SCOPES` is untouched. | A schema for one endpoint, added because a session needed a member documented, is a second shape in a file whose shape is a decision. The prose is where this document already says what a row carries. | 0050, 0142 |
 | **D1266** | §9's stop condition: *“`classify_changes` returns nothing for the regenerated client while the app digest moved: a divergence row and a decision about the version rule, never a silent `1.0.0`”*. | **It happened, and it is correct behaviour.** `bin/apg.sh generate` printed *version 1.0.0 (no contract change)* while `app_openapi_sha256` moved `f21bf4a8…` → `e477fd23…`. `classify_changes` compares the **IR** — relations, RPCs, tools, enums, filter operators, auth — member by member (D1219), and not the digests; the IR did not move, because a description string is not an interface. ADR 0162's own class for it is `implementation`, which is a PATCH and which nothing feeds into the generator. | **The version rule stands, and the cost is named rather than fixed.** `clientVersion` is a claim about the client's INTERFACE, and `app_openapi_sha256` is provenance compared to nothing served (D1209, ADR 0204). The consequence, written down: two clients at the same `clientVersion` can carry different app provenance digests. Adding a digest term to `classify_changes` would bump every client for every prose edit to the application document, and is a change to a released rule that wants its own ADR and a session that is about the client. | The stop condition did its job: the answer was reached by reading `classify_changes` and `CHANGE_CLASSES` rather than by accepting a number. D1219 is the other half — the grain of this comparison has already been wrong once, in the permissive direction, and the repair was to make it finer rather than to add inputs. | 0162, 0204 |
 | **D1267** | Run 2 step 5: `request_checks(*, host, bound, cookie, expected_cookie, origin, own_origin, method, custom_header) -> int | None`. | **Two of the five checks are about which path is being asked for**: `/open/<key>` is the one path that may arrive without the launch cookie (it is where the cookie is issued), and the custom header is required of `/__apg/` and of nothing else. The signature as written cannot express either, so the handler would have to decide which checks apply — which puts the policy back above the pure function and out of the battery's reach, the exact thing the split exists to prevent. | **`path` is a parameter.** The function takes `method, path, host, bound, cookie, expected_cookie, origin, own_origin, custom_header` and returns 405 / 421 / 403 / 401 / 403 or `None`. Fourteen inputs prove it, five refusals and five controls that differ by one field, plus a cookie parsed rather than substring-matched and an absent `Origin` served. Battery M3 and M4 killed. | The plan's signature was written before rig 24a measured which fields a handler actually sees; the rig's stub had the path in it from the first line. | **0205** |
+| **D1268** | §1 D1243 and Run 3: *“`OPTIONS` is refused, so no cross-origin preflight ever succeeds”* — rig 24a measured `OPTIONS /__apg/x` → **405** against a handler that implemented it. | **`BaseHTTPRequestHandler` answers an unimplemented method itself, with 501 and none of this server's headers** — measured, on the first run of `test_options_is_refused_so_no_preflight_succeeds`: `501`, `Content-Type: text/html`, no Content-Security-Policy, no `Connection: close`. The refusal was the framework's, on the framework's terms, before `request_checks` was reached. Rig 24a could not have caught it: its stub bound `do_OPTIONS` to the same handler as every other verb, so the branch existed there and not in the product. | **`do_OPTIONS` exists and calls `refused()`**, which returns 405 with `SECURITY_HEADERS` and `Connection: close`; `do_PUT` and `do_DELETE` join it, so no method reaches the framework's 501. Battery M11 puts the defect back and the proof fails. | A rig that models the product's SHAPE can be right about the shape and silent about the default underneath it. The measurement said what happens when a handler implements the method; the product's question was what happens when it does not. | 0140, **0205** |
+| **D1269** | §2 `STU-CMD-001`: *“argument errors exit 2 before any file is read”*, and Run 3's proof: *“a `--project` that does not exist with a malformed flag → 2, and the missing file is NOT what the message names”*. | **The wrapper checked each path as it parsed**, so `--project absent.yaml --nope` reported *file not found* and never reached `--nope`. Written that way because checking beside the flag is how the message comes to name the flag; the cost is that the FIRST path wins over every later shape error. | **Shape first, then the filesystem.** `bin/studio.sh` collects `(flag, path)` pairs while parsing and checks existence after the loop, so an unknown flag, a missing value and a positional argument all refuse before any file is opened — and the message still names the flag, because the pair carries it. Battery M12 puts the defect back and the proof fails. | An operator reading *file not found* goes looking for a path. The thing that was wrong was a word they typed. | — |
+| **D1270** | Run 3's `test_every_response_carries_the_csp_and_security_headers`, written as: for every response, for every `name, value` in `studio.SECURITY_HEADERS`, assert the response carries it. | **It compared the product to itself.** Battery M6 deleted `X-Frame-Options` from `SECURITY_HEADERS` and the test **PASSED**: the mutation removed the header from the product and from the expectation in one edit, because they were one object. CLAUDE.md §7's sixth question — *who wrote the fixture, and do they share a belief with the code* — answered by a survivor. | **`EXPECTED_SECURITY_HEADERS` is written in the test module**, from ADR 0205 and §8, and the product's dict is compared to it as an EQUALITY in the same test — so a header added without review is as red as one removed. M6 re-run: killed. | The only thing that finds this class is a mutation, and the only thing that makes the mutation readable is a control it cannot reach. Three of this battery's twelve first came back with the control failing too, which is a broken PAIRING rather than a survivor, and each was re-paired rather than counted. | D499 |
+| **D1271** | Run 3 adds a `bin/` command, and §5's rule is that the run adds it to `SHELL_COMMANDS`/`PYTHON_COMMANDS` and runs `test_cli_contract` (D1014, D1188). | **Two OTHER released guards caught it, and both were right.** (a) `test_no_command_documents_a_secret_argument` scans `--help` output for `--password` as a whole flag; the usage block said *“There is no --password flag”*, which is the opposite of documenting one and which a regular expression cannot read. (b) `test_no_operator_command_puts_a_service_directory_on_the_path` flags any `bin/*.py` holding both `"services"` and `sys.path` — the shape `bin/auth-admin.py` had when it made an image-only package importable in a checkout and nowhere else (D292). `bin/studio.py` names `services/studio` to READ three files, which is not that. | **Neither guard is touched.** (a) The help says the same thing without the spelling (*a password is never taken as a command-line argument*); the `--password)` case arm still refuses the flag BY NAME on stderr, which `--help` does not print. (b) `ASSET_ROOT` moves to `src/agentic_postgres/studio.py` beside `BIND_ADDRESS`, so the command holds no such literal — which is ADR 0002's rule anyway, and `services/studio/` is not a service: it builds no image and no deploy runs it. | A guard that fires on a file it was not written for is a prompt to move the file, not to teach the guard about negation. A scan that had to understand *there is no X* would pass the next command that documented one in a sentence. | 0002, D292 |
+| **D1272** | Run 3: *“copy `generate.py`'s loading sequence, do not re-derive it”*. | A copy is a second authority unless something holds the two together (D486), and the better shape — extracting the sequence into the package so both commands call it — would rewrite a RELEASED command's error paths: `bin/generate.py`'s `fail()` exits with codes `apg studio` does not share, and every Session 23 proof drives them. | **Copied, and the pair is compared**: `test_the_ir_studio_builds_is_the_one_generate_wrote` asserts Studio's four digests, its relation names and its tool names equal the committed `generated.json`'s for the example project. A drift is then a red proof naming two commands rather than a UI quietly describing a contract the client does not. The extraction is §10's, priced at one module and one pass over `generate.py`'s exits. | A refactor of `apg generate` for the convenience of `apg studio` is a change to the wrong command, made in a session that is not about it. | 0002, D486 |
 
 ---
 
@@ -809,8 +814,53 @@ command-proof shapes); rig 24a and 24b scripts and their outputs.
 `test_repository_contract`, `test_printed_commands`, `test_root_script_policy`
 (a new `bin/*.py`), `test_acceptance_registry`. Push; read CI.
 
-**Done.** *(what the stand-in answers; the `ss` availability; the battery
-table; the line-count of the three assets.)*
+**Done.** 2026-09-12 at `34a3b28`'s child. `apg studio` exists: a verb of the
+dispatcher (derived from `bin/*.sh`, so nothing was registered by hand), a
+wrapper, a process, three first-party files and 30 proofs over them. Targeted
+list run once at the close: **895 passed, 2 skipped** in 40 s over
+`test_studio_command`, `test_studio_server`, `test_studio_core`,
+`test_cli_contract`, `test_operator_commands_run_on_the_host`,
+`test_repository_contract`, `test_printed_commands`, `test_root_script_policy`
+and `test_acceptance_registry`. The two skips are `test_root_script_policy`'s
+own, for two shell commands that run no Python.
+
+**What the stand-in answers.** `test_studio_server.py`'s `StandIn` is one
+loopback `ThreadingHTTPServer` answering `/auth/login` (200 with a distinctive
+token, or whatever an arm sets), `/auth/sessions`, `/auth/me`, `/admin/agents`,
+`/admin/audit` and `<rest>/` with the committed snapshot re-addressed to
+itself. It is a double of an HTTP SHAPE and its docstring says so; every
+positive path against the product is Run 4's. The re-addressing is D1261's:
+`host` is the server's own and `schemes` stays `["https"]`, because the
+normalizer refuses `["http"]` and the field describes the address a caller was
+told to use.
+
+**`ss` was available** on this machine, so the loopback proof took both
+readings: `ss -ltn` shows the socket on `127.0.0.1` only, and a `socket.connect`
+from the interface address (read from `hostname -I`, never from
+`gethostbyname_ex` — rig 24a measured that returning `['127.0.1.1']` here) is
+refused. The test asserts it ASKED: a run where neither reading was available
+fails rather than passes.
+
+**Three defects, found by the proofs before the battery existed**, each now a
+row: `OPTIONS` reached `http.server`'s own 501 with none of our headers
+(D1268); the wrapper reported a missing file where an unknown flag was typed
+(D1269); and the header proof compared the product to itself (D1270, found by
+the battery). **Two released guards also caught the new command and both were
+right** (D1271) — neither was weakened.
+
+**The battery: 12 mutations, 12 killed**, after a first pass of 8/12 that is
+the more useful number. One survivor was real (M6, the weak header proof) and
+three were **broken pairings** — the control was reachable by the mutation, so
+both sides failed and the arm said nothing. Re-paired: M5's control read the
+same relayed body, M9's control asserts exit 6 from a refused login, and M11's
+control drives an `OPTIONS` of its own. A control that the mutation can reach
+is not a control (D499), and a battery that counted those as survivors would
+have sent this run looking for three defects that were not there.
+
+**The three assets**: `index.html` 35 lines, `studio.js` 131, `studio.css` 135,
+plus a `README.md` saying why there is no Dockerfile and no `package.json`. No
+external reference, no inline script, no `style=`, no build step. Run 4 adds
+the query, audit, capability, agent and session views to them.
 
 ### Run 4 — the views, the runtime proof, and the negative tests
 

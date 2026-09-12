@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>apg studio</title>
+    <link rel="stylesheet" href="studio.css" />
+  </head>
+  <body>
+    <header>
+      <h1>apg studio</h1>
+      <p id="identity" class="muted">loading…</p>
+      <p id="surface" class="surface">checking the served surface…</p>
+      <p id="surface-detail" class="muted" hidden></p>
+    </header>
+
+    <main>
+      <section id="schema-section">
+        <h2>Schema</h2>
+        <p id="schema-state" class="muted">loading…</p>
+        <div id="schema"></div>
+      </section>
+    </main>
+
+    <footer>
+      <p class="muted">
+        This page holds no token. Every request it makes is answered by the
+        <code>apg studio</code> process on this machine, which makes the upstream
+        call itself. Stop it with Ctrl-C; it ends the login session it began.
+      </p>
+    </footer>
+
+    <script src="studio.js"></script>
+  </body>
+</html>
