@@ -4,10 +4,7 @@ A reusable, isolated, one-project-per-deployment PostgreSQL appliance and
 template. One deployment serves exactly one project; isolation comes from the
 deployment topology rather than from application correctness.
 
-**Status: Session 23 implemented**, at `template_version` **1.4.0**.
-
-Session 24 is built and is not yet a release: `apg studio` is in the tree, and
-the version and session constants move in the run that bumps them.
+**Status: Session 24 implemented**, at `template_version` **1.5.0**.
 
 Session 24 gives a developer a page over their own deployment. `apg studio`
 starts one standard-library process bound to `127.0.0.1` — there is no flag for
@@ -101,7 +98,15 @@ application on 1.0.0, on a host that started empty (see
 [its plan](docs/plans/session-19-implementation-plan.md) and
 [scope closure](docs/scope-closure.md) §8) — and it moved `VERSION` alone, to
 `1.0.1`, the only time in this project's history the two numbers have come
-apart. **Adopt `1.4.0`.** Session 18's code is in this release — independent
+apart. **Adopt `1.5.0`.** It is a minor over `1.4.0` and ADR 0162 prices it:
+a new operator command (`apg studio`), a `services/studio/` directory of three
+first-party files that no image builds and no deploy runs, **one released
+migration** — 0032, which makes the agent audit reader return the boundary that
+refused — and **one additive member in an existing response**, `denial_reason`
+on the rows `GET /admin/audit` serves. No manifest, outputs, capability, lock or
+secret schema moves; a caller that ignores the new member reads exactly what it
+read before; a project that never types `apg studio` deploys the same containers
+with one more migration applied. Session 18's code is in this release — independent
 recovery: every backup repository mirrored to a second provider by a host unit
 the archiver never knows about (ADR 0188), a disaster kit that names every
 secret and holds none and a bootstrap that adopts a provider project by its
@@ -370,9 +375,9 @@ there), and **create the operator user named by `ssh.operator_user`**.
 sudo bin/provision-host.sh      --host host.yaml                  # once per host
 sudo bin/edge.sh                --host host.yaml up               # once per host
 sudo bin/bootstrap-providers.sh --host host.yaml --project project.yaml --apply
-sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 23
+sudo bin/materialize-secrets.sh --project project.yaml --requirements secrets.required.yaml --session 24
 sudo ./deploy.sh --host host.yaml --project project.yaml \
-     --capabilities capabilities.yaml --through-session 23
+     --capabilities capabilities.yaml --through-session 24
 ```
 
 `deploy.sh --through-session` **refuses before it changes anything** when a

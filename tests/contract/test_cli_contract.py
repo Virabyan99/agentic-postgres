@@ -126,6 +126,7 @@ SHELL_COMMANDS = (
     # two that need a deployment are separate host claims rather than folded
     # in, which is the line ADR 0202 exists to let a session draw.
     "bin/session-23-check.sh",
+    "bin/session-24-check.sh",
     "bin/smoke-test.sh",
     # Session 24 (ADR 0205). A loopback client of a deployment's own
     # surfaces, holding the human's token in one process and handing the

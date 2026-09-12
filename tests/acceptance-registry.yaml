@@ -3461,3 +3461,258 @@
     D1153). On a deployment the reported digest is the one the plane's own
     probe reports and the one the generated client was built from, with the
     other project as the control.
+- id: STU-BIND-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_server.py::test_the_listener_is_on_loopback_and_nowhere_else
+    - tests/contract/test_studio_server.py::test_there_is_no_bind_flag_and_the_address_is_a_constant
+    - tests/contract/test_studio_server.py::test_a_request_without_the_launch_cookie_is_refused
+    - tests/contract/test_studio_server.py::test_a_foreign_host_header_is_refused_as_misdirected
+    - tests/contract/test_studio_server.py::test_a_foreign_origin_is_refused_and_the_own_origin_passes
+    - tests/contract/test_studio_server.py::test_options_is_refused_so_no_preflight_succeeds
+    - tests/contract/test_studio_server.py::test_a_forwarded_call_needs_the_custom_header
+    - tests/contract/test_studio_server.py::test_a_refused_post_does_not_read_its_body_and_does_not_hang
+    - tests/contract/test_studio_core.py::test_request_checks_refuses_five_ways_and_serves_every_control
+    - tests/contract/test_studio_core.py::test_the_cookie_is_parsed_and_not_substring_matched
+    - tests/contract/test_studio_core.py::test_an_absent_origin_is_not_a_foreign_one
+    - tests/contract/test_studio_server.py::test_the_launch_path_sets_an_httponly_samesite_cookie
+  description: >-
+    `apg studio` listens on `127.0.0.1` and on no other address, and no flag or
+    setting binds it elsewhere -- the address is a constant and the absence of a
+    flag is itself asserted. The printed URL carries a per-launch key, issued as
+    an `HttpOnly`, `SameSite=Strict` cookie at `/open/<key>` and nowhere else.
+    Five checks run in the process before anything else, each with a passing
+    control beside it: no launch cookie is 401, a `Host` other than the bound
+    address 421, a present foreign `Origin` 403 (an absent one is not foreign),
+    an `OPTIONS` 405 so that no preflight can succeed, and a `/__apg/` call
+    without `X-Apg-Studio` 403. A refused request's body is never read: a POST
+    announcing a megabyte with one byte sent is answered and closed.
+- id: STU-TOKEN-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_command.py::test_a_password_argument_or_environment_variable_is_refused
+    - tests/contract/test_studio_command.py::test_the_password_file_must_be_owner_read_only
+    - tests/contract/test_studio_server.py::test_the_environment_is_not_read_for_a_credential
+    - tests/contract/test_studio_server.py::test_studio_ignores_a_password_shaped_environment_variable
+    - tests/contract/test_studio_runtime.py::test_no_page_response_header_or_asset_carries_the_token
+    - tests/contract/test_studio_server.py::test_no_page_response_header_or_asset_carries_the_token
+    - tests/contract/test_studio_runtime.py::test_nothing_studio_prints_is_a_token_a_key_or_a_value
+    - tests/contract/test_studio_server.py::test_nothing_studio_prints_is_a_token_a_key_or_a_value
+    - tests/contract/test_studio_server.py::test_studio_holds_no_key_and_verifies_nothing
+    - tests/contract/test_studio_core.py::test_the_module_verifies_no_token_and_holds_no_key
+    - tests/contract/test_studio_server.py::test_an_upstream_refusal_is_classified_and_its_body_is_not_relayed
+    - tests/contract/test_studio_core.py::test_redact_for_log_drops_the_query_and_the_launch_key
+  description: >-
+    Studio holds the human's access and refresh tokens in process memory and
+    nothing else -- no signing key, no database credential, no provider token,
+    no SSH key -- and verifies no JWT: it is a HOLDER, not a verifier. The
+    password reaches it from a TTY prompt or a `0600` file and from nowhere
+    else; an argument is refused by name and no environment variable is read for
+    one, proved with a password-shaped variable set. The token never reaches the
+    page -- no response body, header or asset carries it -- is never printed and
+    never logged: the request log is a method and a path with the query string
+    and the launch key removed. An upstream refusal is relayed as a KIND of no
+    and never as the upstream's body.
+- id: STU-SURFACE-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_runtime.py::test_launch_answers_ok_against_the_surface_the_ir_was_built_from
+    - tests/contract/test_studio_runtime.py::test_an_administrators_surface_is_the_one_their_grants_reach
+    - tests/contract/test_studio_runtime.py::test_launch_answers_stale_contract_naming_both_digests_and_refuses_the_rest_views
+    - tests/contract/test_studio_runtime.py::test_unreachable_and_unreadable_are_two_answers
+    - tests/contract/test_studio_runtime.py::test_the_capabilities_view_is_served_whatever_the_surface_answered
+    - tests/contract/test_studio_core.py::test_the_four_answers_are_the_declared_set
+    - tests/contract/test_studio_core.py::test_the_surface_answer_is_ok_for_the_document_the_ir_was_built_from
+    - tests/contract/test_studio_core.py::test_a_moved_byte_is_stale_contract_naming_both_digests
+    - tests/contract/test_studio_core.py::test_unreachable_unreadable_and_a_foreign_host_are_three_reports
+    - tests/contract/test_studio_core.py::test_the_schema_view_is_the_ir_and_nothing_else
+    - tests/contract/test_studio_server.py::test_the_schema_view_is_refused_unless_the_surface_is_ok
+  description: >-
+    At launch Studio fetches the served REST document AS THE HUMAN, normalizes
+    it against the address the deployed document publishes and fingerprints it
+    with `openapi_normalize`, then compares it to the IR's digest. Four answers
+    and the differences between them are the point: `ok`; `stale_contract`
+    naming BOTH digests and both of its causes -- the capture has moved, or this
+    subject's role is not the one it was taken for, since the served document is
+    scoped to the caller's grants and an administrator is served the anonymous
+    one; `unreachable`; `unreadable`. On anything but `ok` the schema and query
+    views are refused with 409 and the application views remain -- the audit,
+    agent and session views answer to a different contract. The capability view
+    is served under every answer, because the compiled lock is not the REST
+    document and no launch answer is evidence about it. The schema browser
+    renders the IR's relations, columns, types, enums and RPCs and nothing the
+    IR does not carry.
+- id: STU-QUERY-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_core.py::test_rest_query_refuses_a_relation_a_column_or_an_operator_the_surface_does_not_name
+    - tests/contract/test_studio_core.py::test_rest_query_bounds_limit_and_names_the_constant
+    - tests/contract/test_studio_core.py::test_a_value_is_encoded_as_a_value_and_never_as_syntax
+    - tests/contract/test_studio_core.py::test_the_forwarder_table_has_no_rest_write
+    - tests/contract/test_studio_core.py::test_the_operator_set_is_the_contracts_and_not_studios
+    - tests/contract/test_studio_core.py::test_the_operator_wire_forms_are_the_runtimes
+    - tests/contract/test_studio_runtime.py::test_a_query_as_a_returns_as_rows_and_none_of_bs
+    - tests/contract/test_studio_runtime.py::test_a_query_syntax_value_finds_nothing_and_the_stored_value_is_found
+  description: >-
+    The query builder sends STRUCTURE -- a relation, a list of columns,
+    `[column, operator, value]` triples -- and the process builds exactly one
+    PostgREST `GET` from it. A relation, a column or an operator the surface
+    does not name is refused before any request exists, and the operator set is
+    the capability schema's closed set rather than one Studio keeps. `limit` is
+    bounded by a named constant. A value is a value: percent-encoded with no
+    safe characters, so `,` `.` `(` `)` and `&` reach the service as characters
+    -- proved with a PostgREST-syntax value that matches nothing, and the
+    control that the same string stored in a row is found by `eq`. No operation
+    in the forwarder's table writes to the REST route. Through Studio as user A
+    the rows are A's and none of B's, because nothing in Studio decides that:
+    PostgREST verifies a token the auth service signed and the database applies
+    the policy.
+- id: STU-AUDIT-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_runtime.py::test_the_audit_view_renders_every_row_of_the_page_with_its_boundary
+    - tests/contract/test_studio_runtime.py::test_the_audit_page_count_equals_the_tables_newest_rows
+    - tests/contract/test_studio_runtime.py::test_a_view_filter_hides_no_row_from_the_pages_count
+    - tests/contract/test_studio_runtime.py::test_a_token_without_the_audit_scope_is_refused_and_classified
+    - tests/contract/test_studio_server.py::test_the_audit_view_takes_the_endpoints_own_filters_and_no_others
+    - tests/contract/test_studio_core.py::test_audit_view_header_carries_the_pages_own_count
+  description: >-
+    The audit view fetches `GET /admin/audit` at the endpoint's own ceiling --
+    plus `agent_id` or `owner_id` when chosen, and NO other parameter, which the
+    forwarder refuses with 400 -- and renders every row of the page, the denial
+    boundary included. The page's own count travels with it: *n of m rows on
+    this page; the page is the newest 500*, always visible, so a view filter
+    that hides rows in the browser cannot hide them from the count. There is
+    therefore no request shape in which a filter narrows what was READ, which is
+    what stops a viewer asking for `outcome=served` and never learning there
+    were refusals. The page's row count equals the newest-500 count read over
+    the table as the superuser, against a table holding more. A token without
+    `admin_audit:read` is served the endpoint's refusal, classified as a kind of
+    no.
+- id: STU-REVOKE-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_core.py::test_revoke_refuses_a_confirmation_that_is_not_the_agent_id_before_any_request
+    - tests/contract/test_studio_runtime.py::test_revocation_through_studio_stops_the_agents_next_exchange
+    - tests/deployment/test_session24_studio.py::test_revocation_through_studio_refuses_the_agents_next_request_on_alpha
+  description: >-
+    Revocation through Studio is `PATCH /admin/agents/{id}` with `{status:
+    revoked}` -- the existing endpoint, never a second path. A confirmation that
+    is not the agent's own id is refused with 422 and a message naming both
+    values and saying nothing was changed, IN THE PROCESS, before any upstream
+    request exists to have changed anything: a confirmation the page checked and
+    the process did not would be a hidden control. After a confirmed
+    revocation the agent's secret exchange is refused and
+    `agent_claims_are_current` returns NULL for the claims a live token carries.
+    Live, on the deployment: a wrong confirmation leaves the agent's next MCP
+    request served -- the control -- and a right one makes the next one refused,
+    with the refusal's row visible in the viewer.
+- id: STU-SESSION-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_runtime.py::test_studio_ends_the_session_it_began
+    - tests/contract/test_studio_runtime.py::test_studio_refreshes_before_expiry
+    - tests/contract/test_studio_core.py::test_an_undetermined_own_session_is_reported_and_none_is_ended
+    - tests/contract/test_studio_core.py::test_the_own_session_is_the_newest_live_row_after_the_login
+  description: >-
+    Studio refreshes its access token before expiry through `/auth/refresh`,
+    driven against a login whose token expires inside the refresh window -- the
+    rig's own application cannot issue one, because its TTL is a module
+    constant. It ends the session it began at exit through `DELETE
+    /auth/sessions/{id}`, read through a SEPARATE login of the same subject
+    before and after, because the token that would ask is the one being revoked.
+    When its own session cannot be determined -- two rows sharing the newest
+    timestamp -- it ends NONE and says so, rather than guessing and revoking
+    somebody else's.
+- id: STU-SUPPLY-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_assets.py::test_studio_assets_carry_no_third_party_code
+    - tests/contract/test_studio_assets.py::test_the_page_carries_no_inline_script_and_no_external_reference
+    - tests/contract/test_studio_server.py::test_every_response_carries_the_csp_and_security_headers
+    - tests/contract/test_operator_commands_run_on_the_host.py::test_operator_commands_import_only_host_packages
+  description: >-
+    `services/studio/` holds three first-party files and a README and nothing
+    else -- an equality, not a subset check, so a fifth file has to be argued
+    for. No `package*.json`, no lockfile, no `node_modules`, no URL outside a
+    comment in any of them, and no protocol-relative reference a scheme scan
+    would miss. The page loads one script, its own, with no inline body; one
+    stylesheet, its own; no `style=` attribute and no `on*=` handler, because
+    every listener is attached in JavaScript. Every response carries the
+    Content-Security-Policy and the security headers, compared against an
+    expectation written in the test module rather than read from the product's
+    own dict. The Python is the standard library plus `agentic_postgres`, which
+    is what an operator command may import.
+- id: STU-CMD-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_studio_command.py::test_studio_is_a_verb_of_the_dispatcher
+    - tests/contract/test_studio_command.py::test_argument_errors_exit_two_before_anything_is_read
+    - tests/contract/test_studio_command.py::test_an_unrendered_project_is_refused_with_exit_four_and_the_render_command
+    - tests/contract/test_studio_command.py::test_a_document_without_a_ready_route_exits_five
+    - tests/contract/test_studio_command.py::test_an_http_route_to_a_non_loopback_host_is_refused
+    - tests/contract/test_studio_command.py::test_a_loopback_http_route_is_not_refused_at_the_document_step
+    - tests/contract/test_studio_command.py::test_a_refused_login_exits_six_and_says_no_more
+    - tests/contract/test_studio_command.py::test_nothing_a_refusal_prints_is_a_credential
+    - tests/contract/test_studio_command.py::test_help_names_the_four_surface_answers
+    - tests/contract/test_studio_command.py::test_the_ir_studio_builds_is_the_one_generate_wrote
+    - tests/contract/test_cli_contract.py::test_commands_are_executable_in_the_git_index
+  description: >-
+    `bin/studio.sh` is a verb of the `apg` dispatcher, derived from `bin/` and
+    registered by nobody. Argument errors exit 2 before any file is read --
+    shape first, then the filesystem, so an unknown flag typed after a missing
+    path reports the flag. An unrendered project exits 4 naming the command that
+    renders it; a deployed document with no ready REST or app route exits 5; an
+    `http` route to a host that is not loopback exits 5, while a loopback one is
+    not refused at that step. A login the deployment refuses exits 6 and says
+    only that the credential was refused. Nothing any refusal prints is a
+    credential. `--help` names the four surface answers, and the intermediate
+    representation Studio builds is compared to the one `apg generate` wrote.
+- id: STU-ENV-001
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_capacity_envelope.py::test_the_envelope_carries_studios_three_latencies
+    - tests/contract/test_capacity_envelope.py::test_the_envelope_is_current
+  description: >-
+    The capacity envelope carries three MACHINE rows for Studio -- the command's
+    own start, the page served, and the schema view served -- each naming the
+    machine it describes, the rig it ran in, and the size of whatever its number
+    is about: the surface for the two that read the intermediate representation,
+    and the bytes served plus an explicit *no surface size applies* for the
+    static page. The pair is itself the claim: the page and the schema view cost
+    the same because neither makes an upstream call, and a reader can only see
+    that if both are published. The views that DO reach the deployment are
+    absent, because those are a deployment's numbers. The document is current
+    against the pinned images.
+- id: AGT-AUDIT-002
+  priority: P0
+  target_session: 24
+  test_nodeids:
+    - tests/contract/test_agent_audit_plane.py::test_the_audit_read_returns_the_boundary_exactly_on_refused_rows
+    - tests/contract/test_auth_endpoints.py::test_admin_audit_serialises_the_denial_boundary
+    - tests/contract/test_migrations.py::test_0032_reissues_the_reader_grant
+    - tests/contract/test_database_function_signatures.py::test_every_call_to_a_released_function_uses_a_released_arity
+    - tests/deployment/test_session24_studio.py::test_the_deployed_audit_read_carries_the_boundary_of_a_real_refusal
+  description: >-
+    `app_private.auth_list_agent_audit` returns `denial_reason` and `GET
+    /admin/audit` serialises it, so a denial served to an administrator names
+    the boundary that refused it (ADR 0178). It is non-null exactly on `refused`
+    rows and null on served ones -- a declared field with no reader was an
+    unverified field, and a served field nobody could read was the same defect
+    one surface out. Migration 0032 is a DROP and CREATE rather than a replace,
+    because PostgreSQL refuses to change an existing function's return type, and
+    it re-issues the `REVOKE ... FROM PUBLIC` and the `GRANT EXECUTE` that the
+    DROP took with it. The arity stays `(uuid, uuid, integer)`, so every
+    released call site is unchanged. Live, on the deployment: after a real
+    refusal on alpha the endpoint's row for it carries the boundary the plane
+    recorded.

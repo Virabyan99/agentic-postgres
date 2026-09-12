@@ -66,7 +66,15 @@ ID_PATTERN = re.compile(
     # it was emitted from has moved. A family of its own because the question
     # it answers -- is this artefact still a true claim about that surface --
     # is asked of nothing else here.
-    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN)-[A-Z0-9]+(-\d+)?$"
+    # `STU` is Session 24 (ADR 0205): a STUDIO surface -- what the product
+    # SHOWS a human, on that human's own machine, holding only what that
+    # human holds. Not `DX`, which is the documented path a person walks;
+    # not `DEV`, which is the developer's own database; not `GEN`, which is
+    # a file the product writes for someone to keep. This is a surface that
+    # exists only while a process is running, whose whole claim is about
+    # what it does NOT hold -- and a family of its own is what makes that
+    # claim countable.
+    r"^(DEP|CFG|DBX|SEC|API|AGT|STO|REC|OPS|DX|REL|CAP|IDN|EVAL|FLEET|TEN|DEV|EVD|GEN|STU)-[A-Z0-9]+(-\d+)?$"
 )
 
 
@@ -195,7 +203,7 @@ def test_every_registered_node_id_is_collectible(
 def swept_by_the_gate() -> set[str]:
     """Node IDs the sweep that REPORTS an offline claim actually collects.
 
-    `OFFLINE_SWEEP_SELECTOR`, which is `bin/session-23-check.sh --mode offline`
+    `OFFLINE_SWEEP_SELECTOR`, which is `bin/session-24-check.sh --mode offline`
     step 3 -- the run whose JUnit step 9 computes every offline claim's verdict
     from. **Not** the Session 1 gate's `contract and not future`: that one
     writes Session 1's evidence and nobody else's, and the two selections are

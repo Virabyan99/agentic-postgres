@@ -13,14 +13,18 @@ decision.
 
 ## 1. The position, in numbers
 
+Counted from the files at this session's close, never recalled (D1194).
+
 | | Count | Note |
 |---|---|---|
-| Requirements in the acceptance registry | **202** | 194 P0, 8 P1, **0 P2** — nine added in Session 23: eight `GEN-*` and one `AGT-*` |
-| Claims in the evidence model | **118** | four added in Session 23 — **two declared offline and two deliberately not**, which is the line ADR 0202 exists to let a session draw |
-| Requirements a claim reports on | **178** | 24 belong to no claim (D697), unchanged in number; see §4 |
-| Migrations released | **31** | fix-forward only. Session 23 adds none, released or project — it ships no SQL at all |
-| Architecture decisions recorded | **204** | 0200–0201 are Session 21's, 0202–0203 Session 22's, **0204 Session 23's** |
-| Divergences measured | **D1–D1242** | D1124–D1155 are Session 21's, D1157–D1199 Session 22's, **D1200–D1242 Session 23's** — the last four written after the code was finished: three by Run 6's own red CI and **D1242 by the close's gate** |
+| Requirements in the acceptance registry | **213** | 205 P0, 8 P1, **0 P2** — eleven added in Session 24: ten `STU-*` and one `AGT-*` |
+| Claims in the evidence model | **122** | four added in Session 24 — **two declared offline and two deliberately not**, the same line Session 23 drew and for the same reason |
+| Requirements a claim reports on | **189** | 24 belong to no claim (D697), unchanged in number for the fourth session running; see §4 |
+| Migrations released | **32** | fix-forward only. Session 24 adds **one**: 0032, a DROP + CREATE of the agent audit reader at the same arity, re-issuing the grant the DROP took with it |
+| Architecture decisions recorded | **205** | 0200–0201 are Session 21's, 0202–0203 Session 22's, 0204 Session 23's, **0205 Session 24's** |
+| Divergences measured | **D1–D1281** | D1157–D1199 are Session 22's, D1200–D1242 Session 23's, **D1259–D1281 Session 24's** — and five of those twenty-three were written after the code was finished: two by the branch's own red CI, and three by the last run's derivations reading themselves |
+| Claims declared offline | **8** | Sessions 22's four, 23's two, 24's two. Declared, never inferred (ADR 0202) |
+| `template_version` | **1.5.0** | a proposed minor, priced by ADR 0162 in `CURRENT_SESSION`'s own comment; Run 7's `upgrade plan` on the host is what confirms it |
 
 ---
 
@@ -426,3 +430,5 @@ named is ADR 0195's folded outcome in the reassuring direction.
 | **A rig that reaches a published loopback port is a rig that assumes a daemon** | D1276. Run 4's CI errored seventeen times on `Connection refused` to the port `apg dev up` publishes — while `docker exec` against the same container, in the same fixture, worked. `apg dev` publishes `127.0.0.1:0:5432` by decision (D1175), and a host-to-loopback DNAT is something a daemon can be configured not to make work. The fixture now proves an address before building on it and says which it used. Every other rig in this suite that reaches a dev cluster from the test process inherits the assumption and has not been asked. |
 | **Studio has no live half for the query view's RLS, off this workstation** | The runtime module proves it against `apg dev` + the real auth application + real PostgREST, which is a deployment in every respect except that it is not THE deployment. The trip's module exercises the launch and the surface answer against beta; the RLS pair is not repeated there, because it would need two subjects created on a production project. Recorded as a choice. |
 | **The three envelope rows are this machine's** | `apg studio` start 0.74/0.66/0.74 s, the page 1.3/3.1/2.4 ms, the schema view 1.3/1.1/1.2 ms. MACHINE measurements, and the views that make an upstream request are deliberately unmeasured: those are a deployment's numbers and no arithmetic converts one machine's into another's. |
+| **Three guards in the gate-modes family go stale by being derived** | D1280. `test_session_twenty_three_gate_modes.py` still checks its own gate for a `session-21-check` filename — two gates back, inherited from its own derivation and passing for free — and still names its gate's path by hand in the executable-bit test. Session 24's copy derives both from `SESSION` and `SCRIPT`; 23's is left alone, because editing a released module this run had no other reason to touch is a decision of its own. Whoever derives Session 25's should repair 23's in the same commit. |
+| **A closed environment roster, and a live module that wanted a third name** | D1278. `APG_ADMIN_PASSWORD_FILE` is read by `admin_password` and is not in `tests/conftest.py::ENVIRONMENT_VARIABLES`, so no module can GATE on it — only fail on it at fixture time. That is right for a password file and the wrong shape for a sweep that would rather skip than fail; whether the roster should carry it is a decision about the roster, not about this session. |

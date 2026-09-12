@@ -1068,6 +1068,17 @@ CLAIM_INTRODUCED_IN = {
     "generated_client_toolchain": 23,
     "generated_client_hash": 23,
     "agent_lock_reported": 23,
+    # Session 24 (ADR 0205). Four claims, landing with the constant (D690), and
+    # split the same way for the same reason: what Studio IS and what it SHOWS
+    # are settled by the source and by a rig this checkout builds, while a
+    # revocation is about a running plane refusing the NEXT request and a
+    # boundary is about a refusal that plane actually recorded. The second pair
+    # is `not_run` at this session's close and Run 7's trip collects it,
+    # alongside Sessions 22's and 23's four.
+    "studio_boundary": 24,
+    "studio_surface": 24,
+    "studio_revocation": 24,
+    "audit_boundary_reported": 24,
     # Session 22 (ADR 0202, ADR 0203). Six claims, landing with the constant
     # (D690), and the first four are the first OFFLINE claims this project has
     # had: `apg dev` is a developer's own machine, and no deployment can answer

@@ -4,7 +4,7 @@
 `main`. **Runs 1, 2 and 3 are Done** (2026-09-12, on branch `session-24`);
 Runs 4–7 are ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
 and Run 1 added **D1259–D1262** and rewrote four with their numbers; the
-runs add theirs below, so **next free is D1278**.
+runs add theirs below, so **next free is D1282**.
 ADR **0205** is this session's (written in Run 1); next free after it 0206.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 24 — Studio* whole (Builds
 / Already true / Must not / Measures / Closes), its rows D1069 (one Studio, a
@@ -176,7 +176,7 @@ and by which sweep).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1278** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1273; Run 4 D1274–D1275; Run 5 D1276–D1277). Rows D1243–D1258
+Six columns, next free number after this table **D1282** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1273; Run 4 D1274–D1275; Run 5 D1276–D1277; Run 6 D1278–D1281). Rows D1243–D1258
 were read from the tree on 2026-09-12 at `035192d`; where a row's *Repository
 does* column says *measure*, Run 1 owns the measurement and the row is
 rewritten with the numbers.
@@ -218,6 +218,10 @@ rewritten with the numbers.
 | **D1275** | §5 Run 4: *“`test_launch_answers_ok_against_the_surface_the_ir_was_built_from`”*, with the fixture's one administrator holding every admin scope — and §5 Run 3's launch line, *“run `bin/apg.sh generate`”*, as the whole of what `stale_contract` says. | **The served REST document is scoped to the caller's grants, and the administrator's is empty.** Rig 24d, one URL and three tokens the auth application issued: `authenticated` is served 16,024 bytes, 8 paths and 3 definitions and fingerprints EQUAL to the committed snapshot; `project_admin` is served 2,393 bytes, **1 path and 0 definitions — byte for byte the same document as `anon`**, because the administrative role administers the auth service's endpoints and holds nothing in `api`. So an administrator's launch answers `stale_contract`, and the first run of the proof did exactly that. | **The answer is right and the sentence was wrong.** `stale_contract` means *the surface served to this subject is not the captured one*, which is the meaning Session 23's client already has — `test_init_refuses_a_surface_with_another_fingerprint_naming_both` produces it by changing only the token's role. What could not stand is a launch line offering ONE cause: an administrator told to regenerate would have regenerated a capture that was exactly right. `bin/studio.py`, `bin/studio.sh --help` and the page's detail line now name both causes. The `ok` proof launches as `alpha-user-a`, and `test_an_administrators_surface_is_the_one_their_grants_reach` is the administrator's half, with the `ok` launch beside it as the control. | The same shape as D1260, found the same way and one run later: a comparison that looked measured, against a document nobody had fetched as this subject. A session that had “fixed” the product to match the first run would have taught Studio to accept a surface it had not verified. | D1260, ADR 0204, rig 23a |
 | **D1276** | Run 4's fixture, built from rig 24b, points the auth application at the dev cluster's PUBLISHED port — `127.0.0.1:<state.port>` — the way rig 24b did on this workstation. | **CI errored seventeen times, all at the fixture, all `PoolTimeout` behind `connection to server at "127.0.0.1", port 32782 failed: Connection refused` — while `docker exec psql` against the SAME container in the SAME fixture had succeeded twice, seconds earlier.** So the cluster was running and its published port was not reachable from the runner's own loopback. `apg dev up` publishes `-p 127.0.0.1:0:5432` by decision (D1175, rig 22a): the port exists on loopback and nowhere else, which is right for a developer's machine and depends on a host-to-loopback DNAT a daemon can be configured not to make. Every other cluster this suite starts publishes on all interfaces, which is why no other rig had met this. | **The fixture proves an address before it builds on one.** `cluster_address()` tries the published port, falls back to the container's own address read from `docker inspect`, fails with a message naming both and what `docker exec` could do, and returns WHICH answered — recorded in the rig and warned about when it is not the first. Not a switch on the machine's name: the question is *can this process reach it*, and only a connection answers that. | CLAUDE.md's own rule in a new place: read the container, not the file. `state["port"]` is a true record of what `up` published and says nothing about whether anything can reach it — a value that looked measured and was not. | D1175, D1152 |
 | **D1277** | Run 5: *“a **Studio** entry under *Threats*”*, *“the status paragraph at Session 24 … write the prose now with `1.5.0` and let Run 6's guard confirm”*, and *“§1's numbers **counted, not recalled**”*. | **Three of the five document edits are guarded against constants Run 6 moves, and writing them here leaves a commit its own guards refuse.** The threat table's two acceptance columns are parsed and must name requirements present in `tests/acceptance-registry.yaml`; every registered requirement belongs to a claim (D697); the `STU-*` family and its claims are Run 6's. `test_the_readme_states_the_session_the_release_implements` compares the README's *Session N implemented* to `CURRENT_SESSION` — writing 24 here failed it on the spot — and `test_the_readme_quotes_the_release_it_ships` compares `template_version` to `VERSION`. And §1 is *the position*, which the registry changes in Run 6, so counting it now publishes numbers a later commit in the same session makes wrong (D1194). | **Each moves to the run that moves its constant, and everything that does not depend on one lands here.** The threat model gets the whole Studio ANALYSIS — the hostile page, the five checks, rig 24b's measured CORS answer, the local-process residual — which the parser does not read; the table ROW lands in Run 6 with its requirements. The README gets Studio's own section and a sentence saying the session is built and not yet a release, with the status line unchanged. The ledger gets §13 whole; §1 is counted in Run 6. | **D1273, applied forward rather than repeated.** Last run recorded a commit that was red by construction and said a future session should land a module with its caller together. Doing the same thing deliberately one run after writing that down would be worse than the original. | D1273, D936, D1194, D697 |
+| **D1278** | Run 6 step 3: the live module marked `requires_environment("APG_LIVE_HOST", "APG_PROJECT_A_OUTPUTS", "APG_ADMIN_PASSWORD_FILE")`. | **`tests/conftest.py::ENVIRONMENT_VARIABLES` is a CLOSED tuple and does not carry the third name.** `apply_environment_gate` raises `pytest.UsageError` on any name outside it, deliberately: *“a typo here would produce a test that silently never runs”* (D687). Every existing module that needs the administrator's password file reads it through the `admin_password` fixture, which fails naming the variable when it is unset — and §2 of this plan says the same thing in the sentence beside it (*“the live module READS”*), so the two halves of the plan disagree rather than the plan and the tree. | **Gated on the two declarations that are declared.** The third is read by `admin_password` the way every other module reads it. Widening a closed roster is a decision about the roster, and this run had no reason of its own to take it. | The guard is right and one sentence of the plan was wrong about it — and the OTHER sentence of the plan was right, which is the useful part: the brief contained its own correction. | D687 |
+| **D1279** | Run 6 step 5: *“a derivation script whose every substitution is anchored to match exactly once”*, with the header and usage *“rewritten whole and read line by line, both halves”*. | **Nine anchored substitutions left four header blocks standing, and one of them had become FALSE.** The precondition an operator reads before a host trip said *“Both projects deployed `--through-session 23`, which publishes outputs v18 — unchanged, because Session 23 moves no outputs schema and adds NO released migration”*. Session 24 adds migration 0032, so an operator reading it would have expected a deploy that applies nothing and then found each ledger one row longer. The other three named the wrong session's claims, the wrong previous gate and the wrong count of runtime rigs. | **All four rewritten, and the line-by-line read is what found them** — a substitution can only repair text somebody predicted would differ. The derivation script prints every line of its output still carrying a `23` so the read has somewhere to start; twenty-four remain and every one is a true reference to what Session 23 did. | D505's family, which is why the plan asked for the read. What is new is the KIND: not a stale name but a stale FACT — and the fact is a precondition for an irreversible operation. | D505, D853, D858 |
+| **D1280** | Run 6 step 5: *“`tests/contract/test_session_twenty_four_gate_modes.py` derived from 23's”*. | **The derivation repaired the script and left three literals in the module that guards it, and one of them is a defect rather than a staleness.** `test_the_gate_exists_and_is_executable_in_the_git_index` ran `git ls-files --stage -- bin/session-23-check.sh`: it would have asserted the PREVIOUS gate's mode bit, and a new gate committed without one would have passed it. The merge-help test looked for `session-23-offline.json` while the gate DERIVES that filename from `${SESSION}` with `%02d`. And the staleness guard looked for `session-21-check` — two gates back, inherited from Session 23's own derivation, **passing for free ever since**. | **Every one derived from `SESSION` or from `SCRIPT`.** A literal that cannot be left behind is the only fix that survives the next derivation. The corrected executable-bit test then went red immediately on the real thing: the new gate was not yet in the index (D1188). | The guard against a stale derivation was itself stale, in the module whose subject is stale derivations. Session 23's copy still carries its own version of two of these and is left as it is — an open item rather than an edit to a released module this run had no other reason to touch. | D505, D703, D1188 |
+| **D1281** | Run 6 step 5: the per-session offline assertion, *“D1237: assert THIS session's two are in the set; never assert the set's size”*. | **D1237's own repair was one scope too wide, and the third offline session is where it shows.** Session 22 asserted an equality against the whole of `OFFLINE_CLAIMS`, which became *no later session may declare an offline claim* — caught by Session 23 (D1237). Session 23's replacement was a SUBTRACTION: `OFFLINE_CLAIMS` less every claim an EARLIER session introduced. That is right for exactly as long as no LATER session declares one. Session 24 declares two, and Session 23's module failed with this session's names in its own `mine` set. | **Matched on the session, in both modules**: the claims whose `CLAIM_INTRODUCED_IN` entry equals that module's own `SESSION`. Each module then owns its own two names, which is what both docstrings already said they wanted. Nothing is lost — under the subtraction a stray later declaration reddened an EARLIER session's module, which is the wrong place and blocks every later offline session by construction. | **The same defect twice, one turn apart, inside the repair for the first instance.** An assertion stated one scope too wide reads as correct until the case beyond its scope exists, and the repair inherited the habit of describing the property in terms of everything ELSE. | D1237 |
 
 ---
 
@@ -1269,9 +1273,56 @@ must still pass), the D1240/D1242 guard module, `test_compatibility`,
 `test_generate_command`, `test_client_typescript`, then the gate. Push; read
 CI.
 
-**Done.** *(the node-id lists as written vs proposed; the setup-plan outputs
-both ways; the derivation's substitution count and what the line-by-line read
-found; the gate's `--help` exit and line count; the selector guard's reading.)*
+**Done.** `CURRENT_SESSION` 24 and `VERSION` 1.5.0, eleven requirements, four
+claims, the live module, `bin/session-24-check.sh` and its modes module.
+
+**The node ids, as WRITTEN against as proposed** (D1236 — every clause checked
+against a node id rather than copied). Three of §2's proposals do not exist:
+`test_migration_contract.py::test_0032_reissues_the_reader_grant`, whose module
+does not exist and whose proof is in `test_migrations.py` — D1264 from Run 2,
+finally reaching the registry — and `test_database_function_signatures.py` and
+`test_operator_commands_run_on_the_host.py`, both named without a node id, which
+are `::test_every_call_to_a_released_function_uses_a_released_arity` and
+`::test_operator_commands_import_only_host_packages`. Two proofs Run 4 wrote
+have no place in §2 because §2 predates them, and both belong to
+`STU-SURFACE-001`: the administrator's role-scoped surface (D1275) and the
+ungated capability view (D1274). `test_the_rig_cost_is_recorded` is deliberately
+unregistered — it records a number rather than asserting a property, and a
+requirement naming it would be one satisfied by a `print`. **Eleven
+requirements, 78 node ids.**
+
+**The `--setup-plan` outputs, both ways.** Unset: `SKIPPED [2] … environment
+absent: APG_LIVE_HOST, APG_PROJECT_A_OUTPUTS`, no error. Set: both tests
+collected, neither deselected, six module fixtures set up and torn down in
+order. The gate is on two declarations and not three, because the third is not
+in `ENVIRONMENT_VARIABLES` and the marker refuses a name outside it (D1278).
+
+**The derivation: 9 anchored substitutions, and the line-by-line read found 4
+more blocks** no substitution could reach (D1279). One had become false rather
+than merely stale — the host-mode precondition said this session *“adds NO
+released migration”*, and 0032 is one. Twenty-four lines still carry a `23`, and
+every one is a true reference to what Session 23 did.
+
+**The gate**: 1,499 lines; `--help` exits **0** in 181 lines. Step 8c is the
+only new step, and step 3's sweep already collects the asset module by its
+marks — what 8c adds is the sentence an operator reads.
+
+**The modes module found three more literals** (D1280), one a real defect: the
+executable-bit test was `git ls-files`-ing the PREVIOUS gate. Derived from
+`SCRIPT` instead, it went red immediately on the true thing — the new gate was
+not in the index yet (D1188).
+
+**The selector guard's reading**:
+`test_the_offline_sweep_selector_is_the_newest_gates` finds the newest gate by
+glob, so it now reads `bin/session-24-check.sh` and passes; and
+`test_every_offline_claim_proof_is_collected_by_the_offline_sweep` passes with
+the eleven new requirements in it. That is step 4's answer: the runtime module
+is collected by the sweep that reports its claim, by its marks, with no CI
+change at all.
+
+**And D1237's repair was itself one scope too wide** (D1281). Session 23's
+subtraction made *no later session may declare an offline claim* true again, and
+Session 24 is the later session; both modules now match on their own session.
 
 ### Run 7 — the trip: three sessions' evidence, one sweep
 

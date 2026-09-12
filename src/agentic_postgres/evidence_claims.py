@@ -95,6 +95,14 @@ ALL_MODES = (*MODE_MARKERS, OFFLINE_MODE)
 #: properties that need a deployment were split out into two separate HOST
 #: claims rather than folded in, which is the line ADR 0202 exists to make
 #: drawable at all.
+#: Session 24 adds two, and the line runs where Session 23's did. What Studio
+#: IS -- where it binds, what it holds, what it refuses, what it ships, how its
+#: command behaves -- is settled by the source and by a rig this checkout can
+#: build, and a production deployment would answer none of it differently. What
+#: needed one was split into two HOST claims rather than folded in: a
+#: revocation is about a running plane refusing the NEXT request, and a
+#: boundary is about a refusal a deployed plane actually recorded. Docker is
+#: required for both of these; a skip is not a pass.
 OFFLINE_CLAIMS: frozenset[str] = frozenset(
     {
         "dev_environment",
@@ -103,6 +111,8 @@ OFFLINE_CLAIMS: frozenset[str] = frozenset(
         "offline_evidence",
         "generated_client",
         "generated_client_toolchain",
+        "studio_boundary",
+        "studio_surface",
     }
 )
 
@@ -210,6 +220,43 @@ CLAIMS: dict[str, tuple[str, ...]] = {
     "generated_client_toolchain": ("GEN-TOOLCHAIN-001", "GEN-ENV-001"),
     "generated_client_hash": ("GEN-HASH-001",),
     "agent_lock_reported": ("AGT-META-001",),
+    # Session 24 (ADR 0205). `apg studio`: a loopback page over a deployment,
+    # holding the human's token and handing the browser a launch cookie.
+    #
+    # Four claims. `studio_boundary` is what Studio IS -- where it binds, what
+    # it holds, what it ships, how its command behaves -- and `studio_surface`
+    # is what it SHOWS: the four launch answers, the query builder, the audit
+    # page and the session plane. Both are declared offline: every proof behind
+    # them runs against the source or against a rig this checkout builds (a dev
+    # cluster, the real auth application, the pinned PostgREST verifying its
+    # published JWKS, the pinned Traefik in front).
+    #
+    # `studio_revocation` and `audit_boundary_reported` are NOT declared, and
+    # the reason is the whole of what a live half is for: a revocation is about
+    # a running plane refusing the next request, and a boundary is about a
+    # refusal that plane actually recorded. Both are `not_run` at this
+    # session's close, by design, and Run 7's trip collects them alongside
+    # Sessions 22's and 23's four.
+    #
+    # `AGT-AUDIT-002` extends an existing family and still gets a claim of its
+    # own: joining it into a Session 9 claim would re-date that claim, because
+    # a claim's session is the MAX of its requirements' target sessions
+    # (ADR 0089, D1150).
+    "studio_boundary": (
+        "STU-BIND-001",
+        "STU-TOKEN-001",
+        "STU-SUPPLY-001",
+        "STU-CMD-001",
+    ),
+    "studio_surface": (
+        "STU-SURFACE-001",
+        "STU-QUERY-001",
+        "STU-AUDIT-001",
+        "STU-SESSION-001",
+        "STU-ENV-001",
+    ),
+    "studio_revocation": ("STU-REVOKE-001",),
+    "audit_boundary_reported": ("AGT-AUDIT-002",),
     # Session 21 (ADR 0200, ADR 0201). Two claims: the agent plane opened to a
     # tenant's domain -- the vocabulary derived from the reviewed surface, the
     # roster compiled from the lock, a project's own capability manifest joined

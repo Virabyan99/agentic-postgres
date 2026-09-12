@@ -226,7 +226,29 @@ from pathlib import Path
 #: containers. A minor, proposed here; Session 24's `upgrade plan` on the host
 #: is what confirms it, and a `major` required there is a stop condition rather
 #: than a number to write down.
-CURRENT_SESSION = 23
+#:
+#: **Session 24 moves it to 24, all-or-nothing again** (D690): ten `STU-*`
+#: requirements, one more `AGT-*`, and four claims -- two declared offline and
+#: two deliberately not, because a revocation is about a running plane refusing
+#: the next request and a boundary is about a refusal that plane recorded. The
+#: live module is collected under `--setup-plan` with its three declarations
+#: set, in this commit, rather than discovered on a host.
+#:
+#: `VERSION` moves to `1.5.0`, and ADR 0162 prices it a MINOR. The session adds
+#: a new operator command (`apg studio`), a `services/studio/` directory of
+#: three first-party files that no image builds and no deploy runs, **one
+#: released migration** (0032: the audit reader returns `denial_reason`, a DROP
+#: + CREATE at the same arity because PostgreSQL refuses to change an existing
+#: function's return type), and **one additive member in an existing response**
+#: (`GET /admin/audit` rows gain `denial_reason`; every other key unchanged, and
+#: that 200 has no schema to widen). **No manifest, outputs, capability, lock or
+#: secret schema moves.** A caller that ignores the new member reads exactly
+#: what it read before, and a project that adopts this release and never types
+#: `apg studio` deploys the same containers with one more migration applied.
+#: Proposed here; Run 7's `upgrade plan` on the host is what confirms it, and a
+#: `major` required there is a stop condition rather than a number to write
+#: down.
+CURRENT_SESSION = 24
 
 #: Repository root, resolved from this file rather than the caller's cwd so
 #: that scripts and tests behave identically when invoked from anywhere

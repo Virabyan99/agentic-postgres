@@ -267,19 +267,6 @@ def studio_rig(tmp_path_factory: pytest.TempPathFactory) -> Any:
         container = state["container"]
         rest_path = resolved["API_REST_PATH"]
 
-        # The address this process will use, proved before anything is built on
-        # it. `state["port"]` is a record of what `up` published; whether
-        # anything can reach it is a different question and only a connection
-        # answers it.
-        cluster_host, cluster_port, how = cluster_address(container, state.get("port"))
-        if how != "the published port":
-            warnings.warn(
-                f"studio_rig reached the dev cluster at {cluster_host}:{cluster_port} via "
-                f"{how}: its published port was not reachable from this process. That is a "
-                "property of this machine's daemon, not of the product",
-                stacklevel=1,
-            )
-
         def su(sql: str, db: str | None = None):
             return docker(
                 "exec", "-i", container,
@@ -311,6 +298,31 @@ def studio_rig(tmp_path_factory: pytest.TempPathFactory) -> Any:
         assert made.returncode == 0, made.stderr
 
         # -- the auth application, on its own loopback socket ------------------
+        # -- the network FIRST, then the address -------------------------------
+        #
+        # Attaching a running container to a second network is the last thing
+        # here that can change how this process reaches it, and on the CI
+        # runner's daemon it changes it completely: the published port answers
+        # a probe before this and refuses a connection after (D1276). So the
+        # topology is built first and the address is proved in it.
+        created = docker("network", "create", network)
+        assert created.returncode == 0, created.stderr
+        joined = docker(
+            "network", "connect", "--alias", resolved["POSTGRES_SERVICE_HOST"], network, container
+        )
+        assert joined.returncode == 0, joined.stderr
+        connected = container
+
+        cluster_host, cluster_port, how = cluster_address(container, state.get("port"))
+        if how != "the published port":
+            warnings.warn(
+                f"studio_rig reached the dev cluster at {cluster_host}:{cluster_port} via "
+                f"{how}: its published port was not reachable from this process once the "
+                "container had joined the rig's network. That is a property of this "
+                "machine's daemon, not of the product (D1276)",
+                stacklevel=1,
+            )
+
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric import rsa
 
@@ -419,15 +431,11 @@ def studio_rig(tmp_path_factory: pytest.TempPathFactory) -> Any:
         jwks.write_bytes(raw)
         jwks.chmod(0o644)
 
-        # -- the network, the edge, then PostgREST -----------------------------
-        created = docker("network", "create", network)
-        assert created.returncode == 0, created.stderr
-        joined = docker(
-            "network", "connect", "--alias", resolved["POSTGRES_SERVICE_HOST"], network, container
-        )
-        assert joined.returncode == 0, joined.stderr
-        connected = container
-
+        # -- the edge, then PostgREST ------------------------------------------
+        # The network already exists and the cluster is already on it; what is
+        # left is the order the edge and PostgREST have to start in, which is
+        # the edge first: the proxy URI has to name the published port and
+        # Docker does not choose one until the container runs.
         (work / "dynamic").mkdir()
         (work / "traefik.yaml").write_text(
             "entryPoints:\n  web:\n    address: ':8080'\n"
