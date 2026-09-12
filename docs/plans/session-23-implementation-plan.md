@@ -1547,7 +1547,50 @@ construction.
 5. Mark this run **Done.** with the offline half's claim table pasted, the
    `main` SHA, and the two host claims named as waiting.
 
-**Done.** *(the run writes this)*
+**Done.** Session 23 is complete, and **the gate found one more thing on its
+way out** (D1242). The first run of `bin/session-23-check.sh --mode offline`
+exited **5**: `generated_client` came back `not_run` with *"no result recorded
+for `test_printed_commands.py::test_the_generate_hook_prints_the_path_the_process_was_given`"*
+— D1240's shape one level deeper, a P0 requirement proved in a `p1` module, in
+the Session 1 gate's collection and absent from the sweep that reports the
+claim. Repaired on both sides, battery 3/3, and the **second** run passed.
+
+**The offline half, `evidence/session-23-offline.json`** (gitignored, on this
+workstation; `checkout_commit` **2121c029**, which is CI-green):
+
+| Claim | Mode | Status |
+|---|---|---|
+| `dev_environment`, `dev_isolation`, `dev_churn`, `offline_evidence` | offline (Session 22's) | **passed**, re-measured |
+| `generated_client` | offline | **passed** |
+| `generated_client_toolchain` | offline | **passed** |
+| `generated_client_hash` | host | **absent by construction** — Session 24's trip |
+| `agent_lock_reported` | host | **absent by construction** — Session 24's trip |
+
+**5570 passed, 0 failed, 3 skipped, 0 errors**, and the three skips were read
+rather than accepted: two are `test_root_script_policy`'s parametrized cases
+for shell scripts that run no Python, and one is
+`test_secret_generation::test_written_manifest_is_owner_read_only`, which needs
+a `chown` to root this run does not have. None belongs to a claim. Two tests
+more than the failing run's 5568, which is the repair's own arithmetic: the new
+drift guard, and the proof that had been outside this sweep entering it.
+`source_commit`, `project_keys`, `routes` and `certificate_sha256` are null for
+the reason ADR 0202 gives — an offline half measures a checkout, not a
+deployment. **The gate's last twenty lines were read** (D1199): step 8b's
+`client-typescript: /work typechecks`, step 9's six claims, the two sentences
+naming what is still owed, and `session-23-check: offline PASSED`.
+
+**Nothing was transported and nothing needed to be**: no deploy, no container,
+no secret, no migration. No `git bundle`, no DR kit re-export. The host stays at
+`f61f716` with the same release deployed on both projects, untouched since
+Session 21.
+
+**`session-23` fast-forwarded into `main` and the branch deleted** after CI was
+green on its last commit. `CLAUDE.md` §2 carries the `SESSION 23 COMPLETE`
+block: what shipped, the offline half's numbers, and what Session 24's trip
+owes — the two host claims, the deploy through ≥23 that recreates the auth/mcp
+container, the example client run on the host against beta and alpha,
+`list_resources` on beta, and everything Session 22 already owed, which is a
+separate three-half merge. Next free **D1243**; next free ADR **0205**.
 
 ---
 ## 7. Evidence and claims
