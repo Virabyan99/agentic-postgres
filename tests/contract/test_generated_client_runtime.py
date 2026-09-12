@@ -36,6 +36,7 @@ import json
 import secrets
 import subprocess
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -52,6 +53,37 @@ FIXTURE = REPO_ROOT / ".generated" / KEY
 CLIENT = REPO_ROOT / "projects" / "example" / "clients" / "typescript"
 SNAPSHOT = REPO_ROOT / "projects" / "example" / "contracts" / "postgrest-openapi.canonical.json"
 TOOLCHAIN = REPO_ROOT / "services" / "clients" / "typescript"
+
+
+def image_user(image: str) -> str:
+    """The uid the image declares it runs as, or `0` when it declares none.
+
+    Read from the image rather than assumed (D1233). The PostgREST image
+    declares `User=1000`; a `0600` pgpass owned by anyone else is unreadable to
+    it, and libpq reports that as *"no password supplied"* -- a message about
+    the value rather than about the file, ninety seconds before the schema
+    cache times out.
+    """
+    inspected = docker("inspect", "--format", "{{.Config.User}}", image, timeout=120)
+    declared = inspected.stdout.strip()
+    return declared.split(":", 1)[0] if declared else "0"
+
+
+def own_as(directory: Path, name: str, uid: str) -> None:
+    """Give one file `uid` as owner, through a root container.
+
+    A test process cannot `chown` to an arbitrary uid, and hard-coding the
+    permission to something world-readable is not available: libpq IGNORES a
+    passfile whose mode is looser than 0600. So the change is made by a
+    container that is root, using an image this repository already pins.
+    """
+    done = docker(
+        "run", "--rm", "-v", f"{directory}:/w",
+        locked("PYTHON_RUNTIME_IMAGE"),
+        "sh", "-c", f"chown {uid}:{uid} /w/{name} && chmod 600 /w/{name}",
+        timeout=300,
+    )  # fmt: skip
+    assert done.returncode == 0, f"could not give {name} to uid {uid}: {done.stderr}"
 
 
 def docker(*arguments: str, stdin: str | None = None, timeout: int = 600):
@@ -229,6 +261,13 @@ def served(tmp_path_factory: pytest.TempPathFactory) -> Any:
         pgpass = work / "pgpass"
         pgpass.write_text(f"*:*:*:{authenticator}:{password}\n", encoding="utf-8")
         pgpass.chmod(0o600)
+        # **The file has to belong to the uid the image runs as** (D1233). This
+        # worked on the author's workstation for the worst possible reason --
+        # their uid is 1000 and so is the image's -- and failed on a CI runner
+        # at uid 1001 with a message about a missing password.
+        rest_uid = image_user(locked("POSTGREST_IMAGE"))
+        work.chmod(0o755)
+        own_as(work, "pgpass", rest_uid)
 
         created = docker("network", "create", network)
         assert created.returncode == 0, created.stderr
@@ -263,6 +302,25 @@ def served(tmp_path_factory: pytest.TempPathFactory) -> Any:
         )  # fmt: skip
         assert made.returncode == 0, made.stderr
         containers.append(rest)
+
+        # **Read the file as the image's own user before waiting on anything.**
+        # Without this the whole class shows up as a 90-second timeout whose
+        # message is about a schema cache, and the actual cause -- a file the
+        # container cannot open -- is eight hundred characters into a log.
+        readable = docker(
+            "run", "--rm", "--user", rest_uid,
+            "-v", f"{pgpass}:/run/secrets/postgrest_authenticator_pgpass:ro",
+            "--entrypoint", "cat", locked("PYTHON_RUNTIME_IMAGE"),
+            "/run/secrets/postgrest_authenticator_pgpass",
+            timeout=300,
+        )  # fmt: skip
+        assert readable.returncode == 0, (
+            f"uid {rest_uid} -- the user the PostgREST image declares -- cannot read the "
+            f"pgpass this fixture wrote: {readable.stderr.strip()[:200]}. libpq reports that "
+            "as 'no password supplied', which reads as a configuration fault rather than a "
+            "permission one (D1233)"
+        )
+        assert authenticator in readable.stdout, "the mounted pgpass is not the one written"
 
         deadline = time.monotonic() + 90
         warm = False

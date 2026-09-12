@@ -3,8 +3,8 @@
 **Status:** **PLANNED 2026-09-12** at `d6f6e94`, Session 22's close, on `main`.
 No run has started. §1 is D1200–D1211 (planning rows, every one measured
 today in a rig or read from the tree at `d6f6e94`); Run 1 added **D1212–D1215**,
-measured at the branch point, Run 2 added **D1216-D1223**, Run 3 **D1224-D1228** and Run 4 **D1229-D1232**, so next
-free is **D1233**. ADR
+measured at the branch point, Run 2 added **D1216-D1223**, Run 3 **D1224-D1228** and Run 4 **D1229-D1233**, so next
+free is **D1234**. ADR
 **0204** is this session's; the runs add theirs below the planning rows.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 23* and its rows D1067
 (the `generate` hook after a project migration), D1068 (one session, the IR
@@ -162,7 +162,7 @@ executed).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1233**. Rows D1200–D1211
+Six columns, next free number after this table **D1234**. Rows D1200–D1211
 were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's** and
 **D1216–D1223 Run 2's**, each measured while the run that names it was built.
 The runs add theirs below them as they go, each run's numbers named in its Done
@@ -203,6 +203,7 @@ paragraph.
 | **D1230** | Run 4's rig, as planned: PostgREST beside `apg dev`, the client pointed at its published port. No edge. | **That rig cannot reproduce the shape any adopter has.** Production serves `basePath: /api/rest` because Traefik strips that prefix before PostgREST, and PostgREST has no path-prefix option of its own. Measured across rigs 23g and 23h: the client pointed at PostgREST's root is refused — correctly — with *"the document's basePath /api/rest is not the path of http://postgrest:3000"*; pointed at the prefix it gets a **404**. So the planned rig could only ever have tested a base path no deployment publishes. | The rig runs the **pinned Traefik** with a `stripPrefix` middleware over the project's own `API_REST_PATH`, which is what the deployment does — a rig as a second configuration of the product (ADR 0065/0066), not a different thing. Through it: `init` → `ok`, a typed read → `ok`, the write → `refused` `PT401`. The direct-at-the-root arm is kept as the **control**, because a pass through the edge has to be a pass *because of* the edge. | A rig that omits the edge is a proof by a route the product does not take (ADR 0065/0066) — and the omission is invisible, because the client's refusal at the root looks like a client defect rather than a missing component. Rig 23a did not meet this: it normalized with `expected_base_path=served["basePath"]`, taking the served value as the expected one, so it never exercised the assertion at all. | 0204 |
 | **D1231** | Run 4's rig, as planned: *"drop `PGRST_JWT_SECRET` (the rig has no key set) and record in the docstring that role selection is therefore by `PGRST_DB_ANON_ROLE`"*. | **Every request then answers 500.** The generated client ALWAYS sends `Authorization: Bearer` — reading the surface *as the caller* is the whole of ADR 0204 — and PostgREST with no JWT configuration cannot verify a token it was given. Measured in rig 23g: all four arms returned `{"kind":"unreachable","reason":"the service answered 500"}` before the secret existed. Rig 23a never met it because it sent no Authorization header. | The rig generates an HS256 secret, sets `PGRST_JWT_SECRET`, and mints its own tokens naming a **role and no subject** — `bin/dev-token.py`'s documented property, since migration 0013's hook returns early without a `sub`. That is also what makes the two proofs honest: the read succeeds and returns **0 rows** because no `app.user_id` is set, and the write is refused with a real `PT401` for want of an identity. The role now comes from the token rather than from `PGRST_DB_ANON_ROLE`, which is how a deployment selects it. | `PGRST_DB_ANON_ROLE` was the right mechanism for rig 23a, which fetched a document anonymously, and the wrong one the moment the *client* became the instrument. A rig inherits its predecessor's configuration far more readily than its predecessor's reason for it. | 0204 |
 | **D1232** | Run 4's `GEN-TYPES-001` proof of the query string, as planned: *"the smoke prints the URL it built, asserted to be `…/notes?select=id,title&order=created_at.desc&limit=5&title=eq.x` after decoding"*. | **The client does not expose the URL it built, and adding that only for a test would be a backdoor.** The deeper problem is that the assertion would compare the client against a string this session wrote — it could not tell a correctly built query from an incorrectly built one that the test was updated to match. | Proved **through the service instead**. The smoke gains an optional `APG_SMOKE_FILTER_VALUE`, and the proof sends `probe&select=no_such_column`: percent-encoded it is an ordinary filter matching nothing (**200**), concatenated it becomes a second query parameter naming a column the relation does not have (**400**). Two outcomes far apart, neither a coincidence, and PostgREST is the judge rather than a literal in the test. The unfiltered read in the same invocation is the control. | ADR 0127 — *a caller value is a value and never syntax* — is one of this product's central claims, and the planned proof would have asserted it against a string rather than against a parser. The battery's `encodeURIComponent` mutation is what says the difference is real. | 0127 |
+| **D1233** | Run 4's rig wrote the authenticator's pgpass at `0600` under `tmp_path` and bind-mounted it into PostgREST. Seven proofs green on this workstation. | **CI RED on the first push.** `fe_sendauth: no password supplied`, surfacing 90 seconds later as *"PostgREST never loaded its schema cache"*. The cause: the PostgREST image declares `User=1000` (`docker inspect --format '{{.Config.User}}'`), and libpq **ignores a passfile looser than 0600** — so the file must be `0600` **and** owned by uid 1000. On this workstation the author's uid is *also* 1000, so it was readable **by coincidence**; the CI runner is uid **1001** and the container could not open it. Reproduced locally with a control: the same file at uid 1000 reads, at uid 1001 gives `Permission denied`. | The uid is read from the image (`image_user`) rather than assumed, and the file is given that owner through a **root container** on a pinned image — a test process cannot `chown` to an arbitrary uid, and the looser mode that would avoid the question is the one libpq refuses. And the fixture now **reads the file as that user before waiting on anything**, so the failure names a permission rather than timing out on a schema cache. | **D1228, two runs earlier, was the same fact in the same session**: a file the author can read and the container's user cannot. That one was a directory at `0700` and this one a file at `0600`; both were found by a container refusing to see something that was plainly there, and the first did not generalise into a habit. The tell both times was a message about the *content* — "no client here", "no password supplied" — where the truth was about *access*. **A rig that passes because the author's uid happens to match the image's is a value that looks measured and is not** (§7), and the only thing that distinguishes it from a correct one is a machine nobody has run it on yet. | 0204 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1090,6 +1091,21 @@ twenty minutes reporting an unapplied mutation as a weak test (D269).
 **Cost, for Run 5's envelope:** the module is **~150 s** wall (7 proofs, one
 `apg dev up`, one PostgREST, one edge, one image build, 13 container runs); the
 battery is six full cycles at roughly that each.
+
+**CI WAS RED ON THE FIRST PUSH, AND THE CAUSE IS WORTH MORE THAN THE RUN**
+(D1233). Every proof errored with *"PostgREST never loaded its schema cache"*,
+and eight hundred characters into the container's log: `fe_sendauth: no password
+supplied`. The PostgREST image declares `User=1000`, libpq ignores a passfile
+looser than `0600`, and the author's uid on this workstation **is also 1000** —
+so the rig read its own pgpass by coincidence and the CI runner, at uid 1001,
+could not. Reproduced locally with a control (readable at 1000, `Permission
+denied` at 1001), repaired by taking the uid from the image and giving the file
+that owner through a root container, and the fixture now **reads the file as
+that user before waiting on anything**, so the failure names a permission
+instead of timing out on a cache. **D1228, two runs earlier, was the same fact**
+— a file the author can read and the container's user cannot — and it did not
+generalise into a habit. Both times the message was about the content ("no
+client here", "no password supplied") where the truth was about access.
 
 **Targeted:** `test_generated_client_runtime`, `test_client_typescript`,
 `test_client_ir`, `test_generated_client_toolchain`, `test_generate_command`,
