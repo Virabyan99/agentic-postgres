@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -748,4 +749,53 @@ def test_no_command_defines_anything_after_its_entry_point() -> None:
 
     assert not offenders, (
         f"these are not bound when main() runs, and only a script invocation notices: {offenders}"
+    )
+
+
+def test_no_printf_format_string_begins_with_a_dash() -> None:
+    """`printf '--mode ...'` is a usage error, not a line of output (D1199).
+
+    bash's `printf` parses its first argument for options, so a format string
+    beginning with `-` is read as one and the call fails:
+
+        printf: usage error
+        printf: usage: printf [-v var] format [arguments]
+
+    Under `set -euo pipefail` that aborts the script. **Session 22's gate
+    shipped three of them** -- the closing lines of all three modes, each
+    wrapping onto a second `printf` that happened to begin with `--mode`. One
+    was caught by running `--help`; the other two are printed only at the END
+    of a successful run, so they were invisible until the gate was run to
+    completion for the first time. The offline one aborted the gate AFTER it
+    had written the evidence half, so the half was correct and the gate never
+    said `PASSED`.
+
+    This is the project's most-repeated class in its cheapest form: a line
+    nobody had executed. Guarded here rather than in that gate's own module
+    because the mistake is available to every command in `bin/`, and guarding
+    the class rather than the instance is what D600 and D918 ask for.
+
+    The remedy is `printf -- 'FORMAT'`, which is what the three now do.
+
+    Goes red if: any shell command grows a `printf` whose format starts with a
+    dash and is not preceded by `--`.
+    """
+    offenders: list[str] = []
+    pattern = re.compile(r"""printf\s+(?!--\s)(['"])(-.*)""")
+
+    for relative in SHELL_COMMANDS:
+        path = REPO_ROOT / relative
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            match = pattern.search(stripped)
+            if match:
+                offenders.append(f"{relative}:{number} {stripped[:80]}")
+
+    assert not offenders, (
+        "these printf format strings begin with a dash, so bash reads them as "
+        f"options and the call fails: {offenders}. Use `printf -- 'FORMAT'`"
     )

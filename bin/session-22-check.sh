@@ -1172,7 +1172,7 @@ Start Docker and run this again."
   if evidence_is_supportable; then
     write_evidence offline
     printf 'This is one half of three. Session %s also needs --mode host and\n' "${SESSION}"
-    printf '--mode external, which are Session 24'"'"'s trip; see --help.\n'
+    printf -- '--mode external, which are Session 24'"'"'s trip; see --help.\n'
   else
     announce_no_evidence
   fi
@@ -1326,7 +1326,7 @@ mode_host() {
 
   printf '\n\033[1m%s: host PASSED\033[0m\n' "${PROGRAM}"
   printf 'This is one half of three. Session %s also needs --mode external and\n' "${SESSION}"
-  printf '--mode offline, whose claims no deployment can answer; see --help.\n'
+  printf -- '--mode offline, whose claims no deployment can answer; see --help.\n'
 }
 
 mode_external() {
@@ -1378,7 +1378,7 @@ mode_external() {
 
   printf '\n\033[1m%s: external PASSED\033[0m\n' "${PROGRAM}"
   printf 'This is one half of three. Session %s also needs --mode host and\n' "${SESSION}"
-  printf '--mode offline, whose claims no deployment can answer; see --help.\n'
+  printf -- '--mode offline, whose claims no deployment can answer; see --help.\n'
 }
 
 main() {
