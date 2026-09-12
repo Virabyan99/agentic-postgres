@@ -4,7 +4,7 @@
 `main`. **Runs 1, 2 and 3 are Done** (2026-09-12, on branch `session-24`);
 Runs 4–7 are ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
 and Run 1 added **D1259–D1262** and rewrote four with their numbers; the
-runs add theirs below, so **next free is D1273**.
+runs add theirs below, so **next free is D1274**.
 ADR **0205** is this session's (written in Run 1); next free after it 0206.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 24 — Studio* whole (Builds
 / Already true / Must not / Measures / Closes), its rows D1069 (one Studio, a
@@ -176,7 +176,7 @@ and by which sweep).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1273** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1272). Rows D1243–D1258
+Six columns, next free number after this table **D1274** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1273). Rows D1243–D1258
 were read from the tree on 2026-09-12 at `035192d`; where a row's *Repository
 does* column says *measure*, Run 1 owns the measurement and the row is
 rewritten with the numbers.
@@ -213,6 +213,7 @@ rewritten with the numbers.
 | **D1270** | Run 3's `test_every_response_carries_the_csp_and_security_headers`, written as: for every response, for every `name, value` in `studio.SECURITY_HEADERS`, assert the response carries it. | **It compared the product to itself.** Battery M6 deleted `X-Frame-Options` from `SECURITY_HEADERS` and the test **PASSED**: the mutation removed the header from the product and from the expectation in one edit, because they were one object. CLAUDE.md §7's sixth question — *who wrote the fixture, and do they share a belief with the code* — answered by a survivor. | **`EXPECTED_SECURITY_HEADERS` is written in the test module**, from ADR 0205 and §8, and the product's dict is compared to it as an EQUALITY in the same test — so a header added without review is as red as one removed. M6 re-run: killed. | The only thing that finds this class is a mutation, and the only thing that makes the mutation readable is a control it cannot reach. Three of this battery's twelve first came back with the control failing too, which is a broken PAIRING rather than a survivor, and each was re-paired rather than counted. | D499 |
 | **D1271** | Run 3 adds a `bin/` command, and §5's rule is that the run adds it to `SHELL_COMMANDS`/`PYTHON_COMMANDS` and runs `test_cli_contract` (D1014, D1188). | **Two OTHER released guards caught it, and both were right.** (a) `test_no_command_documents_a_secret_argument` scans `--help` output for `--password` as a whole flag; the usage block said *“There is no --password flag”*, which is the opposite of documenting one and which a regular expression cannot read. (b) `test_no_operator_command_puts_a_service_directory_on_the_path` flags any `bin/*.py` holding both `"services"` and `sys.path` — the shape `bin/auth-admin.py` had when it made an image-only package importable in a checkout and nowhere else (D292). `bin/studio.py` names `services/studio` to READ three files, which is not that. | **Neither guard is touched.** (a) The help says the same thing without the spelling (*a password is never taken as a command-line argument*); the `--password)` case arm still refuses the flag BY NAME on stderr, which `--help` does not print. (b) `ASSET_ROOT` moves to `src/agentic_postgres/studio.py` beside `BIND_ADDRESS`, so the command holds no such literal — which is ADR 0002's rule anyway, and `services/studio/` is not a service: it builds no image and no deploy runs it. | A guard that fires on a file it was not written for is a prompt to move the file, not to teach the guard about negation. A scan that had to understand *there is no X* would pass the next command that documented one in a sentence. | 0002, D292 |
 | **D1272** | Run 3: *“copy `generate.py`'s loading sequence, do not re-derive it”*. | A copy is a second authority unless something holds the two together (D486), and the better shape — extracting the sequence into the package so both commands call it — would rewrite a RELEASED command's error paths: `bin/generate.py`'s `fail()` exits with codes `apg studio` does not share, and every Session 23 proof drives them. | **Copied, and the pair is compared**: `test_the_ir_studio_builds_is_the_one_generate_wrote` asserts Studio's four digests, its relation names and its tool names equal the committed `generated.json`'s for the example project. A drift is then a red proof naming two commands rather than a UI quietly describing a contract the client does not. The extraction is §10's, priced at one module and one pass over `generate.py`'s exits. | A refactor of `apg generate` for the convenience of `apg studio` is a change to the wrong command, made in a session that is not about it. | 0002, D486 |
+| **D1273** | §5: *“CI green on every commit that changes code”*, with Run 2 building `src/agentic_postgres/studio.py` and its unit proofs, and Run 3 building `bin/studio.py` — the module's only caller — one commit later. | **The two cannot both be true.** `test_repository_contract.py::test_no_module_is_imported_only_by_its_own_tests` refuses a package module whose only importers are its own tests: *“a module with no caller is a feature that does not exist, however well it is tested”* (D204). Run 2's commit is exactly that state, and CI said so — `34a3b28`, both jobs red on that ONE proof, `1 failed, 5507 passed` in the Session 1 gate and `1 failed, 5597 passed` in the Session 2 suite, nothing else in either. The workstation could not have seen it: the targeted list for a run that adds a module does not include `test_repository_contract`, and the guard is about the repository rather than about anything Run 2 touched. | **Recorded, not repaired by rewriting history.** Run 3's commit adds the caller and `test_repository_contract` passes in its targeted list (895 passed) — and **`deb4aa9`'s own CI is green**, read by full SHA, which is what makes this a reading of the split rather than a guess about it. The branch therefore has one red commit by construction, and the alternative — landing the pure core and its command in one commit — is what a future session should plan instead: the split is a reviewing convenience, and D204 is a property of the tree at each commit. | The guard is right and the plan was wrong, which is the direction this table exists for. A session that had “repaired” it by importing `studio` from somewhere to satisfy the scan would have built the feature the guard was written to prevent. | D204 |
 
 ---
 
@@ -856,6 +857,15 @@ same relayed body, M9's control asserts exit 6 from a refused login, and M11's
 control drives an `OPTIONS` of its own. A control that the mutation can reach
 is not a control (D499), and a battery that counted those as survivors would
 have sent this run looking for three defects that were not there.
+
+**Run 2's CI came back red on one proof, and the proof is right** (D1273):
+`test_no_module_is_imported_only_by_its_own_tests` refuses a package module
+whose only importers are its own tests, and at `34a3b28` `studio.py` was
+exactly that -- its caller lands here. Both CI jobs failed on that one
+assertion and nothing else (`1 failed, 5507 passed` and `1 failed, 5597
+passed`), and **this run's own commit `deb4aa9` is green**. Read rather than
+worked around: the split between Run 2 and Run 3 is
+a reviewing convenience and D204 is a property of the tree at every commit.
 
 **The three assets**: `index.html` 35 lines, `studio.js` 131, `studio.css` 135,
 plus a `README.md` saying why there is no Dockerfile and no `package.json`. No
