@@ -2,7 +2,8 @@
 
 **Status:** **PLANNED 2026-09-12** at `d6f6e94`, Session 22's close, on `main`.
 No run has started. §1 is D1200–D1211 (planning rows, every one measured
-today in a rig or read from the tree at `d6f6e94`); next free **D1212**. ADR
+today in a rig or read from the tree at `d6f6e94`); Run 1 added **D1212–D1215**,
+measured at the branch point, so next free is **D1216**. ADR
 **0204** is this session's; the runs add theirs below the planning rows.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 23* and its rows D1067
 (the `generate` hook after a project migration), D1068 (one session, the IR
@@ -160,9 +161,10 @@ executed).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1212**. Rows D1200–D1211
-were measured at planning on 2026-09-12 at `d6f6e94`; the runs add theirs
-below them as they go, each run's numbers named in its Done paragraph.
+Six columns, next free number after this table **D1216**. Rows D1200–D1211
+were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's**,
+measured at the branch point. The runs add theirs below them as they go, each
+run's numbers named in its Done paragraph.
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -178,6 +180,10 @@ below them as they go, each run's numbers named in its Done paragraph.
 | **D1209** | Stage plan: the client is generated from *"the PostgREST snapshot, the application snapshot and the project's compiled MCP contract"*, without saying which of the application API's 18 paths a client should wrap. | `contracts/app-openapi.canonical.json` publishes `/auth/*` (login, refresh, me, jwks, sessions, reset-password, agent-token), `/admin/*` (users, agents, audit) and `/storage/*`. The admin paths are the operator's (`bin/auth-admin.sh`, a password file, D1150), the storage paths are a plane with its own credential flow, and the application document is not live-served on any route a client can read without the docs password (D1200) — it enters the client as provenance only. | **`client.ts` wraps exactly three application operations — `login`, `refresh`, `me`** — typed from the snapshot's request and response schemas (`LoginRequest`, `SessionTokenResponse`, `TokenResponse`, `SubjectResponse`), so a client can obtain, renew and inspect the token it then presents to the REST surface. No admin, no storage, no agent-token exchange for a human (an agent's secret is a credential a human should not hold). `app_openapi_sha256` is embedded and reported by `contract.ts`, not verified at init. The stage plan's four inputs are all read; the row is what is emitted from the second. | The DX layer holds nothing the human does not hold (§8, stage plan §2.1). Three calls a human already makes through a browser are the whole of what a human-side client needs from that surface. | 0204 |
 | **D1210** | Stage plan §5 *Must not*: *"Generate a call the contract does not name — a base table, a column outside the allowlist, a filter operator outside the set."* | The reviewed surface names relations with `columns` and RPCs with `arguments` (`contracts/postgrest-api-surface.yaml`, `projects/example/contracts/postgrest-api-surface.yaml`); the snapshot names the same objects plus every column's `format` and every RPC's body schema; **the filter-operator set** exists once, in `evaluation_harness.filter_operators()` (from `schemas/capabilities.schema.json`) — the operators a capability may declare. PostgREST itself accepts many more (`like`, `ilike`, `fts`, …). | The IR takes relations and RPCs from the **merged surface** and refuses (exit 5, naming the object) any snapshot object the surface does not name and any surface object the snapshot does not publish — the two-sided comparison `api-contract.sh --check` makes, repeated here because a generator that ran on a disagreeing pair would emit a call for one side's belief. Columns are the surface's `columns` in the surface's order; types come from the snapshot's `definitions.<relation>.properties[column].format`; **filters are typed per column over the same operator set the capability schema enumerates** and no other — one operator vocabulary in the product, which the agent plane already enforces (ADR 0127). A read request is built from `select`, `order`, `limit` and `<column>=<op>.<value>` and nothing a caller types reaches the query string unencoded. | A client over the reviewed contract is inside DBX's non-goal line; a client offering PostgREST's whole operator grammar would be a query language with a type signature, and an operator the capability schema forbids an agent would then be one a generated client offered a human. | 0204 |
 | **D1211** | `docs/scope-closure.md` §11, D1157: *"PostgREST on a dev cluster is Session 23's first measurement if its client needs a served surface"*, with the open worry that a locally captured snapshot *"must be measured byte for byte against a deployed one before anybody trusts it"*. | **Measured today, rig 23a.** PostgREST started beside `apg dev` with the product's own environment values serves, to `authenticated`, a document whose normalized fingerprint **equals the snapshot captured from the deployment** (`808ac715…`), the example set included. The `postgrest_authenticator` role exists on the dev cluster (the bootstrap creates it) and is **not** activated by `apg dev up` (`ACTIVATED_ROLES = ("migration_user", "app_runtime")`); the rig activated it as the superuser through `docker exec`. | The offline runtime proof (Run 4) is a **rig** beside the product's environment, and ADR 0066 is what keeps it honest: it reads `compose.yaml`'s `services.postgrest.environment` as YAML and substitutes only the values it must (`PGRST_DB_URI` with the rig's own password file, no `PGRST_JWT_SECRET`, `PGRST_DB_ANON_ROLE` set to the role under test), so a setting the product changes reaches the rig without anybody editing it. `apg dev` gains **no** `--with-rest` verb (ADR 0203 stands; §10 records the option). The worry in §11 is answered as far as this session needs it: a local capture equals the deployed one for the example project, once, today — recorded in the Done paragraph, not promoted to a claim. | The measurement was the cheapest thing in this plan and it decided the design; making it a product verb would make the dev environment a second way to start the product's containers, which ADR 0013 and ADR 0065 refuse. | 0203 |
+| **D1212** | This plan's Run 1, rig 23c: *"`{"typescript":"5.9.3"}` — 5.9.3 is a guess; read the current stable from `https://registry.npmjs.org/typescript/latest` first and use that"*, and *"`… bad.ts` (expect 2, one error line naming the file: the control)"*. | **Measured today, rig 23c, in the pinned image.** `typescript`'s `dist-tags.latest` is **7.0.2** — the native compiler — and the 5.x line ends at 5.9.3. Both arms install and typecheck on musl: `npm install --package-lock-only --ignore-scripts` gives 7.0.2 a **22-entry** lock (the package plus 20 optional per-platform binaries) and 5.9.3 a 2-entry one, **every entry in both carrying an `integrity` hash**; `npm ci --ignore-scripts` exits 0 and `tsc --version` answers for both. But a type error exits **1 under 7.0.2 and 2 under 5.9.3** — same message (`bad.ts(4,7): error TS2322: Type 'string' is not assignable to type 'number'`), different status. | Pin `TYPESCRIPT_VERSION=7.0.2` (current stable; `lock-versions.sh --update --packages-only` would resolve to it anyway, and a pin two majors behind what the locker resolves is D540's shape). **Every typecheck proof asserts a non-zero exit AND the error line naming the file and the TS code, never the bare number** — the plan's "expect 2" would have been a green proof that measured the wrong thing under the version actually pinned. | The plan's own number was flagged in it as a guess, and it was wrong by two majors. An exit code that changes with a major version is §7's *value that looked measured and was not*: the assertion that survives the bump is the message, and it is strictly stronger than the number. | 0204 |
+| **D1213** | This plan's Run 1, rig 23d: *"record whether any caller passes an `api_operation_*` class into `build_plan(also=…)` (**the plan expects none**; D1206 says so from a read, this confirms it from the tree)"*. | **Half right, and the wrong half matters.** No caller *computes* an `api_operation_*` class — but `bin/upgrade.py:100–102` already **lists all three** (`api_operation_added`, `api_operation_removed`, `api_operation_changed`) as classes an operator may **declare** with `--also`, and `upgrade_plan.build_plan` unions `also` into the classified set (`upgrade_plan.py:250`). 15 mentions tree-wide; the others are `compatibility.py`'s three definitions, `test_capability_compiler.py`'s unrelated `test_a_new_api_operation_exposes_no_capability`, and this plan. `required_level` separates them as written: `[]`→patch, `api_operation_added`→minor, `capability_added`→minor, `api_operation_removed`/`api_operation_changed`→major, and an **unclassified name raises** rather than defaulting to patch. | `classify_changes` emits **only** names already in `CHANGE_CLASSES`, so its output is exactly the vocabulary `upgrade plan --also` already accepts. The agreement the stage plan asked for between the generator's class and `upgrade plan`'s is therefore **an agreement by construction**, not a second scheme to reconcile — and a test asserts the generator's vocabulary is a subset of `bin/upgrade.py`'s declarable set. | D1206 read the tree for what computes a class and concluded nothing touches them. The operator surface had accepted all three since ADR 0162. Reading for the producer and missing the consumer is §7 question 5 — *which of its callers got it* — answered from the wrong end. | 0204 |
+| **D1214** | This plan's Run 1 cites `tests/deployment/test_session22_plane.py:831-850` for `sse_result`/`refused`/`tool_text`, and D1200/§1 cite `bin/api-contract.py:665`'s own message about object sets. | **Both line numbers are out of range.** `test_session22_plane.py` is **407** lines and the three helpers are at **:73–95**; `bin/api-contract.py` is **546** lines and the object-sets-agree message is at **:457**. The cited text exists in both cases — only the addresses are wrong, and each file has the helper under a different name elsewhere too (`sse_result` is defined in **six** deployment modules). | Cite **:73** and **:457**; Run 3's emitter is written from the text read at those lines, recorded in this run's Done paragraph rather than re-derived. Every later run that cites a line re-reads it first. | A plan written to be executed by a different model makes a line number an instruction. These two resolved to nothing, which is the safe failure; a line number that resolves to the *wrong* code is the one that costs a run, and nothing in this repository checks a citation. D1187's shape (grep the moved text, not the name) applied to the plan itself. | — |
+| **D1215** | This plan's §2, `AGT-META-001`: the lock digest is *"`null` **below lock schema 4**"*, read as though the loaded lock carried its schema version. | **`CapabilityLock` has no `schema_version` field.** Its ten fields are `contract_id, project_key, upstream, canonical_sha256, tool_count, capability_count, tools, profile, vocabulary, tools_sha256`; `tools_sha256` is `str | None` and `vocabulary` is `dict | None`. The schema version is read by `load_lock` (`SUPPORTED_SCHEMA_VERSIONS` is `{1,2,3,4}`) and **not carried onto the object**. Measured: `list_resources` on a lock with `tools_sha256` set and on one with it `None` returns the same two keys either way. | `AGT-META-001` is written against **`tools_sha256 is None`**, not against a schema version: the `lock` member reports `{tools_sha256, tool_count}` from the loaded object, and `tools_sha256` is `null` exactly when the loaded lock carried none. No schema version is threaded onto `CapabilityLock` to satisfy a requirement's wording. | The wording implied a field, and implementing it literally would have added a field to a released dataclass to make a test sentence true — the inverse of the fix this project wants. `tools_sha256 is None` is the same condition with no new state, and it is the condition the runtime can actually answer. | 0204 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -377,7 +383,115 @@ from the committed contract).
 **Targeted:** none (documentation). **Push.** CI is expected green (docs
 only). Record the run id. Mark Done with 23a–23f's numbers.
 
-**Done.** *(the run writes this)*
+**Done.** 2026-09-12, on `session-23` branched at `2a62833` (this plan's own
+commit, directly after `d6f6e94`). Documentation only: ADR 0204, its index row,
+four divergence rows **D1212–D1215**, and this paragraph. Next free **D1216**.
+
+**23a and 23b re-ran as the control, and the tree has not moved.** Every number
+in §1 reproduced at the branch point. `apg dev up` exit 0, **33 migrations**,
+port 32811; the authenticator activated as the superuser; three PostgREST
+containers on the pinned digest with `compose.yaml`'s own
+`postgrest.environment` values. `GET /` with `Accept: application/openapi+json`,
+200 on all three arms:
+
+| role | bytes | fingerprint | objects | == project snapshot |
+|---|---|---|---|---|
+| `anon` | 2404 | `1da00c119b984b82` | **none** | no |
+| `authenticated` | 16035 | `808ac715c09aeebc` | all 7 | **yes** |
+| `api_documentation` | 16035 | `808ac715c09aeebc` | all 7 | **yes** |
+
+`808ac715c09aeebc382dd5afc886c1680fe2ea9870e729b9d34a623dee8d18de` recomputed
+from `projects/example/contracts/postgrest-openapi.canonical.json` at the branch
+point is the same value — so **D1200 and D1211 stand**: the live surface read as
+the ordinary caller normalizes to the committed snapshot under strict equality,
+`host` is `fixture-alpha-dev.test:443` (D1207's `:443`, measured), `basePath`
+`/api/rest`, `schemes` `["https"]`, and the pre-request hook does not refuse the
+root document. `anon`'s zero-object document at a different fingerprint is the
+control that the arm reads privileges rather than a constant. 23b: node
+**v22.23.2**, npm **10.9.8**, `typeof fetch: function`, `node x.ts` exit 0 with
+no flag (`--experimental-strip-types` accepted and redundant), and **four
+`EQUAL` plus `app-openapi.canonical.json` `DIFFER`** (`f21bf4a8da90` against
+`3007d815448e`) on **exactly** two lines — 494 `"minimum": 1.0` → `1` and 1745
+`"exclusiveMinimum": 0.0` → `0`. **D1203 stands.** All containers removed;
+`apg dev down` in `finally`; the rigs are in the scratchpad under
+`s23-planning-rigs/`.
+
+**23c, the toolchain — and the run's first real find (D1212).** `typescript`'s
+`dist-tags.latest` is **7.0.2**, not the plan's guessed 5.9.3; the 5.x line ends
+at 5.9.3. Both measured in the pinned image, on musl, with `bad.ts` as the
+control in every arm: 7.0.2 locks **22 entries** (the package plus 20 optional
+per-platform binaries, none constrained by `libc`), 5.9.3 locks **2**, and
+**every entry of both carries an `integrity` hash** (`entries WITHOUT
+integrity: []`). `npm ci --ignore-scripts --no-audit --no-fund` exit 0 on both;
+`tsc --version` answers `Version 7.0.2` / `Version 5.9.3`; `good.ts` exits 0 on
+both. **`bad.ts` exits 1 under 7.0.2 and 2 under 5.9.3**, with the identical
+message `bad.ts(4,7): error TS2322: Type 'string' is not assignable to type
+'number'`. `TYPESCRIPT_VERSION=7.0.2` is Run 3's pin, and every typecheck proof
+asserts a non-zero exit **and** the message, never the bare status.
+
+**23d, what classifies an API change today (D1213).** `required_level` measured:
+`[]`→`patch`, `api_operation_added`→`minor`, `capability_added`→`minor`,
+`api_operation_removed`→`major`, `api_operation_changed`→`major`, the pair
+→`major`, and an unclassified name **raises** (`unclassified change(s):
+['client_shape_changed']`) rather than defaulting to patch — the control. The
+plan expected *no* caller to touch an `api_operation_*` class; in fact
+`bin/upgrade.py:100–102` already lists all three as `--also`-declarable and
+`upgrade_plan.py:250` unions them in. Nothing **computes** one, which is the
+half D1206 got right. The planted change is in `/tmp/r23d/`
+(`surface-before.yaml`, `snapshot-before.json`, `snapshot-after.json`): one RPC
+`rpc_probe` with a single `p_x` string body parameter, `create_note`'s
+`produces` and `responses`; fingerprint moves `808ac715c09aeebc` →
+`aa7591474198e25e`, `ADDED objects: ['rpc/rpc_probe']`, and the planted file
+round-trips through `canonical_bytes` unchanged. That is Run 2's
+`classify_changes` fixture.
+
+**23e, `list_resources` today (D1201 confirmed, D1215 found).** The result keys
+are **exactly** `['contract_id', 'resources']` — measured on a lock with
+`tools_sha256` set to a 64-char string and on one with it `None`, both returning
+the same two keys and the same non-empty resource entry (`{"tool":
+"query_resource", "resource": "notes", "required_scopes": ["notes:read"],
+"max_rows": 50}`). `'lock' in result` is `False` on both, which is Run 2's
+before-half control. **`CapabilityLock` carries no `schema_version`**: its ten
+fields are `contract_id, project_key, upstream, canonical_sha256, tool_count,
+capability_count, tools, profile, vocabulary, tools_sha256`, and
+`SUPPORTED_SCHEMA_VERSIONS` `{1,2,3,4}` is read by `load_lock` only — so
+`AGT-META-001` is written against `tools_sha256 is None`. The caller's scopes
+reach `list_resources` through `current_agent_context()`, replaced in the module
+under test the way `test_mcp_tools.py:210` does it. **Run 2's reader list, from
+the tree:** 134 hits in 41 files — the ones that are not prose are
+`services/auth-api/app/mcp_lock.py` (4), `mcp_runtime.py` (1), `mcp_tools.py`
+(7), `scopes.py` (1), `src/agentic_postgres/capability_compiler.py` (1),
+`evaluation_harness.py` (1), and the test modules `test_mcp_tools.py` (19),
+`test_lock_roster.py` (5), `test_capabilities_manifest.py` (5),
+`test_evaluation_harness.py` (6), `test_capability_profile.py` (4),
+`test_capability_compiler.py` (3), `test_mcp_route.py` (3), `test_mcp_budgets.py`
+(2), `test_project_agent_surface.py` (2), `test_agent_audit_plane.py`,
+`test_api_migrations.py`, `test_auth_endpoints.py`, `test_metrics_surface.py`,
+`test_scope_registry.py` (1 each), `tests/deployment/test_session8_agent_plane.py`
+(2), `tests/external/test_session8_public_agent.py` (1), plus
+`tests/evaluation-cases.yaml` (7) and `docs/mcp-tool-catalog.md` /
+`docs/evaluation-report.md`, which are regenerated.
+
+**23f, the wire shape, read from the tree (and D1214).** The plan's two line
+citations are out of range: `test_session22_plane.py` is 407 lines with the
+helpers at **:73–95**, and `bin/api-contract.py` is 546 lines with the
+object-sets message at **:457**. Read at the real addresses, the request the
+`agent.ts` wrapper must send is one `POST` to the plane's URL with
+`Accept: application/json, text/event-stream`, `Authorization: Bearer <the
+caller's own token>`, and body `{"jsonrpc": "2.0", "id": 1, "method":
+"tools/call", "params": {"name": …, "arguments": {…}}}` — **no `initialize`
+handshake**, because the runtime is assembled `stateless_http=True` (ADR 0125)
+and a bare `tools/call` was measured answering 200. The two response shapes it
+must parse: **SSE framing** (`event: message\r\ndata: {…}`; take the **last**
+`data: ` line and `json.loads(line[6:])` — `json.loads(body)` raises on a
+perfectly good answer, D458), and **a refusal in either of two places** —
+top-level `error` with `.message`, or `result.isError` true with the text at
+`result.content[0].text`. Reading only `error` passes on a refused write, which
+is the open item §9 of `CLAUDE.md` still carries against Session 9's live
+proofs; `agent.ts` reads both, and a negative test in Run 4 covers each.
+
+**Targeted:** none — documentation only, so nothing ran before the push, per the
+appendix. CI verdict on this commit read by full SHA, three buckets.
 
 ### Run 2 — the IR, and the plane reports its lock
 
