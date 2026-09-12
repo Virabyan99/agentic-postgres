@@ -4,7 +4,7 @@
 `main`. **Run 1 is Done** (2026-09-12, on branch `session-24`); Runs 2–7 are
 ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
 and Run 1 added **D1259–D1262** and rewrote four with their numbers; the
-runs add theirs below, so **next free is D1263**.
+runs add theirs below, so **next free is D1264**.
 ADR **0205** is this session's (written in Run 1); next free after it 0206.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 24 — Studio* whole (Builds
 / Already true / Must not / Measures / Closes), its rows D1069 (one Studio, a
@@ -176,7 +176,7 @@ and by which sweep).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1263** (Run 1 added D1259–D1262). Rows D1243–D1258
+Six columns, next free number after this table **D1264** (Run 1 added D1259–D1263). Rows D1243–D1258
 were read from the tree on 2026-09-12 at `035192d`; where a row's *Repository
 does* column says *measure*, Run 1 owns the measurement and the row is
 rewritten with the numbers.
@@ -203,6 +203,7 @@ rewritten with the numbers.
 | **D1260** | Run 2's signature for the surface check: `surface_answer(ir, fetched: bytes | None, error: str | None) -> SurfaceAnswer`, and §1 D1253's *"`openapi_normalize.normalize` + `fingerprint`"*. | **`fingerprint()` does not normalize, and the committed snapshot is already in the neutral form** (`host: project.invalid:443`, `basePath: /__project_base_path__`). Measured in rig 24b: the raw served document fingerprints `f12cdc72c67f98e0…` against the snapshot's `808ac715c09aeebc…` — the same 16035 bytes, two different questions. `normalize` takes `expected_host` and `expected_base_path` as REQUIRED keyword arguments, derived by `bin/api-contract.py`'s `published_address()` from the deployed document's `routes.rest.url`, because ADR 0050 requires the real address to be validated before it is substituted. Control, measured: a wrong `expected_host` is refused (`NormalizationError`), not normalized into agreement. | **`surface_answer` takes the expected address**: `surface_answer(ir, fetched, error, *, expected_host, expected_base_path)`, both supplied by `address_book` from the same `routes.rest.url` the fetch used (ADR 0002 — derived once). A `NormalizationError` is `unreadable` with the normalizer's own reason, which is where a host mismatch surfaces. With the correct pair the equality holds: the served document to an APPLICATION-ISSUED human token normalizes to `808ac715c09aeebc…` and equals the committed snapshot **byte for byte** — rig 23a's equality, now through the app, which is the one thing it could not show. | A signature that cannot express the question is the defect, not the answer it would have produced. Had this been written as planned, Studio would have compared a raw document to a normalized snapshot and reported `stale_contract` against every correct deployment — green in no environment, but discovered in Run 4 rather than Run 1. | 0050, 0204 |
 | **D1261** | D1254: the rig writes a deployed document naming loopback URLs, and Studio verifies the served surface against it. | **`normalize` refuses a document whose `schemes` is `['http']`** — *"A document offering http tells every generated client that cleartext is a supported way to reach this API"*. A rig whose `PGRST_OPENAPI_SERVER_PROXY_URI` is `http://127.0.0.1:<port>/api/rest` therefore serves a document Studio can only answer `unreadable` about (measured, arm B), even though the route is correct and reachable. | **The rig's proxy URI names the loopback host with the `https` scheme** — `https://127.0.0.1:<edge port>/api/rest` — while the deployed document's `routes.rest.url` stays `http://127.0.0.1:<edge port>/api/rest` and the transport stays cleartext loopback. Measured, arm C: `host` `127.0.0.1:32923`, `schemes` `['https']`, normalized fingerprint `808ac715c09aeebc…`, **equal** to the snapshot. The fixture's docstring says which value is the rig's and why (ADR 0065/0066). | The alternative is widening `normalize` to accept `http` for a loopback host, which would relax a released contract test so a rig could pass — the exact inversion runbook §6 forbids. The rig configures around it and says so. | 0050, 0065, 0066 |
 | **D1262** | D1243 and §5 Run 1: record PostgREST's CORS header verbatim, *"it does by default in every version this project has measured"*. | **It does not.** Measured in rig 24b at the pinned image: `GET /notes` with `Origin: http://127.0.0.1:1` and a valid bearer answers **200** with `Connection, Content-Length, Content-Location, Content-Range, Content-Type, Date, Server` — **no `Access-Control-*` header of any kind**. | The threat model's *Studio* entry records what was measured, not what was expected: the upstream sends no CORS header, so a page that held a token could not read the answer it provoked anyway — and Studio's design makes the question moot for a second, independent reason (the page holds no token). Both sentences, because the second is the one that stays true when the first changes. | A premise wrong in the reassuring direction survives longest (D930); this one was wrong in the alarming direction, and repeating it would have put a measured falsehood in the threat model. | — |
+| **D1263** | Run 1's close: *"`test_documentation_index` (the ADR index), then push. CI green expected (documentation only; the ADR index is generated content, so `bin/session-01-check.sh` alone is the rule — run it once, on the clean tree)"*. | **The ADR index is not generated content.** No generator writes `docs/decisions/README.md`: `git grep -ln "decisions/README" -- bin src tests` names three CONTRACT TESTS and no renderer (`test_documentation_index`, `test_acceptance_registry`, `test_repository_contract`). It is hand-maintained prose with three proofs over it, which is the *Documentation only* row of `CLAUDE.md` §5's table, not the *generated artefacts* one. And the gate could not have answered anyway: **WSL has lost outbound HTTPS again**, re-measured at this step rather than recalled — `urllib` to `pypi.org` fails immediately with `[Errno 101] Network is unreachable` (D1239 recorded a 20 s timeout; the same fact, a different failure mode), and `bin/lock-dev-deps.sh --check` resolves against PyPI by construction. | **The targeted list is the three modules that read the index**, derived from the tree and not from the plan's sentence (D1146, D1149): `test_documentation_index` 19 passed, `test_acceptance_registry` + `test_repository_contract` 256 passed, 40 s. No gate is run at this run's close. `bin/session-01-check.sh` is still owed at Run 6's close, where D1239's container workaround is the shape — and where there is code for it to check. | A gate run for a reason that turns out to be false is the same defect as a proof that never ran: nobody afterwards can say which question it answered. The grep names what the run CHANGES; the plan's list names what it ADDS. | — |
 
 ---
 
@@ -393,9 +394,10 @@ or `tests/` changes in this run except the ADR and its index line.**
    `docs/decisions/README.md` (count 205).
 5. Rewrite rows D1243, D1252, D1254 and D1247 in §1 with the numbers.
 
-**Targeted:** `test_documentation_index` (the ADR index), then push. CI green
-expected (documentation only; the ADR index is generated content, so
-`bin/session-01-check.sh` alone is the rule — run it once, on the clean tree).
+**Targeted:** `test_documentation_index`, `test_acceptance_registry` and
+`test_repository_contract` — the three modules that read the ADR index,
+derived from the tree (D1263: no generator writes it, so no gate is owed at
+this run's close). Then push and read CI.
 
 **Done.** 2026-09-12, on `session-24` at `e3ba687`'s child. Three rigs, each
 with its control, in WSL with Docker 29.5.2; the scripts and their outputs are
@@ -477,9 +479,9 @@ auth_list_agent_audit`**, and after it reads both rows as the auth service:
 `pronargs` **3**. The draft body is `run1-rigs/0032-body.sql`; 0032 is written
 from it in Run 2 with the `{{auth_service}}` placeholder.
 
-**ADR 0205** written and indexed (count 205). **Four rows added to §1**
-(D1259–D1262) and four rewritten with the numbers (D1243, D1247, D1252,
-D1254); next free is now **D1263**. The one row that changes a later run's
+**ADR 0205** written and indexed (count 205). **Five rows added to §1**
+(D1259–D1263) and four rewritten with the numbers (D1243, D1247, D1252,
+D1254); next free is now **D1264**. The one row that changes a later run's
 code is D1260: `surface_answer` gains `expected_host` and `expected_base_path`,
 and Run 2 writes that signature rather than the planned one.
 
