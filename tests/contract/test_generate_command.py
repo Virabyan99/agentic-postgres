@@ -275,6 +275,98 @@ def test_a_missing_generated_file_is_reported_as_missing_not_as_drift() -> None:
     assert run("--project", PROJECT, "--capabilities", CAPABILITIES, "--check").returncode == 0
 
 
+def test_the_capture_and_the_compile_print_the_next_step() -> None:
+    """`GEN-CMD-002`, D1208. The hook is a printed line, not a coupling.
+
+    A generated client is a claim about a surface, and the two commands that
+    move a surface are the capture (`api-contract --update --project`) and the
+    compile (`mcp-contract compile --project`). Neither regenerates anything --
+    that would make a capture write a directory it was not asked to write --
+    so the hook is the sentence that says what to do next.
+
+    The two halves are proved differently ON PURPOSE, and the difference is
+    the honest part:
+
+    * the **compile** is run. It needs no token and no deployment, so the line
+      can be measured rather than asserted about source, and it is: the
+      contract goes to stdout, the hook to stderr, and running the same verb
+      WITHOUT `--project` prints nothing at all. That control is what says the
+      line is the project path's and not an unconditional print.
+    * the **capture** is not run, because `--update` fetches a live document
+      and refuses long before it reaches this print. Asserting it by structure
+      (`inspect.getsource`) is weaker and is labelled as such rather than
+      dressed up: what it can still catch is the line being deleted or its
+      spelling drifting from the dispatcher's, which is the failure that
+      actually happens (someone writes `bin/generate.sh`, and the README
+      teaches `bin/apg.sh generate`).
+
+    Goes red if: either print is removed; either names the script directly
+    instead of the verb the dispatcher publishes; or the compile starts
+    printing the hook for the release contract, where there is no project
+    client to regenerate.
+    """
+    import inspect
+    import sys as _sys
+
+    _sys.path.insert(0, str(REPO_ROOT / "bin"))
+    try:
+        import importlib.util
+
+        def load(name: str):
+            spec = importlib.util.spec_from_file_location(
+                f"_hook_{name}", REPO_ROOT / "bin" / f"{name}.py"
+            )
+            assert spec is not None and spec.loader is not None
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            return module
+
+        api_contract = load("api-contract")
+        mcp_contract = load("mcp-contract")
+    finally:
+        _sys.path.remove(str(REPO_ROOT / "bin"))
+
+    for function in (api_contract.command_update, mcp_contract.command_compile):
+        source = inspect.getsource(function)
+        assert "bin/apg.sh generate --project" in source, (
+            f"{function.__qualname__} no longer prints the generate step. A "
+            "snapshot or a contract committed without a regeneration leaves the "
+            "client asserting a digest the deployment no longer serves"
+        )
+        assert "bin/generate.sh generate" not in source
+
+    # The compile, run. stdout is the contract; the hook is on stderr.
+    done = subprocess.run(
+        [str(REPO_ROOT / "bin" / "mcp-contract.sh"), "compile", "--project", PROJECT],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert done.returncode == 0, done.stderr
+    assert json.loads(done.stdout)["tools"], "stdout is no longer the contract"
+    assert f"bin/apg.sh generate --project {PROJECT}" in done.stderr, done.stderr
+    assert "bin/apg.sh generate" not in done.stdout, (
+        "the hook reached stdout, so a redirected compile writes a contract with "
+        "an English sentence in it"
+    )
+
+    # The control the hook is only meaningful against: the release contract has
+    # no project client, and the same verb without --project says nothing.
+    release = subprocess.run(
+        [str(REPO_ROOT / "bin" / "mcp-contract.sh"), "compile"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    assert release.returncode == 0, release.stderr
+    assert "generate" not in release.stderr, (
+        "the release compile prints the project hook. It has no project to "
+        f"name, so the line would carry a placeholder: {release.stderr!r}"
+    )
+
+
 def test_nothing_the_command_prints_is_a_credential() -> None:
     """**GEN-CMD-001**, D105. There is no token to print, and that is the check.
 

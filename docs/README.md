@@ -42,6 +42,7 @@ Before a deployment exists, and on a machine that is not one.
 | Page | Answers |
 |---|---|
 | [The developer loop](dev-environment.md) | `apg dev`: a disposable local cluster built from the render and the release, the six verbs, the seed door, what it costs, and what to do when a migration fails as the migration user |
+| [Generated clients](generated-clients.md) | `apg generate`: a typed TypeScript client over your surface, what `init()` checks and its four answers, the two result unions, how the version is derived, and what to do when a client and a deployment disagree |
 
 ## Running a deployment
 

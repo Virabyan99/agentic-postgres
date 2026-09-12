@@ -108,6 +108,24 @@ and nothing reaches a provider — see [the developer loop](dev-environment.md).
 
 It needs Docker, which step 2 installed and step 4 confirmed.
 
+### 8b. Generate a client — *available now*
+
+```bash
+bin/apg.sh generate --project project.yaml
+```
+
+A third of a second, and it writes a typed TypeScript package over the
+surface your project publishes: one method per published object, one per
+agent tool, and the digests that say which surface and which lock they came
+from. It reads four committed artefacts and nothing live, so it works here,
+before any deployment exists.
+
+You cannot *call* anything with it yet — there is no REST service until a
+deploy — and that is worth seeing rather than reading about: `init()` is the
+first thing a caller runs, and against nothing it answers `unreachable`
+rather than pretending the contract is stale. Read the generated `README.md`
+and [generated clients](generated-clients.md).
+
 ### 9. Inspect the output — *available now*
 
 ```bash

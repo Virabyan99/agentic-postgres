@@ -380,6 +380,80 @@ def test_the_envelope_carries_the_environments_churn_with_its_machine_and_cache_
     assert all(item.unblocked_by.strip() for item in first_run)
 
 
+def test_the_envelope_carries_generation_time_per_contract_size() -> None:
+    """`GEN-ENV-001`. What `apg generate` costs, read one row at a time.
+
+    Session 23 put a command in the loop a developer runs after every capture,
+    and the honest question about it is not *"is it fast"* but *"does it get
+    slower as my surface grows"*. One number cannot answer that, so the
+    envelope carries two contract sizes and the typecheck separately — and
+    this test checks each of them **on its own line**.
+
+    That is D1197's lesson, taken literally. Session 22's battery walked one
+    mutation through two versions of a single assertion because the assertion
+    was over a joined document: anything present anywhere satisfied it. So
+    here every property is asserted against the row that must carry it:
+
+    * the two generation rows exist and each names its contract's SIZE, because
+      a wall time without the size it was sampled at is not a point on a slope
+      — it is the one figure a reader quotes for a surface ten times larger;
+    * each says the number holds **no typecheck** (`Python only`), because the
+      check that follows the generation costs four times the generation and a
+      reader who conflates them budgets wrongly;
+    * the typecheck row exists, names the cache state of the image (the
+      condition that changes the number most and is invisible in it — the
+      `apg dev` rows' rule, applied to the second thing this session ships
+      that runs a container), and is filed as `MACHINE`.
+
+    `test_a_machine_measurement_names_the_machine_it_describes` already forces
+    each of them to name its machine; this test does not repeat that.
+
+    Goes red if: either size's row is dropped when someone decides one number
+    is enough; a row is refiled as `CONFIGURATION` (published as transferring,
+    read as a promise about the reader's laptop); the sizes are dropped from
+    the conditions on a re-measurement, which is the likely one, because a
+    re-sample rewrites `value` and inherits the conditions; or the typecheck
+    is folded into the generation number.
+    """
+    generation = [m for m in capacity.ENVELOPE if m.subject.startswith("apg generate")]
+    assert len(generation) == 2, (
+        f"the envelope carries {len(generation)} `apg generate` numbers. Two "
+        "contract sizes were measured and both are published, because one "
+        "number is read as the cost of the command rather than as a point"
+    )
+    sizes = set()
+    for row in generation:
+        assert row.kind == capacity.MACHINE, (
+            f"{row.subject!r} is filed as {row.kind!r}. A wall time is about the "
+            "machine it was sampled on"
+        )
+        stated = " ".join(row.conditions).lower()
+        assert "tools" in stated and ("relations" in stated or "rpcs" in stated), (
+            f"{row.subject!r} does not say how much surface it generated. A "
+            "generation time without its contract's size cannot be read as a "
+            "slope, and the slope is the only thing two numbers add"
+        )
+        assert "python only" in stated, (
+            f"{row.subject!r} does not say the typecheck is outside the number. "
+            "The check costs four times the generation and the two get added"
+        )
+        sizes.add(row.subject)
+    assert len(sizes) == 2, f"both `apg generate` rows describe the same thing: {sizes}"
+
+    typecheck = [m for m in capacity.ENVELOPE if "typechecks on the pinned" in m.subject]
+    assert len(typecheck) == 1, (
+        "the envelope does not carry the toolchain typecheck. It is the part of "
+        "the loop with a container in it, which is the part a developer waits for"
+    )
+    row = typecheck[0]
+    assert row.kind == capacity.MACHINE
+    assert any("cach" in condition.lower() for condition in row.conditions), (
+        f"{row.subject!r} does not say whether the image was cached. That is the "
+        "difference between a second and a build, and it cannot be recovered "
+        "from the number"
+    )
+
+
 def test_nothing_was_tuned_on_an_off_host_measurement() -> None:
     """The plan asks for tuning after the load scenarios, and this run did none.
 

@@ -6,6 +6,11 @@ and what transaction pooling costs each of them.
 Background: [database connections](database-connections.md) ·
 [pool operations](pool-operations.md).
 
+**This page is about drivers, not about the API.** The four fixtures below
+prove that a driver can hold a connection through the pooler; the typed
+client `apg generate` writes is over the HTTP endpoint contract and opens no
+database connection at all — see [generated clients](generated-clients.md).
+
 ## What is proved, and by what
 
 Four fixtures under `services/clients/`. Each is a real container running a real

@@ -181,6 +181,19 @@ def command_compile(arguments: argparse.Namespace) -> int:
                 )
             candidate = _project_contract(inputs)
         sys.stdout.write(candidate.decode("utf-8"))
+        if arguments.project is not None:
+            # The same hook the capture prints (D1208, ADR 0204): the tools a
+            # project publishes are half of what a generated client is a claim
+            # about, so a recompiled contract that is committed without a
+            # regeneration leaves the client's `tools_sha256` behind the lock
+            # the plane will load. On stderr, after the contract, so a
+            # redirected compile is the contract and nothing else.
+            sys.stdout.flush()
+            print(
+                f"mcp-contract: then generate the project's client: "
+                f"bin/apg.sh generate --project {arguments.project}",
+                file=sys.stderr,
+            )
     except FileNotFoundError as exc:
         return fail(EXIT_PREREQUISITE, f"missing input: {exc}")
     except config.ManifestError as exc:

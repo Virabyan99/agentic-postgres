@@ -248,6 +248,49 @@ to do when Docker is absent, when the state is stale, when a seed is refused,
 and when a migration fails as the migration user — which is the case the
 environment exists to surface before a deploy does.
 
+## A generated client
+
+`apg generate` writes a TypeScript client over **your** surface: the release's
+published objects merged with your project's, the tools your lock compiles to,
+and the digests that say which surface and which lock they came from. It reads
+four committed artefacts — the merged API surface, the project's OpenAPI
+snapshot, the app service's own document and the compiled lock — and nothing
+live. It is the same command whether you have a migration set or not; without
+one it generates over the release's surface alone.
+
+```bash
+bin/apg.sh generate --project project.yaml           # writes projects/<slug>/clients/typescript
+bin/apg.sh generate --project project.yaml --check   # exit 5 names the first file that differs
+```
+
+**Call `init()` before anything else**, because a generated client is a claim
+about a surface and `init()` is where the claim is checked. It fetches the
+document the deployment serves *as the caller*, normalizes it the way this
+repository does, and compares the fingerprint with the one compiled into
+`contract.ts`. Four answers, and the differences between them are the point:
+`ok`; `stale_contract`, naming **both** digests, when the deployment serves a
+surface this client was not generated from; `unreachable`, when the service did
+not answer, so nothing is known about its surface; and `unparsable`. An
+unreachable service is never reported as a stale contract (ADR 0195).
+
+**The client holds a URL and a token you passed it, and nothing else.** No
+credential, no deployment address and no caller value is written into a
+generated file — the emitter refuses its own output if one appears — so the
+package is safe to commit and the secret stays wherever you already keep it.
+
+**The version is the artefact's own, and it is derived rather than typed.** The
+generator diffs this contract's intermediate representation against the one it
+last wrote and applies ADR 0162's change classes: an object or a tool your
+project adds is a minor, one that disappears from under a caller is a major,
+and a contract that has not moved keeps the number it had. `projects/example/`
+holds a worked client at `1.0.0`, committed, and `--check` is what keeps it
+honest.
+
+[Generated clients](docs/generated-clients.md) is the longer form: the files,
+the two result unions and the sentence each member carries, the toolchain image
+that typechecks a client with no network, and what to do when `init()` answers
+something other than `ok`.
+
 ## Deploying
 
 **Deploying is an ordered sequence, and no step makes its own preconditions.** A
@@ -374,6 +417,7 @@ Then, in order:
 | 2b | `bin/apg.sh dev up --project project.yaml` — your set applies as the role that will apply it, before any deploy exists to apply it to. A migration that fails here fails in ten seconds rather than in a convergence | **yes** |
 | 3 | `projects/<slug>/contracts/postgrest-api-surface.yaml` — your reviewed surface, merged with the release's for every comparison | yes |
 | 4 | `projects/<slug>/contracts/postgrest-openapi.canonical.json` — captured from a **running deployment** and refuses a hand edit | **no** |
+| 5 | `bin/apg.sh generate --project project.yaml` — a typed client over your surface, regenerated after every capture | yes |
 
 `projects/example/` is a worked one: a pgvector column beside each note, a
 `security_invoker` view, and one `SECURITY DEFINER` write function.
@@ -464,6 +508,15 @@ bin/mcp-contract.sh compile --project project.yaml \
 bin/mcp-contract.sh check --project project.yaml          # refuses a drift, exit 5
 bin/render-evaluation-report.py --write --project project.yaml
 ```
+
+Then regenerate the client, because the lock is half of what one is a claim
+about: `bin/apg.sh generate --project project.yaml`. Your tool arrives in the
+generated agent wrapper the same way the release's do — typed arguments, the
+same refusal union — so a caller reaches your write through the same call shape
+as `create_note`. Both the compile and the capture print that command when they
+finish; the lock's digest travels in the client and `list_resources` reports
+the one the running plane actually loaded, so a client generated against a
+contract the deployment never got is visible rather than silent.
 
 `check --project` is `validate`; `render-evaluation-report.py --check
 --project` is `test`, and it refuses a capability without cases -- yours go in

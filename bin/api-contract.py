@@ -382,6 +382,16 @@ def command_update(deployed_path: Path, project_path: Path | None = None) -> int
             "captured from the project's own deployment.",
             file=sys.stderr,
         )
+        # And the client is a claim about THIS surface (ADR 0204, D1208). A
+        # snapshot committed without regenerating leaves a generated client
+        # asserting a digest the deployment no longer serves, and the caller
+        # learns it from `init()` answering `stale_contract` rather than from
+        # here. The path is the one this process was given (D975).
+        print(
+            f"api-contract: then generate the project's client: "
+            f"bin/apg.sh generate --project {project_path}",
+            file=sys.stderr,
+        )
 
     print(
         f"api-contract: captured {len(candidate.get('paths', {}))} paths from {host}. "

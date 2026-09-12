@@ -321,6 +321,78 @@ ENVELOPE: tuple[Measurement, ...] = (
             "again."
         ),
     ),
+    # ---- what a regeneration costs (Session 23, D1079, GEN-ENV-001) ------
+    #
+    # `apg generate` is in the loop a developer runs after every capture, so
+    # the number that matters is not whether it is fast but whether it is fast
+    # enough to be unremarkable. Two contract sizes, because the only input
+    # that could plausibly move it is how much surface there is to emit; and
+    # the typecheck separately, because that is the part with a container in
+    # it and it is what the developer actually waits for.
+    Measurement(
+        subject="apg generate: the release contract, 5 objects and 6 tools",
+        value="0.28 s, 0.28 s and 0.29 s (three samples)",
+        kind=MACHINE,
+        conditions=(
+            "an 8 GB development machine, WSL2, kernel 6.6.87.2-microsoft-standard-WSL2",
+            "Python 3.12.13 in the checkout's venv; NO DOCKER DAEMON is needed or used",
+            "project.second.example.yaml -- a manifest declaring no migration set,"
+            " so the surface and the lock are the release's",
+            "2 relations, 3 RPCs and 6 tools, emitting 29,157 bytes of TypeScript",
+            "Python only: no typecheck and no container in this number",
+        ),
+        note=(
+            "**The first `bin/apg.sh generate` in a fresh shell took 0.81 s** "
+            "and every one after it 0.28 s, on the same inputs. The difference "
+            "is the interpreter starting, not the generation, and it is stated "
+            "here rather than averaged in: a developer's first regeneration of "
+            "the day is the slow one and it is still under a second."
+        ),
+    ),
+    Measurement(
+        subject="apg generate: a project's contract, 7 objects and 7 tools",
+        value="0.31 s, 0.32 s and 0.33 s (three samples)",
+        kind=MACHINE,
+        conditions=(
+            "the same 8 GB development machine, WSL2, the same venv",
+            "project.example.yaml -- a manifest declaring a migration set and its"
+            " own capabilities, so the surface is merged and the lock is joint",
+            "3 relations, 4 RPCs and 7 tools, emitting 31,097 bytes of TypeScript",
+            "Python only: no typecheck and no container in this number",
+        ),
+        note=(
+            "Forty milliseconds more than the release contract for two more "
+            "objects, one more tool and 1,940 more bytes of output. **The "
+            "point of publishing both is the slope, not either figure**: the "
+            "cost is the process starting, and a tenant's surface growing does "
+            "not change what this command feels like. A project ten times this "
+            "size is unmeasured -- none exists -- and the two rows are what "
+            "can honestly be said about scale."
+        ),
+    ),
+    Measurement(
+        subject="The generated client typechecks on the pinned toolchain",
+        value="1.12-1.61 s (four samples: 1.12, 1.22, 1.57, 1.61)",
+        kind=MACHINE,
+        conditions=(
+            "the same 8 GB development machine, WSL2, Docker server 29.5.2",
+            "the toolchain image ALREADY BUILT AND CACHED; TypeScript 7.0.2",
+            "`docker run --network none` over the committed example client"
+            " mounted read-only -- container start included in the number",
+            "9 emitted files, 31,097 bytes, `tsc --strict`",
+        ),
+        note=(
+            "**This is the number a developer waits for**, because it is the "
+            "one with a container in it: the generation is a third of a second "
+            "and the check that the generation was right is four times that. "
+            "The first run after the image is built took 2.72 s -- a warm-up "
+            "the samples above do not repeat -- and building the image from "
+            "scratch is a separate cost this row does not carry. Still: a "
+            "capture, a regeneration and a full typecheck of the result is "
+            "under two seconds, which is what makes `generate --check` "
+            "affordable in a gate."
+        ),
+    ),
     Measurement(
         subject="apg dev reset on a CI runner",
         value="6.19 s",

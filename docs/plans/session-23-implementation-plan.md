@@ -3,8 +3,8 @@
 **Status:** **PLANNED 2026-09-12** at `d6f6e94`, Session 22's close, on `main`.
 No run has started. §1 is D1200–D1211 (planning rows, every one measured
 today in a rig or read from the tree at `d6f6e94`); Run 1 added **D1212–D1215**,
-measured at the branch point, Run 2 added **D1216-D1223**, Run 3 **D1224-D1228** and Run 4 **D1229-D1233**, so next
-free is **D1234**. ADR
+measured at the branch point, Run 2 added **D1216-D1223**, Run 3 **D1224-D1228**, Run 4 **D1229-D1233** and Run 5
+**D1234-D1235**, so next free is **D1236**. ADR
 **0204** is this session's; the runs add theirs below the planning rows.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 23* and its rows D1067
 (the `generate` hook after a project migration), D1068 (one session, the IR
@@ -162,7 +162,7 @@ executed).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1234**. Rows D1200–D1211
+Six columns, next free number after this table **D1236**. Rows D1200–D1211
 were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's** and
 **D1216–D1223 Run 2's**, each measured while the run that names it was built.
 The runs add theirs below them as they go, each run's numbers named in its Done
@@ -204,6 +204,8 @@ paragraph.
 | **D1231** | Run 4's rig, as planned: *"drop `PGRST_JWT_SECRET` (the rig has no key set) and record in the docstring that role selection is therefore by `PGRST_DB_ANON_ROLE`"*. | **Every request then answers 500.** The generated client ALWAYS sends `Authorization: Bearer` — reading the surface *as the caller* is the whole of ADR 0204 — and PostgREST with no JWT configuration cannot verify a token it was given. Measured in rig 23g: all four arms returned `{"kind":"unreachable","reason":"the service answered 500"}` before the secret existed. Rig 23a never met it because it sent no Authorization header. | The rig generates an HS256 secret, sets `PGRST_JWT_SECRET`, and mints its own tokens naming a **role and no subject** — `bin/dev-token.py`'s documented property, since migration 0013's hook returns early without a `sub`. That is also what makes the two proofs honest: the read succeeds and returns **0 rows** because no `app.user_id` is set, and the write is refused with a real `PT401` for want of an identity. The role now comes from the token rather than from `PGRST_DB_ANON_ROLE`, which is how a deployment selects it. | `PGRST_DB_ANON_ROLE` was the right mechanism for rig 23a, which fetched a document anonymously, and the wrong one the moment the *client* became the instrument. A rig inherits its predecessor's configuration far more readily than its predecessor's reason for it. | 0204 |
 | **D1232** | Run 4's `GEN-TYPES-001` proof of the query string, as planned: *"the smoke prints the URL it built, asserted to be `…/notes?select=id,title&order=created_at.desc&limit=5&title=eq.x` after decoding"*. | **The client does not expose the URL it built, and adding that only for a test would be a backdoor.** The deeper problem is that the assertion would compare the client against a string this session wrote — it could not tell a correctly built query from an incorrectly built one that the test was updated to match. | Proved **through the service instead**. The smoke gains an optional `APG_SMOKE_FILTER_VALUE`, and the proof sends `probe&select=no_such_column`: percent-encoded it is an ordinary filter matching nothing (**200**), concatenated it becomes a second query parameter naming a column the relation does not have (**400**). Two outcomes far apart, neither a coincidence, and PostgREST is the judge rather than a literal in the test. The unfiltered read in the same invocation is the control. | ADR 0127 — *a caller value is a value and never syntax* — is one of this product's central claims, and the planned proof would have asserted it against a string rather than against a parser. The battery's `encodeURIComponent` mutation is what says the difference is real. | 0127 |
 | **D1233** | Run 4's rig wrote the authenticator's pgpass at `0600` under `tmp_path` and bind-mounted it into PostgREST. Seven proofs green on this workstation. | **CI RED on the first push.** `fe_sendauth: no password supplied`, surfacing 90 seconds later as *"PostgREST never loaded its schema cache"*. The cause: the PostgREST image declares `User=1000` (`docker inspect --format '{{.Config.User}}'`), and libpq **ignores a passfile looser than 0600** — so the file must be `0600` **and** owned by uid 1000. On this workstation the author's uid is *also* 1000, so it was readable **by coincidence**; the CI runner is uid **1001** and the container could not open it. Reproduced locally with a control: the same file at uid 1000 reads, at uid 1001 gives `Permission denied`. | The uid is read from the image (`image_user`) rather than assumed, and the file is given that owner through a **root container** on a pinned image — a test process cannot `chown` to an arbitrary uid, and the looser mode that would avoid the question is the one libpq refuses. And the fixture now **reads the file as that user before waiting on anything**, so the failure names a permission rather than timing out on a schema cache. | **D1228, two runs earlier, was the same fact in the same session**: a file the author can read and the container's user cannot. That one was a directory at `0700` and this one a file at `0600`; both were found by a container refusing to see something that was plainly there, and the first did not generalise into a habit. The tell both times was a message about the *content* — "no client here", "no password supplied" — where the truth was about *access*. **A rig that passes because the author's uid happens to match the image's is a value that looks measured and is not** (§7), and the only thing that distinguishes it from a correct one is a machine nobody has run it on yet. | 0204 |
+| **D1234** | Run 5's envelope rows were to be *"`apg generate` wall time for the release contract (5 objects, 6 tools) and for the example project's (7 objects, 8 tools)"*. | The example project's contract compiles to **7 tools, not 8** — measured by generating both in rig 23g and counting the IR: release `relations=2 rpcs=3 tools=6` (5 objects), example `relations=3 rpcs=4 tools=7` (7 objects). The release's six plus the project's one (`set_note_embedding`) is seven, which is also the number beta serves live and has since Session 21. | The rows name what was counted. The second row's subject reads *"a project's contract, 7 objects and 7 tools"* and its conditions carry the relation, RPC and tool counts and the emitted byte count, so a re-measurement that changes the shape cannot inherit a stale size. | A number in a plan is a guess until a run counts it, and this one was about to be written into a **published capacity document** — the class of artefact §7 calls most at risk of being reported dishonestly, because a document goes green by existing. The counting cost one line of the rig. | 0204 |
+| **D1235** | Run 5 step 1: *"`test_printed_commands` scans the new prints"*. | **It could not have.** `tests/contract/test_printed_commands.py` read exactly one file — `bin/deploy-project.py` — and D975's rule has been enforced on that driver alone since Session 17. The two commands that gained a printed command in this run are `bin/api-contract.py` and `bin/mcp-contract.py`, and a placeholder in either would have been invisible to the guard the plan named as its reader. | The scan is widened to a `PRINTING_DRIVERS` map of the three drivers that actually print a command, with the rule and every assertion unchanged — a widening to a measured set, which the non-negotiables distinguish from loosening a check to a subset. A second proof asserts the shape the scan cannot: that `--project` is followed by an interpolation and not a literal, in each of the two. The battery applied the placeholder mutation against both, separately, and both killed. | The plan named a guard as the reader of a new print without checking what that guard reads — question 5's shape (*when a decision is implemented, which of its callers got it?*) turned around: **when a rule is relied on, which files does it actually cover?** A rule enforced on one file for six sessions reads, from a plan, as a rule about the repository. | — |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1195,7 +1197,73 @@ moved), `test_capacity_envelope`, `test_documentation_index`,
 `test_session12_documented_path`, `test_repository_contract`. **Push, read
 CI.**
 
-**Done.** *(the run writes this)*
+**Done.** The hook, the envelope, the documents (2026-09-12).
+
+**What the run built.** `api-contract.py --update --project` and
+`mcp-contract.py compile --project` each end by printing
+`bin/apg.sh generate --project <the path the process was given>`, on **stderr**,
+so a redirected capture is still the document and nothing else; the
+release-only paths of both print nothing, which is the control that says the
+line belongs to the project argument. Three `MACHINE` rows in
+`capacity.ENVELOPE` and the rendered `docs/capacity-envelope.md`.
+`docs/generated-clients.md` (277 lines, nine sections), indexed in
+`docs/README.md` under *Developer loop*; README's new *A generated client*
+section between *A local environment* and *Deploying*, row 5 of the
+*Adding your own tables* table, and the regeneration sentence after the
+compile block; `docs/client-compatibility.md` gains the sentence separating a
+driver proof from an endpoint-contract one; `docs/new-team-member.md` gains
+step **8b**, derived by diff (D693).
+
+**What it measured** (rig 23g, `/tmp/r23g.sh`, `/tmp/r23g2.sh`, `/tmp/r23g3.sh`,
+`date +%s.%N` around the command, output in the scratchpad):
+
+* `apg generate` for the **release** contract — 2 relations, 3 RPCs, 6 tools,
+  29,157 bytes emitted — **0.28 s, 0.28 s, 0.29 s**;
+* for the **example project's** contract — 3 relations, 4 RPCs, 7 tools,
+  31,097 bytes — **0.31 s, 0.32 s, 0.33 s**. Forty milliseconds for two more
+  objects, one more tool and 1,940 more bytes: **the slope is what publishing
+  two sizes buys**, and it is flat, because the cost is the process starting;
+* the **first** `bin/apg.sh generate` in a fresh shell — **0.81 s**, against
+  0.28 s for every one after it on the same inputs. Stated in the row rather
+  than averaged in;
+* the toolchain typecheck of the committed example client, image cached —
+  **1.12, 1.22, 1.57, 1.61 s** over four samples, and **2.72 s** on the first
+  run after the image was built. The first two samples differed by 2× so two
+  more were taken rather than published as a range of two;
+* and the version rule's worked diff, **run rather than written**: identity ⇒
+  no change; a relation removed ⇒ `api_operation_removed` ⇒ major ⇒ 2.0.0;
+  added ⇒ `api_operation_added` ⇒ minor ⇒ 1.1.0; a tool added ⇒
+  `capability_added` ⇒ minor. Eight filter operators, six `PT` codes, seven
+  caller-facing tokens, all read from the committed IR. Every table in the new
+  page is a measurement, not a description of the code's intent.
+
+**Battery: 10 mutations, 10 killed, 10 controls green**, every anchor
+pre-flighted to exactly one match, all three files restored and verified by
+`cmp`. Five against the hook (the dispatcher spelling; the placeholder, killed
+twice — once by the widened scan and once by the shape guard; the hook made
+unconditional, killed by the release control; the hook moved to stdout, killed
+by the redirect-purity assertion) and five against the envelope (the size
+dropped; `Python only` dropped; the cache state dropped; a row renamed out of
+the pair; and the plan's own mutation, a `MACHINE` row naming no machine,
+killed by the existing guard with the churn proof green beside it).
+
+**Two rows. D1234**: the plan said the example project's contract is 7 objects
+and **8** tools; it is **7**, counted in the rig, and the number was one line
+from being written into a published capacity document. **D1235**: the plan
+named `test_printed_commands` as the reader of the two new prints, and that
+module read `bin/deploy-project.py` and nothing else — D975's rule has been
+enforced on one file since Session 17, and from a plan it reads as a rule about
+the repository. Widened to the three drivers that print a command; the
+placeholder mutation was then applied against the capture and killed.
+
+**Targeted:** `test_generate_command` (20), `test_printed_commands` (5),
+`test_api_contract_command`, `test_capability_compiler`,
+`test_capacity_envelope` (16), `test_documentation_index`,
+`test_session12_documented_path`, `test_repository_contract` — 109 + 257
+passed. Also cleaned: six root-owned `node_modules` directories left under
+`/tmp/pytest-of-gmpar` by D1227's *pre-repair* toolchain proofs, which pytest's
+own garbage collection cannot remove and which had been accumulating silently.
+The repaired proofs create none — grep, not assumption.
 
 ### Run 6 — the bump
 
