@@ -1,8 +1,13 @@
 # Session 22 — `apg dev`, the local disposable environment
 
-**Status:** planned 2026-09-11 at `90c1c19`, Session 21's close. **Run 1 done
-2026-09-11** on branch `session-22` (rigs 22a–22e, ADR 0202, ADR 0203,
-D1176–D1179); Runs 2–7 open.
+**Status:** **COMPLETE 2026-09-12.** Planned 2026-09-11 at `90c1c19`, Session
+21's close; all seven runs Done in §5, each with what it measured. `apg dev`
+ships and the evidence model has a third mode (ADR 0202, ADR 0203). §1 is
+D1157–D1199, next free **D1200**. The session closed on
+`evidence/session-22-offline.json` — **four offline claims, all `passed`**,
+5453 passed / 0 failed / 3 skipped, `checkout_commit 8823877e` — and on `main`
+fast-forwarded from `session-22`. Its two HOST claims are `not_run` until
+Session 24's trip, by construction and by design (§7, §10).
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 22*, and its rows D1066
 (the fixture path is the product), D1071 (`seed` is a reviewed file, never a
 capture), D1073 (CI is the PR environment), D1076 (isolation is proved by
@@ -1429,6 +1434,84 @@ both verbs, which it could not do until the second machine had rows.
    and ADR numbers. Memory: the state file updated.
 5. Mark this run **Done.** with the offline half's claim table pasted, the
    `main` SHA, and the two host claims named as waiting.
+
+**Done.** 2026-09-12. **Session 22 is COMPLETE, and it is the first session
+this project has closed without a host trip** — on an offline evidence half,
+under ADR 0202. One divergence row (**D1199**), next free **D1200**.
+
+*The gate, run to completion for the first time.* `bin/session-22-check.sh
+--mode offline` on this workstation, in WSL, with Docker, output to a file and
+the exit code read from inside WSL rather than from Git Bash:
+
+```
+================ GATE EXIT: 0 ================
+session-22-check: offline PASSED
+offline suite   5453 passed, 0 failed, 3 skipped, 0 errors
+```
+
+*The half.* `evidence/session-22-offline.json`, gitignored, on this workstation:
+
+| Claim | Requirements | Verdict |
+|---|---|---|
+| `dev_environment` | `DEV-ENV-001`, `DEV-SUBJECT-001`, `DEV-SEED-001` | **passed** |
+| `dev_isolation` | `DEV-ISO-001` | **passed** |
+| `dev_churn` | `DEV-CHURN-001`, `DEV-CI-001` | **passed** |
+| `offline_evidence` | `EVD-OFFLINE-001` | **passed** |
+
+`mode: offline`, `session: 22`, `checkout_commit:
+8823877e0514e8299841503f43bc10f22352939e`, and `source_commit`,
+`project_keys`, `routes` and `certificate_sha256` all null **by
+construction** — an offline half measures a checkout, and a half naming a
+deployment it never read is the misreading the third mode exists to prevent.
+
+*The two host claims are `not_run`, and that is the honest verdict.*
+`plane_confirmed_count` (`OPS-PLANE-001`) and `agent_tenant_read`
+(`AGT-TENANT-002`) are absent from this half by construction: they are about a
+RUNNING plane, they were deliberately not declared offline, and Session 24's
+trip collects them. `evidence/session-22.json` does not exist at this
+session's close and §7 said in advance that it would not.
+
+*What step 1 found, and it was in this session's own gate.* Three `printf
+'--mode …'` format strings — bash reads a leading dash as an option, the call
+fails, and `set -e` aborts. One died at `--help` in Run 6; the other two print
+only at the END of a successful run, so **nothing had executed them** until
+the close ran the gate to completion. The offline one aborted the gate *after*
+step 9 had written a correct, complete, green half — so the evidence was right
+and the gate never said `PASSED`. **D1199**, guarded now across every command
+in `SHELL_COMMANDS` rather than in this gate, because the mistake is available
+to all forty. The eleven previous instances of a never-executed line were all
+found on host trips; this one was found in a checkout, by the only run that
+executes a gate's last lines.
+
+*Steps 2 and 3.* No `git bundle` and no `scp`: **nothing is transported**, and
+the DR kit is not re-exported because there was no deploy of consequence. CI
+green on `8823877e` — run `34680850176`, workflow `contract`, `completed
+success`, all three jobs. `main` fast-forwarded from `session-22` (ten commits,
+zero ahead), the branch deleted, `main` pushed.
+
+*Step 4.* `CLAUDE.md` §2 in the launch folder carries a `SESSION 22 COMPLETE`
+block in Session 21's shape — what shipped, the half's numbers, D1189 as the
+defect that was shipping, **what Session 24's trip owes this session**, and the
+next free `D` and ADR numbers. The original was copied to the scratchpad first,
+which is that file's own rule. Memory updated.
+
+*The session's commits, in order, every one CI green except where noted:*
+`ff75d1c` (Run 1) · `565a176` RED + `c91efbb` (Run 2, D1184) · `03c3f1b`
+(Run 3) · `aed4f82` (Run 4) · `4763fe7` (Run 5) · `f2a87a5` + `6026ae7` +
+`f93d1f9` (Run 6, the bump, the D1198 repair and the envelope's CI rows) ·
+`8823877` (Run 7's repair, D1199). The commit after that one is this record
+and is **documentation only** — the Session 19/20/21 precedent — which is why
+the half names `8823877e` and not it.
+
+*Five mutation batteries across the session, 48 mutations, all killed after
+repair.* Run 6's found nothing in the product and four defects in its own new
+tests. Two are worth carrying forward: **D1197**, where one mutation walked
+through two successive versions of the same assertion because the subject's
+comments were good enough to satisfy a scan; and **D1198**, where a fixture
+rewrote a module twice inside one test with versions of the same byte length,
+so a subprocess imported stale bytecode — it passed every targeted run and
+failed only in the full sweep, which is one concrete thing a gate at a run's
+close buys that a targeted list cannot.
 
 ---
 
