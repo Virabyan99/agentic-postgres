@@ -33,6 +33,68 @@ no-op.
 | `THR-DATA-LOSS` | None — this is node loss or operator error, not an adversary | Availability and durability of project data | Encrypted pgBackRest repository, continuous WAL archiving, retained full-backup chains | Backup and WAL archive failures produce a non-zero operational signal | Data written after the last archived WAL segment is unrecoverable. The window is bounded by archive frequency, not eliminated | `REC-PITR-001`, `REC-SMOKE-001`, `REC-WAL-001` | `tests/recovery/test_future_pitr.py::test_timestamp_targeted_restore_succeeds` | 10 |
 | `THR-BACKUP-COMPROMISE` | Read access to the backup repository credentials | Every historical copy of the database | Backup credentials separate from application credentials; repository encryption key stored separately from repository credentials; application services hold neither | Credential-scope checks assert application services cannot reach the backup bucket | Backups in the same provider account do not survive account-level compromise. This is documented in operations guidance and explicitly accepted for the MVP | `REC-EVID-001`, `SEC-SECRET-001` | `tests/recovery/test_future_pitr.py::test_restore_evidence_records_the_required_fields` | 10 |
 
+## Studio: a page in the operator's browser, on the operator's machine
+
+`apg studio` (ADR 0205) puts a **token-holding process** and a **web page** on
+the same machine, which is a shape none of the rows above has. Its table row
+lands with the `STU-*` requirements it cites; the analysis is here because it is
+what a reader needs before the row makes sense.
+
+**What a hostile page can do.** Any page in the same browser can make that
+browser send requests to `http://127.0.0.1:<port>` — it does not need to know
+the port, because it can try all of them. So loopback is not a boundary and is
+not treated as one. Five checks run in the process before anything else, and
+each closes a different way in:
+
+| Control | What it stops |
+|---|---|
+| the launch cookie is `HttpOnly`, `SameSite=Strict` | a cross-site request carries no cookie at all, so it is 401 before anything else runs. `Strict` rather than `Lax`: a top-level navigation from a hostile page is still cross-site |
+| `X-Apg-Studio` is required on every `/__apg/` call | not a CORS-simple header, so setting it requires a preflight |
+| `OPTIONS` is answered **405 by this server** | no preflight can succeed, so the header above cannot be set cross-origin. `http.server` would otherwise answer 501 with none of these headers — a refusal nobody here wrote is a refusal nobody here can reason about |
+| the `Host` header must be the address the process bound | a DNS-rebinding attempt resolves an attacker's name to `127.0.0.1` and arrives with that name in `Host`; it is answered 421 |
+| an `Origin` that is present and foreign is 403 | absent is not foreign — a same-origin navigation sends none |
+
+A refused request's **body is never read**: a `POST` announcing a megabyte with
+one byte sent is answered and closed rather than waited on.
+
+**PostgREST's own CORS answer is measured and irrelevant, in that order.** Rig
+24b sent `GET /notes` through the edge with `Origin: http://127.0.0.1:1`:
+
+```
+-> 200
+   (no Access-Control-* header in the response)
+   all response headers: Connection, Content-Length, Content-Location,
+                         Content-Range, Content-Type, Date, Server
+```
+
+No `Access-Control-Allow-Origin` at all, so a browser gives a cross-origin
+reader nothing. That is worth knowing and it is **not** what protects anything
+here, because Studio's page never talks to PostgREST: it talks to the process on
+loopback, which makes the upstream request itself. A design that relied on a
+third party's default header would be relying on a default.
+
+**What a hostile LOCAL process can do — the residual.** Any process running as
+the same user can read the terminal's scrollback, `/proc/<pid>/cmdline`, or the
+port list, and so can obtain the launch URL and with it the cookie value. That
+process could then drive the page's endpoints as the logged-in human.
+
+This is **accepted and not closed.** A local process running as you can already
+read your files, your SSH keys and your shell history; a launch URL is not the
+weakest thing available to it. It is the same residual Jupyter accepts for the
+same reason, and it is bounded twice: by the process's lifetime (the launch ends
+when you press Ctrl-C, and the session it opened is revoked) and by the token's
+own 900 seconds plus 30 of skew. What it is **not** bounded by is the page —
+there is no idle timeout, and adding one would be a control on the wrong side.
+
+**What the page can never obtain, hostile or not**, is the token itself. It is
+held in the process's memory, never written, never printed, never put in a
+response header or an asset. The request log is a method and a path with the
+query string and the launch key removed, because a default logger writes the
+request line and a request line carries both.
+
+**Studio adds no verifier.** It holds a token the auth service signed and
+verifies nothing; the four verifiers are unchanged, and only auth signs.
+
 ## Notes on residual risk
 
 Three of these are worth restating outside the table, because they are the ones
@@ -53,6 +115,18 @@ backup account is listed as post-MVP work.
 agent-facing control here constrains *which* operations are reachable. None of
 them makes an approved operation correct. A flawed RPC on the allowlist is
 reachable by design.
+
+**The agent audit table grows without bound, and so does the idempotency
+table.** Nothing prunes either. `app_private.agent_audit` gains a row per agent
+request — served and refused both, which is the point — and
+`app_private.agent_idempotency` a row per claimed key. This is **stated rather
+than handled**: no retention policy exists, none is enforced, and the counts on
+the deployment are unmeasured until the next host trip. Studio's audit view
+makes the shape visible without solving it — it serves the newest 500 rows and
+says in its header that the page is the newest 500, which is honest about what
+it cannot count but is not a bound on the table. A retention policy is a
+released migration carrying a decision about how long a denial must remain
+readable, and that decision has not been taken.
 
 ## Scope
 

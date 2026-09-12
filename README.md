@@ -6,6 +6,27 @@ deployment topology rather than from application correctness.
 
 **Status: Session 23 implemented**, at `template_version` **1.4.0**.
 
+Session 24 is built and is not yet a release: `apg studio` is in the tree, and
+the version and session constants move in the run that bumps them.
+
+Session 24 gives a developer a page over their own deployment. `apg studio`
+starts one standard-library process bound to `127.0.0.1` — there is no flag for
+anywhere else — logs the human in, holds the access token **in memory**, and
+serves three first-party files plus a same-origin forwarder with an enumerated
+table of the requests it may make. The browser gets a per-launch cookie,
+`HttpOnly` and `SameSite=Strict`, and never the token. Six views: the schema and
+a PostgREST query builder over the reviewed surface, the audit record with the
+boundary that refused each denial, the compiled capability lock, the agent
+roster with a typed revocation, and the session plane. **Studio is a client and
+holds nothing you do not hold** (ADR 0205) — there is no SQL box, not hidden and
+not behind a flag, because a human running SQL through a product surface would
+make it an authority. At launch it fetches the served REST document *as you* and
+answers the same four ways a generated client's `init()` does; an administrator
+is served the anonymous document by PostgREST and therefore always sees
+`stale_contract`, which the launch line says in as many words rather than
+sending anybody to regenerate a correct capture (see
+[Studio](#studio) and [the guide](docs/studio.md)).
+
 Session 23 gives a developer a typed client over their own surface. `apg generate`
 writes a TypeScript package from four committed artefacts — the merged reviewed
 surface, the project's OpenAPI snapshot, the application snapshot and the compiled
@@ -264,6 +285,30 @@ often assumed to be:
 to do when Docker is absent, when the state is stale, when a seed is refused,
 and when a migration fails as the migration user — which is the case the
 environment exists to surface before a deploy does.
+
+## Studio
+
+```bash
+bin/apg.sh studio --project project.yaml --outputs alpha-outputs.json
+```
+
+It prints a URL on `127.0.0.1` with a one-time path in it. Open that, and the
+page shows you your deployment as **you**: the relations your token can read, a
+query builder that becomes one PostgREST request (reads only, values encoded so
+that a comma is a comma), the audit page with its denial boundaries, the
+compiled lock, the agent roster with a revocation that makes you type the
+agent's id, and your own sessions. Ctrl-C ends it, and it revokes the login
+session it opened.
+
+`--outputs` takes a **deployed** document — what a deploy published, not a
+render. The password comes from a prompt or a `0600` file; there is no
+`--password` flag and no environment variable is read for one.
+
+Five checks run before anything else on every request: `OPTIONS` is 405 so no
+preflight can succeed and the custom header stays unsettable cross-origin, a
+foreign `Host` is 421, a foreign `Origin` is 403, no launch cookie is 401, and a
+forwarder call without the header is 403. Full guide:
+[docs/studio.md](docs/studio.md).
 
 ## A generated client
 

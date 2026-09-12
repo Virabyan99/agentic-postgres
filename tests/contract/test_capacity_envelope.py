@@ -454,6 +454,89 @@ def test_the_envelope_carries_generation_time_per_contract_size() -> None:
     )
 
 
+def test_the_envelope_carries_studios_three_latencies() -> None:
+    """`STU-ENV-001`. What `apg studio` costs, read one row at a time.
+
+    Three rows and three different kinds of cost, so the properties are asserted
+    against the row that must carry each -- D1197's lesson, the way the
+    generation proof above takes it. A joined scan would pass on any one row
+    carrying everything.
+
+    * **the launch** is the only one with round trips in it, and it must say so
+      in its conditions: a reader who thinks three quarters of a second is the
+      socket binding will budget wrongly for a deployment across a network;
+    * **the page and the schema view** are the pair, and the pair is the claim:
+      they cost the same because neither makes an upstream call, and a reader
+      can only see that if both are published. One of them alone would read as
+      "Studio is fast", which is a sentence about a page nobody asked about;
+    * **every row names the size of whatever its number is about** -- the two
+      that read the IR name the surface, and the page row names the bytes it
+      serves and says a surface size does not apply to it. That distinction is
+      the assertion rather than a uniform scan: the first version of this proof
+      demanded a surface size from the static page too, and satisfying it would
+      have put a false relevance in the document;
+    * **all three are `MACHINE`**, and the views that DO reach the deployment are
+      deliberately absent -- if one ever appears here, it will have been
+      measured off-host and published as though it described a deployment,
+      which is the exact error `test_the_document_names_the_deployment_host_as_a
+      _different_machine` exists to prevent one document away.
+
+    Goes red if: a row is dropped because "two numbers are enough"; a row is
+    refiled as `CONFIGURATION`; the surface size is lost on a re-measurement,
+    which is the likely one because a re-sample rewrites `value` and inherits
+    the conditions; or a view that makes an upstream request is added to this
+    family without becoming a deployment measurement first.
+    """
+    rows = [m for m in capacity.ENVELOPE if m.subject.startswith("apg studio")]
+    assert len(rows) == 3, (
+        f"the envelope carries {len(rows)} `apg studio` numbers rather than three. The "
+        "launch, the page and the schema view are three different kinds of cost and the "
+        "pair among them is itself the claim"
+    )
+
+    by_subject = {row.subject: row for row in rows}
+    launch = [row for row in rows if "start" in row.subject]
+    assert len(launch) == 1, f"no launch row: {sorted(by_subject)}"
+    stated = " ".join(launch[0].conditions).lower()
+    assert "login" in launch[0].note.lower() or "login" in stated, (
+        "the launch row does not say a login is inside the number. Two round trips are "
+        "most of what separates it from `apg generate`, and a reader budgeting for a "
+        "deployment across a network needs to know they are there"
+    )
+
+    served = [row for row in rows if "start" not in row.subject]
+    assert len(served) == 2, f"the page/view pair is not two rows: {[r.subject for r in served]}"
+    for row in served:
+        assert "upstream" in row.note.lower(), (
+            f"{row.subject!r} does not say whether it makes an upstream request. That is "
+            "the whole reason these two numbers are alike, and it is invisible in them"
+        )
+
+    for row in rows:
+        assert row.kind == capacity.MACHINE, (
+            f"{row.subject!r} is filed as {row.kind!r}. A wall time is about the machine "
+            "it was sampled on"
+        )
+        conditions = " ".join(row.conditions).lower()
+        if "page" in row.subject:
+            # The static file's own size, and an explicit statement that the
+            # surface is not what this number is about.
+            assert "bytes" in conditions, (
+                f"{row.subject!r} does not say how large the thing it serves is"
+            )
+            assert "no surface size applies" in conditions, (
+                f"{row.subject!r} neither names a surface nor says one does not apply. "
+                "Silence reads as an omission, and the next re-measurement fills it in "
+                "with a number that was never relevant"
+            )
+            continue
+        assert "relations" in conditions and "tools" in conditions, (
+            f"{row.subject!r} reads the IR and does not say how much surface was behind "
+            "it. A latency without its surface size is the figure a reader quotes for a "
+            "larger one"
+        )
+
+
 def test_nothing_was_tuned_on_an_off_host_measurement() -> None:
     """The plan asks for tuning after the load scenarios, and this run did none.
 

@@ -397,3 +397,32 @@ deployment serves a caller, nor which lock a running plane loaded.
 | **Nothing regenerates a client automatically, by decision** | D1208. The capture and the compile each print the command, and the gate refuses a stale committed client. An adopter who ignores both holds a client whose `init()` will refuse — which is the designed outcome and not a gap. |
 | **PostgREST beside `apg dev` is a rig, not a verb** | D1211. Session 23's runtime proof stands up a cluster, a PostgREST configured from `compose.yaml`'s own block and the pinned Traefik, and takes ~150 s to do it — the most expensive module in the suite. If Session 24's Studio wants a served surface on a workstation, that is the session to decide whether ADR 0203's boundary moves, with this rig as the measured cost. |
 | **The filter-operator set is the capability schema's, for humans too** | D1210. A human wanting `ilike` through the generated client is a reviewed widening of the capability schema, which then reaches agents. The coupling is deliberate and is written down so it is not undone by accident. |
+
+---
+
+## 13. What Session 24 left open
+
+Session 24 built `apg studio` — a loopback page over a deployment, holding the
+human's token and handing the browser nothing but a launch cookie (ADR 0205) —
+and migration 0032, which makes the audit reader return the boundary that
+refused (D1247, ADR 0178). It is the third session in a row to close on an
+offline half, and its Run 7 is the trip that pays Sessions 22, 23 **and** 24 in
+one sweep.
+
+The find worth carrying out of the session is not in this table: **the served
+REST document is scoped to the caller's grants**, so an administrator is served
+the anonymous document and Studio answers `stale_contract` for them (D1275).
+Nothing was wrong; the sentence was, and one answer with two causes and only one
+named is ADR 0195's folded outcome in the reassuring direction.
+
+| Item | Position |
+|---|---|
+| **Three sessions' host claims and three merges are owed in one trip** | Session 22's `plane_confirmed_count` and `agent_tenant_read`, Session 23's `generated_client_hash` and `agent_lock_reported`, and Session 24's own live half. One 15-minute sweep, three merges (D1244). `tests/deployment/test_session24_studio.py` will have **never executed** when it runs there, which is the fourteenth never-executed proof this project has carried to a host — the count is the point, not the module. |
+| **`agent_audit` and `agent_idempotency` still grow without bound** | STATED, not handled (D1255). Nothing prunes either. Studio's audit view makes the shape visible — the newest 500 rows, with a header that says the page is the newest 500 — which is honest about what it cannot count and is not a bound on the table. The counts on the deployment are unmeasured until the trip records them. A retention policy is a released migration carrying a decision about how long a denial must remain readable; that decision has not been taken, and taking it in a session that also had to deploy it is why it was not taken here. |
+| **`GET /admin/audit` still filters by agent, owner and limit only** | D1248, priced and not built: a window, an outcome/boundary filter and a cursor are one migration over 0032's reader plus one endpoint change. Studio's forwarder deliberately refuses every parameter but the endpoint's own two, with 400 — so there is no request shape in which a filter narrows what was READ, and therefore none in which a viewer is shown a count that silently excludes refusals. That refusal is what a later widening has to preserve: whatever filters are added upstream, the page's count must remain a count of the page. |
+| **An administrator cannot use the schema or query views, and that is the deployment's authorization** | D1275. `project_admin` holds nothing in `api`; PostgREST serves it the anonymous document. Documented in `docs/studio.md` §2 with the measurement beside it. What is NOT decided is whether a human should ever hold both — an administrative scope set and a data role — and that is a question about the project's role model rather than about Studio. |
+| **The capability view is the checkout's lock, never the plane's** | D1274. Studio does not ask the deployment which lock it loaded, because `list_resources` reports that (D1201) and it is an agent call, and ADR 0205's rule is that Studio holds nothing the human does not hold. The view says so in a sentence that travels with the data. A human-readable *is the plane serving this lock* remains `bin/apg.sh doctor`'s question. |
+| **The launch URL is readable by any local process, and that residual is accepted** | Terminal scrollback, `/proc/<pid>/cmdline`, the port list. A process running as you can already read your SSH keys; a launch URL is not the weakest thing available to it. It is bounded by the process's lifetime and by the token's 900 seconds, and by nothing else: there is no idle timeout in the page, deliberately, because a control on the page is a control on the wrong side. `docs/threat-model.md` states it. |
+| **A rig that reaches a published loopback port is a rig that assumes a daemon** | D1276. Run 4's CI errored seventeen times on `Connection refused` to the port `apg dev up` publishes — while `docker exec` against the same container, in the same fixture, worked. `apg dev` publishes `127.0.0.1:0:5432` by decision (D1175), and a host-to-loopback DNAT is something a daemon can be configured not to make work. The fixture now proves an address before building on it and says which it used. Every other rig in this suite that reaches a dev cluster from the test process inherits the assumption and has not been asked. |
+| **Studio has no live half for the query view's RLS, off this workstation** | The runtime module proves it against `apg dev` + the real auth application + real PostgREST, which is a deployment in every respect except that it is not THE deployment. The trip's module exercises the launch and the surface answer against beta; the RLS pair is not repeated there, because it would need two subjects created on a production project. Recorded as a choice. |
+| **The three envelope rows are this machine's** | `apg studio` start 0.74/0.66/0.74 s, the page 1.3/3.1/2.4 ms, the schema view 1.3/1.1/1.2 ms. MACHINE measurements, and the views that make an upstream request are deliberately unmeasured: those are a deployment's numbers and no arithmetic converts one machine's into another's. |

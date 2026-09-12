@@ -4,7 +4,7 @@
 `main`. **Runs 1, 2 and 3 are Done** (2026-09-12, on branch `session-24`);
 Runs 4–7 are ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
 and Run 1 added **D1259–D1262** and rewrote four with their numbers; the
-runs add theirs below, so **next free is D1276**.
+runs add theirs below, so **next free is D1278**.
 ADR **0205** is this session's (written in Run 1); next free after it 0206.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 24 — Studio* whole (Builds
 / Already true / Must not / Measures / Closes), its rows D1069 (one Studio, a
@@ -176,7 +176,7 @@ and by which sweep).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1276** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1273; Run 4 D1274–D1275). Rows D1243–D1258
+Six columns, next free number after this table **D1278** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1273; Run 4 D1274–D1275; Run 5 D1276–D1277). Rows D1243–D1258
 were read from the tree on 2026-09-12 at `035192d`; where a row's *Repository
 does* column says *measure*, Run 1 owns the measurement and the row is
 rewritten with the numbers.
@@ -216,6 +216,8 @@ rewritten with the numbers.
 | **D1273** | §5: *“CI green on every commit that changes code”*, with Run 2 building `src/agentic_postgres/studio.py` and its unit proofs, and Run 3 building `bin/studio.py` — the module's only caller — one commit later. | **The two cannot both be true.** `test_repository_contract.py::test_no_module_is_imported_only_by_its_own_tests` refuses a package module whose only importers are its own tests: *“a module with no caller is a feature that does not exist, however well it is tested”* (D204). Run 2's commit is exactly that state, and CI said so — `34a3b28`, both jobs red on that ONE proof, `1 failed, 5507 passed` in the Session 1 gate and `1 failed, 5597 passed` in the Session 2 suite, nothing else in either. The workstation could not have seen it: the targeted list for a run that adds a module does not include `test_repository_contract`, and the guard is about the repository rather than about anything Run 2 touched. | **Recorded, not repaired by rewriting history.** Run 3's commit adds the caller and `test_repository_contract` passes in its targeted list (895 passed) — and **`deb4aa9`'s own CI is green**, read by full SHA, which is what makes this a reading of the split rather than a guess about it. The branch therefore has one red commit by construction, and the alternative — landing the pure core and its command in one commit — is what a future session should plan instead: the split is a reviewing convenience, and D204 is a property of the tree at each commit. | The guard is right and the plan was wrong, which is the direction this table exists for. A session that had “repaired” it by importing `studio` from somewhere to satisfy the scan would have built the feature the guard was written to prevent. | D204 |
 | **D1274** | Run 4: *“**Capabilities** (the IR's tools: name, kind, arguments, scopes; the lock's `tools_sha256` and a fixed sentence)”* listed as one of six views, against Run 3's rule that *“under anything but ok the schema and query views are refused”*. | **Capabilities is not in either list, and Run 3 had already decided it by accident.** Run 3 built ONE endpoint for everything the IR carries, `/__apg/schema`, gated on `surface.answer == "ok"` — so the capabilities view would have been refused because a REST document disagreed. Those are two contracts: `tools_sha256` is compiled from the capability manifest and the reviewed surface, `rest_openapi_sha256` is the document PostgREST serves, and no launch answer is evidence about the first. The plan's own sentence for the view says as much — *whether the plane serves it is `bin/apg.sh doctor`'s question* — so it cannot be gated on a confirmation that was never about it. | **`/__apg/capabilities` is a second local endpoint, ungated**, served from `studio.capabilities_view(ir)` with `CAPABILITIES_NOTE` travelling in the payload rather than written into the page, so the data and its caveat cannot come apart. `forwarder_table()` is untouched: both endpoints are local and neither is an upstream request. `test_the_capabilities_view_is_served_whatever_the_surface_answered` runs both arms and asserts the two payloads are identical, with the schema view's 409 beside it as the control. | ADR 0195's folded third outcome, one level up: the answer was about one contract and would have been reported as though it were about another. | ADR 0195, D1201 |
 | **D1275** | §5 Run 4: *“`test_launch_answers_ok_against_the_surface_the_ir_was_built_from`”*, with the fixture's one administrator holding every admin scope — and §5 Run 3's launch line, *“run `bin/apg.sh generate`”*, as the whole of what `stale_contract` says. | **The served REST document is scoped to the caller's grants, and the administrator's is empty.** Rig 24d, one URL and three tokens the auth application issued: `authenticated` is served 16,024 bytes, 8 paths and 3 definitions and fingerprints EQUAL to the committed snapshot; `project_admin` is served 2,393 bytes, **1 path and 0 definitions — byte for byte the same document as `anon`**, because the administrative role administers the auth service's endpoints and holds nothing in `api`. So an administrator's launch answers `stale_contract`, and the first run of the proof did exactly that. | **The answer is right and the sentence was wrong.** `stale_contract` means *the surface served to this subject is not the captured one*, which is the meaning Session 23's client already has — `test_init_refuses_a_surface_with_another_fingerprint_naming_both` produces it by changing only the token's role. What could not stand is a launch line offering ONE cause: an administrator told to regenerate would have regenerated a capture that was exactly right. `bin/studio.py`, `bin/studio.sh --help` and the page's detail line now name both causes. The `ok` proof launches as `alpha-user-a`, and `test_an_administrators_surface_is_the_one_their_grants_reach` is the administrator's half, with the `ok` launch beside it as the control. | The same shape as D1260, found the same way and one run later: a comparison that looked measured, against a document nobody had fetched as this subject. A session that had “fixed” the product to match the first run would have taught Studio to accept a surface it had not verified. | D1260, ADR 0204, rig 23a |
+| **D1276** | Run 4's fixture, built from rig 24b, points the auth application at the dev cluster's PUBLISHED port — `127.0.0.1:<state.port>` — the way rig 24b did on this workstation. | **CI errored seventeen times, all at the fixture, all `PoolTimeout` behind `connection to server at "127.0.0.1", port 32782 failed: Connection refused` — while `docker exec psql` against the SAME container in the SAME fixture had succeeded twice, seconds earlier.** So the cluster was running and its published port was not reachable from the runner's own loopback. `apg dev up` publishes `-p 127.0.0.1:0:5432` by decision (D1175, rig 22a): the port exists on loopback and nowhere else, which is right for a developer's machine and depends on a host-to-loopback DNAT a daemon can be configured not to make. Every other cluster this suite starts publishes on all interfaces, which is why no other rig had met this. | **The fixture proves an address before it builds on one.** `cluster_address()` tries the published port, falls back to the container's own address read from `docker inspect`, fails with a message naming both and what `docker exec` could do, and returns WHICH answered — recorded in the rig and warned about when it is not the first. Not a switch on the machine's name: the question is *can this process reach it*, and only a connection answers that. | CLAUDE.md's own rule in a new place: read the container, not the file. `state["port"]` is a true record of what `up` published and says nothing about whether anything can reach it — a value that looked measured and was not. | D1175, D1152 |
+| **D1277** | Run 5: *“a **Studio** entry under *Threats*”*, *“the status paragraph at Session 24 … write the prose now with `1.5.0` and let Run 6's guard confirm”*, and *“§1's numbers **counted, not recalled**”*. | **Three of the five document edits are guarded against constants Run 6 moves, and writing them here leaves a commit its own guards refuse.** The threat table's two acceptance columns are parsed and must name requirements present in `tests/acceptance-registry.yaml`; every registered requirement belongs to a claim (D697); the `STU-*` family and its claims are Run 6's. `test_the_readme_states_the_session_the_release_implements` compares the README's *Session N implemented* to `CURRENT_SESSION` — writing 24 here failed it on the spot — and `test_the_readme_quotes_the_release_it_ships` compares `template_version` to `VERSION`. And §1 is *the position*, which the registry changes in Run 6, so counting it now publishes numbers a later commit in the same session makes wrong (D1194). | **Each moves to the run that moves its constant, and everything that does not depend on one lands here.** The threat model gets the whole Studio ANALYSIS — the hostile page, the five checks, rig 24b's measured CORS answer, the local-process residual — which the parser does not read; the table ROW lands in Run 6 with its requirements. The README gets Studio's own section and a sentence saying the session is built and not yet a release, with the status line unchanged. The ledger gets §13 whole; §1 is counted in Run 6. | **D1273, applied forward rather than repeated.** Last run recorded a commit that was red by construction and said a future session should land a module with its caller together. Doing the same thing deliberately one run after writing that down would be worse than the original. | D1273, D936, D1194, D697 |
 
 ---
 
@@ -1121,8 +1123,50 @@ documented there — grep `admin/audit`).
 `test_session12_documented_path`, `test_repository_contract`, plus any module
 `git grep -ln "capacity-envelope\|threat-model" -- tests` names. Push; read CI.
 
-**Done.** *(the nine timings; the IR's counts as read; the documents' line
-counts.)*
+**Done.** Three envelope rows, `docs/studio.md`, the threat model's Studio
+analysis, the README's Studio section and the ledger's §13 — plus the repair of
+Run 4's CI, which is the run's first fact.
+
+**Run 4's CI was red and the fixture was right to be** (D1276). Seventeen
+errors, all at `studio_rig`, all `PoolTimeout` behind *connection to server at
+`127.0.0.1`, port 32782 failed: Connection refused* — while `docker exec psql`
+against the same container in the same fixture had succeeded twice, seconds
+earlier. `apg dev up` publishes `127.0.0.1:0:5432` deliberately (D1175), and a
+host-to-loopback DNAT is something a daemon can be configured not to make work;
+every other cluster this suite starts publishes on all interfaces, which is why
+no other rig had met it. The fixture now PROVES an address — the published port,
+else the container's own, else a failure naming both and what `docker exec`
+could do — and records which answered. 17 passed again locally in 67 s.
+
+**The nine timings**, rig 24e, three launches against a loopback deployment:
+
+| | samples |
+|---|---|
+| `apg studio` start → the `open` line | 0.74 s, 0.66 s, 0.74 s |
+| `GET /` with the cookie | 1.3 ms, 3.1 ms, 2.4 ms |
+| `GET /__apg/schema` | 1.3 ms, 1.1 ms, 1.2 ms |
+
+**The IR's counts as read**, from the served `/__apg/schema` payload rather than
+recalled: **3 relations, 4 RPCs, 7 tools, 1 enum, 5,235 bytes**. The plan said
+*“7 relations / 7 tools”*; 7 is the OBJECT count (3 + 4), which is how the
+envelope's existing `apg generate` row for the same manifest states it, and
+reading it is what settled the difference.
+
+**A proof corrected by its own first run.**
+`test_the_envelope_carries_studios_three_latencies` demanded a surface size from
+all three rows, including the static page — which does not read the IR at all.
+Satisfying it would have put a false relevance in the document, so the page row
+names the bytes it serves and says *no surface size applies*, and the assertion
+now asks each row for the size of the thing its number is actually about.
+
+**The documents**: `docs/studio.md` 317 lines, indexed
+(`test_documentation_index` green); `docs/threat-model.md` a Studio section and
+a retention residual; `docs/scope-closure.md` §13, nine rows; `README.md` a
+Studio section.
+
+**Three edits moved to Run 6 rather than left red** (D1277): the threat table's
+ROW, the README's *Session N implemented* line and its `template_version`, and
+§1's counts. Everything that does not depend on a Run 6 constant is here.
 
 ### Run 6 — the bump
 

@@ -48,6 +48,7 @@ import os
 import re
 import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -55,6 +56,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid as uuid_module
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -123,6 +125,64 @@ def locked(name: str) -> str:
         if line.startswith(f"{name}="):
             return line.split("=", 1)[1].strip()
     pytest.fail(f"versions.env pins no {name}")
+
+
+def answers(host: str, port: int, *, seconds: float = 20.0) -> bool:
+    """Can this process open a TCP connection there? Asked, never assumed."""
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            with socket.create_connection((host, port), timeout=2):
+                return True
+        except OSError:
+            time.sleep(0.5)
+    return False
+
+
+def cluster_address(container: str, recorded: int | None) -> tuple[str, int, str]:
+    """An address for the dev cluster that THIS process can actually reach.
+
+    Two candidates and a probe, because the answer differs by machine:
+
+    * the published port. `apg dev up` publishes `127.0.0.1:0:5432` by decision
+      (D1175) -- the port exists on loopback and nowhere else, which is the
+      right decision for a developer's machine and depends on a host-to-loopback
+      DNAT that a daemon can be configured not to make work. On the CI runner it
+      does not: Run 4's fixture reached the same container with `docker exec`
+      and could not open its published port.
+    * the container's own address on its network, read from the container.
+      Reachable from the host on a Linux bridge, and unaffected by how the port
+      was published.
+
+    Returns the host, the port and which candidate answered, so the caller can
+    say it rather than discover it again.
+    """
+    published = docker("port", container, "5432", timeout=60)
+    port = recorded
+    if published.returncode == 0 and ":" in published.stdout:
+        port = int(published.stdout.splitlines()[0].rsplit(":", 1)[1])
+    if port is not None and answers("127.0.0.1", port, seconds=20):
+        return "127.0.0.1", port, "the published port"
+
+    inspected = docker(
+        "inspect",
+        "--format",
+        "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}",
+        container,
+        timeout=60,
+    )
+    for address in inspected.stdout.split():
+        if answers(address, 5432, seconds=10):
+            return address, 5432, "the container's own address"
+
+    pytest.fail(
+        f"the dev cluster {container} is running -- `docker exec psql` reaches it -- and "
+        f"this process can open neither its published port ({published.stdout.strip() or 'none'}, "
+        f"recorded {recorded}) nor any of its container addresses "
+        f"({inspected.stdout.strip() or 'none'}). A rig that went on from here would spend "
+        "five minutes in a pool timeout and report it as an application fault"
+    )
+    raise AssertionError("unreachable")
 
 
 def http(
@@ -206,6 +266,19 @@ def studio_rig(tmp_path_factory: pytest.TempPathFactory) -> Any:
         database = state["database"]
         container = state["container"]
         rest_path = resolved["API_REST_PATH"]
+
+        # The address this process will use, proved before anything is built on
+        # it. `state["port"]` is a record of what `up` published; whether
+        # anything can reach it is a different question and only a connection
+        # answers it.
+        cluster_host, cluster_port, how = cluster_address(container, state.get("port"))
+        if how != "the published port":
+            warnings.warn(
+                f"studio_rig reached the dev cluster at {cluster_host}:{cluster_port} via "
+                f"{how}: its published port was not reachable from this process. That is a "
+                "property of this machine's daemon, not of the product",
+                stacklevel=1,
+            )
 
         def su(sql: str, db: str | None = None):
             return docker(
@@ -297,8 +370,8 @@ def studio_rig(tmp_path_factory: pytest.TempPathFactory) -> Any:
                 "APG_PROJECT_ENVIRONMENT": "dev",
                 "APG_JWT_ISSUER": document["jwt"]["issuer"],
                 "APG_JWT_AUDIENCE": document["jwt"]["audience"],
-                "APG_DATABASE_HOST": "127.0.0.1",
-                "APG_DATABASE_PORT": str(state["port"]),
+                "APG_DATABASE_HOST": cluster_host,
+                "APG_DATABASE_PORT": str(cluster_port),
                 "APG_DATABASE_NAME": database,
                 "APG_DATABASE_ROLE": auth_role,
                 "APG_DATABASE_PASSFILE": str(passfile),
@@ -548,6 +621,7 @@ def studio_rig(tmp_path_factory: pytest.TempPathFactory) -> Any:
             "psql": su,
             "database": database,
             "seconds": time.monotonic() - started_at,
+            "cluster_address": f"{cluster_host}:{cluster_port} via {how}",
         }
     finally:
         if server is not None:
@@ -1504,5 +1578,8 @@ def test_the_rig_cost_is_recorded(studio_rig: dict[str, Any]) -> None:
     a threshold here would fail on a slower machine and say nothing true.
     """
     seconds = studio_rig["seconds"]
-    sys.stdout.write(f"\nstudio_rig built in {seconds:.1f} s\n")
+    sys.stdout.write(
+        f"\nstudio_rig built in {seconds:.1f} s, cluster at {studio_rig['cluster_address']}\n"
+    )
     assert seconds > 0
+    assert "via" in studio_rig["cluster_address"]

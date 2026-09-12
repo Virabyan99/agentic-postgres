@@ -226,6 +226,53 @@ Sampled under:
 
 **This is the number a developer waits for**, because it is the one with a container in it: the generation is a third of a second and the check that the generation was right is four times that. The first run after the image is built took 2.72 s -- a warm-up the samples above do not repeat -- and building the image from scratch is a separate cost this row does not carry. Still: a capture, a regeneration and a full typecheck of the result is under two seconds, which is what makes `generate --check` affordable in a gate.
 
+### apg studio: the command's own start
+
+**0.74 s, 0.66 s and 0.74 s (three samples)**
+
+Sampled under:
+
+- the same 8 GB development machine, WSL2, the checkout's venv
+- process spawn to the printed `open http://...` line -- everything before a browser could connect
+- a loopback deployment: `apg dev`, the auth application on uvicorn, the pinned PostgREST verifying its published JWKS and the pinned Traefik in front (rig 24e)
+- project.example.yaml -- 3 relations, 4 RPCs, 7 tools and 1 enum, read back from the served `/__apg/schema` payload, not recalled
+- an `authenticated` subject, so the surface answers `ok` (D1275)
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+**Everything is in this number**: the deployed document read, the IR built from four committed inputs, `POST /auth/login`, the session read that tells the launch which row is its own, the surface fetched as the human and compared, and the socket bound. Three quarters of a second, and `apg generate` measures 0.28 s for the same kind of work with no network in it -- so most of the difference is two round trips to a service on loopback.
+
+### apg studio: the page, served from memory
+
+**1.3 ms, 3.1 ms and 2.4 ms (three samples, one per launch)**
+
+Sampled under:
+
+- the same 8 GB development machine, the same rig
+- `curl -s -o /dev/null -w %{time_total}` carrying the launch cookie and `X-Apg-Studio`, so all five checks ran
+- the three first-party assets -- index.html 4,217 bytes, studio.js 22,875 and studio.css 5,647 -- are read once at launch and served from memory; nothing is read from disk per request
+- no surface size applies: this response is a static file and does not touch the IR, which is why it is published beside the view that does
+- one sample per launch, because the launch is what varies
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+The spread across three launches is larger than any of the values, which is the honest thing to say about a number this small: it is scheduling noise, and a mean would imply a precision nobody has. **No upstream request happens here**, which is the point of the row and the contrast with the views that do make one.
+
+### apg studio: the schema view
+
+**1.3 ms, 1.1 ms and 1.2 ms (three samples, one per launch)**
+
+Sampled under:
+
+- the same 8 GB development machine, the same rig, the same headers
+- `GET /__apg/schema` -- 5,235 bytes of JSON over 3 relations, 4 RPCs, 7 tools and 1 enum
+- the surface answered `ok`, so the view is served rather than 409
+- one sample per launch
+
+**Does not transfer.** It describes the machine the rig ran on. Quoting it for the deployment host would be describing one machine with another's number.
+
+**The same cost as the static page, and that is the design.** This view is the IR rendered, and the IR was built once at launch from the checkout's own contracts -- so the request makes no upstream call and reaches no database. What it costs is JSON serialisation. The query, audit and roster views cost what the deployment costs and none of them is measured here.
+
 ### apg dev reset on a CI runner
 
 **6.19 s**

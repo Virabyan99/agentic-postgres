@@ -393,6 +393,83 @@ ENVELOPE: tuple[Measurement, ...] = (
             "affordable in a gate."
         ),
     ),
+    # ---- what Studio costs (Session 24, STU-ENV-001) ---------------------
+    #
+    # Three rows because Studio has three costs a person feels and they are
+    # different KINDS of cost: a launch that does everything once, a page that
+    # does nothing, and a view that renders something already in memory. The
+    # views that make an upstream call are deliberately absent -- those are a
+    # deployment's numbers, and this envelope's rule is that a machine's number
+    # describes that machine.
+    Measurement(
+        subject="apg studio: the command's own start",
+        value="0.74 s, 0.66 s and 0.74 s (three samples)",
+        kind=MACHINE,
+        conditions=(
+            "the same 8 GB development machine, WSL2, the checkout's venv",
+            "process spawn to the printed `open http://...` line -- everything"
+            " before a browser could connect",
+            "a loopback deployment: `apg dev`, the auth application on uvicorn,"
+            " the pinned PostgREST verifying its published JWKS and the pinned"
+            " Traefik in front (rig 24e)",
+            "project.example.yaml -- 3 relations, 4 RPCs, 7 tools and 1 enum,"
+            " read back from the served `/__apg/schema` payload, not recalled",
+            "an `authenticated` subject, so the surface answers `ok` (D1275)",
+        ),
+        note=(
+            "**Everything is in this number**: the deployed document read, the "
+            "IR built from four committed inputs, `POST /auth/login`, the "
+            "session read that tells the launch which row is its own, the "
+            "surface fetched as the human and compared, and the socket bound. "
+            "Three quarters of a second, and `apg generate` measures 0.28 s for "
+            "the same kind of work with no network in it -- so most of the "
+            "difference is two round trips to a service on loopback."
+        ),
+    ),
+    Measurement(
+        subject="apg studio: the page, served from memory",
+        value="1.3 ms, 3.1 ms and 2.4 ms (three samples, one per launch)",
+        kind=MACHINE,
+        conditions=(
+            "the same 8 GB development machine, the same rig",
+            "`curl -s -o /dev/null -w %{time_total}` carrying the launch cookie"
+            " and `X-Apg-Studio`, so all five checks ran",
+            "the three first-party assets -- index.html 4,217 bytes,"
+            " studio.js 22,875 and studio.css 5,647 -- are read once at launch"
+            " and served from memory; nothing is read from disk per request",
+            "no surface size applies: this response is a static file and does"
+            " not touch the IR, which is why it is published beside the view"
+            " that does",
+            "one sample per launch, because the launch is what varies",
+        ),
+        note=(
+            "The spread across three launches is larger than any of the values, "
+            "which is the honest thing to say about a number this small: it is "
+            "scheduling noise, and a mean would imply a precision nobody has. "
+            "**No upstream request happens here**, which is the point of the "
+            "row and the contrast with the views that do make one."
+        ),
+    ),
+    Measurement(
+        subject="apg studio: the schema view",
+        value="1.3 ms, 1.1 ms and 1.2 ms (three samples, one per launch)",
+        kind=MACHINE,
+        conditions=(
+            "the same 8 GB development machine, the same rig, the same headers",
+            "`GET /__apg/schema` -- 5,235 bytes of JSON over 3 relations,"
+            " 4 RPCs, 7 tools and 1 enum",
+            "the surface answered `ok`, so the view is served rather than 409",
+            "one sample per launch",
+        ),
+        note=(
+            "**The same cost as the static page, and that is the design.** This "
+            "view is the IR rendered, and the IR was built once at launch from "
+            "the checkout's own contracts -- so the request makes no upstream "
+            "call and reaches no database. What it costs is JSON serialisation. "
+            "The query, audit and roster views cost what the deployment costs "
+            "and none of them is measured here."
+        ),
+    ),
     Measurement(
         subject="apg dev reset on a CI runner",
         value="6.19 s",
