@@ -58,6 +58,11 @@ SHELL_COMMANDS = (
     "bin/edge.sh",
     "bin/edge-network.sh",
     "bin/fleet.sh",
+    # Session 23 (ADR 0204, D1222): the generator. Listed here the run it landed
+    # (D1014) -- and `git add`ed before this module runs, because
+    # `test_commands_are_executable_in_the_git_index` reads the INDEX's mode and
+    # not the working tree's (D1188).
+    "bin/generate.sh",
     "bin/lock-dev-deps.sh",
     "bin/lock-versions.sh",
     "bin/materialize-secrets.sh",
@@ -138,6 +143,7 @@ PYTHON_COMMANDS = (
     "bin/doctor.py",
     "bin/dr-kit.py",
     "bin/fleet.py",
+    "bin/generate.py",
     "bin/materialize-secrets.py",
     "bin/mcp-contract.py",
     "bin/migrate.py",

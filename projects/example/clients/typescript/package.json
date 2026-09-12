@@ -1,0 +1,12 @@
+{
+  "dependencies": {},
+  "description": "Generated typed client for notes-tasks-v1+example-note-embeddings-v1. No runtime dependency; verifies the served surface at init().",
+  "devDependencies": {
+    "@types/node": "22.20.2",
+    "typescript": "7.0.2"
+  },
+  "name": "notes-tasks-v1+example-note-embeddings-v1-client",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0"
+}

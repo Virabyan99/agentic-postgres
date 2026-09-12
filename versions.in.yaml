@@ -284,6 +284,37 @@ packages:
     registry: npm
     package: prisma
     version: "6.19.1"
+  # Session 23: the TOOLCHAIN for the generated TypeScript client. Read by
+  # `services/clients/typescript/package.json` (the image's whole purpose is to
+  # hold these two), by `bin/generate.py` for the generated package's
+  # `devDependencies`, and by
+  # `test_generated_client_toolchain::test_the_image_pins_node_and_typescript`.
+  #
+  # **7.0.2 and not the 5.9 line, measured rather than assumed** (D1212, rig
+  # 23c). 7.0.2 is `dist-tags.latest` -- the native compiler -- and the 5.x line
+  # ends at 5.9.3. Both install and typecheck in the pinned `node:22-alpine` on
+  # musl; 7.0.2's lockfile carries 22 entries (the package plus 20 optional
+  # per-platform binaries) and EVERY entry in it carries an integrity hash, so
+  # `npm ci --ignore-scripts` resolves the native binary without running one.
+  # A pin two majors behind what `lock-versions.sh --update` would resolve is
+  # D540's shape.
+  #
+  # What it cost to learn: `tsc` exits **1** on a type error under 7.0.2 where
+  # 5.9.3 exits **2**. Every typecheck proof therefore asserts a non-zero exit
+  # AND the error line naming the file and the TS code, never the bare number.
+  TYPESCRIPT_VERSION:
+    registry: npm
+    package: typescript
+    version: "7.0.2"
+  # `@types/node` is not optional decoration: the generated `canonical.ts`
+  # imports `node:crypto` and the emitted `tsconfig.json` declares
+  # `types: ["node"]`, so a toolchain without it cannot typecheck the client it
+  # exists to typecheck. Measured in rig 23c: without it the emitted package
+  # does not compile.
+  TYPES_NODE_VERSION:
+    registry: npm
+    package: "@types/node"
+    version: "22.20.2"
   # Re-pinned in Session 5 Run 9a, because the previous value named a release
   # that does not exist (D201). `@scalar/api-reference` published 1.36.2 and
   # then 1.37.0; there has never been a 1.36.4, and no Scalar image carries the

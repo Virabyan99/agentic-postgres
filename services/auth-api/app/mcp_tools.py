@@ -258,10 +258,31 @@ def _write_for(lock: CapabilityLock, tool: str) -> WriteSpec:
 
 
 def list_resources(lock: CapabilityLock) -> dict[str, Any]:
-    """The resources this caller can query, and the scope each one needs.
+    """The resources this caller can query, the scope each one needs, and WHICH
+    LOCK THIS PROCESS LOADED.
 
     Filtered by the caller's scopes, so the list does not advertise what it
     would refuse (D421). Reads the lock and nothing else.
+
+    **`lock` answers a question no other reader in this product can** (D1201,
+    ADR 0204). On the Session 21 trip a deploy whose only change was the lock
+    recreated neither container, so beta served six tools for eight minutes
+    while the deployed document said seven (D1152) -- and the document, the
+    doctor's capability-drift check and `mcp.tool_count` all read the lock
+    *file*, so all three agreed with each other and none of them with the
+    plane (D1153). A process cannot be wrong about which lock it loaded, so
+    this member settles the question from the side that cannot lie, and a
+    generated client compares it to the digest it was generated from before it
+    calls anything.
+
+    **The digest is the one the lock CARRIED, never a recomputation.** Hashing
+    `lock.tools` here would produce a string for every lock, including one that
+    carries no digest at all -- a pre-schema-4 lock would then report a value
+    it never had, and a caller could not tell a missing digest from a matching
+    one. `tools_sha256` is `str | None` and there is no `schema_version` field
+    on `CapabilityLock` (D1215), so `None` -- rendered `null` -- IS the answer
+    for a lock below schema 4, and it is a distinct answer rather than an
+    absent one (ADR 0195).
     """
     held = _scopes()
     resources = [
@@ -277,6 +298,7 @@ def list_resources(lock: CapabilityLock) -> dict[str, Any]:
     ]
     return {
         "contract_id": lock.contract_id,
+        "lock": {"tools_sha256": lock.tools_sha256, "tool_count": lock.tool_count},
         "resources": sorted(resources, key=lambda entry: (entry["tool"], entry["resource"])),
     }
 

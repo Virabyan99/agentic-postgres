@@ -3,7 +3,7 @@
 **Status:** **PLANNED 2026-09-12** at `d6f6e94`, Session 22's close, on `main`.
 No run has started. §1 is D1200–D1211 (planning rows, every one measured
 today in a rig or read from the tree at `d6f6e94`); Run 1 added **D1212–D1215**,
-measured at the branch point, so next free is **D1216**. ADR
+measured at the branch point, Run 2 added **D1216-D1223** and Run 3 **D1224**, so next free is **D1225**. ADR
 **0204** is this session's; the runs add theirs below the planning rows.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 23* and its rows D1067
 (the `generate` hook after a project migration), D1068 (one session, the IR
@@ -161,10 +161,11 @@ executed).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1216**. Rows D1200–D1211
-were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's**,
-measured at the branch point. The runs add theirs below them as they go, each
-run's numbers named in its Done paragraph.
+Six columns, next free number after this table **D1225**. Rows D1200–D1211
+were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's** and
+**D1216–D1223 Run 2's**, each measured while the run that names it was built.
+The runs add theirs below them as they go, each run's numbers named in its Done
+paragraph.
 
 | # | Said | Repository does | This session | Why | ADR |
 |---|---|---|---|---|---|
@@ -184,6 +185,15 @@ run's numbers named in its Done paragraph.
 | **D1213** | This plan's Run 1, rig 23d: *"record whether any caller passes an `api_operation_*` class into `build_plan(also=…)` (**the plan expects none**; D1206 says so from a read, this confirms it from the tree)"*. | **Half right, and the wrong half matters.** No caller *computes* an `api_operation_*` class — but `bin/upgrade.py:100–102` already **lists all three** (`api_operation_added`, `api_operation_removed`, `api_operation_changed`) as classes an operator may **declare** with `--also`, and `upgrade_plan.build_plan` unions `also` into the classified set (`upgrade_plan.py:250`). 15 mentions tree-wide; the others are `compatibility.py`'s three definitions, `test_capability_compiler.py`'s unrelated `test_a_new_api_operation_exposes_no_capability`, and this plan. `required_level` separates them as written: `[]`→patch, `api_operation_added`→minor, `capability_added`→minor, `api_operation_removed`/`api_operation_changed`→major, and an **unclassified name raises** rather than defaulting to patch. | `classify_changes` emits **only** names already in `CHANGE_CLASSES`, so its output is exactly the vocabulary `upgrade plan --also` already accepts. The agreement the stage plan asked for between the generator's class and `upgrade plan`'s is therefore **an agreement by construction**, not a second scheme to reconcile — and a test asserts the generator's vocabulary is a subset of `bin/upgrade.py`'s declarable set. | D1206 read the tree for what computes a class and concluded nothing touches them. The operator surface had accepted all three since ADR 0162. Reading for the producer and missing the consumer is §7 question 5 — *which of its callers got it* — answered from the wrong end. | 0204 |
 | **D1214** | This plan's Run 1 cites `tests/deployment/test_session22_plane.py:831-850` for `sse_result`/`refused`/`tool_text`, and D1200/§1 cite `bin/api-contract.py:665`'s own message about object sets. | **Both line numbers are out of range.** `test_session22_plane.py` is **407** lines and the three helpers are at **:73–95**; `bin/api-contract.py` is **546** lines and the object-sets-agree message is at **:457**. The cited text exists in both cases — only the addresses are wrong, and each file has the helper under a different name elsewhere too (`sse_result` is defined in **six** deployment modules). | Cite **:73** and **:457**; Run 3's emitter is written from the text read at those lines, recorded in this run's Done paragraph rather than re-derived. Every later run that cites a line re-reads it first. | A plan written to be executed by a different model makes a line number an instruction. These two resolved to nothing, which is the safe failure; a line number that resolves to the *wrong* code is the one that costs a run, and nothing in this repository checks a citation. D1187's shape (grep the moved text, not the name) applied to the plan itself. | — |
 | **D1215** | This plan's §2, `AGT-META-001`: the lock digest is *"`null` **below lock schema 4**"*, read as though the loaded lock carried its schema version. | **`CapabilityLock` has no `schema_version` field.** Its ten fields are `contract_id, project_key, upstream, canonical_sha256, tool_count, capability_count, tools, profile, vocabulary, tools_sha256`; `tools_sha256` is `str | None` and `vocabulary` is `dict | None`. The schema version is read by `load_lock` (`SUPPORTED_SCHEMA_VERSIONS` is `{1,2,3,4}`) and **not carried onto the object**. Measured: `list_resources` on a lock with `tools_sha256` set and on one with it `None` returns the same two keys either way. | `AGT-META-001` is written against **`tools_sha256 is None`**, not against a schema version: the `lock` member reports `{tools_sha256, tool_count}` from the loaded object, and `tools_sha256` is `null` exactly when the loaded lock carried none. No schema version is threaded onto `CapabilityLock` to satisfy a requirement's wording. | The wording implied a field, and implementing it literally would have added a field to a released dataclass to make a test sentence true — the inverse of the fix this project wants. `tools_sha256 is None` is the same condition with no new state, and it is the condition the runtime can actually answer. | 0204 |
+| **D1216** | Run 2's format table, from the plan: *"typed from `snapshot["definitions"][relation]["properties"][column]["format"]` by one table — `uuid\|text\|…\|extensions.vector → string` … an enum's format (the type's schema-qualified name, `api.task_status`) → a string-literal union"*, i.e. one spelling per type. | **One type has up to three spellings in one document, measured in `projects/example`'s own snapshot.** An enum COLUMN carries the schema-qualified name (`tasks.status` → `api.task_status`) and the same type as an RPC ARGUMENT carries the BARE name (`update_task_status.p_expected_status` → `task_status`); a parameterised type carries its modifier as a column and not as an argument (`note_embeddings.embedding` → `extensions.vector(768)`, `set_note_embedding.p_embedding` → `extensions.vector`). An exact-match table refused the release's own contract on the second call. | `_ts_type` strips a trailing `(…)` modifier, then resolves in a fixed order: the qualified name, then the built-in table, then the bare enum name. An enum whose name is also a format name is **refused outright** — a column of it would be served qualified and an argument bare, so the two spellings would resolve to different TypeScript types and the generated client would disagree with itself about one type. | The plan read one example (a column) and generalised. Three spellings of one type is the sort of fact only the document says, and it says it in a file that was already committed — nothing had to be deployed to find it. The refusal of a shadowing enum is the part worth keeping: it closes the case rather than picking a winner. | 0204 |
+| **D1217** | The plan fixes the IR's digest block as `Digests: api_surface_sha256; rest_openapi_sha256; app_openapi_sha256; tools_sha256`. | **`api_surface_sha256` is a taken name with a different meaning.** `bin/mcp-contract.py` writes `sources.api_surface_sha256 = api_surface.contract_digest()` and the deployed document publishes `api.api_surface_sha256`; both mean *the digest of the RELEASE file's bytes*. The IR's value covers the MERGED surface — release joined with the project's — which for any project declaring a set is a different number. | The IR's field is **`merged_surface_sha256`**, over `capability_compiler.canonical_bytes(merged)`. A test asserts it is NOT equal to `api_surface.contract_digest()`. | This repository already carries one instance of *two fields with one name digesting two files* (the two `capabilities_sha256`, still an open item). A third for the sake of matching the plan's word would have been the cheapest possible way to reproduce a defect that is already written down as a defect. | 0204 |
+| **D1218** | The plan: *"a `write` tool's [arguments] are the lock's `write.arguments` plus `idempotency_key` and `dry_run`"*. | **That is the loaded dataclass's shape, not the document's.** `mcp_lock.CapabilityLock` nests a `WriteSpec` under `write`; the lock DOCUMENT that `capability_compiler.compile_lock` emits is FLAT — `arguments`, `operation`, `required_scopes`, `max_affected_rows` and `idempotent` sit at the tool entry's top level. Reading `entry["write"]["arguments"]` found every write tool argument-less and refused the release's own lock. | The IR reads `entry["arguments"]`. The plan's own instruction two lines earlier was the right one and says why: *the IR reads the lock document, the JSON, never the service's dataclasses* — `src/` may not import `services/` (ADR 0084), so the document is the only shape this module may believe. | A plan that states a rule and then contradicts it in a detail is the ordinary case, not the unusual one. The rule was written down because it is easy to slip; the slip was in the same paragraph. | 0204 |
+| **D1219** | Run 2's `classify_changes`, read as a comparison of IR members: *"a changed argument list, column type, enum set or scope set `api_operation_changed`"*, implemented as dataclass inequality. | **Dataclass equality cannot tell an addition from a retyping, and `api_operation_changed` is MAJOR.** Measured on the tree's own pair: release → example project, a purely additive tenant extension, classified as **major**, because `query_resource` gained the `note_embeddings` resource and a second discovery scope set. A `discovery_scope_sets` entry is an ALTERNATIVE — a caller holding `notes:read` still discovers the tool — so gaining one takes nothing from anybody. | Compared member by member. A relation's column gained, a tool's resource gained, a discovery scope set gained → additive (`api_operation_added` / `capability_added`). A column retyped or lost, a scope set lost, an argument list moved in any way, an enum's members moved → `api_operation_changed` or `api_operation_removed`. **An argument ADDED to an existing RPC stays breaking** and that is not laziness: PostgREST resolves a function by the names supplied and a missing one is a `404 PGRST202` (ADR 0139). Now measured: release → project is `minor`, project → release is `major`, identity is empty. | Stage 3's entire premise is that a project adding a table is additive. A version rule that made the example project's own extension a major bump would have been refuted by the first adopter who used the feature the stage was built for — and it would have looked like a considered answer, because it came out of a comparison rather than a guess. | 0204 |
+| **D1220** | This session's own ADR 0204 draft and D1213: *"a generator that classifies its own diff produces exactly the vocabulary `upgrade plan --also` already takes"*. | **The planner reaches a class two ways, and `--also` is only one of them.** `bin/upgrade.py::DECLARABLE` carries eight names — the ones *"no pair of rendered documents can establish"* — and `capability_added` is deliberately **not** among them, because `upgrade_plan.classify_document_changes:167` computes it itself from a `capabilities.*` addition in the rendered document. Run 2's own proof, written to assert the D1213 sentence, failed on the generator's most ordinary output. | The property asserted is the UNION: every class the generator emits is one the planner can **reach**, by being told it (`DECLARABLE`) or by computing it (`classify_document_changes`). ADR 0204's paragraph was corrected in the same run. | D1213 was itself a correction of the plan, written the same day, and it was still half wrong — in the reassuring direction. The test that caught it was written to confirm the sentence, which is the only reason it was caught: a proof written to agree with a claim is the one that can disagree with it. | 0204 |
+| **D1221** | Run 2's battery, as planned: *"the format table losing `uuid` (kill: `_types` test)"* and *"`pt_codes` scanning only the release"* — both expected to be killed by the proofs as written. | **Neither was.** The `uuid` mutation produced an **ERROR, not a FAILED**: `build` raises inside a module-scoped fixture, so every test in the module errored and none reached an assertion — a broken fixture, which D386 says is never a kill. The `pt_codes` mutation **SURVIVED**: the example project's own migrations raise no code the release does not, so `sources[:1]` returns the same set and no assertion over the committed tree can see the difference. | Two new proofs. `test_every_format_the_committed_snapshots_serve_has_a_typescript_type` reads the table and the documents only, touching no fixture, so the same mutation fails as an assertion; `test_the_pt_codes_are_scanned_from_the_release_and_the_set` gained a synthetic second directory raising `PT499`, which is the only arm that can fail. Both mutations now kill. The battery itself was repaired too: each mutation runs scoped to the test meant to kill it (`-k`), or a fixture-level break masks the assertion under test. | Two of the four defect shapes this project keeps producing, in one battery, in proofs written the same hour: a test that cannot fail, and a reader that cannot tell a broken fixture from a kill. The planned mutation list was right about what to attack and wrong about what would happen — which is the only reason to run one rather than reason about it. | — |
+| **D1222** | The plan's §5: each run ends with *"one commit on the `session-23` branch"*, with Run 2 (the IR) and Run 3 (the emitter) as separate commits. | **A commit of Run 2 alone cannot be green.** `test_repository_contract::test_no_module_is_imported_only_by_its_own_tests` refuses a module imported by nothing outside its own tests (D204: *"a module with no caller is a feature that does not exist, however well it is tested"*), and `client_ir`'s only caller is `client_typescript`, which is Run 3's. Measured: 1156 passed, that one failed. | Run 2 and Run 3's **emitter** land in ONE commit; the rest of Run 3 (the toolchain image, `versions.in.yaml`'s two packages, `bin/generate.sh`/`generate.py`, the committed example client) follows in its own. The guard is not weakened and no placeholder caller is written — writing one to satisfy it would be exactly the gaming D204 exists to prevent. | A run boundary that the repository's own guards make un-commitable is a planning error, not a licence to commit red. The cheap alternative — a caller written to satisfy the check — is available in every instance of this and is always wrong. | — |
+| **D1223** | The emitter's structural proofs: the banner, the digests in one file, no credential, the unions equal to the contract's names — all green on the first emitted package. | **The emitted TypeScript did not compile.** `tsc --noEmit --strict` in the pinned image, first run: `agent.ts(141,11): error TS2300: Duplicate identifier 'listResources'` (written by hand for the digest comparison AND emitted again from the tool roster) and `agent.ts(183,81): error TS2304: Cannot find name 'AgentFilter'` (referenced by the read tool's argument list, emitted by nothing). Every structural proof passed on that code. | `list_resources` is excluded from the generated roster methods, and `AgentFilter` is emitted in `types.ts`. `test_the_emitted_client_typechecks_strict_in_the_pinned_image` is now in the tree with a paired control — a deliberately wrong line in the SAME container — and it asserts the error MESSAGE as well as a non-zero exit, because the exit status for a type error is 1 under 7.0.2 and 2 under 5.x (D1212). | §7's question 1 — *what would have to break for this to go red* — answered honestly about eight green proofs: nothing, because none of them compiled anything. A generator is the one kind of code whose output has a compiler, and not running it is choosing not to use the only total check available. | 0204 |
+| **D1224** | Run 3's version rule: *"the package version is the previous one bumped by `compatibility.required_level(...)`"*. | **Applied literally it moves the number on every regeneration, and makes `--check` permanently red.** `required_level([])` is `patch` — correct for the TEMPLATE, where *"a release that publishes nothing new is still a release"*, and wrong for a generated artefact. Measured on the first `--check` this command ever ran: `generate` wrote the client at `1.0.0`, and `--check` seconds later, against an untouched directory and an unmoved contract, bumped to `1.0.1` and reported `README.md` as drift, exit 5. | The number moves only when `classify_changes` is **non-empty**; an unchanged contract keeps the version it had. That is what ADR 0204 already said in words — *"a client regenerated from an unchanged contract does not move"* — and the code now says it too. Proved by generating three times and checking between each, plus a control: one appended comment in `types.ts` is caught, exit 5, naming that file. | The plan's sentence was right about the mechanism and wrong about the empty case, and the empty case is the one that happens on every run. A drift check that fails on an unmodified artefact is worse than no drift check: it is turned off in a week, and then the real drift is not caught either. Found in five seconds by running the command twice — which is the whole argument for `--check` being exercised by a proof that calls the product's own command (D1114). | 0204 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -606,7 +616,82 @@ imports nothing outside the standard library, `yaml` and `agentic_postgres`
 — asserted by that module for `bin/`, and by `test_embedded_python` for
 `src/`; read what each checks). **Push, read CI.**
 
-**Done.** *(the run writes this)*
+**Done.** 2026-09-12, in one commit with Run 3's emitter — **D1222**: a commit of
+Run 2 alone cannot be green, because `test_repository_contract::test_no_module_is_imported_only_by_its_own_tests`
+refuses a module imported by nothing outside its own tests (D204) and
+`client_ir`'s only caller is `client_typescript`. Measured: 1156 passed, that
+one failed. The guard is not weakened and no placeholder caller was written.
+Rows **D1216–D1223**; next free **D1224**.
+
+**Step 1, `list_resources` reports the loaded lock.** The result now carries
+`lock: {tools_sha256, tool_count}` from the loaded object, beside the two
+existing keys. The digest is the one the lock **carried** — `str | None`, and
+`None` is the answer for a lock below schema 4, which is a distinct answer
+rather than an absent one (ADR 0195). Two proofs in `test_mcp_tools.py`, over a
+document put through the real `load_lock`: the schema-4 arm asserts the reported
+digest equals the fixture's own `tools_sha256`, which the loader has already
+verified against the tool list, so the value is traced end to end; the
+below-schema-4 arm is the one that **kills a recomputation**, because at schema 4
+the carried digest and a freshly computed one are the same string and only below
+it is the honest answer `null`. A third proof keeps `mcp_lock.canonical_bytes`
+equal to `capability_compiler.canonical_bytes` (D486), since the digest is over
+those bytes. The v3 fixture was factored out of the existing v3 test so the new
+v4 one is that document plus the two members version 4 adds, and nothing else;
+at schema 4 a read tool must also DECLARE `reads`, derived in the fixture from
+the methods its resources reach rather than written as a literal.
+**`bin/render-mcp-catalog.py` renders tool metadata and no result shapes, so
+nothing was regenerated** — read, not assumed, as the plan asked. Every reader
+rig 23e's grep named was run whole: **679 passed** across sixteen modules.
+
+**Step 2, `client_ir.py`.** Pure — files in, a frozen dataclass out — and
+asserted so by AST. Built against both arms of the tree: the release client
+(`notes-tasks-v1`, 2 relations, 3 RPCs, 6 tools) and the example project's
+(`notes-tasks-v1+example-note-embeddings-v1`, 3 relations, 4 RPCs, 7 tools),
+with the lock compiled in the test by `command_lock`'s own sequence. No `bin/`
+code was needed for that, so nothing moved into `src/`. Five rows came out of
+building it: **D1216** (one type has up to three spellings in one document — an
+enum column qualified, the same enum as an argument bare, a vector column
+carrying `(768)` where the argument does not), **D1217** (`api_surface_sha256`
+is a taken name meaning the release file's bytes, so the IR's field is
+`merged_surface_sha256`), **D1218** (the lock DOCUMENT is flat; `write.arguments`
+is the loaded dataclass's shape and reading it found every write tool
+argument-less), **D1219** (member-by-member classification, because dataclass
+equality made the example project's purely additive tenant extension a MAJOR
+bump) and **D1220** (the planner reaches a class either by `--also` or by
+computing it, so the agreement is a union of two sets — the proof written to
+confirm D1213 disproved half of it).
+
+Measured, both arms: `js_reproducible` clears every committed REST and MCP
+snapshot and finds the application document's offender at
+`/paths/~1admin~1agents/post/requestBody/content/application~1json/schema/properties/secret_ttl_seconds/anyOf/0/minimum`
+— **the same value rig 23b found by comparing bytes**, from the other side.
+`classify_changes(release, project)` is `('api_operation_added',
+'capability_added')` → **minor**; the reverse is `('api_operation_removed',)` →
+**major**; identity is empty. `next_version(None, …)` is `1.0.0`.
+`from_document(to_document(ir)) == ir` on both.
+
+**Step 4, the battery: 10 mutations, 10 killed, 10 paired controls green,**
+both files restored byte-identical to their `/tmp` snapshots. It found two proof
+defects before it found anything else (**D1221**): the `uuid` mutation produced
+an **ERROR**, not a kill, because `build` raises inside a module-scoped fixture
+and no assertion was ever reached (D386); and the `pt_codes` mutation
+**SURVIVED**, because the example project raises no code the release does not,
+so `sources[:1]` is invisible to any assertion over the committed tree. Both
+repaired with new proofs — a format-table test that touches no fixture, and a
+synthetic second migration directory raising `PT499`. The battery itself was
+repaired to run each mutation scoped to the test meant to kill it, or a
+fixture-level break masks the assertion under test. One mutation of mine was
+uninformative (D493) and rewritten: it called a helper that does not exist, so
+the module failed to import and a different test went red.
+
+**Targeted:** `test_client_ir`, `test_client_typescript`, `test_mcp_tools` and
+every module rig 23e's grep named, plus `test_deploy_command`, `test_diagnosis`,
+`test_acceptance_registry` (test functions added, D1119), `test_embedded_python`
+and `test_operator_commands_run_on_the_host` (a new `src/` module),
+`test_repository_contract`, `test_documentation_index`,
+`test_openapi_normalize`, `test_compatibility` — each checked for existence
+individually (D1104; `test_api_surface.py` does not exist and was dropped rather
+than run by association).
 
 ### Run 3 — the emitter, the toolchain, `apg generate`
 
@@ -724,7 +809,90 @@ the rendered document — name the local `document` only for that, and a lock
 `lock`), `test_dev_command` and `test_dev_environment` if `project_key_of`
 moved (grep its readers). **Push, read CI.**
 
-**Done.** *(the run writes this)*
+**In progress.** 2026-09-12. Steps 1, 2, 4 and 5 are done and committed with
+Run 2 (D1222); **step 3 — the toolchain IMAGE — is not**, and this run is not
+Done until it is. Row **D1224**; next free **D1225**.
+
+**What landed.** `src/agentic_postgres/client_typescript.py`: `emit(ir, …)` →
+nine files, reading the IR and the standard library only (AST-asserted; the
+sentinels and the two pinned versions arrive as arguments its caller read from
+`openapi_normalize` and `versions.env`, never retyped). `contract.ts` is the one
+file carrying a digest; `canonical.ts` is the second implementation of the
+canonical form; `client.ts` has `init()` with four answers and per-relation and
+per-RPC methods over the reviewed names only; `agent.ts` has the JSON-RPC wire
+rig 23f recorded, both refusal shapes, and a `listResources()` that compares the
+digest the PLANE reports. `bin/generate.sh` + `bin/generate.py`, reached as
+`apg generate` by the dispatcher's own derivation (no dispatcher edit), both
+registered in `test_cli_contract` and `git add`ed first (D1014, D1188).
+`projects/example/clients/typescript/` committed, nine files, version `1.0.0`.
+
+**THE PROOF THAT MATTERED IS THE TYPECHECK, and it found what eight green
+structural proofs had passed** (D1223). `tsc --noEmit --strict` in the pinned
+image, first run: `agent.ts(141,11): error TS2300: Duplicate identifier
+'listResources'` — written by hand for the digest comparison AND emitted again
+from the tool roster — and `agent.ts(183,81): error TS2304: Cannot find name
+'AgentFilter'`, a type the read tool's arguments reference and the emitter never
+wrote. The banner check, the digest-placement check, the credential scan and the
+union checks were all green on code that did not compile. Repaired; the emitted
+package now typechecks **exit 0**, with a paired control — one wrong line in the
+SAME container — failing at `contract.ts(27,7): error TS2322`, asserted on the
+message and not the status, because that status is 1 under 7.0.2 and 2 under
+5.9.3 (D1212).
+
+**`canonical.ts` reproduces Python byte for byte, measured over the tree.**
+Release REST `85adb686223e`, release MCP `80a41ab0b986`, project REST
+`808ac715c09a`, project MCP `3d7d6e6d513a` — four EQUAL — and
+`app-openapi.canonical.json` DIFFERS, `f21bf4a8da90` against `3007d815448e`,
+which is exactly D1203's boundary and is now asserted as a difference so the day
+it stops differing somebody reads why. **`808ac715c09a` is the value rig 23a
+measured the live `authenticated` role being served**, so the chain closes end to
+end: served document → the client's own canonical form → the digest
+`contract.ts` embeds.
+
+**The version rule was wrong in the case that happens every time** (D1224): the
+first `--check` this command ever ran failed on a client it had just written,
+because `required_level([])` is `patch`. Repaired; three generates and three
+checks in a row now hold `1.0.0`, and a one-line hand edit is caught with exit 5
+naming the file.
+
+**The two npm packages were locked from a shell that has network.** WSL on this
+workstation resolves DNS and cannot reach HTTPS — measured: A record
+`104.16.1.34`, an IPv4 default route via `172.25.16.1`, `curl` exit **124** on
+both families, `curl -6` failing in 45 ms for want of a route. Docker's
+containers can reach it. So `bin/lock-versions.sh --update --packages-only` — the
+product's own command, unmodified — was run inside the pinned
+`PYTHON_RUNTIME_IMAGE` with the checkout mounted, which is what the plan's §5
+authorises (*"do that step from a shell that has it and record which"*). The diff
+is exactly what §4 required: `TYPESCRIPT_VERSION=7.0.2` and
+`TYPES_NODE_VERSION=22.20.2` with their sha512 digests, plus
+`APG_VERSIONS_IN_SHA256` and `APG_LOCKED_AT`; all **12 image digests carried
+forward unchanged** (D238). `TYPESCRIPT_VERSION_DIGEST` begins `sha512-8FYau96o3NKOhbjKi`,
+which is the integrity hash rig 23c measured independently for
+`node_modules/typescript` — the two arrived by different routes and agree.
+
+**Argument refusals, measured, all exit 2 before Python runs:** no `--project`,
+a manifest that is not there, `--out` twice, an unknown flag, a positional, and
+an `--out` outside the checkout. `shellcheck bin/generate.sh` exit 0.
+
+**NOT DONE — step 3, and this run stays open until it is.** There is no
+`services/clients/typescript/` image directory, no `package-lock.json` committed
+for it, no `entrypoint.sh`, and no `tests/contract/test_generated_client_toolchain.py`.
+The two toolchain proofs currently run the **pinned Node image directly**,
+installing `typescript` and `@types/node` from the registry inside the test —
+which means they need outbound HTTPS *from a container* and are not the
+hash-locked, offline-reproducible image the plan specifies. That is the gap:
+a proof that reaches a registry at test time is not one a gate can trust, and
+`GEN-TOOLCHAIN-001`'s first clause (*"the image pins Node and typescript and the
+lock carries integrity hashes"*) has no proof at all yet. Also still to do:
+`smoke.ts` and the `GEN-CMD-001` / `GEN-VERSION-001` proofs the plan puts in
+`tests/contract/test_generate_command.py` (the argument refusals above are
+measured but not yet a committed test module).
+
+**Targeted, run once:** 31 modules, **1773 passed**, exit 0 — including
+`test_cli_contract`, `test_repository_contract` (D204's guard, which is what
+forced D1222), `test_version_lock`, `test_client_ir`, `test_client_typescript`
+with both Docker proofs, and every reader rig 23e's grep named. `ruff check` exit
+0, `ruff format` clean, `shellcheck` exit 0.
 
 ### Run 4 — the runtime proof, offline
 

@@ -114,10 +114,16 @@ names `api_operation_added` (minor), `api_operation_removed` and
 rather than defaulting to `patch`. No caller *computes* any of the three: the
 only other mentions in `src/`, `bin/` and `tests/` are
 `bin/upgrade.py:100–102`, which lists all three as classes an operator may
-**declare** with `--also`. So a generator that classifies its own diff produces
-exactly the vocabulary `upgrade plan --also` already takes, and the agreement
-the stage plan asked for is an agreement by construction rather than a second
-scheme.
+**declare** with `--also`.
+
+So the agreement the stage plan asked for is an agreement by construction rather
+than a second scheme — but it is a union of two sets, not one (D1220, found by
+Run 2's own proof). `bin/upgrade.py::DECLARABLE` carries the eight classes *"no
+pair of rendered documents can establish"*; `capability_added` is deliberately
+**not** among them, because `upgrade_plan.classify_document_changes` computes it
+itself from a `capabilities.*` addition in the rendered document. Every class the
+generator emits is therefore one the planner can **reach** — by being told it or
+by computing it — and that, not `--also` alone, is the property the test asserts.
 
 ## Decision
 

@@ -26,6 +26,7 @@ rather than an error. That is why these are tests and not comments.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import time
 from pathlib import Path
@@ -52,6 +53,7 @@ from app.mcp_lock import (
     WriteSpec,
     load_lock,
 )
+from app.mcp_lock import canonical_bytes as mcp_lock_canonical_bytes
 from app.mcp_query import (
     Filter,
     QueryRefusal,
@@ -2715,16 +2717,7 @@ def test_a_version_three_lock_is_parsed_as_strictly_as_the_rest(tmp_path: Path) 
     metadata tool must carry neither at any version -- it bounds neither, so a
     value there would describe a limit that does not exist.
     """
-    document = _v2_document(*EXPECTED_TOOL_NAMES)
-    document["schema_version"] = 3
-    for tool in document["tools"]:
-        if tool["name"] in METADATA_TOOLS:
-            continue
-        tool["max_response_bytes"] = 65536
-        tool["max_concurrent_calls"] = 2
-        if tool["name"] in WRITE_TOOLS:
-            tool["supports_dry_run"] = False
-            tool["requires_approval"] = False
+    document = _v3_document(*EXPECTED_TOOL_NAMES)
 
     lock = _load(tmp_path, document)
     for tool in lock.tools:
@@ -2748,6 +2741,152 @@ def test_a_version_three_lock_is_parsed_as_strictly_as_the_rest(tmp_path: Path) 
     ] = 1024
     with pytest.raises(LockError, match="bounds none of them"):
         _load(tmp_path, leaked)
+
+
+# ---------------------------------------------------------------------------
+# AGT-META-001 -- the plane reports WHICH LOCK IT LOADED (Session 23 Run 2)
+# ---------------------------------------------------------------------------
+
+
+def _v3_document(*names: str) -> dict[str, Any]:
+    """Schema 3: v2 plus the two bounds ADR 0179 requires of a read or a write.
+
+    Factored out of `test_a_version_three_lock_is_parsed_as_strictly_as_the_rest`
+    so the v4 fixture below is *that* document plus the two members version 4
+    adds, and nothing else. A v4 fixture built independently would stop being
+    the v3 one plus the difference, which is the only thing under test.
+    """
+    document = _v2_document(*names)
+    document["schema_version"] = 3
+    for tool in document["tools"]:
+        if tool["name"] in METADATA_TOOLS:
+            continue
+        tool["max_response_bytes"] = 65536
+        tool["max_concurrent_calls"] = 2
+        if tool["name"] in WRITE_TOOLS:
+            tool["supports_dry_run"] = False
+            tool["requires_approval"] = False
+    return document
+
+
+def _v4_document(*names: str) -> dict[str, Any]:
+    """Schema 4: v3 plus the scope vocabulary and the compiler's tool signature.
+
+    `tools_sha256` is computed HERE the way `load_lock` recomputes it -- over
+    `canonical_bytes` of the document's own tool list -- because the loader
+    refuses a digest that does not match (ADR 0200). So the value this fixture
+    carries is a real digest of a real tool list, not a placeholder, which is
+    what makes the assertion below about provenance rather than about a string.
+    """
+    document = _v3_document(*names)
+    document["schema_version"] = 4
+    document["vocabulary"] = {
+        "administrative": ["meta:read"],
+        "data": ["notes:read", "notes:write", "tasks:read", "tasks:write"],
+        "storage": [],
+    }
+    # Version 4 makes a read tool DECLARE its shape, and the loader checks the
+    # declaration against the methods its resources reach. Derived here from
+    # those methods rather than written as a literal, so the fixture cannot
+    # declare a shape its own resources contradict.
+    for tool in document["tools"]:
+        if tool["kind"] != "read":
+            continue
+        methods = {resource["operation"]["method"] for resource in tool["resources"]}
+        tool["reads"] = "relation" if methods == {"get"} else "rpc"
+    document["tools_sha256"] = hashlib.sha256(
+        mcp_lock_canonical_bytes(document["tools"])
+    ).hexdigest()
+    return document
+
+
+def test_list_resources_reports_the_loaded_locks_digest_and_count(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """**AGT-META-001.** The plane says which lock it loaded, to the caller.
+
+    D1152/D1153: a deploy whose only change was the lock recreated no container,
+    so the deployed document, the doctor's drift check and `mcp.tool_count` all
+    said seven while the plane served six -- all three read the lock FILE and so
+    all three agreed with each other and none with the process. This member is
+    read off the loaded object, which cannot be wrong about itself.
+
+    The digest is the one the document CARRIED: asserted equal to the fixture's
+    own `tools_sha256`, which `load_lock` has already verified against the tool
+    list, so the value is traced end to end rather than compared to a constant.
+    """
+    document = _v4_document(*EXPECTED_TOOL_NAMES)
+    lock = _load(tmp_path, document)
+    _with_scopes(monkeypatch, "meta:read", "notes:read", "tasks:read")
+
+    result = list_resources(lock)
+
+    assert result["lock"] == {
+        "tools_sha256": document["tools_sha256"],
+        "tool_count": len(EXPECTED_TOOL_NAMES),
+    }
+    assert len(document["tools_sha256"]) == 64, "the fixture's digest is a real sha256"
+
+    # The existing members are untouched -- this is an additive change (§4), and
+    # a caller written against the old shape keeps working.
+    assert result["contract_id"] == document["contract_id"]
+    # `_lock_document` gives both read tools the same `notes` resource, so the
+    # listing is one entry per TOOL -- which is the shape a caller sees.
+    assert [(entry["tool"], entry["resource"]) for entry in result["resources"]] == [
+        ("query_resource", "notes"),
+        ("run_report", "notes"),
+    ]
+    assert sorted(result) == ["contract_id", "lock", "resources"]
+
+
+def test_list_resources_reports_null_for_a_lock_below_schema_four(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A lock that carries no signature reports none -- and that is an ANSWER.
+
+    **This is the test that kills a recomputation.** At schema 4 the carried
+    digest and a freshly computed one are the same string, so hashing the tool
+    list inside `list_resources` would pass the test above. Below 4 the lock
+    carries nothing, `tools_sha256` is `None`, and a recomputation would be a
+    64-character string where the honest answer is `null` -- a caller could not
+    then tell a lock with no signature from one whose signature matches (ADR
+    0195's third outcome, D1215: the condition is the field being `None`, not a
+    schema version, because `CapabilityLock` carries no schema version).
+    """
+    document = _v3_document(*EXPECTED_TOOL_NAMES)
+    assert "tools_sha256" not in document, "below 4 the loader FORBIDS the field"
+    lock = _load(tmp_path, document)
+    assert lock.tools_sha256 is None
+    _with_scopes(monkeypatch, "meta:read", "notes:read", "tasks:read")
+
+    result = list_resources(lock)
+
+    assert result["lock"] == {
+        "tools_sha256": None,
+        "tool_count": len(EXPECTED_TOOL_NAMES),
+    }, "a recomputed digest would be a string here, and the lock signed nothing"
+
+
+def test_the_runtimes_canonical_bytes_is_the_compilers(tmp_path: Path) -> None:
+    """D486's arrangement, for the digest `list_resources` now publishes.
+
+    `mcp_lock.canonical_bytes` reproduces `capability_compiler.canonical_bytes`
+    with the standard library because the service imports nothing from
+    `agentic_postgres` (ADR 0084). The digest the plane reports is computed over
+    those bytes, so a drift between the two serializations would make the
+    plane's answer disagree with the compiler's signature for a lock that is in
+    fact correct.
+    """
+    from agentic_postgres import capability_compiler
+
+    document = _v4_document(*EXPECTED_TOOL_NAMES)
+    assert mcp_lock_canonical_bytes(document["tools"]) == capability_compiler.canonical_bytes(
+        document["tools"]
+    )
+    assert (
+        hashlib.sha256(capability_compiler.canonical_bytes(document["tools"])).hexdigest()
+        == document["tools_sha256"]
+    )
 
 
 def _with_tool_bound(lock: CapabilityLock, name: str, *, declared: int) -> CapabilityLock:

@@ -1,0 +1,541 @@
+{
+  "agent_contract_id": "notes-tasks-agent-v1+example-note-embeddings-agent-v1",
+  "auth": [
+    {
+      "method": "POST",
+      "name": "login",
+      "path": "/auth/login",
+      "request": [
+        {
+          "format": "text",
+          "name": "password",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "text",
+          "name": "username",
+          "required": true,
+          "ts_type": "string"
+        }
+      ],
+      "response_schema": "SessionTokenResponse"
+    },
+    {
+      "method": "POST",
+      "name": "refresh",
+      "path": "/auth/refresh",
+      "request": [
+        {
+          "format": "text",
+          "name": "refresh_token",
+          "required": true,
+          "ts_type": "string"
+        }
+      ],
+      "response_schema": "SessionTokenResponse"
+    },
+    {
+      "method": "GET",
+      "name": "me",
+      "path": "/auth/me",
+      "request": [],
+      "response_schema": "SubjectResponse"
+    }
+  ],
+  "caller_facing_tokens": [
+    "approval_required",
+    "budget_exceeded",
+    "input_not_permitted",
+    "resource_unknown",
+    "row_not_found",
+    "scope_not_held",
+    "write_conflict"
+  ],
+  "digests": {
+    "app_openapi_sha256": "f21bf4a8da906b8dd5a0a58e71f98469a99bbcf6bb4276f70025af64d95d8641",
+    "merged_surface_sha256": "4e10c7cc597057c08af690fb7e76394cbd9cf8a0e9e9d5098931714a880fdd40",
+    "rest_openapi_sha256": "808ac715c09aeebc382dd5afc886c1680fe2ea9870e729b9d34a623dee8d18de",
+    "tools_sha256": "24ac100bcea5f4cf5350c0aa894ec858822c0230d43fe3815d90e17290db3f24"
+  },
+  "enums": {
+    "task_status": [
+      "pending",
+      "in_progress",
+      "completed",
+      "cancelled"
+    ]
+  },
+  "filter_operators": [
+    "eq",
+    "neq",
+    "lt",
+    "lte",
+    "gt",
+    "gte",
+    "in",
+    "is_null"
+  ],
+  "project_root": "projects/example",
+  "pt_codes": [
+    "PT401",
+    "PT403",
+    "PT404",
+    "PT409",
+    "PT412",
+    "PT422"
+  ],
+  "relations": [
+    {
+      "columns": [
+        {
+          "format": "uuid",
+          "name": "note_id",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "uuid",
+          "name": "owner_id",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "extensions.vector(768)",
+          "name": "embedding",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "timestamp with time zone",
+          "name": "updated_at",
+          "nullable": true,
+          "ts_type": "string"
+        }
+      ],
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "name": "note_embeddings"
+    },
+    {
+      "columns": [
+        {
+          "format": "uuid",
+          "name": "id",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "uuid",
+          "name": "owner_id",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "text",
+          "name": "title",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "text",
+          "name": "content",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "timestamp with time zone",
+          "name": "created_at",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "timestamp with time zone",
+          "name": "updated_at",
+          "nullable": true,
+          "ts_type": "string"
+        }
+      ],
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "name": "notes"
+    },
+    {
+      "columns": [
+        {
+          "format": "uuid",
+          "name": "id",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "uuid",
+          "name": "owner_id",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "uuid",
+          "name": "note_id",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "text",
+          "name": "title",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "text",
+          "name": "description",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "api.task_status",
+          "name": "status",
+          "nullable": true,
+          "ts_type": "\"pending\" | \"in_progress\" | \"completed\" | \"cancelled\""
+        },
+        {
+          "format": "timestamp with time zone",
+          "name": "created_at",
+          "nullable": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "timestamp with time zone",
+          "name": "updated_at",
+          "nullable": true,
+          "ts_type": "string"
+        }
+      ],
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "name": "tasks"
+    }
+  ],
+  "rest_contract_id": "notes-tasks-v1+example-note-embeddings-v1",
+  "rpcs": [
+    {
+      "arguments": [
+        {
+          "format": "text",
+          "name": "p_title",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "text",
+          "name": "p_content",
+          "required": false,
+          "ts_type": "string"
+        }
+      ],
+      "name": "create_note",
+      "path": "/rpc/create_note"
+    },
+    {
+      "arguments": [
+        {
+          "format": "text",
+          "name": "p_title",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "uuid",
+          "name": "p_note_id",
+          "required": false,
+          "ts_type": "string"
+        }
+      ],
+      "name": "create_task",
+      "path": "/rpc/create_task"
+    },
+    {
+      "arguments": [
+        {
+          "format": "uuid",
+          "name": "p_note_id",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "extensions.vector",
+          "name": "p_embedding",
+          "required": true,
+          "ts_type": "string"
+        }
+      ],
+      "name": "set_note_embedding",
+      "path": "/rpc/set_note_embedding"
+    },
+    {
+      "arguments": [
+        {
+          "format": "uuid",
+          "name": "p_task_id",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "format": "task_status",
+          "name": "p_expected_status",
+          "required": true,
+          "ts_type": "\"pending\" | \"in_progress\" | \"completed\" | \"cancelled\""
+        },
+        {
+          "format": "task_status",
+          "name": "p_new_status",
+          "required": true,
+          "ts_type": "\"pending\" | \"in_progress\" | \"completed\" | \"cancelled\""
+        }
+      ],
+      "name": "update_task_status",
+      "path": "/rpc/update_task_status"
+    }
+  ],
+  "template_version": "1.3.0",
+  "tools": [
+    {
+      "arguments": [
+        {
+          "name": "p_title",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "p_content",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "idempotency_key",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "dry_run",
+          "required": true,
+          "ts_type": "boolean"
+        }
+      ],
+      "descriptions": [
+        "Create one note owned by the caller's owner. Returns the created row."
+      ],
+      "discovery_scope_sets": [
+        [
+          "notes:write"
+        ]
+      ],
+      "kind": "write",
+      "name": "create_note",
+      "requires_approval": false,
+      "resources": [],
+      "supports_dry_run": true
+    },
+    {
+      "arguments": [
+        {
+          "name": "tool",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "resource",
+          "required": true,
+          "ts_type": "string"
+        }
+      ],
+      "descriptions": [
+        "One resource's frozen columns, permitted filters and permitted ordering, exactly as the lock froze them. Read from the deployed lock."
+      ],
+      "discovery_scope_sets": [
+        [
+          "meta:read"
+        ]
+      ],
+      "kind": "metadata",
+      "name": "describe_resource",
+      "requires_approval": null,
+      "resources": [],
+      "supports_dry_run": null
+    },
+    {
+      "arguments": [],
+      "descriptions": [
+        "The resources this deployment's agent surface can query, and the scope each one needs. Read from the deployed lock; reaches no database."
+      ],
+      "discovery_scope_sets": [
+        [
+          "meta:read"
+        ]
+      ],
+      "kind": "metadata",
+      "name": "list_resources",
+      "requires_approval": null,
+      "resources": [],
+      "supports_dry_run": null
+    },
+    {
+      "arguments": [
+        {
+          "name": "resource",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "columns",
+          "required": false,
+          "ts_type": "string[]"
+        },
+        {
+          "name": "filters",
+          "required": false,
+          "ts_type": "AgentFilter[]"
+        },
+        {
+          "name": "order_by",
+          "required": false,
+          "ts_type": "number"
+        },
+        {
+          "name": "limit",
+          "required": false,
+          "ts_type": "number"
+        }
+      ],
+      "descriptions": [
+        "The caller's own rows of note_embeddings, filtered and ordered within frozen bounds. Scaffolded by `bin/agent.sh init`; add the filters and orderings a caller may use, and nothing the view does not publish.",
+        "The caller's own notes, filtered and ordered within frozen bounds.",
+        "The caller's own tasks, filtered and ordered within frozen bounds."
+      ],
+      "discovery_scope_sets": [
+        [
+          "note_embeddings:read"
+        ],
+        [
+          "notes:read"
+        ],
+        [
+          "tasks:read"
+        ]
+      ],
+      "kind": "read",
+      "name": "query_resource",
+      "requires_approval": null,
+      "resources": [
+        "notes",
+        "tasks",
+        "note_embeddings"
+      ],
+      "supports_dry_run": null
+    },
+    {
+      "arguments": [],
+      "descriptions": [
+        "The caller's own activity, counted under the caller's own RLS: notes and tasks totals, tasks by status, and the two most recent update times."
+      ],
+      "discovery_scope_sets": [
+        [
+          "notes:read",
+          "tasks:read"
+        ]
+      ],
+      "kind": "read",
+      "name": "run_report",
+      "requires_approval": null,
+      "resources": [
+        "owner_activity_report"
+      ],
+      "supports_dry_run": null
+    },
+    {
+      "arguments": [
+        {
+          "name": "p_note_id",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "p_embedding",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "idempotency_key",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "dry_run",
+          "required": true,
+          "ts_type": "boolean"
+        }
+      ],
+      "descriptions": [
+        "One reviewed write, set_note_embedding, over the caller's own rows. Scaffolded by `bin/agent.sh init` at the conservative end of every bound: a rehearsal is supported, approval is required, every argument is redacted."
+      ],
+      "discovery_scope_sets": [
+        [
+          "note_embeddings:write"
+        ]
+      ],
+      "kind": "write",
+      "name": "set_note_embedding",
+      "requires_approval": true,
+      "resources": [],
+      "supports_dry_run": true
+    },
+    {
+      "arguments": [
+        {
+          "name": "p_task_id",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "p_expected_status",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "p_new_status",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "idempotency_key",
+          "required": true,
+          "ts_type": "string"
+        },
+        {
+          "name": "dry_run",
+          "required": true,
+          "ts_type": "boolean"
+        }
+      ],
+      "descriptions": [
+        "Move one of the caller's owner's tasks from an expected status to a new one; refused when the expected status no longer holds."
+      ],
+      "discovery_scope_sets": [
+        [
+          "tasks:write"
+        ]
+      ],
+      "kind": "write",
+      "name": "update_task_status",
+      "requires_approval": false,
+      "resources": [],
+      "supports_dry_run": true
+    }
+  ]
+}
