@@ -6,9 +6,9 @@
 // by the product is not an exception in the caller's program and treating it as
 // one is what makes callers swallow it.
 
-import { CONTRACT } from "./contract.js";
-import { fingerprint, normalizeServed, type Json } from "./canonical.js";
-import type { CreateNoteArgs, CreateTaskArgs, FilterOperator, NoteEmbeddingsColumn, NoteEmbeddingsRow, NotesColumn, NotesRow, PtCode, SetNoteEmbeddingArgs, TasksColumn, TasksRow, UpdateTaskStatusArgs } from "./types.js";
+import { CONTRACT } from "./contract.ts";
+import { fingerprint, normalizeServed, type Json } from "./canonical.ts";
+import type { CreateNoteArgs, CreateTaskArgs, FilterOperator, NoteEmbeddingsColumn, NoteEmbeddingsRow, NotesColumn, NotesRow, PtCode, SetNoteEmbeddingArgs, TasksColumn, TasksRow, UpdateTaskStatusArgs } from "./types.ts";
 
 export type Filter<Column extends string> = {
   column: Column;

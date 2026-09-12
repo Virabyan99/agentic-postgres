@@ -1,0 +1,11 @@
+{
+  "name": "apg-client-typescript-toolchain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Session 23 toolchain image: typechecks a generated client and runs its smoke.",
+  "dependencies": {
+    "@types/node": "22.20.2",
+    "typescript": "7.0.2"
+  }
+}

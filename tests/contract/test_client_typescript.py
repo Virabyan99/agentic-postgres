@@ -1,19 +1,21 @@
-"""`GEN-EMIT-001` and the reproducibility half of `GEN-TOOLCHAIN-001` (Session 23 Run 3).
+"""`GEN-EMIT-001` and `GEN-CMD-001`'s drift half (Session 23 Run 3).
 
-Two kinds of proof here, and the second is the one that earns its cost.
+These proofs read the emitted TEXT: the emitter's inputs, the banner, where a
+digest may appear, what may never appear, that every union is exactly the
+contract's names, and that the committed example client is what its contract
+generates -- asked by running the product's own `--check` rather than by
+re-emitting here (D1114).
 
-The **structural** proofs read the emitted text: the emitter's inputs, the
-banner, where a digest may appear, what may never appear, and that every union
-is exactly the contract's names. They are cheap and they run everywhere.
+**Reading the text is not enough, and this module is where that was learned.**
+The first version of the emitter passed every proof below and did not compile:
+`agent.ts` declared `listResources` twice and named a type nothing emitted
+(D1223). It typechecked, later, and still could not RUN, because its import
+specifiers named `.js` files a package that is never compiled does not have
+(D1226). Both were found by a compiler and a runtime, not by a scan.
 
-The **toolchain** proofs run the emitted package through the pinned Node image:
-`tsc --noEmit --strict` over the generated client, and the emitted
-`canonical.ts` over every committed snapshot compared against
-`openapi_normalize.fingerprint`. They are the only proofs that can answer
-whether the thing this product writes for a developer actually *works* -- and
-the first run of the typecheck found two defects in emitted code that every
-structural proof had passed (D1223). A generated client nobody compiled is a
-value that looks measured and is not.
+So the proofs that build and execute live in
+`tests/contract/test_generated_client_toolchain.py`, against the hash-locked
+image, with `--network none`.
 """
 
 from __future__ import annotations
@@ -22,18 +24,13 @@ import ast
 import json
 import re
 import subprocess
-from pathlib import Path
 
 import pytest
 from tests.contract.test_client_ir import (  # the four inputs, assembled once
-    APP_SNAPSHOT,
-    CANONICAL_MCP,
-    RELEASE_SNAPSHOT,
     project_inputs,  # noqa: F401 -- a fixture, used by name
     project_ir,  # noqa: F401
     release_ir,  # noqa: F401
 )
-from tests.contract.test_image_contracts import requires_docker
 
 from agentic_postgres import REPO_ROOT, client_ir, client_typescript, openapi_normalize
 
@@ -60,13 +57,6 @@ def _emit(ir: client_ir.IR, version: str = "1.0.0") -> dict[str, str]:
 @pytest.fixture(scope="module")
 def emitted(project_ir: client_ir.IR) -> dict[str, str]:  # noqa: F811
     return _emit(project_ir)
-
-
-def _node_image() -> str:
-    for line in (REPO_ROOT / "versions.env").read_text(encoding="utf-8").splitlines():
-        if line.startswith("NODE_RUNTIME_IMAGE="):
-            return line.split("=", 1)[1].strip()
-    pytest.fail("versions.env pins no NODE_RUNTIME_IMAGE")
 
 
 # ---------------------------------------------------------------------------
@@ -390,145 +380,15 @@ def test_nothing_the_generate_command_prints_is_a_credential() -> None:
 
 
 # ---------------------------------------------------------------------------
-# GEN-TOOLCHAIN-001 -- the proofs that need the image
+# The proofs that need the image live in `test_generated_client_toolchain.py`
 # ---------------------------------------------------------------------------
-
-
-def _run_in_node(work: Path, script: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            "docker",
-            "run",
-            "--rm",
-            "-v",
-            f"{work}:/w",
-            "-w",
-            "/w",
-            _node_image(),
-            "sh",
-            "-c",
-            script,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=600,
-    )
-
-
-@requires_docker
-def test_the_emitted_client_typechecks_strict_in_the_pinned_image(
-    emitted: dict[str, str], tmp_path: Path
-) -> None:
-    """**GEN-TOOLCHAIN-001.** The generated package COMPILES.
-
-    **This proof found two defects nothing else could** (D1223): `agent.ts`
-    declared `listResources` twice -- once by hand and once from the tool
-    roster -- and referred to an `AgentFilter` type the emitter never wrote.
-    Every structural proof above passed on that code.
-
-    The control is a deliberately wrong line in the same container: a typecheck
-    that cannot fail proves nothing, and `tsc`'s exit status for a type error
-    is 1 under 7.0.2 where it was 2 under 5.x (D1212), so the assertion is on
-    the MESSAGE as well as on a non-zero status.
-    """
-    for name, text in emitted.items():
-        (tmp_path / name).write_text(text, encoding="utf-8")
-
-    install = _run_in_node(
-        tmp_path,
-        "npm install --package-lock-only --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 "
-        "&& npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 && echo installed",
-    )
-    assert "installed" in install.stdout, f"the toolchain did not install: {install.stderr[-400:]}"
-
-    good = _run_in_node(tmp_path, "./node_modules/.bin/tsc -p tsconfig.json --noEmit")
-    assert good.returncode == 0, (
-        f"the GENERATED client does not typecheck under --strict:\n{good.stdout}\n{good.stderr}"
-    )
-
-    # The control, in the same container, on the same toolchain.
-    broken = tmp_path / "contract.ts"
-    original = broken.read_text(encoding="utf-8")
-    broken.write_text(
-        original + "\nconst wrong: number = CONTRACT.restContractId;\n", encoding="utf-8"
-    )
-    try:
-        control = _run_in_node(tmp_path, "./node_modules/.bin/tsc -p tsconfig.json --noEmit")
-    finally:
-        broken.write_text(original, encoding="utf-8")
-
-    assert control.returncode != 0, "a typecheck that passes a type error measures nothing"
-    assert "contract.ts" in control.stdout and "TS2322" in control.stdout, (
-        f"the control failed for the wrong reason: {control.stdout}\n{control.stderr}"
-    )
-
-
-@requires_docker
-def test_canonical_ts_reproduces_pythons_fingerprint_for_every_committed_snapshot(
-    emitted: dict[str, str], tmp_path: Path
-) -> None:
-    """**GEN-TOOLCHAIN-001.** The second canonical form, GUARDED (D1203).
-
-    Two implementations of one serialization rule now exist in two languages,
-    and `init()`'s whole value rests on them agreeing. So they are compared,
-    over every committed snapshot, in the image the client will run on.
-
-    **The application document is asserted to DIFFER**, and that is the point of
-    including it: the boundary is written down, so the day it stops differing
-    somebody has to read why rather than discovering it in a client.
-    """
-    (tmp_path / "canonical.ts").write_text(emitted["canonical.ts"], encoding="utf-8")
-    contracts = tmp_path / "c"
-    contracts.mkdir()
-
-    sources = {
-        "release-rest.json": RELEASE_SNAPSHOT,
-        "release-mcp.json": CANONICAL_MCP,
-        "project-rest.json": REPO_ROOT
-        / "projects/example/contracts/postgrest-openapi.canonical.json",
-        "project-mcp.json": REPO_ROOT
-        / "projects/example/contracts/mcp-capabilities.canonical.json",
-        "app.json": APP_SNAPSHOT,
-    }
-    for name, path in sources.items():
-        assert path.is_file(), f"{path} is missing; the comparison needs every committed contract"
-        (contracts / name).write_bytes(path.read_bytes())
-
-    (tmp_path / "driver.ts").write_text(
-        'import { readFileSync, readdirSync } from "node:fs";\n'
-        'import { fingerprint } from "./canonical.ts";\n'
-        'for (const name of readdirSync("c").sort()) {\n'
-        '  const doc = JSON.parse(readFileSync(`c/${name}`, "utf8"));\n'
-        "  console.log(JSON.stringify({ name, fingerprint: fingerprint(doc) }));\n"
-        "}\n",
-        encoding="utf-8",
-    )
-
-    done = _run_in_node(tmp_path, "node driver.ts")
-    assert done.returncode == 0, f"the driver did not run: {done.stdout}\n{done.stderr}"
-    javascript = {
-        row["name"]: row["fingerprint"]
-        for row in (json.loads(line) for line in done.stdout.splitlines() if line.startswith("{"))
-    }
-    assert set(javascript) == set(sources), f"the driver read {sorted(javascript)}"
-
-    differ = []
-    for name, path in sources.items():
-        python = openapi_normalize.fingerprint(json.loads(path.read_text(encoding="utf-8")))
-        if python != javascript[name]:
-            differ.append(name)
-        elif name == "project-rest.json":
-            assert python == "808ac715c09aeebc382dd5afc886c1680fe2ea9870e729b9d34a623dee8d18de", (
-                "the project snapshot's fingerprint moved; rig 23a measured this exact value "
-                "being served to the authenticated role, and init() compares against it"
-            )
-
-    assert differ == ["app.json"], (
-        f"the JavaScript canonical form agrees with Python everywhere except {differ}. "
-        "D1203 recorded exactly one exception -- the application document's two Pydantic "
-        "floats. If that list has changed, re-read rig 23b before trusting either side"
-    )
-    assert client_ir.js_reproducible(json.loads(APP_SNAPSHOT.read_text(encoding="utf-8"))), (
-        "the Python walker must find the same document unreproducible that the byte "
-        "comparison does; the two are checking one fact from two sides"
-    )
+#
+# `tsc --noEmit --strict` over the emitted package, and `canonical.ts` compared
+# against `openapi_normalize.fingerprint`, were both here first -- and both
+# installed `typescript` from the npm registry inside the test (D1227). They
+# were green, and they would have failed in a gate run with no route out, while
+# `generated_client_toolchain` is DECLARED an offline claim (ADR 0202).
+#
+# They now run against the hash-locked toolchain image with `--network none`.
+# They are not duplicated here: two proofs of one fact, where one is weaker, is
+# the arrangement in which the weaker one is the one that stays green.

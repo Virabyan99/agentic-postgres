@@ -3,7 +3,7 @@
 **Status:** **PLANNED 2026-09-12** at `d6f6e94`, Session 22's close, on `main`.
 No run has started. §1 is D1200–D1211 (planning rows, every one measured
 today in a rig or read from the tree at `d6f6e94`); Run 1 added **D1212–D1215**,
-measured at the branch point, Run 2 added **D1216-D1223** and Run 3 **D1224**, so next free is **D1225**. ADR
+measured at the branch point, Run 2 added **D1216-D1223** and Run 3 **D1224-D1228**, so next free is **D1229**. ADR
 **0204** is this session's; the runs add theirs below the planning rows.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 23* and its rows D1067
 (the `generate` hook after a project migration), D1068 (one session, the IR
@@ -161,7 +161,7 @@ executed).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1225**. Rows D1200–D1211
+Six columns, next free number after this table **D1229**. Rows D1200–D1211
 were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's** and
 **D1216–D1223 Run 2's**, each measured while the run that names it was built.
 The runs add theirs below them as they go, each run's numbers named in its Done
@@ -194,6 +194,10 @@ paragraph.
 | **D1222** | The plan's §5: each run ends with *"one commit on the `session-23` branch"*, with Run 2 (the IR) and Run 3 (the emitter) as separate commits. | **A commit of Run 2 alone cannot be green.** `test_repository_contract::test_no_module_is_imported_only_by_its_own_tests` refuses a module imported by nothing outside its own tests (D204: *"a module with no caller is a feature that does not exist, however well it is tested"*), and `client_ir`'s only caller is `client_typescript`, which is Run 3's. Measured: 1156 passed, that one failed. | Run 2 and Run 3's **emitter** land in ONE commit; the rest of Run 3 (the toolchain image, `versions.in.yaml`'s two packages, `bin/generate.sh`/`generate.py`, the committed example client) follows in its own. The guard is not weakened and no placeholder caller is written — writing one to satisfy it would be exactly the gaming D204 exists to prevent. | A run boundary that the repository's own guards make un-commitable is a planning error, not a licence to commit red. The cheap alternative — a caller written to satisfy the check — is available in every instance of this and is always wrong. | — |
 | **D1223** | The emitter's structural proofs: the banner, the digests in one file, no credential, the unions equal to the contract's names — all green on the first emitted package. | **The emitted TypeScript did not compile.** `tsc --noEmit --strict` in the pinned image, first run: `agent.ts(141,11): error TS2300: Duplicate identifier 'listResources'` (written by hand for the digest comparison AND emitted again from the tool roster) and `agent.ts(183,81): error TS2304: Cannot find name 'AgentFilter'` (referenced by the read tool's argument list, emitted by nothing). Every structural proof passed on that code. | `list_resources` is excluded from the generated roster methods, and `AgentFilter` is emitted in `types.ts`. `test_the_emitted_client_typechecks_strict_in_the_pinned_image` is now in the tree with a paired control — a deliberately wrong line in the SAME container — and it asserts the error MESSAGE as well as a non-zero exit, because the exit status for a type error is 1 under 7.0.2 and 2 under 5.x (D1212). | §7's question 1 — *what would have to break for this to go red* — answered honestly about eight green proofs: nothing, because none of them compiled anything. A generator is the one kind of code whose output has a compiler, and not running it is choosing not to use the only total check available. | 0204 |
 | **D1224** | Run 3's version rule: *"the package version is the previous one bumped by `compatibility.required_level(...)`"*. | **Applied literally it moves the number on every regeneration, and makes `--check` permanently red.** `required_level([])` is `patch` — correct for the TEMPLATE, where *"a release that publishes nothing new is still a release"*, and wrong for a generated artefact. Measured on the first `--check` this command ever ran: `generate` wrote the client at `1.0.0`, and `--check` seconds later, against an untouched directory and an unmoved contract, bumped to `1.0.1` and reported `README.md` as drift, exit 5. | The number moves only when `classify_changes` is **non-empty**; an unchanged contract keeps the version it had. That is what ADR 0204 already said in words — *"a client regenerated from an unchanged contract does not move"* — and the code now says it too. Proved by generating three times and checking between each, plus a control: one appended comment in `types.ts` is caught, exit 5, naming that file. | The plan's sentence was right about the mechanism and wrong about the empty case, and the empty case is the one that happens on every run. A drift check that fails on an unmodified artefact is worse than no drift check: it is turned off in a week, and then the real drift is not caught either. Found in five seconds by running the command twice — which is the whole argument for `--check` being exercised by a proof that calls the product's own command (D1114). | 0204 |
+| **D1225** | Run 3 step 3's `entrypoint.sh`, as planned: *"`cd /work && npx tsc -p tsconfig.json --noEmit`"*. | **`npx` can reach the registry.** It resolves from the working directory first, and finding nothing there — which is exactly the case, since a generated client declares no dependency and has no `node_modules` — it **fetches the package**. So the entrypoint as written would have made every typecheck a silent network call, passing on any machine that happened to be online and failing in a gate with no route out. The same call also has nowhere to find `@types/node`: the emitted `tsconfig.json` declares `types: ["node"]`, and TypeScript resolves that by walking up from the tsconfig's directory, which is the read-only mount. | The compiler is addressed as `/app/node_modules/.bin/tsc`, the path **in this image**, and `@types` is supplied with `--typeRoots /app/node_modules/@types` rather than by installing anything into the directory under test. `test_the_entrypoint_addresses_the_compiler_by_path_and_never_through_npx` asserts the mechanism and `test_the_toolchain_typechecks_with_no_network_at_all` proves the result — `docker run --network none` exits 0. | A toolchain image exists so that a check is reproducible and offline; one word in its entrypoint gave both away, and nothing about the output would have shown it. The second half is worth as much: a toolchain that fixed the `@types` problem by writing a `node_modules` into the directory it was handed would dirty a developer's checkout, and the dirt would appear in their `git status` after a command that only claimed to read. | 0204 |
+| **D1226** | The emitted package's import specifiers, written `./client.js` — the TypeScript convention under `moduleResolution: nodenext`, and what `tsc` accepts. | **It typechecks and it cannot RUN.** That convention is for a package that is COMPILED, where the emitted JavaScript sits beside the source. This package is never compiled — `noEmit`, executed directly by the pinned Node's type stripping (D1204) — so at runtime `./client.js` does not exist. Measured: `tsc` exit **0**, then `node smoke.ts` dead with `ERR_MODULE_NOT_FOUND: Cannot find module '/work/client.js'`. | Specifiers name the files that exist (`./client.ts`), and the emitted `tsconfig.json` gains `allowImportingTsExtensions` — which `tsc` only accepts alongside `noEmit`, the setting this package already had for the same underlying reason. Eight specifiers across three emitted files. Now measured both ways: typecheck exit 0, and `node smoke.ts` runs, refusing cleanly with exit 2 on a missing environment and exit 1 reporting `unreachable`. | **D1223 one layer out, and it is the more interesting half.** That one said a generator's output has a compiler and not running it declines the only total check available. This says the compiler is not the last word either: a package can satisfy the type checker and still not load. The check that found it was executing the artefact, which is what Run 4 exists to do — and it was cheaper to find here. | 0204 |
+| **D1227** | Run 3's first pair of toolchain proofs, written in `test_client_typescript.py`: they installed `typescript` and `@types/node` from the npm registry **inside the test**, then typechecked. | **They were green, and they could not have run in the gate that will report them.** `generated_client_toolchain` is DECLARED an offline claim (`OFFLINE_CLAIMS`, ADR 0202), and a proof that reaches `registry.npmjs.org` needs the network the offline mode is defined by not having. On this very workstation WSL cannot reach HTTPS at all — the proofs passed only because Docker's containers still can. | Both moved to `tests/contract/test_generated_client_toolchain.py`, against the hash-locked image, and `run_toolchain` passes `--network none` by DEFAULT rather than as an option a later test can forget. They are not duplicated in the old module: two proofs of one fact, where one is weaker, is the arrangement in which the weaker one is the one that stays green. | A declared offline claim whose proof needs the internet is the strongest form of *a value that looked measured and was not* — it would have passed every run on this machine and failed the first time somebody ran the gate on an air-gapped host, which is precisely the case the offline mode was built for (ADR 0202). Nothing in the tree checks that an offline claim's proofs are offline; `--network none` in the runner is the closest thing to one. | 0202 |
+| **D1228** | The toolchain entrypoint's input check: `[ -f /work/tsconfig.json ]`, and the refusal *"there is no generated client to check"*. | **An UNREADABLE directory is not an absent one, and the test was false for both.** The image runs as 65532; pytest's `tmp_path` is `0700` owned by the invoking user, so a mount of it is perfectly present and simply cannot be read — and every `[ -f … ]` inside answers false. Measured with a control: the same directory at `0755` typechecks, at `0700` the image said *"tsconfig.json is not there"* and exited 2. Two of this module's proofs failed that way before the cause was found. | A third answer, before the file tests: an unreadable `/work` exits **3** and says which uid the image runs as and what the directory needs, explicitly ending *"This is NOT 'no client here'"*. `test_an_unreadable_mount_is_reported_as_unreadable_and_never_as_absent` asserts the code, the message, and — the control — that the same bytes at `0755` typecheck. | **ADR 0195's class, in a component built the same day by someone who had just written the ADR's number into three other files.** Reported as absence it sends a developer to regenerate a client already sitting in front of them. The reason it was found is that the failure happened to be *mine*, in a test; had the first person to hit it been an adopter with an unusual umask, the message would have sent them the wrong way and the tests would all have been green. | 0195 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -809,90 +813,94 @@ the rendered document — name the local `document` only for that, and a lock
 `lock`), `test_dev_command` and `test_dev_environment` if `project_key_of`
 moved (grep its readers). **Push, read CI.**
 
-**In progress.** 2026-09-12. Steps 1, 2, 4 and 5 are done and committed with
-Run 2 (D1222); **step 3 — the toolchain IMAGE — is not**, and this run is not
-Done until it is. Row **D1224**; next free **D1225**.
+**Done.** 2026-09-12. Steps 1, 2, 4 and 5 landed at `0fe0bf9` with Run 2
+(D1222, CI green); step 3 — the toolchain image — and the two remaining test
+modules land here. Rows **D1225–D1228**; next free **D1229**.
 
-**What landed.** `src/agentic_postgres/client_typescript.py`: `emit(ir, …)` →
-nine files, reading the IR and the standard library only (AST-asserted; the
-sentinels and the two pinned versions arrive as arguments its caller read from
-`openapi_normalize` and `versions.env`, never retyped). `contract.ts` is the one
-file carrying a digest; `canonical.ts` is the second implementation of the
-canonical form; `client.ts` has `init()` with four answers and per-relation and
-per-RPC methods over the reviewed names only; `agent.ts` has the JSON-RPC wire
-rig 23f recorded, both refusal shapes, and a `listResources()` that compares the
-digest the PLANE reports. `bin/generate.sh` + `bin/generate.py`, reached as
-`apg generate` by the dispatcher's own derivation (no dispatcher edit), both
-registered in `test_cli_contract` and `git add`ed first (D1014, D1188).
-`projects/example/clients/typescript/` committed, nine files, version `1.0.0`.
+**The image.** `services/clients/typescript/`: a `Dockerfile` on the node-pg
+shape (`ARG BASE_IMAGE`, `npm ci --ignore-scripts`, uid 65532), a `package.json`
+declaring `typescript` and `@types/node` as **dependencies** — for this image the
+compiler is not a development convenience, it is the payload — a
+`package-lock.json` of **24 entries, every one carrying an integrity hash**, and
+an `entrypoint.sh` that typechecks `/work` and, given `smoke`, runs the client's
+own driver. Both locked versions agree across three places (`versions.env`,
+`package.json`, the lock), asserted rather than trusted (D486); the lock's
+`typescript` integrity is `sha512-8FYau96o3NKOhbjKi…`, the value rig 23c measured
+independently.
 
-**THE PROOF THAT MATTERED IS THE TYPECHECK, and it found what eight green
-structural proofs had passed** (D1223). `tsc --noEmit --strict` in the pinned
-image, first run: `agent.ts(141,11): error TS2300: Duplicate identifier
-'listResources'` — written by hand for the digest comparison AND emitted again
-from the tool roster — and `agent.ts(183,81): error TS2304: Cannot find name
-'AgentFilter'`, a type the read tool's arguments reference and the emitter never
-wrote. The banner check, the digest-placement check, the credential scan and the
-union checks were all green on code that did not compile. Repaired; the emitted
-package now typechecks **exit 0**, with a paired control — one wrong line in the
-SAME container — failing at `contract.ts(27,7): error TS2322`, asserted on the
-message and not the status, because that status is 1 under 7.0.2 and 2 under
-5.9.3 (D1212).
+**What the image is FOR, measured:** the committed example client mounted
+**read-only** typechecks with **`--network none`**, exit 0; a copy with one
+wrong line fails in the same image at `contract.ts(27,7): error TS2322`; a
+directory with no client exits 2; an unreadable one exits 3. The checkout is
+untouched afterwards — no `node_modules`, no `tsbuildinfo`, nothing in `git
+status`.
 
-**`canonical.ts` reproduces Python byte for byte, measured over the tree.**
-Release REST `85adb686223e`, release MCP `80a41ab0b986`, project REST
-`808ac715c09a`, project MCP `3d7d6e6d513a` — four EQUAL — and
-`app-openapi.canonical.json` DIFFERS, `f21bf4a8da90` against `3007d815448e`,
-which is exactly D1203's boundary and is now asserted as a difference so the day
-it stops differing somebody reads why. **`808ac715c09a` is the value rig 23a
-measured the live `authenticated` role being served**, so the chain closes end to
-end: served document → the client's own canonical form → the digest
-`contract.ts` embeds.
+**Four rows, and three of them are about a check that could not have failed.**
 
-**The version rule was wrong in the case that happens every time** (D1224): the
-first `--check` this command ever ran failed on a client it had just written,
-because `required_level([])` is `patch`. Repaired; three generates and three
-checks in a row now hold `1.0.0`, and a one-line hand edit is caught with exit 5
-naming the file.
+* **D1225** — the plan's `npx tsc` **can reach the registry**: it resolves from
+  the working directory first and, finding nothing (a generated client declares
+  no dependency and has no `node_modules`), it fetches. Every typecheck would
+  have been a silent network call. The compiler is addressed by its path in the
+  image, and `@types` comes from `--typeRoots` rather than by writing a
+  `node_modules` into the directory under test.
+* **D1227** — the two toolchain proofs written earlier in Run 3 **installed
+  `typescript` from the registry inside the test**. They were green, and
+  `generated_client_toolchain` is a DECLARED OFFLINE claim (ADR 0202): they
+  could not have run in the gate that will report them. Moved here, against the
+  image, with `--network none` as the runner's DEFAULT rather than an option a
+  later test can forget.
+* **D1228** — the entrypoint reported an **unreadable** `/work` as *"there is no
+  generated client to check"*. The image runs as 65532 and `tmp_path` is 0700,
+  so the mount is present and unreadable, and every `[ -f … ]` is false for both
+  reasons. Two proofs in this module failed that way before the cause was found.
+  Now a third answer: exit 3, naming the uid and the modes, ending *"This is NOT
+  'no client here'"*. **ADR 0195's class, in a component written the same day by
+  someone who had just put that ADR's number in three other files.**
+* **D1226** is the one to carry forward. The emitted package used `./client.js`
+  specifiers — correct TypeScript for a package that is COMPILED. This one never
+  is: `noEmit`, run directly on the pinned Node's type stripping. So it
+  **typechecked, exit 0, and could not run**: `node smoke.ts` died with
+  `ERR_MODULE_NOT_FOUND: Cannot find module '/work/client.js'`. D1223 said a
+  generator's output has a compiler and not running it declines the only total
+  check available; D1226 says the compiler is not the last word either.
 
-**The two npm packages were locked from a shell that has network.** WSL on this
-workstation resolves DNS and cannot reach HTTPS — measured: A record
-`104.16.1.34`, an IPv4 default route via `172.25.16.1`, `curl` exit **124** on
-both families, `curl -6` failing in 45 ms for want of a route. Docker's
-containers can reach it. So `bin/lock-versions.sh --update --packages-only` — the
-product's own command, unmodified — was run inside the pinned
-`PYTHON_RUNTIME_IMAGE` with the checkout mounted, which is what the plan's §5
-authorises (*"do that step from a shell that has it and record which"*). The diff
-is exactly what §4 required: `TYPESCRIPT_VERSION=7.0.2` and
-`TYPES_NODE_VERSION=22.20.2` with their sha512 digests, plus
-`APG_VERSIONS_IN_SHA256` and `APG_LOCKED_AT`; all **12 image digests carried
-forward unchanged** (D238). `TYPESCRIPT_VERSION_DIGEST` begins `sha512-8FYau96o3NKOhbjKi`,
-which is the integrity hash rig 23c measured independently for
-`node_modules/typescript` — the two arrived by different routes and agree.
+**`smoke.ts` ships** (emitter step 1's last file): the only emitted file that
+prints, and it prints outcomes — the kind of each step, a refusal's code, never
+a token, a URL or a row. Measured in the image with no network: missing
+environment → `{"step":"environment","missing":"APG_REST_URL"}`, exit 2; an
+address that resolves to nothing → `{"step":"init","kind":"unreachable"}` then
+`{"step":"done","ok":false,"reason":"unreachable"}`, exit 1 — **`unreachable`,
+not `stale_contract`**, which is ADR 0195 proved at runtime rather than by
+reading the emitted source for three branches. The RPC step is behind
+`APG_SMOKE_ALLOW_WRITE` because the first reviewed function of any real contract
+is a write, and skipping is reported as its own outcome rather than as a pass.
 
-**Argument refusals, measured, all exit 2 before Python runs:** no `--project`,
-a manifest that is not there, `--out` twice, an unknown flag, a positional, and
-an `--out` outside the checkout. `shellcheck bin/generate.sh` exit 0.
+**`tests/contract/test_generate_command.py`**, 18 proofs: nine argument errors
+each exiting 2 **before Python runs** (no `Traceback` in any of them), `apg
+--list` offering the verb by the dispatcher's own derivation, `--out` outside the
+checkout refused, an unrendered project refused with **exit 4 naming the render
+command and this invocation's own arguments**, a project declaring **no set**
+generating the RELEASE's client (two relations, no `note_embeddings`, fingerprint
+`85adb686223e` — ADR 0198's boundary), `--check` agreeing with the committed
+client and **writing nothing** (asserted over the directory's bytes AND mtimes,
+not by reading the code), drift reported as exit 5 naming the file, a MISSING
+file reported as missing rather than as drift, and nothing printed that matches a
+credential.
 
-**NOT DONE — step 3, and this run stays open until it is.** There is no
-`services/clients/typescript/` image directory, no `package-lock.json` committed
-for it, no `entrypoint.sh`, and no `tests/contract/test_generated_client_toolchain.py`.
-The two toolchain proofs currently run the **pinned Node image directly**,
-installing `typescript` and `@types/node` from the registry inside the test —
-which means they need outbound HTTPS *from a container* and are not the
-hash-locked, offline-reproducible image the plan specifies. That is the gap:
-a proof that reaches a registry at test time is not one a gate can trust, and
-`GEN-TOOLCHAIN-001`'s first clause (*"the image pins Node and typescript and the
-lock carries integrity hashes"*) has no proof at all yet. Also still to do:
-`smoke.ts` and the `GEN-CMD-001` / `GEN-VERSION-001` proofs the plan puts in
-`tests/contract/test_generate_command.py` (the argument refusals above are
-measured but not yet a committed test module).
+**Battery: 8 mutations, 8 killed, 8 paired controls green**, every subject
+restored byte-identical and the committed client's ten files unchanged. The
+mutations that matter: the unreadable/absent distinction removed (killed by
+D1228's proof), `npx` reintroduced, `--typeRoots` dropped, the smoke reporting
+`unreachable` as `stale_contract`, `--out` accepted twice, an `--out` outside the
+checkout permitted, a missing file reported as drift, and `--check` writing the
+files it was asked only to compare.
 
-**Targeted, run once:** 31 modules, **1773 passed**, exit 0 — including
-`test_cli_contract`, `test_repository_contract` (D204's guard, which is what
-forced D1222), `test_version_lock`, `test_client_ir`, `test_client_typescript`
-with both Docker proofs, and every reader rig 23e's grep named. `ruff check` exit
-0, `ruff format` clean, `shellcheck` exit 0.
+**Targeted:** `test_generated_client_toolchain` (8), `test_generate_command`
+(18), `test_client_typescript`, `test_client_ir`, `test_repository_contract`
+(the tracked-file list gained the image's four files), `test_client_fixtures`,
+`test_cli_contract`, `test_version_lock`, `test_image_contracts`,
+`test_documentation_index`, `test_acceptance_registry` — each checked for
+existence individually (D1104). `ruff check` exit 0, `shellcheck` exit 0.
 
 ### Run 4 — the runtime proof, offline
 

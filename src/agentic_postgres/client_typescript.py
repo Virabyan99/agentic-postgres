@@ -71,6 +71,7 @@ def emit(
         "types.ts": _types_ts(ir, banner),
         "client.ts": _client_ts(ir, banner),
         "agent.ts": _agent_ts(ir, banner),
+        "smoke.ts": _smoke_ts(ir, banner),
         "package.json": _package_json(ir, client_version, typescript_version, types_node_version),
         "tsconfig.json": _tsconfig_json(),
         "README.md": _readme(ir, client_version),
@@ -356,9 +357,9 @@ def _client_ts(ir: IR, banner: str) -> str:
 // by the product is not an exception in the caller's program and treating it as
 // one is what makes callers swallow it.
 
-import {{ CONTRACT }} from "./contract.js";
-import {{ fingerprint, normalizeServed, type Json }} from "./canonical.js";
-import type {{ {row_imports} }} from "./types.js";
+import {{ CONTRACT }} from "./contract.ts";
+import {{ fingerprint, normalizeServed, type Json }} from "./canonical.ts";
+import type {{ {row_imports} }} from "./types.ts";
 
 export type Filter<Column extends string> = {{
   column: Column;
@@ -610,8 +611,8 @@ def _agent_ts(ir: IR, banner: str) -> str:
 // Reading only `error` passes on a refused write, which is a defect this
 // repository has carried against its own live proofs since Session 9.
 
-import {{ CONTRACT }} from "./contract.js";
-import type {{ AgentFilter, AgentRefusal }} from "./types.js";
+import {{ CONTRACT }} from "./contract.ts";
+import type {{ AgentFilter, AgentRefusal }} from "./types.ts";
 
 const CALLER_FACING_TOKENS = {_literal(list(ir.caller_facing_tokens))} as const;
 
@@ -782,6 +783,145 @@ def _tool_method(tool: Tool) -> str:
 
 
 # ---------------------------------------------------------------------------
+# smoke.ts -- the only emitted file that prints
+# ---------------------------------------------------------------------------
+
+
+def _smoke_ts(ir: IR, banner: str) -> str:
+    """The driver Run 4's runtime proof runs inside the toolchain image.
+
+    **The only emitted file that prints**, and it prints OUTCOMES: the kind of
+    each step and, for a refusal, the code — never a token, never a URL, never a
+    row's contents (D105). One JSON line per step, so a proof reads it by
+    parsing rather than by matching prose.
+
+    The RPC step is behind `APG_SMOKE_ALLOW_WRITE` because the first RPC of any
+    real contract is a WRITE, and a smoke that writes is a smoke somebody will
+    eventually point at a deployment that matters. Skipping is reported as its
+    own outcome rather than as a pass (ADR 0195): a reader can tell "the write
+    succeeded" from "nobody asked for the write" from "the write was refused".
+    """
+    relation = ir.relations[0] if ir.relations else None
+    rpc = ir.rpcs[0] if ir.rpcs else None
+
+    read_step = (
+        f"""
+const read = await client.{_camel(f"list_{relation.name}")}({{ limit: 1 }});
+say("read", {{ relation: {json.dumps(relation.name)}, kind: read.kind,
+  ...(read.kind === "refused" ? {{ code: read.code }} : {{}}),
+  ...(read.kind === "ok" ? {{ rows: Array.isArray(read.body) ? read.body.length : 0 }} : {{}}) }});
+if (read.kind !== "ok") failures += 1;
+"""
+        if relation
+        else '\nsay("read", { skipped: "this contract declares no relation" });\n'
+    )
+
+    rpc_arguments = (
+        "{ "
+        + ", ".join(
+            f"{argument.name}: "
+            + (
+                '"apg-smoke"'
+                if argument.ts_type == "string"
+                else ("0" if argument.ts_type == "number" else "null")
+            )
+            for argument in rpc.arguments
+            if argument.required
+        )
+        + " }"
+        if rpc
+        else "{}"
+    )
+    rpc_step = (
+        f"""
+if (process.env.APG_SMOKE_ALLOW_WRITE === "1") {{
+  const called = await client.{_camel(rpc.name)}({rpc_arguments} as never);
+  say("rpc", {{ name: {json.dumps(rpc.name)}, kind: called.kind,
+    ...(called.kind === "refused" ? {{ code: called.code }} : {{}}) }});
+  if (called.kind !== "ok") failures += 1;
+}} else {{
+  say("rpc", {{ name: {json.dumps(rpc.name)},
+    skipped: "APG_SMOKE_ALLOW_WRITE is not 1, and the first reviewed function writes" }});
+}}
+"""
+        if rpc
+        else '\nsay("rpc", { skipped: "this contract declares no function" });\n'
+    )
+
+    return f"""{banner}
+//
+// A driver, not a library. It reads three values from the environment, calls
+// init(), reads one relation and (when asked) calls one function, and prints
+// one JSON line per step. Run it inside the toolchain image:
+//
+//   docker run --rm -v <client>:/work:ro -e APG_REST_URL=... -e APG_TOKEN=... \\
+//     apg-client-typescript smoke
+//
+// It prints outcomes. It does not print the token, the URLs, or any row it
+// read -- a smoke's output is pasted into issues, and the one value it holds
+// is somebody's credential.
+
+import {{ createClient }} from "./client.ts";
+import {{ createAgentClient }} from "./agent.ts";
+import {{ CONTRACT }} from "./contract.ts";
+
+function say(step: string, detail: Record<string, unknown>): void {{
+  console.log(JSON.stringify({{ step, ...detail }}));
+}}
+
+function required(name: string): string {{
+  const value = process.env[name];
+  if (!value) {{
+    say("environment", {{ missing: name }});
+    process.exit(2);
+  }}
+  return value;
+}}
+
+const restUrl = required("APG_REST_URL");
+const token = required("APG_TOKEN");
+const mcpUrl = process.env.APG_MCP_URL ?? "";
+
+let failures = 0;
+
+const client = createClient({{ restUrl, appUrl: process.env.APG_APP_URL, token }});
+
+const started = await client.init();
+say("init", {{ kind: started.kind,
+  ...(started.kind === "stale_contract"
+    ? {{ expected: started.expected, served: started.served }}
+    : {{}}),
+  ...(started.kind === "unreachable" || started.kind === "unparsable"
+    ? {{ reason: started.reason }}
+    : {{}}) }});
+if (started.kind !== "ok") {{
+  // Nothing below can mean anything if the surface is not the one this client
+  // was generated from, so the driver stops rather than reporting failures
+  // whose cause is already known.
+  say("done", {{ ok: false, reason: started.kind }});
+  process.exit(1);
+}}
+{read_step}{rpc_step}
+if (mcpUrl) {{
+  const agent = createAgentClient({{ mcpUrl, token }});
+  const roster = await agent.listResources();
+  say("lock", {{ kind: roster.kind,
+    ...(roster.kind === "ok" ? {{ toolCount: roster.toolCount }} : {{}}),
+    ...(roster.kind === "stale_contract"
+      ? {{ expected: roster.expected, reported: roster.reported }}
+      : {{}}),
+    ...(roster.kind === "unconfirmable" ? {{ reason: roster.reason }} : {{}}) }});
+  if (roster.kind !== "ok") failures += 1;
+}} else {{
+  say("lock", {{ skipped: "APG_MCP_URL is not set" }});
+}}
+
+say("done", {{ ok: failures === 0, failures, clientVersion: CONTRACT.clientVersion }});
+process.exit(failures === 0 ? 0 : 1);
+"""
+
+
+# ---------------------------------------------------------------------------
 # the package files
 # ---------------------------------------------------------------------------
 
@@ -822,6 +962,13 @@ def _tsconfig_json() -> str:
                     "target": "es2022",
                     "lib": ["es2022", "dom"],
                     "noEmit": True,
+                    # The package is RUN, never compiled: the pinned Node strips
+                    # types directly (D1204), so an import must name the file
+                    # that actually exists. `.js` specifiers are the convention
+                    # for a COMPILED package and resolve for `tsc` while failing
+                    # at runtime (D1226) -- this flag makes the honest spelling
+                    # legal, and `tsc` only accepts it alongside `noEmit`.
+                    "allowImportingTsExtensions": True,
                     "types": ["node"],
                     "skipLibCheck": True,
                 }

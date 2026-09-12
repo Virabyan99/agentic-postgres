@@ -202,6 +202,24 @@ REQUIRED_PATHS = (
     "services/clients/prisma/prisma/schema.prisma",
     "services/clients/prisma/prisma/migrations/migration_lock.toml",
     "services/clients/prisma/prisma/migrations/20260809000000_fixture_init/migration.sql",
+    # Session 23 (ADR 0204, D1225): the toolchain image. Not a driver fixture
+    # like the four above -- it holds a COMPILER, and it is what stops a
+    # generated client being committed without one having read it (D1223). The
+    # lock is named individually for the same reason the others are: `npm ci`
+    # fails without it, and only at build time.
+    "services/clients/typescript/Dockerfile",
+    "services/clients/typescript/entrypoint.sh",
+    "services/clients/typescript/package.json",
+    "services/clients/typescript/package-lock.json",
+    # Session 23 (ADR 0204, D1225): the toolchain image. Not a driver fixture
+    # like the four above -- it holds a COMPILER, and it is what stops a
+    # generated client being committed without one having read it (D1223). The
+    # lock is named individually for the same reason the others are: `npm ci`
+    # fails without it, and only at build time.
+    "services/clients/typescript/Dockerfile",
+    "services/clients/typescript/entrypoint.sh",
+    "services/clients/typescript/package.json",
+    "services/clients/typescript/package-lock.json",
     "docs/plans/session-01-implementation-plan.md",
     "docs/plans/session-02-implementation-plan.md",
     "contracts/postgrest-api-surface.yaml",

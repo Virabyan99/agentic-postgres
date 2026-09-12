@@ -12,8 +12,8 @@
 // Reading only `error` passes on a refused write, which is a defect this
 // repository has carried against its own live proofs since Session 9.
 
-import { CONTRACT } from "./contract.js";
-import type { AgentFilter, AgentRefusal } from "./types.js";
+import { CONTRACT } from "./contract.ts";
+import type { AgentFilter, AgentRefusal } from "./types.ts";
 
 const CALLER_FACING_TOKENS = [
   "approval_required",
