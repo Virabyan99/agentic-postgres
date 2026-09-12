@@ -3,7 +3,8 @@
 **Status:** **PLANNED 2026-09-12** at `d6f6e94`, Session 22's close, on `main`.
 No run has started. §1 is D1200–D1211 (planning rows, every one measured
 today in a rig or read from the tree at `d6f6e94`); Run 1 added **D1212–D1215**,
-measured at the branch point, Run 2 added **D1216-D1223** and Run 3 **D1224-D1228**, so next free is **D1229**. ADR
+measured at the branch point, Run 2 added **D1216-D1223**, Run 3 **D1224-D1228** and Run 4 **D1229-D1232**, so next
+free is **D1233**. ADR
 **0204** is this session's; the runs add theirs below the planning rows.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 23* and its rows D1067
 (the `generate` hook after a project migration), D1068 (one session, the IR
@@ -161,7 +162,7 @@ executed).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1229**. Rows D1200–D1211
+Six columns, next free number after this table **D1233**. Rows D1200–D1211
 were measured at planning on 2026-09-12 at `d6f6e94`; **D1212–D1215 are Run 1's** and
 **D1216–D1223 Run 2's**, each measured while the run that names it was built.
 The runs add theirs below them as they go, each run's numbers named in its Done
@@ -198,6 +199,10 @@ paragraph.
 | **D1226** | The emitted package's import specifiers, written `./client.js` — the TypeScript convention under `moduleResolution: nodenext`, and what `tsc` accepts. | **It typechecks and it cannot RUN.** That convention is for a package that is COMPILED, where the emitted JavaScript sits beside the source. This package is never compiled — `noEmit`, executed directly by the pinned Node's type stripping (D1204) — so at runtime `./client.js` does not exist. Measured: `tsc` exit **0**, then `node smoke.ts` dead with `ERR_MODULE_NOT_FOUND: Cannot find module '/work/client.js'`. | Specifiers name the files that exist (`./client.ts`), and the emitted `tsconfig.json` gains `allowImportingTsExtensions` — which `tsc` only accepts alongside `noEmit`, the setting this package already had for the same underlying reason. Eight specifiers across three emitted files. Now measured both ways: typecheck exit 0, and `node smoke.ts` runs, refusing cleanly with exit 2 on a missing environment and exit 1 reporting `unreachable`. | **D1223 one layer out, and it is the more interesting half.** That one said a generator's output has a compiler and not running it declines the only total check available. This says the compiler is not the last word either: a package can satisfy the type checker and still not load. The check that found it was executing the artefact, which is what Run 4 exists to do — and it was cheaper to find here. | 0204 |
 | **D1227** | Run 3's first pair of toolchain proofs, written in `test_client_typescript.py`: they installed `typescript` and `@types/node` from the npm registry **inside the test**, then typechecked. | **They were green, and they could not have run in the gate that will report them.** `generated_client_toolchain` is DECLARED an offline claim (`OFFLINE_CLAIMS`, ADR 0202), and a proof that reaches `registry.npmjs.org` needs the network the offline mode is defined by not having. On this very workstation WSL cannot reach HTTPS at all — the proofs passed only because Docker's containers still can. | Both moved to `tests/contract/test_generated_client_toolchain.py`, against the hash-locked image, and `run_toolchain` passes `--network none` by DEFAULT rather than as an option a later test can forget. They are not duplicated in the old module: two proofs of one fact, where one is weaker, is the arrangement in which the weaker one is the one that stays green. | A declared offline claim whose proof needs the internet is the strongest form of *a value that looked measured and was not* — it would have passed every run on this machine and failed the first time somebody ran the gate on an air-gapped host, which is precisely the case the offline mode was built for (ADR 0202). Nothing in the tree checks that an offline claim's proofs are offline; `--network none` in the runner is the closest thing to one. | 0202 |
 | **D1228** | The toolchain entrypoint's input check: `[ -f /work/tsconfig.json ]`, and the refusal *"there is no generated client to check"*. | **An UNREADABLE directory is not an absent one, and the test was false for both.** The image runs as 65532; pytest's `tmp_path` is `0700` owned by the invoking user, so a mount of it is perfectly present and simply cannot be read — and every `[ -f … ]` inside answers false. Measured with a control: the same directory at `0755` typechecks, at `0700` the image said *"tsconfig.json is not there"* and exited 2. Two of this module's proofs failed that way before the cause was found. | A third answer, before the file tests: an unreadable `/work` exits **3** and says which uid the image runs as and what the directory needs, explicitly ending *"This is NOT 'no client here'"*. `test_an_unreadable_mount_is_reported_as_unreadable_and_never_as_absent` asserts the code, the message, and — the control — that the same bytes at `0755` typecheck. | **ADR 0195's class, in a component built the same day by someone who had just written the ADR's number into three other files.** Reported as absence it sends a developer to regenerate a client already sitting in front of them. The reason it was found is that the failure happened to be *mine*, in a test; had the first person to hit it been an adopter with an unusual umask, the message would have sent them the wrong way and the tests would all have been green. | 0195 |
+| **D1229** | The generated client's `normalizeServed`, and `openapi_normalize._refuse_residue` it mirrors: after substituting `host` and `basePath` with the sentinels, refuse if either real value *survives anywhere* in the document. | **A `basePath` of `/` occurs in every OpenAPI document, so the check refuses every document.** Every path key begins with one, so the substring test always matches. Measured in rig 23g: PostgREST configured with a proxy URI of `http://arm-b:3000/` served a document whose fingerprint was **exactly** the committed snapshot's (`808ac715c09aeebc`), and the client refused it with *"the document still names / after substitution, so the normalized form would not be project-neutral"*. | The client checks residue on the **trailing-slash-stripped** base path and skips it when empty — there is nothing distinctive to look for — and gains the capture's **bare-hostname** clause, which it was missing. Measured after the change: production's shape still `ok`, so the added clause refuses nothing real. **`openapi_normalize` is NOT changed**: it carries the same clause and cannot reach it, because `project.schema.json`'s `public_base_path` pattern (`^/[^/].*[^/]$\|^/[^/]$`) forbids a bare `/`. | The interesting half is which copy was worth repairing. In the capture the condition is unreachable and the module is released; in the client it is reachable by whoever holds the package, because a client is copied and pointed at things its author never saw. Same clause, two reachability answers, two decisions. | 0204 |
+| **D1230** | Run 4's rig, as planned: PostgREST beside `apg dev`, the client pointed at its published port. No edge. | **That rig cannot reproduce the shape any adopter has.** Production serves `basePath: /api/rest` because Traefik strips that prefix before PostgREST, and PostgREST has no path-prefix option of its own. Measured across rigs 23g and 23h: the client pointed at PostgREST's root is refused — correctly — with *"the document's basePath /api/rest is not the path of http://postgrest:3000"*; pointed at the prefix it gets a **404**. So the planned rig could only ever have tested a base path no deployment publishes. | The rig runs the **pinned Traefik** with a `stripPrefix` middleware over the project's own `API_REST_PATH`, which is what the deployment does — a rig as a second configuration of the product (ADR 0065/0066), not a different thing. Through it: `init` → `ok`, a typed read → `ok`, the write → `refused` `PT401`. The direct-at-the-root arm is kept as the **control**, because a pass through the edge has to be a pass *because of* the edge. | A rig that omits the edge is a proof by a route the product does not take (ADR 0065/0066) — and the omission is invisible, because the client's refusal at the root looks like a client defect rather than a missing component. Rig 23a did not meet this: it normalized with `expected_base_path=served["basePath"]`, taking the served value as the expected one, so it never exercised the assertion at all. | 0204 |
+| **D1231** | Run 4's rig, as planned: *"drop `PGRST_JWT_SECRET` (the rig has no key set) and record in the docstring that role selection is therefore by `PGRST_DB_ANON_ROLE`"*. | **Every request then answers 500.** The generated client ALWAYS sends `Authorization: Bearer` — reading the surface *as the caller* is the whole of ADR 0204 — and PostgREST with no JWT configuration cannot verify a token it was given. Measured in rig 23g: all four arms returned `{"kind":"unreachable","reason":"the service answered 500"}` before the secret existed. Rig 23a never met it because it sent no Authorization header. | The rig generates an HS256 secret, sets `PGRST_JWT_SECRET`, and mints its own tokens naming a **role and no subject** — `bin/dev-token.py`'s documented property, since migration 0013's hook returns early without a `sub`. That is also what makes the two proofs honest: the read succeeds and returns **0 rows** because no `app.user_id` is set, and the write is refused with a real `PT401` for want of an identity. The role now comes from the token rather than from `PGRST_DB_ANON_ROLE`, which is how a deployment selects it. | `PGRST_DB_ANON_ROLE` was the right mechanism for rig 23a, which fetched a document anonymously, and the wrong one the moment the *client* became the instrument. A rig inherits its predecessor's configuration far more readily than its predecessor's reason for it. | 0204 |
+| **D1232** | Run 4's `GEN-TYPES-001` proof of the query string, as planned: *"the smoke prints the URL it built, asserted to be `…/notes?select=id,title&order=created_at.desc&limit=5&title=eq.x` after decoding"*. | **The client does not expose the URL it built, and adding that only for a test would be a backdoor.** The deeper problem is that the assertion would compare the client against a string this session wrote — it could not tell a correctly built query from an incorrectly built one that the test was updated to match. | Proved **through the service instead**. The smoke gains an optional `APG_SMOKE_FILTER_VALUE`, and the proof sends `probe&select=no_such_column`: percent-encoded it is an ordinary filter matching nothing (**200**), concatenated it becomes a second query parameter naming a column the relation does not have (**400**). Two outcomes far apart, neither a coincidence, and PostgREST is the judge rather than a literal in the test. The unfiltered read in the same invocation is the control. | ADR 0127 — *a caller value is a value and never syntax* — is one of this product's central claims, and the planned proof would have asserted it against a string rather than against a parser. The battery's `encodeURIComponent` mutation is what says the difference is real. | 0127 |
 
 ---
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1004,7 +1009,94 @@ render; the `gate` job's suite runs it too. Read both jobs' logs for the
 step's wall time (Run 5's envelope wants the generation time, and this
 step's time is a bound on the smoke).
 
-**Done.** *(the run writes this)*
+**Done.** 2026-09-12. `tests/contract/test_generated_client_runtime.py`, seven
+proofs, all green against a real cluster. Rows **D1229–D1232**; next free
+**D1233**.
+
+**THE CHAIN CLOSES, MEASURED END TO END.** `apg dev up` (33 migrations), the
+authenticator activated by the rig's one superuser action through `docker exec`
+stdin, PostgREST configured from `compose.yaml`'s own `postgrest.environment`
+block with every `${…}` resolved from the rendered `compose.env`, the pinned
+Traefik stripping the project's own `API_REST_PATH`, and the generated client
+run in the toolchain image against it:
+
+```
+{"step":"init","kind":"ok"}
+{"step":"read","relation":"note_embeddings","kind":"ok","rows":0}
+{"step":"filter","relation":"notes","column":"title","kind":"ok"}
+{"step":"rpc","name":"create_note","kind":"refused","code":"PT401"}
+```
+
+`init` verified `808ac715c09aeebc…` — **arrived at two ways in one assertion**:
+computed here from the committed snapshot by `openapi_normalize.fingerprint`,
+and computed inside the container by the emitted `canonical.ts` over the
+document the service actually served, as the caller. That is rig 23a's
+measurement made a proof, with the client as the instrument.
+
+The three refusals, each distinct: the `anon` role's document →
+`stale_contract` **naming both digests** (`808ac715c09a…` expected,
+`1da00c119b98…` served) and no later call attempted; nothing listening and the
+right service at a wrong path → `unreachable`; the right service at its own
+root → `unparsable`, naming the basePath mismatch. **A read of 0 rows is the
+correct result** — the token names a role and no subject, so migration 0013's
+hook sets no `app.user_id` and every owner-scoped policy matches nothing; rows
+here would mean the policy was not applied.
+
+**FOUR ROWS, AND THREE ARE THE RIG'S DESIGN NOT SURVIVING CONTACT WITH THE
+PRODUCT.**
+
+* **D1230 — the rig needed the product's own edge.** PostgREST serves at the
+  root and has no prefix option; production's `basePath: /api/rest` exists
+  because Traefik strips it. The planned rig — PostgREST alone — could only ever
+  have tested a base path no deployment publishes: measured, the client at the
+  root is refused (correctly) and at the prefix gets a 404. Rig 23a never met
+  this because it normalized with `expected_base_path=served["basePath"]`,
+  taking the served value as the expected one, so it never exercised the
+  assertion at all. The direct-at-the-root arm is kept as the control.
+* **D1231 — the planned rig would have answered 500 to everything.** It said to
+  drop `PGRST_JWT_SECRET` and select roles by `PGRST_DB_ANON_ROLE`. But the
+  generated client ALWAYS sends `Authorization: Bearer` — reading the surface as
+  the caller is the whole of ADR 0204 — and PostgREST with no JWT configuration
+  cannot verify a token it was handed. All four arms of rig 23g returned
+  `{"kind":"unreachable","reason":"the service answered 500"}` before the rig
+  signed its own. `PGRST_DB_ANON_ROLE` was right for rig 23a, which fetched a
+  document anonymously, and wrong the moment the CLIENT became the instrument.
+* **D1232 — the query-string proof would have compared the client to a string
+  this session wrote.** Replaced by a proof through the service: the filter
+  value `probe&select=no_such_column` is **200** when percent-encoded and
+  **400** when concatenated, because the second form names a column the relation
+  does not have. PostgREST is the judge rather than a literal in the test, and
+  ADR 0127 — *a caller value is a value, never syntax* — is asserted at the
+  client for the first time.
+* **D1229** is the defect the rigs exposed on the way: the client refused any
+  document whose `basePath` is `/`, because `/` occurs in every OpenAPI document
+  and the residue check is a substring test. Unreachable for this product —
+  `project.schema.json` forbids a root base path — but reachable by whoever
+  holds a copied client, so the client was repaired and `openapi_normalize`,
+  which carries the same clause and cannot reach it, was not.
+
+**BATTERY: 5 mutations, 5 killed, 5 paired controls green**, the emitter
+restored byte-identical and the committed client's ten files unchanged. Every
+mutation is made in `client_typescript.py`, the client **regenerated with the
+product's own command**, and the proof run against a fresh cluster — a battery
+over the emitter's source would only prove that the emitter emits what it
+emits. Killed: the fingerprint comparison inverted, the basePath assertion
+removed, a refusal's code read from the status instead of the body,
+`encodeURIComponent` dropped, and an unreachable service reported as a stale
+contract. **The pre-flight earned its keep**: the first run stopped on a
+`0x` anchor — a backslash lost to Python string escaping — before spending
+twenty minutes reporting an unapplied mutation as a weak test (D269).
+
+**Cost, for Run 5's envelope:** the module is **~150 s** wall (7 proofs, one
+`apg dev up`, one PostgREST, one edge, one image build, 13 container runs); the
+battery is six full cycles at roughly that each.
+
+**Targeted:** `test_generated_client_runtime`, `test_client_typescript`,
+`test_client_ir`, `test_generated_client_toolchain`, `test_generate_command`,
+`test_dev_environment_cluster` (the `apg dev` round trip is shared, and a
+fixture that left an environment up would make the next module's `down` the
+first thing that ran), `test_repository_contract`, `test_acceptance_registry`.
+`ruff check` exit 0.
 
 ### Run 5 — the version, the hook, the envelope, the documents
 

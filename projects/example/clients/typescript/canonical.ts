@@ -83,8 +83,21 @@ export function normalizeServed(document: Json, restUrl: string): NormalizeResul
   neutral.basePath = SENTINEL_BASE_PATH;
   neutral.schemes = [...REQUIRED_SCHEMES];
 
+  // The guard on the substitution, mirroring the capture's own
+  // (`openapi_normalize._refuse_residue`): the BARE hostname as well as the
+  // `host:port` form, because that is the form a $ref, a description or an
+  // example would carry.
+  //
+  // The base path is checked only when it is DISTINCTIVE (D1229). A base path
+  // of "/" -- or of "" -- occurs in every OpenAPI document, since every path
+  // key begins with one, so a substring test over it refuses every document
+  // there is. Measured: a rig serving `basePath: "/"` was refused by this very
+  // clause, with a message about project-neutrality, for a document that was
+  // perfectly correct. The capture carries the same clause and cannot reach it,
+  // because `project.schema.json` forbids a `public_base_path` of "/".
   const residue = JSON.stringify(neutral);
-  for (const real of [host, basePath]) {
+  const bareHost = host.includes(":") ? host.slice(0, host.lastIndexOf(":")) : host;
+  for (const real of [host, bareHost, expected]) {
     if (real.length > 0 && residue.includes(real)) {
       return {
         kind: "unparsable",

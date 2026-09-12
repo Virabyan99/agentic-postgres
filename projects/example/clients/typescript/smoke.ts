@@ -58,6 +58,22 @@ say("read", { relation: "note_embeddings", kind: read.kind,
   ...(read.kind === "ok" ? { rows: Array.isArray(read.body) ? read.body.length : 0 } : {}) });
 if (read.kind !== "ok") failures += 1;
 
+const probe = process.env.APG_SMOKE_FILTER_VALUE;
+if (probe) {
+  const filtered = await client.listNotes({
+    limit: 1,
+    filters: [{ column: "title", op: "eq", value: probe }],
+  });
+  const detail = filtered.kind === "refused"
+    ? { status: filtered.status, code: filtered.code }
+    : {};
+  say("filter", { relation: "notes",
+    column: "title", kind: filtered.kind, ...detail });
+  if (filtered.kind !== "ok") failures += 1;
+} else {
+  say("filter", { skipped: "APG_SMOKE_FILTER_VALUE is not set" });
+}
+
 if (process.env.APG_SMOKE_ALLOW_WRITE === "1") {
   const called = await client.createNote({ p_title: "apg-smoke" } as never);
   say("rpc", { name: "create_note", kind: called.kind,

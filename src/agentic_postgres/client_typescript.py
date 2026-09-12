@@ -252,8 +252,21 @@ export function normalizeServed(document: Json, restUrl: string): NormalizeResul
   neutral.basePath = SENTINEL_BASE_PATH;
   neutral.schemes = [...REQUIRED_SCHEMES];
 
+  // The guard on the substitution, mirroring the capture's own
+  // (`openapi_normalize._refuse_residue`): the BARE hostname as well as the
+  // `host:port` form, because that is the form a $ref, a description or an
+  // example would carry.
+  //
+  // The base path is checked only when it is DISTINCTIVE (D1229). A base path
+  // of "/" -- or of "" -- occurs in every OpenAPI document, since every path
+  // key begins with one, so a substring test over it refuses every document
+  // there is. Measured: a rig serving `basePath: "/"` was refused by this very
+  // clause, with a message about project-neutrality, for a document that was
+  // perfectly correct. The capture carries the same clause and cannot reach it,
+  // because `project.schema.json` forbids a `public_base_path` of "/".
   const residue = JSON.stringify(neutral);
-  for (const real of [host, basePath]) {{
+  const bareHost = host.includes(":") ? host.slice(0, host.lastIndexOf(":")) : host;
+  for (const real of [host, bareHost, expected]) {{
     if (real.length > 0 && residue.includes(real)) {{
       return {{
         kind: "unparsable",
@@ -848,6 +861,42 @@ if (process.env.APG_SMOKE_ALLOW_WRITE === "1") {{
         else '\nsay("rpc", { skipped: "this contract declares no function" });\n'
     )
 
+    # **The filter step exists to prove ADR 0127 at the client**: a caller value
+    # is a VALUE and never syntax. It runs only when asked, over the first
+    # relation that has a `text` column -- an `eq` on a uuid or a vector with an
+    # arbitrary probe string is refused for its TYPE, which would look like the
+    # same refusal for an entirely different reason.
+    filterable = next(
+        (
+            (relation, column)
+            for relation in ir.relations
+            for column in relation.columns
+            if column.format == "text"
+        ),
+        None,
+    )
+    if filterable is None:
+        filter_step = '\nsay("filter", { skipped: "no text column to filter on" });\n'
+    else:
+        filter_relation, filter_column = filterable
+        filter_step = f"""
+const probe = process.env.APG_SMOKE_FILTER_VALUE;
+if (probe) {{
+  const filtered = await client.{_camel(f"list_{filter_relation.name}")}({{
+    limit: 1,
+    filters: [{{ column: {json.dumps(filter_column.name)}, op: "eq", value: probe }}],
+  }});
+  const detail = filtered.kind === "refused"
+    ? {{ status: filtered.status, code: filtered.code }}
+    : {{}};
+  say("filter", {{ relation: {json.dumps(filter_relation.name)},
+    column: {json.dumps(filter_column.name)}, kind: filtered.kind, ...detail }});
+  if (filtered.kind !== "ok") failures += 1;
+}} else {{
+  say("filter", {{ skipped: "APG_SMOKE_FILTER_VALUE is not set" }});
+}}
+"""
+
     return f"""{banner}
 //
 // A driver, not a library. It reads three values from the environment, calls
@@ -901,7 +950,7 @@ if (started.kind !== "ok") {{
   say("done", {{ ok: false, reason: started.kind }});
   process.exit(1);
 }}
-{read_step}{rpc_step}
+{read_step}{filter_step}{rpc_step}
 if (mcpUrl) {{
   const agent = createAgentClient({{ mcpUrl, token }});
   const roster = await agent.listResources();
