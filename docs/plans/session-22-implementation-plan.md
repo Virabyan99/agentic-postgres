@@ -103,7 +103,7 @@ D1060, D1066, D1071, D1076, D1098, D1110, D1131.
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1198**. Rows D1157–D1175
+Six columns, next free number after this table **D1199**. Rows D1157–D1175
 were measured at planning on 2026-09-11 at `90c1c19`; the runs add theirs
 below them as they go, each run's numbers named in its Done paragraph. Run 1
 added **D1176–D1179**, measured in rigs 22a–22e on 2026-09-11 at `dd9e2be`;
@@ -113,7 +113,7 @@ found by a test going red during the move it describes. Run 4 added
 **D1189–D1191**, the first of them a defect two sessions old that only a
 proof trying to READ could find. Run 5 added **D1192–D1193**, one a guard that
 could not be observed where it was being asserted and one a rig that reverted
-its own run's work. Run 6 added **D1194–D1197**, and every one of the four is a
+its own run's work. Run 6 added **D1194–D1198**, and every one of the five is a
 GUARD rather than a product defect — an anchor that stopped matching, an
 allowlist one machine short, a scan that asked a dispatcher about a flag it
 delegates, and an assertion that two different mutations walked through.
@@ -161,6 +161,7 @@ delegates, and an assertion that two different mutations walked through.
 | **D1195** | `test_capacity_envelope.py::test_a_machine_measurement_names_the_machine_it_describes`: *"a `MACHINE` measurement must name its machine among its conditions"*, implemented as `"development machine" in condition or "deployment host" in condition`. | The envelope has had exactly two machines for eight sessions, so the allowlist and the world coincided. `apg dev` is measured on a **third** — a CI runner is where the uncached first run can be measured at all, because measuring it on the workstation means evicting the image the whole contract suite shares (D1168, D1169). The rule was right and its enumeration was one short. | `MACHINES = ("development machine", "deployment host", "CI runner")`, a named constant with its own comment, and the widening is to a machine the envelope actually has rows from. Non-negotiable §2's distinction applies exactly: **widening an allowlist to a measured set is not weakening**; loosening it to *"names some machine"* would be. | An enumerated allowlist is the right instrument and it has a maintenance cost, which is the point — a rule that accepted any capitalised noun would have accepted a typo as a new machine (ADR 0006's reason, in a second place). | — |
 | **D1196** | `test_documentation_index.py::test_every_flag_the_readme_shows_appears_in_that_commands_usage`: every `--flag` on a README command line appears in that command's `--help`. | `bin/apg.sh` is a **dispatcher**. Its `--help` lists verbs; `--project` is documented by `bin/dev.sh --help`, which is what `apg.sh dev` execs. So the first README line this session added — the one a reader is most likely to copy — was reported as an invented flag, and every future line through the front door would have been too. The guard has been correct since Session 7 because no README line had gone through a dispatcher before. | The scan resolves the verb: a line whose command is `bin/apg.sh` and whose next token is a bare word is checked against `bin/apg.sh <verb> --help`. **Resolved rather than exempted** — an exemption for `apg.sh` would have made every flag it dispatches unscanned, which is the opposite of what the test is for. A flag nobody documents anywhere is still caught, and battery arm (p) proves it by inventing `--detach`. | The front door was added in Session 13 and the README only started routing readers through it now. A guard that reads a command's help has to know what the command IS; *"ask the binary"* is right until the binary's job is to delegate. | — |
 | **D1197** | Run 6's own battery, arm (k): *"the gate checks for docker after the suite has skipped past it"* — and the guard `assert "docker version" in offline_mode`. | **The same mutation survived two versions of the test.** `true # docker version` leaves the words in the file. The first version scanned the function including its comments, and this gate explains at length what each step does, so the sentence *describing* the check satisfied the assertion that the check exists — D277 exactly. The second version stripped comment LINES, and a trailing comment is not a comment line. Both read a substring where the question was "does this script RUN this". | `code()` strips comment lines for every source-reading test in the module, and the docker assertion goes further: it finds a LINE that begins with `docker version`, and derives the ordering check and the message scan from that line's index. A mention, an argument and a commented-out command are all excluded by construction. | Two attempts at the same assertion, killed by the same mutation, is the argument for batteries rather than an argument about this test. Neither version was obviously weak; what made them weak was the subject being a file whose comments are unusually good. | — |
+| **D1198** | CLAUDE.md §1: *"`PYTHONDONTWRITEBYTECODE=1`, clear `__pycache__` first — a same-size mutation applied and reverted within one second runs stale bytecode."* Written for mutation batteries. | **The rule applies to any fixture that edits a module a subprocess imports, and Run 5's `declared_offline` is one.** It writes `evidence_claims.py` twice inside a single test: once with `claim_mode`'s first guard neutralised (`if False:`) and once with it intact (`if modes:`) — **the same number of bytes**, a fraction of a second apart. A `.pyc` is revalidated on the source's mtime in whole seconds plus its size, so the two versions are indistinguishable to the import system and the second subprocess ran the first one's bytecode. The control arm, whose entire job is to show the FIRST guard refusing, then got the second guard's message and the test failed asserting that `claim_mode` no longer works. **It passed in every targeted run and failed in the full suite**, because whether a `.pyc` exists at all depends on what ran before — which is why Run 5's battery, Run 5's CI and Run 6's fourteen-module list all missed it. | `run_writer` passes `PYTHONDONTWRITEBYTECODE=1`, and `declared_offline` removes any existing `evidence_claims.*.pyc` after every write and after the restore. **Measured both ways** (`/tmp/r6-flake.sh`, `/tmp/r6-flake-control.py`): with the repair reverted, 3 of 5 warm runs fail; with it, 0 of 5. The control writes the file back by copy and byte-compares it. | A flake is a proof that is sometimes not one, and this one was written by the run that added the mode it protects. Two lessons, and the second is the general one: the bytecode rule is not about batteries, it is about **any** test that rewrites a module between two subprocess invocations; and a targeted list cannot find a failure whose trigger is what ran BEFORE — only the whole suite can, which is one concrete thing the gate at a run's close buys. | — |
 ---
 
 ## 2. What the session adds to `tests/acceptance-registry.yaml`
@@ -1274,7 +1275,7 @@ envelope (step 3's second commit). Record both run ids.
 
 **Done.** 2026-09-12. `CURRENT_SESSION` 22, `VERSION` 1.3.0, nine requirements,
 six claims, **four of them the first offline claims this project has had**.
-Four divergence rows (**D1194**–**D1197**), next free **D1198**. `ruff format`
+Five divergence rows (**D1194**–**D1198**), next free **D1199**. `ruff format`
 and `ruff check` exit 0. **Battery 17/17 killed**, every paired control green,
 every file restored by copy and byte-compared — and two of the seventeen took
 three attempts, which is recorded below rather than smoothed over.
@@ -1365,6 +1366,25 @@ D1–D1194); §11 records what this session leaves open, including what Session
 *Collected, not asserted.* `pytest --setup-plan
 tests/deployment/test_session22_plane.py` with `APG_LIVE_HOST=1` and both
 outputs paths set: all three proofs collected, none deselected (D671, D676).
+
+*And then the gate found a fifth* (**D1198**), which is the one worth reading.
+The full contract suite at this run's close failed on
+`test_the_offline_half_refuses_a_claim_with_a_live_node_id` — a test that had
+passed in Run 5's battery, in Run 5's CI, and in this run's fourteen-module
+targeted list. Run 5's `declared_offline` fixture writes `evidence_claims.py`
+twice inside one test, and the two versions differ by `if False:` against `if
+modes:`: **the same number of bytes**, a fraction of a second apart. Python
+revalidates a `.pyc` on mtime in whole seconds plus size, so the second
+subprocess imported the first version's bytecode and the control arm got the
+wrong guard's refusal. It passed whenever no `.pyc` happened to exist, which is
+every targeted run. Repaired and **measured both ways**: reverted, 3 of 5 warm
+runs fail; repaired, 0 of 5. Next free **D1199**.
+
+The suite after it: **5362 passed, 0 failed, 3 skipped**, and
+`write-session-evidence.py --session 22 --mode offline` over that JUnit writes
+`dev_churn`, `dev_environment`, `dev_isolation` and `offline_evidence` all
+`passed` — which is Run 7's step 1, confirmed before the push rather than
+discovered by a red CI run.
 
 
 ### Run 7 — the close (no trip)

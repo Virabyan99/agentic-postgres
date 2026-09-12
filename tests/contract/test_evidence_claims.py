@@ -13,6 +13,7 @@ none of them is ``passed``.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -507,12 +508,20 @@ def deployed(tmp_path: Path, key: str) -> Path:
 
 
 def run_writer(*args: str) -> subprocess.CompletedProcess[str]:
+    # `PYTHONDONTWRITEBYTECODE` because `declared_offline` below EDITS the
+    # module this subprocess imports, twice inside one test (D1198). A `.pyc`
+    # is revalidated on the source's mtime in whole seconds and its size, so
+    # two edits a fraction of a second apart that happen to produce the same
+    # file length are indistinguishable to the import system -- and the second
+    # import silently runs the first edit's bytecode. Not writing one at all is
+    # the cheap half; `declared_offline` removes any that already exists.
     return subprocess.run(
         [sys.executable, str(WRITER), *args],
         capture_output=True,
         text=True,
         check=False,
         cwd=REPO_ROOT,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
     )
 
 
@@ -1356,6 +1365,28 @@ def write_offline_half(
     )  # fmt: skip
 
 
+def drop_bytecode(path: Path) -> None:
+    """Remove any cached bytecode for one source file.
+
+    **D1198, and it is CLAUDE.md §1's rule arriving somewhere nobody put a
+    battery.** `declared_offline` writes this module twice inside one test: once
+    with `claim_mode`'s first guard neutralised and once with it intact. Those
+    two versions differ by `if False:` against `if modes:` -- the SAME NUMBER OF
+    BYTES -- and a `.pyc` is revalidated on the source's mtime in whole seconds
+    plus its size. Two same-size writes inside one second are therefore
+    indistinguishable to the import system, and the second subprocess ran the
+    first version's bytecode.
+
+    What that looked like was a product defect: the control arm, whose whole job
+    is to show the FIRST guard refusing, got the second guard's message, and the
+    test failed asserting `claim_mode` no longer works. It failed in the full
+    suite and passed in every targeted run, because whether a `.pyc` exists at
+    all depends on what ran before.
+    """
+    for cached in (path.parent / "__pycache__").glob(f"{path.stem}.*.pyc"):
+        cached.unlink(missing_ok=True)
+
+
 @pytest.fixture
 def declared_offline(tmp_path: Path):
     """Declare one offline claim in the library, and put it back afterwards.
@@ -1406,11 +1437,13 @@ def declared_offline(tmp_path: Path):
             text = text.replace(anchor, "    if claim in OFFLINE_CLAIMS:\n        if False:", 1)
 
         path.write_text(text, encoding="utf-8")
+        drop_bytecode(path)
 
     try:
         yield declare
     finally:
         path.write_bytes(original)
+        drop_bytecode(path)
         assert path.read_bytes() == original, "evidence_claims.py was not restored"
 
 
