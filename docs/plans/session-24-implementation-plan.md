@@ -4,7 +4,7 @@
 `main`. **Runs 1, 2 and 3 are Done** (2026-09-12, on branch `session-24`);
 Runs 4–7 are ahead. §1 was D1243–D1258 at planning (each read from the tree at `035192d`),
 and Run 1 added **D1259–D1262** and rewrote four with their numbers; the
-runs add theirs below, so **next free is D1274**.
+runs add theirs below, so **next free is D1276**.
 ADR **0205** is this session's (written in Run 1); next free after it 0206.
 **Brief:** `docs/plans/stage-3-plan.md` §5 *Session 24 — Studio* whole (Builds
 / Already true / Must not / Measures / Closes), its rows D1069 (one Studio, a
@@ -176,7 +176,7 @@ and by which sweep).
 
 ## 1. The divergence table
 
-Six columns, next free number after this table **D1274** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1273). Rows D1243–D1258
+Six columns, next free number after this table **D1276** (Run 1 added D1259–D1263; Run 2 D1264–D1267; Run 3 D1268–D1273; Run 4 D1274–D1275). Rows D1243–D1258
 were read from the tree on 2026-09-12 at `035192d`; where a row's *Repository
 does* column says *measure*, Run 1 owns the measurement and the row is
 rewritten with the numbers.
@@ -214,6 +214,8 @@ rewritten with the numbers.
 | **D1271** | Run 3 adds a `bin/` command, and §5's rule is that the run adds it to `SHELL_COMMANDS`/`PYTHON_COMMANDS` and runs `test_cli_contract` (D1014, D1188). | **Two OTHER released guards caught it, and both were right.** (a) `test_no_command_documents_a_secret_argument` scans `--help` output for `--password` as a whole flag; the usage block said *“There is no --password flag”*, which is the opposite of documenting one and which a regular expression cannot read. (b) `test_no_operator_command_puts_a_service_directory_on_the_path` flags any `bin/*.py` holding both `"services"` and `sys.path` — the shape `bin/auth-admin.py` had when it made an image-only package importable in a checkout and nowhere else (D292). `bin/studio.py` names `services/studio` to READ three files, which is not that. | **Neither guard is touched.** (a) The help says the same thing without the spelling (*a password is never taken as a command-line argument*); the `--password)` case arm still refuses the flag BY NAME on stderr, which `--help` does not print. (b) `ASSET_ROOT` moves to `src/agentic_postgres/studio.py` beside `BIND_ADDRESS`, so the command holds no such literal — which is ADR 0002's rule anyway, and `services/studio/` is not a service: it builds no image and no deploy runs it. | A guard that fires on a file it was not written for is a prompt to move the file, not to teach the guard about negation. A scan that had to understand *there is no X* would pass the next command that documented one in a sentence. | 0002, D292 |
 | **D1272** | Run 3: *“copy `generate.py`'s loading sequence, do not re-derive it”*. | A copy is a second authority unless something holds the two together (D486), and the better shape — extracting the sequence into the package so both commands call it — would rewrite a RELEASED command's error paths: `bin/generate.py`'s `fail()` exits with codes `apg studio` does not share, and every Session 23 proof drives them. | **Copied, and the pair is compared**: `test_the_ir_studio_builds_is_the_one_generate_wrote` asserts Studio's four digests, its relation names and its tool names equal the committed `generated.json`'s for the example project. A drift is then a red proof naming two commands rather than a UI quietly describing a contract the client does not. The extraction is §10's, priced at one module and one pass over `generate.py`'s exits. | A refactor of `apg generate` for the convenience of `apg studio` is a change to the wrong command, made in a session that is not about it. | 0002, D486 |
 | **D1273** | §5: *“CI green on every commit that changes code”*, with Run 2 building `src/agentic_postgres/studio.py` and its unit proofs, and Run 3 building `bin/studio.py` — the module's only caller — one commit later. | **The two cannot both be true.** `test_repository_contract.py::test_no_module_is_imported_only_by_its_own_tests` refuses a package module whose only importers are its own tests: *“a module with no caller is a feature that does not exist, however well it is tested”* (D204). Run 2's commit is exactly that state, and CI said so — `34a3b28`, both jobs red on that ONE proof, `1 failed, 5507 passed` in the Session 1 gate and `1 failed, 5597 passed` in the Session 2 suite, nothing else in either. The workstation could not have seen it: the targeted list for a run that adds a module does not include `test_repository_contract`, and the guard is about the repository rather than about anything Run 2 touched. | **Recorded, not repaired by rewriting history.** Run 3's commit adds the caller and `test_repository_contract` passes in its targeted list (895 passed) — and **`deb4aa9`'s own CI is green**, read by full SHA, which is what makes this a reading of the split rather than a guess about it. The branch therefore has one red commit by construction, and the alternative — landing the pure core and its command in one commit — is what a future session should plan instead: the split is a reviewing convenience, and D204 is a property of the tree at each commit. | The guard is right and the plan was wrong, which is the direction this table exists for. A session that had “repaired” it by importing `studio` from somewhere to satisfy the scan would have built the feature the guard was written to prevent. | D204 |
+| **D1274** | Run 4: *“**Capabilities** (the IR's tools: name, kind, arguments, scopes; the lock's `tools_sha256` and a fixed sentence)”* listed as one of six views, against Run 3's rule that *“under anything but ok the schema and query views are refused”*. | **Capabilities is not in either list, and Run 3 had already decided it by accident.** Run 3 built ONE endpoint for everything the IR carries, `/__apg/schema`, gated on `surface.answer == "ok"` — so the capabilities view would have been refused because a REST document disagreed. Those are two contracts: `tools_sha256` is compiled from the capability manifest and the reviewed surface, `rest_openapi_sha256` is the document PostgREST serves, and no launch answer is evidence about the first. The plan's own sentence for the view says as much — *whether the plane serves it is `bin/apg.sh doctor`'s question* — so it cannot be gated on a confirmation that was never about it. | **`/__apg/capabilities` is a second local endpoint, ungated**, served from `studio.capabilities_view(ir)` with `CAPABILITIES_NOTE` travelling in the payload rather than written into the page, so the data and its caveat cannot come apart. `forwarder_table()` is untouched: both endpoints are local and neither is an upstream request. `test_the_capabilities_view_is_served_whatever_the_surface_answered` runs both arms and asserts the two payloads are identical, with the schema view's 409 beside it as the control. | ADR 0195's folded third outcome, one level up: the answer was about one contract and would have been reported as though it were about another. | ADR 0195, D1201 |
+| **D1275** | §5 Run 4: *“`test_launch_answers_ok_against_the_surface_the_ir_was_built_from`”*, with the fixture's one administrator holding every admin scope — and §5 Run 3's launch line, *“run `bin/apg.sh generate`”*, as the whole of what `stale_contract` says. | **The served REST document is scoped to the caller's grants, and the administrator's is empty.** Rig 24d, one URL and three tokens the auth application issued: `authenticated` is served 16,024 bytes, 8 paths and 3 definitions and fingerprints EQUAL to the committed snapshot; `project_admin` is served 2,393 bytes, **1 path and 0 definitions — byte for byte the same document as `anon`**, because the administrative role administers the auth service's endpoints and holds nothing in `api`. So an administrator's launch answers `stale_contract`, and the first run of the proof did exactly that. | **The answer is right and the sentence was wrong.** `stale_contract` means *the surface served to this subject is not the captured one*, which is the meaning Session 23's client already has — `test_init_refuses_a_surface_with_another_fingerprint_naming_both` produces it by changing only the token's role. What could not stand is a launch line offering ONE cause: an administrator told to regenerate would have regenerated a capture that was exactly right. `bin/studio.py`, `bin/studio.sh --help` and the page's detail line now name both causes. The `ok` proof launches as `alpha-user-a`, and `test_an_administrators_surface_is_the_one_their_grants_reach` is the administrator's half, with the `ok` launch beside it as the control. | The same shape as D1260, found the same way and one run later: a comparison that looked measured, against a document nobody had fetched as this subject. A session that had “fixed” the product to match the first run would have taught Studio to accept a surface it had not verified. | D1260, ADR 0204, rig 23a |
 
 ---
 
@@ -994,8 +996,69 @@ agent can and cannot do); the Session 16 `refused()` helper
 read CI. **CI's Session 2 job now runs the rig** — read its wall time in the
 run log and record it.
 
-**Done.** *(the fixture's wall time here and in CI; the refresh measurement;
-every number the proofs read; the battery table.)*
+**Done.** Six views in `services/studio/`, `tests/contract/test_studio_runtime.py`
+(17 proofs) and `tests/contract/test_studio_assets.py` (2), and one product
+change the rig forced.
+
+**The fixture costs 59 s for the whole module** on this workstation — the rig
+built, seventeen proofs run, everything torn down — against rig 24b's 40 s to
+the same point and D1211's ~3 min estimate for a PostgREST rig. `apg dev up` is
+16 s of it. Module scope is what makes that one price rather than seventeen.
+
+**Rig 24d, and the run's find** (D1275). The first execution of the `ok` proof
+answered `stale_contract` for the administrator, so the question got a rig: one
+URL, three tokens the auth application issued. `authenticated` → 16,024 bytes,
+8 paths, 3 definitions, fingerprint `808ac715…`, EQUAL to the committed
+snapshot. `project_admin` → 2,393 bytes, **1 path, 0 definitions**, fingerprint
+`1da00c11…` — and `anon` → the same 2,393 bytes and the same fingerprint. The
+administrative role holds nothing in `api`, so PostgREST serves it the
+anonymous document. The ANSWER was right; the launch line was not, and now
+names both causes rather than sending an administrator to regenerate a correct
+capture.
+
+**The refresh measurement** (the plan asked for it first): the rig's
+application cannot issue a short-lived token. `app.service.TOKEN_TTL_SECONDS`
+is `claims.MAX_TTL_SECONDS`, a module constant of 900 with no settings path,
+and rig 24b read `expires_at` back from a real login 900 s out. So
+`test_studio_refreshes_before_expiry` drives the product's own
+`Upstream.bearer` against a stand-in whose login hands out a token expiring in
+10 s, and asserts `POST /auth/refresh` is among the calls the double recorded —
+which is better than the monkeypatched clock the plan offered as the fallback,
+because it exercises the real helper. The control is the other sixteen proofs:
+they run against the real application at 900 s and none of them refreshes.
+
+**Every number the proofs read**: 2 notes as A and 1 as B, with none of B's
+owner in A's rows; 5 audit rows for one owner, 3 served and 2 refused at two
+different boundaries; 520 rows written for one agent, 500 served, the header
+*“showing 500 of 500 rows on this page; the page is the newest 500”*, and 520
+counted over the table as the superuser — the number the page cannot show; 400
+for each of `outcome`, `denial_reason` and `since`, with `agent_id` accepted as
+the control; `/auth/agent-token` 200 → 422 → **still 200** → 200 → 401, and
+`agent_claims_are_current` NULL after.
+
+**The battery: 14 arms, 14 as expected, first pass.** Thirteen mutations killed
+and one negative control held.
+
+| arm | mutation | killed by | control |
+|---|---|---|---|
+| M1 | the forwarder drops the bearer | the RLS proof, **on `refused`** not on a count | the asset scan |
+| M2 | only `served` rows are rendered | the five-row boundary proof | the 520-row page proof (all served) |
+| M3 | the endpoint stops serving `denial_reason` (0032 undone) | the boundary proof | the page proof |
+| M4 | the page is capped at 100, the header still says 500 | the page proof | the boundary proof (5 rows fit either cap) |
+| M5 | `outcome` is passed upstream | the filter proof | the boundary proof (`owner_id` only) |
+| M6 | the typed confirmation is not checked | the revocation proof | the boundary proof |
+| M7 | the launch does not end its session | the session proof | the `ok` launch |
+| M8 | an upstream refusal body is relayed | the audit-scope proof | the boundary proof |
+| M9 | the schema view is served under `stale` | the stale proof | the `ok` launch (the gate never fired) |
+| M10 | the capabilities view is gated on the surface | the capabilities proof | the `ok` launch |
+| M11 | the log keeps the query string | the log proof | the `ok` launch |
+| M12 | an inline `<script>` | the page parse | the third-party scan |
+| M13 | `https://fonts.example.test` outside a comment | the third-party scan | the page parse |
+| C1 | the same URL **inside** a comment | *both must pass* — HELD | — |
+
+M1 is the arm the plan asked for by name: a refusal and an empty result are the
+same count, so the battery asserts the failure text says `refused`. C1 is what
+makes M13 evidence rather than a scan that deletes what it looks for.
 
 ### Run 5 — the envelope, the documents, the threat model
 

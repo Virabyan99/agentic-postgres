@@ -41,6 +41,7 @@ __all__ = [
     "ASSET_ROOT",
     "AUDIT_PAGE_LIMIT",
     "BIND_ADDRESS",
+    "CAPABILITIES_NOTE",
     "CONTENT_SECURITY_POLICY",
     "CUSTOM_HEADER",
     "IS_NULL_OPERAND",
@@ -57,6 +58,7 @@ __all__ = [
     "SurfaceAnswer",
     "address_book",
     "audit_view_header",
+    "capabilities_view",
     "forwarder_table",
     "own_session",
     "redact_for_log",
@@ -189,6 +191,21 @@ OPERATOR_WIRE_FORMS: dict[str, tuple[str, str]] = {
     "in": ("in", "list"),
     "is_null": ("is", "none"),
 }
+
+#: The sentence the capabilities view carries, and the reason that view is not
+#: gated on the surface answer.
+#:
+#: Studio never asks the deployment what lock it loaded. `list_resources` on the
+#: agent plane reports the lock the running process holds (D1201) and
+#: `bin/apg.sh doctor` is the command that compares it; Studio holds a human's
+#: token, which is not an agent credential, and ADR 0205's rule is that the DX
+#: layer holds nothing the human does not hold. So the honest thing this view
+#: can say is what it is a view OF, said in the view rather than in a document
+#: the reader does not have open.
+CAPABILITIES_NOTE = (
+    "This is the checkout's compiled lock. Whether the plane serves it is "
+    "bin/apg.sh doctor's question, not this page's."
+)
 
 #: What `is_null` sends. A constant because it is the one operand this module
 #: emits that did not come from a caller, and it must not look like one.
@@ -435,6 +452,40 @@ def schema_view(ir: IR) -> dict[str, Any]:
             "tools_sha256": ir.digests.tools_sha256,
             "merged_surface_sha256": ir.digests.merged_surface_sha256,
         },
+    }
+
+
+def capabilities_view(ir: IR) -> dict[str, Any]:
+    """The compiled lock, as the page renders it -- served whatever the surface said.
+
+    **Separate from `schema_view` because it answers a different question**
+    (D1274). `schema_view` describes the REST surface, and the page may show it
+    only after the deployment confirmed that surface. This describes the tools
+    compiled into the project's capability lock, which no request Studio makes
+    ever confirms: no launch answer is evidence about it either way, so gating
+    it on one would report a REST document's staleness as though it were the
+    lock's, and that is ADR 0195's folded third outcome.
+
+    `CAPABILITIES_NOTE` travels with the payload rather than being written into
+    the page, so the sentence and the data cannot come apart -- a reader looking
+    at the JSON sees the same caveat as a reader looking at the table.
+    """
+    return {
+        "note": CAPABILITIES_NOTE,
+        "tools_sha256": ir.digests.tools_sha256,
+        "tools": [
+            {
+                "name": tool.name,
+                "kind": tool.kind,
+                "arguments": [
+                    {"name": argument.name, "type": argument.ts_type, "required": argument.required}
+                    for argument in tool.arguments
+                ],
+                "scopes": [list(scopes) for scopes in tool.discovery_scope_sets],
+                "resources": list(tool.resources),
+            }
+            for tool in ir.tools
+        ],
     }
 
 

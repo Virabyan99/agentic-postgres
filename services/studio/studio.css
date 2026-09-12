@@ -95,6 +95,108 @@ code {
   color: var(--bad);
 }
 
+/* The view switcher. Six buttons; the page shows one section at a time and
+   every section exists in the document from the first paint, so a view that
+   fails to load says so in its own place rather than leaving a blank page. */
+nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  margin: 1rem 0 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+nav button {
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  padding: 0.4rem 0.7rem;
+  cursor: pointer;
+}
+
+nav button[aria-current="true"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+  font-weight: 600;
+}
+
+/* Forms. The query builder is the only place this page takes structured input,
+   and every part of it is a control over a name the surface published -- there
+   is no box anywhere that takes a URL, a path or a fragment of SQL. */
+form {
+  margin: 0.5rem 0 1rem;
+  max-width: 60rem;
+}
+
+fieldset {
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+legend {
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 0 0.35rem;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+  flex-wrap: wrap;
+}
+
+label {
+  color: var(--muted);
+  font-size: 0.8rem;
+  min-width: 5rem;
+}
+
+input,
+select,
+button {
+  font: inherit;
+  font-size: 0.875rem;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.25rem 0.4rem;
+}
+
+input[type="checkbox"] {
+  min-width: 0;
+}
+
+button {
+  cursor: pointer;
+}
+
+.checkboxes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.checkboxes label {
+  min-width: 0;
+  color: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.filter-row {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.25rem 0;
+  flex-wrap: wrap;
+}
+
 table {
   border-collapse: collapse;
   width: 100%;
@@ -120,6 +222,48 @@ th {
 }
 
 td {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* A refused audit row is marked, and the boundary column is the one a reader
+   came for: ADR 0178's whole point is that a denial names what refused it. */
+tr.refused td {
+  color: var(--bad);
+}
+
+td.boundary {
+  font-weight: 600;
+}
+
+/* The audit page header. Always visible, whatever the view filters hide --
+   D1248: a page that shows "3 rows" after a filter, over a page that was itself
+   the newest 500 of an unknown total, has told the reader nothing true. */
+.header-line {
+  font-weight: 600;
+  padding: 0.4rem 0.6rem;
+  border-left: 3px solid var(--rule);
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+
+.note {
+  color: var(--muted);
+  font-size: 0.85rem;
+  border-left: 3px solid var(--rule);
+  padding: 0.35rem 0.6rem;
+  max-width: 60rem;
+}
+
+.confirm {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.3rem;
+  flex-wrap: wrap;
+}
+
+.confirm-message {
+  color: var(--bad);
+  font-size: 0.8rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 

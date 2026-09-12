@@ -14,11 +14,97 @@
       <p id="surface-detail" class="muted" hidden></p>
     </header>
 
+    <nav id="views" aria-label="views"></nav>
+
     <main>
-      <section id="schema-section">
+      <section id="view-schema" class="view">
         <h2>Schema</h2>
         <p id="schema-state" class="muted">loading…</p>
         <div id="schema"></div>
+      </section>
+
+      <section id="view-query" class="view" hidden>
+        <h2>Query</h2>
+        <p id="query-state" class="muted">loading…</p>
+        <form id="query-form" hidden>
+          <div class="field">
+            <label for="query-relation">relation</label>
+            <select id="query-relation"></select>
+          </div>
+          <fieldset id="query-columns">
+            <legend>columns</legend>
+          </fieldset>
+          <fieldset id="query-filters">
+            <legend>filters</legend>
+            <div id="filter-rows"></div>
+            <button type="button" id="add-filter">+ filter</button>
+          </fieldset>
+          <div class="field">
+            <label for="query-order">order</label>
+            <select id="query-order"></select>
+            <select id="query-direction" aria-label="direction">
+              <option value="asc">asc</option>
+              <option value="desc">desc</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="query-limit">limit</label>
+            <input id="query-limit" type="number" min="1" value="100" />
+          </div>
+          <button type="submit" id="query-run">run</button>
+        </form>
+        <p id="query-outcome" class="muted"></p>
+        <div id="query-rows"></div>
+      </section>
+
+      <section id="view-audit" class="view" hidden>
+        <h2>Audit</h2>
+        <p id="audit-header" class="header-line">loading…</p>
+        <fieldset id="audit-filters">
+          <legend>hide rows that do not match — this filters the page, not the query</legend>
+          <div class="field">
+            <label for="audit-agent">agent</label>
+            <input id="audit-agent" type="text" />
+          </div>
+          <div class="field">
+            <label for="audit-tool">tool</label>
+            <input id="audit-tool" type="text" />
+          </div>
+          <div class="field">
+            <label for="audit-outcome">outcome</label>
+            <input id="audit-outcome" type="text" />
+          </div>
+          <div class="field">
+            <label for="audit-boundary">boundary</label>
+            <input id="audit-boundary" type="text" />
+          </div>
+          <div class="field">
+            <label for="audit-when">time contains</label>
+            <input id="audit-when" type="text" />
+          </div>
+        </fieldset>
+        <p id="audit-filter-state" class="muted"></p>
+        <div id="audit-rows"></div>
+      </section>
+
+      <section id="view-capabilities" class="view" hidden>
+        <h2>Capabilities</h2>
+        <p id="capabilities-state" class="muted">loading…</p>
+        <p id="capabilities-note" class="note"></p>
+        <div id="capabilities"></div>
+      </section>
+
+      <section id="view-agents" class="view" hidden>
+        <h2>Agents</h2>
+        <p id="agents-state" class="muted">loading…</p>
+        <div id="agents"></div>
+      </section>
+
+      <section id="view-session" class="view" hidden>
+        <h2>Session</h2>
+        <p id="session-own" class="muted"></p>
+        <div id="session-me"></div>
+        <div id="session-rows"></div>
       </section>
     </main>
 

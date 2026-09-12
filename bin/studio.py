@@ -513,6 +513,14 @@ def make_handler(state: dict[str, Any]) -> type[http.server.BaseHTTPRequestHandl
                     return
                 self.send_json(200, studio.schema_view(state["ir"]))
                 return
+            if path == "/__apg/capabilities":
+                # Ungated, and that is the decision (D1274). The surface answer
+                # is about the REST document; this view is about the compiled
+                # lock, which no request this process makes confirms. Refusing
+                # it because a REST contract is stale would report one
+                # contract's staleness as another's.
+                self.send_json(200, studio.capabilities_view(state["ir"]))
+                return
             if path == "/__apg/me":
                 self.relay("GET", f"{state['upstream'].app_url}/auth/me")
                 return
@@ -757,8 +765,18 @@ def main(argv: list[str] | None = None) -> int:
     elif surface.answer == "stale_contract":
         announce(
             f"surface stale_contract served {surface.served_sha256[:16]}… expected "
-            f"{surface.expected_sha256[:16]}…; run bin/apg.sh generate --project "
-            f"{arguments.project}"
+            f"{surface.expected_sha256[:16]}…"
+        )
+        # **Two causes, one answer, and both named** (D1275). The capture may be
+        # stale -- or this subject's role may simply not be the capture's.
+        # PostgREST serves a document scoped to the caller's grants, measured in
+        # rig 24d: `project_admin` is served the same one-path document as
+        # `anon`, because the administrative role holds nothing in `api`. An
+        # operator told only the first would regenerate a capture that was right.
+        announce(
+            f"  either the capture moved -- run bin/apg.sh generate --project "
+            f"{arguments.project} -- or {username} holds a role this surface is not "
+            "granted to; an administrator is served the anonymous document"
         )
     else:
         announce(f"surface {surface.answer}: {surface.reason}")

@@ -22,10 +22,15 @@
 # of four ways, the same four a generated client's `init()` answers:
 #
 #   ok               the deployment serves the surface this checkout describes
-#   stale_contract   it serves a different one; both digests are printed, and
-#                    the schema and query views are refused until you
-#                    regenerate. The audit, agent and session views stay --
-#                    they are release operations, not project ones.
+#   stale_contract   it serves a different one; both digests are printed and
+#                    the schema and query views are refused. TWO causes, and the
+#                    launch line names both: the capture has moved (regenerate),
+#                    or this subject's role is not the one the capture was taken
+#                    for. PostgREST scopes the document to the caller's grants,
+#                    so an administrator -- who holds nothing in `api` -- is
+#                    served the anonymous document (rig 24d). The audit, agent
+#                    and session views stay either way: they are release
+#                    operations, not project ones.
 #   unreachable      the REST route did not answer
 #   unreadable       it answered with something this cannot read -- including a
 #                    document published at a host the deployed document does
