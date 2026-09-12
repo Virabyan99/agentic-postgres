@@ -208,6 +208,17 @@ jobs:
           . .venv/bin/activate
           ./deploy.sh --project project.example.yaml \
             --capabilities capabilities.example.yaml --render-only >/dev/null
+          # BOTH fixtures, as `bin/session-01-check.sh` step 3 does and as its
+          # name says. The second is the control project -- version 6, no
+          # migration set and no capabilities of its own -- and a proof that
+          # generates the RELEASE's client needs it rendered. `apg generate`
+          # refuses an unrendered project by design (exit 4, naming the render
+          # command), so the omission reads as a product refusal rather than a
+          # missing prerequisite. It never showed on a workstation, where
+          # `.generated/` survives the last gate run: D877's fact about a fresh
+          # runner, applied to WHICH fixture rather than to the order (D1241).
+          ./deploy.sh --project project.second.example.yaml \
+            --capabilities capabilities.example.yaml --render-only >/dev/null
           bin/compose.sh .generated/fixture-alpha-dev --profile contract config >/dev/null
           bin/compose.sh --edge --host host.example.yaml config >/dev/null
 
