@@ -31,6 +31,15 @@ REGISTRY = REPO_ROOT / "tests" / "acceptance-registry.yaml"
 THREAT_MODEL = REPO_ROOT / "docs" / "threat-model.md"
 
 VALID_PRIORITIES = {"P0", "P1", "P2"}
+
+#: The selector the sweep whose JUnit REPORTS an offline claim runs with --
+#: `bin/session-NN-check.sh --mode offline` step 3. It is NOT the Session 1
+#: gate's `contract and not future`, and the difference is D1242: this
+#: module's first version of the guard below copied the wrong one, so a
+#: registered P0 proof sitting in a `p1` module passed every check here and
+#: the close's gate still said `not_run`. `test_the_offline_sweep_selector_
+#: is_the_newest_gates` keeps this string and that script one fact (D486).
+OFFLINE_SWEEP_SELECTOR = "p0 and not future and not live_host and not external"
 #: `REL` joined in Session 13 — release identity, the upgrade path, and the
 #: operator front door. `IDN` joined in Session 15 — the identity lifecycle:
 #: sessions, agent credential expiry, password reset, and the rotation surface.
@@ -184,12 +193,14 @@ def test_every_registered_node_id_is_collectible(
 
 @pytest.fixture(scope="module")
 def swept_by_the_gate() -> set[str]:
-    """Node IDs the Session 1 gate's own selector actually collects.
+    """Node IDs the sweep that REPORTS an offline claim actually collects.
 
-    `-m "contract and not future"`, copied from `bin/session-01-check.sh` step
-    4, which is the run whose JUnit step 8 computes every claim's verdict from.
-    A second collection costs what one costs and is the only way to ask the
-    question this module could not previously ask.
+    `OFFLINE_SWEEP_SELECTOR`, which is `bin/session-23-check.sh --mode offline`
+    step 3 -- the run whose JUnit step 9 computes every offline claim's verdict
+    from. **Not** the Session 1 gate's `contract and not future`: that one
+    writes Session 1's evidence and nobody else's, and the two selections are
+    not the same set (D1242). A second collection costs what one costs and is
+    the only way to ask the question this module could not previously ask.
     """
     result = subprocess.run(
         [
@@ -200,7 +211,7 @@ def swept_by_the_gate() -> set[str]:
             "-q",
             "--no-header",
             "-m",
-            "contract and not future",
+            OFFLINE_SWEEP_SELECTOR,
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -269,10 +280,41 @@ def test_every_offline_claims_proof_is_swept_by_the_gate_that_reports_it(
 
     assert not unswept, (
         "these offline-claim proofs are registered and are NOT collected by "
-        f"`-m 'contract and not future'`: {unswept}. They are collectible by "
+        f"`-m '{OFFLINE_SWEEP_SELECTOR}'`: {unswept}. They are collectible by "
         "name, which is why the tests above pass; what reports their claim is a "
-        "marker-selected sweep, and it does not see them. The usual cause is a "
-        "module with no `pytestmark` at all (D1240)"
+        "marker-selected sweep, and it does not see them. The usual causes are a "
+        "module with no `pytestmark` at all (D1240) and a P0 requirement whose "
+        "proof sits in a `p1` module (D1242)"
+    )
+
+
+def test_the_offline_sweep_selector_is_the_newest_gates() -> None:
+    """**D1242.** The constant above and the gate are one fact (D486).
+
+    The guard before this one is only as good as the selector it copies, and
+    the first version of it copied the Session 1 gate's. Both strings are real
+    selectors, both collect thousands of tests, and the wrong one was green --
+    so nothing but a comparison with the script can tell them apart.
+
+    Reads the NEWEST `bin/session-NN-check.sh`, because that is the gate a
+    session closes on, and asserts the selector appears in it verbatim. A
+    session that derives its gate from the last one carries the line across; a
+    session that CHANGES the selector gets a red test here and has to move this
+    constant deliberately, which is the whole point.
+    """
+    gates = sorted(
+        REPO_ROOT.glob("bin/session-*-check.sh"),
+        key=lambda path: int(re.search(r"session-(\d+)-check", path.name).group(1)),
+    )
+    assert gates, "no session gate found"
+    newest = gates[-1]
+    text = newest.read_text(encoding="utf-8")
+    assert f'run_suite "{OFFLINE_SWEEP_SELECTOR}"' in text, (
+        f"{newest.name} does not run its offline sweep with "
+        f"`{OFFLINE_SWEEP_SELECTOR}`. Either the gate changed its selector and "
+        "OFFLINE_SWEEP_SELECTOR was not moved with it -- in which case the guard "
+        "above is asking about a sweep that no longer reports anything -- or the "
+        "constant was edited on its own (D1242)"
     )
 
 

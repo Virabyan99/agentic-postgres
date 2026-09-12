@@ -66,6 +66,14 @@ def test_no_printed_command_carries_a_placeholder_for_a_value_the_process_holds(
     assert "--host {arguments.host}" in DRIVER, "the verify hint no longer prints the host path"
 
 
+# This module is `p1` and its other proofs stay that way. This one backs a P0
+# requirement -- GEN-CMD-001, the generate command's surface -- and the sweep
+# that computes an offline claim's verdict selects `p0`, so a P0 requirement
+# whose only proof is `p1` is registered and never swept (D1242). A function
+# mark composes with the module's, so this test carries contract, p1 and p0;
+# the alternative -- moving the module to p0 -- would re-price three proofs
+# nobody has argued about.
+@pytest.mark.p0
 def test_the_generate_hook_prints_the_path_the_process_was_given() -> None:
     """D1208, and the reason the scan above was widened to reach these two.
 
