@@ -102,6 +102,23 @@ AGENT_SCOPES = ("meta:read", "notes:read")
 #: revocation proofs run.
 AUDITED_RELATION = "notes"
 
+#: A relation the probe agent holds NO scope for, for the refusal half.
+#:
+#: **D1299.** The refused row cannot come from the revoked agent's next request:
+#: that is refused at the credential boundary, where `agent_claims_are_current`
+#: returns NULL in the pre-request hook, which is before the plane's audited
+#: path and before `agent_audit_begin` is called. No row is written and none
+#: should be.
+#:
+#: A refusal the plane itself makes is audited, because the record is opened
+#: BEFORE the scope check -- `test_..._is_audited_before_its_scope_is_checked`
+#: is that ordering, and it is what makes ADR 0141's "a denial is audited and
+#: names its boundary" true. So the refusal is a scope violation, made while
+#: the credential is still good.
+#:
+#: `tasks` is in alpha's vocabulary and not in `AGENT_SCOPES`.
+UNSCOPED_RELATION = "tasks"
+
 #: Where the alpha manifest lives on the host. Inside the checkout for alpha and
 #: beta, outside it for a third project (D971: a third manifest inside the
 #: checkout dirties the release and every deploy refuses).
@@ -440,13 +457,26 @@ def revocation(
         the revocation and the refused one after, which is the pair that makes
         `denial_reason` mean something rather than being a constant.
         """
+        return _query(AUDITED_RELATION)
+
+    def unscoped_read() -> dict[str, Any]:
+        """A call the plane REFUSES at its own boundary, and audits (D1299).
+
+        The scope check runs after the audit record is opened, so this produces
+        a `refused` row carrying the boundary that refused it -- which is what
+        `AGT-AUDIT-002` is about. A revoked agent's request would not: it is
+        stopped at the credential boundary before the plane is reached.
+        """
+        return _query(UNSCOPED_RELATION)
+
+    def _query(relation: str) -> dict[str, Any]:
         answer = mcp_rpc(
             mcp_route,
             token=agent_token,
             method="tools/call",
             params={
                 "name": "query_resource",
-                "arguments": {"resource": AUDITED_RELATION, "limit": 1},
+                "arguments": {"resource": relation, "limit": 1},
             },
         )
         return mcp_message(answer)
@@ -455,6 +485,10 @@ def revocation(
     # An audited read on each side of the revocation, so the audit view has a
     # served row and a refused one to show (D1297).
     served_read = audited_read()
+    # And one the plane refuses at its own boundary, while the credential is
+    # still good -- the pair is what makes `denial_reason` mean something
+    # (D1299).
+    scope_refused_read = unscoped_read()
     wrong_status, wrong_body = launched_studio.call(
         "POST", "/__apg/revoke", {"agent_id": identifier, "confirm": "yes"}
     )
@@ -475,6 +509,7 @@ def revocation(
         "right": (right_status, right_body),
         "after_right": after_right,
         "served_read": served_read,
+        "scope_refused_read": scope_refused_read,
         "refused_read": refused_read,
         "audit": (audit_status, audit_body),
     }
@@ -597,10 +632,15 @@ def test_the_deployed_audit_read_carries_the_boundary_of_a_real_refusal(
     by_id = {row["id"]: row for row in direct_rows}
     assert by_id, "the endpoint returned no row for an agent Studio showed rows for"
 
+    # The refusal the PLANE made, not the one the credential boundary made
+    # (D1299). A revoked agent's next request never reaches the audited path --
+    # `agent_claims_are_current` returns NULL in the pre-request hook, before
+    # `agent_audit_begin` -- so the refused row here is the scope violation the
+    # fixture made while the credential was still good.
     refusals = [row for row in direct_rows if row["outcome"] == "refused"]
     assert refusals, (
-        f"the plane refused this agent's request and recorded no `refused` row: "
-        f"{[row['outcome'] for row in direct_rows]}"
+        "the plane refused this agent's unscoped request and recorded no `refused` "
+        f"row: {[row['outcome'] for row in direct_rows]}"
     )
     for row in refusals:
         assert row["denial_reason"], (
