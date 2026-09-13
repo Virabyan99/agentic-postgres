@@ -26,6 +26,7 @@ classmethod is called here, at line one of the key path, for that reason.
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from fastmcp.server.auth import TokenVerifier as _TokenVerifier
@@ -112,15 +113,65 @@ HEALTH_READY_PATH = "/health/ready"
 #: answer where there is none (ADR 0195).
 LOADED_LOCK: CapabilityLock | None = None
 
+#: Where this process RECORDS the lock it loaded, for a reader that is not it.
+#:
+#: **D1286.** `LOADED_LOCK` above is correct and unreadable from outside: the
+#: deploy asks with `docker exec python -c`, which is a FRESH interpreter in the
+#: same container, and a fresh import sees `None` because only `create_mcp_app`
+#: assigns it. The global answered `null` on every host from the day it was
+#: written -- the first deploy ever to run that path was Session 24's, and it
+#: could not have worked on any earlier one either.
+#:
+#: So the signature is written to a file the serving process owns, and the path
+#: is a module-level constant: a fresh import can read the constant, and the
+#: file carries the state. One authority -- `agent_plane.PROBE` asks the module
+#: where to look rather than holding a second copy of this path (D486).
+#:
+#: `/tmp` is not a convenience: the container is `read_only: true` with exactly
+#: one writable mount, `tmpfs /tmp` owned by this uid. Per-container and
+#: per-boot is the right lifetime for "what THIS process loaded" -- a record
+#: that outlived the process would be the stale-file problem D1152 is about,
+#: one directory along.
+LOADED_LOCK_RECORD = "/tmp/apg-loaded-lock.json"  # noqa: S108 -- see above:
+#: this container is read_only with a PRIVATE tmpfs /tmp at mode 0700 owned by
+#: this uid, so the shared-directory races S108 is about cannot arise here, and
+#: it is the only writable path the service has.
+
+
+def record_loaded_lock(lock: CapabilityLock, path: str | None = None) -> None:
+    """Write the signature of the lock this process loaded, for an outside reader.
+
+    Best effort by decision: a plane that is serving correctly must not fail to
+    start because a diagnostic record could not be written. A caller that cannot
+    read the record gets the third outcome it already handles -- `serves_lock`
+    returns `None` and the count goes unpublished -- which is the same answer it
+    got before this existed, rather than a new failure mode (ADR 0195).
+    """
+    # Resolved here rather than as a default argument: a default binds at
+    # definition and would make `LOADED_LOCK_RECORD` two values -- the one the
+    # module names and the one this function captured at import (D486).
+    target = path or LOADED_LOCK_RECORD
+    try:
+        with open(target, "w", encoding="utf-8") as handle:
+            json.dump(
+                {"tools_sha256": lock.tools_sha256, "tool_count": lock.tool_count},
+                handle,
+            )
+    except OSError:
+        pass
+
+
 __all__ = [
     "ACCEPTED_TOKEN_USE",
     "AUTHORIZATION_SPEC_CONFORMANT",
     "LOADED_LOCK",
+    "LOADED_LOCK_RECORD",
     "MINIMUM_AUTHZ_VERSION",
     "PROTOCOL_REVISION",
     "AgentTokenVerifier",
     "build_server",
     "create_mcp_app",
+    "record_loaded_lock",
     "verify_agent_claims",
 ]
 
@@ -407,6 +458,9 @@ def create_mcp_app() -> Starlette:
     # assignments agreeing (D1153).
     global LOADED_LOCK
     LOADED_LOCK = lock
+    # And written where a SECOND process can read it (D1286). The global above
+    # is invisible to `docker exec python -c`, which is how the deploy asks.
+    record_loaded_lock(lock)
     server = build_server(
         AgentTokenVerifier(key_set, issuer=settings.issuer, audience=settings.audience),
         project_key=settings.project_key,

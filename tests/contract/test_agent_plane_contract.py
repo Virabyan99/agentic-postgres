@@ -27,15 +27,141 @@ from __future__ import annotations
 
 import ast
 import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from agentic_postgres import REPO_ROOT, config, deployed_output
+from agentic_postgres import REPO_ROOT, agent_plane, config, deployed_output
 from app import claims as claim_contract
 from app import service as auth_service_module
 
 pytestmark = [pytest.mark.contract, pytest.mark.p0]
+
+
+# ---------------------------------------------------------------------------
+# The probe reads what the SERVING process recorded (D1286)
+# ---------------------------------------------------------------------------
+#
+# `agent_plane.PROBE` runs in `docker exec … python -c`: a fresh interpreter in
+# the container, not the process answering requests. `LOADED_LOCK` is assigned
+# only by `create_mcp_app`, so a fresh import sees `None` -- which is what every
+# host got, for as long as the probe read that global. Measured on alpha-dev on
+# 2026-09-13 with the plane up 17 minutes and healthy: the probe printed
+# `["2025-11-25", false, "agent", null, null]` against a lock file whose
+# `tools_sha256` was `aac4bcf0…`.
+#
+# So these run a REAL subprocess. A stub module supplies the constants and the
+# record path, `LOADED_LOCK` is left `None` exactly as a fresh import leaves it,
+# and the record file is the only way the digest can arrive.
+
+
+STUB_RUNTIME = """
+PROTOCOL_REVISION = "2025-11-25"
+AUTHORIZATION_SPEC_CONFORMANT = False
+ACCEPTED_TOKEN_USE = "agent"
+LOADED_LOCK = None
+LOADED_LOCK_RECORD = {record!r}
+"""
+
+
+def _probe_in_a_fresh_interpreter(
+    root: Path, record_path: Path
+) -> subprocess.CompletedProcess[str]:
+    """Run `agent_plane.PROBE` the way the deploy runs it: another process."""
+    package = root / "app"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (package / "mcp_runtime.py").write_text(
+        STUB_RUNTIME.format(record=str(record_path)), encoding="utf-8"
+    )
+    return subprocess.run(
+        [sys.executable, "-c", agent_plane.PROBE],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+        env={**os.environ, "PYTHONPATH": str(root)},
+    )
+
+
+def test_a_fresh_interpreter_reports_the_lock_the_serving_process_recorded(
+    tmp_path: Path,
+) -> None:
+    """D1286. The question the deploy asks, asked the way the deploy asks it.
+
+    `LOADED_LOCK` is `None` here because a fresh import leaves it `None`, which
+    is the whole defect: the probe read that global and therefore answered
+    `null` on every host it was ever pointed at, however healthy the plane.
+    """
+    record = tmp_path / "apg-loaded-lock.json"
+    record.write_text(json.dumps({"tools_sha256": "a" * 64, "tool_count": 6}), encoding="utf-8")
+
+    result = _probe_in_a_fresh_interpreter(tmp_path, record)
+    assert result.returncode == 0, f"the probe failed: {result.stderr}"
+
+    report = agent_plane.parse_report(result.stdout)
+    assert report is not None, f"the probe printed something unreadable: {result.stdout!r}"
+    assert report.tools_sha256 == "a" * 64, (
+        "a second process could not read the lock the serving process recorded, "
+        "which is the only thing this record exists for"
+    )
+    assert report.tool_count == 6
+    assert agent_plane.serves_lock(report, "a" * 64) is True
+    assert agent_plane.serves_lock(report, "b" * 64) is False, (
+        "a plane serving a different lock must read as drift, not as agreement"
+    )
+
+
+def test_without_the_record_a_fresh_interpreter_says_it_cannot_tell(tmp_path: Path) -> None:
+    """The control, and the state every host was in until this was repaired.
+
+    No record file, `LOADED_LOCK` `None`: the probe must answer `null` rather
+    than inventing a digest, and `serves_lock` must turn that into the third
+    outcome. Without this the proof above would be satisfied by a probe that
+    reported something whatever it found.
+    """
+    result = _probe_in_a_fresh_interpreter(tmp_path, tmp_path / "absent.json")
+    assert result.returncode == 0, f"the probe failed: {result.stderr}"
+
+    report = agent_plane.parse_report(result.stdout)
+    assert report is not None, f"the probe printed something unreadable: {result.stdout!r}"
+    assert report.protocol_revision == "2025-11-25", "the other constants still answer"
+    assert report.tools_sha256 is None
+    assert report.tool_count is None
+    assert agent_plane.serves_lock(report, "a" * 64) is None, (
+        "a plane that cannot say which lock it serves must be the third outcome, "
+        "never folded into agreement or into drift (ADR 0195)"
+    )
+
+
+def test_the_probe_asks_the_module_where_the_record_is(tmp_path: Path) -> None:
+    """One authority for the path, asserted as wiring rather than as a value.
+
+    The probe string and the service module would otherwise each carry a copy of
+    `/tmp/apg-loaded-lock.json`, and the day one moved is the day the probe goes
+    back to answering `null` -- silently, because `null` is a legal answer.
+    """
+    del tmp_path
+    assert "LOADED_LOCK_RECORD" in agent_plane.PROBE, (
+        "the probe must read the record's path from the module it is asking"
+    )
+    source = (REPO_ROOT / "services" / "auth-api" / "app" / "mcp_runtime.py").read_text(
+        encoding="utf-8"
+    )
+    assert "LOADED_LOCK_RECORD" in source, "the service must name the record it writes"
+    # Read out of the service rather than typed here, so this cannot drift into
+    # asserting about a path neither side uses any more.
+    declared = re.search(r'^LOADED_LOCK_RECORD = "([^"]+)"', source, re.M)
+    assert declared, "the service must assign LOADED_LOCK_RECORD a literal path"
+    assert declared.group(1) not in agent_plane.PROBE, (
+        f"the probe holds its own copy of {declared.group(1)}; it must ask the module"
+    )
+
 
 #: The one `token_use` the MCP surface accepts (ADR 0115). Declared here, in the
 #: repository's contract layer, because Run 1 has no MCP runtime to declare it

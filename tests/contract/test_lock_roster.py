@@ -566,6 +566,8 @@ def test_the_runtime_records_the_lock_it_loaded_at_module_level(
         postgrest_url = "https://postgrest.test"
         max_concurrent_reads = 4
 
+    record = tmp_path / "apg-loaded-lock.json"
+    monkeypatch.setattr(mcp_runtime, "LOADED_LOCK_RECORD", str(record))
     monkeypatch.setattr(mcp_runtime, "build_server", fake_build_server)
     monkeypatch.setattr(mcp_runtime.settings_module, "load_mcp", lambda: _Settings())
     monkeypatch.setattr(mcp_runtime.LocalKeySet, "from_path", staticmethod(lambda _p: object()))
@@ -589,6 +591,15 @@ def test_the_runtime_records_the_lock_it_loaded_at_module_level(
     )
     assert mcp_runtime.LOADED_LOCK.tools_sha256 == document["tools_sha256"]
     assert mcp_runtime.LOADED_LOCK.tool_count == document["tool_count"]
+
+    # D1286: and written where a SECOND process can read it. The global above is
+    # invisible to `docker exec python -c`, which is how the deploy asks -- so
+    # asserting only the global is asserting the half that was never in doubt.
+    written = json.loads(record.read_text(encoding="utf-8"))
+    assert written == {
+        "tools_sha256": document["tools_sha256"],
+        "tool_count": document["tool_count"],
+    }, f"the record does not describe the lock the server was built with: {written}"
 
     # And the loader is still the gate: a lock this runtime refuses records
     # nothing, because the assignment sits after `load_lock` returns.

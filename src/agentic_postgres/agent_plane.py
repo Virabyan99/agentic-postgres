@@ -50,13 +50,40 @@ COMPOSE_SERVICE_LABEL = "com.docker.compose.service"
 #: answering perfectly well about everything that existed when it was built.
 #: The two trailing values arrive as `null` instead, which is the honest shape
 #: -- this runtime does not say which lock it loaded (ADR 0195).
+#: **D1286.** This runs in a FRESH interpreter (`docker exec … python -c`), not
+#: in the process serving requests, so `m.LOADED_LOCK` -- which only
+#: `create_mcp_app` assigns -- is `None` here however healthy the plane is. It
+#: read exactly that global until Session 24's trip, and therefore answered
+#: `null` on every host it was ever pointed at.
+#:
+#: The signature now comes from the record the SERVING process wrote, at a path
+#: the module names. The module is asked for the path (`m.LOADED_LOCK_RECORD`)
+#: rather than this string holding a second copy of it (D486); `getattr` with a
+#: default so a plane from a release that predates the record answers `null`
+#: and gets the third outcome, which is what it got before.
+#:
+#: `LOADED_LOCK` is still consulted, and only as a fallback: in a process that
+#: DID build the app the global is the same object, and preferring the file
+#: keeps the answer a statement about the running server rather than about
+#: whoever imported the module last.
 PROBE = (
-    "import json, app.mcp_runtime as m; "
-    "lock = getattr(m, 'LOADED_LOCK', None); "
-    "print(json.dumps([m.PROTOCOL_REVISION, m.AUTHORIZATION_SPEC_CONFORMANT, "
-    "m.ACCEPTED_TOKEN_USE, "
-    "None if lock is None else lock.tools_sha256, "
-    "None if lock is None else lock.tool_count]))"
+    "import json, app.mcp_runtime as m\n"
+    "record = {}\n"
+    "path = getattr(m, 'LOADED_LOCK_RECORD', None)\n"
+    "if path:\n"
+    "    try:\n"
+    "        with open(path, encoding='utf-8') as handle:\n"
+    "            loaded = json.load(handle)\n"
+    "        record = loaded if isinstance(loaded, dict) else {}\n"
+    "    except (OSError, ValueError):\n"
+    "        record = {}\n"
+    "lock = getattr(m, 'LOADED_LOCK', None)\n"
+    "digest = record.get('tools_sha256')\n"
+    "count = record.get('tool_count')\n"
+    "if digest is None and lock is not None:\n"
+    "    digest, count = lock.tools_sha256, lock.tool_count\n"
+    "print(json.dumps([m.PROTOCOL_REVISION, m.AUTHORIZATION_SPEC_CONFORMANT,\n"
+    "                  m.ACCEPTED_TOKEN_USE, digest, count]))\n"
 )
 
 
