@@ -188,11 +188,36 @@ def await_ready(container: str) -> None:
     )
 
 
+#: How docker says "I looked, and there is no such thing", in either voice.
+#:
+#: **D1285.** This was one capitalised substring, and docker 29.5.2 writes
+#: `error: no such object: <name>` in lower case -- so the match never fired,
+#: every absent container came back as "docker could not be asked", and
+#: `status_of` told the operator to check whether the daemon was running while
+#: the daemon was answering every other call in the same process. ADR 0195's
+#: class inverted: the reader HAD the answer and reported that it had not.
+#:
+#: Matched case-insensitively, and on both spellings, because this wording is
+#: an upstream message rather than a contract -- `inspect` says *object* and
+#: the typed verbs say *container*, and neither is promised to hold still. The
+#: exit code cannot stand in for it: `inspect` exits 1 for an absent object and
+#: for an unreachable daemon alike, which is the whole reason this reads stderr.
+ABSENT_PHRASES = ("no such object", "no such container")
+
+
 def container_state(container: str) -> str | None:
-    """`docker inspect`'s word for this container, or `None` if it cannot say."""
+    """`docker inspect`'s word for this container, or `None` if it cannot say.
+
+    Three outcomes, two of them returned here (ADR 0195): the container's own
+    status, `"absent"` when docker says there is no such thing, and `None` when
+    docker could not be asked at all. The caller renders the third differently
+    from the second, and an operator acts differently on each -- `apg dev up`
+    against an absent container, and a daemon to start against the other.
+    """
     probe = docker("inspect", "-f", "{{.State.Status}}", container, timeout=30)
     if probe.returncode != 0:
-        return None if "No such object" not in probe.stderr else "absent"
+        stderr = probe.stderr.lower()
+        return "absent" if any(phrase in stderr for phrase in ABSENT_PHRASES) else None
     return probe.stdout.strip()
 
 

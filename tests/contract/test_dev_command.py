@@ -12,8 +12,11 @@ which is the property under test.
 
 from __future__ import annotations
 
+import importlib.util
+import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -30,6 +33,86 @@ def dev(*arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [str(DEV), *arguments], capture_output=True, text=True, check=False, cwd=REPO_ROOT
     )
+
+
+# ---------------------------------------------------------------------------
+# container_state: docker's two silences are not the same silence (D1285)
+# ---------------------------------------------------------------------------
+#
+# Neither proof starts a container, so the module's standing rule holds. They
+# reach the daemon to ASK about a name, which is what the function does, and
+# the pair is the point: one asserts that a definite "there is no such thing"
+# is reported as `absent`, the other that a daemon which cannot be reached at
+# all is reported as `None`. Either alone would pass while the two were
+# conflated, which is how the conflation survived from Session 22 with no
+# proof over the function at all.
+
+
+@pytest.fixture(scope="module")
+def dev_module() -> Any:
+    specification = importlib.util.spec_from_file_location(
+        "apg_dev_cli", REPO_ROOT / "bin" / "dev.py"
+    )
+    assert specification and specification.loader
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
+
+
+def test_a_container_docker_says_is_absent_reads_as_absent(dev_module: Any) -> None:
+    """D1285. `absent` is an answer docker gave, not a failure to get one.
+
+    The name is one no rig creates. Docker exits 1 and writes *no such object*
+    in lower case at 29.5.2; the reader matched *No such object* capitalised,
+    so this returned `None` and `apg dev status` asked the operator whether the
+    daemon was running while the daemon answered every other call in the run.
+    """
+    if not shutil.which("docker"):
+        pytest.skip("no docker client on this machine; the gate's offline mode requires one")
+    probe = subprocess.run(
+        ["docker", "version", "--format", "{{.Server.Version}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        pytest.skip("no docker daemon; this proof asks one about a name")
+
+    assert dev_module.container_state("apg-no-such-container-d1285") == "absent"
+
+
+def test_a_daemon_that_cannot_be_reached_reads_as_unknown_not_as_absent(
+    dev_module: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The control, and the half that must NOT become `absent`.
+
+    Pointed at a socket that is not there, docker fails the same way it fails
+    for an absent object -- exit 1, a message on stderr -- and the difference
+    is only in the words. `None` here is what makes `absent` above mean
+    something; a reader that returned `absent` for both would pass the proof
+    before this one and tell a developer to run `apg dev up` against a daemon
+    that is not running.
+    """
+    if not shutil.which("docker"):
+        pytest.skip("no docker client on this machine; the gate's offline mode requires one")
+    monkeypatch.setenv("DOCKER_HOST", f"unix://{tmp_path / 'not-a-socket'}")
+    monkeypatch.delenv("DOCKER_CONTEXT", raising=False)
+
+    assert dev_module.container_state("apg-no-such-container-d1285") is None
+
+
+def test_the_absent_phrases_are_matched_without_regard_to_case(dev_module: Any) -> None:
+    """The wiring, so a third spelling is one entry rather than a new branch.
+
+    Asserted against the constant rather than the behaviour above, because the
+    behaviour above can only exercise whichever voice the installed docker
+    happens to use, and the point of the constant is the one it does not.
+    """
+    assert dev_module.ABSENT_PHRASES, "the phrases must be named somewhere readable"
+    for phrase in dev_module.ABSENT_PHRASES:
+        assert phrase == phrase.lower(), (
+            f"{phrase!r} is compared against a lower-cased stderr and must be lower case"
+        )
 
 
 # ---------------------------------------------------------------------------
