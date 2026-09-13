@@ -44,6 +44,30 @@ EXIT_UNREADABLE = 3
 EXIT_ABSENT = 4
 
 
+def _traversable_to_the_checkout_owner(leaf: Path) -> None:
+    """Let the checkout's owner reach `leaf`, when this process is root (D1300).
+
+    D1165's repair re-enters as that owner so these proofs run under the
+    identity the gate uses, and root's pytest temp directory is `0700` -- so
+    without this the re-entry is refused at an ANCESTOR and never reaches the
+    directory a proof made unreadable. Their first execution in any environment
+    said so exactly: `Permission denied: '/tmp/pytest-of-root/…/.generated'`,
+    which is `.generated` and not the project inside it, and a bare
+    `PermissionError` there is D1151's shape rather than the reader's refusal.
+
+    Ancestors only, and only under the temporary directory: what a proof makes
+    unreadable it makes unreadable itself, and this must not reach it. A no-op
+    unprivileged, where the owner is already the user running the test.
+    """
+    if os.geteuid() != 0:
+        return
+    temporary = Path(tempfile.gettempdir()).resolve()
+    probe = leaf
+    while probe != probe.parent and probe.resolve().is_relative_to(temporary):
+        probe.chmod(0o755)
+        probe = probe.parent
+
+
 @pytest.fixture
 def rendered(tmp_path: Path) -> Path:
     """A checkout-shaped tree: `<root>/.generated/<key>/outputs.json`.
@@ -66,12 +90,7 @@ def rendered(tmp_path: Path) -> Path:
     Only the ancestors, and only under `/tmp`: what the proof makes unreadable
     it makes unreadable itself, and this must not reach it.
     """
-    if os.geteuid() == 0:
-        probe = tmp_path
-        temporary = Path(tempfile.gettempdir()).resolve()
-        while probe != probe.parent and probe.resolve().is_relative_to(temporary):
-            probe.chmod(0o755)
-            probe = probe.parent
+    _traversable_to_the_checkout_owner(tmp_path)
 
     directory = tmp_path / ".generated" / "fixture-honest-dev"
     directory.mkdir(parents=True)
@@ -673,6 +692,8 @@ def test_publish_and_load_rendered_name_the_owner_and_the_remedy(
     `_as_checkout_owner`): root traverses a 0000 directory and there would be
     nothing to observe.
     """
+    _traversable_to_the_checkout_owner(tmp_path)
+
     generated = tmp_path / ".generated"
     directory = generated / "fixture-shut-dev"
     directory.mkdir(parents=True)
