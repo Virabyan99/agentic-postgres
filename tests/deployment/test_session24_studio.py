@@ -590,7 +590,11 @@ def test_the_deployed_audit_read_carries_the_boundary_of_a_real_refusal(
     assert direct.status == 200, f"{direct.status}: {direct.body[:300]}"
     direct_rows = json.loads(direct.body)["audit"]
 
-    by_id = {row["audit_id"]: row for row in direct_rows}
+    # Keyed on `id`, which is what both readers call it: the endpoint
+    # serialises `"id": str(row["id"])` and Studio relays `payload["audit"]`
+    # unchanged -- which is itself half of what this proof checks. The table
+    # has no `audit_id`; migration 0019 declares `id uuid PRIMARY KEY` (D1298).
+    by_id = {row["id"]: row for row in direct_rows}
     assert by_id, "the endpoint returned no row for an agent Studio showed rows for"
 
     refusals = [row for row in direct_rows if row["outcome"] == "refused"]
@@ -612,7 +616,7 @@ def test_the_deployed_audit_read_carries_the_boundary_of_a_real_refusal(
             )
 
     # The two readers agree, row for row, on the field this claim is about.
-    studio_by_id = {row["audit_id"]: row for row in studio_rows}
+    studio_by_id = {row["id"]: row for row in studio_rows}
     shared = set(studio_by_id) & set(by_id)
     assert shared, (
         f"Studio and the endpoint returned disjoint sets of rows for one agent: "
